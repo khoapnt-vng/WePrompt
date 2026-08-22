@@ -12,6 +12,7 @@ import {
   type StudioJobV2,
   type StudioProjectV2,
   type StudioQuotedGeneration,
+  type StudioRendererChainBoundaryV2,
   type StudioRendererChainStatusV2,
   type StudioRendererParkBlockerCodeV2,
   type StudioRendererParkBlockerV2,
@@ -22,6 +23,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioDirtyShotsV2, deriveStudioInboundShotReferencesV2 } from './chain';
 import { createStudioFrameExtractionId } from './generation';
+import type { StudioVerifiedConditioningFrameV2 } from './lifecycle';
 
 const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
   'waiting_for_conditioning',
@@ -153,6 +155,28 @@ const latestVideoItemsByShot = (
   return result;
 };
 
+const projectCurrentVideoJobs = (
+  project: StudioProjectV2,
+  locations: readonly ActiveShotLocation[]
+): StudioRendererWorkspaceStatusV2['currentVideoJobs'] => {
+  const activeShotIds = new Set(locations.map((location) => location.shotId));
+  const latestByShot = latestVideoItemsByShot(project, activeShotIds);
+  return locations.map((location) => {
+    const latest = latestByShot.get(location.shotId);
+    return {
+      shotId: location.shotId,
+      jobIds:
+        latest === undefined
+          ? []
+          : jobsForItem(project, latest.authorization.id, latest.item.id)
+              .filter(
+                (job) => job.projectId === project.id && job.shotId === location.shotId && job.purpose === 'video_take'
+              )
+              .map((job) => job.id),
+    };
+  });
+};
+
 const canCancelWaitingJobs = (jobs: readonly StudioJobV2[]): boolean => {
   const remaining = jobs.filter((job) => job.status !== 'cancelled');
   return (
@@ -173,6 +197,18 @@ const canCancelWaitingJobs = (jobs: readonly StudioJobV2[]): boolean => {
   );
 };
 
+const wasNeverDispatchedCancellation = (job: StudioJobV2): boolean =>
+  job.status === 'cancelled' &&
+  job.requestSnapshot === null &&
+  job.providerJobId === null &&
+  (job.remoteStartedAt === undefined || job.remoteStartedAt === null) &&
+  job.spendReceipt === null &&
+  job.outputAssetIds.length === 0 &&
+  job.outputAssetIdsByRole.primary === null &&
+  job.outputAssetIdsByRole.poster === null &&
+  job.error === null &&
+  job.progress === undefined;
+
 const projectCascadeProgress = (
   project: StudioProjectV2,
   locations: readonly ActiveShotLocation[]
@@ -191,6 +227,7 @@ const projectCascadeProgress = (
     const upstreamShotId = dependency.kind === 'authorized_seed' ? dependency.shotId : dependency.predecessorShotId;
 
     if (remaining.length === 0) {
+      if (!siblings.every(wasNeverDispatchedCancellation)) continue;
       result.push({
         dependentShotId: location.shotId,
         upstreamShotId,
@@ -381,6 +418,170 @@ const projectConditioningFailures = (
   return result;
 };
 
+type StudioChainBoundaryFactV2 =
+  | {
+      upstreamShotId: string;
+      dependentShotId: string;
+      status: 'empty' | 'gone';
+    }
+  | {
+      upstreamShotId: string;
+      dependentShotId: string;
+      status: 'ready';
+      extractionId: string;
+      takeAssetId: string;
+      endpointSeconds: number;
+      frameAssetId: string;
+    };
+
+const projectStudioChainBoundaryFactsV2 = (project: StudioProjectV2): StudioChainBoundaryFactV2[] => {
+  const beatCounts = new Map<string, number>();
+  const shotCounts = new Map<string, number>();
+  for (const beatId of project.beatOrder) {
+    beatCounts.set(beatId, (beatCounts.get(beatId) ?? 0) + 1);
+    const beat = ownValue(project.beats, beatId);
+    if (beat?.id !== beatId) continue;
+    for (const shotId of beat.shotOrder) shotCounts.set(shotId, (shotCounts.get(shotId) ?? 0) + 1);
+  }
+
+  const result: StudioChainBoundaryFactV2[] = [];
+  for (const beatId of project.beatOrder) {
+    const beat = ownValue(project.beats, beatId);
+    if (beat?.id !== beatId || beatCounts.get(beatId) !== 1) continue;
+    for (let shotIndex = 1; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+      const upstreamShotId = beat.shotOrder[shotIndex - 1]!;
+      const dependentShotId = beat.shotOrder[shotIndex]!;
+      const upstream = ownValue(project.shots, upstreamShotId);
+      const dependent = ownValue(project.shots, dependentShotId);
+      if (
+        upstream?.id !== upstreamShotId ||
+        dependent?.id !== dependentShotId ||
+        shotCounts.get(upstreamShotId) !== 1 ||
+        shotCounts.get(dependentShotId) !== 1 ||
+        dependent.chainBreak === 'hard_cut'
+      ) {
+        continue;
+      }
+      const empty = (): void => {
+        result.push({ upstreamShotId, dependentShotId, status: 'empty' });
+      };
+      const gone = (): void => {
+        result.push({ upstreamShotId, dependentShotId, status: 'gone' });
+      };
+      if (upstream.selectedTakeId === null) {
+        empty();
+        continue;
+      }
+      const take = ownValue(project.assets, upstream.selectedTakeId);
+      if (
+        !isCanonicalTake(project, upstream, take) ||
+        take.mediaKind !== 'video' ||
+        take.managedAsset.collection !== 'assets' ||
+        isBinnedTake(project, take.id) ||
+        typeof take.durationSeconds !== 'number'
+      ) {
+        empty();
+        continue;
+      }
+      const endpointSeconds = take.durationSeconds - (upstream.trimOutSeconds ?? 0);
+      if (!Number.isFinite(endpointSeconds) || endpointSeconds <= 0) {
+        empty();
+        continue;
+      }
+      let extractionId: string;
+      try {
+        extractionId = createStudioFrameExtractionId({
+          shotId: upstream.id,
+          takeAssetId: take.id,
+          endpointSeconds,
+        });
+      } catch {
+        empty();
+        continue;
+      }
+      const extraction = ownValue(project.frameExtractions, extractionId);
+      if (extraction === undefined) {
+        empty();
+        continue;
+      }
+      if (
+        extraction.id !== extractionId ||
+        extraction.shotId !== upstream.id ||
+        extraction.takeAssetId !== take.id ||
+        !Object.is(extraction.endpointSeconds, endpointSeconds)
+      ) {
+        gone();
+        continue;
+      }
+      if (extraction.status === 'pending' || extraction.status === 'extracting') {
+        empty();
+        continue;
+      }
+      if (extraction.status !== 'ready' || extraction.frameAssetId === null) {
+        gone();
+        continue;
+      }
+      result.push({
+        upstreamShotId,
+        dependentShotId,
+        status: 'ready',
+        extractionId,
+        takeAssetId: take.id,
+        endpointSeconds,
+        frameAssetId: extraction.frameAssetId,
+      });
+    }
+  }
+  return result;
+};
+
+/** Returns only deterministic ready-extraction identities that main must verify before projection. */
+export const projectStudioChainBoundaryVerificationIdsV2 = (project: StudioProjectV2): string[] => [
+  ...new Set(
+    projectStudioChainBoundaryFactsV2(project).flatMap((boundary) =>
+      boundary.status === 'ready' ? [boundary.extractionId] : []
+    )
+  ),
+];
+
+const verifiedBoundary = (
+  project: StudioProjectV2,
+  boundary: Extract<StudioChainBoundaryFactV2, { status: 'ready' }>,
+  verification: StudioVerifiedConditioningFrameV2 | undefined
+): StudioRendererChainBoundaryV2 => {
+  const frameAsset = ownValue(project.assets, boundary.frameAssetId);
+  const frameIsCanonical =
+    frameAsset?.id === boundary.frameAssetId &&
+    frameAsset.projectId === project.id &&
+    frameAsset.shotId === boundary.upstreamShotId &&
+    frameAsset.mediaKind === 'image' &&
+    frameAsset.managedAsset.collection === 'conditioningFrames' &&
+    ownValue(project.shots, boundary.upstreamShotId)?.assetIds.includes(frameAsset.id) === true;
+  if (
+    !frameIsCanonical ||
+    verification?.extractionId !== boundary.extractionId ||
+    verification.shotId !== boundary.upstreamShotId ||
+    verification.takeAssetId !== boundary.takeAssetId ||
+    !Object.is(verification.endpointSeconds, boundary.endpointSeconds) ||
+    verification.frameAssetId !== boundary.frameAssetId ||
+    verification.byteSize !== frameAsset.byteSize ||
+    verification.sha256 !== frameAsset.sha256
+  ) {
+    return {
+      upstreamShotId: boundary.upstreamShotId,
+      dependentShotId: boundary.dependentShotId,
+      status: 'gone',
+      frameAssetId: null,
+    };
+  }
+  return {
+    upstreamShotId: boundary.upstreamShotId,
+    dependentShotId: boundary.dependentShotId,
+    status: 'on_disk',
+    frameAssetId: boundary.frameAssetId,
+  };
+};
+
 const dedupeAndSortBlockers = (
   blockers: readonly StudioRendererParkBlockerV2[],
   shotOrder: readonly string[]
@@ -546,16 +747,31 @@ export const projectStudioWorkspaceStatusV2 = (project: StudioProjectV2): Studio
         : { entryId: undoTop.id, label: undoTop.label, sourceRevision: undoTop.sourceRevision },
     dirtyShots: deriveStudioDirtyShotsV2(project),
     cascadeProgress: projectCascadeProgress(project, locations),
+    currentVideoJobs: projectCurrentVideoJobs(project, locations),
     parkEligibility: projectParkEligibility(project),
   };
 };
 
-/** Projects post-cancellation active-chain extraction failures without exposing frame authority. */
-export const projectStudioChainStatusV2 = (project: StudioProjectV2): StudioRendererChainStatusV2 => {
+/** Projects post-cancellation failures and renderer-safe boundaries without exposing extraction authority. */
+export const projectStudioChainStatusV2 = (
+  project: StudioProjectV2,
+  verifiedReadyExtractions: ReadonlyMap<string, StudioVerifiedConditioningFrameV2> = new Map()
+): StudioRendererChainStatusV2 => {
   const locations = activeShotLocations(project);
   return {
     projectId: project.id,
     projectRevision: project.revision,
     conditioningFailures: projectConditioningFailures(project, locations),
+    boundaries: projectStudioChainBoundaryFactsV2(project).map((boundary): StudioRendererChainBoundaryV2 => {
+      if (boundary.status === 'ready') {
+        return verifiedBoundary(project, boundary, verifiedReadyExtractions.get(boundary.extractionId));
+      }
+      return {
+        upstreamShotId: boundary.upstreamShotId,
+        dependentShotId: boundary.dependentShotId,
+        status: boundary.status,
+        frameAssetId: null,
+      };
+    }),
   };
 };

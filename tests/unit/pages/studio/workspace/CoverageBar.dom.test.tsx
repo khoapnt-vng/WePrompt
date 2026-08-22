@@ -23,6 +23,22 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.planningLane': 'Planning lane',
         'conversation.creativeStudio.workspace.beatPanel.coverage.trimGuidance': 'Edge · Trim · Free',
         'conversation.creativeStudio.workspace.beatPanel.coverage.boundaryGuidance': 'Boundary · Costs a re-render',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.noTake': 'No Take',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.queued': 'Queued',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.nextUp': 'Next up',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.waitingOnFrame': 'Waiting on the frame',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendering': 'Rendering',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderingStill':
+          'Rendering · Showing the still',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendered': 'Rendered',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderedOneTake': 'Rendered · 1 Take',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.untouched': 'Untouched',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.staleStillPlays': 'Stale · Still plays',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.failedNotBilled': 'Failed · Not billed',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.neverDispatched': 'Never dispatched',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.statusPending': 'Status unavailable',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.needsAttention': 'Needs attention',
         'conversation.creativeStudio.workspace.beatPanel.coverage.seekGuidance': 'Rail · Seek · Free',
         'conversation.creativeStudio.workspace.beatPanel.coverage.seekLane': 'Beat seek rail',
         'conversation.creativeStudio.workspace.beatPanel.coverage.tailTrimWarning':
@@ -35,6 +51,24 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.trimOutLabel')) return `Trim out Shot ${String(values?.index)}`;
       if (key.endsWith('.trimValue')) return `${String(values?.seconds)}s trimmed`;
       if (key.endsWith('.seekValue')) return `${String(values?.current)} of ${String(values?.total)}`;
+      if (key.endsWith('.segmentState.waitingOnShot')) return `Waiting on ${String(values?.position)}`;
+      if (key.endsWith('.segmentState.renderingProgress')) return `Rendering · ${String(values?.progress)}%`;
+      if (key.endsWith('.segmentState.selectedTake')) {
+        return `${String(values?.count)} Takes · T${String(values?.take)} in the Cut`;
+      }
+      if (key.endsWith('.segmentState.shotKept')) return `Shot ${String(values?.position)} · Kept`;
+      if (key.endsWith('.boundaryFrame.empty')) {
+        return `Boundary after Shot ${String(values?.position)} · Waiting for continuity frame`;
+      }
+      if (key.endsWith('.boundaryFrame.ready')) {
+        return `Boundary after Shot ${String(values?.position)} · Continuity frame ready`;
+      }
+      if (key.endsWith('.boundaryFrame.gone')) {
+        return `Boundary after Shot ${String(values?.position)} · Continuity frame missing`;
+      }
+      if (key.endsWith('.boundaryFrame.stale')) {
+        return `Boundary after Shot ${String(values?.position)} · Continuity frame is out of date`;
+      }
       if (key.endsWith('.boundaryLabel')) return `Boundary after Shot ${String(values?.index)}`;
       if (key.endsWith('.boundaryValue')) return `${String(values?.seconds)}s left`;
       if (key.endsWith('.boundaryAnnouncement')) {
@@ -139,6 +173,12 @@ const makeShot = (
   effectiveSeedAssetId: null,
   segmentHead: startSeconds === 0,
   planningBoundary: { shotId: id, startSeconds, endSeconds: startSeconds + durationSeconds },
+  frameBoundary: null,
+  segmentState:
+    overrides.segmentState ??
+    (overrides.selectedTakeId === undefined || overrides.selectedTakeId === null
+      ? { kind: 'no_take' }
+      : { kind: 'rendered', takeCount: 1, selectedTakeNumber: 1 }),
   dirtyCauses: [],
   downstreamShotIds: [],
   imageTakes: [],
@@ -167,23 +207,30 @@ const renderCoverage = (
   shots: readonly WorkspaceShotProjection[],
   options: {
     disabled?: boolean;
+    inspectedShotId?: string | null;
     onCommitPlanningDurations?: ReturnType<typeof vi.fn>;
     onCommitTrim?: ReturnType<typeof vi.fn>;
+    onInspectShot?: ReturnType<typeof vi.fn>;
     playback?: React.ComponentProps<typeof CoverageBar>['playback'];
   } = {}
 ) => {
+  const inspectedShotId = options.inspectedShotId === undefined ? (shots[0]?.id ?? null) : options.inspectedShotId;
   const onCommitPlanningDurations = options.onCommitPlanningDurations ?? vi.fn().mockResolvedValue(true);
   const onCommitTrim = options.onCommitTrim ?? vi.fn().mockResolvedValue(true);
+  const onInspectShot = options.onInspectShot ?? vi.fn();
   const result = render(
     <CoverageBar
       disabled={options.disabled ?? false}
+      inspectedShotId={inspectedShotId}
       onCommitPlanningDurations={onCommitPlanningDurations}
       onCommitTrim={onCommitTrim}
+      onInspectShot={onInspectShot}
       playback={options.playback}
+      projectId='project_1'
       shots={shots}
     />
   );
-  return { ...result, onCommitPlanningDurations, onCommitTrim };
+  return { ...result, inspectedShotId, onCommitPlanningDurations, onCommitTrim, onInspectShot };
 };
 
 describe('coverage geometry', () => {
@@ -424,12 +471,43 @@ describe('CoverageBar', () => {
     empty.rerender(
       <CoverageBar
         disabled={false}
+        inspectedShotId={empty.inspectedShotId}
         onCommitPlanningDurations={empty.onCommitPlanningDurations}
         onCommitTrim={empty.onCommitTrim}
+        onInspectShot={empty.onInspectShot}
+        projectId='project_1'
         shots={[makeShot('shot_1', 8, 0, { planningBoundary: null })]}
       />
     );
     expect(screen.getByRole('alert')).toHaveTextContent('Coverage unavailable');
+  });
+
+  it('keeps Shot inspection reachable when malformed coverage fails closed', () => {
+    const onCommitPlanningDurations = vi.fn().mockResolvedValue(true);
+    const onCommitTrim = vi.fn().mockResolvedValue(true);
+    const onInspectShot = vi.fn();
+    renderCoverage([makeShot('shot_1', 8, 0, { planningBoundary: null }), makeShot('shot_2', 8, 8)], {
+      inspectedShotId: 'shot_1',
+      onCommitPlanningDurations,
+      onCommitTrim,
+      onInspectShot,
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Coverage unavailable');
+    const selectors = screen
+      .getAllByRole('button')
+      .filter((button) => button.hasAttribute('data-coverage-shot-selector'));
+    expect(selectors).toHaveLength(2);
+    expect(selectors[0]).toHaveAttribute('aria-pressed', 'true');
+    expect(selectors[1]).toHaveAttribute('aria-pressed', 'false');
+    const firstState = selectors[0]!.querySelector<HTMLElement>('[data-segment-state]');
+    if (firstState === null) throw new Error('Malformed coverage selector did not retain its state row');
+    expect(firstState.parentElement).not.toBe(selectors[0]);
+    expect(firstState.parentElement?.className).toMatch(/segmentMeta/);
+    fireEvent.click(selectors[1]!);
+    expect(onInspectShot).toHaveBeenCalledWith('shot_2');
+    expect(onCommitPlanningDurations).not.toHaveBeenCalled();
+    expect(onCommitTrim).not.toHaveBeenCalled();
   });
 
   it('renders 10-second selected playback with a separate 8-second planning overlay and no density label', () => {
@@ -457,6 +535,166 @@ describe('CoverageBar', () => {
       );
     });
     expect(screen.getByTestId('studio-coverage-playback')).toHaveAttribute('data-density', 'medium');
+  });
+
+  it('uses a pressed segment button to request the inspected Shot without nesting trim controls', () => {
+    const onInspectShot = vi.fn();
+    renderCoverage([makeSelectedShot(), makeShot('shot_2', 8, 8)], {
+      inspectedShotId: 'shot_2',
+      onInspectShot,
+    });
+
+    const [firstSelector, secondSelector] = screen
+      .getAllByRole('button')
+      .filter((button) => button.hasAttribute('data-coverage-shot-selector'));
+    expect(firstSelector).toHaveAccessibleName(/Shot 1.*10s source/);
+    expect(secondSelector).toHaveAccessibleName(/Shot 2.*8s plan/);
+    expect(firstSelector).toHaveAttribute('aria-pressed', 'false');
+    expect(secondSelector).toHaveAttribute('aria-pressed', 'true');
+    expect(firstSelector).not.toContainElement(screen.getByRole('slider', { name: 'Trim in Shot 1' }));
+
+    fireEvent.click(firstSelector);
+    expect(onInspectShot).toHaveBeenCalledTimes(1);
+    expect(onInspectShot).toHaveBeenCalledWith('shot_1');
+  });
+
+  it.each([
+    [{ kind: 'status_pending' } as const, 'Status unavailable'],
+    [{ kind: 'no_take' } as const, 'No Take'],
+    [{ kind: 'queued' } as const, 'Queued'],
+    [{ kind: 'waiting_on_shot', upstreamShotNumber: 1 } as const, 'Waiting on 01'],
+    [{ kind: 'waiting_on_frame' } as const, 'Waiting on the frame'],
+    [{ kind: 'rendering', progressPercent: null, showingStill: false } as const, 'Rendering'],
+    [{ kind: 'rendering', progressPercent: null, showingStill: true } as const, 'Rendering · Showing the still'],
+    [{ kind: 'rendering', progressPercent: 39.6, showingStill: true } as const, 'Rendering · 39.6%'],
+    [{ kind: 'rendered', takeCount: 1, selectedTakeNumber: 1 } as const, 'Rendered · 1 Take'],
+    [{ kind: 'rendered', takeCount: 2, selectedTakeNumber: 2 } as const, '2 Takes · T2 in the Cut'],
+    [{ kind: 'rendered', takeCount: 2, selectedTakeNumber: null } as const, 'Rendered'],
+    [{ kind: 'needs_rerender' } as const, 'Needs a re-render'],
+    [{ kind: 'stale' } as const, 'Stale · Still plays'],
+    [{ kind: 'failed_unbilled' } as const, 'Failed · Not billed'],
+    [{ kind: 'never_dispatched' } as const, 'Never dispatched'],
+    [{ kind: 'needs_attention' } as const, 'Needs attention'],
+  ])('renders the exact truthful segment state %#', (segmentState, copy) => {
+    renderCoverage([makeShot('shot_1', 8, 0, { segmentState })]);
+
+    const state = screen.getByText(copy);
+    expect(state).toHaveAttribute('data-segment-state', segmentState.kind);
+    expect(screen.getByRole('button', { name: new RegExp(`Shot 1.*8s plan.*${copy}`) })).toContainElement(state);
+  });
+
+  it('keeps stale selected media playable while rendering exact empty, verified, and hard-cut boundary markers', () => {
+    const first = makeSelectedShot({ segmentState: { kind: 'stale' } });
+    const second = makeShot('shot_2', 8, 8, {
+      frameBoundary: {
+        upstreamShotId: 'shot_1',
+        dependentShotId: 'shot_2',
+        status: 'on_disk',
+        frameAssetId: 'frame_1',
+      },
+      segmentState: { kind: 'waiting_on_frame' },
+    });
+    const third = makeShot('shot_3', 8, 16, {
+      frameBoundary: {
+        upstreamShotId: 'shot_2',
+        dependentShotId: 'shot_3',
+        status: 'empty',
+        frameAssetId: null,
+      },
+      segmentState: { kind: 'queued' },
+    });
+    const fourth = makeShot('shot_4', 8, 24, {
+      chainBreak: 'hard_cut',
+      frameBoundary: null,
+      segmentHead: true,
+    });
+    renderCoverage([first, second, third, fourth]);
+
+    expect(screen.getByText('Stale · Still plays')).toBeVisible();
+    expect(screen.getByRole('slider', { name: 'Trim in Shot 1' })).toBeEnabled();
+
+    const ready = screen.getByRole('img', { name: 'Boundary after Shot 01 · Continuity frame ready' });
+    expect(ready).toHaveAttribute('data-boundary-frame', 'on_disk');
+    expect(ready.querySelector('img')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/frame_1');
+    expect(ready.querySelector('img')).toHaveAttribute('alt', '');
+
+    expect(screen.getByRole('img', { name: 'Boundary after Shot 02 · Waiting for continuity frame' })).toHaveAttribute(
+      'data-boundary-frame',
+      'empty'
+    );
+    const gone = screen.getByRole('img', { name: 'Boundary after Shot 03 · Continuity frame missing' });
+    expect(gone).toHaveAttribute('data-boundary-frame', 'gone');
+    expect(gone).not.toContainElement(screen.getByRole('slider', { name: 'Boundary after Shot 3' }));
+  });
+
+  it('fails malformed or unsafe boundary authority closed without inventing an on-disk frame', () => {
+    const second = makeShot('shot_2', 8, 8, {
+      frameBoundary: {
+        upstreamShotId: 'wrong_upstream',
+        dependentShotId: 'shot_2',
+        status: 'on_disk',
+        frameAssetId: 'frame_1',
+      },
+    });
+    const invalidProject = renderCoverage([makeShot('shot_1', 8, 0), second]);
+    expect(screen.queryByRole('img', { name: /Continuity frame ready/ })).toBeNull();
+
+    invalidProject.unmount();
+    render(
+      <CoverageBar
+        disabled={false}
+        inspectedShotId='shot_1'
+        onCommitPlanningDurations={vi.fn().mockResolvedValue(true)}
+        onCommitTrim={vi.fn().mockResolvedValue(true)}
+        onInspectShot={vi.fn()}
+        projectId='unsafe/project'
+        shots={[
+          makeShot('shot_1', 8, 0),
+          {
+            ...second,
+            frameBoundary: {
+              upstreamShotId: 'shot_1',
+              dependentShotId: 'shot_2',
+              status: 'on_disk',
+              frameAssetId: 'frame_1',
+            },
+          },
+        ]}
+      />
+    );
+    expect(screen.queryByRole('img', { name: /Continuity frame ready/ })).toBeNull();
+    expect(screen.getByRole('img', { name: 'Boundary after Shot 01 · Continuity frame missing' })).toHaveAttribute(
+      'data-boundary-frame',
+      'gone'
+    );
+  });
+
+  it('keeps a stale dependent Take playable but marks its incoming verified frame red', () => {
+    const upstream = makeSelectedShot();
+    const dependent = makeShot('shot_2', 8, 8, {
+      selectedTakeId: 'take_2',
+      selectedTakeSourceDurationSeconds: 10,
+      trimInSeconds: 1,
+      trimOutSeconds: 1,
+      playedDurationSeconds: 8,
+      dirtyCauses: ['continuity_stale'],
+      segmentState: { kind: 'stale' },
+      frameBoundary: {
+        upstreamShotId: 'shot_1',
+        dependentShotId: 'shot_2',
+        status: 'on_disk',
+        frameAssetId: 'frame_1',
+      },
+    });
+    renderCoverage([upstream, dependent]);
+
+    expect(screen.getByText('Stale · Still plays')).toBeVisible();
+    expect(screen.getByRole('slider', { name: 'Trim in Shot 2' })).toBeEnabled();
+    const marker = screen.getByRole('img', {
+      name: 'Boundary after Shot 01 · Continuity frame is out of date',
+    });
+    expect(marker).toHaveAttribute('data-boundary-frame', 'gone');
+    expect(marker.querySelector('img')).toBeNull();
   });
 
   it('keeps source copy outside a dedicated trim lane without weakening the sliders', () => {
@@ -571,7 +809,7 @@ describe('CoverageBar', () => {
     expect(trimGuidanceId).not.toBe('');
     expect(boundaryGuidanceId).not.toBe(trimGuidanceId);
     for (const slider of screen.getAllByRole('slider', { name: /Trim (?:in|out) Shot/ })) {
-      expect(slider).toHaveAttribute('aria-describedby', trimGuidanceId);
+      expect(slider.getAttribute('aria-describedby')?.split(' ')).toContain(trimGuidanceId);
     }
     for (const slider of screen.getAllByRole('slider', { name: /Boundary after Shot/ })) {
       expect(slider).toHaveAttribute('aria-describedby', boundaryGuidanceId);
@@ -580,8 +818,11 @@ describe('CoverageBar', () => {
     result.rerender(
       <CoverageBar
         disabled={false}
+        inspectedShotId={result.inspectedShotId}
         onCommitPlanningDurations={result.onCommitPlanningDurations}
         onCommitTrim={result.onCommitTrim}
+        onInspectShot={result.onInspectShot}
+        projectId='project_1'
         shots={[{ ...first, trimInSeconds: 2, playedDurationSeconds: 7 }, second, third]}
       />
     );
@@ -589,7 +830,7 @@ describe('CoverageBar', () => {
     expect(screen.getByText('Boundary · Costs a re-render')).toHaveAttribute('id', boundaryGuidanceId);
   });
 
-  it('reserves a normal-flow bottom row for trim chrome', () => {
+  it('fits selection and trim chrome into the specified 88px playback track', () => {
     const css = readFileSync(
       resolve(
         process.cwd(),
@@ -598,8 +839,17 @@ describe('CoverageBar', () => {
       'utf8'
     );
 
-    expect(css).toMatch(/\.playbackSegment\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) 34px/s);
-    expect(css).toMatch(/\.trimLane\s*\{[^}]*position:\s*relative[^}]*grid-row:\s*4/s);
+    const playbackTrackRule = cssRuleBody(css, '.playbackTrack');
+    expect(playbackTrackRule).toContain('box-sizing: border-box');
+    expect(playbackTrackRule).toContain('block-size: 88px');
+    expect(playbackTrackRule).toContain('border-radius: 11px');
+    expect(css).toMatch(/\.playbackSegment\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\) 28px/s);
+    expect(cssRuleBody(css, '.segmentSelector')).toContain('block-size: 100% !important');
+    expect(cssRuleBody(css, '.segmentSelector')).toContain('grid-template-rows: auto auto');
+    expect(cssRuleBody(css, '.segmentMeta')).toContain('grid-row: 2');
+    expect(cssRuleBody(css, '.segmentState')).toContain('line-height: 14px');
+    expect(cssRuleBody(css, '.trimWarning')).toContain('position: absolute');
+    expect(css).toMatch(/\.trimLane\s*\{[^}]*position:\s*relative[^}]*grid-row:\s*2/s);
     expect(css).toMatch(/\.trimHandle\s*\{[^}]*inset-block:\s*2px/s);
     expect(css).not.toMatch(/\.trimLane\s*\{[^}]*position:\s*absolute/s);
     expect(cssRuleBody(css, '.playbackSurface')).toContain('position: relative');
@@ -637,8 +887,11 @@ describe('CoverageBar', () => {
     result.rerender(
       <CoverageBar
         disabled={false}
+        inspectedShotId={result.inspectedShotId}
         onCommitPlanningDurations={result.onCommitPlanningDurations}
         onCommitTrim={result.onCommitTrim}
+        onInspectShot={result.onInspectShot}
+        projectId='project_1'
         shots={[makeShot('shot_1', 8, 0)]}
       />
     );
@@ -662,8 +915,11 @@ describe('CoverageBar', () => {
     result.rerender(
       <CoverageBar
         disabled={false}
+        inspectedShotId={result.inspectedShotId}
         onCommitPlanningDurations={result.onCommitPlanningDurations}
         onCommitTrim={result.onCommitTrim}
+        onInspectShot={result.onInspectShot}
+        projectId='project_1'
         shots={[makeShot('shot_1', 8, 0, { planningBoundary: null })]}
       />
     );
@@ -674,8 +930,11 @@ describe('CoverageBar', () => {
     result.rerender(
       <CoverageBar
         disabled={false}
+        inspectedShotId={result.inspectedShotId}
         onCommitPlanningDurations={result.onCommitPlanningDurations}
         onCommitTrim={result.onCommitTrim}
+        onInspectShot={result.onInspectShot}
+        projectId='project_1'
         shots={[shot]}
       />
     );
@@ -794,8 +1053,14 @@ describe('CoverageBar', () => {
       playedDurationSeconds: 8,
     });
     const result = renderCoverage([first, makeShot('shot_2', 8, 8, { segmentHead: false })], { onCommitTrim });
-    expect(screen.getByText('Tail trim makes the next Shot stale')).toBeInTheDocument();
+    const warning = screen.getByText('Tail trim makes the next Shot stale');
+    const selector = screen.getByRole('button', { name: /Shot 1.*10s source.*Rendered · 1 Take/ });
+    expect(warning).toBeVisible();
+    expect(selector).not.toContainElement(warning);
+    expect(selector).toHaveAccessibleDescription('Tail trim makes the next Shot stale');
     const trimIn = screen.getByRole('slider', { name: 'Trim in Shot 1' });
+    const trimOut = screen.getByRole('slider', { name: 'Trim out Shot 1' });
+    expect(trimOut).toHaveAccessibleDescription(/Edge · Trim · Free.*Tail trim makes/);
     fireEvent.keyDown(trimIn, { key: 'ArrowUp' });
     await waitFor(() => expect(onCommitTrim).toHaveBeenCalledWith('shot_1', 1.5, 1));
     expect(onCommitTrim).toHaveBeenCalledTimes(1);
@@ -803,8 +1068,11 @@ describe('CoverageBar', () => {
     result.rerender(
       <CoverageBar
         disabled={false}
+        inspectedShotId={result.inspectedShotId}
         onCommitPlanningDurations={result.onCommitPlanningDurations}
         onCommitTrim={onCommitTrim}
+        onInspectShot={result.onInspectShot}
+        projectId='project_1'
         shots={[first, makeShot('shot_2', 8, 8, { chainBreak: 'hard_cut', segmentHead: true })]}
       />
     );
@@ -874,8 +1142,11 @@ describe('CoverageBar', () => {
     result.rerender(
       <CoverageBar
         disabled
+        inspectedShotId={result.inspectedShotId}
         onCommitPlanningDurations={result.onCommitPlanningDurations}
         onCommitTrim={onCommitTrim}
+        onInspectShot={result.onInspectShot}
+        projectId='project_1'
         shots={[shot]}
       />
     );
@@ -946,8 +1217,11 @@ describe('CoverageBar', () => {
     result.rerender(
       <CoverageBar
         disabled={false}
+        inspectedShotId={result.inspectedShotId}
         onCommitPlanningDurations={result.onCommitPlanningDurations}
         onCommitTrim={onCommitTrim}
+        onInspectShot={result.onInspectShot}
+        projectId='project_1'
         shots={[makeSelectedShot({ trimInSeconds: 2, trimOutSeconds: 1, playedDurationSeconds: 7 })]}
       />
     );

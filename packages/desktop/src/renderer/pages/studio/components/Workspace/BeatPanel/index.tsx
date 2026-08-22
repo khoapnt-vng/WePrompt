@@ -527,6 +527,7 @@ type ShotCardProps = {
   drafts: UseWorkspaceDraftsResult;
   disabled: boolean;
   gatePreferences: GatePreferenceRecord;
+  hidden: boolean;
   index: number;
   onMove: (index: number, delta: -1 | 1) => void;
   onParkSettled: (shotId: string, parked: boolean) => void;
@@ -551,6 +552,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
   drafts,
   disabled,
   gatePreferences,
+  hidden,
   index,
   onMove,
   onParkSettled,
@@ -711,10 +713,15 @@ const ShotCard: React.FC<ShotCardProps> = ({
 
   const liftBodyKey = downstream.length === 0 ? `${KEY_ROOT}.lift.shotBodyNoStale` : `${KEY_ROOT}.lift.shotBodyStale`;
   return (
-    <article className={styles.shotCard} data-shot-id={shot.id}>
+    <article className={styles.shotCard} data-shot-id={shot.id} hidden={hidden}>
       <header className={styles.shotHeader}>
         <div>
           <h3>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
+          <span id={lineGuidanceId} className={styles.lineGuidance} data-line-derivation={shot.derivation}>
+            {t(
+              `${KEY_ROOT}.derivation.${shot.derivation === 'derived' ? 'attachedLineGuidance' : 'detachedLineGuidance'}`
+            )}
+          </span>
           <p
             className={styles.chainState}
             data-chain-state={
@@ -757,15 +764,10 @@ const ShotCard: React.FC<ShotCardProps> = ({
       <div className={styles.editorGrid}>
         <label data-shot-field='line'>
           <span>{t(`${KEY_ROOT}.fields.line`)}</span>
-          <span id={lineGuidanceId} className={styles.lineGuidance} data-line-derivation={shot.derivation}>
-            {t(
-              `${KEY_ROOT}.derivation.${shot.derivation === 'derived' ? 'attachedLineGuidance' : 'detachedLineGuidance'}`
-            )}
-          </span>
           <Input.TextArea
             aria-describedby={lineGuidanceId}
             aria-label={t(`${KEY_ROOT}.fields.lineFor`, { index: index + 1 })}
-            autoSize={{ minRows: 2, maxRows: 6 }}
+            autoSize={{ minRows: 2, maxRows: 2 }}
             disabled={disabled}
             onChange={(value) => drafts.setValue(lineKey, value)}
             value={line}
@@ -806,30 +808,52 @@ const ShotCard: React.FC<ShotCardProps> = ({
           />
         </label>
       </div>
-      <div className={styles.editorActions}>
-        <Button
-          disabled={disabled || drafts.staleRevision || saving || !dirty}
-          loading={saving}
-          onClick={() => void save()}
-          type='primary'
-        >
-          {t(`${KEY_ROOT}.common.saveShot`)}
-        </Button>
-        <Button disabled={disabled || saving || !dirty} onClick={reset}>
-          {t(`${KEY_ROOT}.common.resetShot`)}
-        </Button>
-        <div
-          aria-describedby={hardCutUnavailableId}
-          aria-labelledby={`${hardCutUnavailableId}-label`}
-          className={styles.hardCutControl}
-          data-hard-cut-contained
-          role='group'
-        >
-          <Checkbox checked={shot.chainBreak === 'hard_cut'} disabled>
-            <span id={`${hardCutUnavailableId}-label`}>{t(`${KEY_ROOT}.chain.authorHardCut`)}</span>
-          </Checkbox>
-          <p id={hardCutUnavailableId}>{t(`${KEY_ROOT}.chain.hardCutUnavailable`)}</p>
+      <div className={styles.shotActionCluster}>
+        <div className={styles.shotActionBand} data-shot-action-band>
+          <dl className={styles.takeSummary} data-shot-take-summary>
+            {shot.segmentHead || shot.imageTakes.length > 0 ? (
+              <div>
+                <dt>{t(shot.segmentHead ? `${KEY_ROOT}.seeds.title` : `${KEY_ROOT}.seeds.imageTitle`)}</dt>
+                <dd>
+                  <bdi>{shot.imageTakes.length}</bdi>
+                </dd>
+              </div>
+            ) : null}
+            <div>
+              <dt>{t(`${KEY_ROOT}.takes.videoTitle`)}</dt>
+              <dd>
+                <bdi>{shot.videoTakes.length}</bdi>
+              </dd>
+            </div>
+          </dl>
+          <div className={styles.editorActions} data-shot-actions>
+            <Button
+              disabled={disabled || drafts.staleRevision || saving || !dirty}
+              loading={saving}
+              onClick={() => void save()}
+              type='primary'
+            >
+              {t(`${KEY_ROOT}.common.saveShot`)}
+            </Button>
+            <Button disabled={disabled || saving || !dirty} onClick={reset}>
+              {t(`${KEY_ROOT}.common.resetShot`)}
+            </Button>
+            <div
+              aria-describedby={hardCutUnavailableId}
+              aria-labelledby={`${hardCutUnavailableId}-label`}
+              className={styles.hardCutControl}
+              data-hard-cut-contained
+              role='group'
+            >
+              <Checkbox checked={shot.chainBreak === 'hard_cut'} disabled>
+                <span id={`${hardCutUnavailableId}-label`}>{t(`${KEY_ROOT}.chain.authorHardCut`)}</span>
+              </Checkbox>
+            </div>
+          </div>
         </div>
+        <p className={styles.hardCutExplanation} data-hard-cut-explanation id={hardCutUnavailableId}>
+          {t(`${KEY_ROOT}.chain.hardCutUnavailable`)}
+        </p>
       </div>
 
       <section aria-label={t(`${KEY_ROOT}.derivation.label`, { index: index + 1 })} className={styles.subsection}>
@@ -1242,6 +1266,10 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const [savingBeat, setSavingBeat] = useState(false);
   const [reorderAnnouncement, setReorderAnnouncement] = useState('');
   const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
+  const [inspectedShotSelection, setInspectedShotSelection] = useState<{
+    beatId: string;
+    shotId: string | null;
+  }>(() => ({ beatId: beat.id, shotId: beat.shots[0]?.id ?? null }));
   const actionKey = beatDraftKey(beat.id, 'action');
   const lookKey = beatDraftKey(beat.id, 'look');
   const targetKey = beatDraftKey(beat.id, 'targetSeconds');
@@ -1297,6 +1325,15 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
     beatDownstreamPositions.length === beatDownstream.length;
   const displayBeatIndex = safeBeatIndex >= 0 ? safeBeatIndex + 1 : Math.max(beatIndex + 1, 1);
   const beatTitle = beat.title.trim() || t(`${KEY_ROOT}.untitledBeat`, { index: displayBeatIndex });
+  const requestedInspectedShotId = inspectedShotSelection.beatId === beat.id ? inspectedShotSelection.shotId : null;
+  const inspectedShotId = beat.shots.some((shot) => shot.id === requestedInspectedShotId)
+    ? requestedInspectedShotId
+    : (beat.shots[0]?.id ?? null);
+
+  const inspectShot = (shotId: string): void => {
+    if (!beat.shots.some((shot) => shot.id === shotId)) return;
+    setInspectedShotSelection({ beatId: beat.id, shotId });
+  };
 
   const saveBeat = async (): Promise<void> => {
     if (!beatDirty || savingBeat || mutationLocked || drafts.staleRevision) return;
@@ -1477,13 +1514,64 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           </div>
         </section>
 
-        <BeatPlayer beat={beat} projectId={projectId} projection={projection}>
+        <BeatPlayer
+          beat={beat}
+          inspector={
+            <section
+              aria-label={t(`${KEY_ROOT}.shots.label`)}
+              className={styles.shotInspector}
+              data-inspected-shot-id={inspectedShotId ?? undefined}
+              data-shot-inspector
+            >
+              {beat.shots.map((shot, index) => (
+                <ShotCard
+                  key={shot.id}
+                  actions={actions}
+                  beat={beat}
+                  briefReferenceOptions={safeBriefReferenceOptions}
+                  canMoveNext={index < beat.shots.length - 1}
+                  canMovePrevious={index > 0}
+                  disabled={mutationLocked}
+                  drafts={drafts}
+                  gatePreferences={gatePreferences}
+                  hidden={shot.id !== inspectedShotId}
+                  index={index}
+                  onMove={(position, delta) => void moveShot(position, delta)}
+                  onParkSettled={(shotId, parked) => {
+                    if (parked) {
+                      onParkShotSuccess(shotId);
+                      return;
+                    }
+                    setShotLiftAnnouncement(t(`${KEY_ROOT}.lift.shotFailed`));
+                  }}
+                  onUpdateReviewPreference={updateReviewPreference}
+                  projectId={projectId}
+                  projection={projection}
+                  reviewBlocked={reviewBlockedMessageKey !== null || gateLocked}
+                  reviewChoices={exactReviewGraph(
+                    projection,
+                    reviewGraphs,
+                    shot.id,
+                    shot.segmentHead && shot.effectiveSeedAssetId === null ? 'seed_still' : 'video_take'
+                  )}
+                  shot={shot}
+                />
+              ))}
+              {beat.shots.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.shots.empty`)}</p> : null}
+            </section>
+          }
+          projectId={projectId}
+          projection={projection}
+        >
           {(playback) => (
             <CoverageBar
               disabled={coverageDisabled}
+              inspectedShotId={inspectedShotId}
               onCommitPlanningDurations={commitPlanningDurations}
               onCommitTrim={commitTrim}
+              onInspectShot={inspectShot}
               playback={playback}
+              projectId={projectId}
               shots={beat.shots}
             />
           )}
@@ -1502,43 +1590,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           projectId={projectId}
           projection={projection}
         />
-
-        <section aria-label={t(`${KEY_ROOT}.shots.label`)} className={styles.shotList}>
-          {beat.shots.map((shot, index) => (
-            <ShotCard
-              key={shot.id}
-              actions={actions}
-              beat={beat}
-              briefReferenceOptions={safeBriefReferenceOptions}
-              canMoveNext={index < beat.shots.length - 1}
-              canMovePrevious={index > 0}
-              disabled={mutationLocked}
-              drafts={drafts}
-              gatePreferences={gatePreferences}
-              index={index}
-              onMove={(position, delta) => void moveShot(position, delta)}
-              onParkSettled={(shotId, parked) => {
-                if (parked) {
-                  onParkShotSuccess(shotId);
-                  return;
-                }
-                setShotLiftAnnouncement(t(`${KEY_ROOT}.lift.shotFailed`));
-              }}
-              onUpdateReviewPreference={updateReviewPreference}
-              projectId={projectId}
-              projection={projection}
-              reviewBlocked={reviewBlockedMessageKey !== null || gateLocked}
-              reviewChoices={exactReviewGraph(
-                projection,
-                reviewGraphs,
-                shot.id,
-                shot.segmentHead && shot.effectiveSeedAssetId === null ? 'seed_still' : 'video_take'
-              )}
-              shot={shot}
-            />
-          ))}
-          {beat.shots.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.shots.empty`)}</p> : null}
-        </section>
 
         <footer className={styles.panelFooter}>
           <Popconfirm

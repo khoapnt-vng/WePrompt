@@ -22,7 +22,11 @@ export {
   type StudioVerifiedConditioningFrameV2,
   type StudioWaitingBindingAdvanceV2,
 } from './lifecycle';
-export { projectStudioChainStatusV2, projectStudioWorkspaceStatusV2 } from './workspaceStatus';
+export {
+  projectStudioChainBoundaryVerificationIdsV2,
+  projectStudioChainStatusV2,
+  projectStudioWorkspaceStatusV2,
+} from './workspaceStatus';
 export {
   applyStudioMutationBatchV2,
   StudioMutationErrorV2,

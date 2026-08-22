@@ -172,6 +172,7 @@ const workspaceStatus: StudioRendererWorkspaceStatusV2 = {
   undoTop: null,
   dirtyShots: [],
   cascadeProgress: [],
+  currentVideoJobs: [],
   parkEligibility: [],
 };
 const preparedSubmission = {
@@ -274,7 +275,12 @@ const createService = () =>
     })),
     applyMutations: vi.fn(async () => mutationResult),
     getWorkspaceStatus: vi.fn(async () => workspaceStatus),
-    getChainStatus: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8, conditioningFailures: [] })),
+    getChainStatus: vi.fn(async () => ({
+      projectId: 'project_1',
+      projectRevision: 8,
+      conditioningFailures: [],
+      boundaries: [],
+    })),
     retryConditioningFrame: vi.fn(async () => workspaceStatus),
     cancelWaitingCascade: vi.fn(async () => workspaceStatus),
     deleteProject: vi.fn(async () => true),

@@ -932,16 +932,22 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
   const geometry = await panel.evaluate((panelElement) => {
     const element = panelElement.querySelector<HTMLElement>('section[aria-label="Beat action, look, and target"]');
     if (element === null) throw new Error('Beat authoring section was unavailable');
-    const box = (selector: string) => {
-      const target = element.querySelector<HTMLElement>(selector);
+    // eslint-disable-next-line unicorn/consistent-function-scoping -- Playwright serializes only this evaluate closure.
+    const box = (root: HTMLElement, selector: string) => {
+      const target = root.querySelector<HTMLElement>(selector);
       if (target === null) throw new Error(`Beat authoring geometry target was unavailable: ${selector}`);
       const { bottom, left, right, top, width } = target.getBoundingClientRect();
-      return { bottom, left, right, top, width };
+      return { bottom, height: target.getBoundingClientRect().height, left, right, top, width };
     };
     const panelRect = panelElement.getBoundingClientRect();
     const panelStyle = getComputedStyle(panelElement);
     const { bottom, left, right, top, width } = element.getBoundingClientRect();
     const documentElement = element.ownerDocument.documentElement;
+    const visibleShotInspectors = Array.from(
+      panelElement.querySelectorAll<HTMLElement>('article[data-shot-id]')
+    ).filter((shot) => !shot.hidden);
+    const visibleShotInspector = visibleShotInspectors[0];
+    if (visibleShotInspector === undefined) throw new Error('Visible Shot inspector was unavailable');
     return {
       panel: {
         rect: {
@@ -967,30 +973,79 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
       sectionScrollWidth: element.scrollWidth,
       documentClientWidth: documentElement.clientWidth,
       documentScrollWidth: documentElement.scrollWidth,
-      action: box('[data-beat-field="action"]'),
-      look: box('[data-beat-field="look"]'),
-      target: box('[data-beat-field="target"]'),
-      meta: box('[data-beat-meta-row]'),
-      actions: box('[data-beat-editor-actions]'),
+      action: box(element, '[data-beat-field="action"]'),
+      look: box(element, '[data-beat-field="look"]'),
+      target: box(element, '[data-beat-field="target"]'),
+      meta: box(element, '[data-beat-meta-row]'),
+      actions: box(element, '[data-beat-editor-actions]'),
+      working: box(panelElement, '[data-beat-working-row]'),
+      previewColumn: box(panelElement, '[data-beat-preview-column]'),
+      inspector: box(panelElement, '[data-shot-inspector]'),
+      shotActionBand: box(visibleShotInspector, '[data-shot-action-band]'),
+      shotTakeSummary: box(visibleShotInspector, '[data-shot-take-summary]'),
+      shotActions: box(visibleShotInspector, '[data-shot-actions]'),
+      hardCutExplanation: box(visibleShotInspector, '[data-hard-cut-explanation]'),
+      playbackTrack: box(panelElement, '[data-testid="studio-coverage-playback"]'),
+      coverage: (() => {
+        const coverage = panelElement.querySelector<HTMLElement>('[data-beat-coverage]');
+        if (coverage === null) throw new Error('Beat coverage geometry target was unavailable');
+        return {
+          ...box(panelElement, '[data-beat-coverage]'),
+          clientWidth: coverage.clientWidth,
+          scrollWidth: coverage.scrollWidth,
+        };
+      })(),
+      visibleShotInspectors: visibleShotInspectors.length,
     };
   });
   const computedPanelWidth = Number.parseFloat(geometry.panel.computedWidth);
   const computedPanelInlineSize = Number.parseFloat(geometry.panel.computedInlineSize);
   const computedPanelMaxInlineSize = Number.parseFloat(geometry.panel.computedMaxInlineSize);
-  expect(computedPanelWidth).toBeLessThanOrEqual(854);
-  expect(computedPanelInlineSize).toBeLessThanOrEqual(854);
-  expect(computedPanelMaxInlineSize).toBe(852);
-  expect(geometry.panel.clientWidth).toBeLessThanOrEqual(854);
+  const expectedPanelWidth = Math.min(1100, reference.width - 32);
+  expect(computedPanelWidth).toBeGreaterThanOrEqual(expectedPanelWidth - 4);
+  expect(computedPanelWidth).toBeLessThanOrEqual(expectedPanelWidth + 2);
+  expect(computedPanelInlineSize).toBeGreaterThanOrEqual(expectedPanelWidth - 4);
+  expect(computedPanelInlineSize).toBeLessThanOrEqual(expectedPanelWidth + 2);
+  expect(computedPanelMaxInlineSize).toBe(1100);
+  expect(geometry.panel.clientWidth).toBeGreaterThanOrEqual(expectedPanelWidth - 4);
+  expect(geometry.panel.clientWidth).toBeLessThanOrEqual(expectedPanelWidth + 2);
   expect(geometry.panel.scrollWidth).toBeLessThanOrEqual(geometry.panel.clientWidth + 1);
   expect(geometry.section.left).toBeGreaterThanOrEqual(geometry.panel.rect.left - 1);
   expect(geometry.section.right).toBeLessThanOrEqual(geometry.panel.rect.right + 1);
   expect(geometry.sectionScrollWidth).toBeLessThanOrEqual(geometry.sectionClientWidth + 1);
   expect(geometry.documentScrollWidth).toBeLessThanOrEqual(geometry.documentClientWidth + 1);
+  expect(geometry.visibleShotInspectors).toBe(1);
+  expect(geometry.playbackTrack.height).toBeGreaterThanOrEqual(87);
+  expect(geometry.playbackTrack.height).toBeLessThanOrEqual(89);
+  expect(geometry.coverage.scrollWidth).toBeGreaterThanOrEqual(geometry.coverage.clientWidth);
+  expect(geometry.hardCutExplanation.top).toBeGreaterThanOrEqual(geometry.shotActionBand.bottom + 3);
+
+  if (reference.width > 900) {
+    expect(geometry.previewColumn.width).toBeGreaterThanOrEqual(403);
+    expect(geometry.previewColumn.width).toBeLessThanOrEqual(405);
+    expect(Math.abs(geometry.previewColumn.top - geometry.inspector.top)).toBeLessThanOrEqual(1);
+    const workingGap =
+      reference.direction === 'rtl'
+        ? geometry.previewColumn.left - geometry.inspector.right
+        : geometry.inspector.left - geometry.previewColumn.right;
+    expect(workingGap).toBeGreaterThanOrEqual(17);
+    expect(workingGap).toBeLessThanOrEqual(19);
+    expect(
+      Math.abs(geometry.previewColumn.width + geometry.inspector.width + workingGap - geometry.working.width)
+    ).toBeLessThanOrEqual(1);
+    expect(Math.abs(geometry.shotTakeSummary.top - geometry.shotActions.top)).toBeLessThanOrEqual(1);
+    if (reference.direction === 'rtl') {
+      expect(geometry.shotActions.right).toBeLessThanOrEqual(geometry.shotTakeSummary.left + 1);
+    } else {
+      expect(geometry.shotTakeSummary.right).toBeLessThanOrEqual(geometry.shotActions.left + 1);
+    }
+  } else {
+    expect(geometry.previewColumn.bottom).toBeLessThanOrEqual(geometry.inspector.top - 17);
+    expect(Math.abs(geometry.previewColumn.width - geometry.working.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(geometry.inspector.width - geometry.working.width)).toBeLessThanOrEqual(1);
+  }
 
   if (reference.width > 760) {
-    expect(computedPanelWidth).toBeGreaterThanOrEqual(848);
-    expect(computedPanelInlineSize).toBeGreaterThanOrEqual(848);
-    expect(geometry.panel.clientWidth).toBeGreaterThanOrEqual(848);
     expect(Math.abs(geometry.action.top - geometry.look.top)).toBeLessThanOrEqual(1);
     expect(geometry.action.width / geometry.look.width).toBeCloseTo(1.25, 1);
     const inlineGap =
@@ -1123,6 +1178,16 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   await expectBeatAuthoringBandGeometry(panel, reference);
   const shotCard = panel.locator(`article[data-shot-id="${shotId}"]`);
   const anchorShotCard = panel.locator(`article[data-shot-id="${anchorShotId}"]`);
+  const shotSelector = panel.locator(
+    `[data-testid="studio-coverage-playback"] [data-shot-id="${shotId}"] [data-coverage-shot-selector]`
+  );
+  const anchorShotSelector = panel.locator(
+    `[data-testid="studio-coverage-playback"] [data-shot-id="${anchorShotId}"] [data-coverage-shot-selector]`
+  );
+  await expect(shotSelector).toHaveAttribute('aria-pressed', 'true');
+  await expect(anchorShotSelector).toHaveAttribute('aria-pressed', 'false');
+  await expect(shotCard).toBeVisible();
+  await expect(anchorShotCard).toBeHidden();
   await expect(shotCard).toContainText('The plane lands.');
   await expect(anchorShotCard).toContainText('The desk remains in view.');
   expect(projectBeforeLift.shots[shotId]?.derivation).toBe('derived');
@@ -1130,13 +1195,9 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   const headState = shotCard.locator('[data-chain-state="segment_head"]');
   const continuousState = anchorShotCard.locator('[data-chain-state="continuous"]');
   await expect(headState).toHaveText('Head of the chain · Starts from the still');
-  await expect(continuousState).toHaveText('Continues from Shot 01’s last frame');
   await expect(headState.locator('[data-hard-cut-contained]')).toHaveCount(0);
-  await expect(continuousState.locator('[data-hard-cut-contained]')).toHaveCount(0);
   const firstLine = shotCard.getByRole('textbox', { name: 'Line for Shot 1', exact: true });
-  const secondLine = anchorShotCard.getByRole('textbox', { name: 'Line for Shot 2', exact: true });
   await expect(firstLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
-  await expect(secondLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
   const hardCutGroup = shotCard.locator('[data-hard-cut-contained]');
   await expect(hardCutGroup).toHaveAccessibleName('Start with a hard cut');
   await expect(hardCutGroup).toHaveAccessibleDescription(
@@ -1151,6 +1212,17 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   }
   await hardCutControl.evaluate((element: HTMLInputElement) => element.click());
   expect(await readStudioProject(page, projectId)).toEqual(projectBeforeLift);
+
+  await anchorShotSelector.click();
+  await expect(anchorShotSelector).toHaveAttribute('aria-pressed', 'true');
+  await expect(shotSelector).toHaveAttribute('aria-pressed', 'false');
+  await expect(anchorShotCard).toBeVisible();
+  await expect(shotCard).toBeHidden();
+  await expect(continuousState).toHaveText('Continues from Shot 01’s last frame');
+  await expect(continuousState.locator('[data-hard-cut-contained]')).toHaveCount(0);
+  const secondLine = anchorShotCard.getByRole('textbox', { name: 'Line for Shot 2', exact: true });
+  await expect(secondLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
+
   const playbackLane = panel.getByRole('group', { name: 'Playback coverage' });
   const planningLane = panel.getByRole('group', { name: 'Planning overlay' });
   const renderedPlaybackSegment = playbackLane.locator(`[data-shot-id="${shotId}"]`);
@@ -1164,6 +1236,8 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   await expectLocatorFitsViewport(panel, reference, 'Beat panel');
   await takeScreenshot(page, `creative-studio/gate-3/beat-panel-coverage-${reference.screenshotSuffix}.png`);
 
+  await shotSelector.click();
+  await expect(shotCard).toBeVisible();
   const liftShot = shotCard.getByRole('button', { name: 'Lift Shot', exact: true });
   await expect(liftShot).toBeEnabled();
   await expect(panel.getByRole('button', { name: 'Lift Beat', exact: true })).toBeEnabled();
@@ -1263,7 +1337,12 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   await openBeat.click();
   await expect(panel).toBeVisible();
   await expect(panel.locator(`article[data-shot-id="${shotId}"]`)).toBeVisible();
+  await expect(panel.locator(`article[data-shot-id="${anchorShotId}"]`)).toBeHidden();
+  await anchorShotSelector.click();
   await expect(panel.locator(`article[data-shot-id="${anchorShotId}"]`)).toBeVisible();
+  await expect(panel.locator(`article[data-shot-id="${shotId}"]`)).toBeHidden();
+  await shotSelector.click();
+  await expect(panel.locator(`article[data-shot-id="${shotId}"]`)).toBeVisible();
   await expect(playbackLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('10s source');
   await expect(planningLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('8s plan');
   await panel.getByRole('button', { name: 'Close', exact: true }).click();
@@ -2078,7 +2157,15 @@ test.describe('Creative Studio workspace', () => {
       await beatSeek.press('Home');
       const playbackLane = panel.getByRole('group', { name: 'Playback coverage' });
       const planningLane = panel.getByRole('group', { name: 'Planning overlay' });
-      await expect(playbackLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('10s source');
+      const firstPlaybackSegment = playbackLane.locator(`[data-shot-id="${shotId}"]`);
+      const secondPlaybackSegment = playbackLane.locator(`[data-shot-id="${anchorShotId}"]`);
+      await expect(firstPlaybackSegment).toContainText('10s source');
+      await expect(firstPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered · 1 Take');
+      await expect(secondPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered · 1 Take');
+      await expect(panel.getByRole('img', { name: 'Boundary after Shot 01 · Continuity frame ready' })).toHaveAttribute(
+        'data-boundary-frame',
+        'on_disk'
+      );
       await expect(planningLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('8s plan');
 
       const providerCallsBeforeTrim = await readStudioE2EProviderCallCounts(userDataDirectory);
@@ -2104,7 +2191,15 @@ test.describe('Creative Studio workspace', () => {
       await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:00 / 0:18');
       await expect(beatSeek).toHaveAttribute('aria-valuemax', '18');
       await expect(panel.getByText('Tail trim breaks downstream continuity.')).toBeVisible();
+      await expect(firstPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered · 1 Take');
+      await expect(secondPlaybackSegment.locator('[data-segment-state="stale"]')).toHaveText('Stale · Still plays');
+      await expect(
+        panel.getByRole('img', { name: 'Boundary after Shot 01 · Continuity frame is out of date' })
+      ).toHaveAttribute('data-boundary-frame', 'gone');
+      const anchorShotSelector = secondPlaybackSegment.locator('[data-coverage-shot-selector]');
+      await anchorShotSelector.click();
       const staleAnchorShotCard = panel.locator(`article[data-shot-id="${anchorShotId}"]`);
+      await expect(staleAnchorShotCard).toBeVisible();
       const continuityWarning = staleAnchorShotCard.getByText('Continuity is out of date', { exact: true });
       await expect(continuityWarning).toBeVisible();
       await expect(staleAnchorShotCard.locator('[data-chain-state="continuous"]')).toHaveText(

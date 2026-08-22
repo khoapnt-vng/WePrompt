@@ -965,6 +965,33 @@
         "coverage": {
           "trimGuidance": "边缘 · 修剪 · 免费",
           "boundaryGuidance": "边界 · 需要重新渲染",
+          "segmentState": {
+            "noTake": "暂无镜次",
+            "queued": "已加入队列",
+            "nextUp": "下一个",
+            "waitingOnShot": "等待镜头 {{position}}",
+            "waitingOnFrame": "等待连续性帧",
+            "rendering": "正在渲染",
+            "renderingProgress": "正在渲染 · {{progress}}%",
+            "renderingStill": "正在渲染 · 正在显示静帧",
+            "rendered": "已渲染",
+            "renderedOneTake": "已渲染 · 1 个镜次",
+            "selectedTake": "{{count}} 个镜次 · 剪辑中使用 T{{take}}",
+            "untouched": "未更改",
+            "needsRerender": "需要重新渲染",
+            "staleStillPlays": "已过时 · 仍可播放",
+            "failedNotBilled": "失败 · 未计费",
+            "neverDispatched": "从未提交",
+            "shotKept": "镜头 {{position}} · 已保留",
+            "statusPending": "状态不可用",
+            "needsAttention": "需要处理"
+          },
+          "boundaryFrame": {
+            "empty": "镜头 {{position}} 后的边界 · 等待连续性帧",
+            "ready": "镜头 {{position}} 后的边界 · 连续性帧已就绪",
+            "gone": "镜头 {{position}} 后的边界 · 连续性帧缺失",
+            "stale": "镜头 {{position}} 后的边界 · 连续性帧已过时"
+          },
           "seekGuidance": "轨道 · 定位 · 免费",
           "seekLane": "节拍定位轨",
           "seekValue": "{{current}} / {{total}}"

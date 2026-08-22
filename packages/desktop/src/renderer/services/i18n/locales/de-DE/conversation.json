@@ -968,6 +968,33 @@
         "coverage": {
           "trimGuidance": "Kante · Trimmen · Kostenlos",
           "boundaryGuidance": "Grenze · Erfordert neues Rendern",
+          "segmentState": {
+            "noTake": "Kein Take",
+            "queued": "In Warteschlange",
+            "nextUp": "Als Nächstes",
+            "waitingOnShot": "Wartet auf Shot {{position}}",
+            "waitingOnFrame": "Wartet auf den Anschlussframe",
+            "rendering": "Wird gerendert",
+            "renderingProgress": "Wird gerendert · {{progress}} %",
+            "renderingStill": "Wird gerendert · Standbild wird angezeigt",
+            "rendered": "Gerendert",
+            "renderedOneTake": "Gerendert · 1 Take",
+            "selectedTake": "{{count}} Takes · T{{take}} im Schnitt",
+            "untouched": "Unverändert",
+            "needsRerender": "Muss neu gerendert werden",
+            "staleStillPlays": "Veraltet · Weiterhin abspielbar",
+            "failedNotBilled": "Fehlgeschlagen · Nicht berechnet",
+            "neverDispatched": "Nie gesendet",
+            "shotKept": "Shot {{position}} · Beibehalten",
+            "statusPending": "Status nicht verfügbar",
+            "needsAttention": "Aufmerksamkeit erforderlich"
+          },
+          "boundaryFrame": {
+            "empty": "Grenze nach Shot {{position}} · Wartet auf Anschlussframe",
+            "ready": "Grenze nach Shot {{position}} · Anschlussframe bereit",
+            "gone": "Grenze nach Shot {{position}} · Anschlussframe fehlt",
+            "stale": "Grenze nach Shot {{position}} · Anschlussframe ist veraltet"
+          },
           "seekGuidance": "Leiste · Suchen · Kostenlos",
           "seekLane": "Beat-Suchleiste",
           "seekValue": "{{current}} von {{total}}"

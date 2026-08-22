@@ -965,6 +965,33 @@
         "coverage": {
           "trimGuidance": "가장자리 · 트리밍 · 무료",
           "boundaryGuidance": "경계 · 다시 렌더링해야 함",
+          "segmentState": {
+            "noTake": "테이크 없음",
+            "queued": "대기열에 있음",
+            "nextUp": "다음 차례",
+            "waitingOnShot": "숏 {{position}} 대기 중",
+            "waitingOnFrame": "연속성 프레임 대기 중",
+            "rendering": "렌더링 중",
+            "renderingProgress": "렌더링 중 · {{progress}}%",
+            "renderingStill": "렌더링 중 · 스틸 표시 중",
+            "rendered": "렌더링 완료",
+            "renderedOneTake": "렌더링 완료 · 테이크 1개",
+            "selectedTake": "{{count}}개 테이크 · T{{take}} 컷에 사용",
+            "untouched": "변경 없음",
+            "needsRerender": "다시 렌더링해야 함",
+            "staleStillPlays": "최신 아님 · 계속 재생 가능",
+            "failedNotBilled": "실패 · 청구 안 됨",
+            "neverDispatched": "전송되지 않음",
+            "shotKept": "숏 {{position}} · 유지됨",
+            "statusPending": "상태를 사용할 수 없음",
+            "needsAttention": "확인 필요"
+          },
+          "boundaryFrame": {
+            "empty": "숏 {{position}} 뒤 경계 · 연속성 프레임 대기 중",
+            "ready": "숏 {{position}} 뒤 경계 · 연속성 프레임 준비됨",
+            "gone": "숏 {{position}} 뒤 경계 · 연속성 프레임 누락",
+            "stale": "숏 {{position}} 뒤 경계 · 연속성 프레임이 최신 상태가 아님"
+          },
           "seekGuidance": "레일 · 탐색 · 무료",
           "seekLane": "비트 탐색 레일",
           "seekValue": "{{total}} 중 {{current}}"

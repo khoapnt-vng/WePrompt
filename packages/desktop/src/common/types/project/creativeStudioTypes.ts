@@ -739,10 +739,25 @@ export type StudioRendererChainConditioningFailureV2 = {
   canRetry: true;
 };
 
+export type StudioRendererChainBoundaryV2 =
+  | {
+      upstreamShotId: string;
+      dependentShotId: string;
+      status: 'empty' | 'gone';
+      frameAssetId: null;
+    }
+  | {
+      upstreamShotId: string;
+      dependentShotId: string;
+      status: 'on_disk';
+      frameAssetId: string;
+    };
+
 export type StudioRendererChainStatusV2 = {
   projectId: string;
   projectRevision: number;
   conditioningFailures: StudioRendererChainConditioningFailureV2[];
+  boundaries: StudioRendererChainBoundaryV2[];
 };
 
 export type StudioGetChainStatusRequestV2 = { projectId: string };
@@ -789,6 +804,8 @@ export type StudioRendererWorkspaceStatusV2 = {
   undoTop: StudioRendererUndoTopV2 | null;
   dirtyShots: StudioRendererDirtyShotV2[];
   cascadeProgress: StudioCascadeProgressV2[];
+  /** Exact renderer job identities for each active Shot's latest authorized video generation item. */
+  currentVideoJobs: { shotId: string; jobIds: string[] }[];
   parkEligibility: StudioRendererParkEligibilityV2[];
 };
 

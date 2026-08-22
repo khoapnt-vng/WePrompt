@@ -136,6 +136,7 @@ import {
   applyStudioMutationBatchV2,
   advanceStudioWaitingBindingsV2,
   createStudioFrameExtractionId,
+  projectStudioChainBoundaryVerificationIdsV2,
   projectStudioChainStatusV2,
   projectStudioWorkspaceStatusV2,
   terminalizeStudioUnboundDependenciesV2,
@@ -2264,7 +2265,23 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     async getChainStatus(input): Promise<StudioRendererChainStatusV2> {
       if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio chain request');
       assertSafeId(input.projectId, 'project id');
-      return projectStudioChainStatusV2(await loadSupported(input.projectId));
+      const project = await loadSupported(input.projectId);
+      const verifiedReadyExtractions = new Map<string, StudioVerifiedConditioningFrameV2>();
+      const mediaStore = deps.mediaStore;
+      if (mediaStore !== undefined) {
+        await Promise.all(
+          projectStudioChainBoundaryVerificationIdsV2(project).map(async (extractionId) => {
+            let verified: StudioVerifiedConditioningFrameV2 | null;
+            try {
+              verified = await mediaStore.verifyConditioningFrameV2({ projectId: project.id, extractionId });
+            } catch {
+              verified = null;
+            }
+            if (verified !== null) verifiedReadyExtractions.set(extractionId, verified);
+          })
+        );
+      }
+      return projectStudioChainStatusV2(project, verifiedReadyExtractions);
     },
 
     async listProposals(input): Promise<StudioProposalV2[]> {

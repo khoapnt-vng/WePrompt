@@ -9,8 +9,10 @@ import type {
   StudioProposalV2,
   StudioReferenceRequestV2,
   StudioRendererExportCatalogV2,
+  StudioRendererChainStatusV2,
   StudioRendererProjectV2,
   StudioRendererReferenceGenerationHandoffV2,
+  StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import type {
   BeatPanelActions,
@@ -367,8 +369,47 @@ const projectWithAttentionJob = (
   return value;
 };
 
-const recoveryStatus = (revision: number) => ({
-  ...workspaceStatus(revision),
+const statusProject = (authority: number | StudioRendererProjectV2): StudioRendererProjectV2 => {
+  if (typeof authority !== 'number') return authority;
+  return { ...project(), revision: authority };
+};
+
+const currentVideoJobs = (authority: StudioRendererProjectV2): StudioRendererWorkspaceStatusV2['currentVideoJobs'] =>
+  authority.beatOrder.flatMap((beatId) => {
+    const beat = authority.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.map((shotId) => {
+      const shot = authority.shots[shotId];
+      return {
+        shotId,
+        jobIds:
+          shot?.id === shotId
+            ? shot.jobIds.filter((jobId) => {
+                const job = authority.jobs[jobId];
+                return job?.id === jobId && job.shotId === shotId && job.purpose === 'video_take';
+              })
+            : [],
+      };
+    });
+  });
+
+const chainBoundaries = (authority: StudioRendererProjectV2): StudioRendererChainStatusV2['boundaries'] =>
+  authority.beatOrder.flatMap((beatId) => {
+    const beat = authority.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.slice(1).flatMap((dependentShotId, index) => {
+      const upstreamShotId = beat.shotOrder[index]!;
+      const upstream = authority.shots[upstreamShotId];
+      const dependent = authority.shots[dependentShotId];
+      if (upstream?.id !== upstreamShotId || dependent?.id !== dependentShotId || dependent.chainBreak === 'hard_cut') {
+        return [];
+      }
+      return [{ upstreamShotId, dependentShotId, status: 'empty' as const, frameAssetId: null }];
+    });
+  });
+
+const recoveryStatus = (authority: number | StudioRendererProjectV2): StudioRendererWorkspaceStatusV2 => ({
+  ...workspaceStatus(typeof authority === 'number' ? projectWithRecovery(authority) : authority),
   cascadeProgress: [
     {
       dependentShotId: 'dependent_seed',
@@ -389,32 +430,46 @@ const recoveryStatus = (revision: number) => ({
   ],
 });
 
-const workspaceStatus = (revision: number, locked = false) => ({
-  projectId: 'project_1',
-  projectRevision: revision,
-  undoTop: null,
-  dirtyShots: [],
-  cascadeProgress: [],
-  parkEligibility: locked
-    ? [
-        {
-          subject: 'shot' as const,
-          action: 'park' as const,
-          beatId: 'beat_1',
-          shotId: 'shot_1',
-          assetId: null,
-          allowed: false,
-          blockers: [{ shotId: 'shot_1', code: 'bound_nonterminal_request' as const }],
-        },
-      ]
-    : [],
-});
+const workspaceStatus = (source: number | StudioRendererProjectV2, locked = false): StudioRendererWorkspaceStatusV2 => {
+  const authority = statusProject(source);
+  return {
+    projectId: authority.id,
+    projectRevision: authority.revision,
+    undoTop: null,
+    dirtyShots: [],
+    cascadeProgress: [],
+    currentVideoJobs: currentVideoJobs(authority),
+    parkEligibility: locked
+      ? [
+          {
+            subject: 'shot' as const,
+            action: 'park' as const,
+            beatId: 'beat_1',
+            shotId: 'shot_1',
+            assetId: null,
+            allowed: false,
+            blockers: [{ shotId: 'shot_1', code: 'bound_nonterminal_request' as const }],
+          },
+        ]
+      : [],
+  };
+};
 
-const chainStatus = (revision: number) => ({
-  projectId: 'project_1',
-  projectRevision: revision,
-  conditioningFailures: [],
-});
+const chainStatus = (source: number | StudioRendererProjectV2): StudioRendererChainStatusV2 => {
+  const authority = statusProject(source);
+  return {
+    projectId: authority.id,
+    projectRevision: authority.revision,
+    conditioningFailures: [],
+    boundaries: chainBoundaries(authority),
+  };
+};
+
+const mockSupportedProject = (authority: StudioRendererProjectV2): void => {
+  mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: authority }));
+  mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValue(ok(workspaceStatus(authority)));
+  mocks.bridge.getChainStatus.invoke.mockResolvedValue(ok(chainStatus(authority)));
+};
 
 const commit = (revision: number) =>
   ok({ projectId: 'project_1', projectRevision: revision, createdBeatIds: [], createdShotIds: [] });
@@ -965,7 +1020,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('opens one reviewed spend gate from the app-bar Render action without spending automatically', async () => {
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithDraftBatch(1) }));
+    mockSupportedProject(projectWithDraftBatch(1));
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
 
@@ -996,7 +1051,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('keeps app-bar project drafts and native snapshot counts stable across Table, Board, and Cut navigation', async () => {
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
+    mockSupportedProject(projectWithHandoffShot());
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     expectProjectFormsAbsentFromMain('table');
@@ -1250,7 +1305,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('opens choices for an exact active-shot handoff without preparing paid work', async () => {
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
+    mockSupportedProject(projectWithHandoffShot());
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
     renderStudio();
     const card = within(await screen.findByTestId('studio-handoff-handoff_open'));
@@ -1287,7 +1342,7 @@ describe('StudioPage schema-2 cutover', () => {
         }),
       },
     });
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: generativeProject }));
+    mockSupportedProject(generativeProject);
     mocks.bridge.listRoutes.invoke.mockResolvedValue(
       ok({
         image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
@@ -1670,6 +1725,14 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValueOnce(ok({ status: 'supported', project: revision4 }))
       .mockResolvedValue(ok({ status: 'supported', project: revision5 }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValueOnce(ok(workspaceStatus(revision4)))
+      .mockResolvedValue(ok(workspaceStatus(revision5)));
+    mocks.bridge.getChainStatus.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValueOnce(ok(chainStatus(revision4)))
+      .mockResolvedValue(ok(chainStatus(revision5)));
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValueOnce(commit(4)).mockResolvedValueOnce(commit(5));
 
     renderStudio();
@@ -2106,9 +2169,9 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[0]! }))
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[1]! }))
       .mockResolvedValue(ok({ status: 'supported', project: projects[2]! }));
-    for (const revision of [3, 4, 5]) {
-      mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValueOnce(ok(recoveryStatus(revision)));
-      mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(revision)));
+    for (const authority of projects) {
+      mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValueOnce(ok(recoveryStatus(authority)));
+      mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(authority)));
     }
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
     mocks.bridge.selectTake.invoke.mockResolvedValue(commit(5));
@@ -2156,9 +2219,9 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[0]! }))
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[1]! }))
       .mockResolvedValue(ok({ status: 'supported', project: projects[2]! }));
-    for (const revision of [3, 4, 5]) {
-      mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValueOnce(ok(recoveryStatus(revision)));
-      mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(revision)));
+    for (const authority of projects) {
+      mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValueOnce(ok(recoveryStatus(authority)));
+      mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(authority)));
     }
     mocks.bridge.retryConditioningFrame.invoke.mockResolvedValue(commit(4));
     mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(5));
@@ -2213,9 +2276,11 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValue(ok({ status: 'supported', project: imported }));
     mocks.bridge.getWorkspaceStatus.invoke
-      .mockResolvedValueOnce(ok(recoveryStatus(3)))
-      .mockResolvedValue(ok(recoveryStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+      .mockResolvedValueOnce(ok(recoveryStatus(initial)))
+      .mockResolvedValue(ok(recoveryStatus(imported)));
+    mocks.bridge.getChainStatus.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(imported)));
 
     renderStudio();
     fireEvent.click(await screen.findByRole('row', { name: /Recovery Beat/ }));
@@ -2282,6 +2347,22 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[3]! }))
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[4]! }))
       .mockResolvedValue(ok({ status: 'supported', project: projects[5]! }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockReset()
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[0]!)))
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[1]!)))
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[2]!)))
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[3]!)))
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[4]!)))
+      .mockResolvedValue(ok(workspaceStatus(projects[5]!)));
+    mocks.bridge.getChainStatus.invoke
+      .mockReset()
+      .mockResolvedValueOnce(ok(chainStatus(projects[0]!)))
+      .mockResolvedValueOnce(ok(chainStatus(projects[1]!)))
+      .mockResolvedValueOnce(ok(chainStatus(projects[2]!)))
+      .mockResolvedValueOnce(ok(chainStatus(projects[3]!)))
+      .mockResolvedValueOnce(ok(chainStatus(projects[4]!)))
+      .mockResolvedValue(ok(chainStatus(projects[5]!)));
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
     mocks.bridge.setBed.invoke.mockResolvedValue(commit(5));
     mocks.bridge.setMatchTo.invoke.mockResolvedValue(commit(6));
@@ -2416,8 +2497,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke.mockImplementation(async () =>
       ok({ status: 'supported' as const, project: { ...authority, revision } })
     );
-    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async () => ok(workspaceStatus(revision)));
-    mocks.bridge.getChainStatus.invoke.mockImplementation(async () => ok(chainStatus(revision)));
+    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async () =>
+      ok(workspaceStatus({ ...authority, revision }))
+    );
+    mocks.bridge.getChainStatus.invoke.mockImplementation(async () => ok(chainStatus({ ...authority, revision })));
     const nextCommit = async () => {
       revision += 1;
       return commit(revision);
@@ -2606,7 +2689,7 @@ describe('StudioPage schema-2 cutover', () => {
     const malformed = projectWithDraftBatch(1);
     malformed.beatOrder.unshift('missing_beat');
     malformed.beats.beat_0!.shotOrder.unshift('missing_shot');
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: malformed }));
+    mockSupportedProject(malformed);
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
@@ -2645,7 +2728,7 @@ describe('StudioPage schema-2 cutover', () => {
       alpha: briefReference('ref_a', 'Alpha', 'cast'),
       duplicate: briefReference('ref_a', 'Alpha', 'cast'),
     };
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: referenced }));
+    mockSupportedProject(referenced);
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
@@ -2742,7 +2825,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('reveals reviewed requests without replacing a manually closed rail preference', async () => {
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
+    mockSupportedProject(projectWithHandoffShot());
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
@@ -2782,7 +2865,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('ignores a reviewed-request reveal captured for a view that is no longer active', async () => {
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
+    mockSupportedProject(projectWithHandoffShot());
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
@@ -2799,7 +2882,7 @@ describe('StudioPage schema-2 cutover', () => {
 
   it('keeps captured seed imports fail-closed across native, transport, stale, and concurrent outcomes', async () => {
     const authority = projectWithDraftBatch(1);
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: authority }));
+    mockSupportedProject(authority);
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
@@ -2839,7 +2922,7 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('rejects malformed reviewed choice graphs at the captured Beat Panel boundary', async () => {
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithHandoffShot() }));
+    mockSupportedProject(projectWithHandoffShot());
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
@@ -2911,7 +2994,7 @@ describe('StudioPage schema-2 cutover', () => {
     seedWorkspaceDrafts({
       'shot.shot_0.line': { baseValue: 'Shot 1', value: 'Unsaved local line' },
     });
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: draftedProject }));
+    mockSupportedProject(draftedProject);
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
 
     renderStudio();
@@ -2934,7 +3017,7 @@ describe('StudioPage schema-2 cutover', () => {
     seedWorkspaceDrafts({
       'shot.shot_0.line': { baseValue: 'Shot 1', value: 'Unsaved local line' },
     });
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: draftedProject }));
+    mockSupportedProject(draftedProject);
     mocks.bridge.listProposals.invoke.mockResolvedValueOnce(ok([ruleProposal])).mockResolvedValue(ok([]));
     mocks.bridge.acceptProposal.invoke.mockResolvedValue(
       ok({
@@ -2968,9 +3051,11 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValue(ok({ status: 'supported', project: advanced }));
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
     mocks.bridge.getWorkspaceStatus.invoke
-      .mockResolvedValueOnce(ok(workspaceStatus(3)))
-      .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(advanced)));
+    mocks.bridge.getChainStatus.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(advanced)));
     mocks.bridge.acceptProposal.invoke.mockResolvedValue({
       ok: false,
       error: { code: 'stale_revision', messageKey: 'native.acceptFailed' },
@@ -3144,7 +3229,7 @@ describe('StudioPage schema-2 cutover', () => {
     'refuses or discards malformed dynamic authoring draft %s',
     async (key, baseValue, value, expectedDirtyCount, expectedSaved) => {
       seedWorkspaceDrafts({ [key]: { baseValue, value } });
-      mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithDraftBatch(1) }));
+      mockSupportedProject(projectWithDraftBatch(1));
       renderStudio();
       await screen.findByRole('heading', { name: 'Launch film' });
       await waitFor(() =>
@@ -3167,7 +3252,7 @@ describe('StudioPage schema-2 cutover', () => {
       'beat.beat_0.action': { baseValue: 'Stale action base', value: 'Action 1' },
       'shot.shot_0.line': { baseValue: 'Stale Shot base', value: 'Shot 1' },
     });
-    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: projectWithDraftBatch(2) }));
+    mockSupportedProject(projectWithDraftBatch(2));
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
@@ -3321,14 +3406,17 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('keeps typed rule input and idempotently recognizes an ambiguously adopted rule on retry', async () => {
+    const initial = project();
     const omittedRuleSnapshot = { ...project(), revision: 4, rules: [] };
     mocks.bridge.getProject.invoke
-      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValue(ok({ status: 'supported', project: omittedRuleSnapshot }));
     mocks.bridge.getWorkspaceStatus.invoke
-      .mockResolvedValueOnce(ok(workspaceStatus(3)))
-      .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValue(ok(workspaceStatus(omittedRuleSnapshot)));
+    mocks.bridge.getChainStatus.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(omittedRuleSnapshot)));
 
     renderStudio();
     const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
@@ -3370,14 +3458,17 @@ describe('StudioPage schema-2 cutover', () => {
   });
 
   it('does not let delayed rule adoption clear a newer action error', async () => {
+    const initial = project();
     const omittedRuleSnapshot = { ...project(), revision: 4, rules: [] };
     mocks.bridge.getProject.invoke
-      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValue(ok({ status: 'supported', project: omittedRuleSnapshot }));
     mocks.bridge.getWorkspaceStatus.invoke
-      .mockResolvedValueOnce(ok(workspaceStatus(3)))
-      .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValue(ok(workspaceStatus(omittedRuleSnapshot)));
+    mocks.bridge.getChainStatus.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(omittedRuleSnapshot)));
 
     renderStudio();
     const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
@@ -3451,9 +3542,11 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
       .mockResolvedValue(ok({ status: 'supported', project: recovered }));
     mocks.bridge.getWorkspaceStatus.invoke
-      .mockResolvedValueOnce(ok(workspaceStatus(3)))
-      .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(recovered)));
+    mocks.bridge.getChainStatus.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(recovered)));
     mocks.bridge.retryJob.invoke.mockResolvedValue(ok(recovered.jobs.job_attention));
 
     renderStudio();
@@ -3491,9 +3584,11 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
       .mockResolvedValue(ok({ status: 'supported', project: acknowledged }));
     mocks.bridge.getWorkspaceStatus.invoke
-      .mockResolvedValueOnce(ok(workspaceStatus(3)))
-      .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(acknowledged)));
+    mocks.bridge.getChainStatus.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(acknowledged)));
     mocks.bridge.retryJob.invoke.mockResolvedValue(ok(acknowledged.jobs.job_attention));
 
     renderStudio();
@@ -3521,9 +3616,11 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
       .mockResolvedValue(ok({ status: 'supported', project: cancelled }));
     mocks.bridge.getWorkspaceStatus.invoke
-      .mockResolvedValueOnce(ok(workspaceStatus(3)))
-      .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(cancelled)));
+    mocks.bridge.getChainStatus.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(cancelled)));
     mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(cancelled.jobs.job_attention));
 
     renderStudio();

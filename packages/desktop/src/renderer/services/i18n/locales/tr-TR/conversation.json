@@ -969,6 +969,33 @@
         "coverage": {
           "trimGuidance": "Kenar · Kırpma · Ücretsiz",
           "boundaryGuidance": "Sınır · Yeniden oluşturma gerektirir",
+          "segmentState": {
+            "noTake": "Çekim yok",
+            "queued": "Kuyrukta",
+            "nextUp": "Sıradaki",
+            "waitingOnShot": "{{position}}. çekim bekleniyor",
+            "waitingOnFrame": "Süreklilik karesi bekleniyor",
+            "rendering": "İşleniyor",
+            "renderingProgress": "İşleniyor · %{{progress}}",
+            "renderingStill": "İşleniyor · Sabit görüntü gösteriliyor",
+            "rendered": "İşlendi",
+            "renderedOneTake": "İşlendi · 1 çekim",
+            "selectedTake": "{{count}} çekim · T{{take}} kurguda",
+            "untouched": "Değiştirilmedi",
+            "needsRerender": "Yeniden işlenmesi gerekiyor",
+            "staleStillPlays": "Güncel değil · Yine de oynatılır",
+            "failedNotBilled": "Başarısız · Ücretlendirilmedi",
+            "neverDispatched": "Hiç gönderilmedi",
+            "shotKept": "{{position}}. çekim · Korundu",
+            "statusPending": "Durum kullanılamıyor",
+            "needsAttention": "İlgilenilmesi gerekiyor"
+          },
+          "boundaryFrame": {
+            "empty": "{{position}}. çekimden sonraki sınır · Süreklilik karesi bekleniyor",
+            "ready": "{{position}}. çekimden sonraki sınır · Süreklilik karesi hazır",
+            "gone": "{{position}}. çekimden sonraki sınır · Süreklilik karesi eksik",
+            "stale": "{{position}}. çekimden sonraki sınır · Süreklilik karesi güncel değil"
+          },
           "seekGuidance": "Ray · Arama · Ücretsiz",
           "seekLane": "Beat arama rayı",
           "seekValue": "{{total}} içinde {{current}}"

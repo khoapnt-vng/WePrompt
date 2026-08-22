@@ -967,6 +967,33 @@
         "coverage": {
           "trimGuidance": "لبه · برش · رایگان",
           "boundaryGuidance": "مرز · نیازمند رندر مجدد",
+          "segmentState": {
+            "noTake": "بدون برداشت",
+            "queued": "در صف",
+            "nextUp": "نوبت بعدی",
+            "waitingOnShot": "در انتظار نمای {{position}}",
+            "waitingOnFrame": "در انتظار فریم تداوم",
+            "rendering": "در حال رندر",
+            "renderingProgress": "در حال رندر · {{progress}}٪",
+            "renderingStill": "در حال رندر · نمایش تصویر ثابت",
+            "rendered": "رندر شد",
+            "renderedOneTake": "رندر شد · ۱ برداشت",
+            "selectedTake": "{{count}} برداشت · T{{take}} در تدوین",
+            "untouched": "بدون تغییر",
+            "needsRerender": "نیازمند رندر مجدد",
+            "staleStillPlays": "قدیمی · همچنان قابل پخش",
+            "failedNotBilled": "ناموفق · بدون هزینه",
+            "neverDispatched": "هرگز ارسال نشد",
+            "shotKept": "نمای {{position}} · حفظ شد",
+            "statusPending": "وضعیت در دسترس نیست",
+            "needsAttention": "نیازمند توجه"
+          },
+          "boundaryFrame": {
+            "empty": "مرز پس از نمای {{position}} · در انتظار فریم تداوم",
+            "ready": "مرز پس از نمای {{position}} · فریم تداوم آماده است",
+            "gone": "مرز پس از نمای {{position}} · فریم تداوم موجود نیست",
+            "stale": "مرز پس از نمای {{position}} · فریم تداوم قدیمی است"
+          },
           "seekGuidance": "نوار · پیمایش · رایگان",
           "seekLane": "نوار پیمایش ضرب‌آهنگ",
           "seekValue": "{{current}} از {{total}}"

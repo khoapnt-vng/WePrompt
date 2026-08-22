@@ -344,6 +344,8 @@ const playbackShot = (
     effectiveSeedAssetId: null,
     segmentHead: false,
     planningBoundary: null,
+    frameBoundary: null,
+    segmentState: { kind: 'rendered', takeCount: 1, selectedTakeNumber: 1 },
     dirtyCauses: [],
     downstreamShotIds: [],
     imageTakes: [],

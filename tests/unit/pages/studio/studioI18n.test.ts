@@ -350,6 +350,29 @@ const expectedLeaves = [
   'controls.renderFilmEmpty',
   'beatPanel.coverage.trimGuidance',
   'beatPanel.coverage.boundaryGuidance',
+  'beatPanel.coverage.segmentState.noTake',
+  'beatPanel.coverage.segmentState.queued',
+  'beatPanel.coverage.segmentState.nextUp',
+  'beatPanel.coverage.segmentState.waitingOnShot',
+  'beatPanel.coverage.segmentState.waitingOnFrame',
+  'beatPanel.coverage.segmentState.rendering',
+  'beatPanel.coverage.segmentState.renderingProgress',
+  'beatPanel.coverage.segmentState.renderingStill',
+  'beatPanel.coverage.segmentState.rendered',
+  'beatPanel.coverage.segmentState.renderedOneTake',
+  'beatPanel.coverage.segmentState.selectedTake',
+  'beatPanel.coverage.segmentState.untouched',
+  'beatPanel.coverage.segmentState.needsRerender',
+  'beatPanel.coverage.segmentState.staleStillPlays',
+  'beatPanel.coverage.segmentState.failedNotBilled',
+  'beatPanel.coverage.segmentState.neverDispatched',
+  'beatPanel.coverage.segmentState.shotKept',
+  'beatPanel.coverage.segmentState.statusPending',
+  'beatPanel.coverage.segmentState.needsAttention',
+  'beatPanel.coverage.boundaryFrame.empty',
+  'beatPanel.coverage.boundaryFrame.ready',
+  'beatPanel.coverage.boundaryFrame.gone',
+  'beatPanel.coverage.boundaryFrame.stale',
   'beatPanel.coverage.seekGuidance',
   'beatPanel.coverage.seekLane',
   'beatPanel.coverage.seekValue',
@@ -779,6 +802,32 @@ const localizedBeatPlaybackKeys = [
   'beatPanel.preview.keyboardGuidance',
 ] as const;
 
+const localizedBeatSegmentKeys = [
+  'beatPanel.coverage.segmentState.noTake',
+  'beatPanel.coverage.segmentState.queued',
+  'beatPanel.coverage.segmentState.nextUp',
+  'beatPanel.coverage.segmentState.waitingOnShot',
+  'beatPanel.coverage.segmentState.waitingOnFrame',
+  'beatPanel.coverage.segmentState.rendering',
+  'beatPanel.coverage.segmentState.renderingProgress',
+  'beatPanel.coverage.segmentState.renderingStill',
+  'beatPanel.coverage.segmentState.rendered',
+  'beatPanel.coverage.segmentState.renderedOneTake',
+  'beatPanel.coverage.segmentState.selectedTake',
+  'beatPanel.coverage.segmentState.untouched',
+  'beatPanel.coverage.segmentState.needsRerender',
+  'beatPanel.coverage.segmentState.staleStillPlays',
+  'beatPanel.coverage.segmentState.failedNotBilled',
+  'beatPanel.coverage.segmentState.neverDispatched',
+  'beatPanel.coverage.segmentState.shotKept',
+  'beatPanel.coverage.segmentState.statusPending',
+  'beatPanel.coverage.segmentState.needsAttention',
+  'beatPanel.coverage.boundaryFrame.empty',
+  'beatPanel.coverage.boundaryFrame.ready',
+  'beatPanel.coverage.boundaryFrame.gone',
+  'beatPanel.coverage.boundaryFrame.stale',
+] as const;
+
 const localizedCutFilmDeltaKeys = ['cut.film.under', 'cut.film.over'] as const;
 
 const localizedWorkspaceKeys = [
@@ -803,6 +852,7 @@ const localizedWorkspaceKeys = [
   ...localizedCutPreviewKeys,
   ...localizedCutCompositionKeys,
   ...localizedBeatPlaybackKeys,
+  ...localizedBeatSegmentKeys,
   ...localizedCutFilmDeltaKeys,
   'controls.briefAndRulesTitle',
   'gate.errors.routesUnavailable',
@@ -892,6 +942,36 @@ describe('Creative Studio workspace translations', () => {
       'beatPanel.preview.nextJoin': 'Next join',
       'beatPanel.preview.loopJoin': 'Loop nearest join',
       'beatPanel.preview.keyboardGuidance': 'Space play · Arrows seek · [ ] joins · L loop',
+    });
+  });
+
+  it('keeps Beat segment and boundary states as complete en-US phrases', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'beatPanel.coverage.segmentState.noTake': 'No Take',
+      'beatPanel.coverage.segmentState.queued': 'Queued',
+      'beatPanel.coverage.segmentState.nextUp': 'Next up',
+      'beatPanel.coverage.segmentState.waitingOnShot': 'Waiting on {{position}}',
+      'beatPanel.coverage.segmentState.waitingOnFrame': 'Waiting on the frame',
+      'beatPanel.coverage.segmentState.rendering': 'Rendering',
+      'beatPanel.coverage.segmentState.renderingProgress': 'Rendering · {{progress}}%',
+      'beatPanel.coverage.segmentState.renderingStill': 'Rendering · Showing the still',
+      'beatPanel.coverage.segmentState.rendered': 'Rendered',
+      'beatPanel.coverage.segmentState.renderedOneTake': 'Rendered · 1 Take',
+      'beatPanel.coverage.segmentState.selectedTake': '{{count}} Takes · T{{take}} in the Cut',
+      'beatPanel.coverage.segmentState.untouched': 'Untouched',
+      'beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
+      'beatPanel.coverage.segmentState.staleStillPlays': 'Stale · Still plays',
+      'beatPanel.coverage.segmentState.failedNotBilled': 'Failed · Not billed',
+      'beatPanel.coverage.segmentState.neverDispatched': 'Never dispatched',
+      'beatPanel.coverage.segmentState.shotKept': 'Shot {{position}} · Kept',
+      'beatPanel.coverage.segmentState.statusPending': 'Status unavailable',
+      'beatPanel.coverage.segmentState.needsAttention': 'Needs attention',
+      'beatPanel.coverage.boundaryFrame.empty': 'Boundary after Shot {{position}} · Waiting for continuity frame',
+      'beatPanel.coverage.boundaryFrame.ready': 'Boundary after Shot {{position}} · Continuity frame ready',
+      'beatPanel.coverage.boundaryFrame.gone': 'Boundary after Shot {{position}} · Continuity frame missing',
+      'beatPanel.coverage.boundaryFrame.stale': 'Boundary after Shot {{position}} · Continuity frame is out of date',
     });
   });
 
@@ -1086,7 +1166,7 @@ describe('Creative Studio workspace translations', () => {
           placeholders(englishCopy!)
         );
       }
-      for (const key of [...localizedCutCompositionKeys, ...localizedBeatPlaybackKeys]) {
+      for (const key of [...localizedCutCompositionKeys, ...localizedBeatPlaybackKeys, ...localizedBeatSegmentKeys]) {
         const englishCopy = englishLeaves[key];
         const localizedCopy = localizedLeaves[key];
         expect(localizedCopy?.trim(), `${locale}:${key}`).not.toBe('');

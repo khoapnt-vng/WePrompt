@@ -115,6 +115,7 @@ const workspaceStatus = (project: StudioRendererProjectV2): StudioRendererWorksp
   undoTop: null,
   dirtyShots: [],
   cascadeProgress: [],
+  currentVideoJobs: [],
   parkEligibility: [],
 });
 
@@ -122,6 +123,7 @@ const chainStatus = (project: StudioRendererProjectV2): StudioRendererChainStatu
   projectId: project.id,
   projectRevision: project.revision,
   conditioningFailures: [],
+  boundaries: [],
 });
 
 const makeMutations = (

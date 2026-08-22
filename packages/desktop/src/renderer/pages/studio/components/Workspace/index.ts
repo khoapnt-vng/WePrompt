@@ -1,6 +1,7 @@
 export { SpendGateModal, useSpendGate } from './Gate';
 export type { SpendGateModalProps, UseSpendGateInput, UseSpendGateResult } from './Gate';
 export { BeatPanel } from './BeatPanel';
+export type { WorkspaceShotSegmentState } from './BeatPanel/segmentState';
 export type {
   BeatPanelActions,
   BeatPanelBriefReferenceOption,

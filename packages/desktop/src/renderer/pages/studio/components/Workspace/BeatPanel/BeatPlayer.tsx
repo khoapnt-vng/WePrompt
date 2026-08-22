@@ -37,6 +37,7 @@ export type BeatPlaybackControl = {
 export type BeatPlayerProps = {
   beat: WorkspaceBeatProjection;
   children: (playback: BeatPlaybackControl) => React.ReactNode;
+  inspector?: React.ReactNode;
   projectId: string;
   projection: WorkspaceProjection;
 };
@@ -112,7 +113,7 @@ const isEditableDescendant = (target: EventTarget | null, root: HTMLElement): bo
 };
 
 /** Owns truthful selected-Take/slate playback and exposes a controlled Beat seek position. */
-export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, projectId, projection }) => {
+export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspector, projectId, projection }) => {
   const { t } = useTranslation();
   const keyboardGuidanceId = useId();
   const sequence = useMemo(() => buildBeatPlaybackSequence(projectId, beat, projection), [beat, projectId, projection]);
@@ -805,156 +806,174 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, projectI
       onKeyDown={handleKeyboard}
       tabIndex={available ? 0 : -1}
     >
-      <section
-        aria-label={t(`${PREVIEW_ROOT}.label`)}
-        className={styles.beatPreview}
-        data-beat-preview
-        data-playback-kind={unavailable ? 'empty' : segment.kind}
-      >
-        {unavailable ? (
-          <p className={styles.previewUnavailable} data-beat-preview-media data-media-kind='empty'>
-            {t(`${PREVIEW_ROOT}.noMedia`)}
-          </p>
-        ) : segment.kind === 'video' ? (
-          <div className={styles.previewFrame}>
-            <video
-              key={`${planToken}:${state.segmentIndex}:${state.mediaEpoch}:${segment.assetId}`}
-              ref={setVideoNode}
-              aria-label={segmentCopy}
-              className={styles.previewMedia}
-              data-beat-preview-media
-              data-media-kind='video'
-              muted
-              playsInline
-              poster={posterSource ?? undefined}
-              preload='metadata'
-              src={mediaSource ?? undefined}
-              tabIndex={-1}
-              onEnded={(event) => {
-                const media = event.currentTarget;
-                if (media.currentTime + MEDIA_DURATION_EPSILON_SECONDS < segment.sourceOutSeconds) {
-                  failMedia(planToken, state.segmentIndex, media);
-                  return;
-                }
-                observeVideoTime(media, segment);
-              }}
-              onError={(event) => failMedia(planToken, state.segmentIndex, event.currentTarget)}
-              onLoadedMetadata={(event) => onLoadedMetadata(event.currentTarget, segment)}
-              onPlaying={(event) => {
-                const media = event.currentTarget;
-                const current = stateRef.current;
-                if (!isCurrentMedia(planToken, state.segmentIndex, media)) return;
-                if (!current.playing || current.failed || readyMediaRef.current?.media !== media) {
-                  stopMediaBoundaryWatch();
-                  pauseMedia(media);
-                  return;
-                }
-                updateCurrentState(planToken, state.segmentIndex, (latest) => ({ ...latest, buffering: false }));
-                startMediaBoundaryWatch(planToken, state.segmentIndex, media, segment);
-              }}
-              onRateChange={(event) => {
-                const media = event.currentTarget;
-                const current = stateRef.current;
-                if (
-                  isCurrentMedia(planToken, state.segmentIndex, media) &&
-                  current.playing &&
-                  !current.buffering &&
-                  !current.failed &&
-                  !current.seeking
-                ) {
-                  startMediaBoundaryWatch(planToken, state.segmentIndex, media, segment);
-                }
-              }}
-              onSeeked={(event) => onSeeked(event.currentTarget)}
-              onTimeUpdate={(event) => observeVideoTime(event.currentTarget, segment)}
-              onWaiting={(event) => {
-                if (!isCurrentMedia(planToken, state.segmentIndex, event.currentTarget) || !stateRef.current.playing) {
-                  return;
-                }
-                stopMediaBoundaryWatch();
-                updateCurrentState(planToken, state.segmentIndex, (latest) => ({ ...latest, buffering: true }));
-              }}
-            />
-            {state.seeking ? (
-              posterSource === null ? (
-                <span aria-hidden='true' className={styles.previewSeekFallback} data-beat-seek-poster />
-              ) : (
-                <img
-                  alt=''
-                  aria-hidden='true'
-                  className={styles.previewSeekPoster}
-                  data-beat-seek-poster
-                  src={posterSource}
-                />
-              )
-            ) : null}
-          </div>
-        ) : (
-          <div
-            aria-label={segmentCopy}
-            className={styles.previewMedia}
-            data-beat-preview-media
-            data-media-kind='slate'
-            role='img'
+      <div className={styles.workingRow} data-beat-working-row data-has-inspector={inspector !== undefined}>
+        <div className={styles.previewColumn} data-beat-preview-column>
+          <section
+            aria-label={t(`${PREVIEW_ROOT}.label`)}
+            className={styles.beatPreview}
+            data-beat-preview
+            data-playback-kind={unavailable ? 'empty' : segment.kind}
           >
-            <strong>{t(`${PREVIEW_ROOT}.slate`)}</strong>
-            <span>
-              {t(`${PREVIEW_ROOT}.slateHold`, {
-                clock: formatBeatPlaybackClock(segment.durationSeconds, segment.durationSeconds) ?? '0:00',
-              })}
-            </span>
-          </div>
-        )}
-      </section>
+            {unavailable ? (
+              <p className={styles.previewUnavailable} data-beat-preview-media data-media-kind='empty'>
+                {t(`${PREVIEW_ROOT}.noMedia`)}
+              </p>
+            ) : segment.kind === 'video' ? (
+              <div className={styles.previewFrame}>
+                <video
+                  key={`${planToken}:${state.segmentIndex}:${state.mediaEpoch}:${segment.assetId}`}
+                  ref={setVideoNode}
+                  aria-label={segmentCopy}
+                  className={styles.previewMedia}
+                  data-beat-preview-media
+                  data-media-kind='video'
+                  muted
+                  playsInline
+                  poster={posterSource ?? undefined}
+                  preload='metadata'
+                  src={mediaSource ?? undefined}
+                  tabIndex={-1}
+                  onEnded={(event) => {
+                    const media = event.currentTarget;
+                    if (media.currentTime + MEDIA_DURATION_EPSILON_SECONDS < segment.sourceOutSeconds) {
+                      failMedia(planToken, state.segmentIndex, media);
+                      return;
+                    }
+                    observeVideoTime(media, segment);
+                  }}
+                  onError={(event) => failMedia(planToken, state.segmentIndex, event.currentTarget)}
+                  onLoadedMetadata={(event) => onLoadedMetadata(event.currentTarget, segment)}
+                  onPlaying={(event) => {
+                    const media = event.currentTarget;
+                    const current = stateRef.current;
+                    if (!isCurrentMedia(planToken, state.segmentIndex, media)) return;
+                    if (!current.playing || current.failed || readyMediaRef.current?.media !== media) {
+                      stopMediaBoundaryWatch();
+                      pauseMedia(media);
+                      return;
+                    }
+                    updateCurrentState(planToken, state.segmentIndex, (latest) => ({ ...latest, buffering: false }));
+                    startMediaBoundaryWatch(planToken, state.segmentIndex, media, segment);
+                  }}
+                  onRateChange={(event) => {
+                    const media = event.currentTarget;
+                    const current = stateRef.current;
+                    if (
+                      isCurrentMedia(planToken, state.segmentIndex, media) &&
+                      current.playing &&
+                      !current.buffering &&
+                      !current.failed &&
+                      !current.seeking
+                    ) {
+                      startMediaBoundaryWatch(planToken, state.segmentIndex, media, segment);
+                    }
+                  }}
+                  onSeeked={(event) => onSeeked(event.currentTarget)}
+                  onTimeUpdate={(event) => observeVideoTime(event.currentTarget, segment)}
+                  onWaiting={(event) => {
+                    if (
+                      !isCurrentMedia(planToken, state.segmentIndex, event.currentTarget) ||
+                      !stateRef.current.playing
+                    ) {
+                      return;
+                    }
+                    stopMediaBoundaryWatch();
+                    updateCurrentState(planToken, state.segmentIndex, (latest) => ({ ...latest, buffering: true }));
+                  }}
+                />
+                {state.seeking ? (
+                  posterSource === null ? (
+                    <span aria-hidden='true' className={styles.previewSeekFallback} data-beat-seek-poster />
+                  ) : (
+                    <img
+                      alt=''
+                      aria-hidden='true'
+                      className={styles.previewSeekPoster}
+                      data-beat-seek-poster
+                      src={posterSource}
+                    />
+                  )
+                ) : null}
+              </div>
+            ) : (
+              <div
+                aria-label={segmentCopy}
+                className={styles.previewMedia}
+                data-beat-preview-media
+                data-media-kind='slate'
+                role='img'
+              >
+                <strong>{t(`${PREVIEW_ROOT}.slate`)}</strong>
+                <span>
+                  {t(`${PREVIEW_ROOT}.slateHold`, {
+                    clock: formatBeatPlaybackClock(segment.durationSeconds, segment.durationSeconds) ?? '0:00',
+                  })}
+                </span>
+              </div>
+            )}
+          </section>
 
-      <div
-        aria-label={t(`${PREVIEW_ROOT}.controlsLabel`)}
-        className={styles.beatTransport}
-        data-beat-transport
-        role='group'
-      >
-        <Button
-          aria-pressed={state.playing}
-          data-beat-play
-          disabled={!available}
-          onClick={togglePlayback}
-          type='primary'
-        >
-          {t(`${PREVIEW_ROOT}.${state.playing ? 'pause' : 'play'}`)}
-        </Button>
-        <output aria-live='off' className={styles.transportTime} data-beat-time role='timer'>
-          <bdi dir='auto'>{t(`${PREVIEW_ROOT}.position`, { current: currentClock, total: totalClock })}</bdi>
-        </output>
-        <span className={styles.pictureOnly}>{t(`${PREVIEW_ROOT}.pictureOnly`)}</span>
-        <Button
-          aria-label={t(`${PREVIEW_ROOT}.previousJoin`)}
-          data-beat-previous-join
-          disabled={!available || !previousJoinAvailable}
-          onClick={() => stepJoin(-1)}
-        >
-          {t(`${PREVIEW_ROOT}.previousJoin`)}
-        </Button>
-        <Button
-          aria-label={t(`${PREVIEW_ROOT}.nextJoin`)}
-          data-beat-next-join
-          disabled={!available || !nextJoinAvailable}
-          onClick={() => stepJoin(1)}
-        >
-          {t(`${PREVIEW_ROOT}.nextJoin`)}
-        </Button>
-        <Button
-          aria-label={t(`${PREVIEW_ROOT}.loopJoin`)}
-          aria-pressed={state.loopJoinIndex !== null}
-          data-beat-loop
-          disabled={!available || joins.length === 0}
-          onClick={toggleJoinLoop}
-        >
-          {t(`${PREVIEW_ROOT}.loopJoin`)}
-        </Button>
+          <div
+            aria-label={t(`${PREVIEW_ROOT}.controlsLabel`)}
+            className={styles.beatTransport}
+            data-beat-transport
+            role='group'
+          >
+            <Button
+              aria-pressed={state.playing}
+              data-beat-play
+              disabled={!available}
+              onClick={togglePlayback}
+              type='primary'
+            >
+              {t(`${PREVIEW_ROOT}.${state.playing ? 'pause' : 'play'}`)}
+            </Button>
+            <output aria-live='off' className={styles.transportTime} data-beat-time role='timer'>
+              <bdi dir='auto'>{t(`${PREVIEW_ROOT}.position`, { current: currentClock, total: totalClock })}</bdi>
+            </output>
+            <span className={styles.pictureOnly}>{t(`${PREVIEW_ROOT}.pictureOnly`)}</span>
+            <Button
+              aria-label={t(`${PREVIEW_ROOT}.previousJoin`)}
+              data-beat-previous-join
+              disabled={!available || !previousJoinAvailable}
+              onClick={() => stepJoin(-1)}
+            >
+              {t(`${PREVIEW_ROOT}.previousJoin`)}
+            </Button>
+            <Button
+              aria-label={t(`${PREVIEW_ROOT}.nextJoin`)}
+              data-beat-next-join
+              disabled={!available || !nextJoinAvailable}
+              onClick={() => stepJoin(1)}
+            >
+              {t(`${PREVIEW_ROOT}.nextJoin`)}
+            </Button>
+            <Button
+              aria-label={t(`${PREVIEW_ROOT}.loopJoin`)}
+              aria-pressed={state.loopJoinIndex !== null}
+              data-beat-loop
+              disabled={!available || joins.length === 0}
+              onClick={toggleJoinLoop}
+            >
+              {t(`${PREVIEW_ROOT}.loopJoin`)}
+            </Button>
+          </div>
+          <span className={styles.keyboardGuidance} id={keyboardGuidanceId}>
+            {t(`${PREVIEW_ROOT}.keyboardGuidance`)}
+          </span>
+
+          <p
+            aria-atomic='true'
+            aria-live='polite'
+            className={state.failed ? styles.previewError : styles.srOnly}
+            data-beat-preview-status
+            role='status'
+          >
+            {state.failed ? t(`${PREVIEW_ROOT}.mediaError`) : segmentCopy}
+          </p>
+        </div>
+        {inspector}
       </div>
-      <span className={styles.keyboardGuidance} id={keyboardGuidanceId}>
-        {t(`${PREVIEW_ROOT}.keyboardGuidance`)}
-      </span>
 
       {children({
         available,
@@ -962,16 +981,6 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, projectI
         positionSeconds: state.positionSeconds,
         onSeek: (positionSeconds) => seekTo(positionSeconds, { joinCursorIndex: null, loopJoinIndex: null }),
       })}
-
-      <p
-        aria-atomic='true'
-        aria-live='polite'
-        className={state.failed ? styles.previewError : styles.srOnly}
-        data-beat-preview-status
-        role='status'
-      >
-        {state.failed ? t(`${PREVIEW_ROOT}.mediaError`) : segmentCopy}
-      </p>
     </div>
   );
 };

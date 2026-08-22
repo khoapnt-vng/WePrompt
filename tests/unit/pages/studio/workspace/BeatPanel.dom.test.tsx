@@ -34,8 +34,13 @@ vi.mock('@arco-design/web-react', async () => {
       </button>
     )
   );
-  const TextArea = ({ autoSize: _autoSize, onChange, ...props }: any) => (
-    <textarea {...props} onChange={(event) => onChange?.(event.target.value)} />
+  const TextArea = ({ autoSize, onChange, ...props }: any) => (
+    <textarea
+      {...props}
+      data-max-rows={autoSize?.maxRows}
+      data-min-rows={autoSize?.minRows}
+      onChange={(event) => onChange?.(event.target.value)}
+    />
   );
   const Input = Object.assign(
     ({ onChange, ...props }: any) => <input {...props} onChange={(event) => onChange?.(event.target.value)} />,
@@ -214,6 +219,22 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.unavailable': 'Coverage unavailable',
         'conversation.creativeStudio.workspace.beatPanel.coverage.playbackLane': 'Playback lane',
         'conversation.creativeStudio.workspace.beatPanel.coverage.planningLane': 'Planning lane',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.noTake': 'No Take',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.queued': 'Queued',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.nextUp': 'Next up',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.waitingOnFrame': 'Waiting on the frame',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendering': 'Rendering',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderingStill':
+          'Rendering · Showing the still',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendered': 'Rendered',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderedOneTake': 'Rendered · 1 Take',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.untouched': 'Untouched',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.staleStillPlays': 'Stale · Still plays',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.failedNotBilled': 'Failed · Not billed',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.neverDispatched': 'Never dispatched',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.statusPending': 'Status unavailable',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.needsAttention': 'Needs attention',
         'conversation.creativeStudio.workspace.beatPanel.coverage.seekGuidance': 'Rail · Seek · Free',
         'conversation.creativeStudio.workspace.beatPanel.coverage.seekLane': 'Beat seek rail',
         'conversation.creativeStudio.workspace.beatPanel.preview.label': 'Beat preview',
@@ -273,6 +294,24 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.preview.slateHold')) return `Hold ${String(values?.clock)}`;
       if (key.endsWith('.coverage.seekValue')) {
         return `${String(values?.current)} of ${String(values?.total)}`;
+      }
+      if (key.endsWith('.segmentState.waitingOnShot')) return `Waiting on ${String(values?.position)}`;
+      if (key.endsWith('.segmentState.renderingProgress')) return `Rendering · ${String(values?.progress)}%`;
+      if (key.endsWith('.segmentState.selectedTake')) {
+        return `${String(values?.count)} Takes · T${String(values?.take)} in the Cut`;
+      }
+      if (key.endsWith('.segmentState.shotKept')) return `Shot ${String(values?.position)} · Kept`;
+      if (key.endsWith('.boundaryFrame.empty')) {
+        return `Boundary after Shot ${String(values?.position)} · Waiting for continuity frame`;
+      }
+      if (key.endsWith('.boundaryFrame.ready')) {
+        return `Boundary after Shot ${String(values?.position)} · Continuity frame ready`;
+      }
+      if (key.endsWith('.boundaryFrame.gone')) {
+        return `Boundary after Shot ${String(values?.position)} · Continuity frame missing`;
+      }
+      if (key.endsWith('.boundaryFrame.stale')) {
+        return `Boundary after Shot ${String(values?.position)} · Continuity frame is out of date`;
       }
       if (key.endsWith('.takes.sourceDuration')) return `${String(values?.seconds)} seconds source`;
       if (key.endsWith('.generation.choiceLabel')) {
@@ -366,6 +405,12 @@ const makeShot = (
   effectiveSeedAssetId: null,
   segmentHead: index === 0,
   planningBoundary: { shotId: id, startSeconds: index * 8, endSeconds: (index + 1) * 8 },
+  frameBoundary: null,
+  segmentState:
+    overrides.segmentState ??
+    (overrides.selectedTakeId === undefined || overrides.selectedTakeId === null
+      ? { kind: 'no_take' }
+      : { kind: 'rendered', takeCount: 1, selectedTakeNumber: 1 }),
   dirtyCauses: [],
   downstreamShotIds: [],
   imageTakes: [],
@@ -597,6 +642,15 @@ const shotCard = (container: HTMLElement, shotId: string): HTMLElement => {
   const card = container.querySelector<HTMLElement>(`article[data-shot-id="${shotId}"]`);
   if (card === null) throw new Error(`Missing Shot card ${shotId}`);
   return card;
+};
+
+const inspectShot = (container: HTMLElement, shotId: string): HTMLElement => {
+  const selector = container.querySelector<HTMLButtonElement>(
+    `[data-testid="studio-coverage-playback"] [data-shot-id="${shotId}"] [data-coverage-shot-selector]`
+  );
+  if (selector === null) throw new Error(`Missing Shot inspector selector ${shotId}`);
+  fireEvent.click(selector);
+  return shotCard(container, shotId);
 };
 
 const takeCard = (container: HTMLElement, assetId: string): HTMLElement => {
@@ -1208,6 +1262,7 @@ describe('BeatPanel', () => {
       'Continues from Shot 04’s last frame'
     );
 
+    inspectShot(container, 'shot_private_2');
     const continuityWarning = within(continuation).getByText('System continuity is stale');
     const continuationState = continuation.querySelector<HTMLElement>('[data-chain-state="continuous"]');
     const hardCutGroup = within(continuation).getByRole('group', { name: 'Author hard cut' });
@@ -1216,20 +1271,28 @@ describe('BeatPanel', () => {
     expect(hardCutGroup).not.toContainElement(continuityWarning);
     expect(within(continuation).getByText('Generated work is out of date')).toBeVisible();
 
+    inspectShot(container, 'shot_private_1');
     const derivedGuidance = naturalHead.querySelector<HTMLElement>('[data-line-derivation="derived"]');
-    const detachedGuidance = laterNaturalHead.querySelector<HTMLElement>('[data-line-derivation="detached"]');
     expect(derivedGuidance).toHaveTextContent('Written from the action · Edit to detach');
-    expect(detachedGuidance).toHaveTextContent('Your words · No longer follows the action');
     const derivedLine = within(naturalHead).getByRole('textbox', { name: 'Line for Shot 1' });
-    const detachedLine = within(laterNaturalHead).getByRole('textbox', { name: 'Line for Shot 3' });
     expect(derivedLine).toHaveAttribute('aria-describedby', derivedGuidance?.id);
     expect(derivedLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
+    expect(derivedLine).toHaveAttribute('data-min-rows', '2');
+    expect(derivedLine).toHaveAttribute('data-max-rows', '2');
+    expect(derivedGuidance?.closest('header')).toBe(naturalHead.querySelector('header'));
+    expect(within(naturalHead).getByText('Derived from the action')).toBeVisible();
+
+    inspectShot(container, 'shot_private_3');
+    const detachedGuidance = laterNaturalHead.querySelector<HTMLElement>('[data-line-derivation="detached"]');
+    expect(detachedGuidance).toHaveTextContent('Your words · No longer follows the action');
+    const detachedLine = within(laterNaturalHead).getByRole('textbox', { name: 'Line for Shot 3' });
     expect(detachedLine).toHaveAttribute('aria-describedby', detachedGuidance?.id);
     expect(detachedLine).toHaveAccessibleDescription('Your words · No longer follows the action');
-
-    expect(within(naturalHead).getByText('Derived from the action')).toBeVisible();
     expect(within(laterNaturalHead).getByText('Detached · Yours')).toBeVisible();
+
+    inspectShot(container, 'shot_private_4');
     expect(within(authoredHead).getByRole('checkbox', { name: 'Author hard cut' })).toBeChecked();
+    inspectShot(container, 'shot_private_5');
     expect(within(defensiveContinuation).getByRole('checkbox', { name: 'Author hard cut' })).toBeChecked();
     expect(container.querySelector('video')).toHaveProperty('controls', true);
     expect(container).toHaveTextContent('Shot 1 image 1');
@@ -1249,10 +1312,11 @@ describe('BeatPanel', () => {
     const continuousGroup = within(shotCard(container, 'shot_continuous')).getByRole('group', {
       name: 'Author hard cut',
     });
+    const continuousControl = within(continuousGroup).getByRole('checkbox', { name: 'Author hard cut' });
+    inspectShot(container, 'shot_hard_cut');
     const hardCutGroup = within(shotCard(container, 'shot_hard_cut')).getByRole('group', {
       name: 'Author hard cut',
     });
-    const continuousControl = within(continuousGroup).getByRole('checkbox', { name: 'Author hard cut' });
     const hardCutControl = within(hardCutGroup).getByRole('checkbox', { name: 'Author hard cut' });
 
     expect(continuousControl).not.toBeChecked();
@@ -1264,9 +1328,11 @@ describe('BeatPanel', () => {
       expect(control).toBeDisabled();
       const descriptionId = group.getAttribute('aria-describedby');
       expect(descriptionId).not.toBeNull();
-      expect(document.getElementById(descriptionId!)).toHaveTextContent(
+      const description = document.getElementById(descriptionId!);
+      expect(description).toHaveTextContent(
         'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.'
       );
+      expect(group).not.toContainElement(description);
       fireEvent.click(control);
       fireEvent.keyDown(control, { key: ' ' });
       fireEvent.change(control, { target: { checked: !control.hasAttribute('checked') } });
@@ -1311,7 +1377,56 @@ describe('BeatPanel', () => {
     expect(targetField.compareDocumentPosition(editorActions) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
   });
 
-  it('pins the authoring band to the prototype grid without widening the existing modal', () => {
+  it('keeps one beat-scoped Shot inspector visible while preserving mounted drafts across selection', () => {
+    const first = makeShot('shot_1', 0);
+    const second = makeShot('shot_2', 1);
+    const beat = makeBeat('beat_1', [first, second]);
+    const drafts = makeDrafts({ 'shot.shot_1.line': 'Local first-Shot line' });
+    const actions = makeActions();
+    const result = render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
+    const inspector = screen.getByRole('region', { name: 'Shots' });
+    const selectors = Array.from(result.container.querySelectorAll<HTMLButtonElement>('[data-coverage-shot-selector]'));
+    const firstCard = shotCard(result.container, 'shot_1');
+    const secondCard = shotCard(result.container, 'shot_2');
+
+    expect(inspector).toHaveAttribute('data-inspected-shot-id', 'shot_1');
+    expect(firstCard).not.toHaveAttribute('hidden');
+    expect(secondCard).toHaveAttribute('hidden');
+    expect(selectors.map((selector) => selector.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+    expect(within(firstCard).getByRole('textbox', { name: 'Line for Shot 1' })).toHaveValue('Local first-Shot line');
+
+    fireEvent.click(selectors[1]!);
+    expect(inspector).toHaveAttribute('data-inspected-shot-id', 'shot_2');
+    expect(firstCard).toHaveAttribute('hidden');
+    expect(secondCard).not.toHaveAttribute('hidden');
+    expect(selectors.map((selector) => selector.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
+    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
+
+    fireEvent.click(selectors[0]!);
+    expect(within(firstCard).getByRole('textbox', { name: 'Line for Shot 1' })).toHaveValue('Local first-Shot line');
+
+    fireEvent.click(selectors[1]!);
+    const replacement = makeBeat('beat_2', [makeShot('shot_new', 0), makeShot('shot_2', 1)]);
+    result.rerender(<BeatPanel {...panelProps(replacement, drafts, actions, makeProjection([replacement]))} />);
+    expect(screen.getByRole('region', { name: 'Shots' })).toHaveAttribute('data-inspected-shot-id', 'shot_new');
+    expect(shotCard(result.container, 'shot_new')).not.toHaveAttribute('hidden');
+    expect(shotCard(result.container, 'shot_2')).toHaveAttribute('hidden');
+  });
+
+  it('keeps every Shot inspectable when coverage geometry fails closed', () => {
+    const beat = makeBeat('beat_1', [makeShot('shot_1', 0, { planningBoundary: null }), makeShot('shot_2', 1)]);
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('Coverage unavailable');
+    const second = inspectShot(container, 'shot_2');
+    expect(second).not.toHaveAttribute('hidden');
+    expect(shotCard(container, 'shot_1')).toHaveAttribute('hidden');
+    expect(screen.getByRole('region', { name: 'Shots' })).toHaveAttribute('data-inspected-shot-id', 'shot_2');
+    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
+  });
+
+  it('pins the authoring frame to the measured 1100px preview and inspector layout', () => {
     const css = readFileSync(
       resolvePath(
         process.cwd(),
@@ -1321,16 +1436,38 @@ describe('BeatPanel', () => {
     );
 
     const modalRule = cssRuleBody(css, '.modal');
-    expect(modalRule).toMatch(/inline-size:\s*min\(852px,\s*calc\(100vw\s*-\s*32px\)\)/);
-    expect(modalRule).toMatch(/max-inline-size:\s*852px/);
+    expect(modalRule).toMatch(/inline-size:\s*min\(1100px,\s*calc\(100vw\s*-\s*32px\)\)/);
+    expect(modalRule).toMatch(/max-inline-size:\s*1100px/);
+    expect(modalRule).toMatch(/border-radius:\s*16px/);
+    expect(cssRuleBody(css, '.root')).toMatch(/padding:\s*18px\s+22px/);
 
-    const wideRule = cssRuleBody(css, '.beatEditor');
-    expect(wideRule).toMatch(/grid-template-columns:\s*minmax\(0,\s*1\.25fr\)\s+minmax\(0,\s*1fr\)/);
-    expect(wideRule).toMatch(/gap:\s*13px/);
+    const workingRow = cssRuleBody(css, '.workingRow');
+    expect(workingRow).toMatch(/display:\s*flex/);
+    expect(workingRow).toMatch(/align-items:\s*flex-start/);
+    expect(workingRow).toMatch(/gap:\s*18px/);
+    const previewColumn = cssRuleBody(css, '.previewColumn');
+    expect(previewColumn).toMatch(/inline-size:\s*404px/);
+    expect(previewColumn).toMatch(/flex:\s*none/);
+    expect(previewColumn).toMatch(/gap:\s*7px/);
+    expect(cssRuleBody(css, '.shotInspector')).toMatch(/flex:\s*1\s+1\s+0/);
+    expect(cssRuleBody(css, '.shotCard')).toMatch(/padding:\s*18px\s+22px/);
+    expect(cssRuleBody(css, '.shotCard')).toMatch(/gap:\s*18px/);
+    expect(cssRuleBody(css, '.shotActionBand')).toMatch(/align-items:\s*flex-start/);
+    expect(cssRuleBody(css, '.shotActionBand')).toMatch(/flex-wrap:\s*nowrap/);
+    expect(cssRuleBody(css, '.shotActionBand > .editorActions')).toMatch(/flex-wrap:\s*nowrap/);
+    expect(cssRuleBody(css, '.takeSummary')).toMatch(/flex-wrap:\s*nowrap/);
     expect(cssRuleBody(css, '.beatMetaRow')).toMatch(/grid-column:\s*1\s*\/\s*-1/);
     expect(cssRuleBody(css, '.fieldGuidance')).toMatch(/text-transform:\s*uppercase/);
     expect(cssRuleBody(css, '.chainState')).toMatch(/text-transform:\s*uppercase/);
     expect(cssRuleBody(css, '.lineGuidance')).toMatch(/text-transform:\s*uppercase/);
+
+    const workingCompactStart = css.search(/@media\s*\(max-width:\s*900px\)/);
+    expect(workingCompactStart).toBeGreaterThanOrEqual(0);
+    const stackedWorkingRow = workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.workingRow');
+    expect(stackedWorkingRow).toMatch(/flex-direction:\s*column/);
+    const stackedShotActions =
+      workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.shotActionBand');
+    expect(stackedShotActions).toMatch(/flex-wrap:\s*wrap/);
 
     const compactStart = css.search(/@media\s*\(max-width:\s*760px\)/);
     expect(compactStart).toBeGreaterThanOrEqual(0);
@@ -1451,6 +1588,7 @@ describe('BeatPanel', () => {
     });
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
+    inspectShot(container, 'shot_2');
     const targetShot = within(shotCard(container, 'shot_2'));
 
     expect(targetShot.getByText('Preserved before re-split')).toBeVisible();
@@ -1521,8 +1659,9 @@ describe('BeatPanel', () => {
       makeShot('shot_2', 1, { imageTakes: [retainedImage], segmentHead: false }),
     ]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
+    const inspected = inspectShot(container, 'shot_2');
     const card = takeCard(container, 'image_continuity');
-    expect(screen.getByText('Retained image takes')).toBeInTheDocument();
+    expect(within(inspected).getAllByText('Retained image takes')).toHaveLength(2);
     expect(card).toHaveTextContent('Shot 2 image 1');
     expect(card).not.toHaveTextContent('Effective seed');
     expect(within(card).queryByRole('button', { name: 'Pin seed' })).toBeNull();

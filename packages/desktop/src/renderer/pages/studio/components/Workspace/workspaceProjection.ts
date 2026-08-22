@@ -11,6 +11,7 @@ import type {
   StudioBinItem,
   StudioLineHistoryEntry,
   StudioPlanningShotBoundaryV2,
+  StudioRendererChainBoundaryV2,
   StudioRendererChainConditioningFailureV2,
   StudioRendererChainStatusV2,
   StudioRendererDirtyShotV2,
@@ -27,6 +28,7 @@ import {
   studioPlanningShotBoundariesV2,
   studioShotPlayedDurationV2,
 } from '@/common/types/project/creativeStudioProjectSummary';
+import { deriveWorkspaceShotSegmentState, type WorkspaceShotSegmentState } from './BeatPanel/segmentState';
 
 export type WorkspaceShotDisplayState = 'draft' | 'seed_ready' | 'takes_available' | 'selected_take';
 
@@ -78,6 +80,8 @@ export type WorkspaceShotProjection = {
   effectiveSeedAssetId: string | null;
   segmentHead: boolean;
   planningBoundary: StudioPlanningShotBoundaryV2 | null;
+  frameBoundary: StudioRendererChainBoundaryV2 | null;
+  segmentState: WorkspaceShotSegmentState;
   dirtyCauses: StudioRendererDirtyShotV2['causes'];
   downstreamShotIds: string[];
   imageTakes: WorkspaceTakeProjection[];
@@ -488,6 +492,15 @@ const ownedAttentionJobs = (project: StudioRendererProjectV2, shot: StudioShot):
       : [];
   });
 
+const selectedTakeNumberFromProjectedTakes = (
+  selectedTakeId: string | null,
+  activeVideoTakeIds: readonly string[]
+): number | null => {
+  if (selectedTakeId === null) return null;
+  const matches = activeVideoTakeIds.flatMap((assetId, index) => (assetId === selectedTakeId ? [index + 1] : []));
+  return matches.length === 1 ? matches[0]! : null;
+};
+
 const projectShot = (
   project: StudioRendererProjectV2,
   shot: StudioShot,
@@ -495,8 +508,14 @@ const projectShot = (
     beatActionRevision: number | null;
     segmentHead: boolean;
     planningBoundary: StudioPlanningShotBoundaryV2 | null;
+    frameBoundary: StudioRendererChainBoundaryV2 | null;
     dirtyCauses: ReadonlyArray<StudioRendererDirtyShotV2['causes'][number]>;
     downstreamShotIds: readonly string[];
+    segmentStatusReady: boolean;
+    cascade: StudioCascadeProgressV2 | null;
+    upstreamShotNumber: number | null;
+    conditioningFailed: boolean;
+    currentVideoJobs: readonly StudioRendererJobV2[] | null;
   }
 ): WorkspaceShotProjection => {
   const explicitSeedAssetId = validExplicitSeedStillId(project, shot);
@@ -511,7 +530,12 @@ const projectShot = (
     effectiveSeedAssetId,
   });
   const activeTakeCount = [...imageTakes, ...videoTakes].filter((take) => take.binReason === null).length;
-  const activeVideoTakeCount = videoTakes.filter((take) => take.binReason === null).length;
+  const activeVideoTakes = videoTakes.filter((take) => take.binReason === null);
+  const activeVideoTakeCount = activeVideoTakes.length;
+  const selectedTakeNumber = selectedTakeNumberFromProjectedTakes(
+    selectedTakeId,
+    videoTakes.map((take) => take.assetId)
+  );
   const selectedTakeSourceDurationSeconds = selectedTake === null ? null : validVideoSourceDuration(selectedTake);
   const playedDurationSeconds = studioShotPlayedDurationV2(project, shot);
   const displayState: WorkspaceShotDisplayState =
@@ -544,6 +568,20 @@ const projectShot = (
     effectiveSeedAssetId,
     segmentHead: context.segmentHead,
     planningBoundary: context.planningBoundary === null ? null : { ...context.planningBoundary },
+    frameBoundary: context.frameBoundary === null ? null : { ...context.frameBoundary },
+    segmentState: deriveWorkspaceShotSegmentState({
+      statusReady: context.segmentStatusReady,
+      cascade: context.cascade,
+      upstreamShotNumber: context.upstreamShotNumber,
+      conditioningFailed: context.conditioningFailed,
+      expectsFrameBoundary: !context.segmentHead,
+      frameBoundary: context.frameBoundary,
+      currentVideoJobs: context.currentVideoJobs,
+      dirtyCauses: context.dirtyCauses,
+      activeVideoTakeCount,
+      visibleVideoTakeCount: videoTakes.length,
+      selectedTakeNumber,
+    }),
     dirtyCauses: [...context.dirtyCauses],
     downstreamShotIds: [...context.downstreamShotIds],
     imageTakes,
@@ -1023,8 +1061,14 @@ const projectStoredBeat = (input: {
       beatActionRevision: input.beat.actionRevision,
       segmentHead: shotIndex === 0 || shot.chainBreak === 'hard_cut',
       planningBoundary: boundaryByShotId.get(shot.id) ?? null,
+      frameBoundary: null,
       dirtyCauses: input.status.dirtyCausesByShotId.get(shot.id) ?? [],
       downstreamShotIds,
+      segmentStatusReady: false,
+      cascade: null,
+      upstreamShotNumber: null,
+      conditioningFailed: false,
+      currentVideoJobs: null,
     });
   });
   return {
@@ -1057,6 +1101,124 @@ const revisionMatches = (
   project: StudioRendererProjectV2,
   snapshot: { projectId: string; projectRevision: number } | null
 ): boolean => snapshot?.projectId === project.id && snapshot.projectRevision === project.revision;
+
+type ExactStatusFact<Value> = { valid: true; value: Value } | { valid: false; value: null };
+
+const exactCurrentVideoJobs = (
+  project: StudioRendererProjectV2,
+  shot: StudioShot,
+  status: StudioRendererWorkspaceStatusV2 | null
+): ExactStatusFact<StudioRendererJobV2[]> => {
+  if (status === null || !Array.isArray(status.currentVideoJobs)) return { valid: false, value: null };
+  const matches = status.currentVideoJobs.filter((row) => row?.shotId === shot.id);
+  if (matches.length !== 1) return { valid: false, value: null };
+  const jobIds = matches[0]!.jobIds;
+  if (
+    !Array.isArray(jobIds) ||
+    new Set(jobIds).size !== jobIds.length ||
+    jobIds.some((jobId) => !isSafeStudioId(jobId))
+  ) {
+    return { valid: false, value: null };
+  }
+  const jobs: StudioRendererJobV2[] = [];
+  for (const jobId of jobIds) {
+    const job = ownValue(project.jobs, jobId);
+    if (
+      job?.id !== jobId ||
+      job.projectId !== project.id ||
+      job.shotId !== shot.id ||
+      job.purpose !== 'video_take' ||
+      shot.jobIds.filter((ownedId) => ownedId === jobId).length !== 1
+    ) {
+      return { valid: false, value: null };
+    }
+    jobs.push(job);
+  }
+  return { valid: true, value: jobs };
+};
+
+const exactCascade = (
+  status: StudioRendererWorkspaceStatusV2 | null,
+  shot: StudioShot,
+  orderedShots: readonly StudioShot[],
+  shotIndex: number
+): ExactStatusFact<{ row: StudioCascadeProgressV2 | null; upstreamShotNumber: number | null }> => {
+  if (status === null || !Array.isArray(status.cascadeProgress)) return { valid: false, value: null };
+  const matches = status.cascadeProgress.filter((row) => row?.dependentShotId === shot.id);
+  if (matches.length === 0) return { valid: true, value: { row: null, upstreamShotNumber: null } };
+  if (matches.length !== 1) return { valid: false, value: null };
+  const row = matches[0]!;
+  const upstreamIndex = orderedShots.findIndex((candidate) => candidate.id === row.upstreamShotId);
+  if (
+    !isSafeStudioId(row.upstreamShotId) ||
+    upstreamIndex < 0 ||
+    upstreamIndex > shotIndex ||
+    !Array.isArray(row.eligiblePrimaryAssetIds) ||
+    row.eligiblePrimaryAssetIds.some((assetId) => !isSafeStudioId(assetId)) ||
+    new Set(row.eligiblePrimaryAssetIds).size !== row.eligiblePrimaryAssetIds.length ||
+    typeof row.canRetryConditioningFrame !== 'boolean' ||
+    typeof row.canCancelWaiting !== 'boolean' ||
+    (row.waitingReason === 'conditioning_frame' && upstreamIndex !== shotIndex - 1)
+  ) {
+    return { valid: false, value: null };
+  }
+  return {
+    valid: true,
+    value: {
+      row: { ...row, eligiblePrimaryAssetIds: [...row.eligiblePrimaryAssetIds] },
+      upstreamShotNumber: upstreamIndex < shotIndex ? upstreamIndex + 1 : null,
+    },
+  };
+};
+
+const exactConditioningFailure = (
+  status: StudioRendererChainStatusV2 | null,
+  shotId: string
+): ExactStatusFact<boolean> => {
+  if (status === null || !Array.isArray(status.conditioningFailures)) return { valid: false, value: null };
+  const matches = status.conditioningFailures.filter((row) => row?.dependentShotId === shotId);
+  if (matches.length === 0) return { valid: true, value: false };
+  if (matches.length !== 1 || matches[0]!.reason !== 'conditioning_failed' || matches[0]!.canRetry !== true) {
+    return { valid: false, value: null };
+  }
+  return { valid: true, value: true };
+};
+
+const exactFrameBoundary = (
+  project: StudioRendererProjectV2,
+  status: StudioRendererChainStatusV2 | null,
+  orderedShots: readonly StudioShot[],
+  shotIndex: number
+): ExactStatusFact<StudioRendererChainBoundaryV2 | null> => {
+  const shot = orderedShots[shotIndex]!;
+  if (status === null || !Array.isArray(status.boundaries)) return { valid: false, value: null };
+  const matches = status.boundaries.filter((row) => row?.dependentShotId === shot.id);
+  if (shotIndex === 0 || shot.chainBreak === 'hard_cut') {
+    return matches.length === 0 ? { valid: true, value: null } : { valid: false, value: null };
+  }
+  if (matches.length !== 1) return { valid: false, value: null };
+  const row = matches[0]!;
+  const upstream = orderedShots[shotIndex - 1]!;
+  if (row.upstreamShotId !== upstream.id || row.dependentShotId !== shot.id) {
+    return { valid: false, value: null };
+  }
+  if ((row.status === 'empty' || row.status === 'gone') && row.frameAssetId === null) {
+    return { valid: true, value: { ...row } };
+  }
+  if (row.status !== 'on_disk' || !isSafeStudioId(row.frameAssetId)) return { valid: false, value: null };
+  const frame = ownValue(project.assets, row.frameAssetId);
+  if (
+    frame?.id !== row.frameAssetId ||
+    frame.projectId !== project.id ||
+    frame.shotId !== upstream.id ||
+    frame.mediaKind !== 'image' ||
+    frame.managedAsset.collection !== 'conditioningFrames' ||
+    !upstream.assetIds.includes(frame.id)
+  ) {
+    return { valid: false, value: null };
+  }
+  return { valid: true, value: { ...row } };
+};
 
 /**
  * Builds the only renderer workspace projection. Provider identity and mutable paid records are
@@ -1107,12 +1269,22 @@ export const projectWorkspace = (
         if (downstream.chainBreak === 'hard_cut') break;
         downstreamShotIds.push(downstream.id);
       }
+      const currentVideoJobs = exactCurrentVideoJobs(project, shot, matchedWorkspaceStatus);
+      const cascade = exactCascade(matchedWorkspaceStatus, shot, orderedShots, shotIndex);
+      const conditioningFailure = exactConditioningFailure(matchedChainStatus, shot.id);
+      const frameBoundary = exactFrameBoundary(project, matchedChainStatus, orderedShots, shotIndex);
       return projectShot(project, shot, {
         beatActionRevision: beat.actionRevision,
         segmentHead: shotIndex === 0 || shot.chainBreak === 'hard_cut',
         planningBoundary: planningBoundaryByShotId.get(shot.id) ?? null,
+        frameBoundary: frameBoundary.value,
         dirtyCauses: dirtyCausesByShotId.get(shot.id) ?? [],
         downstreamShotIds,
+        segmentStatusReady: currentVideoJobs.valid && cascade.valid && conditioningFailure.valid && frameBoundary.valid,
+        cascade: cascade.value?.row ?? null,
+        upstreamShotNumber: cascade.value?.upstreamShotNumber ?? null,
+        conditioningFailed: conditioningFailure.value ?? false,
+        currentVideoJobs: currentVideoJobs.value,
       });
     });
     return [
@@ -1197,8 +1369,14 @@ export const projectWorkspace = (
         beatActionRevision: owner.beat.actionRevision,
         segmentHead: shot.chainBreak === 'hard_cut',
         planningBoundary: null,
+        frameBoundary: null,
         dirtyCauses: dirtyCausesByShotId.get(shot.id) ?? [],
         downstreamShotIds: [],
+        segmentStatusReady: false,
+        cascade: null,
+        upstreamShotNumber: null,
+        conditioningFailed: false,
+        currentVideoJobs: null,
       });
       const selectedTake = validSelectedVideoTake(project, shot);
       const binnedCoverAssetId =

@@ -151,6 +151,11 @@ const workspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
   undoTop: { entryId: 'undo_1', label: 'Edit shot', sourceRevision: 2 },
   dirtyShots: [{ shotId: 'shot_2', causes: ['continuity_stale'] }],
   cascadeProgress: [],
+  currentVideoJobs: [
+    { shotId: 'shot_1', jobIds: [] },
+    { shotId: 'shot_2', jobIds: [] },
+    { shotId: 'shot_3', jobIds: [] },
+  ],
   parkEligibility: [],
 });
 
@@ -158,6 +163,14 @@ const chainStatus = (revision = 3): StudioRendererChainStatusV2 => ({
   projectId: 'project_1',
   projectRevision: revision,
   conditioningFailures: [{ dependentShotId: 'shot_2', reason: 'conditioning_failed', canRetry: true }],
+  boundaries: [
+    {
+      upstreamShotId: 'shot_1',
+      dependentShotId: 'shot_2',
+      status: 'empty',
+      frameAssetId: null,
+    },
+  ],
 });
 
 const cleanWorkspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
@@ -613,6 +626,9 @@ describe('projectWorkspace', () => {
         posterAssetId: 'poster_selected',
       },
     ]);
+    expect(
+      projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState
+    ).toEqual({ kind: 'rendered', takeCount: 2, selectedTakeNumber: 2 });
 
     project.shots.shot_1!.seedStillId = null;
     shot = projectWorkspace(project, null, null).activeBeats[0]!.shots[0]!;
@@ -1028,6 +1044,250 @@ describe('projectWorkspace', () => {
     // clock but not the constraint, and the render gate is exactly that comparison.
     expect(cut.filmDurationSeconds).toBe(11);
     expect(cut.targetDurationSeconds).toBe(12);
+  });
+
+  it('projects revision-matched frame boundaries onto only their exact dependent Shot', () => {
+    const project = makeProject();
+    const current = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus());
+    expect(current.activeBeats[0]!.shots.map((shot) => [shot.id, shot.frameBoundary])).toEqual([
+      ['shot_1', null],
+      [
+        'shot_2',
+        {
+          upstreamShotId: 'shot_1',
+          dependentShotId: 'shot_2',
+          status: 'empty',
+          frameAssetId: null,
+        },
+      ],
+    ]);
+
+    const poisoned = cleanChainStatus();
+    poisoned.boundaries.push({
+      upstreamShotId: 'shot_3',
+      dependentShotId: 'shot_2',
+      status: 'on_disk',
+      frameAssetId: 'forged_frame',
+    });
+    expect(
+      projectWorkspace(project, cleanWorkspaceStatus(), poisoned).activeBeats[0]!.shots[1]!.frameBoundary
+    ).toBeNull();
+    expect(
+      projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus(2)).activeBeats[0]!.shots[1]!
+    ).toMatchObject({ frameBoundary: null, segmentState: { kind: 'status_pending' } });
+  });
+
+  it('derives queued and provider-progress rendering only from the exact current video-job wave', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    addSeed(project, 'shot_1');
+    project.shots.shot_1!.jobIds.push('job_old_failure', 'job_current');
+    project.jobs.job_old_failure = makeJob('job_old_failure', 'shot_1', {
+      status: 'failed',
+      error: { code: 'provider_error', messageKey: 'provider_error' },
+    });
+    project.jobs.job_current = makeJob('job_current', 'shot_1', { status: 'queued_remote' });
+    const status = cleanWorkspaceStatus();
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_1')!.jobIds = ['job_current'];
+
+    let shot = projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.segmentState).toEqual({ kind: 'queued' });
+
+    project.jobs.job_current!.status = 'running';
+    project.jobs.job_current!.progress = 40;
+    shot = projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.segmentState).toEqual({ kind: 'rendering', progressPercent: 40, showingStill: false });
+
+    project.jobs.job_current!.progress = undefined;
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'rendering',
+      progressPercent: null,
+      showingStill: false,
+    });
+  });
+
+  it('keeps a continuous waiting job on the exact frame boundary and fails missing authority closed', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_2!.jobIds.push('job_waiting_frame');
+    project.jobs.job_waiting_frame = makeJob('job_waiting_frame', 'shot_2', {
+      status: 'waiting_for_conditioning',
+    });
+    const status = cleanWorkspaceStatus();
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_2')!.jobIds = ['job_waiting_frame'];
+
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[1]!.segmentState).toEqual({
+      kind: 'waiting_on_frame',
+    });
+
+    const missing = cleanChainStatus();
+    missing.boundaries = [];
+    expect(projectWorkspace(project, status, missing).activeBeats[0]!.shots[1]!.segmentState).toEqual({
+      kind: 'status_pending',
+    });
+
+    const frame = makeAsset('frame_ready', 'shot_1', 'image', 'conditioningFrames');
+    project.assets[frame.id] = frame;
+    project.shots.shot_1!.assetIds.push(frame.id);
+    const ready = cleanChainStatus();
+    ready.boundaries = [
+      {
+        upstreamShotId: 'shot_1',
+        dependentShotId: 'shot_2',
+        status: 'on_disk',
+        frameAssetId: frame.id,
+      },
+    ];
+    expect(projectWorkspace(project, status, ready).activeBeats[0]!.shots[1]!.segmentState).toEqual({
+      kind: 'queued',
+    });
+  });
+
+  it('reports live current-wave siblings ahead of a terminal sibling failure', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.jobIds.push('job_failed_sibling', 'job_live_sibling');
+    project.jobs.job_failed_sibling = makeJob('job_failed_sibling', 'shot_1', {
+      status: 'failed',
+      error: { code: 'provider_error', messageKey: 'provider_error' },
+    });
+    project.jobs.job_live_sibling = makeJob('job_live_sibling', 'shot_1', { status: 'running', progress: 40 });
+    const status = cleanWorkspaceStatus();
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_1')!.jobIds = ['job_failed_sibling', 'job_live_sibling'];
+
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'rendering',
+      progressPercent: 40,
+      showingStill: false,
+    });
+
+    project.jobs.job_live_sibling!.status = 'queued_remote';
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'queued',
+    });
+  });
+
+  it('gives exact cascade barriers precedence and resolves only a preceding Shot number', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_2!.jobIds.push('job_waiting');
+    project.jobs.job_waiting = makeJob('job_waiting', 'shot_2', { status: 'waiting_for_conditioning' });
+    const status = cleanWorkspaceStatus();
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_2')!.jobIds = ['job_waiting'];
+
+    status.cascadeProgress = [cascadeRow('upstream_running')];
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[1]!.segmentState).toEqual({
+      kind: 'waiting_on_shot',
+      upstreamShotNumber: 1,
+    });
+
+    status.cascadeProgress = [cascadeRow('conditioning_frame')];
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[1]!.segmentState).toEqual({
+      kind: 'waiting_on_frame',
+    });
+
+    status.cascadeProgress = [cascadeRow('dependency_failed')];
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[1]!.segmentState).toEqual({
+      kind: 'never_dispatched',
+    });
+
+    status.cascadeProgress = [cascadeRow('choose_take')];
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[1]!.segmentState).toEqual({
+      kind: 'needs_attention',
+    });
+  });
+
+  it('does not call a provider-submitted cancellation never dispatched', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    const cancelled = makeJob('job_cancelled_remote', 'shot_1', { status: 'cancelled' });
+    project.jobs[cancelled.id] = cancelled;
+    project.shots.shot_1!.jobIds.push(cancelled.id);
+    const status = cleanWorkspaceStatus();
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_1')!.jobIds = [cancelled.id];
+
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'no_take',
+    });
+  });
+
+  it('projects current failures, dirty playable work, and rendered Take facts in fail-closed precedence', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    const failed = makeJob('job_failed_current', 'shot_1', {
+      status: 'failed',
+      error: { code: 'provider_error', messageKey: 'provider_error' },
+      spendReceipt: null,
+    });
+    project.jobs[failed.id] = failed;
+    project.shots.shot_1!.jobIds.push(failed.id);
+    const status = cleanWorkspaceStatus();
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_1')!.jobIds = [failed.id];
+
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'failed_unbilled',
+    });
+
+    failed.status = 'needs_attention';
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'needs_attention',
+    });
+
+    failed.status = 'succeeded';
+    failed.error = null;
+    const firstTake = makeAsset('take_first', 'shot_1', 'video', 'assets', '2026-08-19T01:00:00.000Z');
+    const selectedTake = makeAsset('take_selected', 'shot_1', 'video', 'assets', '2026-08-19T02:00:00.000Z');
+    Object.assign(project.assets, { [firstTake.id]: firstTake, [selectedTake.id]: selectedTake });
+    project.shots.shot_1!.assetIds.push(firstTake.id, selectedTake.id);
+    project.shots.shot_1!.selectedTakeId = selectedTake.id;
+    const firstProducer = makeJob('job_first_current', 'shot_1', {
+      status: 'succeeded',
+      generationIndex: 0,
+      outputAssetIds: [firstTake.id],
+      outputAssetIdsByRole: { primary: firstTake.id, poster: null },
+    });
+    project.jobs[firstProducer.id] = firstProducer;
+    project.shots.shot_1!.jobIds.push(firstProducer.id);
+    failed.generationIndex = 1;
+    failed.outputAssetIds = [selectedTake.id];
+    failed.outputAssetIdsByRole.primary = selectedTake.id;
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_1')!.jobIds = [firstProducer.id, failed.id];
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'rendered',
+      takeCount: 2,
+      selectedTakeNumber: 1,
+    });
+
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_1')!.jobIds = [failed.id];
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'rendered',
+      takeCount: 2,
+      selectedTakeNumber: 1,
+    });
+
+    status.dirtyShots = [{ shotId: 'shot_1', causes: ['generation_out_of_date'] }];
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'needs_rerender',
+    });
+    status.dirtyShots = [{ shotId: 'shot_1', causes: ['generation_out_of_date', 'continuity_stale'] }];
+    expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'stale',
+    });
+  });
+
+  it('fails a missing or duplicate current-wave row to status pending instead of trusting historical jobs', () => {
+    const project = makeProject();
+    const missing = cleanWorkspaceStatus();
+    missing.currentVideoJobs = missing.currentVideoJobs.filter((row) => row.shotId !== 'shot_1');
+    expect(projectWorkspace(project, missing, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'status_pending',
+    });
+
+    const duplicate = cleanWorkspaceStatus();
+    duplicate.currentVideoJobs.push({ shotId: 'shot_1', jobIds: [] });
+    expect(projectWorkspace(project, duplicate, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
+      kind: 'status_pending',
+    });
   });
 
   it('fails Cut bed, duration, order, classification, and Match To facts closed', () => {

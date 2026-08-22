@@ -318,14 +318,34 @@ const cutActions = (): CutActions => ({
   revealExport: vi.fn(async () => true),
 });
 
-const readyWorkspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
-  projectId: 'project_1',
-  projectRevision: revision,
-  undoTop: null,
-  dirtyShots: [],
-  cascadeProgress: [],
-  parkEligibility: [],
-});
+const readyWorkspaceStatus = (source: number | StudioRendererProjectV2 = 3): StudioRendererWorkspaceStatusV2 => {
+  const revision = typeof source === 'number' ? source : source.revision;
+  const currentVideoJobs =
+    typeof source === 'number'
+      ? [
+          { shotId: 'shot_1', jobIds: [] },
+          { shotId: 'shot_2', jobIds: [] },
+          { shotId: 'shot_3', jobIds: [] },
+        ]
+      : source.beatOrder.flatMap((beatId) =>
+          (source.beats[beatId]?.shotOrder ?? []).map((shotId) => ({
+            shotId,
+            jobIds: (source.shots[shotId]?.jobIds ?? []).filter((jobId) => {
+              const job = source.jobs[jobId];
+              return job?.id === jobId && job.shotId === shotId && job.purpose === 'video_take';
+            }),
+          }))
+        );
+  return {
+    projectId: typeof source === 'number' ? 'project_1' : source.id,
+    projectRevision: revision,
+    undoTop: null,
+    dirtyShots: [],
+    cascadeProgress: [],
+    currentVideoJobs,
+    parkEligibility: [],
+  };
+};
 
 const parkableWorkspaceStatus = (projectId = 'project_1', revision = 3): StudioRendererWorkspaceStatusV2 => ({
   ...readyWorkspaceStatus(revision),
@@ -343,14 +363,33 @@ const parkableWorkspaceStatus = (projectId = 'project_1', revision = 3): StudioR
   ],
 });
 
-const readyChainStatus = (revision = 3): StudioRendererChainStatusV2 => ({
-  projectId: 'project_1',
-  projectRevision: revision,
+const readyChainStatus = (source: number | StudioRendererProjectV2 = 3): StudioRendererChainStatusV2 => ({
+  projectId: typeof source === 'number' ? 'project_1' : source.id,
+  projectRevision: typeof source === 'number' ? source : source.revision,
   conditioningFailures: [],
+  boundaries:
+    typeof source === 'number'
+      ? [
+          {
+            upstreamShotId: 'shot_1',
+            dependentShotId: 'shot_2',
+            status: 'empty',
+            frameAssetId: null,
+          },
+        ]
+      : source.beatOrder.flatMap((beatId) => {
+          const shotOrder = source.beats[beatId]?.shotOrder ?? [];
+          return shotOrder.slice(1).flatMap((dependentShotId, index) => {
+            const upstreamShotId = shotOrder[index]!;
+            return source.shots[dependentShotId]?.chainBreak === 'hard_cut'
+              ? []
+              : [{ upstreamShotId, dependentShotId, status: 'empty' as const, frameAssetId: null }];
+          });
+        }),
 });
 
 const readyProjection = (project: StudioRendererProjectV2) =>
-  projectWorkspace(project, readyWorkspaceStatus(project.revision), readyChainStatus(project.revision));
+  projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
 
 const ControlsHarness: React.FC<{
   routes: StudioRouteCatalogV2 | null;
@@ -383,8 +422,8 @@ const ControlsHarness: React.FC<{
   if (spendPolicy) project.spendPolicy = { currency: 'USD', maxPerBatchMinorUnits: 1_000 };
   const projection = projectWorkspace(
     project,
-    status === undefined ? readyWorkspaceStatus(project.revision) : status,
-    chain === undefined ? readyChainStatus(project.revision) : chain
+    status === undefined ? readyWorkspaceStatus(project) : status,
+    chain === undefined ? readyChainStatus(project) : chain
   );
   const canonicalValues: Record<string, WorkspaceDraftValue> = {
     'settings.name': project.name,
@@ -569,10 +608,18 @@ describe('spend gate draft graph', () => {
       cascadeChoices: [],
     });
 
-    projection = projectWorkspace(project, readyWorkspaceStatus(), {
+    projection = projectWorkspace(project, readyWorkspaceStatus(project), {
       projectId: project.id,
       projectRevision: project.revision,
       conditioningFailures: [{ dependentShotId: 'shot_1', reason: 'conditioning_failed', canRetry: true }],
+      boundaries: [
+        {
+          upstreamShotId: 'shot_1',
+          dependentShotId: 'shot_2',
+          status: 'empty',
+          frameAssetId: null,
+        },
+      ],
     });
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toBeNull();
   });

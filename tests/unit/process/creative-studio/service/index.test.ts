@@ -49,6 +49,7 @@ import {
   applyStudioMutationBatchV2,
   calculateStudioQuoteTotals,
   createEmptyStudioProjectV2,
+  createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
   createStudioRateCardV2,
   validateStudioMutationOperationV2,
@@ -275,6 +276,7 @@ describe('CreativeStudioServiceV2', () => {
       serviceStore?: CreativeStudioStore;
       resolveAssetV2?: StudioMediaStore['resolveAssetV2'];
       resolveAssetWithProjectAuthorityV2?: StudioMediaStore['resolveAssetWithProjectAuthorityV2'];
+      verifyConditioningFrameV2?: StudioMediaStore['verifyConditioningFrameV2'];
       importBedAudioFromPathV2?: StudioMediaStore['importBedAudioFromPathV2'];
       detachBedAudioV2?: StudioMediaStore['detachBedAudioV2'];
     } = {}
@@ -572,6 +574,7 @@ describe('CreativeStudioServiceV2', () => {
     const detachBriefReferenceV2 = vi.fn(async () => structuredClone(current));
     const persistCapturedPosterV2 = vi.fn(async () => structuredClone(referenceAsset));
     const extractConditioningFrameV2 = vi.fn(async () => ({ status: 'failed' as const }));
+    const verifyConditioningFrameV2 = options.verifyConditioningFrameV2 ?? vi.fn(async () => null);
     const resolveAssetV2 = options.resolveAssetV2 ?? vi.fn(async () => null);
     const resolveAssetWithProjectAuthorityV2 = options.resolveAssetWithProjectAuthorityV2 ?? vi.fn(async () => null);
     const providerResolver = {
@@ -693,6 +696,7 @@ describe('CreativeStudioServiceV2', () => {
               detachBriefReferenceV2,
               persistCapturedPosterV2,
               extractConditioningFrameV2,
+              verifyConditioningFrameV2,
               resolveAssetV2,
               resolveAssetWithProjectAuthorityV2,
             } as never,
@@ -713,6 +717,7 @@ describe('CreativeStudioServiceV2', () => {
       detachBriefReferenceV2,
       persistCapturedPosterV2,
       extractConditioningFrameV2,
+      verifyConditioningFrameV2,
       resolveAssetV2,
       resolveAssetWithProjectAuthorityV2,
       providerResolver,
@@ -3906,18 +3911,104 @@ describe('CreativeStudioServiceV2', () => {
     });
     expect(Object.keys(workspace).toSorted()).toEqual([
       'cascadeProgress',
+      'currentVideoJobs',
       'dirtyShots',
       'parkEligibility',
       'projectId',
       'projectRevision',
       'undoTop',
     ]);
-    expect(chain).toEqual({ projectId: project.id, projectRevision: project.revision, conditioningFailures: [] });
+    expect(chain).toEqual({
+      projectId: project.id,
+      projectRevision: project.revision,
+      conditioningFailures: [],
+      boundaries: [],
+    });
+    expect(workspace.currentVideoJobs).toEqual([
+      { shotId: 'clip_1', jobIds: [] },
+      { shotId: 'clip_2', jobIds: [] },
+    ]);
+    expect(harness.verifyConditioningFrameV2).not.toHaveBeenCalled();
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
     expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
     await expect(
       harness.service.getWorkspaceStatus({ projectId: project.id, revision: project.revision } as never)
     ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('marks a ready chain frame on disk only after exact media verification and otherwise fails closed', async () => {
+    const project = makeSchema2ServiceProject();
+    project.beats.section_1!.shotOrder = ['clip_1', 'clip_2'];
+    project.beats.section_2!.shotOrder = [];
+    project.shots.clip_2!.chainBreak = 'none';
+    const take: StudioAssetV2 = {
+      id: 'take_chain_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'take_chain_1.mp4' },
+      byteSize: 100,
+      sha256: 'c'.repeat(64),
+      durationSeconds: 10,
+      createdAt: '2026-08-17T00:00:01.000Z',
+    };
+    const frame: StudioAssetV2 = {
+      id: 'frame_chain_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'conditioningFrames', fileName: 'frame_chain_1.png' },
+      byteSize: 25,
+      sha256: 'd'.repeat(64),
+      createdAt: '2026-08-17T00:00:02.000Z',
+    };
+    Object.assign(project.assets, { [take.id]: take, [frame.id]: frame });
+    project.shots.clip_1!.assetIds.push(take.id, frame.id);
+    project.shots.clip_1!.selectedTakeId = take.id;
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'clip_1',
+      takeAssetId: take.id,
+      endpointSeconds: 10,
+    });
+    project.frameExtractions[extractionId] = {
+      id: extractionId,
+      shotId: 'clip_1',
+      takeAssetId: take.id,
+      endpointSeconds: 10,
+      frameAssetId: frame.id,
+      status: 'ready',
+      errorCode: null,
+    };
+    const verifyConditioningFrameV2 = vi.fn<StudioMediaStore['verifyConditioningFrameV2']>(async () => ({
+      extractionId,
+      shotId: 'clip_1',
+      takeAssetId: take.id,
+      endpointSeconds: 10,
+      frameAssetId: frame.id,
+      byteSize: frame.byteSize,
+      sha256: frame.sha256,
+    }));
+    const harness = makeHarness(project, { verifyConditioningFrameV2 });
+
+    await expect(harness.service.getChainStatus({ projectId: project.id })).resolves.toMatchObject({
+      boundaries: [
+        {
+          upstreamShotId: 'clip_1',
+          dependentShotId: 'clip_2',
+          status: 'on_disk',
+          frameAssetId: frame.id,
+        },
+      ],
+    });
+    expect(verifyConditioningFrameV2).toHaveBeenCalledWith({ projectId: project.id, extractionId });
+
+    verifyConditioningFrameV2.mockRejectedValueOnce(new Error('media unavailable'));
+    await expect(harness.service.getChainStatus({ projectId: project.id })).resolves.toMatchObject({
+      boundaries: [{ status: 'gone', frameAssetId: null }],
+    });
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
   });
 });
 

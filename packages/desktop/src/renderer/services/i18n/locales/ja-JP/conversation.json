@@ -965,6 +965,33 @@
         "coverage": {
           "trimGuidance": "エッジ · トリミング · 無料",
           "boundaryGuidance": "境界 · 再レンダリングが必要",
+          "segmentState": {
+            "noTake": "テイクなし",
+            "queued": "キュー済み",
+            "nextUp": "次に実行",
+            "waitingOnShot": "ショット{{position}}を待機",
+            "waitingOnFrame": "連続性フレームを待機",
+            "rendering": "レンダリング中",
+            "renderingProgress": "レンダリング中 · {{progress}}%",
+            "renderingStill": "レンダリング中 · 静止画を表示中",
+            "rendered": "レンダリング済み",
+            "renderedOneTake": "レンダリング済み · 1テイク",
+            "selectedTake": "{{count}}テイク · T{{take}}をカットで使用",
+            "untouched": "未変更",
+            "needsRerender": "再レンダリングが必要",
+            "staleStillPlays": "古い状態 · 引き続き再生可能",
+            "failedNotBilled": "失敗 · 課金なし",
+            "neverDispatched": "未送信",
+            "shotKept": "ショット{{position}} · 保持",
+            "statusPending": "ステータスを取得できません",
+            "needsAttention": "確認が必要"
+          },
+          "boundaryFrame": {
+            "empty": "ショット{{position}}の後の境界 · 連続性フレームを待機",
+            "ready": "ショット{{position}}の後の境界 · 連続性フレームの準備完了",
+            "gone": "ショット{{position}}の後の境界 · 連続性フレームがありません",
+            "stale": "ショット{{position}}の後の境界 · 連続性フレームが古くなっています"
+          },
           "seekGuidance": "レール · シーク · 無料",
           "seekLane": "ビートシークレール",
           "seekValue": "{{total}} 中 {{current}}"

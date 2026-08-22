@@ -970,6 +970,33 @@
         "coverage": {
           "trimGuidance": "Borde · Recorte · Gratis",
           "boundaryGuidance": "Límite · Requiere volver a renderizar",
+          "segmentState": {
+            "noTake": "Sin toma",
+            "queued": "En cola",
+            "nextUp": "Siguiente",
+            "waitingOnShot": "Esperando al plano {{position}}",
+            "waitingOnFrame": "Esperando el fotograma de continuidad",
+            "rendering": "Renderizando",
+            "renderingProgress": "Renderizando · {{progress}}%",
+            "renderingStill": "Renderizando · Mostrando la imagen fija",
+            "rendered": "Renderizado",
+            "renderedOneTake": "Renderizado · 1 toma",
+            "selectedTake": "{{count}} tomas · T{{take}} en el montaje",
+            "untouched": "Sin cambios",
+            "needsRerender": "Necesita volver a renderizarse",
+            "staleStillPlays": "Desactualizado · Aún se reproduce",
+            "failedNotBilled": "Falló · Sin cargo",
+            "neverDispatched": "Nunca se envió",
+            "shotKept": "Plano {{position}} · Conservado",
+            "statusPending": "Estado no disponible",
+            "needsAttention": "Requiere atención"
+          },
+          "boundaryFrame": {
+            "empty": "Límite después del plano {{position}} · Esperando el fotograma de continuidad",
+            "ready": "Límite después del plano {{position}} · Fotograma de continuidad listo",
+            "gone": "Límite después del plano {{position}} · Falta el fotograma de continuidad",
+            "stale": "Límite después del plano {{position}} · Fotograma de continuidad desactualizado"
+          },
           "seekGuidance": "Barra · Buscar · Gratis",
           "seekLane": "Barra de búsqueda del beat",
           "seekValue": "{{current}} de {{total}}"

@@ -182,6 +182,8 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
   effectiveSeedAssetId: null,
   segmentHead: false,
   planningBoundary: null,
+  frameBoundary: null,
+  segmentState: { kind: 'no_take' },
   dirtyCauses: [],
   downstreamShotIds: [],
   imageTakes: [],
@@ -236,8 +238,12 @@ const makeProjection = (): WorkspaceProjection => {
   const activeShot = makeShot('active_shot', { line: 'Active owner shot' });
   const activeOwner = makeBeat('active_owner', 'Active owner', [activeShot]);
   const activeSecond = makeBeat('active_second', 'Second active Beat', [makeShot('second_shot')]);
-  const ownerAnchorA = makeShot('owner_anchor_a', { line: 'Owner anchor A', coverAssetId: 'cover_beat' });
-  const ownerAnchorB = makeShot('owner_anchor_b', { line: 'Owner anchor B' });
+  const ownerAnchorA = makeShot('owner_anchor_a', {
+    line: 'Owner anchor A',
+    coverAssetId: 'cover_beat',
+    segmentState: { kind: 'status_pending' },
+  });
+  const ownerAnchorB = makeShot('owner_anchor_b', { segmentState: { kind: 'status_pending' } });
   const binnedBeat: WorkspaceBinnedBeatProjection = {
     ...makeBeat('beat_parked', 'Parked owner', [ownerAnchorA, ownerAnchorB], {
       coverAssetId: 'cover_beat',
@@ -257,6 +263,7 @@ const makeProjection = (): WorkspaceProjection => {
         makeTake('shot_video', 'video'),
         { ...makeTake('take_alternate', 'video'), binReason: 'alternate', posterAssetId: 'cover_take' },
       ],
+      segmentState: { kind: 'status_pending' },
       takeCount: 3,
       retainedWork: true,
     }),

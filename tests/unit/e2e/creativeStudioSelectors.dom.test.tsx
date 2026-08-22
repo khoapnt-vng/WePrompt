@@ -104,12 +104,13 @@ describe('Creative Studio E2E selectors', () => {
         undoTop: null,
         dirtyShots: [],
         cascadeProgress: [],
+        currentVideoJobs: [],
         parkEligibility: [],
       },
     });
     mocks.bridge.getChainStatus.invoke.mockResolvedValue({
       ok: true,
-      data: { projectId: project.id, projectRevision: project.revision, conditioningFailures: [] },
+      data: { projectId: project.id, projectRevision: project.revision, conditioningFailures: [], boundaries: [] },
     });
     mocks.bridge.listRoutes.invoke.mockResolvedValue({
       ok: true,

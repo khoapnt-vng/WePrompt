@@ -975,6 +975,33 @@
         "coverage": {
           "trimGuidance": "Borda · Corte · Grátis",
           "boundaryGuidance": "Limite · Exige nova renderização",
+          "segmentState": {
+            "noTake": "Sem tomada",
+            "queued": "Na fila",
+            "nextUp": "Próximo",
+            "waitingOnShot": "Aguardando o plano {{position}}",
+            "waitingOnFrame": "Aguardando o quadro de continuidade",
+            "rendering": "Renderizando",
+            "renderingProgress": "Renderizando · {{progress}}%",
+            "renderingStill": "Renderizando · Exibindo o quadro estático",
+            "rendered": "Renderizado",
+            "renderedOneTake": "Renderizado · 1 tomada",
+            "selectedTake": "{{count}} tomadas · T{{take}} no corte",
+            "untouched": "Intocado",
+            "needsRerender": "Precisa renderizar novamente",
+            "staleStillPlays": "Desatualizado · Ainda reproduz",
+            "failedNotBilled": "Falhou · Não cobrado",
+            "neverDispatched": "Nunca enviado",
+            "shotKept": "Plano {{position}} · Mantido",
+            "statusPending": "Status indisponível",
+            "needsAttention": "Requer atenção"
+          },
+          "boundaryFrame": {
+            "empty": "Limite após o plano {{position}} · Aguardando o quadro de continuidade",
+            "ready": "Limite após o plano {{position}} · Quadro de continuidade pronto",
+            "gone": "Limite após o plano {{position}} · Quadro de continuidade ausente",
+            "stale": "Limite após o plano {{position}} · Quadro de continuidade desatualizado"
+          },
           "seekGuidance": "Trilho · Busca · Grátis",
           "seekLane": "Trilho de busca do beat",
           "seekValue": "{{current}} de {{total}}"

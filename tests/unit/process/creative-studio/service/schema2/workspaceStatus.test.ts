@@ -19,6 +19,7 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { createStudioFrameExtractionId } from '@/process/services/creative-studio/service/schema2/generation';
 import {
+  projectStudioChainBoundaryVerificationIdsV2,
   projectStudioChainStatusV2,
   projectStudioWorkspaceStatusV2,
 } from '@/process/services/creative-studio/service/schema2/workspaceStatus';
@@ -387,6 +388,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
     expect(status.dirtyShots).toEqual([{ shotId: 'shot_1', causes: ['generation_out_of_date'] }]);
     expect(exactKeys(status)).toEqual([
       'cascadeProgress',
+      'currentVideoJobs',
       'dirtyShots',
       'parkEligibility',
       'projectId',
@@ -638,6 +640,9 @@ describe('workspace cascade progress', () => {
       canCancelWaiting: false,
       eligiblePrimaryAssetIds: [],
     });
+
+    fixture.dependentJob.providerJobId = 'remote_cancelled';
+    expect(projectStudioWorkspaceStatusV2(fixture.project).cascadeProgress).toEqual([]);
   });
 
   it('projects choose-seed and suppresses older waiting history when the latest item is runnable', () => {
@@ -674,6 +679,35 @@ describe('workspace cascade progress', () => {
     );
     expect(projectStudioWorkspaceStatusV2(project).cascadeProgress).toEqual([]);
   });
+
+  it('projects exact latest video authorization jobs for every active Shot in film order', () => {
+    const fixture = makeCascadeProject();
+    expect(projectStudioWorkspaceStatusV2(fixture.project).currentVideoJobs).toEqual([
+      { shotId: 'shot_1', jobIds: ['job_upstream'] },
+      { shotId: 'shot_2', jobIds: ['job_dependent'] },
+    ]);
+
+    const latestItem = makeItem('item_latest', 'shot_1', resolvedPlan());
+    const latestAuthorization = makeAuthorization('auth_latest', [latestItem]);
+    fixture.project.spendAuthorizations.push(latestAuthorization);
+    addJob(
+      fixture.project,
+      makeJob('job_latest', 'shot_1', latestItem.requestPlan, {
+        authorizationId: latestAuthorization.id,
+        authorizationItemId: latestItem.id,
+      })
+    );
+
+    const rows = projectStudioWorkspaceStatusV2(fixture.project).currentVideoJobs;
+    expect(rows).toEqual([
+      { shotId: 'shot_1', jobIds: ['job_latest'] },
+      { shotId: 'shot_2', jobIds: ['job_dependent'] },
+    ]);
+    expect(rows.map(exactKeys)).toEqual([
+      ['jobIds', 'shotId'],
+      ['jobIds', 'shotId'],
+    ]);
+  });
 });
 
 describe('projectStudioChainStatusV2', () => {
@@ -702,8 +736,17 @@ describe('projectStudioChainStatusV2', () => {
       projectId: 'project_1',
       projectRevision: 7,
       conditioningFailures: [{ dependentShotId: 'shot_2', reason: 'conditioning_failed', canRetry: true }],
+      boundaries: [
+        {
+          upstreamShotId: 'shot_1',
+          dependentShotId: 'shot_2',
+          status: 'gone',
+          frameAssetId: null,
+        },
+      ],
     });
     expect(exactKeys(status.conditioningFailures[0]!)).toEqual(['canRetry', 'dependentShotId', 'reason']);
+    expect(exactKeys(status.boundaries[0]!)).toEqual(['dependentShotId', 'frameAssetId', 'status', 'upstreamShotId']);
   });
 
   it('suppresses changed endpoints, nonfailed states, hard cuts, and a current nonterminal owner', () => {
@@ -723,5 +766,80 @@ describe('projectStudioChainStatusV2', () => {
     const owned = makeFailedChain();
     addJob(owned.project, makeJob('job_current_owner', 'shot_2', deferredPredecessorPlan('item_upstream', 'shot_1')));
     expect(projectStudioChainStatusV2(owned.project).conditioningFailures).toEqual([]);
+  });
+
+  it('projects empty, verified on-disk, and fail-closed ready frame boundaries without leaking extraction authority', () => {
+    const project = makeProject(['shot_1', 'shot_2', 'shot_3']);
+    const firstTake = addAsset(project, 'shot_1', 'take_1');
+    project.shots.shot_1!.selectedTakeId = firstTake.id;
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: firstTake.id,
+      endpointSeconds: 10,
+    });
+    const frame = addAsset(project, 'shot_1', 'frame_1', 'image', 'conditioningFrames');
+    project.frameExtractions[extractionId] = {
+      id: extractionId,
+      shotId: 'shot_1',
+      takeAssetId: firstTake.id,
+      endpointSeconds: 10,
+      frameAssetId: frame.id,
+      status: 'ready',
+      errorCode: null,
+    };
+
+    expect(projectStudioChainBoundaryVerificationIdsV2(project)).toEqual([extractionId]);
+    expect(projectStudioChainStatusV2(project).boundaries).toEqual([
+      { upstreamShotId: 'shot_1', dependentShotId: 'shot_2', status: 'gone', frameAssetId: null },
+      { upstreamShotId: 'shot_2', dependentShotId: 'shot_3', status: 'empty', frameAssetId: null },
+    ]);
+
+    const verified = new Map([
+      [
+        extractionId,
+        {
+          extractionId,
+          shotId: 'shot_1',
+          takeAssetId: firstTake.id,
+          endpointSeconds: 10,
+          frameAssetId: frame.id,
+          byteSize: frame.byteSize,
+          sha256: frame.sha256,
+        },
+      ],
+    ]);
+    const projected = projectStudioChainStatusV2(project, verified);
+    expect(projected.boundaries[0]).toEqual({
+      upstreamShotId: 'shot_1',
+      dependentShotId: 'shot_2',
+      status: 'on_disk',
+      frameAssetId: 'frame_1',
+    });
+    expect(JSON.stringify(projected.boundaries)).not.toContain(extractionId);
+
+    verified.set(extractionId, { ...verified.get(extractionId)!, frameAssetId: 'wrong_frame' });
+    expect(projectStudioChainStatusV2(project, verified).boundaries[0]).toMatchObject({
+      status: 'gone',
+      frameAssetId: null,
+    });
+  });
+
+  it('omits hard cuts and fails changed, pending, or malformed extraction ownership closed', () => {
+    const { project, frameId } = makeFailedChain();
+    project.frameExtractions[frameId]!.status = 'pending';
+    project.frameExtractions[frameId]!.errorCode = null;
+    expect(projectStudioChainStatusV2(project).boundaries[0]).toMatchObject({ status: 'empty', frameAssetId: null });
+
+    project.frameExtractions[frameId]!.status = 'ready';
+    project.frameExtractions[frameId]!.frameAssetId = 'frame_missing';
+    expect(projectStudioChainBoundaryVerificationIdsV2(project)).toEqual([frameId]);
+    expect(projectStudioChainStatusV2(project).boundaries[0]).toMatchObject({ status: 'gone', frameAssetId: null });
+
+    project.frameExtractions[frameId]!.takeAssetId = 'take_other';
+    expect(projectStudioChainBoundaryVerificationIdsV2(project)).toEqual([]);
+    expect(projectStudioChainStatusV2(project).boundaries[0]).toMatchObject({ status: 'gone', frameAssetId: null });
+
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    expect(projectStudioChainStatusV2(project).boundaries).toEqual([]);
   });
 });

@@ -81,6 +81,8 @@ const makeShot = (id: string): WorkspaceShotProjection => ({
   effectiveSeedAssetId: null,
   segmentHead: true,
   planningBoundary: { shotId: id, startSeconds: 0, endSeconds: 4 },
+  frameBoundary: null,
+  segmentState: { kind: 'no_take' },
   dirtyCauses: [],
   downstreamShotIds: [],
   imageTakes: [],

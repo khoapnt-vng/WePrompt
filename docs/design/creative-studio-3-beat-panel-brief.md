@@ -17,8 +17,9 @@ Two halves. **Do A before B.**
 A first, because widening a bar that says nothing only produces a wider empty bar. The storyboard is
 explicit that _"the bar is the subject"_, and B is what gives the bar room for what A puts in it.
 
-Every label in A is already pinned by the storyboard, so A needs nothing further from the designer.
-B is fully specified by v2, measured below.
+The storyboard pins the visual vocabulary, but the implementation emits only labels supported by
+exact current authority. Four drawn labels remain intentionally un-emitted and are documented
+below. B is fully specified by v2, measured below.
 
 ---
 
@@ -29,8 +30,9 @@ B is fully specified by v2, measured below.
 - **Beat-level state is already rich.** `WorkspaceBeatDisplayState` carries `duration_pending`,
   `no_coverage`, `part_done`, `needs_attention`, `rendering`, `stale`, `seed_pending`,
   `status_pending`.
-- **Job state is already rich.** `StudioJobStatus` is an exactly-validated set of eighteen values
-  including `waiting_for_conditioning`, `needs_attention`, `submission_unknown`.
+- **Job state is already rich.** Base `StudioJobStatus` has eight exactly validated values. Schema 2
+  adds `waiting_for_conditioning`, so `StudioJobStatusV2` has nine. `submission_unknown` is a
+  `StudioJobErrorCode`, not a job status.
 - **Extraction state already exists separately** — `StudioFrameExtraction` with
   `pending | extracting | ready | failed`. The handoff's request for a new `StudioJobStatus` value
   has been withdrawn; do not add one.
@@ -39,7 +41,7 @@ B is fully specified by v2, measured below.
   WAITING ON THE FRAME vs QUEUED split is a presentation of facts that already exist.
 - **The bar already has** trim handles, boundary handles, the seek rail, RTL and keyboard support.
 
-### What is missing — measured, 2026-08-23
+### Baseline before implementation — measured 2026-08-23
 
 - `CoverageBar.tsx` contains **zero** references to `displayState`, progress or percentage, and
   **zero** references to a frame asset or boundary chip.
@@ -48,8 +50,13 @@ selected_take` — all of which describe whether Takes _exist_. None describes a
 - The `beatPanel.coverage.*` locale block has labels for trim, boundary and seek only. There is no
   per-segment state copy at all.
 
-**So the state model exists one level too high.** The Beat knows it is part-done; the Shot segment
-that failed cannot say so. That is the gap, and it is the whole of half A.
+**So the state model existed one level too high.** The Beat knew it was part-done; the Shot segment
+that failed could not say so. That was the gap, and it was the whole of half A.
+
+That gap is now closed. `segmentState.ts` derives revision-matched current-wave state without
+overloading `WorkspaceShotDisplayState`; `workspaceProjection.ts` supplies exact job, cascade,
+boundary, dirty-state, and Take facts; and `CoverageBar.tsx` renders localized state copy plus
+verified boundary markers, including its malformed-geometry fallback.
 
 ### The vocabulary the storyboard draws
 
@@ -65,6 +72,20 @@ i18n, but the _set_ is the contract:
 | Cascade states | `UNTOUCHED`, `NEEDS A RE-RENDER`, `STALE · STILL PLAYS`         |
 | Part done      | `FAILED · NOT BILLED`, `NEVER DISPATCHED`, `SHOT 01 · KEPT`     |
 
+The implementation emits every label above that current authority can prove. Four remain
+intentionally unsupported:
+
+- `NEXT UP` — queued state exposes no exact global FIFO position.
+- `UNTOUCHED` — absence of a current job cannot distinguish an untouched cascade member from
+  ordinary no-Take state.
+- `SHOT xx · KEPT` — no exact current-wave cohort fact identifies a retained sibling.
+- `RENDERING · SHOWING THE STILL` — the current preview shows either a selected Take or a planning
+  slate, so segment derivation never claims a still is showing.
+
+`STATUS UNAVAILABLE` and `NEEDS ATTENTION` are additional fail-closed implementation states.
+`NEVER DISPATCHED` is emitted only when dependency/extraction facts or pristine durable cancellation
+fields prove that no provider dispatch occurred.
+
 Three rules the storyboard states as invariants:
 
 1. **`WAITING ON THE FRAME` is not `QUEUED`.** The Shot immediately behind a completed one is waiting
@@ -77,9 +98,11 @@ Three rules the storyboard states as invariants:
 ### The boundary marker
 
 Between two Shots sits a marker carrying the handed-forward frame, in three states — **empty**
-(no frame yet, chain waits), **on disk** (chain may advance), **gone** (continuity break). The
-underlying facts exist already: `frameExtractions` carries the status, and the chain refuses to
-advance until the file is verified. This is presentation of existing truth, not new bookkeeping.
+(no frame yet, chain waits), **on disk** (chain may advance), **gone** (continuity break). Main now
+projects only exact active adjacent boundaries through a renderer-safe, revision-bound DTO. An
+`on_disk` row carries a canonical conditioning-frame asset only after the media store verifies the
+bytes; missing, mismatched, failed, or stale continuity renders fail-closed without exposing raw
+extraction records. This is presentation of existing truth, not a second source of bookkeeping.
 
 ---
 
@@ -95,7 +118,9 @@ Measured directly from v2 rather than transcribed:
 | Inspector      | **`flex: 1`**                                                                                         |
 | Coverage bar   | `height: 88px`, radius 11, border `1px solid #E4D9C6`, background `#FBF7F0`                           |
 
-Current shell for comparison: `inline-size: min(852px, calc(100vw - 32px)); max-inline-size: 852px`.
+Previous shell for comparison: `inline-size: min(852px, calc(100vw - 32px)); max-inline-size: 852px`.
+The implemented shell is border-box, capped at 1100px, with the 404px preview and flexible inspector
+sharing the wide working row and stacking at 900px and below.
 
 **Do not hard-code 634.** The handoff reads "Inspector goes 400 → 634", which sounds authored. It is
 not: the only two occurrences of `634` in v2 are inside font URLs. The inspector is `flex: 1` and 634
@@ -116,13 +141,11 @@ equal Shots move medium → wide — but do not treat the table's cells as a spe
 ## Repo constraints that will bite on this specific task
 
 **Colour.** The design gives hex values. This repo forbids them: colours must use semantic tokens.
-`BeatPanel.module.css` currently uses **zero** raw hex and eleven distinct `var(--color-*)` /
-`var(--font-*)` tokens, so the precedent is set — map the drawn palette onto existing tokens, and only
-add a token when nothing fits. Four of the six main storyboard colours (`#FBF7F0`, `#E4D9C6`,
-`#2E7D5B`, `#FDFAF2`) have no token today, so this needs a deliberate mapping rather than a paste.
+`BeatPanel.module.css` uses semantic colour and typography tokens throughout and contains zero raw
+hex values. The drawn palette is mapped onto those tokens rather than pasted into the component.
 
-**i18n cannot be a final task.** A repo test requires every referenced key in all twelve locales, so
-each task ships its own translated keys. Half A adds a lot of copy — budget for it.
+**i18n cannot be a final task.** A repo test requires every referenced key in all twelve locales.
+Half A ships its state and boundary copy in all twelve.
 
 **Two leaf inventories, not one.** `tests/unit/pages/studio/studioI18n.test.ts` pins an exact list.
 New `beatPanel.*` keys must be added to `expectedLeaves`, and anything under `cut.preview` also to
@@ -132,12 +155,22 @@ New `beatPanel.*` keys must be added to `expectedLeaves`, and anything under `cu
 executable Studio files under an 80% per-file threshold. As of 2026-08-23 (BUG-108) that gate is
 green and wired into both `just push` and the CI PR gate, and it runs the whole suite as well as
 measuring coverage. **Any new runtime file must be added to the manifest, with tests that clear 80%
-lines and branches, or the push fails.** Half A adds at least one new module, so plan for it rather
-than discovering it at push time. The command is `bun run test:coverage:creative-studio`.
+lines and branches, or the push fails.** Half A added `segmentState.ts`; it is listed in the Creative
+Studio coverage manifest and remains subject to the per-file gate. The command is
+`bun run test:coverage:creative-studio`.
 
 **The usual:** Arco components only (no raw interactive HTML), `bunx oxfmt` on touched files, never
 `bun run lint:fix` (it rewrites unrelated files repo-wide), `just push` rather than `git push`, and no
 AI signatures in commits.
+
+## Implemented and verified — 2026-08-23
+
+Half A and Half B are complete. Coverage selection changes only the visible inspector; inactive Shot
+cards remain mounted and hidden. The wide Takes summary and three Shot controls share one aligned
+row, while compact layouts wrap without horizontal overflow. The full thresholded Creative Studio
+suite passed with 652 files and 9,450 tests, and the rendered-chain Electron lifecycle passed at
+1440×900, 1100×760, 760×900, and forced RTL. The lifecycle covers trimming, verified and stale
+boundary markers, rerendering, lift/restore, focus handoff, and the non-mutating selected inspector.
 
 ---
 

@@ -965,6 +965,33 @@
         "coverage": {
           "trimGuidance": "邊緣 · 修剪 · 免費",
           "boundaryGuidance": "邊界 · 需要重新渲染",
+          "segmentState": {
+            "noTake": "暫無鏡次",
+            "queued": "已加入佇列",
+            "nextUp": "下一個",
+            "waitingOnShot": "等待鏡頭 {{position}}",
+            "waitingOnFrame": "等待連續性幀",
+            "rendering": "正在算繪",
+            "renderingProgress": "正在算繪 · {{progress}}%",
+            "renderingStill": "正在算繪 · 正在顯示靜幀",
+            "rendered": "已算繪",
+            "renderedOneTake": "已算繪 · 1 個鏡次",
+            "selectedTake": "{{count}} 個鏡次 · 剪輯中使用 T{{take}}",
+            "untouched": "未變更",
+            "needsRerender": "需要重新算繪",
+            "staleStillPlays": "已過時 · 仍可播放",
+            "failedNotBilled": "失敗 · 未計費",
+            "neverDispatched": "從未提交",
+            "shotKept": "鏡頭 {{position}} · 已保留",
+            "statusPending": "狀態無法使用",
+            "needsAttention": "需要處理"
+          },
+          "boundaryFrame": {
+            "empty": "鏡頭 {{position}} 後的邊界 · 等待連續性幀",
+            "ready": "鏡頭 {{position}} 後的邊界 · 連續性幀已就緒",
+            "gone": "鏡頭 {{position}} 後的邊界 · 連續性幀遺失",
+            "stale": "鏡頭 {{position}} 後的邊界 · 連續性幀已過時"
+          },
           "seekGuidance": "軌道 · 定位 · 免費",
           "seekLane": "節拍定位軌",
           "seekValue": "{{current}} / {{total}}"

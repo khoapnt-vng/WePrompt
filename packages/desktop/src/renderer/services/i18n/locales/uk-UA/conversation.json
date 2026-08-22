@@ -971,6 +971,33 @@
         "coverage": {
           "trimGuidance": "Край · Обрізання · Безкоштовно",
           "boundaryGuidance": "Межа · Потребує повторного рендерингу",
+          "segmentState": {
+            "noTake": "Немає дубля",
+            "queued": "У черзі",
+            "nextUp": "Наступний",
+            "waitingOnShot": "Очікування шоту {{position}}",
+            "waitingOnFrame": "Очікування кадру для продовження",
+            "rendering": "Рендеринг",
+            "renderingProgress": "Рендеринг · {{progress}} %",
+            "renderingStill": "Рендеринг · Показ стоп-кадру",
+            "rendered": "Готово",
+            "renderedOneTake": "Готово · 1 дубль",
+            "selectedTake": "{{count}} дубля · T{{take}} у монтажі",
+            "untouched": "Без змін",
+            "needsRerender": "Потрібен повторний рендеринг",
+            "staleStillPlays": "Застаріло · Усе ще відтворюється",
+            "failedNotBilled": "Помилка · Без списання",
+            "neverDispatched": "Не відправлено",
+            "shotKept": "Шот {{position}} · Збережено",
+            "statusPending": "Статус недоступний",
+            "needsAttention": "Потребує уваги"
+          },
+          "boundaryFrame": {
+            "empty": "Межа після шоту {{position}} · Очікування кадру для продовження",
+            "ready": "Межа після шоту {{position}} · Кадр для продовження готовий",
+            "gone": "Межа після шоту {{position}} · Кадр для продовження відсутній",
+            "stale": "Межа після шоту {{position}} · Кадр для продовження застарів"
+          },
           "seekGuidance": "Шкала · Перемотування · Безкоштовно",
           "seekLane": "Шкала перемотування біта",
           "seekValue": "{{current}} з {{total}}"
