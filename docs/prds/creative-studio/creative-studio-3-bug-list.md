@@ -321,6 +321,16 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - The app already had everything needed to say this: `providerUnavailable`, `submissionUnknown`, a retry flow and a duplicate-charge dialog, all translated. Only the projection was hiding it.
   - **Still open, and worth its own entry: the generation subsystem logs nothing.** No dispatch, poll, failure or timeout line exists anywhere. The only way to learn that three paid jobs had failed was to read `project.json` off disk.
 
+- [ ] **[BUG-101][P1][Creative Studio] The generation subsystem cannot be observed: zero log statements in the whole path** — found 2026-08-22, verified directly
+  - `grep -cE 'console\.(log|warn|error|info|debug)'` returns **0** for both `jobManager.ts` and `v2Service.ts`. Between them these own dispatch, polling, provider calls, failure handling and every paid operation in Studio.
+  - The consequence is not theoretical. Three paid jobs failed with `provider_unavailable` and `submission_unknown`, and the only way to discover that was reading `project.json` off disk. Nothing in the log, the console, or the UI said a provider had rejected anything.
+  - A subsystem that spends money needs, at minimum: a dispatch line carrying the job id and provider job id, a line when a poll observes a terminal state, and a line for every error already modelled in `jobs.errors.*`. Those message keys exist and are translated into twelve locales; nothing writes them anywhere durable.
+
+- [ ] **[BUG-102][P2][Creative Studio] Nothing retries a job that misses its dispatch: there is no run loop** — found 2026-08-22 by a parallel review, then verified directly
+  - `jobManager.ts` contains no scheduler. Its only timer is `defaultSleep` at line 191, a backoff helper inside a poll, not a tick. `dispatchAuthorizedJobsV2` has exactly three call sites, all in `v2Service.ts` (1769, 2506, 2562), and every one is externally triggered.
+  - So a job leaves `queued_local` only if something calls dispatch while it is there. A job that misses that call has nothing in the system that will ever pick it up again — it simply waits, and until BUG-100 was fixed it waited while displaying as `Rendering`.
+  - **Reported by review, not yet reproduced:** dispatch preparation is described as all-or-nothing, so one job failing preparation aborts the whole wave and leaves its siblings in `queued_local` unmarked; and the video path runs a media-resolution step the seed-still path never runs, whose failure is not a `StudioJobManagerError` and so marks no job before aborting. Both would explain a partly-dispatched wave — two of my three jobs had no `providerJobId` at all — and both need reproducing before anyone acts on them.
+
 ## Correctness and honesty of failures
 
 - [x] **[BUG-062][P2][Creative Studio] Three distinct Director failures all report "could not read or save this workspace"** — found 2026-08-21 while diagnosing BUG-061
