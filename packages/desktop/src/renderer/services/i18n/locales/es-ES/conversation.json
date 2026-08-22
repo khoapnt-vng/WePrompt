@@ -1450,8 +1450,8 @@
       "retryConfirmationConfirm": "Confirmar y reintentar",
       "retryDownload": "Reintentar descarga",
       "retryChargeTitle": "¿Reintentar con un posible cargo duplicado?",
-      "retryChargeBody": "Se desconoce el resultado del envío anterior. Si lo reintentas, el proveedor podría aplicar otro cargo.",
-      "retryChargeConfirm": "Aceptar y reintentar",
+      "retryChargeBody": "Se desconoce el resultado del envío anterior. Un reemplazo podría generar otro cargo del proveedor. Continuar solo habilita una nueva estimación; todavía no envía trabajo.",
+      "retryChargeConfirm": "Aceptar y revisar la estimación",
       "status": {
         "queuedLocal": "Esperando para enviar",
         "submitting": "Enviando",

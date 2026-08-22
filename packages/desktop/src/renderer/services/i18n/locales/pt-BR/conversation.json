@@ -1455,8 +1455,8 @@
       "retryConfirmationConfirm": "Confirmar e tentar novamente",
       "retryDownload": "Tentar baixar novamente",
       "retryChargeTitle": "Tentar novamente com possível cobrança duplicada?",
-      "retryChargeBody": "O resultado do envio anterior é desconhecido. Tentar novamente pode gerar outra cobrança do provedor.",
-      "retryChargeConfirm": "Reconhecer e tentar novamente",
+      "retryChargeBody": "O resultado do envio anterior é desconhecido. Uma substituição pode gerar outra cobrança do provedor. Continuar apenas libera uma nova estimativa; nenhum trabalho é enviado ainda.",
+      "retryChargeConfirm": "Reconhecer e revisar a estimativa",
       "status": {
         "queuedLocal": "Aguardando envio",
         "submitting": "Enviando",

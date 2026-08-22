@@ -829,6 +829,14 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.list-reference-generation-handoffs': studioV2ProjectRequestSchema,
   'creative-studio.prepare-submission': studioV2PrepareSubmissionSchema,
   'creative-studio.confirm-submission': z.object({ ...studioV2MutationRequestShape, quoteId: safeIdSchema }).strict(),
+  'creative-studio.cancel-job': z.object({ ...studioV2MutationRequestShape, jobId: safeIdSchema }).strict(),
+  'creative-studio.retry-job': z
+    .object({
+      ...studioV2MutationRequestShape,
+      jobId: safeIdSchema,
+      acknowledgePossibleDuplicateCharge: z.boolean().optional(),
+    })
+    .strict(),
   'creative-studio.dismiss-reference-generation-handoff': z
     .object({ ...studioV2MutationRequestShape, handoffId: safeIdSchema })
     .strict(),

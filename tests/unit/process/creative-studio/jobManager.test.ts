@@ -29,6 +29,7 @@ import {
 } from '@process/services/creative-studio/adapters';
 import {
   canCancelJobV2,
+  canRetryJobV2,
   createStudioJobManager,
   type StudioJobManagerV2,
   type StudioJobManagerDeps,
@@ -486,6 +487,64 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
             jobId: job.id,
             generationIndex: job.generationIndex,
           }),
+        })
+      )
+    ).toBe(false);
+  });
+
+  it('projects retry authority only for same-remote recovery or an acknowledged unknown submission', async () => {
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1'));
+    const job = harness.jobs[0]!;
+    const candidate = (overrides: Partial<StudioJobV2>): StudioJobV2 => ({ ...structuredClone(job), ...overrides });
+
+    expect(
+      canRetryJobV2(
+        candidate({
+          status: 'needs_attention',
+          providerJobId: 'remote_1',
+          error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+        })
+      )
+    ).toBe(true);
+    expect(
+      canRetryJobV2(
+        candidate({
+          status: 'needs_attention',
+          providerJobId: null,
+          error: { code: 'submission_unknown', messageKey: 'submissionUnknown' },
+        })
+      )
+    ).toBe(true);
+    expect(
+      canRetryJobV2(
+        candidate({
+          status: 'needs_attention',
+          providerJobId: 'remote_1',
+          error: { code: 'poll_deadline', messageKey: 'pollDeadline' },
+        })
+      )
+    ).toBe(false);
+    expect(
+      canRetryJobV2(
+        candidate({
+          status: 'needs_attention',
+          providerJobId: 'remote_1',
+          error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+          spendReceipt: createStudioSpendReceiptV2({
+            authorization: harness.authorization,
+            itemId: harness.item.id,
+            jobId: job.id,
+            generationIndex: job.generationIndex,
+          }),
+        })
+      )
+    ).toBe(false);
+    expect(
+      canRetryJobV2(
+        candidate({
+          status: 'failed',
+          providerJobId: 'remote_1',
+          error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
         })
       )
     ).toBe(false);
@@ -2258,7 +2317,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it('refuses every V2 retry state that would mint work, cross a parked Beat, or race a sibling', async () => {
+  it('refuses every V2 retry state that would mint work or cross a parked Beat', async () => {
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1'));
     await expect(
       harness.manager.retryJobV2({
@@ -2303,7 +2362,47 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     });
     await expect(
       siblings.manager.retryJobV2({ projectId: busy.id, jobId: 'job_v2_1', expectedRevision: busy.revision })
-    ).rejects.toMatchObject({ code: 'busy' });
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+  });
+
+  it('resumes independent same-provider attempts for generation siblings without a false busy lock', async () => {
+    const poll = vi.fn(
+      async (): Promise<ProviderJobSnapshot> => ({
+        status: 'failed',
+        error: { code: 'provider_unavailable' },
+      })
+    );
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { poll }), {
+      generationCount: 2,
+      nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+    });
+    const attention = await harness.store.updateProjectV2(harness.project.id, (project) => {
+      for (const [index, jobId] of ['job_v2_1', 'job_v2_2'].entries()) {
+        const job = project.jobs[jobId]!;
+        job.status = 'needs_attention';
+        job.providerJobId = `remote_${index + 1}`;
+        job.remoteStartedAt = '2026-08-17T12:00:02.000Z';
+        job.error = { code: 'provider_unavailable', messageKey: 'providerUnavailable' };
+      }
+      return project;
+    });
+
+    await expect(
+      harness.manager.retryJobV2({
+        projectId: attention.id,
+        jobId: 'job_v2_1',
+        expectedRevision: attention.revision,
+      })
+    ).resolves.toMatchObject({ id: 'job_v2_1', status: 'queued_remote' });
+    const afterFirst = await harness.store.getProjectV2(attention.id);
+    if (afterFirst.status !== 'supported') throw new Error('missing sibling retry fixture project');
+    await expect(
+      harness.manager.retryJobV2({
+        projectId: afterFirst.project.id,
+        jobId: 'job_v2_2',
+        expectedRevision: afterFirst.project.revision,
+      })
+    ).resolves.toMatchObject({ id: 'job_v2_2', status: 'queued_remote' });
   });
 
   it('bounds V2 download retry across absent remotes, adapters, siblings, and terminal provider results', async () => {

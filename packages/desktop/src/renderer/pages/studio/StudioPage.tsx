@@ -21,6 +21,7 @@ import {
   type StudioCommandResult,
   type StudioRendererAuthoringOperationV2,
   type StudioRendererExportCatalogV2,
+  type StudioRendererJobV2,
   type StudioRendererProjectCommitResultV2,
   type StudioRendererProjectV2,
   type StudioRendererReferenceGenerationHandoffV2,
@@ -390,6 +391,75 @@ const StudioProjectPage: React.FC<{
       );
     },
     [runWorkspaceCommitAtRevision]
+  );
+
+  const runJobRecovery = useCallback(
+    async (
+      jobId: string,
+      isAuthorized: (job: StudioRendererJobV2) => boolean,
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererJobV2>>
+    ): Promise<boolean> => {
+      const current = projectRef.current;
+      if (current === null || workspacePendingRef.current || !Object.hasOwn(current.jobs, jobId)) return false;
+      const job = current.jobs[jobId];
+      const shot =
+        job === undefined || !Object.hasOwn(current.shots, job.shotId) ? undefined : current.shots[job.shotId];
+      if (
+        job === undefined ||
+        shot === undefined ||
+        job.id !== jobId ||
+        job.projectId !== current.id ||
+        job.shotId !== shot.id ||
+        !shot.jobIds.includes(job.id) ||
+        job.status !== 'needs_attention' ||
+        !isAuthorized(job)
+      ) {
+        return false;
+      }
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
+      try {
+        const result = await invoke(current);
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          return false;
+        }
+        if (result.data.id !== job.id || result.data.projectId !== current.id || result.data.shotId !== shot.id) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        const refreshed = await refetchProject();
+        if (refreshed === null || refreshed.id !== current.id || refreshed.revision <= current.revision) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        const refreshedJob = Object.hasOwn(refreshed.jobs, job.id) ? refreshed.jobs[job.id] : undefined;
+        if (
+          refreshedJob === undefined ||
+          refreshedJob.id !== result.data.id ||
+          refreshedJob.projectId !== current.id ||
+          refreshedJob.shotId !== shot.id
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        projectRef.current = refreshed;
+        await refetchWorkspace();
+        if (projectRef.current?.id !== refreshed.id || projectRef.current.revision !== refreshed.revision) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        return true;
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        return false;
+      } finally {
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
+      }
+    },
+    [refetchProject, refetchWorkspace, setActionErrorMessageKey]
   );
 
   /**
@@ -893,6 +963,29 @@ const StudioProjectPage: React.FC<{
         setActionErrorMessageKey(null);
         spendGate.open(draft);
       },
+      retryGenerationJob: async (jobId, acknowledgePossibleDuplicateCharge) =>
+        runJobRecovery(
+          jobId,
+          (job) => job.canRetry && acknowledgePossibleDuplicateCharge === (job.error?.code === 'submission_unknown'),
+          (current) =>
+            ipcBridge.creativeStudio.retryJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+              acknowledgePossibleDuplicateCharge,
+            })
+        ),
+      cancelGenerationJob: async (jobId) =>
+        runJobRecovery(
+          jobId,
+          (job) => job.canCancel,
+          (current) =>
+            ipcBridge.creativeStudio.cancelJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+            })
+        ),
       chooseCascadeAsset: mutations.chooseCascadeAsset,
       retryConditioning: mutations.retryConditioning,
       cancelWaiting: mutations.cancelWaiting,
@@ -908,6 +1001,7 @@ const StudioProjectPage: React.FC<{
       refetchProject,
       refetchWorkspace,
       routeCatalog,
+      runJobRecovery,
       runWorkspaceCommit,
       setActionErrorMessageKey,
       spendGate.open,

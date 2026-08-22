@@ -52,6 +52,7 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
     outputAssetIdsByRole: { primary: null, poster: null },
     error: null,
     canCancel: false,
+    canRetry: false,
     canRetryDownload: false,
     retryOfJobId: null,
     retryReason: null,
@@ -840,6 +841,61 @@ describe('projectWorkspace', () => {
     const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
     expect(shot.videoGenerationBlocked).toBe(true);
     expect(shot.videoGenerationInFlight).toBe(false);
+  });
+
+  it('projects only exact owned attention-job recovery capabilities without provider authority', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.jobIds.push('job_retry', 'job_cancel');
+    project.jobs.job_retry = makeJob('job_retry', 'shot_1', {
+      status: 'needs_attention',
+      purpose: 'video_take',
+      generationIndex: 1,
+      error: {
+        code: 'submission_unknown',
+        messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
+      },
+      canRetry: true,
+    });
+    project.jobs.job_cancel = makeJob('job_cancel', 'shot_1', {
+      status: 'needs_attention',
+      purpose: 'seed_still',
+      generationIndex: 0,
+      error: {
+        code: 'provider_unavailable',
+        messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+      },
+      canCancel: true,
+      canRetry: true,
+    });
+    project.jobs.forged = makeJob('forged', 'shot_1', { status: 'needs_attention', canRetry: true });
+
+    const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.attentionJobs).toEqual([
+      {
+        id: 'job_retry',
+        purpose: 'video_take',
+        generationIndex: 1,
+        error: {
+          code: 'submission_unknown',
+          messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
+        },
+        canCancel: false,
+        canRetry: true,
+      },
+      {
+        id: 'job_cancel',
+        purpose: 'seed_still',
+        generationIndex: 0,
+        error: {
+          code: 'provider_unavailable',
+          messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+        },
+        canCancel: true,
+        canRetry: true,
+      },
+    ]);
+    expect(JSON.stringify(shot.attentionJobs)).not.toContain('providerJobId');
   });
 
   it('projects owned generation activity as rendering ahead of stale and seed-pending states', () => {

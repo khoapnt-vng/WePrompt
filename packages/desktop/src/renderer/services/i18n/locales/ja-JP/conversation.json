@@ -1413,8 +1413,8 @@
       "retryConfirmationConfirm": "確認して再試行",
       "retryDownload": "ダウンロードを再試行",
       "retryChargeTitle": "重複料金の可能性を承知して再試行しますか？",
-      "retryChargeBody": "前回の送信結果は不明です。再試行するとプロバイダー料金が再度発生する場合があります。",
-      "retryChargeConfirm": "了承して再試行",
+      "retryChargeBody": "前回の送信結果は不明です。代替生成ではプロバイダー料金が再度発生する場合があります。続行しても新しい見積もりが有効になるだけで、まだ処理は送信されません。",
+      "retryChargeConfirm": "了承して見積もりを確認",
       "status": {
         "queuedLocal": "送信待ち",
         "submitting": "送信中",

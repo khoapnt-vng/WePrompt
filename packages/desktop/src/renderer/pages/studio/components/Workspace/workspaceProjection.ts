@@ -14,6 +14,7 @@ import type {
   StudioRendererChainConditioningFailureV2,
   StudioRendererChainStatusV2,
   StudioRendererDirtyShotV2,
+  StudioRendererJobV2,
   StudioRendererParkEligibilityV2,
   StudioRendererProjectV2,
   StudioRendererUndoTopV2,
@@ -53,6 +54,11 @@ export type WorkspaceTakeProjection = {
   posterAssetId: string | null;
 };
 
+export type WorkspaceAttentionJobProjection = Pick<
+  StudioRendererJobV2,
+  'id' | 'purpose' | 'generationIndex' | 'error' | 'canCancel' | 'canRetry'
+>;
+
 export type WorkspaceShotProjection = {
   id: string;
   line: string;
@@ -85,6 +91,7 @@ export type WorkspaceShotProjection = {
   /** True while a job blocks a fresh submission, including one that failed and needs the user. */
   videoGenerationBlocked: boolean;
   seedGenerationBlocked: boolean;
+  attentionJobs: WorkspaceAttentionJobProjection[];
   hasEffectiveSeed: boolean;
 };
 
@@ -459,6 +466,28 @@ const hasOwnedGenerationWithStatus = (
   });
 };
 
+const ownedAttentionJobs = (project: StudioRendererProjectV2, shot: StudioShot): WorkspaceAttentionJobProjection[] =>
+  shot.jobIds.flatMap((jobId) => {
+    const job = ownValue(project.jobs, jobId);
+    return job?.id === jobId &&
+      job.projectId === project.id &&
+      job.shotId === shot.id &&
+      job.status === 'needs_attention' &&
+      job.error !== null &&
+      (job.canRetry || job.canCancel)
+      ? [
+          {
+            id: job.id,
+            purpose: job.purpose,
+            generationIndex: job.generationIndex,
+            error: { ...job.error },
+            canCancel: job.canCancel,
+            canRetry: job.canRetry,
+          },
+        ]
+      : [];
+  });
+
 const projectShot = (
   project: StudioRendererProjectV2,
   shot: StudioShot,
@@ -527,6 +556,7 @@ const projectShot = (
     seedGenerationInFlight: hasOwnedGenerationWithStatus(project, shot, 'seed_still', GENERATION_IN_FLIGHT_STATUSES),
     videoGenerationBlocked: hasOwnedGenerationWithStatus(project, shot, 'video_take', GENERATION_BLOCKING_STATUSES),
     seedGenerationBlocked: hasOwnedGenerationWithStatus(project, shot, 'seed_still', GENERATION_BLOCKING_STATUSES),
+    attentionJobs: ownedAttentionJobs(project, shot),
     hasEffectiveSeed: effectiveSeedAssetId !== null,
   };
 };

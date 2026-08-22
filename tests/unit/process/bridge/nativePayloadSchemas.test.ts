@@ -267,6 +267,17 @@ const VALID_PAYLOADS = {
     quoteId: 'quote_1',
     expectedRevision: 1,
   },
+  'creative-studio.cancel-job': {
+    projectId: 'project_1',
+    jobId: 'job_1',
+    expectedRevision: 1,
+  },
+  'creative-studio.retry-job': {
+    projectId: 'project_1',
+    jobId: 'job_1',
+    expectedRevision: 1,
+    acknowledgePossibleDuplicateCharge: false,
+  },
   'creative-studio.dismiss-reference-generation-handoff': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -1680,6 +1691,8 @@ describe('native bridge payload schemas', () => {
       'creative-studio.list-reference-generation-handoffs',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
+      'creative-studio.cancel-job',
+      'creative-studio.retry-job',
       'creative-studio.dismiss-reference-generation-handoff',
     ] as const;
     const absent = [
@@ -1700,8 +1713,6 @@ describe('native bridge payload schemas', () => {
       'creative-studio.cancel-render',
       'creative-studio.fit-storyboard',
       'creative-studio.submit-scenes',
-      'creative-studio.cancel-job',
-      'creative-studio.retry-job',
       'creative-studio.retry-download',
     ] as const;
     const providerKeys = collectBridgeBuildProviderKeys(readFileSync(IPC_BRIDGE_PATH, 'utf8'));
@@ -1711,6 +1722,8 @@ describe('native bridge payload schemas', () => {
       'creative-studio.bind-director-conversation',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
+      'creative-studio.cancel-job',
+      'creative-studio.retry-job',
       'creative-studio.dismiss-reference-generation-handoff',
       'creative-studio.import-bed-audio',
       'creative-studio.detach-bed-audio',
@@ -1732,9 +1745,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(51);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(51);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(51);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);

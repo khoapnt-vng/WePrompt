@@ -2917,6 +2917,7 @@ describe('CreativeStudioServiceV2', () => {
         shotId: 'clip_1',
         purpose: 'seed_still',
         progress: 0.5,
+        canRetry: false,
         canRetryDownload: true,
         error: { code: 'download_failed' },
       });
@@ -2924,6 +2925,44 @@ describe('CreativeStudioServiceV2', () => {
       expect(job).not.toHaveProperty('idempotencyKey');
     }
     expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
+  it('projects independent same-attempt retry capability across generation siblings', async () => {
+    const single = makeSchema2ServiceProject();
+    const retryable = makeSchema2Job(single, {
+      status: 'needs_attention',
+      providerJobId: 'remote_job_1',
+      error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+    });
+    single.jobs[retryable.id] = retryable;
+    single.shots.clip_1!.jobIds.push(retryable.id);
+    const singleHarness = makeHarness(single);
+
+    const singleResult = await singleHarness.service.getProject({ projectId: single.id });
+    expect(singleResult.status === 'supported' ? singleResult.project.jobs[retryable.id]?.canRetry : null).toBe(true);
+
+    const competing = makeSchema2ServiceProject();
+    const first = makeSchema2Job(competing, {
+      status: 'needs_attention',
+      providerJobId: 'remote_job_1',
+      error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+    });
+    const sibling = makeSchema2Job(competing, {
+      id: 'job_2',
+      status: 'needs_attention',
+      providerJobId: 'remote_job_2',
+      error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+    });
+    competing.jobs[first.id] = first;
+    competing.jobs[sibling.id] = sibling;
+    competing.shots.clip_1!.jobIds.push(first.id, sibling.id);
+    const competingHarness = makeHarness(competing);
+
+    const competingResult = await competingHarness.service.getProject({ projectId: competing.id });
+    expect(competingResult.status === 'supported' ? competingResult.project.jobs[first.id]?.canRetry : null).toBe(true);
+    expect(competingResult.status === 'supported' ? competingResult.project.jobs[sibling.id]?.canRetry : null).toBe(
+      true
+    );
   });
 
   it('rejects an invalid duplicate-charge acknowledgement before retry manager work', async () => {

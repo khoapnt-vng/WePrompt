@@ -425,6 +425,14 @@ export const canCancelJobV2 = (job: StudioJobV2): boolean => {
   return false;
 };
 
+/** Whether the bounded retry seam can make progress without minting new paid work. */
+export const canRetryJobV2 = (job: StudioJobV2): boolean =>
+  job.status === 'needs_attention' &&
+  job.spendReceipt === null &&
+  job.error?.code !== 'download_failed' &&
+  job.error?.code !== 'poll_deadline' &&
+  (job.providerJobId !== null || job.error?.code === 'submission_unknown');
+
 /** Creates one runtime-owned durable scheduler for all schema-2 Studio projects. */
 export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobManagerV2 => {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -1438,17 +1446,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       const job = ownValueV2(project.jobs, jobId);
       return job?.projectId === project.id && job.shotId === shot.id ? [job] : [];
     });
-    if (
-      shotJobs.some((job) => job.retryOfJobId === previous.id) ||
-      shotJobs.some((job) => job.id !== previous.id && !TERMINAL_STATUSES.has(job.status))
-    ) {
+    if (shotJobs.some((job) => job.retryOfJobId === previous.id)) {
       throw new StudioJobManagerError('busy');
     }
-    if (
-      (previous.status !== 'failed' && previous.status !== 'needs_attention') ||
-      previous.error?.code === 'download_failed' ||
-      previous.error?.code === 'poll_deadline'
-    ) {
+    if (!canRetryJobV2(previous)) {
       throw new StudioJobManagerError('invalid_request');
     }
     if (

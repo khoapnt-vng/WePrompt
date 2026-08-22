@@ -1021,6 +1021,8 @@ export type StudioRendererJobV2 = Omit<
 > & {
   provider: StudioRendererMediaModelRef;
   canCancel: boolean;
+  /** True only when retry reuses an existing provider attempt or acknowledges an unknown submission. */
+  canRetry: boolean;
   canRetryDownload: boolean;
   spendReceipt: StudioRendererSpendReceiptV2 | null;
 };

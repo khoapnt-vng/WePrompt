@@ -1413,8 +1413,8 @@
       "retryConfirmationConfirm": "확인 후 다시 시도",
       "retryDownload": "다운로드 다시 시도",
       "retryChargeTitle": "중복 요금 가능성을 감수하고 다시 시도할까요?",
-      "retryChargeBody": "이전 제출 결과를 알 수 없습니다. 다시 시도하면 제공업체 요금이 한 번 더 발생할 수 있습니다.",
-      "retryChargeConfirm": "확인 후 다시 시도",
+      "retryChargeBody": "이전 제출 결과를 알 수 없습니다. 대체 생성에는 제공업체 요금이 다시 발생할 수 있습니다. 계속하면 새 견적만 활성화되며 아직 작업은 제출되지 않습니다.",
+      "retryChargeConfirm": "확인하고 견적 검토",
       "status": {
         "queuedLocal": "제출 대기 중",
         "submitting": "제출 중",

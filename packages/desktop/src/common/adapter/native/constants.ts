@@ -87,6 +87,8 @@ export const NATIVE_BRIDGE_PROVIDER_KEYS = [
   'creative-studio.list-reference-generation-handoffs',
   'creative-studio.prepare-submission',
   'creative-studio.confirm-submission',
+  'creative-studio.cancel-job',
+  'creative-studio.retry-job',
   'creative-studio.dismiss-reference-generation-handoff',
   'creative-studio.apply-authoring-batch',
   'creative-studio.undo-last',

@@ -81,7 +81,12 @@ import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { isImagesApiModel } from '@/common/utils/imageModelAllowlist';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
-import { canCancelJobV2, type StudioDispatchAuthorizedJobsRequestV2, type StudioJobManagerV2 } from '../jobManager';
+import {
+  canCancelJobV2,
+  canRetryJobV2,
+  type StudioDispatchAuthorizedJobsRequestV2,
+  type StudioJobManagerV2,
+} from '../jobManager';
 import type { StudioMediaStore } from '../mediaStore';
 import type { GenerationProviderAdapterRegistry } from '../adapters';
 import { ProviderDeadlineError, runWithProviderDeadline } from '../adapters/types';
@@ -1086,7 +1091,20 @@ const toRendererSpendReceipt = (job: StudioJobV2): StudioRendererJobV2['spendRec
   };
 };
 
-const toRendererJob = (job: StudioJobV2): StudioRendererJobV2 => ({
+const canRetryRendererJob = (project: StudioProjectV2 | undefined, job: StudioJobV2): boolean => {
+  if (project === undefined || !canRetryJobV2(job)) return false;
+  const shot = ownValue(project.shots, job.shotId);
+  if (job.projectId !== project.id || shot === undefined || shot.id !== job.shotId || !shot.jobIds.includes(job.id)) {
+    return false;
+  }
+  const shotJobs = shot.jobIds.flatMap((jobId) => {
+    const candidate = ownValue(project.jobs, jobId);
+    return candidate?.projectId === project.id && candidate.shotId === shot.id ? [candidate] : [];
+  });
+  return !shotJobs.some((candidate) => candidate.retryOfJobId === job.id);
+};
+
+const toRendererJob = (job: StudioJobV2, project?: StudioProjectV2): StudioRendererJobV2 => ({
   id: job.id,
   projectId: job.projectId,
   shotId: job.shotId,
@@ -1098,6 +1116,7 @@ const toRendererJob = (job: StudioJobV2): StudioRendererJobV2 => ({
   outputAssetIdsByRole: { ...job.outputAssetIdsByRole },
   error: job.error === null ? null : { ...job.error },
   canCancel: canCancelJobV2(job),
+  canRetry: canRetryRendererJob(project, job),
   canRetryDownload: job.status === 'failed' && job.error?.code === 'download_failed' && job.providerJobId !== null,
   ...(job.progress === undefined ? {} : { progress: job.progress }),
   retryOfJobId: job.retryOfJobId,
@@ -1119,7 +1138,7 @@ const toRendererProject = (project: StudioProjectV2): StudioRendererProjectV2 =>
   } = structuredClone(project);
   return {
     ...safe,
-    jobs: Object.fromEntries(Object.entries(project.jobs).map(([jobId, job]) => [jobId, toRendererJob(job)])),
+    jobs: Object.fromEntries(Object.entries(project.jobs).map(([jobId, job]) => [jobId, toRendererJob(job, project)])),
   };
 };
 

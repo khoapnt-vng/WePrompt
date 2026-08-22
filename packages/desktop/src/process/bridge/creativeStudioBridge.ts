@@ -28,6 +28,7 @@ import {
   type StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
+import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
 import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import { StudioPricingErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/estimate';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
@@ -64,6 +65,9 @@ type NonPricingStudioCommandErrorCode = Exclude<StudioCommandErrorCode, 'pricing
 const storeErrorCode = (error: CreativeStudioStoreError): NonPricingStudioCommandErrorCode =>
   error.code === 'unsupported_prototype_schema' ? 'storage_error' : error.code;
 
+const jobManagerErrorCode = (error: StudioJobManagerError): NonPricingStudioCommandErrorCode =>
+  error.code === 'invalid_request' ? 'invalid_payload' : error.code;
+
 const toCommandError = (error: unknown): StudioCommandResult<never> => {
   if (error instanceof StudioPricingErrorV2 && isStudioPricingRefusalReasonV2(error.code)) {
     return {
@@ -78,21 +82,23 @@ const toCommandError = (error: unknown): StudioCommandResult<never> => {
   const code: NonPricingStudioCommandErrorCode =
     error instanceof CreativeStudioStoreError
       ? storeErrorCode(error)
-      : error instanceof CreativeStudioServiceError
-        ? error.code
-        : error instanceof StudioPreparedSubmissionCacheErrorV2
+      : error instanceof StudioJobManagerError
+        ? jobManagerErrorCode(error)
+        : error instanceof CreativeStudioServiceError
           ? error.code
-          : error instanceof CreativeStudioMediaError
-            ? error.code === 'not_found'
-              ? 'not_found'
-              : error.code === 'stale_project'
-                ? 'stale_project'
-                : error.code === 'invalid_media'
-                  ? 'invalid_payload'
-                  : error.code === 'media_in_use'
-                    ? 'media_in_use'
-                    : 'storage_error'
-            : 'storage_error';
+          : error instanceof StudioPreparedSubmissionCacheErrorV2
+            ? error.code
+            : error instanceof CreativeStudioMediaError
+              ? error.code === 'not_found'
+                ? 'not_found'
+                : error.code === 'stale_project'
+                  ? 'stale_project'
+                  : error.code === 'invalid_media'
+                    ? 'invalid_payload'
+                    : error.code === 'media_in_use'
+                      ? 'media_in_use'
+                      : 'storage_error'
+              : 'storage_error';
   return { ok: false, error: { code, messageKey: errorMessageKeys[code] } };
 };
 
@@ -723,6 +729,8 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.confirmSubmission.provider((input) =>
     runCommand(() => dependencies.getService().confirmSubmission(input))
   );
+  ipcBridge.creativeStudio.cancelJob.provider((input) => runCommand(() => dependencies.getService().cancelJob(input)));
+  ipcBridge.creativeStudio.retryJob.provider((input) => runCommand(() => dependencies.getService().retryJob(input)));
   ipcBridge.creativeStudio.dismissReferenceGenerationHandoff.provider((input) =>
     runCommand(() => dependencies.getService().dismissReferenceGenerationHandoff(input))
   );

@@ -31,6 +31,7 @@ import { CoverageBar } from './CoverageBar';
 import { COVERAGE_MIN_PLAYED_SECONDS, type CoveragePlanningPairChange } from './coverageGeometry';
 
 const KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel';
+const JOB_KEY_ROOT = 'conversation.creativeStudio.jobs';
 
 export type BeatPanelImportResult = 'cancelled' | 'imported' | 'failed';
 
@@ -80,6 +81,8 @@ export type BeatPanelActions = {
   parkShot: (shotId: string, onCommitted?: () => void) => Promise<boolean>;
   parkBeat: (beatId: string) => Promise<boolean>;
   reviewShot: (triggerShotId: string, choices: readonly [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]) => void;
+  retryGenerationJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
+  cancelGenerationJob: (jobId: string) => Promise<boolean>;
   chooseCascadeAsset: (row: StudioCascadeProgressV2, assetId: string) => Promise<boolean>;
   retryConditioning: (dependentShotId: string) => Promise<boolean>;
   cancelWaiting: (dependentShotId: string) => Promise<boolean>;
@@ -213,6 +216,11 @@ const exactShotPosition = (projection: WorkspaceProjection, shotId: string): Sho
   const matches = projection.activeBeats.flatMap((beat, beatIndex) =>
     beat.shots.flatMap((shot, shotIndex) => (shot.id === shotId ? [{ beatIndex, shotIndex }] : []))
   );
+  return matches.length === 1 ? matches[0]! : null;
+};
+
+const exactShotProjection = (projection: WorkspaceProjection, shotId: string): WorkspaceShotProjection | null => {
+  const matches = projection.activeBeats.flatMap((beat) => beat.shots.filter((shot) => shot.id === shotId));
   return matches.length === 1 ? matches[0]! : null;
 };
 
@@ -557,9 +565,11 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [lifting, setLifting] = useState(false);
+  const [recoveringJobId, setRecoveringJobId] = useState<string | null>(null);
   const [restoreLiftFocus, setRestoreLiftFocus] = useState(false);
   const hardCutUnavailableId = useId();
   const lineGuidanceId = useId();
+  const generationRecoveryId = useId();
   const liftButtonRef = useRef<HTMLButtonElement | null>(null);
   const lineKey = shotDraftKey(shot.id, 'line');
   const narrationKey = shotDraftKey(shot.id, 'narration');
@@ -592,7 +602,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
   );
   const liftAllowed = liftEligibility?.allowed === true && !dirty && downstreamPositions.length === downstream.length;
   const history = beat.lineHistory;
-  const generationInFlight = shot.seedGenerationInFlight || shot.videoGenerationInFlight;
   const reviewPreferences =
     reviewChoices?.map((choice): BeatPanelReviewChoice => {
       const stored = gatePreferences[reviewPreferenceKey(choice.shotId, choice.purpose)];
@@ -608,6 +617,15 @@ const ShotCard: React.FC<ShotCardProps> = ({
         referenceAssetId,
       };
     }) ?? null;
+  const reviewedGenerationBlocked =
+    reviewChoices === null ||
+    reviewChoices.some((choice) => {
+      const reviewedShot = exactShotProjection(projection, choice.shotId);
+      return (
+        reviewedShot === null ||
+        (choice.purpose === 'seed_still' ? reviewedShot.seedGenerationBlocked : reviewedShot.videoGenerationBlocked)
+      );
+    });
 
   const save = async (): Promise<void> => {
     if (!dirty || saving || disabled || drafts.staleRevision) return;
@@ -668,6 +686,26 @@ const ShotCard: React.FC<ShotCardProps> = ({
     }
     onParkSettled(shot.id, parked);
     if (!parked) setRestoreLiftFocus(true);
+  };
+
+  const retryGenerationJob = async (jobId: string, acknowledgePossibleDuplicateCharge: boolean): Promise<void> => {
+    if (disabled || recoveringJobId !== null) return;
+    setRecoveringJobId(jobId);
+    try {
+      await actions.retryGenerationJob(jobId, acknowledgePossibleDuplicateCharge);
+    } finally {
+      setRecoveringJobId(null);
+    }
+  };
+
+  const cancelGenerationJob = async (jobId: string): Promise<void> => {
+    if (disabled || recoveringJobId !== null) return;
+    setRecoveringJobId(jobId);
+    try {
+      await actions.cancelGenerationJob(jobId);
+    } finally {
+      setRecoveringJobId(null);
+    }
   };
 
   const liftBodyKey = downstream.length === 0 ? `${KEY_ROOT}.lift.shotBodyNoStale` : `${KEY_ROOT}.lift.shotBodyStale`;
@@ -902,6 +940,73 @@ const ShotCard: React.FC<ShotCardProps> = ({
         {shot.videoTakes.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.takes.empty`)}</p> : null}
       </section>
 
+      {shot.attentionJobs.length > 0 ? (
+        <section
+          aria-label={t(`${JOB_KEY_ROOT}.status.needsAttention`)}
+          className={styles.recoveryCard}
+          data-generation-recovery
+        >
+          {shot.attentionJobs.map((job) => {
+            const duplicateChargeAcknowledgement = job.error.code === 'submission_unknown';
+            const jobPending = recoveringJobId === job.id;
+            const jobDescriptionId = `${generationRecoveryId}-${job.id}`;
+            return (
+              <div key={job.id} className={styles.jobRecoveryRow} data-job-id={job.id}>
+                <div id={jobDescriptionId}>
+                  <p>{t(job.error.messageKey)}</p>
+                  <p className={styles.muted}>
+                    {t(
+                      job.purpose === 'seed_still'
+                        ? `${KEY_ROOT}.generation.purpose.seedStill`
+                        : `${KEY_ROOT}.generation.purpose.videoTake`
+                    )}
+                  </p>
+                </div>
+                <div className={styles.actions}>
+                  {job.canRetry && duplicateChargeAcknowledgement ? (
+                    <Popconfirm
+                      cancelText={t(`${KEY_ROOT}.common.cancel`)}
+                      content={t(`${JOB_KEY_ROOT}.retryChargeBody`)}
+                      disabled={disabled || recoveringJobId !== null}
+                      okText={t(`${JOB_KEY_ROOT}.retryChargeConfirm`)}
+                      onOk={() => void retryGenerationJob(job.id, true)}
+                      title={t(`${JOB_KEY_ROOT}.retryChargeTitle`)}
+                    >
+                      <Button
+                        aria-describedby={jobDescriptionId}
+                        disabled={disabled || recoveringJobId !== null}
+                        loading={jobPending}
+                      >
+                        {t(`${JOB_KEY_ROOT}.retry`)}
+                      </Button>
+                    </Popconfirm>
+                  ) : job.canRetry ? (
+                    <Button
+                      aria-describedby={jobDescriptionId}
+                      disabled={disabled || recoveringJobId !== null}
+                      loading={jobPending}
+                      onClick={() => void retryGenerationJob(job.id, false)}
+                    >
+                      {t(`${JOB_KEY_ROOT}.retry`)}
+                    </Button>
+                  ) : null}
+                  {job.canCancel ? (
+                    <Button
+                      aria-describedby={jobDescriptionId}
+                      disabled={disabled || recoveringJobId !== null}
+                      loading={jobPending}
+                      onClick={() => void cancelGenerationJob(job.id)}
+                    >
+                      {t(`${JOB_KEY_ROOT}.cancel`)}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </section>
+      ) : null}
+
       <div className={styles.shotFooter}>
         <div className={styles.generationPreferences}>
           {reviewPreferences?.map((preference) => {
@@ -978,7 +1083,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
           ) : null}
         </div>
         <Button
-          disabled={disabled || reviewBlocked || generationInFlight || reviewPreferences === null}
+          disabled={disabled || reviewBlocked || reviewedGenerationBlocked || reviewPreferences === null}
           onClick={() => {
             if (reviewPreferences !== null && reviewPreferences.length > 0) {
               actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);

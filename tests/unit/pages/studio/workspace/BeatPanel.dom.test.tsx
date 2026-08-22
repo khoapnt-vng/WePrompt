@@ -344,6 +344,7 @@ const makeShot = (
   retainedWork: false,
   videoGenerationInFlight: false,
   seedGenerationInFlight: false,
+  attentionJobs: [],
   hasEffectiveSeed: false,
   ...overrides,
 });
@@ -463,12 +464,65 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   parkShot: vi.fn().mockResolvedValue(true),
   parkBeat: vi.fn().mockResolvedValue(true),
   reviewShot: vi.fn(),
+  retryGenerationJob: vi.fn().mockResolvedValue(true),
+  cancelGenerationJob: vi.fn().mockResolvedValue(true),
   chooseCascadeAsset: vi.fn().mockResolvedValue(true),
   retryConditioning: vi.fn().mockResolvedValue(true),
   cancelWaiting: vi.fn().mockResolvedValue(true),
   requestReviewedRederive: vi.fn(),
   requestResplit: vi.fn(),
   ...overrides,
+});
+
+describe('BeatPanel generation recovery', () => {
+  it('offers only projected job capabilities and requires duplicate-charge acknowledgement', async () => {
+    const actions = makeActions();
+    const shot = makeShot('shot_1', 0, {
+      attentionJobs: [
+        {
+          id: 'job_remote',
+          purpose: 'video_take',
+          generationIndex: 0,
+          error: {
+            code: 'provider_unavailable',
+            messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+          },
+          canCancel: true,
+          canRetry: true,
+        },
+        {
+          id: 'job_unknown',
+          purpose: 'video_take',
+          generationIndex: 1,
+          error: {
+            code: 'submission_unknown',
+            messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
+          },
+          canCancel: false,
+          canRetry: true,
+        },
+      ],
+      effectiveSeedAssetId: 'seed_existing',
+      hasEffectiveSeed: true,
+      videoGenerationBlocked: true,
+    });
+    const beat = makeBeat('beat_1', [shot]);
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
+
+    const remote = container.querySelector<HTMLElement>('[data-job-id="job_remote"]')!;
+    expect(screen.getByRole('button', { name: 'Render Shot' })).toBeDisabled();
+    fireEvent.click(within(remote).getByRole('button', { name: 'conversation.creativeStudio.jobs.retry' }));
+    await waitFor(() => expect(actions.retryGenerationJob).toHaveBeenCalledWith('job_remote', false));
+    fireEvent.click(within(remote).getByRole('button', { name: 'conversation.creativeStudio.jobs.cancel' }));
+    await waitFor(() => expect(actions.cancelGenerationJob).toHaveBeenCalledWith('job_remote'));
+
+    const unknown = container.querySelector<HTMLElement>('[data-job-id="job_unknown"]')!;
+    expect(within(unknown).queryByRole('button', { name: 'conversation.creativeStudio.jobs.cancel' })).toBeNull();
+    fireEvent.click(
+      within(unknown).getByRole('button', { name: 'conversation.creativeStudio.jobs.retryChargeConfirm' })
+    );
+    await waitFor(() => expect(actions.retryGenerationJob).toHaveBeenCalledWith('job_unknown', true));
+  });
 });
 
 const panelProps = (

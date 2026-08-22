@@ -21,6 +21,7 @@ import { CreativeStudioMediaError } from '@process/services/creative-studio/medi
 import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import { StudioPricingErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/estimate';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
+import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
 
 const providerNames = [
   'listProjects',
@@ -37,6 +38,8 @@ const providerNames = [
   'listReferenceGenerationHandoffs',
   'prepareSubmission',
   'confirmSubmission',
+  'cancelJob',
+  'retryJob',
   'dismissReferenceGenerationHandoff',
   'applyAuthoringBatch',
   'undoLast',
@@ -95,6 +98,8 @@ const mocks = vi.hoisted(() => ({
       'listReferenceGenerationHandoffs',
       'prepareSubmission',
       'confirmSubmission',
+      'cancelJob',
+      'retryJob',
       'dismissReferenceGenerationHandoff',
       'applyAuthoringBatch',
       'undoLast',
@@ -261,6 +266,8 @@ const createService = () =>
     listReferenceGenerationHandoffs: vi.fn(async () => []),
     prepareSubmission: vi.fn(async () => preparedSubmission),
     confirmSubmission: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8 })),
+    cancelJob: vi.fn(),
+    retryJob: vi.fn(),
     dismissReferenceGenerationHandoff: vi.fn(async () => ({
       status: 'dismissed' as const,
       completedAt: '2026-08-19T02:03:04.000Z',
@@ -635,6 +642,61 @@ describe('initCreativeStudioBridge', () => {
       data: { status: 'dismissed', completedAt: '2026-08-19T02:03:04.000Z' },
     });
     expect(Object.keys(dismissed.data).toSorted()).toEqual(['completedAt', 'status']);
+  });
+
+  it('routes exact job recovery requests and preserves bounded manager failures', async () => {
+    const job = {
+      id: 'job_1',
+      projectId: 'project_1',
+      shotId: 'shot_1',
+      status: 'queued_remote' as const,
+      purpose: 'video_take' as const,
+      generationIndex: 0,
+      provider: { choiceId: 'route_1', providerId: 'provider_1', model: 'model_1' },
+      outputAssetIds: [],
+      outputAssetIdsByRole: { primary: null, poster: null },
+      error: null,
+      canCancel: true,
+      canRetry: false,
+      canRetryDownload: false,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      spendReceipt: null,
+      createdAt: '2026-08-19T02:03:04.000Z',
+      updatedAt: '2026-08-19T02:03:04.000Z',
+    };
+    vi.mocked(service.cancelJob).mockResolvedValueOnce(job);
+    vi.mocked(service.retryJob).mockRejectedValueOnce(
+      new StudioJobManagerError('duplicate_charge_acknowledgement_required')
+    );
+    initCreativeStudioBridge(dependencies);
+
+    const request = { projectId: 'project_1', jobId: 'job_1', expectedRevision: 7 };
+    await expect(registeredHandler('cancelJob')(request as never)).resolves.toEqual({ ok: true, data: job });
+    await expect(
+      registeredHandler('retryJob')({ ...request, acknowledgePossibleDuplicateCharge: false } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'duplicate_charge_acknowledgement_required',
+        messageKey: 'conversation.creativeStudio.errors.duplicateChargeAcknowledgementRequired',
+      },
+    });
+    expect(service.cancelJob).toHaveBeenCalledExactlyOnceWith(request);
+    expect(service.retryJob).toHaveBeenCalledExactlyOnceWith({
+      ...request,
+      acknowledgePossibleDuplicateCharge: false,
+    });
+
+    vi.mocked(service.retryJob).mockRejectedValueOnce(new StudioJobManagerError('invalid_request'));
+    await expect(
+      registeredHandler('retryJob')({ ...request, acknowledgePossibleDuplicateCharge: true } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: { code: 'invalid_payload', messageKey: 'conversation.creativeStudio.errors.invalidPayload' },
+    });
   });
 
   it.each([

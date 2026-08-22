@@ -1432,8 +1432,8 @@
       "retryConfirmationConfirm": "Bestätigen und wiederholen",
       "retryDownload": "Download wiederholen",
       "retryChargeTitle": "Mit möglicher Doppelbelastung wiederholen?",
-      "retryChargeBody": "Das Ergebnis der vorherigen Übermittlung ist unbekannt. Eine Wiederholung kann eine weitere Anbietergebühr verursachen.",
-      "retryChargeConfirm": "Bestätigen und wiederholen",
+      "retryChargeBody": "Das Ergebnis der vorherigen Übermittlung ist unbekannt. Ein Ersatz kann eine weitere Anbietergebühr verursachen. Durch Fortfahren wird nur eine neue Kostenschätzung freigeschaltet; es wird noch keine Arbeit übermittelt.",
+      "retryChargeConfirm": "Bestätigen und Schätzung prüfen",
       "status": {
         "queuedLocal": "Wartet auf Übermittlung",
         "submitting": "Wird übermittelt",

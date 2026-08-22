@@ -123,6 +123,7 @@ import type {
   StudioImportManagedMediaResultV2,
   StudioImportBedAudioRequestV2,
   StudioImportSeedStillRequestV2,
+  StudioJobRequest,
   StudioExportArtifactRequestV2,
   StudioListExportsRequestV2,
   StudioParkBeatRequestV2,
@@ -134,12 +135,14 @@ import type {
   StudioReferenceRequestDecisionV2,
   StudioReferenceRequestV2,
   StudioRendererChainStatusV2,
+  StudioRendererJobV2,
   StudioRendererProjectCommitResultV2,
   StudioRendererProjectV2,
   StudioRendererPreparedSubmissionOptionsV2,
   StudioRendererExportCatalogV2,
   StudioRendererReferenceGenerationHandoffV2,
   StudioRendererWorkspaceStatusV2,
+  StudioRetryJobRequest,
   StudioRouteCatalogV2,
   StudioRevealExportResultV2,
   StudioReorderBinRequestV2,
@@ -1279,6 +1282,12 @@ export const creativeStudio = {
     StudioCommandResult<StudioConfirmSubmissionResultV2>,
     StudioConfirmSubmissionRequestV2
   >('creative-studio.confirm-submission'),
+  cancelJob: bridge.buildProvider<StudioCommandResult<StudioRendererJobV2>, StudioJobRequest>(
+    'creative-studio.cancel-job'
+  ),
+  retryJob: bridge.buildProvider<StudioCommandResult<StudioRendererJobV2>, StudioRetryJobRequest>(
+    'creative-studio.retry-job'
+  ),
   dismissReferenceGenerationHandoff: bridge.buildProvider<
     StudioCommandResult<StudioDismissReferenceGenerationHandoffResultV2>,
     StudioDismissReferenceGenerationHandoffRequestV2

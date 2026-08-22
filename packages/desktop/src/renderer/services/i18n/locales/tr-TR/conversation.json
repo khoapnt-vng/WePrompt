@@ -1433,8 +1433,8 @@
       "retryConfirmationConfirm": "Onayla ve tekrar dene",
       "retryDownload": "İndirmeyi tekrar dene",
       "retryChargeTitle": "Olası mükerrer ücretle tekrar denensin mi?",
-      "retryChargeBody": "Önceki gönderimin sonucu bilinmiyor. Tekrar denemek başka bir sağlayıcı ücretine yol açabilir.",
-      "retryChargeConfirm": "Kabul et ve tekrar dene",
+      "retryChargeBody": "Önceki gönderimin sonucu bilinmiyor. Bir yenileme başka bir sağlayıcı ücretine yol açabilir. Devam etmek yalnızca yeni bir tahmini açar; henüz iş göndermez.",
+      "retryChargeConfirm": "Kabul et ve tahmini incele",
       "status": {
         "queuedLocal": "Gönderim bekleniyor",
         "submitting": "Gönderiliyor",

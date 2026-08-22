@@ -92,6 +92,7 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
     outputAssetIdsByRole: { primary: null, poster: null },
     error: null,
     canCancel: false,
+    canRetry: false,
     canRetryDownload: false,
     retryOfJobId: null,
     retryReason: null,

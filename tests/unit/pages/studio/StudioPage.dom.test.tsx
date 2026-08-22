@@ -73,6 +73,8 @@ const mocks = vi.hoisted(() => {
       revealExport: { invoke: vi.fn() },
       prepareSubmission: { invoke: vi.fn() },
       confirmSubmission: { invoke: vi.fn() },
+      cancelJob: { invoke: vi.fn() },
+      retryJob: { invoke: vi.fn() },
       dismissReferenceGenerationHandoff: { invoke: vi.fn() },
       applyAuthoringBatch: { invoke: vi.fn() },
       undoLast: { invoke: vi.fn() },
@@ -324,6 +326,43 @@ const projectWithRecovery = (revision = 3): StudioRendererProjectV2 => {
   value.assets = { [seed.id]: seed, [take.id]: take };
   value.shots.upstream_seed!.assetIds.push(seed.id);
   value.shots.upstream_take!.assetIds.push(take.id);
+  return value;
+};
+
+const projectWithAttentionJob = (
+  status: 'needs_attention' | 'queued_remote' | 'failed' | 'cancelled'
+): StudioRendererProjectV2 => {
+  const value = projectWithHandoffShot();
+  value.revision = status === 'needs_attention' ? 3 : 4;
+  value.shots.shot_3!.jobIds = ['job_attention'];
+  value.jobs.job_attention = {
+    id: 'job_attention',
+    projectId: value.id,
+    shotId: 'shot_3',
+    status,
+    provider: { choiceId: 'route_video', providerId: 'provider_safe', model: 'model_safe' },
+    outputAssetIds: [],
+    outputAssetIdsByRole: { primary: null, poster: null },
+    error:
+      status === 'needs_attention'
+        ? {
+            code: 'provider_unavailable',
+            messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+          }
+        : null,
+    canCancel: status === 'needs_attention',
+    canRetry: status === 'needs_attention',
+    canRetryDownload: false,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    purpose: 'video_take',
+    generationIndex: 0,
+    spendReceipt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
   return value;
 };
 
@@ -3260,6 +3299,102 @@ describe('StudioPage schema-2 cutover', () => {
     expect(saved).toEqual({ saved: true });
     expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('recovers only the exact current attention job and refreshes its committed revision', async () => {
+    const current = projectWithAttentionJob('needs_attention');
+    const recovered = projectWithAttentionJob('queued_remote');
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: recovered }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.retryJob.invoke.mockResolvedValue(ok(recovered.jobs.job_attention));
+
+    renderStudio();
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    let retried = false;
+    await act(async () => {
+      retried = await capturedBeatPanelActions().retryGenerationJob('job_attention', false);
+    });
+
+    expect(retried).toBe(true);
+    expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      jobId: 'job_attention',
+      expectedRevision: 3,
+      acknowledgePossibleDuplicateCharge: false,
+    });
+    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(2);
+
+    await expect(capturedBeatPanelActions().retryGenerationJob('job_attention', false)).resolves.toBe(false);
+    await expect(capturedBeatPanelActions().cancelGenerationJob('forged_job')).resolves.toBe(false);
+    expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.cancelJob.invoke).not.toHaveBeenCalled();
+  });
+
+  it('requires the exact unknown-submission acknowledgement before unlocking a replacement quote', async () => {
+    const current = projectWithAttentionJob('needs_attention');
+    current.jobs.job_attention!.error = {
+      code: 'submission_unknown',
+      messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
+    };
+    current.jobs.job_attention!.canCancel = false;
+    const acknowledged = projectWithAttentionJob('failed');
+    acknowledged.jobs.job_attention!.error = { ...current.jobs.job_attention!.error };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: acknowledged }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.retryJob.invoke.mockResolvedValue(ok(acknowledged.jobs.job_attention));
+
+    renderStudio();
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    await expect(capturedBeatPanelActions().retryGenerationJob('job_attention', false)).resolves.toBe(false);
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+
+    let acknowledgedResult = false;
+    await act(async () => {
+      acknowledgedResult = await capturedBeatPanelActions().retryGenerationJob('job_attention', true);
+    });
+    expect(acknowledgedResult).toBe(true);
+    expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      jobId: 'job_attention',
+      expectedRevision: 3,
+      acknowledgePossibleDuplicateCharge: true,
+    });
+  });
+
+  it('cancels only the exact current provider-cancellable attention job', async () => {
+    const current = projectWithAttentionJob('needs_attention');
+    const cancelled = projectWithAttentionJob('cancelled');
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: cancelled }));
+    mocks.bridge.getWorkspaceStatus.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(cancelled.jobs.job_attention));
+
+    renderStudio();
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    let cancelledResult = false;
+    await act(async () => {
+      cancelledResult = await capturedBeatPanelActions().cancelGenerationJob('job_attention');
+    });
+    expect(cancelledResult).toBe(true);
+    expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      jobId: 'job_attention',
+      expectedRevision: 3,
+    });
   });
 
   it('renders the unsupported prototype state without fabricating a project', async () => {

@@ -1413,8 +1413,8 @@
       "retryConfirmationConfirm": "確認並重試",
       "retryDownload": "重試下載",
       "retryChargeTitle": "重試可能產生重複費用，是否繼續？",
-      "retryChargeBody": "上次提交結果不明。重試可能再次產生供應商費用。",
-      "retryChargeConfirm": "確認風險並重試",
+      "retryChargeBody": "上次提交結果不明。替代產生可能再次產生供應商費用。繼續只會解鎖新的費用估算，尚不會提交產生工作。",
+      "retryChargeConfirm": "確認風險並檢視估算",
       "status": {
         "queuedLocal": "等待提交",
         "submitting": "正在提交",

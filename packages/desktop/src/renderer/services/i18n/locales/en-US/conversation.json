@@ -1201,8 +1201,8 @@
       "retryConfirmationConfirm": "Confirm and retry",
       "retryDownload": "Retry download",
       "retryChargeTitle": "Retry with possible duplicate charge?",
-      "retryChargeBody": "The previous submission outcome is unknown. Retrying may create another provider charge.",
-      "retryChargeConfirm": "Acknowledge and retry",
+      "retryChargeBody": "The previous submission outcome is unknown. A replacement may create another provider charge. Continuing only unlocks a new estimate; it does not submit work.",
+      "retryChargeConfirm": "Acknowledge and review estimate",
       "status": {
         "queuedLocal": "Waiting to submit",
         "submitting": "Submitting",
