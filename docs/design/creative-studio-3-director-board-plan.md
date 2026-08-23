@@ -50,9 +50,24 @@ This is not hypothetical. It is the mechanism behind the thing the designer alre
 down — _"a 2×2 grid sitting as a seed still"_. That grid became a first frame by exactly this
 fallback, and it cost four ruined Shots in the paper-boat film.
 
-**So the enforcement point is not a validator on promotion. It is this function.** Blocking
-multi-panel images from the first-frame slot treats the symptom; the disease is that the slot fills
-itself.
+**So the enforcement point is not a validator on promotion.** Blocking multi-panel images from the
+first-frame slot treats the symptom; the disease is that the slot fills itself.
+
+**The clean fix already has a precedent in the codebase.** `eligibleSeed` (`chain.ts:84`) admits only
+assets in the `'assets'` or `'imports'` collections, which is why video **posters** — shot-owned
+images sitting in `shot.assetIds` since `mediaStore.ts:3529` — are structurally invisible to the
+first-frame fallback. A board still in a collection the fallback does not admit is ineligible by
+construction, with no change to how real seed stills behave.
+
+The one thing in the way is `validation.ts:1529`, which requires a job's **primary** output to live in
+`'assets'`:
+
+```ts
+primary.managedAsset.collection !== 'assets' || …  → invalid
+```
+
+Posters escape it only because they are not primary outputs. Widening that gate for a board-still
+purpose is a small, well-located change — and it is the whole of the fix.
 
 ### 3. "The Director draws the board"
 
@@ -61,8 +76,9 @@ The Director cannot draw, and cannot see.
 - **No tool starts any generation.** All seven Studio MCP tools either read, or write a record into a
   pending directory for a human to approve (`studioServer.ts`). None can cause an image to exist.
 - **No image can ever reach it.** `StudioToolResult` is `content: Array<{ type: 'text'; text: string }>`
-  (`studioServer.ts:83`). `read_storyboard` projects a shot's picture state as `hasSeedStill: boolean`.
-  The Director cannot look at what it supposedly drew, cannot judge it, cannot redraw it on merit.
+  (`studioServer.ts:83`). `read_storyboard` does hand back a real `videoAssetId` (`studioServer.ts:840`),
+  so the Director can name a picture — but it can never see one, so it cannot judge what it drew or
+  redraw it on merit.
 - **`set_seed_still` is `operation_not_permitted`** (`directorCommandContracts.ts:298`), so it cannot
   bind a still either.
 
@@ -79,7 +95,7 @@ this one.
 | "propose four shots for the empty beat" | `apply_coverage` is **proposal-capable** (`directorCommandContracts.ts:296`) and already renders as a real review card with per-shot durations |
 | a new Table column                      | columns are a declarative list; `<colgroup>` with fixed `inlineSize` — a 96px column is one entry                                              |
 | real accessibility                      | native `<table>` with `role='grid'`, `aria-colcount`, roving cell focus                                                                        |
-| staleness                               | two causes, computed in `chain.ts`, already surfaced per shot                                                                                  |
+| staleness (for shots that have video)   | two causes, computed in `chain.ts`, already surfaced per shot                                                                                  |
 | cast / look references                  | role vocabulary exists (`'cast'` / `'look'`), import + detach + per-shot picker all built                                                      |
 | a gate shape for promotion              | the two-line/two-price continuity gate is exactly this shape already                                                                           |
 
@@ -105,6 +121,20 @@ multi-angle sheet. A "cast reference" is one image with a role. Detach **deletes
 with no tombstone, so _"numbers are permanent, removing one never renumbers the rest"_ is not
 expressible without a new record type. The cap of six is the **provider's** `maxConditioningImages`
 ceiling, not a product choice.
+
+**Staleness for a boarded-but-unrendered film.** This one is worse than "the wrong cause".
+`deriveStudioDirtyShotsV2` opens with a hard gate (`chain.ts:257`):
+
+```ts
+const selected = selectedVideoTake(project, shot);
+if (selected === null) continue;
+```
+
+**A shot with no video is never dirty, for any cause.** The design's entire premise is reading a
+thirty-shot film _before any video exists_ — and in exactly that state the dirty-shot derivation
+returns an empty list unconditionally. "Change a reference and the panels drawn against it go stale"
+has no derivation path at all. Board staleness is new machinery, not a new cause on existing
+machinery.
 
 **Table expansion.** No `aria-expanded`, no disclosure, no nested rows anywhere in Studio.
 
@@ -142,14 +172,15 @@ frame"; `seedStillId` stays what it is called in the store. That is a normal and
 
 ## Slices
 
-**Slice 1 — the first-frame slot stops filling itself.** Make `effectiveSeedStillId` return only an
-explicit pin, and surface "no first frame" as a real state with an action. Rename the copy in the same
-change. **This ships alone, fixes the 2×2 grid class of bug, and is a prerequisite for any new
-per-shot image.** Nothing else on this list is safe before it.
+**Slice 1 — the first-frame slot stops filling itself.** Surface "no first frame" as a real state with
+an action rather than a silent fallback to the newest image, and rename the copy in the same change.
+**This ships alone, fixes the 2×2 grid class of bug, and is a prerequisite for any new per-shot
+image.** Nothing else on this list is safe before it.
 
-**Slice 2 — a board-still tier.** A discriminator on the asset (not a fifth collection — the union is
-duplicated in `validation.ts` and the null-shot law is enforced in four places), plus replace-in-place
-so a redraw does not accumulate. Board stills excluded from `isEligibleImageTake` by construction.
+**Slice 2 — a board-still tier.** A fifth managed collection that `eligibleSeed` does not admit,
+following the poster precedent, plus the `validation.ts:1529` widening so a job's primary output may
+live there. Replace-in-place so a redraw does not accumulate. Board stills are then ineligible as a
+first frame **by construction** rather than by a check somebody has to remember.
 
 **Slice 3 — drawing.** A `board_still` purpose: a named `StudioJobPurpose` alias first, then the nine
 declaration sites, the eight fail-open ternaries, the id minter, the rate card, `spendMath`. One gate
