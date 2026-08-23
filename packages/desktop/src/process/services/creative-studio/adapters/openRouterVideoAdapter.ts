@@ -84,6 +84,12 @@ export type OpenRouterHttpErrorEvidence = {
   providerCode: string | null;
   /** e.g. `openrouter_credits` on a 402 — the one identifier that says which spend gate fired. */
   limitSource: string | null;
+  /**
+   * The upstream provider's own code, which OpenRouter nests as JSON *inside* `error.message`
+   * rather than in `metadata`. Without lifting it, a rejection like
+   * `InputImageSensitiveContentDetected.PrivacyInformation` arrives as two nulls and a flag.
+   */
+  upstreamCode: string | null;
   messagePresent: boolean;
 };
 
@@ -415,7 +421,25 @@ export const getOpenRouterVideoModelSpec = (model: string): OpenRouterVideoModel
  * `error.message` remains fully redacted and must stay that way. It is free text, and the provider
  * demonstrably echoes the prompt and request material into it; no length cap makes that safe.
  */
-const IDENTIFIER_TAG = /^[a-z][a-z0-9_]{0,39}$/;
+const IDENTIFIER_TAG = /^[A-Za-z][A-Za-z0-9_.]{0,79}$/;
+
+/**
+ * OpenRouter forwards some upstream rejections by stringifying the origin provider's whole error
+ * object into `message`, leaving `metadata` empty. Only that object's `code` is lifted, and only
+ * when it passes the same identifier gate — the prose beside it names the request and can name the
+ * prompt, so it stays where it is.
+ */
+const nestedUpstreamCode = (message: unknown): string | null => {
+  if (typeof message !== 'string') return null;
+  const start = message.indexOf('{');
+  if (start < 0) return null;
+  try {
+    const parsed: unknown = JSON.parse(message.slice(start));
+    return safeEvidenceTag(record(record(parsed)?.error)?.code);
+  } catch {
+    return null;
+  }
+};
 
 const safeEvidenceTag = (value: unknown): string | null => {
   const normalized = typeof value === 'number' && Number.isInteger(value) ? String(value) : value;
@@ -444,6 +468,7 @@ const httpErrorEvidence = async (
       errorType: null,
       providerCode: null,
       limitSource: null,
+      upstreamCode: null,
       messagePresent: false,
     };
   }
@@ -459,6 +484,7 @@ const httpErrorEvidence = async (
     errorType: safeEvidenceTag(metadata?.error_type),
     providerCode: safeEvidenceTag(metadata?.provider_code),
     limitSource: safeEvidenceTag(metadata?.limit_source),
+    upstreamCode: nestedUpstreamCode(error?.message),
     messagePresent: typeof error?.message === 'string' && error.message.length > 0,
   };
 };

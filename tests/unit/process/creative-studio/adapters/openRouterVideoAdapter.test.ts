@@ -202,11 +202,42 @@ describe('OpenRouter video generation adapter', () => {
       errorType: 'invalid_image',
       providerCode: 'image_download_failed',
       limitSource: null,
+      upstreamCode: null,
       messagePresent: true,
     });
     expect(JSON.stringify(emitHttpErrorEvidence.mock.calls)).not.toMatch(
       /private scarf|sk-or-secret|private\.example|data:image|base64/i
     );
+  });
+
+  it('lifts the upstream code OpenRouter buries inside the message string', async () => {
+    const emitHttpErrorEvidence = vi.fn();
+    const upstream = JSON.stringify({
+      error: {
+        code: 'InputImageSensitiveContentDetected.PrivacyInformation',
+        message:
+          "The request failed because the input image 'content[1]' may contain real person. Request id: 0217874476920",
+        param: '',
+        type: 'BadRequest',
+      },
+    });
+    const fetch = vi.fn(async () => response(400, { error: { message: `HTTP 400: ${upstream}`, code: 400 } }));
+    const adapter = createOpenRouterVideoAdapter({
+      fetch,
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
+
+    await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+
+    await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
+    expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ upstreamCode: 'InputImageSensitiveContentDetected.PrivacyInformation' })
+    );
+    // The prose beside it names the request and could name the prompt; it must not travel.
+    expect(JSON.stringify(emitHttpErrorEvidence.mock.calls)).not.toMatch(/may contain real person|Request id/i);
   });
 
   it('surfaces the spend-limit source a 402 names, because it is the one field that explains it', async () => {
