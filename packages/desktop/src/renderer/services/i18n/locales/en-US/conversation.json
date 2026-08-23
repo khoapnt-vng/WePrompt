@@ -1577,18 +1577,6 @@
           "silentPreview": "Silent in preview · applied on export",
           "extent": "From 0:00 · {{seconds}}s extent"
         },
-        "match": {
-          "title": "Match To",
-          "description": "This changes generation prompts. Applying the look requires a separately reviewed, costed re-render; it is not a free colour grade.",
-          "label": "Prompt reference Shot",
-          "none": "No Match To Shot",
-          "option": "{{beatTitle}} · {{line}}",
-          "selected": "Match To reference changed. Existing media was not regenerated.",
-          "cleared": "Match To reference cleared. Existing media was not regenerated.",
-          "setFailed": "Match To reference was not changed.",
-          "invalid": "The selected Match To reference is not an active Shot. Clear it or choose an active Shot.",
-          "reference": "Beat {{beat}} · Shot {{shot}} is the reference"
-        },
         "exports": {
           "title": "Exports",
           "description": "Create non-destructive deliverables from the current project revision. Exporting never generates media.",

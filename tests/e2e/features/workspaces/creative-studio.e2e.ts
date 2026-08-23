@@ -587,10 +587,6 @@ const captureCutViewportReference = async (
   expect(seekRailGeometry.rail.left).toBeGreaterThanOrEqual(seekRailGeometry.shell.left - 1);
   expect(seekRailGeometry.rail.right).toBeLessThanOrEqual(seekRailGeometry.shell.right + 1);
 
-  const matchThumbnails = cut.locator('[data-cut-match-thumbnails]');
-  await expect(matchThumbnails.getByRole('button')).toHaveCount(1);
-  await expect(matchThumbnails.getByRole('button')).toHaveAttribute('aria-pressed', 'true');
-  await expect(matchThumbnails.locator('img')).toHaveCount(1);
   const bedExtent = cut.locator('[data-cut-bed-extent]');
   await expect(bedExtent).toHaveAttribute('data-source-seconds', '18');
   await expect(bedExtent).toHaveAttribute('data-film-seconds', '10');

@@ -24,7 +24,6 @@ import {
   formatCutClock,
 } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmSummary';
 import { buildCutFilmstrip } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmstrip';
-import { buildCutMatchReference } from '@/renderer/pages/studio/components/Workspace/Views/Cut/matchReference';
 import {
   buildCutPlaybackSequence,
   cutPlaybackShotsAwaitingTake,
@@ -270,12 +269,10 @@ const cut = (overrides: Partial<WorkspaceCutProjection> = {}): WorkspaceCutProje
     fadeOutStartSeconds: 9,
     fadeOutEndSeconds: 11,
   },
-  matchCandidates: [
+  coverCandidates: [
     { shotId: 'shot_1', beatId: 'beat_1', beatTitle: 'Opening', line: 'Wide opening', coverAssetId: 'cover_1' },
     { shotId: 'shot_2', beatId: 'beat_1', beatTitle: 'Opening', line: 'Detail', coverAssetId: null },
   ],
-  selectedMatchShotId: 'shot_1',
-  matchSelectionInvalid: false,
   ...overrides,
 });
 
@@ -427,8 +424,7 @@ const playableProjection = (): WorkspaceProjection => {
     ],
     filmDurationSeconds: 23,
     targetDurationSeconds: 24,
-    matchCandidates: [],
-    selectedMatchShotId: null,
+    coverCandidates: [],
   });
   return {
     ...projection(cutProjection, activeBeats),
@@ -539,8 +535,7 @@ describe('the truthful Cut playback sequence', () => {
         },
       ],
       filmDurationSeconds: 2.038,
-      matchCandidates: [],
-      selectedMatchShotId: null,
+      coverCandidates: [],
     });
     const current = {
       ...projection(cutProjection, [firstBeat, secondBeat]),
@@ -574,8 +569,7 @@ describe('the truthful Cut playback sequence', () => {
         },
       ],
       filmDurationSeconds: 0.09,
-      matchCandidates: [],
-      selectedMatchShotId: null,
+      coverCandidates: [],
     });
     const current = {
       ...projection(cutProjection, [beat]),
@@ -615,8 +609,7 @@ describe('the truthful Cut playback sequence', () => {
         },
       ],
       filmDurationSeconds: total,
-      matchCandidates: [],
-      selectedMatchShotId: null,
+      coverCandidates: [],
     });
     const current = {
       ...projection(cutProjection, [firstBeat, secondBeat]),
@@ -653,8 +646,7 @@ describe('the truthful Cut playback sequence', () => {
         },
       ],
       filmDurationSeconds: Number.MAX_SAFE_INTEGER,
-      matchCandidates: [],
-      selectedMatchShotId: null,
+      coverCandidates: [],
     });
     const current = {
       ...projection(cutProjection, [firstBeat, secondBeat]),
@@ -1464,7 +1456,6 @@ const actions = (): CutActions => ({
   importBedAudio: vi.fn().mockResolvedValue('cancelled'),
   setBed: vi.fn().mockResolvedValue(true),
   detachBedAudio: vi.fn().mockResolvedValue(true),
-  setMatchTo: vi.fn().mockResolvedValue(true),
   createExport: vi.fn().mockResolvedValue(true),
   refreshExports: vi.fn().mockResolvedValue(true),
   copyExport: vi.fn().mockResolvedValue('copied'),
@@ -1505,7 +1496,7 @@ describe('CutView', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders one film-level rail, honest bed and Match To copy, and exactly three export shapes', () => {
+  it('renders one film-level rail, an honest bed, and exactly three export shapes', () => {
     renderCut();
 
     expect(screen.getByRole('region', { name: 'conversation.creativeStudio.workspace.cut.ariaLabel' })).toBeVisible();
@@ -1736,8 +1727,7 @@ describe('CutView', () => {
         coverAssetId: null,
       })),
       filmDurationSeconds: 15,
-      matchCandidates: [],
-      selectedMatchShotId: null,
+      coverCandidates: [],
     });
     renderCut({ activeBeats, cutProjection });
     const seek = screen.getByRole('slider', { name: 'Film seek rail' });
@@ -1766,8 +1756,7 @@ describe('CutView', () => {
         },
       ],
       filmDurationSeconds: 10,
-      matchCandidates: [],
-      selectedMatchShotId: null,
+      coverCandidates: [],
     });
     renderCut({ activeBeats, cutProjection });
     const root = screen.getByRole('region', { name: 'conversation.creativeStudio.workspace.cut.ariaLabel' });
@@ -1782,13 +1771,9 @@ describe('CutView', () => {
     expect(seek).toHaveValue('3');
   });
 
-  it('uses actionable Match thumbnails and opens both the selected and uncovered Beat', async () => {
+  it('opens both the selected and the uncovered Beat', () => {
     const onOpenBeat = vi.fn();
-    const cutActions = renderCut({ onOpenBeat });
-    const thumbnails = screen.getByRole('group', { name: 'conversation.creativeStudio.workspace.cut.match.title' });
-    expect(thumbnails.querySelector('img')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/cover_1');
-    fireEvent.click(within(thumbnails).getByRole('button', { name: /Detail/ }));
-    await waitFor(() => expect(cutActions.setMatchTo).toHaveBeenCalledWith('shot_2'));
+    renderCut({ onOpenBeat });
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.cut.openBeat' }));
     expect(onOpenBeat).toHaveBeenCalledWith('beat_1');
@@ -1841,19 +1826,13 @@ describe('CutView', () => {
     await waitFor(() => expect(cutActions.reorderBeats).toHaveBeenCalledTimes(3));
   });
 
-  it('routes bed and Match To selection through exact values and keeps import cancellation inert', async () => {
+  it('routes bed selection through exact values and keeps import cancellation inert', async () => {
     const cutActions = renderCut();
     const bed = screen.getByLabelText('conversation.creativeStudio.workspace.cut.bed.label');
-    const match = screen.getByLabelText('conversation.creativeStudio.workspace.cut.match.label');
-
     fireEvent.change(bed, { target: { value: 'audio_old' } });
     await waitFor(() => expect(cutActions.setBed).toHaveBeenCalledWith('audio_old'));
     fireEvent.change(bed, { target: { value: '' } });
     await waitFor(() => expect(cutActions.setBed).toHaveBeenCalledWith(null));
-    fireEvent.change(match, { target: { value: 'shot_2' } });
-    await waitFor(() => expect(cutActions.setMatchTo).toHaveBeenCalledWith('shot_2'));
-    fireEvent.change(match, { target: { value: '' } });
-    await waitFor(() => expect(cutActions.setMatchTo).toHaveBeenCalledWith(null));
 
     fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.cut.bed.import'));
     await waitFor(() => expect(cutActions.importBedAudio).toHaveBeenCalledTimes(1));
@@ -1864,7 +1843,6 @@ describe('CutView', () => {
     const cutActions = actions();
     vi.mocked(cutActions.importBedAudio).mockResolvedValueOnce('imported').mockRejectedValueOnce(new Error('closed'));
     vi.mocked(cutActions.setBed).mockResolvedValueOnce(false);
-    vi.mocked(cutActions.setMatchTo).mockResolvedValueOnce(false);
     vi.mocked(cutActions.refreshExports).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     vi.mocked(cutActions.createExport).mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValue(true);
     vi.mocked(cutActions.copyExport).mockResolvedValueOnce('cancelled').mockRejectedValueOnce(new Error('closed'));
@@ -1889,14 +1867,6 @@ describe('CutView', () => {
     );
     fireEvent.change(bed, { target: { value: 'audio_current' } });
     expect(cutActions.setBed).toHaveBeenCalledTimes(1);
-
-    const match = screen.getByLabelText('conversation.creativeStudio.workspace.cut.match.label');
-    fireEvent.change(match, { target: { value: 'shot_2' } });
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.cut.match.setFailed')).toBeVisible()
-    );
-    fireEvent.change(match, { target: { value: 'shot_1' } });
-    expect(cutActions.setMatchTo).toHaveBeenCalledTimes(1);
 
     const refresh = screen.getByText('conversation.creativeStudio.workspace.cut.exports.refresh');
     fireEvent.click(refresh);
@@ -1967,8 +1937,7 @@ describe('CutView', () => {
         filmDurationSeconds: null,
         audioImports: [],
         bed: { status: 'none', assetId: null },
-        matchCandidates: [],
-        selectedMatchShotId: null,
+        coverCandidates: [],
       }),
       exportErrorMessageKey: 'conversation.creativeStudio.workspace.errors.storage',
     });
@@ -2017,15 +1986,12 @@ describe('CutView', () => {
         orderReady: false,
         filmDurationSeconds: null,
         bed: { status: 'invalid', assetId: 'missing_audio' },
-        selectedMatchShotId: null,
-        matchSelectionInvalid: true,
       }),
       exportCatalog: null,
     });
 
     expect(screen.getByText('conversation.creativeStudio.workspace.cut.orderUnavailable')).toBeVisible();
     expect(screen.getByText('conversation.creativeStudio.workspace.cut.bed.invalid')).toBeVisible();
-    expect(screen.getByText('conversation.creativeStudio.workspace.cut.match.invalid')).toBeVisible();
     expect(screen.getByText('conversation.creativeStudio.workspace.cut.exports.catalogUnavailable')).toBeVisible();
     document.querySelectorAll('[data-export-shape] button').forEach((button) => expect(button).toBeDisabled());
   });
@@ -2299,24 +2265,6 @@ describe('the Cut renders the film it is judging', () => {
     );
   });
 
-  it('names the Match To reference by its Beat and Shot position once one is chosen', () => {
-    renderCut({
-      cutProjection: cut({ selectedMatchShotId: 'shot_1' }),
-      activeBeats: [
-        { id: 'beat_1', shots: [{ id: 'shot_0' }, { id: 'shot_1' }] },
-      ] as unknown as WorkspaceProjection['activeBeats'],
-    });
-
-    const reference = document.querySelector('[data-cut-match-reference]');
-    expect(reference).not.toBeNull();
-    expect(reference?.getAttribute('data-shot-id')).toBe('shot_1');
-  });
-
-  it('names no reference while none is chosen', () => {
-    renderCut({ cutProjection: cut({ selectedMatchShotId: null }) });
-    expect(document.querySelector('[data-cut-match-reference]')).toBeNull();
-  });
-
   it('badges every uncovered Beat with its film position and the slate it will export', () => {
     renderCut({ cutProjection: cut({ filmDurationSeconds: 11, targetDurationSeconds: 12 }) });
 
@@ -2325,63 +2273,5 @@ describe('the Cut renders the film it is judging', () => {
     expect(slates).toHaveLength(1);
     expect(slates[0]?.getAttribute('data-slate-beat-id')).toBe('beat_2');
     expect(slates[0]?.textContent).toContain('02');
-  });
-});
-
-describe('the Match To reference', () => {
-  const shot = (id: string) => ({ id }) as WorkspaceProjection['activeBeats'][number]['shots'][number];
-  const refBeat = (id: string, shotIds: readonly string[]) =>
-    ({ id, shots: shotIds.map(shot) }) as WorkspaceProjection['activeBeats'][number];
-
-  it('names the reference by its Beat position in the film and its Shot position in that Beat', () => {
-    const reference = buildCutMatchReference({
-      activeBeats: [
-        refBeat('beat_1', ['shot_a']),
-        refBeat('beat_2', ['shot_b', 'shot_c']),
-        refBeat('beat_3', ['shot_d', 'shot_e']),
-      ],
-      selectedMatchShotId: 'shot_e',
-    });
-
-    expect(reference).toEqual({
-      beatId: 'beat_3',
-      shotId: 'shot_e',
-      beatPosition: 3,
-      shotPosition: 2,
-      beatLabel: '03',
-      shotLabel: '02',
-    });
-  });
-
-  it('counts the Shot position within its own Beat, not across the film', () => {
-    // shot_d is the fourth Shot in the film but the first in its Beat, and the label says 01.
-    const reference = buildCutMatchReference({
-      activeBeats: [refBeat('beat_1', ['a', 'b']), refBeat('beat_2', ['c']), refBeat('beat_3', ['shot_d'])],
-      selectedMatchShotId: 'shot_d',
-    });
-    expect(reference?.shotLabel).toBe('01');
-    expect(reference?.beatLabel).toBe('03');
-  });
-
-  it('has no reference when nothing is selected', () => {
-    expect(
-      buildCutMatchReference({ activeBeats: [refBeat('beat_1', ['shot_a'])], selectedMatchShotId: null })
-    ).toBeNull();
-  });
-
-  it('has no reference when the selected Shot is not in the film', () => {
-    // A Shot that has been parked or removed must not be named as the reference.
-    expect(
-      buildCutMatchReference({ activeBeats: [refBeat('beat_1', ['shot_a'])], selectedMatchShotId: 'shot_gone' })
-    ).toBeNull();
-  });
-
-  it('takes the first Beat that owns the Shot when identity is duplicated', () => {
-    // Duplicated ids are malformed authority; naming one deterministically beats naming none.
-    const reference = buildCutMatchReference({
-      activeBeats: [refBeat('beat_1', ['dupe']), refBeat('beat_2', ['dupe'])],
-      selectedMatchShotId: 'dupe',
-    });
-    expect(reference?.beatId).toBe('beat_1');
   });
 });

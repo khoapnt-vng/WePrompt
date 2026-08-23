@@ -1016,14 +1016,12 @@ describe('projectWorkspace', () => {
         fadeOutStartSeconds: 9,
         fadeOutEndSeconds: 11,
       },
-      selectedMatchShotId: 'shot_1',
-      matchSelectionInvalid: false,
     });
     expect(cut.audioImports.map(({ assetId, position }) => ({ assetId, position }))).toEqual([
       { assetId: 'audio_bed', position: 1 },
       { assetId: 'audio_old', position: 2 },
     ]);
-    expect(cut.matchCandidates).toMatchObject([
+    expect(cut.coverCandidates).toMatchObject([
       { shotId: 'shot_1', beatId: 'beat_1', beatTitle: 'Opening', line: 'First' },
     ]);
     expect(JSON.stringify(cut)).not.toContain('fileName');
@@ -1313,8 +1311,6 @@ describe('projectWorkspace', () => {
       sourceDurationSeconds: 10,
       requiredDurationSeconds: 12,
     });
-    expect(cut).toMatchObject({ selectedMatchShotId: null, matchSelectionInvalid: true });
-
     project.beats.beat_2!.targetSeconds = null;
     cut = projectWorkspace(project, null, null).cut;
     expect(cut.filmDurationSeconds).toBeNull();
@@ -1326,7 +1322,7 @@ describe('projectWorkspace', () => {
 
     project.beatOrder = ['beat_1', 'beat_1'];
     cut = projectWorkspace(project, null, null).cut;
-    expect(cut).toMatchObject({ orderReady: false, filmDurationSeconds: null, matchCandidates: [] });
+    expect(cut).toMatchObject({ orderReady: false, filmDurationSeconds: null, coverCandidates: [] });
   });
 });
 

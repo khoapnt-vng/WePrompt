@@ -19,7 +19,6 @@ import {
 } from './CutPlayer';
 import { buildCutFilmSummary, buildCutSlateWarnings, formatCutClock } from './filmSummary';
 import { buildCutFilmstrip } from './filmstrip';
-import { buildCutMatchReference } from './matchReference';
 import styles from './Cut.module.css';
 
 const CUT_ROOT = 'conversation.creativeStudio.workspace.cut';
@@ -56,7 +55,6 @@ export type CutActions = {
   importBedAudio: () => Promise<CutImportResult>;
   setBed: (assetId: string | null) => Promise<boolean>;
   detachBedAudio: (assetId: string) => Promise<boolean>;
-  setMatchTo: (shotId: string | null) => Promise<boolean>;
   createExport: (input: CutCreateExportInput) => Promise<boolean>;
   refreshExports: () => Promise<boolean>;
   copyExport: (artifactId: string) => Promise<CutCopyResult>;
@@ -127,8 +125,8 @@ export const CutView: React.FC<CutViewProps> = ({
   const currentBedId = selectedBedId(projection);
   const currentBed = projection.cut.audioImports.find((asset) => asset.assetId === currentBedId) ?? null;
   const stillCandidates = useMemo(
-    () => projection.cut.matchCandidates.filter((candidate) => candidate.coverAssetId !== null),
-    [projection.cut.matchCandidates]
+    () => projection.cut.coverCandidates.filter((candidate) => candidate.coverAssetId !== null),
+    [projection.cut.coverCandidates]
   );
 
   useEffect(() => {
@@ -213,18 +211,6 @@ export const CutView: React.FC<CutViewProps> = ({
     );
   };
 
-  const chooseMatch = async (value: unknown): Promise<void> => {
-    const shotId =
-      typeof value === 'string' && projection.cut.matchCandidates.some((candidate) => candidate.shotId === value)
-        ? value
-        : null;
-    if (shotId === projection.cut.selectedMatchShotId) return;
-    const changed = await runAction('match:select', () => actions.setMatchTo(shotId));
-    setAnnouncement(
-      t(`${CUT_ROOT}.match.${changed === true ? (shotId === null ? 'cleared' : 'selected') : 'setFailed'}`)
-    );
-  };
-
   const createExport = async (input: CutCreateExportInput): Promise<void> => {
     const created = await runAction(`export:${input.shape}`, () => actions.createExport(input));
     setAnnouncement(t(`${CUT_ROOT}.exports.${created === true ? 'created' : 'createFailed'}`));
@@ -271,10 +257,6 @@ export const CutView: React.FC<CutViewProps> = ({
     projection.cut.beats.findIndex((beat) => beat.id === selectedBeatId)
   );
   const selectedBeat = projection.cut.beats[selectedBeatIndex] ?? null;
-  const matchReference = buildCutMatchReference({
-    activeBeats: projection.activeBeats,
-    selectedMatchShotId: projection.cut.selectedMatchShotId,
-  });
   const bedScaleSeconds = Math.max(currentBed?.durationSeconds ?? 0, projection.cut.filmDurationSeconds ?? 0);
   const bedFilmPercent =
     bedScaleSeconds > 0 && projection.cut.filmDurationSeconds !== null
@@ -692,83 +674,6 @@ export const CutView: React.FC<CutViewProps> = ({
           ) : (
             <p className={styles.status}>{t(`${CUT_ROOT}.bed.empty`)}</p>
           )}
-        </section>
-
-        <section className={styles.panel}>
-          <div className={styles.panelHeading}>
-            <div>
-              <h3>{t(`${CUT_ROOT}.match.title`)}</h3>
-              <p>{t(`${CUT_ROOT}.match.description`)}</p>
-            </div>
-          </div>
-          <div
-            aria-label={t(`${CUT_ROOT}.match.title`)}
-            className={styles.matchThumbnails}
-            data-cut-match-thumbnails
-            role='group'
-          >
-            {projection.cut.matchCandidates.map((candidate) => {
-              const thumbnailSource =
-                candidate.coverAssetId === null ? null : createManagedStudioAssetUrl(projectId, candidate.coverAssetId);
-              const label = t(`${CUT_ROOT}.match.option`, {
-                beatTitle: candidate.beatTitle,
-                line: candidate.line,
-              });
-              return (
-                <Button
-                  key={candidate.shotId}
-                  aria-label={label}
-                  aria-pressed={candidate.shotId === projection.cut.selectedMatchShotId}
-                  className={styles.matchThumbnail}
-                  data-match-shot-id={candidate.shotId}
-                  disabled={locked}
-                  onClick={() => void chooseMatch(candidate.shotId)}
-                >
-                  {thumbnailSource === null ? (
-                    <span aria-hidden='true' className={styles.matchThumbnailPlaceholder} />
-                  ) : (
-                    <img alt='' aria-hidden='true' src={thumbnailSource} />
-                  )}
-                  <span dir='auto'>{candidate.line || candidate.shotId}</span>
-                </Button>
-              );
-            })}
-          </div>
-          <label>
-            <span>{t(`${CUT_ROOT}.match.label`)}</span>
-            <Select
-              allowClear
-              aria-label={t(`${CUT_ROOT}.match.label`)}
-              disabled={locked}
-              onChange={(value) => void chooseMatch(value)}
-              placeholder={t(`${CUT_ROOT}.match.none`)}
-              value={projection.cut.selectedMatchShotId ?? undefined}
-            >
-              {projection.cut.matchCandidates.map((candidate) => (
-                <Select.Option key={candidate.shotId} value={candidate.shotId}>
-                  <span dir='auto'>
-                    {t(`${CUT_ROOT}.match.option`, {
-                      beatTitle: candidate.beatTitle,
-                      line: candidate.line,
-                    })}
-                  </span>
-                </Select.Option>
-              ))}
-            </Select>
-          </label>
-          {matchReference === null ? null : (
-            <p className={styles.matchReference} data-cut-match-reference data-shot-id={matchReference.shotId}>
-              <bdi dir='auto'>
-                {t(`${CUT_ROOT}.match.reference`, {
-                  beat: matchReference.beatLabel,
-                  shot: matchReference.shotLabel,
-                })}
-              </bdi>
-            </p>
-          )}
-          {projection.cut.matchSelectionInvalid ? (
-            <Alert type='warning' content={t(`${CUT_ROOT}.match.invalid`)} />
-          ) : null}
         </section>
       </div>
 

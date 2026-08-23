@@ -202,7 +202,7 @@ export type WorkspaceCutBedProjection =
       fadeOutEndSeconds: number;
     };
 
-export type WorkspaceCutMatchCandidateProjection = {
+export type WorkspaceCutCoverCandidateProjection = {
   shotId: string;
   beatId: string;
   beatTitle: string;
@@ -218,9 +218,7 @@ export type WorkspaceCutProjection = {
   targetDurationSeconds: number | null;
   audioImports: WorkspaceCutAudioImportProjection[];
   bed: WorkspaceCutBedProjection;
-  matchCandidates: WorkspaceCutMatchCandidateProjection[];
-  selectedMatchShotId: string | null;
-  matchSelectionInvalid: boolean;
+  coverCandidates: WorkspaceCutCoverCandidateProjection[];
 };
 
 export type WorkspaceProjection = {
@@ -756,7 +754,7 @@ const projectCut = (
     }
   }
 
-  const matchCandidates: WorkspaceCutMatchCandidateProjection[] = [];
+  const coverCandidates: WorkspaceCutCoverCandidateProjection[] = [];
   const seenShotIds = new Set<string>();
   if (orderReady) {
     for (const beat of activeBeats) {
@@ -770,7 +768,7 @@ const projectCut = (
           continue;
         }
         seenShotIds.add(shot.id);
-        matchCandidates.push({
+        coverCandidates.push({
           shotId: shot.id,
           beatId: beat.id,
           beatTitle: beat.title,
@@ -780,13 +778,6 @@ const projectCut = (
       }
     }
   }
-  const selectedMatchShotId =
-    project.matchToShotId !== null &&
-    isSafeStudioId(project.matchToShotId) &&
-    matchCandidates.some((candidate) => candidate.shotId === project.matchToShotId)
-      ? project.matchToShotId
-      : null;
-
   return {
     orderReady,
     beats,
@@ -794,9 +785,7 @@ const projectCut = (
     targetDurationSeconds,
     audioImports,
     bed,
-    matchCandidates,
-    selectedMatchShotId,
-    matchSelectionInvalid: project.matchToShotId !== null && selectedMatchShotId === null,
+    coverCandidates,
   };
 };
 

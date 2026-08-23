@@ -1131,14 +1131,6 @@ const StudioProjectPage: React.FC<{
           projectRef.current = refreshed;
           return true;
         })) ?? false,
-      setMatchTo: async (shotId) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.setMatchTo.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            shotId,
-          })
-        ),
       createExport: async (input) =>
         (await runWorkspaceExclusive(async () => {
           const current = projectRef.current;

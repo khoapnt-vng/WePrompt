@@ -69,7 +69,6 @@ const mocks = vi.hoisted(() => {
       importBedAudio: { invoke: vi.fn() },
       detachBedAudio: { invoke: vi.fn() },
       setBed: { invoke: vi.fn() },
-      setMatchTo: { invoke: vi.fn() },
       createExport: { invoke: vi.fn() },
       listExports: { invoke: vi.fn() },
       copyExport: { invoke: vi.fn() },
@@ -736,7 +735,6 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.importBedAudio.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
     mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 4 }));
     mocks.bridge.setBed.invoke.mockResolvedValue(commit(4));
-    mocks.bridge.setMatchTo.invoke.mockResolvedValue(commit(4));
     mocks.bridge.createExport.invoke.mockResolvedValue(ok({ revision: 2, artifacts: [] }));
     mocks.bridge.copyExport.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
     mocks.bridge.revealExport.invoke.mockResolvedValue(ok({ status: 'revealed' }));
@@ -2399,7 +2397,7 @@ describe('StudioPage schema-2 cutover', () => {
     expect(document.querySelector('[data-asset-id="imported_seed"]')).not.toBeNull();
   });
 
-  it('routes the eight Cut providers through exact project and catalog revisions without paid work', async () => {
+  it('routes the seven Cut providers through exact project and catalog revisions without paid work', async () => {
     const projectAt = (revision: number): StudioRendererProjectV2 => {
       const value = projectWithHandoffShot();
       value.revision = revision;
@@ -2446,15 +2444,14 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValue(ok(chainStatus(projects[5]!)));
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
     mocks.bridge.setBed.invoke.mockResolvedValue(commit(5));
-    mocks.bridge.setMatchTo.invoke.mockResolvedValue(commit(6));
-    mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 7 }));
+    mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 6 }));
     mocks.bridge.importBedAudio.invoke
       .mockResolvedValueOnce(ok({ status: 'cancelled' as const }))
-      .mockResolvedValueOnce(ok({ status: 'imported' as const, assetId: 'audio_imported', projectRevision: 8 }));
+      .mockResolvedValueOnce(ok({ status: 'imported' as const, assetId: 'audio_imported', projectRevision: 7 }));
     const catalog1: StudioRendererExportCatalogV2 = { revision: 1, artifacts: [] };
     const artifact = {
       id: 'export_1',
-      sourceRevision: 8,
+      sourceRevision: 7,
       shape: 'still' as const,
       byteSize: 64,
       fileCount: 1,
@@ -2496,16 +2493,10 @@ describe('StudioPage schema-2 cutover', () => {
       expectedRevision: 4,
       assetId: 'audio_current',
     });
-    await expectSuccessfulBeatPanelAction(() => cutApi.setMatchTo('shot_3'));
-    expect(mocks.bridge.setMatchTo.invoke).toHaveBeenLastCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 5,
-      shotId: 'shot_3',
-    });
     await expectSuccessfulBeatPanelAction(() => cutApi.detachBedAudio('audio_old'));
     expect(mocks.bridge.detachBedAudio.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
-      expectedRevision: 6,
+      expectedRevision: 5,
       assetId: 'audio_old',
     });
     await act(async () => {
@@ -2514,14 +2505,14 @@ describe('StudioPage schema-2 cutover', () => {
     expect(importResult).toBe('imported');
     expect(mocks.bridge.importBedAudio.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
-      expectedRevision: 7,
+      expectedRevision: 6,
     });
 
     const projectReadsBeforeExports = mocks.bridge.getProject.invoke.mock.calls.length;
     await expectSuccessfulBeatPanelAction(() => cutApi.createExport({ shape: 'still', shotId: 'shot_3' }));
     expect(mocks.bridge.createExport.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
-      expectedRevision: 8,
+      expectedRevision: 7,
       expectedCatalogRevision: 1,
       shape: 'still',
       shotId: 'shot_3',

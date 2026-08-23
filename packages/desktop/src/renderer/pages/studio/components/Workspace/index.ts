@@ -62,7 +62,7 @@ export type {
   WorkspaceCutBeatDurationKind,
   WorkspaceCutBeatProjection,
   WorkspaceCutBedProjection,
-  WorkspaceCutMatchCandidateProjection,
+  WorkspaceCutCoverCandidateProjection,
   WorkspaceCutProjection,
   WorkspaceProjection,
   WorkspaceShotProjection,
