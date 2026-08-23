@@ -493,6 +493,40 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     ).toBe(false);
   });
 
+  it('offers a retry when the submission never took, which is the safest case there is', async () => {
+    // A submit that was refused outright leaves no provider job and no receipt, so retrying it cannot
+    // duplicate anything. Requiring a provider job id here stranded a Shot on a plain 5xx with no way
+    // forward at all — only Lift Shot or Lift Beat, both destructive.
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1'));
+    const job = harness.jobs[0]!;
+    const refused = (code: StudioJobErrorCode): StudioJobV2 => ({
+      ...structuredClone(job),
+      status: 'needs_attention',
+      providerJobId: null,
+      spendReceipt: null,
+      error: { code, messageKey: 'x' },
+    });
+
+    for (const code of ['provider_unavailable', 'rate_limited', 'quota', 'invalid_request', 'auth'] as const) {
+      expect(canRetryJobV2(refused(code)), code).toBe(true);
+    }
+  });
+
+  it('still refuses a retry once the job has been paid for', async () => {
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1'));
+    const job = harness.jobs[0]!;
+
+    expect(
+      canRetryJobV2({
+        ...structuredClone(job),
+        status: 'needs_attention',
+        providerJobId: null,
+        spendReceipt: { jobId: job.id } as StudioJobV2['spendReceipt'],
+        error: { code: 'provider_unavailable', messageKey: 'x' },
+      })
+    ).toBe(false);
+  });
+
   it('projects retry authority only for same-remote recovery or an acknowledged unknown submission', async () => {
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1'));
     const job = harness.jobs[0]!;

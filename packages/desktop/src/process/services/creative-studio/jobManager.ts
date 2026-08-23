@@ -455,13 +455,37 @@ export const canCancelJobV2 = (job: StudioJobV2): boolean => {
   return false;
 };
 
-/** Whether the bounded retry seam can make progress without minting new paid work. */
+/**
+ * Failures where the provider answered before taking the work: it refused the request, or refused to
+ * serve it at all. No provider job exists and none was created, so a retry cannot duplicate anything.
+ *
+ * `submission_unknown` is deliberately not in here — that one *is* ambiguous, and it keeps its own
+ * acknowledgement of duplicate-charge risk. Nor is `timeout`, for the same reason: a request that
+ * timed out may still have landed.
+ */
+const SUBMISSION_REFUSED_CODES: ReadonlySet<string> = new Set([
+  'provider_unavailable',
+  'rate_limited',
+  'quota',
+  'invalid_request',
+  'auth',
+]);
+
+/**
+ * Whether the bounded retry seam can make progress without minting new paid work.
+ *
+ * The provider-job requirement used to exclude a submission that never took, which stranded a Shot on
+ * a plain 5xx with nothing offered but Lift Shot or Lift Beat — both destructive — while the case most
+ * likely to succeed on a second attempt was the one with no way to attempt it.
+ */
 export const canRetryJobV2 = (job: StudioJobV2): boolean =>
   job.status === 'needs_attention' &&
   job.spendReceipt === null &&
   job.error?.code !== 'download_failed' &&
   job.error?.code !== 'poll_deadline' &&
-  (job.providerJobId !== null || job.error?.code === 'submission_unknown');
+  (job.providerJobId !== null ||
+    job.error?.code === 'submission_unknown' ||
+    (job.error !== null && job.error !== undefined && SUBMISSION_REFUSED_CODES.has(job.error.code)));
 
 /** Creates one runtime-owned durable scheduler for all schema-2 Studio projects. */
 export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobManagerV2 => {
