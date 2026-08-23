@@ -740,11 +740,8 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.undoLast.provider((input) =>
     runCommand(() => applyOperations(input, [{ kind: 'undo_last', entryId: input.entryId }]))
   );
-  ipcBridge.creativeStudio.getWorkspaceStatus.provider((input) =>
-    runCommand(() => dependencies.getService().getWorkspaceStatus(input))
-  );
-  ipcBridge.creativeStudio.getChainStatus.provider((input) =>
-    runCommand(() => dependencies.getService().getChainStatus(input))
+  ipcBridge.creativeStudio.getProjectWorkspace.provider((input) =>
+    runCommand(() => dependencies.getService().getProjectWorkspace(input))
   );
   ipcBridge.creativeStudio.retryConditioningFrame.provider((input) =>
     runCommand(() => dependencies.getService().retryConditioningFrame(input).then(toCommitResult))

@@ -27,8 +27,7 @@ const mocks = vi.hoisted(() => {
       listReferenceRequests: { invoke: vi.fn() },
       decideReferenceRequest: { invoke: vi.fn() },
       listReferenceGenerationHandoffs: { invoke: vi.fn() },
-      getWorkspaceStatus: { invoke: vi.fn() },
-      getChainStatus: { invoke: vi.fn() },
+      getProjectWorkspace: { invoke: vi.fn() },
       listRoutes: { invoke: vi.fn() },
       hasUnsavedWork: { provider: vi.fn(() => vi.fn()) },
       flushUnsavedWork: { provider: vi.fn(() => vi.fn()) },
@@ -91,25 +90,32 @@ describe('Creative Studio E2E selectors', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.bridge.getProject.invoke.mockResolvedValue({ ok: true, data: { status: 'supported', project } });
     mocks.bridge.listProposals.invoke.mockResolvedValue({ ok: true, data: [] });
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue({ ok: true, data: [] });
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue({ ok: true, data: [] });
-    mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValue({
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue({
       ok: true,
       data: {
-        projectId: project.id,
-        projectRevision: project.revision,
-        undoTop: null,
-        dirtyShots: [],
-        cascadeProgress: [],
-        currentVideoJobs: [],
-        parkEligibility: [],
+        status: 'supported',
+        snapshot: {
+          project,
+          workspaceStatus: {
+            projectId: project.id,
+            projectRevision: project.revision,
+            undoTop: null,
+            dirtyShots: [],
+            cascadeProgress: [],
+            currentVideoJobs: [],
+            parkEligibility: [],
+          },
+          chainStatus: {
+            projectId: project.id,
+            projectRevision: project.revision,
+            conditioningFailures: [],
+            boundaries: [],
+          },
+        },
       },
-    });
-    mocks.bridge.getChainStatus.invoke.mockResolvedValue({
-      ok: true,
-      data: { projectId: project.id, projectRevision: project.revision, conditioningFailures: [], boundaries: [] },
     });
     mocks.bridge.listRoutes.invoke.mockResolvedValue({
       ok: true,

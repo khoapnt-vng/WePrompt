@@ -118,8 +118,6 @@ import type {
   StudioDismissReferenceGenerationHandoffRequestV2,
   StudioDismissReferenceGenerationHandoffResultV2,
   StudioEditProjectSettingsRequestV2,
-  StudioGetChainStatusRequestV2,
-  StudioGetWorkspaceStatusRequestV2,
   StudioImportManagedMediaResultV2,
   StudioImportBedAudioRequestV2,
   StudioImportSeedStillRequestV2,
@@ -131,17 +129,16 @@ import type {
   StudioPrepareSubmissionRequestV2,
   StudioProjectListResultV2,
   StudioProjectLoadResultV2,
+  StudioProjectWorkspaceLoadResultV2,
   StudioProposalV2,
   StudioReferenceRequestDecisionV2,
   StudioReferenceRequestV2,
-  StudioRendererChainStatusV2,
   StudioRendererJobV2,
   StudioRendererProjectCommitResultV2,
   StudioRendererProjectV2,
   StudioRendererPreparedSubmissionOptionsV2,
   StudioRendererExportCatalogV2,
   StudioRendererReferenceGenerationHandoffV2,
-  StudioRendererWorkspaceStatusV2,
   StudioRetryJobRequest,
   StudioRouteCatalogV2,
   StudioRevealExportResultV2,
@@ -1297,13 +1294,10 @@ export const creativeStudio = {
   undoLast: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioUndoLastRequestV2>(
     'creative-studio.undo-last'
   ),
-  getWorkspaceStatus: bridge.buildProvider<
-    StudioCommandResult<StudioRendererWorkspaceStatusV2>,
-    StudioGetWorkspaceStatusRequestV2
-  >('creative-studio.get-workspace-status'),
-  getChainStatus: bridge.buildProvider<StudioCommandResult<StudioRendererChainStatusV2>, StudioGetChainStatusRequestV2>(
-    'creative-studio.get-chain-status'
-  ),
+  getProjectWorkspace: bridge.buildProvider<
+    StudioCommandResult<StudioProjectWorkspaceLoadResultV2>,
+    StudioProjectRequestV2
+  >('creative-studio.get-project-workspace'),
   retryConditioningFrame: bridge.buildProvider<
     StudioCommandResult<StudioRendererProjectCommitResultV2>,
     StudioCascadeBarrierActionRequestV2

@@ -53,14 +53,15 @@ const mocks = vi.hoisted(() => {
     beatPanelBriefReferenceOptions: null as readonly BeatPanelBriefReferenceOption[] | null,
     bridge: {
       getProject: { invoke: vi.fn() },
+      getProjectWorkspace: { invoke: vi.fn() },
       listProposals: { invoke: vi.fn() },
       acceptProposal: { invoke: vi.fn() },
       rejectProposal: { invoke: vi.fn() },
       listReferenceRequests: { invoke: vi.fn() },
       decideReferenceRequest: { invoke: vi.fn() },
       listReferenceGenerationHandoffs: { invoke: vi.fn() },
-      getWorkspaceStatus: { invoke: vi.fn() },
-      getChainStatus: { invoke: vi.fn() },
+      projectWorkspaceStatusFixture: { invoke: vi.fn() },
+      projectWorkspaceChainFixture: { invoke: vi.fn() },
       listRoutes: { invoke: vi.fn() },
       listConnectionCandidates: { invoke: vi.fn() },
       listConnections: { invoke: vi.fn() },
@@ -461,10 +462,40 @@ const chainStatus = (source: number | StudioRendererProjectV2): StudioRendererCh
   };
 };
 
+const projectWorkspaceLoad = (
+  authority: StudioRendererProjectV2,
+  workspace = workspaceStatus(authority),
+  chain = chainStatus(authority)
+) =>
+  ok({
+    status: 'supported' as const,
+    snapshot: { project: authority, workspaceStatus: workspace, chainStatus: chain },
+  });
+
 const mockSupportedProject = (authority: StudioRendererProjectV2): void => {
   mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: authority }));
-  mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValue(ok(workspaceStatus(authority)));
-  mocks.bridge.getChainStatus.invoke.mockResolvedValue(ok(chainStatus(authority)));
+  mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(authority)));
+  mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(authority)));
+};
+
+const installCompositeProjectWorkspaceRead = (): void => {
+  mocks.bridge.getProjectWorkspace.invoke.mockImplementation(async (input: { projectId: string }) => {
+    const projectResult = await mocks.bridge.getProject.invoke(input);
+    if (projectResult.ok === false) return projectResult;
+    if (projectResult.data.status !== 'supported') return projectResult;
+    const workspaceResult = await mocks.bridge.projectWorkspaceStatusFixture.invoke(input);
+    if (workspaceResult.ok === false) return workspaceResult;
+    const chainResult = await mocks.bridge.projectWorkspaceChainFixture.invoke(input);
+    if (chainResult.ok === false) return chainResult;
+    return ok({
+      status: 'supported' as const,
+      snapshot: {
+        project: projectResult.data.project,
+        workspaceStatus: workspaceResult.data,
+        chainStatus: chainResult.data,
+      },
+    });
+  });
 };
 
 const commit = (revision: number) =>
@@ -708,8 +739,9 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok([]));
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([]));
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([]));
-    mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValue(ok(workspaceStatus(3)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValue(ok(chainStatus(3)));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(3)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(3)));
+    installCompositeProjectWorkspaceRead();
     mocks.bridge.listRoutes.invoke.mockResolvedValue(
       ok({
         image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
@@ -1150,8 +1182,8 @@ describe('StudioPage schema-2 cutover', () => {
     await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1));
     const baseline = {
       project: mocks.bridge.getProject.invoke.mock.calls.length,
-      workspace: mocks.bridge.getWorkspaceStatus.invoke.mock.calls.length,
-      chain: mocks.bridge.getChainStatus.invoke.mock.calls.length,
+      workspace: mocks.bridge.projectWorkspaceStatusFixture.invoke.mock.calls.length,
+      chain: mocks.bridge.projectWorkspaceChainFixture.invoke.mock.calls.length,
       routes: mocks.bridge.listRoutes.invoke.mock.calls.length,
       proposals: mocks.bridge.listProposals.invoke.mock.calls.length,
       references: mocks.bridge.listReferenceRequests.invoke.mock.calls.length,
@@ -1222,8 +1254,8 @@ describe('StudioPage schema-2 cutover', () => {
 
     expect({
       project: mocks.bridge.getProject.invoke.mock.calls.length,
-      workspace: mocks.bridge.getWorkspaceStatus.invoke.mock.calls.length,
-      chain: mocks.bridge.getChainStatus.invoke.mock.calls.length,
+      workspace: mocks.bridge.projectWorkspaceStatusFixture.invoke.mock.calls.length,
+      chain: mocks.bridge.projectWorkspaceChainFixture.invoke.mock.calls.length,
       routes: mocks.bridge.listRoutes.invoke.mock.calls.length,
       proposals: mocks.bridge.listProposals.invoke.mock.calls.length,
       references: mocks.bridge.listReferenceRequests.invoke.mock.calls.length,
@@ -1346,15 +1378,48 @@ describe('StudioPage schema-2 cutover', () => {
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('blocks handoff review until both revision-matched status snapshots are ready', async () => {
+  it('keeps visible revision-matched controls installed while a newer composite snapshot is pending', async () => {
+    const initial = projectWithHandoffShot();
+    const updated = { ...projectWithHandoffShot(), revision: 4, name: 'Updated without a blink' };
+    const pending = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockReset()
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockReturnValueOnce(pending.promise);
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValue(ok(chainStatus(2)));
 
     renderStudio();
     const card = within(await screen.findByTestId('studio-handoff-handoff_open'));
-    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled();
-    expect(card.getByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
-    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' })).toBeEnabled();
+    const review = card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' });
+    expect(review).toBeEnabled();
+    expect(card.queryByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeNull();
+
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(review).toBeEnabled();
+    expect(card.queryByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Launch film' })).toBeVisible();
+
+    await act(async () => {
+      pending.resolve(projectWorkspaceLoad(updated));
+      await pending.promise;
+    });
+    expect(await screen.findByRole('heading', { name: 'Updated without a blink' })).toBeVisible();
+    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeEnabled();
+    expect(card.queryByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeNull();
+  });
+
+  it('rejects a successful composite response whose three revisions do not match', async () => {
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    const authority = project();
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, workspaceStatus(authority), chainStatus(2))
+    );
+
+    renderStudio();
+    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
+    expect(screen.queryByTestId('studio-handoff-handoff_open')).toBeNull();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
   });
 
   it('refuses an open handoff whose shot identities are absent from the active project', async () => {
@@ -1494,10 +1559,12 @@ describe('StudioPage schema-2 cutover', () => {
     const revised = { ...project(), revision: 4, name: 'Saved name' };
     mocks.bridge.getProject.invoke.mockResolvedValueOnce(ok({ status: 'supported', project: initial }));
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: revised }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(3)))
       .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
 
     const first = renderStudio();
     let settingsDialog = await openProjectDialog(SETTINGS_TITLE);
@@ -1566,10 +1633,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
       ok({ status: 'supported' as const, project: projectId === 'project_2' ? projectB : project() })
     );
-    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
       ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
     );
-    mocks.bridge.getChainStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
       ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
     );
 
@@ -1635,10 +1702,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
       ok({ status: 'supported' as const, project: projectId === 'project_2' ? projectB : project() })
     );
-    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
       ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
     );
-    mocks.bridge.getChainStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
       ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
     );
 
@@ -1685,10 +1752,10 @@ describe('StudioPage schema-2 cutover', () => {
       projectALoads += 1;
       return ok({ status: 'supported' as const, project: projectALoads === 1 ? project() : projectACommitted });
     });
-    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
       ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
     );
-    mocks.bridge.getChainStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
       ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
     );
 
@@ -1716,7 +1783,6 @@ describe('StudioPage schema-2 cutover', () => {
     expect(projectBName).toHaveValue('B local draft');
 
     await act(async () => edit.resolve(commit(4)));
-    await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(3));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Second project' })).toBeVisible());
 
     expect(projectBName).toHaveValue('B local draft');
@@ -1740,10 +1806,12 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValue(ok({ status: 'supported', project: revision4 }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(3, true)))
       .mockResolvedValue(ok(workspaceStatus(4, true)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
@@ -1787,11 +1855,11 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValueOnce(ok({ status: 'supported', project: revision4 }))
       .mockResolvedValue(ok({ status: 'supported', project: revision5 }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(initial)))
       .mockResolvedValueOnce(ok(workspaceStatus(revision4)))
       .mockResolvedValue(ok(workspaceStatus(revision5)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(initial)))
       .mockResolvedValueOnce(ok(chainStatus(revision4)))
       .mockResolvedValue(ok(chainStatus(revision5)));
@@ -1829,10 +1897,12 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValue(ok({ status: 'supported', project: revised }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(3)))
       .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
     const settingsDialog = await openProjectDialog(SETTINGS_TITLE);
@@ -1894,10 +1964,12 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
       .mockResolvedValue(ok({ status: 'supported', project: changed }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(3)))
       .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
     let briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
@@ -1948,10 +2020,12 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
       .mockResolvedValue(ok({ status: 'supported', project: changed }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(3)))
       .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
     const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
@@ -1967,6 +2041,317 @@ describe('StudioPage schema-2 cutover', () => {
       within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
     ).toHaveLength(2);
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces each active composite read into one trailing epoch without starving earlier callers', async () => {
+    const initial = project();
+    const revision4 = { ...project(), revision: 4, name: 'Revision four' };
+    const revision5 = { ...project(), revision: 5, name: 'Revision five' };
+    const revision6 = { ...project(), revision: 6, name: 'Revision six' };
+    const leader = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const firstTrailing = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const secondTrailing = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockReset()
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockReturnValueOnce(leader.promise)
+      .mockReturnValueOnce(firstTrailing.promise)
+      .mockReturnValueOnce(secondTrailing.promise);
+
+    render(<HookProbe projectId='project_1' />);
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(3));
+
+    let leaderPromise!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      leaderPromise = latestHookResult!.refetchProjectWorkspace();
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(latestHookResult?.project?.revision).toBe(3);
+    expect(latestHookResult?.workspaceStatus?.projectRevision).toBe(3);
+    expect(latestHookResult?.chainStatus?.projectRevision).toBe(3);
+
+    let firstWaiter!: Promise<StudioRendererProjectV2 | null>;
+    let sharedWaiter!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      firstWaiter = latestHookResult!.refetchProjectWorkspace();
+      sharedWaiter = latestHookResult!.refetchProjectWorkspace();
+      mocks.listeners.projectUpdated?.({ projectId: 'project_1' });
+      mocks.listeners.projectUpdated?.({ projectId: 'project_1' });
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+
+    let leaderResult: StudioRendererProjectV2 | null = null;
+    await act(async () => {
+      leader.resolve(projectWorkspaceLoad(revision4));
+      leaderResult = await leaderPromise;
+    });
+    expect(leaderResult?.revision).toBe(4);
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3));
+
+    let secondWaiter!: Promise<StudioRendererProjectV2 | null>;
+    let secondWaiterSettled = false;
+    act(() => {
+      secondWaiter = latestHookResult!.refetchProjectWorkspace();
+      void secondWaiter.then(() => {
+        secondWaiterSettled = true;
+      });
+      mocks.listeners.projectUpdated?.({ projectId: 'project_1' });
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3);
+
+    let firstResult: StudioRendererProjectV2 | null = null;
+    let sharedResult: StudioRendererProjectV2 | null = null;
+    await act(async () => {
+      firstTrailing.resolve(projectWorkspaceLoad(revision5));
+      [firstResult, sharedResult] = await Promise.all([firstWaiter, sharedWaiter]);
+    });
+    expect(firstResult?.revision).toBe(5);
+    expect(sharedResult?.revision).toBe(5);
+    expect(secondWaiterSettled).toBe(false);
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(4));
+
+    let secondResult: StudioRendererProjectV2 | null = null;
+    await act(async () => {
+      secondTrailing.resolve(projectWorkspaceLoad(revision6));
+      secondResult = await secondWaiter;
+    });
+    expect(secondResult?.revision).toBe(6);
+    expect(latestHookResult?.project?.revision).toBe(6);
+  });
+
+  it('settles an obsolete binding leader and trailing waiter without reviving them after a project switch', async () => {
+    const projectA = project();
+    const projectARevision4 = { ...projectA, revision: 4, name: 'Obsolete project A' };
+    const projectB = { ...project(), id: 'project_2', revision: 8, name: 'Current project B' };
+    const delayedA = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    let projectAReads = 0;
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) => {
+      if (projectId === projectB.id) return Promise.resolve(projectWorkspaceLoad(projectB));
+      projectAReads += 1;
+      return projectAReads === 1 ? Promise.resolve(projectWorkspaceLoad(projectA)) : delayedA.promise;
+    });
+
+    const view = render(<HookProbe projectId={projectA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
+
+    let leader!: Promise<StudioRendererProjectV2 | null>;
+    let trailing!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      leader = latestHookResult!.refetchProjectWorkspace();
+      trailing = latestHookResult!.refetchProjectWorkspace();
+    });
+    await waitFor(() => expect(projectAReads).toBe(2));
+
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await expect(Promise.all([leader, trailing])).resolves.toEqual([null, null]);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectB.id));
+
+    await act(async () => {
+      delayedA.resolve(projectWorkspaceLoad(projectARevision4));
+      await delayedA.promise;
+    });
+    expect(latestHookResult?.project?.id).toBe(projectB.id);
+    expect(latestHookResult?.project?.revision).toBe(projectB.revision);
+    expect(latestHookResult?.workspaceStatus?.projectId).toBe(projectB.id);
+    expect(latestHookResult?.chainStatus?.projectId).toBe(projectB.id);
+  });
+
+  it('settles a pending composite leader and trailing waiter before an unmounted provider read resolves', async () => {
+    const initial = project();
+    const delayedRevision4 = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockReset()
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockReturnValueOnce(delayedRevision4.promise);
+
+    const view = render(<HookProbe projectId={initial.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(initial.revision));
+
+    let leader!: Promise<StudioRendererProjectV2 | null>;
+    let trailing!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      leader = latestHookResult!.refetchProjectWorkspace();
+      trailing = latestHookResult!.refetchProjectWorkspace();
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      let settled: Array<StudioRendererProjectV2 | null> = [initial, initial];
+      await act(async () => {
+        view.unmount();
+        settled = await Promise.all([leader, trailing]);
+      });
+      expect(settled).toEqual([null, null]);
+
+      await act(async () => {
+        delayedRevision4.resolve(projectWorkspaceLoad({ ...initial, revision: 4, name: 'Too late' }));
+        await delayedRevision4.promise;
+      });
+      expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+      expect(latestHookResult?.project?.revision).toBe(initial.revision);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('keeps a stale project-A composite callback from displacing the active project-B flight', async () => {
+    const projectA = project();
+    const projectARevision4 = { ...project(), revision: 4, name: 'Late project A' };
+    const projectB = { ...project(), id: 'project_2', revision: 7, name: 'Project B' };
+    const delayedA = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const delayedB = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    let projectAReads = 0;
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) => {
+      if (projectId === projectA.id) {
+        projectAReads += 1;
+        return projectAReads === 1 ? Promise.resolve(projectWorkspaceLoad(projectA)) : delayedA.promise;
+      }
+      return delayedB.promise;
+    });
+
+    const view = render(<HookProbe projectId={projectA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
+    const staleRefetch = latestHookResult!.refetchProjectWorkspace;
+
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await waitFor(() =>
+      expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledWith({ projectId: projectB.id })
+    );
+
+    let stalePromise!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      stalePromise = staleRefetch();
+    });
+    delayedA.resolve(projectWorkspaceLoad(projectARevision4));
+    const staleResult = await stalePromise;
+
+    expect(staleResult).toBeNull();
+    expect(projectAReads).toBe(1);
+    expect(latestHookResult?.project?.id).not.toBe(projectA.id);
+    expect(
+      mocks.bridge.getProjectWorkspace.invoke.mock.calls.filter(([input]) => input.projectId === projectB.id)
+    ).toHaveLength(1);
+
+    await act(async () => {
+      delayedB.resolve(projectWorkspaceLoad(projectB));
+      await delayedB.promise;
+    });
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectB.id));
+    expect(latestHookResult?.workspaceStatus?.projectId).toBe(projectB.id);
+    expect(latestHookResult?.chainStatus?.projectId).toBe(projectB.id);
+  });
+
+  it('keeps every stale project binding callback inert across an A-to-B-to-A rebinding', async () => {
+    const firstA = project();
+    const projectB = { ...project(), id: 'project_2', revision: 4, name: 'Project B' };
+    const reboundA = { ...project(), revision: 5, name: 'Rebound project A' };
+    let projectAReads = 0;
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) => {
+      if (projectId === projectB.id) return Promise.resolve(projectWorkspaceLoad(projectB));
+      projectAReads += 1;
+      return Promise.resolve(projectWorkspaceLoad(projectAReads === 1 ? firstA : reboundA));
+    });
+
+    const view = render(<HookProbe projectId={firstA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(firstA.revision));
+    const staleCallbacks = {
+      projectWorkspace: latestHookResult!.refetchProjectWorkspace,
+      proposals: latestHookResult!.refetchProposals,
+      references: latestHookResult!.refetchReferences,
+      routes: latestHookResult!.refetchRoutes,
+      exports: latestHookResult!.refetchExports,
+      all: latestHookResult!.refetchAll,
+      installExportCatalog: latestHookResult!.installExportCatalog,
+    };
+
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectB.id));
+    view.rerender(<HookProbe projectId={firstA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(reboundA.revision));
+
+    mocks.bridge.getProjectWorkspace.invoke.mockClear();
+    mocks.bridge.listProposals.invoke.mockClear();
+    mocks.bridge.listReferenceRequests.invoke.mockClear();
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockClear();
+    mocks.bridge.listRoutes.invoke.mockClear();
+    mocks.bridge.listExports.invoke.mockClear();
+
+    let staleProject: StudioRendererProjectV2 | null = reboundA;
+    let staleRouteResult = true;
+    let staleExportResult = true;
+    await act(async () => {
+      [staleProject, staleRouteResult, staleExportResult] = await Promise.all([
+        staleCallbacks.projectWorkspace(),
+        staleCallbacks.routes(),
+        staleCallbacks.exports(),
+      ]);
+      await Promise.all([staleCallbacks.proposals(), staleCallbacks.references(), staleCallbacks.all()]);
+    });
+
+    expect(staleProject).toBeNull();
+    expect(staleRouteResult).toBe(false);
+    expect(staleExportResult).toBe(false);
+    expect(staleCallbacks.installExportCatalog({ revision: 2, artifacts: [] })).toBe(false);
+    expect(mocks.bridge.getProjectWorkspace.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listProposals.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listRoutes.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listExports.invoke).not.toHaveBeenCalled();
+    expect(latestHookResult?.project?.revision).toBe(reboundA.revision);
+  });
+
+  it('discards delayed proposal, reference, and export results from the previous project binding', async () => {
+    const projectA = project();
+    const projectB = { ...project(), id: 'project_2', revision: 6, name: 'Project B' };
+    const delayedProposals = deferred<{ ok: true; data: StudioProposalV2[] }>();
+    const delayedReferenceRequests = deferred<{ ok: true; data: StudioReferenceRequestV2[] }>();
+    const delayedHandoffs = deferred<{ ok: true; data: StudioRendererReferenceGenerationHandoffV2[] }>();
+    const delayedExports = deferred<{ ok: true; data: StudioRendererExportCatalogV2 }>();
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) =>
+      Promise.resolve(projectWorkspaceLoad(projectId === projectB.id ? projectB : projectA))
+    );
+
+    const view = render(<HookProbe projectId={projectA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(1));
+    mocks.bridge.listProposals.invoke.mockReturnValueOnce(delayedProposals.promise);
+    mocks.bridge.listReferenceRequests.invoke.mockReturnValueOnce(delayedReferenceRequests.promise);
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockReturnValueOnce(delayedHandoffs.promise);
+    mocks.bridge.listExports.invoke.mockReturnValueOnce(delayedExports.promise);
+
+    let proposals!: Promise<void>;
+    let references!: Promise<void>;
+    let exports!: Promise<boolean>;
+    act(() => {
+      proposals = latestHookResult!.refetchProposals();
+      references = latestHookResult!.refetchReferences();
+      exports = latestHookResult!.refetchExports();
+    });
+    await waitFor(() => expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(2));
+
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectB.id));
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      delayedProposals.resolve(ok([{ ...proposal(), id: 'stale_proposal' }]));
+      delayedReferenceRequests.resolve(ok([{ ...referenceRequest(), id: 'stale_reference' }]));
+      delayedHandoffs.resolve(ok([{ ...handoff(), handoffId: 'stale_handoff' }]));
+      delayedExports.resolve(ok({ revision: 9, artifacts: [] }));
+      await Promise.all([proposals, references, exports]);
+    });
+
+    expect(latestHookResult?.project?.id).toBe(projectB.id);
+    expect(latestHookResult?.proposals).toEqual([]);
+    expect(latestHookResult?.referenceRequests).toEqual([]);
+    expect(latestHookResult?.referenceGenerationHandoffs).toEqual([]);
+    expect(latestHookResult?.exportCatalog).toEqual({ revision: 1, artifacts: [] });
   });
 
   it('keeps export catalog authority sanitized, monotonic, and isolated from an older in-flight list', async () => {
@@ -2053,10 +2438,12 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
       .mockResolvedValue(ok({ status: 'supported', project: changed }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(3)))
       .mockResolvedValue(ok(workspaceStatus(4)));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(3))).mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
@@ -2111,12 +2498,15 @@ describe('StudioPage schema-2 cutover', () => {
     const first = renderStudio();
     expect(await screen.findByText('conversation.creativeStudio.workspace.project.notFound')).toBeVisible();
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBeNull();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(1);
     first.unmount();
 
+    mocks.bridge.getProjectWorkspace.invoke.mockClear();
     mocks.bridge.getProject.invoke.mockRejectedValue(new Error('offline'));
     renderStudio();
     expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBeNull();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
   });
 
   it('surfaces independent snapshot failures while preserving the supported project shell', async () => {
@@ -2129,56 +2519,45 @@ describe('StudioPage schema-2 cutover', () => {
       ok: false,
       error: { code: 'storage_error', messageKey: 'native.handoffsFailed' },
     });
-    mocks.bridge.getWorkspaceStatus.invoke.mockRejectedValue(new Error('workspace offline'));
-    mocks.bridge.getChainStatus.invoke.mockResolvedValue({
-      ok: false,
-      error: { code: 'storage_error', messageKey: 'native.chainFailed' },
-    });
-    mocks.bridge.listRoutes.invoke.mockResolvedValue({
-      ok: false,
-      error: { code: 'storage_error', messageKey: 'native.routesFailed' },
-    });
-
     renderStudio();
 
     expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
-    expect(screen.getByText('native.proposalsFailed')).toBeVisible();
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.errors.storage')).toHaveLength(2);
     const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    await waitFor(() =>
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
+    );
+    mocks.bridge.getProjectWorkspace.invoke.mockRejectedValue(new Error('workspace offline'));
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole('heading', { name: 'Launch film' })).toBeVisible();
+    expect(screen.getByText('native.proposalsFailed')).toBeVisible();
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.errors.storage')).toHaveLength(3);
     expect(
       within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
     ).toHaveLength(2);
     expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
     expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(1);
     expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.bridge.getChainStatus.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3);
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
   });
 
-  it('handles the opposite asynchronous snapshot failures without combining their authority', async () => {
-    mocks.bridge.listProposals.invoke.mockRejectedValue(new Error('proposal list offline'));
-    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([]));
-    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockRejectedValue(new Error('handoff list offline'));
-    mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValue({
+  it('recovers one composite command failure with exactly one bounded retry', async () => {
+    const authority = project();
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValueOnce({
       ok: false,
       error: { code: 'storage_error', messageKey: 'native.workspaceFailed' },
     });
-    mocks.bridge.getChainStatus.invoke.mockRejectedValue(new Error('chain offline'));
-    mocks.bridge.listRoutes.invoke.mockRejectedValue(new Error('route list offline'));
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValueOnce(projectWorkspaceLoad(authority));
 
     renderStudio();
 
     expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.errors.storage').length).toBeGreaterThan(0);
-    expect(screen.getByText('native.workspaceFailed')).toBeVisible();
-    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
-    expect(
-      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
-    ).toHaveLength(2);
-    expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('native.workspaceFailed')).toBeNull();
   });
 
   it('ignores native events for another project identity', async () => {
@@ -2208,19 +2587,17 @@ describe('StudioPage schema-2 cutover', () => {
     expect(screen.getByTestId('hook-state')).toHaveTextContent('idle');
 
     await act(async () => {
-      expect(await latestHookResult?.refetchProject()).toBeNull();
+      expect(await latestHookResult?.refetchProjectWorkspace()).toBeNull();
       await latestHookResult?.refetchProposals();
       await latestHookResult?.refetchReferences();
-      await latestHookResult?.refetchWorkspace();
       expect(await latestHookResult?.refetchRoutes()).toBe(false);
       expect(await latestHookResult?.refetchExports()).toBe(false);
       await latestHookResult?.refetchAll();
     });
 
-    expect(mocks.bridge.getProject.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.getProjectWorkspace.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.listProposals.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.listReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(mocks.bridge.getWorkspaceStatus.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.listRoutes.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.listExports.invoke).not.toHaveBeenCalled();
   });
@@ -2232,8 +2609,8 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[1]! }))
       .mockResolvedValue(ok({ status: 'supported', project: projects[2]! }));
     for (const authority of projects) {
-      mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValueOnce(ok(recoveryStatus(authority)));
-      mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(authority)));
+      mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValueOnce(ok(recoveryStatus(authority)));
+      mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValueOnce(ok(chainStatus(authority)));
     }
     mocks.bridge.retryConditioningFrame.invoke.mockResolvedValue(commit(4));
     mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(5));
@@ -2287,10 +2664,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValue(ok({ status: 'supported', project: imported }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(recoveryStatus(initial)))
       .mockResolvedValue(ok(recoveryStatus(imported)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(initial)))
       .mockResolvedValue(ok(chainStatus(imported)));
 
@@ -2311,8 +2688,8 @@ describe('StudioPage schema-2 cutover', () => {
       })
     );
     expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.bridge.getChainStatus.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.projectWorkspaceChainFixture.invoke).toHaveBeenCalledTimes(1);
 
     mocks.bridge.importSeedStill.invoke.mockResolvedValueOnce(
       ok({ status: 'imported' as const, assetId: 'imported_seed', projectRevision: 4 })
@@ -2320,8 +2697,8 @@ describe('StudioPage schema-2 cutover', () => {
     fireEvent.click(importButton);
     await waitFor(() => expect(mocks.bridge.importSeedStill.invoke).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2));
-    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(2);
-    expect(mocks.bridge.getChainStatus.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.projectWorkspaceChainFixture.invoke).toHaveBeenCalledTimes(2);
     expect(mocks.bridge.importSeedStill.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
       expectedRevision: 3,
@@ -2358,7 +2735,7 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[3]! }))
       .mockResolvedValueOnce(ok({ status: 'supported', project: projects[4]! }))
       .mockResolvedValue(ok({ status: 'supported', project: projects[5]! }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockReset()
       .mockResolvedValueOnce(ok(workspaceStatus(projects[0]!)))
       .mockResolvedValueOnce(ok(workspaceStatus(projects[1]!)))
@@ -2366,7 +2743,7 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok(workspaceStatus(projects[3]!)))
       .mockResolvedValueOnce(ok(workspaceStatus(projects[4]!)))
       .mockResolvedValue(ok(workspaceStatus(projects[5]!)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockReset()
       .mockResolvedValueOnce(ok(chainStatus(projects[0]!)))
       .mockResolvedValueOnce(ok(chainStatus(projects[1]!)))
@@ -2501,10 +2878,12 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke.mockImplementation(async () =>
       ok({ status: 'supported' as const, project: { ...authority, revision } })
     );
-    mocks.bridge.getWorkspaceStatus.invoke.mockImplementation(async () =>
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async () =>
       ok(workspaceStatus({ ...authority, revision }))
     );
-    mocks.bridge.getChainStatus.invoke.mockImplementation(async () => ok(chainStatus({ ...authority, revision })));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async () =>
+      ok(chainStatus({ ...authority, revision }))
+    );
     const nextCommit = async () => {
       revision += 1;
       return commit(revision);
@@ -3018,10 +3397,10 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
       .mockResolvedValue(ok({ status: 'supported', project: advanced }));
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(current)))
       .mockResolvedValue(ok(workspaceStatus(advanced)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(current)))
       .mockResolvedValue(ok(chainStatus(advanced)));
     mocks.bridge.acceptProposal.invoke.mockResolvedValue({
@@ -3042,8 +3421,8 @@ describe('StudioPage schema-2 cutover', () => {
     );
     expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2);
     expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(2);
-    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(2);
-    expect(mocks.bridge.getChainStatus.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.projectWorkspaceChainFixture.invoke).toHaveBeenCalledTimes(2);
   });
 
   it('keeps a setting draft dirty when the post-commit snapshot is older than the commit receipt', async () => {
@@ -3063,7 +3442,7 @@ describe('StudioPage schema-2 cutover', () => {
     ).toBeVisible();
     expect(name).toHaveValue('Awaiting durable refresh');
     expect(mocks.bridge.editProject.invoke).toHaveBeenCalledTimes(1);
-    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
   });
 
   it('stops a chained close-save when another writer advances past the commit receipt', async () => {
@@ -3080,6 +3459,12 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
       .mockResolvedValue(ok({ status: 'supported', project: concurrentlyAdvanced }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(concurrentlyAdvanced)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(concurrentlyAdvanced)));
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
@@ -3101,7 +3486,7 @@ describe('StudioPage schema-2 cutover', () => {
     expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Unsaved local Brief.');
   });
 
-  it('pins a close-save chain when a project update lands during the receipt workspace refresh', async () => {
+  it('coalesces an update during close-save refresh and retains the next draft when authority advances', async () => {
     seedWorkspaceDrafts({
       'settings.name': { baseValue: 'Launch film', value: 'Saved local name' },
       'brief.text': { baseValue: 'A small launch film.', value: 'Unsaved local Brief.' },
@@ -3118,11 +3503,11 @@ describe('StudioPage schema-2 cutover', () => {
       .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
       .mockResolvedValueOnce(ok({ status: 'supported', project: committed }))
       .mockResolvedValue(ok({ status: 'supported', project: concurrentlyAdvanced }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(3)))
       .mockReturnValueOnce(stalledWorkspace.promise)
       .mockResolvedValue(ok(workspaceStatus(5)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(3)))
       .mockResolvedValueOnce(ok(chainStatus(4)))
       .mockResolvedValue(ok(chainStatus(5)));
@@ -3130,24 +3515,26 @@ describe('StudioPage schema-2 cutover', () => {
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
-    await waitFor(() => expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(1));
     let flushPromise: Promise<{ saved: boolean }> | undefined;
     act(() => {
       flushPromise = mocks.closeHandlers.flushUnsavedWork?.();
     });
     expect(flushPromise).toBeDefined();
-    await waitFor(() => expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
 
     act(() => {
       mocks.listeners.projectUpdated?.({ projectId: 'project_1' });
     });
-    await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(3));
-    await screen.findByRole('heading', { name: 'Saved local name' });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
 
     let saved: { saved: boolean } | undefined;
-    await act(async () => {
+    act(() => {
       stalledWorkspace.resolve(stalledWorkspaceResult);
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(4));
+    await screen.findByRole('heading', { name: 'Saved local name' });
+    await act(async () => {
       saved = await flushPromise;
     });
 
@@ -3157,7 +3544,11 @@ describe('StudioPage schema-2 cutover', () => {
       expectedRevision: 3,
       changes: { name: 'Saved local name' },
     });
-    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 4,
+      operations: [{ kind: 'set_brief', brief: 'Unsaved local Brief.' }],
+    });
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
     const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Unsaved local Brief.');
@@ -3379,10 +3770,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValue(ok({ status: 'supported', project: omittedRuleSnapshot }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(initial)))
       .mockResolvedValue(ok(workspaceStatus(omittedRuleSnapshot)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(initial)))
       .mockResolvedValue(ok(chainStatus(omittedRuleSnapshot)));
 
@@ -3431,10 +3822,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
       .mockResolvedValue(ok({ status: 'supported', project: omittedRuleSnapshot }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(initial)))
       .mockResolvedValue(ok(workspaceStatus(omittedRuleSnapshot)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(initial)))
       .mockResolvedValue(ok(chainStatus(omittedRuleSnapshot)));
 
@@ -3509,10 +3900,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
       .mockResolvedValue(ok({ status: 'supported', project: recovered }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(current)))
       .mockResolvedValue(ok(workspaceStatus(recovered)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(current)))
       .mockResolvedValue(ok(chainStatus(recovered)));
     mocks.bridge.retryJob.invoke.mockResolvedValue(ok(recovered.jobs.job_attention));
@@ -3531,7 +3922,7 @@ describe('StudioPage schema-2 cutover', () => {
       expectedRevision: 3,
       acknowledgePossibleDuplicateCharge: false,
     });
-    expect(mocks.bridge.getWorkspaceStatus.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(2);
 
     await expect(capturedBeatPanelActions().retryGenerationJob('job_attention', false)).resolves.toBe(false);
     await expect(capturedBeatPanelActions().cancelGenerationJob('forged_job')).resolves.toBe(false);
@@ -3551,10 +3942,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
       .mockResolvedValue(ok({ status: 'supported', project: acknowledged }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(current)))
       .mockResolvedValue(ok(workspaceStatus(acknowledged)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(current)))
       .mockResolvedValue(ok(chainStatus(acknowledged)));
     mocks.bridge.retryJob.invoke.mockResolvedValue(ok(acknowledged.jobs.job_attention));
@@ -3583,10 +3974,10 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
       .mockResolvedValue(ok({ status: 'supported', project: cancelled }));
-    mocks.bridge.getWorkspaceStatus.invoke
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(current)))
       .mockResolvedValue(ok(workspaceStatus(cancelled)));
-    mocks.bridge.getChainStatus.invoke
+    mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(current)))
       .mockResolvedValue(ok(chainStatus(cancelled)));
     mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(cancelled.jobs.job_attention));
@@ -3614,5 +4005,6 @@ describe('StudioPage schema-2 cutover', () => {
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.project.unsupportedPrototype')).toBeVisible();
     expect(screen.queryByRole('heading', { name: 'Launch film' })).not.toBeInTheDocument();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(1);
   });
 });

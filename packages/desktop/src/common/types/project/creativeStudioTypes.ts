@@ -761,8 +761,6 @@ export type StudioRendererChainStatusV2 = {
   boundaries: StudioRendererChainBoundaryV2[];
 };
 
-export type StudioGetChainStatusRequestV2 = { projectId: string };
-
 export type StudioRendererDirtyShotV2 = {
   shotId: string;
   causes: ('continuity_stale' | 'generation_out_of_date')[];
@@ -791,8 +789,6 @@ export type StudioRendererParkEligibilityV2 = {
   blockers: StudioRendererParkBlockerV2[];
 };
 
-export type StudioGetWorkspaceStatusRequestV2 = { projectId: string };
-
 export type StudioRendererWorkspaceStatusV2 = {
   projectId: string;
   projectRevision: number;
@@ -803,6 +799,17 @@ export type StudioRendererWorkspaceStatusV2 = {
   currentVideoJobs: { shotId: string; jobIds: string[] }[];
   parkEligibility: StudioRendererParkEligibilityV2[];
 };
+
+export type StudioRendererProjectWorkspaceSnapshotV2 = {
+  project: StudioRendererProjectV2;
+  workspaceStatus: StudioRendererWorkspaceStatusV2;
+  chainStatus: StudioRendererChainStatusV2;
+};
+
+export type StudioProjectWorkspaceLoadResultV2 =
+  | { status: 'supported'; snapshot: StudioRendererProjectWorkspaceSnapshotV2 }
+  | { status: 'unsupported_prototype_schema'; projectId: string }
+  | { status: 'not_found'; projectId: string };
 
 export type StudioSpendAuthorization = StudioSubmissionQuote & {
   confirmedAt: string;

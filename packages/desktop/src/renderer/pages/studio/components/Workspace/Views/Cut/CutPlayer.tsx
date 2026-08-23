@@ -126,6 +126,13 @@ type MediaBoundaryWatch = {
   timerId: number | null;
 };
 
+type PrewarmTarget = {
+  token: string;
+  segmentIndex: number;
+  assetId: string;
+  source: string;
+};
+
 const initialTransportState = (token: string): TransportState => ({
   token,
   segmentIndex: 0,
@@ -178,8 +185,11 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
 
   const [storedState, setStoredState] = useState<TransportState>(() => initialTransportState(planToken));
   const state = storedState.token === planToken ? storedState : initialTransportState(planToken);
+  const [storedPrewarmTarget, setStoredPrewarmTarget] = useState<PrewarmTarget | null>(null);
+  const prewarmTarget = storedPrewarmTarget?.token === planToken ? storedPrewarmTarget : null;
   const stateRef = useRef(state);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const prewarmVideoRef = useRef<HTMLVideoElement | null>(null);
   const playingMediaRef = useRef<HTMLVideoElement | null>(null);
   const readyMediaRef = useRef<ReadyMedia | null>(null);
   const pendingMediaSeekRef = useRef<PendingMediaSeek | null>(null);
@@ -215,6 +225,69 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
     }
     if (watch.timerId !== null) window.clearTimeout(watch.timerId);
   }, []);
+
+  const releasePrewarmMedia = useCallback((media: HTMLVideoElement): void => {
+    pauseMedia(media);
+    media.removeAttribute('src');
+    try {
+      media.load();
+    } catch {
+      // Detached native media can reject load; its source authority is already removed.
+    }
+  }, []);
+
+  const setPrewarmVideoNode = useCallback(
+    (node: HTMLVideoElement | null): void => {
+      const previous = prewarmVideoRef.current;
+      if (previous === node) return;
+      if (previous !== null) releasePrewarmMedia(previous);
+      prewarmVideoRef.current = node;
+      if (node === null) return;
+      try {
+        node.load();
+      } catch {
+        // `preload` is advisory, so request the warm-up explicitly and contain native refusal.
+      }
+    },
+    [releasePrewarmMedia]
+  );
+
+  const clearPrewarm = useCallback((token: string): void => {
+    if (activeTokenRef.current !== token) return;
+    setStoredPrewarmTarget((current) => (current?.token === token ? null : current));
+  }, []);
+
+  const armPrewarm = useCallback(
+    (token: string, segmentIndex: number, currentSequence: CutPlaybackSequence): void => {
+      if (activeTokenRef.current !== token) return;
+      const nextVideoIndex = currentSequence.segments.findIndex(
+        (futureSegment, index) => index > segmentIndex && futureSegment.kind === 'video'
+      );
+      const nextVideo = currentSequence.segments[nextVideoIndex];
+      if (nextVideoIndex < 0 || nextVideo?.kind !== 'video') {
+        clearPrewarm(token);
+        return;
+      }
+      const source = createManagedStudioAssetUrl(currentSequence.projectId, nextVideo.assetId);
+      if (source === null) {
+        clearPrewarm(token);
+        return;
+      }
+      setStoredPrewarmTarget((current) => {
+        if (activeTokenRef.current !== token) return current;
+        if (
+          current?.token === token &&
+          current.segmentIndex === nextVideoIndex &&
+          current.assetId === nextVideo.assetId &&
+          current.source === source
+        ) {
+          return current;
+        }
+        return { assetId: nextVideo.assetId, segmentIndex: nextVideoIndex, source, token };
+      });
+    },
+    [clearPrewarm]
+  );
 
   const updateCurrentState = useCallback(
     (token: string, segmentIndex: number, update: (current: TransportState) => TransportState): void => {
@@ -274,6 +347,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
   const failMedia = useCallback(
     (token: string, segmentIndex: number, media: HTMLVideoElement): void => {
       if (!isCurrentMedia(token, segmentIndex, media)) return;
+      clearPrewarm(token);
       stopMediaBoundaryWatch();
       invalidatePlayAttempt();
       pauseMedia(media);
@@ -287,7 +361,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
         failed: true,
       }));
     },
-    [invalidatePlayAttempt, isCurrentMedia, stopMediaBoundaryWatch, updateCurrentState]
+    [clearPrewarm, invalidatePlayAttempt, isCurrentMedia, stopMediaBoundaryWatch, updateCurrentState]
   );
 
   const playMedia = useCallback(
@@ -351,6 +425,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       const target = currentSequence.segments[location.segmentIndex];
       if (target === undefined) return;
 
+      if (location.segmentIndex !== activeState.segmentIndex) clearPrewarm(planToken);
       stopMediaBoundaryWatch();
       invalidatePlayAttempt();
       pauseMedia(videoRef.current);
@@ -369,7 +444,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
         slateEpoch: current.slateEpoch + 1,
       }));
     },
-    [invalidatePlayAttempt, pending, planToken, replaceCurrentState, sequence, stopMediaBoundaryWatch]
+    [clearPrewarm, invalidatePlayAttempt, pending, planToken, replaceCurrentState, sequence, stopMediaBoundaryWatch]
   );
 
   const loopRange = useCallback(
@@ -521,6 +596,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
     playingMediaRef.current = null;
     readyMediaRef.current = null;
     pendingMediaSeekRef.current = null;
+    setStoredPrewarmTarget(null);
     const reset = initialTransportState(planToken);
     stateRef.current = reset;
     setStoredState(reset);
@@ -548,6 +624,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       startedAt,
     };
     slateClockRef.current = slateClock;
+    armPrewarm(token, segmentIndex, sequence);
     const timer = window.setInterval(() => {
       const activeState = stateRef.current;
       if (
@@ -586,6 +663,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
     };
   }, [
     advanceSegment,
+    armPrewarm,
     pending,
     planToken,
     loopRange,
@@ -965,6 +1043,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
                     }
                     updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, buffering: false }));
                     if (sequence !== null) startMediaBoundaryWatch(token, segmentIndex, media, segment, sequence);
+                    if (sequence !== null) armPrewarm(token, segmentIndex, sequence);
                   }}
                   onRateChange={(event) => {
                     const media = event.currentTarget;
@@ -1022,6 +1101,20 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
           </>
         )}
       </div>
+      {prewarmTarget === null ? null : (
+        <video
+          key={`${prewarmTarget.token}:prewarm:${prewarmTarget.segmentIndex}:${prewarmTarget.assetId}`}
+          ref={setPrewarmVideoNode}
+          aria-hidden='true'
+          className={styles.prewarmMedia}
+          data-cut-prewarm-media
+          muted
+          playsInline
+          preload='auto'
+          src={prewarmTarget.source}
+          tabIndex={-1}
+        />
+      )}
       <div aria-label={t(`${PREVIEW_ROOT}.controlsLabel`)} className={styles.transport} data-cut-transport role='group'>
         <Button
           aria-disabled={state.failed ? true : undefined}

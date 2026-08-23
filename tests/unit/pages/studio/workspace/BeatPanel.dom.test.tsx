@@ -875,6 +875,370 @@ describe('BeatPlayer', () => {
     );
   };
 
+  const contiguousVideoBeat = (): WorkspaceBeatProjection =>
+    makeBeat(
+      'beat_video_run',
+      [
+        makeShot('shot_video_1', 0, {
+          currentPicture: makeCurrentPicture('video_1', 10, 'poster_1'),
+          durationSeconds: 8,
+          playedDurationSeconds: 8,
+          planningBoundary: { shotId: 'shot_video_1', startSeconds: 0, endSeconds: 8 },
+          trimInSeconds: 1,
+          trimOutSeconds: 1,
+        }),
+        makeShot('shot_video_2', 1, {
+          currentPicture: makeCurrentPicture('video_2', 4, 'poster_2'),
+          durationSeconds: 4,
+          playedDurationSeconds: 4,
+          planningBoundary: { shotId: 'shot_video_2', startSeconds: 8, endSeconds: 12 },
+        }),
+        makeShot('shot_video_3', 2, {
+          currentPicture: makeCurrentPicture('video_3', 8, 'poster_3'),
+          durationSeconds: 7,
+          playedDurationSeconds: 7,
+          planningBoundary: { shotId: 'shot_video_3', startSeconds: 12, endSeconds: 19 },
+          trimInSeconds: 0.5,
+          trimOutSeconds: 0.5,
+        }),
+      ],
+      { actualSeconds: 19, targetSeconds: 19 }
+    );
+
+  it('arms from exact native playback, keeps one inert node stable, and cleans it on retarget, seek, and unmount', () => {
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const beat = contiguousVideoBeat();
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => (
+          <>
+            <button onClick={() => playback.onSeek(0)} type='button'>
+              Seek to Beat start
+            </button>
+            <output data-position={playback.positionSeconds} data-testid='prewarm-position' />
+          </>
+        )}
+      </BeatPlayer>
+    );
+    let unmounted = false;
+
+    try {
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      const first = previewVideo();
+      const firstFacts = installMediaFacts(first, { duration: 10 });
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      fireEvent.loadedMetadata(first);
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      fireEvent.playing(first);
+
+      const firstPrewarm = document.querySelector<HTMLVideoElement>('[data-beat-prewarm-media]')!;
+      expect(firstPrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_2');
+      expect(firstPrewarm).toHaveAttribute('preload', 'auto');
+      expect(firstPrewarm).not.toHaveAttribute('hidden');
+      expect(firstPrewarm).toHaveAttribute('aria-hidden', 'true');
+      expect(firstPrewarm).toHaveProperty('muted', true);
+      expect(firstPrewarm).toHaveProperty('autoplay', false);
+      expect(firstPrewarm).not.toHaveAttribute('data-beat-preview-media');
+      expect(firstPrewarm).not.toHaveAttribute('poster');
+      expect(firstPrewarm.className).not.toBe('');
+      expect(load.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(1);
+      expect(pause.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(0);
+      expect(play).toHaveBeenCalledTimes(1);
+
+      fireEvent.loadedMetadata(firstPrewarm);
+      fireEvent.playing(firstPrewarm);
+      fireEvent.timeUpdate(firstPrewarm);
+      fireEvent.waiting(firstPrewarm);
+      fireEvent.ended(firstPrewarm);
+      fireEvent.error(firstPrewarm);
+      expect(previewVideo()).toBe(first);
+      expect(screen.getByTestId('prewarm-position')).toHaveAttribute('data-position', '0');
+      expect(screen.queryByText('The current picture could not be previewed.')).toBeNull();
+      expect(play).toHaveBeenCalledTimes(1);
+
+      firstFacts.setCurrentTime(2);
+      fireEvent.timeUpdate(first);
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(firstPrewarm);
+      fireEvent.click(screen.getByRole('button', { name: 'Pause Beat' }));
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(firstPrewarm);
+      expect(firstPrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_2');
+      expect(load.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(1);
+      expect(pause.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(0);
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+      fireEvent.playing(first);
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(firstPrewarm);
+
+      firstFacts.setCurrentTime(9);
+      fireEvent.timeUpdate(first);
+      const second = previewVideo();
+      expect(second).not.toBe(first);
+      expect(second).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_2');
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(firstPrewarm);
+
+      installMediaFacts(second, { duration: 4 });
+      fireEvent.loadedMetadata(second);
+      fireEvent.playing(second);
+      const secondPrewarm = document.querySelector<HTMLVideoElement>('[data-beat-prewarm-media]')!;
+      expect(secondPrewarm).not.toBe(firstPrewarm);
+      expect(secondPrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_3');
+      expect(firstPrewarm).not.toHaveAttribute('src');
+      expect(pause.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(1);
+      expect(load.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(2);
+      expect(load.mock.contexts.filter((context) => context === secondPrewarm)).toHaveLength(1);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Seek to Beat start' }));
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      expect(secondPrewarm).not.toHaveAttribute('src');
+      expect(pause.mock.contexts.filter((context) => context === secondPrewarm)).toHaveLength(1);
+      expect(load.mock.contexts.filter((context) => context === secondPrewarm)).toHaveLength(2);
+
+      const soughtFirst = previewVideo();
+      installMediaFacts(soughtFirst, { duration: 10 });
+      fireEvent.loadedMetadata(soughtFirst);
+      fireEvent.playing(soughtFirst);
+      const finalPrewarm = document.querySelector<HTMLVideoElement>('[data-beat-prewarm-media]')!;
+      expect(finalPrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_2');
+      expect(finalPrewarm).not.toBe(firstPrewarm);
+
+      result.unmount();
+      unmounted = true;
+      expect(finalPrewarm).not.toHaveAttribute('src');
+      expect(pause.mock.contexts.filter((context) => context === finalPrewarm)).toHaveLength(1);
+      expect(load.mock.contexts.filter((context) => context === finalPrewarm)).toHaveLength(2);
+    } finally {
+      if (!unmounted) result.unmount();
+      load.mockRestore();
+      pause.mockRestore();
+      play.mockRestore();
+    }
+  });
+
+  it('scans across a slate and retains the warmed video through that slate transition', () => {
+    vi.useFakeTimers();
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const beat = makeBeat(
+      'beat_slate_boundary',
+      [
+        makeShot('shot_video', 0, {
+          currentPicture: makeCurrentPicture('video_before_slate', 8),
+          planningBoundary: { shotId: 'shot_video', startSeconds: 0, endSeconds: 8 },
+        }),
+        makeShot('shot_slate', 1, {
+          durationSeconds: 6,
+          playedDurationSeconds: 6,
+          planningBoundary: { shotId: 'shot_slate', startSeconds: 8, endSeconds: 14 },
+        }),
+        makeShot('shot_after_slate', 2, {
+          currentPicture: makeCurrentPicture('video_after_slate', 4),
+          durationSeconds: 4,
+          playedDurationSeconds: 4,
+          planningBoundary: { shotId: 'shot_after_slate', startSeconds: 14, endSeconds: 18 },
+        }),
+      ],
+      { actualSeconds: 18, targetSeconds: 18 }
+    );
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => <output data-position={playback.positionSeconds} data-testid='slate-prewarm-position' />}
+      </BeatPlayer>
+    );
+
+    try {
+      const first = previewVideo();
+      const firstFacts = installMediaFacts(first, { duration: 8 });
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      fireEvent.loadedMetadata(first);
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      fireEvent.playing(first);
+      const prewarm = document.querySelector<HTMLVideoElement>('[data-beat-prewarm-media]')!;
+      expect(prewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_after_slate');
+
+      firstFacts.setCurrentTime(8);
+      fireEvent.timeUpdate(first);
+      expect(document.querySelector('[data-beat-preview-media][data-media-kind="slate"]')).toBeInTheDocument();
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(prewarm);
+      act(() => vi.advanceTimersByTime(100));
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(prewarm);
+      act(() => vi.advanceTimersByTime(5_900));
+      expect(previewVideo()).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_after_slate');
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(prewarm);
+
+      const afterSlate = previewVideo();
+      installMediaFacts(afterSlate, { duration: 4 });
+      fireEvent.loadedMetadata(afterSlate);
+      fireEvent.playing(afterSlate);
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      expect(prewarm).not.toHaveAttribute('src');
+      expect(pause.mock.contexts.filter((context) => context === prewarm)).toHaveLength(1);
+      expect(load.mock.contexts.filter((context) => context === prewarm)).toHaveLength(2);
+    } finally {
+      result.unmount();
+      vi.useRealTimers();
+      load.mockRestore();
+      pause.mockRestore();
+      play.mockRestore();
+    }
+  });
+
+  it('arms the first future video when an opening slate clock starts', () => {
+    vi.useFakeTimers();
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const beat = makeBeat(
+      'beat_slate_first',
+      [
+        makeShot('shot_opening_slate', 0, {
+          durationSeconds: 4,
+          playedDurationSeconds: 4,
+          planningBoundary: { shotId: 'shot_opening_slate', startSeconds: 0, endSeconds: 4 },
+        }),
+        makeShot('shot_opening_video', 1, {
+          currentPicture: makeCurrentPicture('video_after_opening_slate', 4),
+          durationSeconds: 4,
+          playedDurationSeconds: 4,
+          planningBoundary: { shotId: 'shot_opening_video', startSeconds: 4, endSeconds: 8 },
+        }),
+      ],
+      { actualSeconds: 8, targetSeconds: 8 }
+    );
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => <output>{playback.positionSeconds}</output>}
+      </BeatPlayer>
+    );
+
+    try {
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+      expect(document.querySelector('[data-beat-prewarm-media]')).toHaveAttribute(
+        'src',
+        'weprompt-studio://asset/project_1/video_after_opening_slate'
+      );
+    } finally {
+      result.unmount();
+      vi.useRealTimers();
+      load.mockRestore();
+      pause.mockRestore();
+    }
+  });
+
+  it('cleans the warmed target when authoritative current media fails', () => {
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const beat = contiguousVideoBeat();
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => <output>{playback.positionSeconds}</output>}
+      </BeatPlayer>
+    );
+
+    try {
+      const current = previewVideo();
+      installMediaFacts(current, { duration: 10 });
+      fireEvent.loadedMetadata(current);
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+      fireEvent.playing(current);
+      const prewarm = document.querySelector<HTMLVideoElement>('[data-beat-prewarm-media]')!;
+
+      fireEvent.error(current);
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+      expect(prewarm).not.toHaveAttribute('src');
+      expect(pause.mock.contexts.filter((context) => context === prewarm)).toHaveLength(1);
+      expect(load.mock.contexts.filter((context) => context === prewarm)).toHaveLength(2);
+      expect(screen.getByText('The current picture could not be previewed.')).toBeVisible();
+    } finally {
+      result.unmount();
+      load.mockRestore();
+      pause.mockRestore();
+      play.mockRestore();
+    }
+  });
+
+  it.each(['plan', 'project', 'revision', 'order'] as const)(
+    'drops the prewarm on a %s change and ignores detached prewarm events',
+    (change) => {
+      const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+      const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+      const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+      const beat = contiguousVideoBeat();
+      const projection = makeProjection([beat]);
+      const result = render(
+        <BeatPlayer beat={beat} projectId='project_1' projection={projection}>
+          {(playback) => <output data-position={playback.positionSeconds} data-testid='prewarm-reset-position' />}
+        </BeatPlayer>
+      );
+
+      try {
+        const current = previewVideo();
+        installMediaFacts(current, { duration: 10 });
+        fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+        fireEvent.loadedMetadata(current);
+        fireEvent.playing(current);
+        const stalePrewarm = document.querySelector<HTMLVideoElement>('[data-beat-prewarm-media]')!;
+        expect(stalePrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_2');
+
+        let nextBeat = structuredClone(beat);
+        let nextProjectId = 'project_1';
+        let nextProjection = makeProjection([nextBeat]);
+        if (change === 'plan') {
+          nextBeat.shots[1]!.currentPicture!.assetId = 'video_2_replaced';
+          nextProjection = makeProjection([nextBeat]);
+        } else if (change === 'project') {
+          nextProjectId = 'project_2';
+          nextProjection = makeProjection([nextBeat], { projectId: nextProjectId });
+        } else if (change === 'revision') {
+          nextProjection = makeProjection([nextBeat], { projectRevision: projection.projectRevision + 1 });
+        } else {
+          const second = {
+            ...nextBeat.shots[1]!,
+            planningBoundary: { shotId: 'shot_video_2', startSeconds: 0, endSeconds: 4 },
+          };
+          const first = {
+            ...nextBeat.shots[0]!,
+            planningBoundary: { shotId: 'shot_video_1', startSeconds: 4, endSeconds: 12 },
+          };
+          const third = {
+            ...nextBeat.shots[2]!,
+            planningBoundary: { shotId: 'shot_video_3', startSeconds: 12, endSeconds: 19 },
+          };
+          nextBeat = { ...nextBeat, shots: [second, first, third] };
+          nextProjection = makeProjection([nextBeat]);
+        }
+        result.rerender(
+          <BeatPlayer beat={nextBeat} projectId={nextProjectId} projection={nextProjection}>
+            {(playback) => <output data-position={playback.positionSeconds} data-testid='prewarm-reset-position' />}
+          </BeatPlayer>
+        );
+
+        expect(document.querySelector('[data-beat-prewarm-media]')).toBeNull();
+        expect(stalePrewarm).not.toHaveAttribute('src');
+        expect(pause.mock.contexts.filter((context) => context === stalePrewarm)).toHaveLength(1);
+        expect(load.mock.contexts.filter((context) => context === stalePrewarm)).toHaveLength(2);
+        expect(screen.getByTestId('prewarm-reset-position')).toHaveAttribute('data-position', '0');
+        expect(screen.getByRole('button', { name: 'Play Beat' })).toBeInTheDocument();
+        fireEvent.loadedMetadata(stalePrewarm);
+        fireEvent.playing(stalePrewarm);
+        fireEvent.timeUpdate(stalePrewarm);
+        fireEvent.ended(stalePrewarm);
+        fireEvent.error(stalePrewarm);
+        expect(screen.getByTestId('prewarm-reset-position')).toHaveAttribute('data-position', '0');
+        expect(screen.queryByText('The current picture could not be previewed.')).toBeNull();
+      } finally {
+        result.unmount();
+        load.mockRestore();
+        pause.mockRestore();
+        play.mockRestore();
+      }
+    }
+  );
+
   it('plays only the exact picture trim, shows its poster during seek, and crosses into the planned slate', () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
@@ -1599,6 +1963,13 @@ describe('BeatPanel', () => {
     expect(previewColumn).toMatch(/inline-size:\s*404px/);
     expect(previewColumn).toMatch(/flex:\s*none/);
     expect(previewColumn).toMatch(/gap:\s*7px/);
+    const prewarmMedia = cssRuleBody(css, '.prewarmMedia');
+    expect(prewarmMedia).toMatch(/position:\s*absolute/);
+    expect(prewarmMedia).toMatch(/inline-size:\s*1px/);
+    expect(prewarmMedia).toMatch(/block-size:\s*1px/);
+    expect(prewarmMedia).toMatch(/clip-path:\s*inset\(50%\)/);
+    expect(prewarmMedia).not.toMatch(/display:\s*none/);
+    expect(prewarmMedia).not.toMatch(/visibility:\s*hidden/);
     expect(cssRuleBody(css, '.shotInspector')).toMatch(/flex:\s*1\s+1\s+0/);
     expect(cssRuleBody(css, '.shotCard')).toMatch(/padding:\s*18px\s+22px/);
     expect(cssRuleBody(css, '.shotCard')).toMatch(/gap:\s*18px/);

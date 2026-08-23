@@ -844,8 +844,7 @@ export const nativeBridgePayloadSchemas = {
     .strict(),
   'creative-studio.apply-authoring-batch': studioV2ApplyAuthoringBatchSchema,
   'creative-studio.undo-last': z.object({ ...studioV2MutationRequestShape, entryId: safeIdSchema }).strict(),
-  'creative-studio.get-workspace-status': studioV2ProjectRequestSchema,
-  'creative-studio.get-chain-status': studioV2ProjectRequestSchema,
+  'creative-studio.get-project-workspace': studioV2ProjectRequestSchema,
   'creative-studio.retry-conditioning-frame': z
     .object({ ...studioV2MutationRequestShape, dependentShotId: safeIdSchema })
     .strict(),

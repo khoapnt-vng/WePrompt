@@ -222,7 +222,7 @@ vi.mock('react-i18next', () => ({
 }));
 
 import { CutView, type CutActions } from '@/renderer/pages/studio/components/Workspace/Views/Cut';
-import { CutPlayer } from '@/renderer/pages/studio/components/Workspace/Views/Cut/CutPlayer';
+import { CutPlayer, type CutPlayerHandle } from '@/renderer/pages/studio/components/Workspace/Views/Cut/CutPlayer';
 
 const cut = (overrides: Partial<WorkspaceCutProjection> = {}): WorkspaceCutProjection => ({
   orderReady: true,
@@ -831,6 +831,7 @@ describe('the truthful Cut player and transport', () => {
   });
 
   const mockMedia = () => ({
+    load: vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined),
     pause: vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined),
     play: vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined),
   });
@@ -862,6 +863,221 @@ describe('the truthful Cut player and transport', () => {
     expect(within(transport).getByText('Picture only — the bed is muted here')).toBeVisible();
     expect(document.querySelector('audio')).toBeNull();
   });
+
+  it('arms from exact native playback, stays stable through pause and slate, and cleans on every retarget', async () => {
+    vi.useFakeTimers();
+    const media = mockMedia();
+    renderCutPlayer();
+
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+    const first = mediaElement();
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+    setMediaNumber(first, 'duration', 10);
+    fireEvent.loadedMetadata(first);
+    await act(async () => Promise.resolve());
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+    fireEvent.playing(first);
+
+    const firstPrewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+    expect(firstPrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+    expect(firstPrewarm).toHaveAttribute('preload', 'auto');
+    expect(firstPrewarm).not.toHaveAttribute('hidden');
+    expect(firstPrewarm).toHaveAttribute('aria-hidden', 'true');
+    expect(firstPrewarm).toHaveProperty('muted', true);
+    expect(firstPrewarm).toHaveProperty('autoplay', false);
+    expect(firstPrewarm).not.toHaveAttribute('data-cut-preview-media');
+    expect(firstPrewarm).not.toHaveAttribute('poster');
+    expect(firstPrewarm.className).not.toBe('');
+    expect(media.load.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(1);
+    expect(media.pause.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(0);
+    expect(media.play).toHaveBeenCalledTimes(1);
+
+    fireEvent.loadedMetadata(firstPrewarm);
+    fireEvent.playing(firstPrewarm);
+    fireEvent.timeUpdate(firstPrewarm);
+    fireEvent.waiting(firstPrewarm);
+    fireEvent.ended(firstPrewarm);
+    fireEvent.error(firstPrewarm);
+    expect(mediaElement()).toBe(first);
+    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
+    expect(screen.getByRole('status')).not.toHaveTextContent('This preview could not be loaded.');
+    expect(media.play).toHaveBeenCalledTimes(1);
+
+    setMediaNumber(first, 'currentTime', 2);
+    fireEvent.timeUpdate(first);
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(firstPrewarm);
+    fireEvent.click(screen.getByRole('button', { name: 'Pause film' }));
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(firstPrewarm);
+    expect(firstPrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+    expect(media.load.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(1);
+    expect(media.pause.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+    fireEvent.playing(first);
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(firstPrewarm);
+
+    setMediaNumber(first, 'currentTime', 8);
+    fireEvent.timeUpdate(first);
+    const second = mediaElement();
+    expect(second).not.toBe(first);
+    expect(second).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(firstPrewarm);
+
+    setMediaNumber(second, 'duration', 4);
+    fireEvent.loadedMetadata(second);
+    await act(async () => Promise.resolve());
+    fireEvent.playing(second);
+    const secondPrewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+    expect(secondPrewarm).not.toBe(firstPrewarm);
+    expect(secondPrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_3');
+    expect(firstPrewarm).not.toHaveAttribute('src');
+    expect(media.pause.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(1);
+    expect(media.load.mock.contexts.filter((context) => context === firstPrewarm)).toHaveLength(2);
+    expect(media.load.mock.contexts.filter((context) => context === secondPrewarm)).toHaveLength(1);
+
+    setMediaNumber(second, 'currentTime', 4);
+    fireEvent.timeUpdate(second);
+    expect(document.querySelector('[data-cut-preview-media][data-media-kind="slate"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(secondPrewarm);
+    act(() => vi.advanceTimersByTime(100));
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(secondPrewarm);
+    act(() => vi.advanceTimersByTime(4_900));
+    const final = mediaElement();
+    expect(final).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_3');
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(secondPrewarm);
+
+    setMediaNumber(final, 'duration', 8);
+    fireEvent.loadedMetadata(final);
+    await act(async () => Promise.resolve());
+    fireEvent.playing(final);
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+    expect(secondPrewarm).not.toHaveAttribute('src');
+    expect(media.pause.mock.contexts.filter((context) => context === secondPrewarm)).toHaveLength(1);
+    expect(media.load.mock.contexts.filter((context) => context === secondPrewarm)).toHaveLength(2);
+  });
+
+  it('arms the first future video when an opening slate clock starts', () => {
+    vi.useFakeTimers();
+    mockMedia();
+    renderCutPlayer(slateFirstProjection());
+
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    expect(document.querySelector('[data-cut-prewarm-media]')).toHaveAttribute(
+      'src',
+      'weprompt-studio://asset/project_1/take_1'
+    );
+  });
+
+  it('cleans a warmed target on a cross-segment seek and rearms only after new native playback', async () => {
+    const media = mockMedia();
+    const player = React.createRef<CutPlayerHandle>();
+    const current = playableProjection();
+    const view = render(<CutPlayer ref={player} pending={false} projectId='project_1' projection={current} />);
+    const first = mediaElement();
+    setMediaNumber(first, 'duration', 10);
+    fireEvent.loadedMetadata(first);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+    fireEvent.playing(first);
+    const firstPrewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+
+    setMediaNumber(first, 'currentTime', 8);
+    fireEvent.timeUpdate(first);
+    const second = mediaElement();
+    setMediaNumber(second, 'duration', 4);
+    fireEvent.loadedMetadata(second);
+    await act(async () => Promise.resolve());
+    fireEvent.playing(second);
+    const stalePrewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+    expect(stalePrewarm).not.toBe(firstPrewarm);
+    expect(stalePrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_3');
+
+    act(() => player.current?.seek(0));
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+    expect(stalePrewarm).not.toHaveAttribute('src');
+    expect(media.pause.mock.contexts.filter((context) => context === stalePrewarm)).toHaveLength(1);
+    expect(media.load.mock.contexts.filter((context) => context === stalePrewarm)).toHaveLength(2);
+
+    const soughtFirst = mediaElement();
+    setMediaNumber(soughtFirst, 'duration', 10);
+    fireEvent.loadedMetadata(soughtFirst);
+    await act(async () => Promise.resolve());
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+    fireEvent.playing(soughtFirst);
+    const finalPrewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+    expect(finalPrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+
+    view.unmount();
+    expect(finalPrewarm).not.toHaveAttribute('src');
+    expect(media.pause.mock.contexts.filter((context) => context === finalPrewarm)).toHaveLength(1);
+    expect(media.load.mock.contexts.filter((context) => context === finalPrewarm)).toHaveLength(2);
+  });
+
+  it('cleans the warmed target when authoritative current media fails', async () => {
+    const media = mockMedia();
+    renderCutPlayer();
+    const current = mediaElement();
+    setMediaNumber(current, 'duration', 10);
+    fireEvent.loadedMetadata(current);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+    fireEvent.playing(current);
+    const prewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+
+    fireEvent.error(current);
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+    expect(prewarm).not.toHaveAttribute('src');
+    expect(media.pause.mock.contexts.filter((context) => context === prewarm)).toHaveLength(1);
+    expect(media.load.mock.contexts.filter((context) => context === prewarm)).toHaveLength(2);
+    expect(screen.getByRole('status')).toHaveTextContent('This preview could not be loaded.');
+  });
+
+  it.each(['plan', 'project', 'revision', 'order', 'pending'] as const)(
+    'drops the prewarm on a %s change and ignores detached prewarm events',
+    async (change) => {
+      const media = mockMedia();
+      const current = playableProjection();
+      const view = renderCutPlayer(current);
+      const first = mediaElement();
+      setMediaNumber(first, 'duration', 10);
+      fireEvent.loadedMetadata(first);
+      fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+      await act(async () => Promise.resolve());
+      fireEvent.playing(first);
+      const stalePrewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+      expect(stalePrewarm).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_2');
+
+      let nextProjectId = 'project_1';
+      let nextProjection = structuredClone(current);
+      if (change === 'plan') {
+        nextProjection.activeBeats[0]!.shots[1]!.currentPicture!.assetId = 'take_2_replaced';
+      } else if (change === 'project') {
+        nextProjectId = 'project_2';
+        nextProjection = { ...nextProjection, projectId: nextProjectId };
+      } else if (change === 'revision') {
+        nextProjection = { ...nextProjection, projectRevision: nextProjection.projectRevision + 1 };
+      } else if (change === 'order') {
+        nextProjection = slateFirstProjection();
+      }
+      view.rerender(<CutPlayer pending={change === 'pending'} projectId={nextProjectId} projection={nextProjection} />);
+
+      expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
+      expect(stalePrewarm).not.toHaveAttribute('src');
+      expect(media.pause.mock.contexts.filter((context) => context === stalePrewarm)).toHaveLength(1);
+      expect(media.load.mock.contexts.filter((context) => context === stalePrewarm)).toHaveLength(2);
+      expect(screen.getByText('0:00 / 0:23')).toBeVisible();
+      expect(screen.getByRole('button', { name: 'Play film' })).toBeInTheDocument();
+      fireEvent.loadedMetadata(stalePrewarm);
+      fireEvent.playing(stalePrewarm);
+      fireEvent.timeUpdate(stalePrewarm);
+      fireEvent.ended(stalePrewarm);
+      fireEvent.error(stalePrewarm);
+      expect(screen.getByText('0:00 / 0:23')).toBeVisible();
+      expect(screen.getByRole('status')).not.toHaveTextContent('This preview could not be loaded.');
+    }
+  );
 
   it('waits for an exact asynchronous trim-in seek before playing a pre-metadata Play request', async () => {
     const media = mockMedia();
@@ -1387,6 +1603,7 @@ describe('the truthful Cut player and transport', () => {
 
     expect(source).toContain('data-cut-preview');
     expect(source).toContain('data-cut-preview-media');
+    expect(source).toContain('data-cut-prewarm-media');
     expect(source).toContain('data-cut-preview-badge');
     expect(source).toContain('data-cut-transport');
     expect(source).toContain('data-cut-play');
@@ -1398,6 +1615,10 @@ describe('the truthful Cut player and transport', () => {
     expect(css).toMatch(/\.hero\s*\{[^}]*gap:\s*13px/s);
     expect(css).toMatch(/\.preview\s*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/s);
     expect(css).toMatch(/\.previewMedia\s*\{[^}]*object-fit:\s*contain/s);
+    expect(css).toMatch(
+      /\.prewarmMedia\s*\{[^}]*position:\s*absolute[^}]*inline-size:\s*1px[^}]*block-size:\s*1px[^}]*clip-path:\s*inset\(50%\)/s
+    );
+    expect(css).not.toMatch(/\.prewarmMedia\s*\{[^}]*(?:display:\s*none|visibility:\s*hidden)/s);
     expect(css).toMatch(
       /@container\s*\(max-width:\s*859px\)[\s\S]*?\.hero\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s
     );

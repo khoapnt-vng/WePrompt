@@ -48,6 +48,7 @@ import {
   type StudioMutationReducerContextV2,
   type StudioProjectListResultV2,
   type StudioProjectLoadResultV2,
+  type StudioProjectWorkspaceLoadResultV2,
   type StudioProjectV2,
   type StudioPrepareSubmissionRequestV2,
   type StudioProposalV2,
@@ -57,7 +58,6 @@ import {
   type StudioReferenceRequestDecisionV2,
   type StudioReferenceRequestV2,
   type StudioRemoveConnectionRequest,
-  type StudioRendererChainStatusV2,
   type StudioRendererExportCatalogV2,
   type StudioRendererJobV2,
   type StudioRendererPreparedSubmissionOptionsV2,
@@ -277,8 +277,7 @@ export type CreativeStudioServiceV2 = {
   }): Promise<StudioAssetV2>;
   listRoutes(input?: { projectId?: string }): Promise<StudioRouteCatalogV2>;
   getGenerationReadiness(input: { projectId: string; beatIds: string[] }): Promise<StudioGenerationReadinessV2>;
-  getWorkspaceStatus(input: { projectId: string }): Promise<StudioRendererWorkspaceStatusV2>;
-  getChainStatus(input: { projectId: string }): Promise<StudioRendererChainStatusV2>;
+  getProjectWorkspace(input: { projectId: string }): Promise<StudioProjectWorkspaceLoadResultV2>;
   listProposals(input: { projectId: string }): Promise<StudioProposalV2[]>;
   acceptProposal(input: { projectId: string; proposalId: string }): Promise<{
     proposal: StudioProposalV2;
@@ -710,6 +709,21 @@ const isDenseArray = (value: unknown, maximum: number): value is unknown[] => {
 
 const ownValue = <Value>(record: Record<string, Value>, id: string): Value | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
+
+const forEachStudioReadBounded = async <Value>(
+  values: readonly Value[],
+  operation: (value: Value) => Promise<void>
+): Promise<void> => {
+  let nextIndex = 0;
+  const worker = async (): Promise<void> => {
+    while (nextIndex < values.length) {
+      const value = values[nextIndex++];
+      // eslint-disable-next-line no-await-in-loop -- Each worker is sequential so the shared pool stays bounded at eight reads.
+      if (value !== undefined) await operation(value);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, values.length) }, worker));
+};
 
 const ownedShotAssetV2 = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
   const asset = ownValue(project.assets, assetId);
@@ -2372,32 +2386,96 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       };
     },
 
-    async getWorkspaceStatus(input): Promise<StudioRendererWorkspaceStatusV2> {
-      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio workspace request');
-      assertSafeId(input.projectId, 'project id');
-      return projectStudioWorkspaceStatusV2(await loadSupported(input.projectId));
-    },
-
-    async getChainStatus(input): Promise<StudioRendererChainStatusV2> {
-      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio chain request');
-      assertSafeId(input.projectId, 'project id');
-      const project = await loadSupported(input.projectId);
-      const verifiedReadyExtractions = new Map<string, StudioVerifiedConditioningFrameV2>();
-      const mediaStore = deps.mediaStore;
-      if (mediaStore !== undefined) {
-        await Promise.all(
-          projectStudioChainBoundaryVerificationIdsV2(project).map(async (extractionId) => {
-            let verified: StudioVerifiedConditioningFrameV2 | null;
-            try {
-              verified = await mediaStore.verifyConditioningFrameV2({ projectId: project.id, extractionId });
-            } catch {
-              verified = null;
-            }
-            if (verified !== null) verifiedReadyExtractions.set(extractionId, verified);
-          })
-        );
+    async getProjectWorkspace(input): Promise<StudioProjectWorkspaceLoadResultV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
+        throw invalid('Invalid Studio project workspace request');
       }
-      return projectStudioChainStatusV2(project, verifiedReadyExtractions);
+      assertSafeId(input.projectId, 'project id');
+      try {
+        return await deps.store.withProjectAuthorityV2(input.projectId, async (authority) => {
+          const { project } = authority;
+          const verifiedReadyExtractions = new Map<string, StudioVerifiedConditioningFrameV2>();
+          const mediaStore = deps.mediaStore;
+          if (mediaStore !== undefined) {
+            await forEachStudioReadBounded(
+              projectStudioChainBoundaryVerificationIdsV2(project),
+              async (extractionId) => {
+                const extraction = ownValue(project.frameExtractions, extractionId);
+                if (
+                  extraction?.id !== extractionId ||
+                  extraction.status !== 'ready' ||
+                  extraction.frameAssetId === null
+                ) {
+                  return;
+                }
+                const frameAsset = ownValue(project.assets, extraction.frameAssetId);
+                const shot = ownValue(project.shots, extraction.shotId);
+                if (
+                  frameAsset === undefined ||
+                  shot === undefined ||
+                  frameAsset.id !== extraction.frameAssetId ||
+                  frameAsset.projectId !== project.id ||
+                  frameAsset.shotId !== extraction.shotId ||
+                  frameAsset.mediaKind !== 'image' ||
+                  frameAsset.managedAsset.collection !== 'conditioningFrames' ||
+                  !shot.assetIds.includes(frameAsset.id)
+                ) {
+                  return;
+                }
+                let resolved: Awaited<ReturnType<StudioMediaStore['resolveAssetWithProjectAuthorityV2']>>;
+                try {
+                  resolved = await mediaStore.resolveAssetWithProjectAuthorityV2(authority, frameAsset.id);
+                } catch {
+                  return;
+                }
+                if (
+                  resolved === null ||
+                  resolved.asset.id !== frameAsset.id ||
+                  resolved.asset.projectId !== frameAsset.projectId ||
+                  resolved.asset.shotId !== frameAsset.shotId ||
+                  resolved.asset.mediaKind !== frameAsset.mediaKind ||
+                  resolved.asset.mimeType !== frameAsset.mimeType ||
+                  resolved.asset.byteSize !== frameAsset.byteSize ||
+                  resolved.asset.sha256 !== frameAsset.sha256 ||
+                  resolved.asset.managedAsset.collection !== frameAsset.managedAsset.collection ||
+                  resolved.asset.managedAsset.fileName !== frameAsset.managedAsset.fileName
+                ) {
+                  return;
+                }
+                verifiedReadyExtractions.set(extractionId, {
+                  extractionId: extraction.id,
+                  shotId: extraction.shotId,
+                  videoAssetId: extraction.videoAssetId,
+                  endpointSeconds: extraction.endpointSeconds,
+                  frameAssetId: frameAsset.id,
+                  byteSize: frameAsset.byteSize,
+                  sha256: frameAsset.sha256,
+                });
+              }
+            );
+          }
+          if (authority.assertCurrent === undefined) {
+            throw new CreativeStudioStoreError('storage_error', 'Studio project authority cannot be verified');
+          }
+          await authority.assertCurrent();
+          return {
+            status: 'supported',
+            snapshot: {
+              project: toRendererProject(project),
+              workspaceStatus: projectStudioWorkspaceStatusV2(project),
+              chainStatus: projectStudioChainStatusV2(project, verifiedReadyExtractions),
+            },
+          };
+        });
+      } catch (error) {
+        if (
+          error instanceof CreativeStudioStoreError &&
+          (error.code === 'not_found' || error.code === 'unsupported_prototype_schema')
+        ) {
+          return { status: error.code, projectId: input.projectId };
+        }
+        throw error;
+      }
     },
 
     async listProposals(input): Promise<StudioProposalV2[]> {

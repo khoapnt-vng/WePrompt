@@ -82,6 +82,13 @@ type MediaBoundaryWatch = ReadyMedia & {
   timerId: number | null;
 };
 
+type PrewarmTarget = {
+  token: string;
+  segmentIndex: number;
+  assetId: string;
+  source: string;
+};
+
 const initialTransportState = (token: string): TransportState => ({
   token,
   segmentIndex: 0,
@@ -125,8 +132,11 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   const activeTokenRef = useRef(planToken);
   const [storedState, setStoredState] = useState<TransportState>(() => initialTransportState(planToken));
   const state = storedState.token === planToken ? storedState : initialTransportState(planToken);
+  const [storedPrewarmTarget, setStoredPrewarmTarget] = useState<PrewarmTarget | null>(null);
+  const prewarmTarget = storedPrewarmTarget?.token === planToken ? storedPrewarmTarget : null;
   const stateRef = useRef(state);
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const prewarmVideoRef = useRef<HTMLVideoElement | null>(null);
   const readyMediaRef = useRef<ReadyMedia | null>(null);
   const pendingMediaSeekRef = useRef<PendingMediaSeek | null>(null);
   const playingMediaRef = useRef<HTMLVideoElement | null>(null);
@@ -162,6 +172,69 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
     }
     if (watch.timerId !== null) window.clearTimeout(watch.timerId);
   }, []);
+
+  const releasePrewarmMedia = useCallback((media: HTMLVideoElement): void => {
+    pauseMedia(media);
+    media.removeAttribute('src');
+    try {
+      media.load();
+    } catch {
+      // Detached native media can reject load; its source authority is already removed.
+    }
+  }, []);
+
+  const setPrewarmVideoNode = useCallback(
+    (node: HTMLVideoElement | null): void => {
+      const previous = prewarmVideoRef.current;
+      if (previous === node) return;
+      if (previous !== null) releasePrewarmMedia(previous);
+      prewarmVideoRef.current = node;
+      if (node === null) return;
+      try {
+        node.load();
+      } catch {
+        // `preload` is advisory, so request the warm-up explicitly and contain native refusal.
+      }
+    },
+    [releasePrewarmMedia]
+  );
+
+  const clearPrewarm = useCallback((token: string): void => {
+    if (activeTokenRef.current !== token) return;
+    setStoredPrewarmTarget((current) => (current?.token === token ? null : current));
+  }, []);
+
+  const armPrewarm = useCallback(
+    (token: string, segmentIndex: number, currentSequence: BeatPlaybackSequence): void => {
+      if (activeTokenRef.current !== token) return;
+      const nextVideoIndex = currentSequence.segments.findIndex(
+        (candidate, index) => index > segmentIndex && candidate.kind === 'video'
+      );
+      const nextVideo = currentSequence.segments[nextVideoIndex];
+      if (nextVideoIndex < 0 || nextVideo?.kind !== 'video') {
+        clearPrewarm(token);
+        return;
+      }
+      const source = createManagedStudioAssetUrl(currentSequence.projectId, nextVideo.assetId);
+      if (source === null) {
+        clearPrewarm(token);
+        return;
+      }
+      setStoredPrewarmTarget((current) => {
+        if (activeTokenRef.current !== token) return current;
+        if (
+          current?.token === token &&
+          current.segmentIndex === nextVideoIndex &&
+          current.assetId === nextVideo.assetId &&
+          current.source === source
+        ) {
+          return current;
+        }
+        return { assetId: nextVideo.assetId, segmentIndex: nextVideoIndex, source, token };
+      });
+    },
+    [clearPrewarm]
+  );
 
   const updateCurrentState = useCallback(
     (token: string, segmentIndex: number, update: (current: TransportState) => TransportState): void => {
@@ -221,6 +294,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   const failMedia = useCallback(
     (token: string, segmentIndex: number, media: HTMLVideoElement): void => {
       if (!isCurrentMedia(token, segmentIndex, media)) return;
+      clearPrewarm(token);
       stopMediaBoundaryWatch();
       invalidatePlayAttempt();
       pauseMedia(media);
@@ -235,7 +309,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
         failed: true,
       }));
     },
-    [invalidatePlayAttempt, isCurrentMedia, stopMediaBoundaryWatch, updateCurrentState]
+    [clearPrewarm, invalidatePlayAttempt, isCurrentMedia, stopMediaBoundaryWatch, updateCurrentState]
   );
 
   const playMedia = useCallback(
@@ -310,6 +384,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
       const target = currentSequence.segments[location.segmentIndex];
       if (target === undefined) return;
 
+      if (location.segmentIndex !== activeState.segmentIndex) clearPrewarm(planToken);
       invalidatePlayAttempt();
       pauseMedia(videoRef.current);
       playingMediaRef.current = null;
@@ -329,7 +404,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
         loopJoinIndex: options.loopJoinIndex === undefined ? current.loopJoinIndex : options.loopJoinIndex,
       }));
     },
-    [invalidatePlayAttempt, planToken, replaceCurrentState, sequence, stopMediaBoundaryWatch]
+    [clearPrewarm, invalidatePlayAttempt, planToken, replaceCurrentState, sequence, stopMediaBoundaryWatch]
   );
 
   const advanceSegment = useCallback(
@@ -395,6 +470,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
     readyMediaRef.current = null;
     pendingMediaSeekRef.current = null;
     slateClockRef.current = null;
+    setStoredPrewarmTarget(null);
     const reset = initialTransportState(planToken);
     stateRef.current = reset;
     setStoredState(reset);
@@ -418,6 +494,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
     const startedAt = performance.now();
     const slateClock: SlateClock = { token, segmentIndex, startPositionSeconds, startedAt };
     slateClockRef.current = slateClock;
+    armPrewarm(token, segmentIndex, sequence);
     const timer = window.setInterval(() => {
       const current = stateRef.current;
       if (
@@ -456,6 +533,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
     };
   }, [
     advanceSegment,
+    armPrewarm,
     loopRange,
     planToken,
     seekTo,
@@ -858,6 +936,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
                     }
                     updateCurrentState(planToken, state.segmentIndex, (latest) => ({ ...latest, buffering: false }));
                     startMediaBoundaryWatch(planToken, state.segmentIndex, media, segment);
+                    if (sequence !== null) armPrewarm(planToken, state.segmentIndex, sequence);
                   }}
                   onRateChange={(event) => {
                     const media = event.currentTarget;
@@ -916,6 +995,21 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
               </div>
             )}
           </section>
+
+          {prewarmTarget === null ? null : (
+            <video
+              key={`${prewarmTarget.token}:prewarm:${prewarmTarget.segmentIndex}:${prewarmTarget.assetId}`}
+              ref={setPrewarmVideoNode}
+              aria-hidden='true'
+              className={styles.prewarmMedia}
+              data-beat-prewarm-media
+              muted
+              playsInline
+              preload='auto'
+              src={prewarmTarget.source}
+              tabIndex={-1}
+            />
+          )}
 
           <div
             aria-label={t(`${PREVIEW_ROOT}.controlsLabel`)}

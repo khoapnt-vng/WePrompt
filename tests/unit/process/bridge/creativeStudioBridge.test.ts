@@ -43,8 +43,7 @@ const providerNames = [
   'dismissReferenceGenerationHandoff',
   'applyAuthoringBatch',
   'undoLast',
-  'getWorkspaceStatus',
-  'getChainStatus',
+  'getProjectWorkspace',
   'retryConditioningFrame',
   'cancelWaitingCascade',
   'editProject',
@@ -98,8 +97,7 @@ const mocks = vi.hoisted(() => ({
       'dismissReferenceGenerationHandoff',
       'applyAuthoringBatch',
       'undoLast',
-      'getWorkspaceStatus',
-      'getChainStatus',
+      'getProjectWorkspace',
       'retryConditioningFrame',
       'cancelWaitingCascade',
       'editProject',
@@ -261,12 +259,18 @@ const createService = () =>
       completedAt: '2026-08-19T02:03:04.000Z',
     })),
     applyMutations: vi.fn(async () => mutationResult),
-    getWorkspaceStatus: vi.fn(async () => workspaceStatus),
-    getChainStatus: vi.fn(async () => ({
-      projectId: 'project_1',
-      projectRevision: 8,
-      conditioningFailures: [],
-      boundaries: [],
+    getProjectWorkspace: vi.fn(async () => ({
+      status: 'supported' as const,
+      snapshot: {
+        project: rendererProject,
+        workspaceStatus,
+        chainStatus: {
+          projectId: 'project_1',
+          projectRevision: 8,
+          conditioningFailures: [],
+          boundaries: [],
+        },
+      },
     })),
     retryConditioningFrame: vi.fn(async () => workspaceStatus),
     cancelWaitingCascade: vi.fn(async () => workspaceStatus),
@@ -500,15 +504,25 @@ describe('initCreativeStudioBridge', () => {
     }
   );
 
-  it('keeps read-only workspace and chain results on their exact service seams', async () => {
+  it('keeps the project/workspace/chain snapshot on one exact service seam', async () => {
     initCreativeStudioBridge(dependencies);
-    await expect(registeredHandler('getWorkspaceStatus')({ projectId: 'project_1' } as never)).resolves.toEqual({
+    await expect(registeredHandler('getProjectWorkspace')({ projectId: 'project_1' } as never)).resolves.toEqual({
       ok: true,
-      data: workspaceStatus,
+      data: {
+        status: 'supported',
+        snapshot: {
+          project: rendererProject,
+          workspaceStatus,
+          chainStatus: {
+            projectId: 'project_1',
+            projectRevision: 8,
+            conditioningFailures: [],
+            boundaries: [],
+          },
+        },
+      },
     });
-    await registeredHandler('getChainStatus')({ projectId: 'project_1' } as never);
-    expect(service.getWorkspaceStatus).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_1' });
-    expect(service.getChainStatus).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_1' });
+    expect(service.getProjectWorkspace).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_1' });
   });
 
   it('routes bounded prepare choices and returns only the renderer-safe quote allowlist', async () => {

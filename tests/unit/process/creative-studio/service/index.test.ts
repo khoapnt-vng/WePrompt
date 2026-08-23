@@ -471,6 +471,21 @@ describe('CreativeStudioServiceV2', () => {
       return removed;
     });
     const deleteProjectV2 = vi.fn(async () => true);
+    const assertProjectAuthorityCurrent = vi.fn(async () => undefined);
+    const withProjectAuthorityV2 = vi.fn(
+      async (projectId: string, operation: (authority: never) => Promise<unknown>) => {
+        if (projectId !== current.id) throw new CreativeStudioStoreError('not_found', 'missing Studio fixture project');
+        return operation({
+          project: structuredClone(current),
+          projectDir: `/studio/${current.id}`,
+          assertCurrent: assertProjectAuthorityCurrent,
+          delete: async (expectedRevision: number, authorizeBeforeDelete?: () => void | Promise<void>) => {
+            await authorizeBeforeDelete?.();
+            return deleteProjectV2(projectId, expectedRevision);
+          },
+        } as never);
+      }
+    );
     const store = {
       listProjectsV2: vi.fn(async () => ({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })),
       createProjectV2: vi.fn(async () => structuredClone(current)),
@@ -493,18 +508,7 @@ describe('CreativeStudioServiceV2', () => {
       listConnections,
       saveConnection,
       removeConnection,
-      withProjectAuthorityV2: vi.fn(async (projectId: string, operation: (authority: never) => Promise<unknown>) => {
-        if (projectId !== current.id) throw new CreativeStudioStoreError('not_found', 'missing Studio fixture project');
-        return operation({
-          project: structuredClone(current),
-          projectDir: `/studio/${current.id}`,
-          assertCurrent: vi.fn(async () => undefined),
-          delete: async (expectedRevision: number, authorizeBeforeDelete?: () => void | Promise<void>) => {
-            await authorizeBeforeDelete?.();
-            return deleteProjectV2(projectId, expectedRevision);
-          },
-        } as never);
-      }),
+      withProjectAuthorityV2,
       deleteProjectWithSidecarAuthorityV2: vi.fn(
         async (projectId: string, _expectedRevision: number, operation: (authority: never) => Promise<boolean>) => {
           if (projectId !== current.id) {
@@ -705,6 +709,8 @@ describe('CreativeStudioServiceV2', () => {
     return {
       service,
       store,
+      withProjectAuthorityV2,
+      assertProjectAuthorityCurrent,
       exportCatalogStore: options.exportCatalogStore ?? defaultExportCatalogStore,
       submitShots,
       cancelJobV2,
@@ -805,7 +811,7 @@ describe('CreativeStudioServiceV2', () => {
     const attempts: Array<() => Promise<unknown>> = [
       () => harness.service.deleteProject({ projectId: '../project', expectedRevision: 1 }),
       () => harness.service.deleteProject({ projectId: 'project_v2', expectedRevision: 0 }),
-      () => harness.service.getChainStatus({ projectId: 'project_v2', extra: true } as never),
+      () => harness.service.getProjectWorkspace({ projectId: 'project_v2', extra: true } as never),
       () => harness.service.getDirectorSessionAuthority({ projectId: '../project_v2' }),
       () => harness.service.getDirectorSessionAuthority({ projectId: 'project_v2', extra: true } as never),
       () =>
@@ -3337,17 +3343,22 @@ describe('CreativeStudioServiceV2', () => {
       extractionId,
     });
     expect(harness.submitShots).not.toHaveBeenCalled();
-    await expect(harness.service.getWorkspaceStatus({ projectId: project.id })).resolves.toMatchObject({
-      cascadeProgress: [
-        {
-          dependentShotId: 'clip_2',
-          upstreamShotId: 'clip_1',
-          eligiblePrimaryAssetIds: [take.id],
-          canRetryConditioningFrame: false,
-          canCancelWaiting: true,
-          waitingReason: 'conditioning_frame',
+    await expect(harness.service.getProjectWorkspace({ projectId: project.id })).resolves.toMatchObject({
+      status: 'supported',
+      snapshot: {
+        workspaceStatus: {
+          cascadeProgress: [
+            {
+              dependentShotId: 'clip_2',
+              upstreamShotId: 'clip_1',
+              eligiblePrimaryAssetIds: [take.id],
+              canRetryConditioningFrame: false,
+              canCancelWaiting: true,
+              waitingReason: 'conditioning_frame',
+            },
+          ],
         },
-      ],
+      },
     });
   });
 
@@ -4399,14 +4410,18 @@ describe('CreativeStudioServiceV2', () => {
     expect(status.cascadeProgress[0]).not.toHaveProperty('jobId');
   });
 
-  it('projects workspace and chain status through exact read-only service seams', async () => {
+  it('projects one revision-matched project/workspace/chain snapshot through one authority seam', async () => {
     const project = makeSchema2ServiceProject();
     project.undoHistory = [{ id: 'undo_top', sourceRevision: project.revision, label: 'edit_shot', patches: [] }];
     const harness = makeHarness(project);
 
-    const workspace = await harness.service.getWorkspaceStatus({ projectId: project.id });
-    const chain = await harness.service.getChainStatus({ projectId: project.id });
+    const result = await harness.service.getProjectWorkspace({ projectId: project.id });
 
+    expect(result.status).toBe('supported');
+    if (result.status !== 'supported') throw new Error('Expected a supported project workspace snapshot');
+    const { project: rendererProject, workspaceStatus: workspace, chainStatus: chain } = result.snapshot;
+
+    expect(rendererProject).toMatchObject({ id: project.id, revision: project.revision });
     expect(workspace).toMatchObject({
       projectId: project.id,
       projectRevision: project.revision,
@@ -4436,11 +4451,11 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
     expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
     await expect(
-      harness.service.getWorkspaceStatus({ projectId: project.id, revision: project.revision } as never)
+      harness.service.getProjectWorkspace({ projectId: project.id, revision: project.revision } as never)
     ).rejects.toMatchObject({ code: 'invalid_payload' });
   });
 
-  it('marks a ready chain frame on disk only after exact media verification and otherwise fails closed', async () => {
+  it('verifies ready chain frames inside project authority and fails closed on null, mismatch, or media failure', async () => {
     const project = makeSchema2ServiceProject();
     project.beats.section_1!.shotOrder = ['clip_1', 'clip_2'];
     project.beats.section_2!.shotOrder = [];
@@ -4485,34 +4500,94 @@ describe('CreativeStudioServiceV2', () => {
       status: 'ready',
       errorCode: null,
     };
-    const verifyConditioningFrameV2 = vi.fn<StudioMediaStore['verifyConditioningFrameV2']>(async () => ({
-      extractionId,
-      shotId: 'clip_1',
-      videoAssetId: take.id,
-      endpointSeconds: 10,
+    const resolveAssetWithProjectAuthorityV2 = vi.fn<StudioMediaStore['resolveAssetWithProjectAuthorityV2']>(
+      async (_authority, assetId) =>
+        assetId === frame.id
+          ? {
+              asset: structuredClone(frame),
+              openVerifiedStream: async () => Readable.from([Buffer.alloc(frame.byteSize)]),
+            }
+          : null
+    );
+    const harness = makeHarness(project, { resolveAssetWithProjectAuthorityV2 });
+    harness.store.getProjectV2.mockRejectedValue(new Error('composite read escaped project authority'));
+    harness.resolveAssetV2.mockRejectedValue(new Error('composite read re-entered queued media lookup'));
+    harness.verifyConditioningFrameV2.mockRejectedValue(new Error('composite read used the re-entrant frame verifier'));
+    const readBoundary = async () => {
+      const result = await harness.service.getProjectWorkspace({ projectId: project.id });
+      expect(result.status).toBe('supported');
+      if (result.status !== 'supported') throw new Error('Expected a supported project workspace snapshot');
+      return result.snapshot.chainStatus.boundaries[0];
+    };
+
+    await expect(readBoundary()).resolves.toEqual({
+      upstreamShotId: 'clip_1',
+      dependentShotId: 'clip_2',
+      status: 'on_disk',
       frameAssetId: frame.id,
-      byteSize: frame.byteSize,
-      sha256: frame.sha256,
-    }));
-    const harness = makeHarness(project, { verifyConditioningFrameV2 });
-
-    await expect(harness.service.getChainStatus({ projectId: project.id })).resolves.toMatchObject({
-      boundaries: [
-        {
-          upstreamShotId: 'clip_1',
-          dependentShotId: 'clip_2',
-          status: 'on_disk',
-          frameAssetId: frame.id,
-        },
-      ],
     });
-    expect(verifyConditioningFrameV2).toHaveBeenCalledWith({ projectId: project.id, extractionId });
+    expect(resolveAssetWithProjectAuthorityV2).toHaveBeenCalledWith(expect.any(Object), frame.id);
+    expect(resolveAssetWithProjectAuthorityV2.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.assertProjectAuthorityCurrent.mock.invocationCallOrder[0]!
+    );
 
-    verifyConditioningFrameV2.mockRejectedValueOnce(new Error('media unavailable'));
-    await expect(harness.service.getChainStatus({ projectId: project.id })).resolves.toMatchObject({
-      boundaries: [{ status: 'gone', frameAssetId: null }],
+    resolveAssetWithProjectAuthorityV2.mockResolvedValueOnce(null);
+    await expect(readBoundary()).resolves.toMatchObject({ status: 'gone', frameAssetId: null });
+
+    resolveAssetWithProjectAuthorityV2.mockResolvedValueOnce({
+      asset: { ...structuredClone(frame), sha256: 'e'.repeat(64) },
+      openVerifiedStream: async () => Readable.from([]),
     });
+    await expect(readBoundary()).resolves.toMatchObject({ status: 'gone', frameAssetId: null });
+
+    resolveAssetWithProjectAuthorityV2.mockRejectedValueOnce(new Error('media unavailable'));
+    await expect(readBoundary()).resolves.toMatchObject({ status: 'gone', frameAssetId: null });
+    expect(harness.store.getProjectV2).not.toHaveBeenCalled();
+    expect(harness.resolveAssetV2).not.toHaveBeenCalled();
+    expect(harness.verifyConditioningFrameV2).not.toHaveBeenCalled();
     expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+  });
+
+  it('rejects the composite snapshot when its final project-authority fence rejects', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    harness.assertProjectAuthorityCurrent.mockRejectedValueOnce(new Error('project authority expired'));
+
+    await expect(harness.service.getProjectWorkspace({ projectId: project.id })).rejects.toThrow(
+      'project authority expired'
+    );
+    expect(harness.assertProjectAuthorityCurrent).toHaveBeenCalledTimes(1);
+    expect(harness.store.getProjectV2).not.toHaveBeenCalled();
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+  });
+
+  it('maps only missing and unsupported authority loads into the composite load-result union', async () => {
+    const harness = makeHarness();
+
+    harness.withProjectAuthorityV2.mockRejectedValueOnce(
+      new CreativeStudioStoreError('not_found', 'missing Studio project')
+    );
+    await expect(harness.service.getProjectWorkspace({ projectId: 'project_v2' })).resolves.toEqual({
+      status: 'not_found',
+      projectId: 'project_v2',
+    });
+
+    harness.withProjectAuthorityV2.mockRejectedValueOnce(
+      new CreativeStudioStoreError('unsupported_prototype_schema', 'old Studio schema')
+    );
+    await expect(harness.service.getProjectWorkspace({ projectId: 'project_v2' })).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId: 'project_v2',
+    });
+
+    harness.withProjectAuthorityV2.mockRejectedValueOnce(
+      new CreativeStudioStoreError('storage_error', 'Studio storage unavailable')
+    );
+    await expect(harness.service.getProjectWorkspace({ projectId: 'project_v2' })).rejects.toMatchObject({
+      code: 'storage_error',
+    });
   });
 });
 

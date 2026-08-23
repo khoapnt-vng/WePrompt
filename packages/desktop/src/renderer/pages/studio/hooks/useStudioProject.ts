@@ -11,7 +11,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import type {
   StudioProposalV2,
-  StudioProjectLoadResultV2,
+  StudioProjectWorkspaceLoadResultV2,
   StudioReferenceRequestV2,
   StudioRendererChainStatusV2,
   StudioRendererExportCatalogV2,
@@ -20,7 +20,7 @@ import type {
   StudioRendererWorkspaceStatusV2,
   StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 export type StudioProjectLoadState = 'idle' | 'loading' | 'supported' | 'unsupported' | 'not_found' | 'error';
 
@@ -40,14 +40,36 @@ export type UseStudioProjectResult = {
   workspaceErrorMessageKey: string | null;
   routeErrorMessageKey: string | null;
   exportErrorMessageKey: string | null;
-  refetchProject: () => Promise<StudioRendererProjectV2 | null>;
+  refetchProjectWorkspace: () => Promise<StudioRendererProjectV2 | null>;
   refetchProposals: () => Promise<void>;
   refetchReferences: () => Promise<void>;
-  refetchWorkspace: () => Promise<void>;
   refetchRoutes: () => Promise<boolean>;
   refetchExports: () => Promise<boolean>;
   installExportCatalog: (catalog: StudioRendererExportCatalogV2) => boolean;
   refetchAll: () => Promise<void>;
+};
+
+type InstalledStudioProjectWorkspace = {
+  project: StudioRendererProjectV2 | null;
+  workspaceStatus: StudioRendererWorkspaceStatusV2 | null;
+  chainStatus: StudioRendererChainStatusV2 | null;
+};
+
+type StudioProjectBinding = Readonly<{
+  projectId: string | undefined;
+  epoch: symbol;
+}>;
+
+type StudioProjectWorkspaceFlight = {
+  binding: StudioProjectBinding;
+  generation: number;
+  promise: Promise<StudioRendererProjectV2 | null>;
+  canceled: boolean;
+  cancel: () => void;
+  trailing: {
+    promise: Promise<StudioRendererProjectV2 | null>;
+    resolve: (project: StudioRendererProjectV2 | null) => void;
+  } | null;
 };
 
 const uniqueHandoffs = (
@@ -151,16 +173,24 @@ const sanitizeExportCatalog = (
   return { revision: catalog.revision as number, artifacts };
 };
 
-/** Owns the schema-2 renderer snapshots and subscribes before every initial list. */
+/** Owns the schema-3 composite renderer snapshot and subscribes before every initial read. */
 export const useStudioProject = (projectId: string | undefined): UseStudioProjectResult => {
-  const [project, setProject] = useState<StudioRendererProjectV2 | null>(null);
+  const binding = useMemo<StudioProjectBinding>(
+    () => Object.freeze({ projectId, epoch: Symbol('studio-project-binding') }),
+    [projectId]
+  );
+  const activeBindingRef = useRef<StudioProjectBinding | null>(null);
+  const [projectWorkspace, setProjectWorkspace] = useState<InstalledStudioProjectWorkspace>({
+    project: null,
+    workspaceStatus: null,
+    chainStatus: null,
+  });
+  const { project, workspaceStatus, chainStatus } = projectWorkspace;
   const [proposals, setProposals] = useState<StudioProposalV2[]>([]);
   const [referenceRequests, setReferenceRequests] = useState<StudioReferenceRequestV2[]>([]);
   const [referenceGenerationHandoffs, setReferenceGenerationHandoffs] = useState<
     StudioRendererReferenceGenerationHandoffV2[]
   >([]);
-  const [workspaceStatus, setWorkspaceStatus] = useState<StudioRendererWorkspaceStatusV2 | null>(null);
-  const [chainStatus, setChainStatus] = useState<StudioRendererChainStatusV2 | null>(null);
   const [routeCatalog, setRouteCatalog] = useState<StudioRouteCatalogV2 | null>(null);
   const [exportCatalog, setExportCatalog] = useState<StudioRendererExportCatalogV2 | null>(null);
   const [loadState, setLoadState] = useState<StudioProjectLoadState>(projectId ? 'loading' : 'idle');
@@ -171,125 +201,287 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const [routeErrorMessageKey, setRouteErrorMessageKey] = useState<string | null>(null);
   const [exportErrorMessageKey, setExportErrorMessageKey] = useState<string | null>(null);
   const generationRef = useRef(0);
-  const projectRequestRef = useRef(0);
+  const projectWorkspaceFlightRef = useRef<StudioProjectWorkspaceFlight | null>(null);
   const proposalRequestRef = useRef(0);
   const referenceRequestRef = useRef(0);
   const handoffRequestRef = useRef(0);
   const referencePairRequestRef = useRef(0);
-  const workspaceRequestRef = useRef(0);
-  const chainRequestRef = useRef(0);
   const routeRequestRef = useRef(0);
   const exportRequestRef = useRef(0);
   const projectRef = useRef<StudioRendererProjectV2 | null>(null);
   const exportCatalogRef = useRef<StudioRendererExportCatalogV2 | null>(null);
 
-  const loadProject = useCallback(
-    async (
-      requestedProjectId: string,
+  useLayoutEffect(() => {
+    activeBindingRef.current = binding;
+    return () => {
+      if (activeBindingRef.current === binding) activeBindingRef.current = null;
+      const flight = projectWorkspaceFlightRef.current;
+      if (flight?.binding === binding) {
+        flight.cancel();
+        if (projectWorkspaceFlightRef.current === flight) projectWorkspaceFlightRef.current = null;
+      }
+    };
+  }, [binding]);
+
+  const loadProjectWorkspace = useCallback(
+    (
+      requestedBinding: StudioProjectBinding,
       generation: number,
       initial: boolean
     ): Promise<StudioRendererProjectV2 | null> => {
-      const request = ++projectRequestRef.current;
-      const invalidatePaidFreshness = (): void => {
-        workspaceRequestRef.current += 1;
-        chainRequestRef.current += 1;
-        routeRequestRef.current += 1;
-        exportRequestRef.current += 1;
-        setWorkspaceStatus(null);
-        setChainStatus(null);
-        setRouteCatalog(null);
-        exportCatalogRef.current = null;
-        setExportCatalog(null);
-        setExportErrorMessageKey(null);
-      };
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return Promise.resolve(null);
+      }
+
+      const existingFlight = projectWorkspaceFlightRef.current;
+      if (existingFlight?.binding === requestedBinding && existingFlight.generation === generation) {
+        if (existingFlight.trailing === null) {
+          let resolveTrailing!: (project: StudioRendererProjectV2 | null) => void;
+          const promise = new Promise<StudioRendererProjectV2 | null>((resolve) => {
+            resolveTrailing = resolve;
+          });
+          existingFlight.trailing = { promise, resolve: resolveTrailing };
+        }
+        return existingFlight.trailing.promise;
+      }
+      if (existingFlight !== null) {
+        existingFlight.cancel();
+        if (projectWorkspaceFlightRef.current === existingFlight) projectWorkspaceFlightRef.current = null;
+      }
+
       if (initial) {
         projectRef.current = null;
-        setProject(null);
+        setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
         setLoadState('loading');
       }
       setErrorMessageKey(null);
 
-      try {
-        const result = await ipcBridge.creativeStudio.getProject.invoke({ projectId: requestedProjectId });
-        if (generationRef.current !== generation || projectRequestRef.current !== request) return null;
-        if (result.ok === false) {
-          invalidatePaidFreshness();
-          setLoadState('error');
-          setErrorMessageKey(result.error.messageKey);
+      const readAndInstall = async (): Promise<StudioRendererProjectV2 | null> => {
+        type ReadOutcome =
+          | { kind: 'loaded'; loaded: StudioProjectWorkspaceLoadResultV2 }
+          | { kind: 'error'; messageKey: string };
+        const invoke = async (): Promise<ReadOutcome> => {
+          if (activeBindingRef.current !== requestedBinding || generationRef.current !== generation) {
+            return { kind: 'error', messageKey: 'conversation.creativeStudio.workspace.errors.storage' };
+          }
+          try {
+            const result = await ipcBridge.creativeStudio.getProjectWorkspace.invoke({
+              projectId: requestedProjectId,
+            });
+            if (result.ok === false) return { kind: 'error', messageKey: result.error.messageKey };
+            const loaded = result.data as StudioProjectWorkspaceLoadResultV2;
+            if (loaded.status === 'supported') {
+              const {
+                project: snapshotProject,
+                workspaceStatus: snapshotWorkspaceStatus,
+                chainStatus: snapshotChainStatus,
+              } = loaded.snapshot;
+              if (
+                snapshotProject.id !== requestedProjectId ||
+                snapshotWorkspaceStatus.projectId !== requestedProjectId ||
+                snapshotChainStatus.projectId !== requestedProjectId ||
+                snapshotWorkspaceStatus.projectRevision !== snapshotProject.revision ||
+                snapshotChainStatus.projectRevision !== snapshotProject.revision
+              ) {
+                return {
+                  kind: 'error',
+                  messageKey: 'conversation.creativeStudio.workspace.errors.storage',
+                };
+              }
+            } else if (loaded.projectId !== requestedProjectId) {
+              return { kind: 'error', messageKey: 'conversation.creativeStudio.workspace.errors.storage' };
+            }
+            return { kind: 'loaded', loaded };
+          } catch {
+            return { kind: 'error', messageKey: 'conversation.creativeStudio.workspace.errors.storage' };
+          }
+        };
+
+        const first = await invoke();
+        if (activeBindingRef.current !== requestedBinding || generationRef.current !== generation) return null;
+        const outcome = first.kind === 'error' ? await invoke() : first;
+        if (activeBindingRef.current !== requestedBinding || generationRef.current !== generation) return null;
+
+        if (outcome.kind === 'error') {
+          const current = projectRef.current?.id === requestedProjectId ? projectRef.current : null;
+          setProjectWorkspace({ project: current, workspaceStatus: null, chainStatus: null });
+          routeRequestRef.current += 1;
+          exportRequestRef.current += 1;
+          setRouteCatalog(null);
+          exportCatalogRef.current = null;
+          setExportCatalog(null);
+          setRouteErrorMessageKey(null);
+          setExportErrorMessageKey(null);
+          setWorkspaceErrorMessageKey(outcome.messageKey);
+          if (current === null) {
+            setLoadState('error');
+            setErrorMessageKey(outcome.messageKey);
+          } else {
+            setLoadState('supported');
+            setErrorMessageKey(null);
+          }
           return null;
         }
 
-        const loaded = result.data as StudioProjectLoadResultV2;
-        if (loaded.status === 'unsupported_prototype_schema') {
-          invalidatePaidFreshness();
+        const { loaded } = outcome;
+        if (loaded.status !== 'supported') {
           projectRef.current = null;
-          setProject(null);
-          setLoadState('unsupported');
-          return null;
-        }
-        if (loaded.status === 'not_found') {
-          invalidatePaidFreshness();
-          projectRef.current = null;
-          setProject(null);
-          setLoadState('not_found');
+          setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
+          routeRequestRef.current += 1;
+          exportRequestRef.current += 1;
+          setRouteCatalog(null);
+          exportCatalogRef.current = null;
+          setExportCatalog(null);
+          setRouteErrorMessageKey(null);
+          setExportErrorMessageKey(null);
+          setWorkspaceErrorMessageKey(null);
+          setErrorMessageKey(null);
+          setLoadState(loaded.status === 'not_found' ? 'not_found' : 'unsupported');
           return null;
         }
 
         const current = projectRef.current;
-        const canonical =
-          current?.id === loaded.project.id && current.revision > loaded.project.revision ? current : loaded.project;
-        if (current !== null && routeRelevantSignature(current) !== routeRelevantSignature(canonical)) {
+        if (current?.id === loaded.snapshot.project.id && current.revision > loaded.snapshot.project.revision) {
+          return current;
+        }
+        if (current !== null && routeRelevantSignature(current) !== routeRelevantSignature(loaded.snapshot.project)) {
           routeRequestRef.current += 1;
           setRouteCatalog(null);
           setRouteErrorMessageKey(null);
         }
-        projectRef.current = canonical;
-        setProject(canonical);
+        projectRef.current = loaded.snapshot.project;
+        setProjectWorkspace(loaded.snapshot);
         setLoadState('supported');
-        return canonical;
-      } catch {
-        if (generationRef.current === generation && projectRequestRef.current === request) {
-          invalidatePaidFreshness();
-          setLoadState('error');
-          setErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        setErrorMessageKey(null);
+        setWorkspaceErrorMessageKey(null);
+        return loaded.snapshot.project;
+      };
+
+      const startFlight = (): Promise<StudioRendererProjectV2 | null> => {
+        if (activeBindingRef.current !== requestedBinding || generationRef.current !== generation) {
+          return Promise.resolve(null);
         }
-        return null;
+        let resolveCancellation!: (project: StudioRendererProjectV2 | null) => void;
+        const cancellation = new Promise<StudioRendererProjectV2 | null>((resolve) => {
+          resolveCancellation = resolve;
+        });
+        const read = readAndInstall();
+        const flight: StudioProjectWorkspaceFlight = {
+          binding: requestedBinding,
+          generation,
+          promise: Promise.race([read, cancellation]),
+          canceled: false,
+          cancel: () => {
+            if (flight.canceled) return;
+            flight.canceled = true;
+            resolveCancellation(null);
+            flight.trailing?.resolve(null);
+            flight.trailing = null;
+          },
+          trailing: null,
+        };
+        projectWorkspaceFlightRef.current = flight;
+        const settle = (): void => {
+          if (flight.canceled) {
+            if (projectWorkspaceFlightRef.current === flight) projectWorkspaceFlightRef.current = null;
+            return;
+          }
+          const trailing = flight.trailing;
+          if (projectWorkspaceFlightRef.current !== flight) {
+            trailing?.resolve(null);
+            return;
+          }
+          projectWorkspaceFlightRef.current = null;
+          if (trailing === null) return;
+          if (activeBindingRef.current !== requestedBinding || generationRef.current !== generation) {
+            trailing.resolve(null);
+            return;
+          }
+          void startFlight().then(trailing.resolve, () => trailing.resolve(null));
+        };
+        void flight.promise.then(settle, settle);
+        return flight.promise;
+      };
+      return startFlight();
+    },
+    []
+  );
+
+  const loadProposals = useCallback(
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<void> => {
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return;
+      }
+      const request = ++proposalRequestRef.current;
+      try {
+        const result = await ipcBridge.creativeStudio.listProposals.invoke({ projectId: requestedProjectId });
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          proposalRequestRef.current !== request
+        ) {
+          return;
+        }
+        if (result.ok === false) {
+          setProposalErrorMessageKey(result.error.messageKey);
+          return;
+        }
+        setProposals((result.data as StudioProposalV2[]).filter((candidate) => candidate.status === 'pending'));
+        setProposalErrorMessageKey(null);
+      } catch {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          proposalRequestRef.current === request
+        ) {
+          setProposalErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        }
       }
     },
     []
   );
 
-  const loadProposals = useCallback(async (requestedProjectId: string, generation: number): Promise<void> => {
-    const request = ++proposalRequestRef.current;
-    try {
-      const result = await ipcBridge.creativeStudio.listProposals.invoke({ projectId: requestedProjectId });
-      if (generationRef.current !== generation || proposalRequestRef.current !== request) return;
-      if (result.ok === false) {
-        setProposalErrorMessageKey(result.error.messageKey);
-        return;
-      }
-      setProposals((result.data as StudioProposalV2[]).filter((candidate) => candidate.status === 'pending'));
-      setProposalErrorMessageKey(null);
-    } catch {
-      if (generationRef.current === generation && proposalRequestRef.current === request) {
-        setProposalErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
-      }
-    }
-  }, []);
-
   const loadReferenceRequests = useCallback(
-    async (requestedProjectId: string, generation: number): Promise<string | null> => {
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<string | null> => {
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return null;
+      }
       const request = ++referenceRequestRef.current;
       try {
         const result = await ipcBridge.creativeStudio.listReferenceRequests.invoke({ projectId: requestedProjectId });
-        if (generationRef.current !== generation || referenceRequestRef.current !== request) return null;
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          referenceRequestRef.current !== request
+        ) {
+          return null;
+        }
         if (result.ok === false) {
           return result.error.messageKey;
         }
         setReferenceRequests(result.data as StudioReferenceRequestV2[]);
         return null;
       } catch {
-        if (generationRef.current === generation && referenceRequestRef.current === request) {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          referenceRequestRef.current === request
+        ) {
           return 'conversation.creativeStudio.workspace.errors.storage';
         }
         return null;
@@ -299,20 +491,38 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   );
 
   const loadReferenceHandoffs = useCallback(
-    async (requestedProjectId: string, generation: number): Promise<string | null> => {
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<string | null> => {
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return null;
+      }
       const request = ++handoffRequestRef.current;
       try {
         const result = await ipcBridge.creativeStudio.listReferenceGenerationHandoffs.invoke({
           projectId: requestedProjectId,
         });
-        if (generationRef.current !== generation || handoffRequestRef.current !== request) return null;
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          handoffRequestRef.current !== request
+        ) {
+          return null;
+        }
         if (result.ok === false) {
           return result.error.messageKey;
         }
         setReferenceGenerationHandoffs(uniqueHandoffs(result.data as StudioRendererReferenceGenerationHandoffV2[]));
         return null;
       } catch {
-        if (generationRef.current === generation && handoffRequestRef.current === request) {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          handoffRequestRef.current === request
+        ) {
           return 'conversation.creativeStudio.workspace.errors.storage';
         }
         return null;
@@ -322,84 +532,82 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   );
 
   const loadReferences = useCallback(
-    async (requestedProjectId: string, generation: number): Promise<void> => {
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<void> => {
+      if (
+        requestedBinding.projectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return;
+      }
       const pairRequest = ++referencePairRequestRef.current;
       const [requestError, handoffError] = await Promise.all([
-        loadReferenceRequests(requestedProjectId, generation),
-        loadReferenceHandoffs(requestedProjectId, generation),
+        loadReferenceRequests(requestedBinding, generation),
+        loadReferenceHandoffs(requestedBinding, generation),
       ]);
-      if (generationRef.current === generation && referencePairRequestRef.current === pairRequest) {
+      if (
+        activeBindingRef.current === requestedBinding &&
+        generationRef.current === generation &&
+        referencePairRequestRef.current === pairRequest
+      ) {
         setReferenceErrorMessageKey(requestError ?? handoffError);
       }
     },
     [loadReferenceHandoffs, loadReferenceRequests]
   );
 
-  const loadWorkspace = useCallback(async (requestedProjectId: string, generation: number): Promise<void> => {
-    const workspaceRequest = ++workspaceRequestRef.current;
-    const chainRequest = ++chainRequestRef.current;
-    const [workspaceResult, chainResult] = await Promise.allSettled([
-      ipcBridge.creativeStudio.getWorkspaceStatus.invoke({ projectId: requestedProjectId }),
-      ipcBridge.creativeStudio.getChainStatus.invoke({ projectId: requestedProjectId }),
-    ]);
-    if (
-      generationRef.current !== generation ||
-      workspaceRequestRef.current !== workspaceRequest ||
-      chainRequestRef.current !== chainRequest
-    ) {
-      return;
-    }
-    let messageKey: string | null = null;
-    if (workspaceResult.status === 'rejected') {
-      setWorkspaceStatus(null);
-      messageKey = 'conversation.creativeStudio.workspace.errors.storage';
-    } else if (workspaceResult.value.ok === false) {
-      setWorkspaceStatus(null);
-      messageKey = workspaceResult.value.error.messageKey;
-    } else {
-      setWorkspaceStatus(workspaceResult.value.data as StudioRendererWorkspaceStatusV2);
-    }
-    if (chainResult.status === 'rejected') {
-      setChainStatus(null);
-      messageKey ??= 'conversation.creativeStudio.workspace.errors.storage';
-    } else if (chainResult.value.ok === false) {
-      setChainStatus(null);
-      messageKey ??= chainResult.value.error.messageKey;
-    } else {
-      setChainStatus(chainResult.value.data as StudioRendererChainStatusV2);
-    }
-    setWorkspaceErrorMessageKey(messageKey);
-  }, []);
-
-  const loadRoutes = useCallback(async (requestedProjectId: string, generation: number): Promise<boolean> => {
-    const boundProject = projectRef.current;
-    if (boundProject?.id !== requestedProjectId) return false;
-    const boundSignature = routeRelevantSignature(boundProject);
-    const request = ++routeRequestRef.current;
-    try {
-      const result = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: requestedProjectId });
-      if (generationRef.current !== generation || routeRequestRef.current !== request) return false;
-      const current = projectRef.current;
-      if (current?.id !== requestedProjectId || routeRelevantSignature(current) !== boundSignature) return false;
-      if (result.ok === false) {
-        setRouteCatalog(null);
-        setRouteErrorMessageKey(result.error.messageKey);
+  const loadRoutes = useCallback(
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<boolean> => {
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
         return false;
       }
-      setRouteCatalog(result.data as StudioRouteCatalogV2);
-      setRouteErrorMessageKey(null);
-      return true;
-    } catch {
-      if (generationRef.current === generation && routeRequestRef.current === request) {
-        setRouteCatalog(null);
-        setRouteErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      const boundProject = projectRef.current;
+      if (boundProject?.id !== requestedProjectId) return false;
+      const boundSignature = routeRelevantSignature(boundProject);
+      const request = ++routeRequestRef.current;
+      try {
+        const result = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: requestedProjectId });
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          routeRequestRef.current !== request
+        ) {
+          return false;
+        }
+        const current = projectRef.current;
+        if (current?.id !== requestedProjectId || routeRelevantSignature(current) !== boundSignature) return false;
+        if (result.ok === false) {
+          setRouteCatalog(null);
+          setRouteErrorMessageKey(result.error.messageKey);
+          return false;
+        }
+        setRouteCatalog(result.data as StudioRouteCatalogV2);
+        setRouteErrorMessageKey(null);
+        return true;
+      } catch {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          routeRequestRef.current === request
+        ) {
+          setRouteCatalog(null);
+          setRouteErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        }
+        return false;
       }
-      return false;
-    }
-  }, []);
+    },
+    []
+  );
 
-  const applyExportCatalog = useCallback((value: unknown): boolean => {
+  const applyExportCatalog = useCallback((requestedBinding: StudioProjectBinding, value: unknown): boolean => {
+    if (activeBindingRef.current !== requestedBinding) return false;
     const currentProject = projectRef.current;
+    if (requestedBinding.projectId === undefined || currentProject?.id !== requestedBinding.projectId) return false;
     const sanitized = currentProject === null ? null : sanitizeExportCatalog(value, currentProject.revision);
     if (sanitized === null) {
       exportCatalogRef.current = null;
@@ -426,20 +634,38 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   }, []);
 
   const loadExports = useCallback(
-    async (requestedProjectId: string, generation: number): Promise<boolean> => {
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<boolean> => {
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return false;
+      }
       const request = ++exportRequestRef.current;
       try {
         const result = await ipcBridge.creativeStudio.listExports.invoke({ projectId: requestedProjectId });
-        if (generationRef.current !== generation || exportRequestRef.current !== request) return false;
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          exportRequestRef.current !== request
+        ) {
+          return false;
+        }
         if (result.ok === false) {
           exportCatalogRef.current = null;
           setExportCatalog(null);
           setExportErrorMessageKey(result.error.messageKey);
           return false;
         }
-        return applyExportCatalog(result.data);
+        return applyExportCatalog(requestedBinding, result.data);
       } catch {
-        if (generationRef.current === generation && exportRequestRef.current === request) {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          exportRequestRef.current === request
+        ) {
           exportCatalogRef.current = null;
           setExportCatalog(null);
           setExportErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
@@ -453,15 +679,14 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   useEffect(() => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
+    const boundProjectId = binding.projectId;
 
-    if (!projectId) {
+    if (!boundProjectId) {
       projectRef.current = null;
-      setProject(null);
+      setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
       setProposals([]);
       setReferenceRequests([]);
       setReferenceGenerationHandoffs([]);
-      setWorkspaceStatus(null);
-      setChainStatus(null);
       setRouteCatalog(null);
       exportCatalogRef.current = null;
       setExportCatalog(null);
@@ -480,8 +705,8 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     setReferenceGenerationHandoffs([]);
     setProposalErrorMessageKey(null);
     setReferenceErrorMessageKey(null);
-    setWorkspaceStatus(null);
-    setChainStatus(null);
+    projectRef.current = null;
+    setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
     setRouteCatalog(null);
     exportCatalogRef.current = null;
     setExportCatalog(null);
@@ -490,25 +715,28 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     setExportErrorMessageKey(null);
 
     const unsubscribeProject = ipcBridge.creativeStudio.projectUpdated.on(({ projectId: updatedProjectId }) => {
-      if (updatedProjectId === projectId) {
-        void Promise.all([loadProject(projectId, generation, false), loadWorkspace(projectId, generation)]);
+      if (updatedProjectId === boundProjectId && activeBindingRef.current === binding) {
+        void loadProjectWorkspace(binding, generation, false);
       }
     });
     const unsubscribeProposal = ipcBridge.creativeStudio.proposalUpdated.on(({ projectId: updatedProjectId }) => {
-      if (updatedProjectId === projectId) void loadProposals(projectId, generation);
+      if (updatedProjectId === boundProjectId && activeBindingRef.current === binding) {
+        void loadProposals(binding, generation);
+      }
     });
     const unsubscribeReference = ipcBridge.creativeStudio.referenceUpdated.on(({ projectId: updatedProjectId }) => {
-      if (updatedProjectId === projectId) void loadReferences(projectId, generation);
+      if (updatedProjectId === boundProjectId && activeBindingRef.current === binding) {
+        void loadReferences(binding, generation);
+      }
     });
 
     void (async () => {
-      if ((await loadProject(projectId, generation, true)) !== null) {
-        await Promise.all([loadRoutes(projectId, generation), loadExports(projectId, generation)]);
+      if ((await loadProjectWorkspace(binding, generation, true)) !== null) {
+        await Promise.all([loadRoutes(binding, generation), loadExports(binding, generation)]);
       }
     })();
-    void loadProposals(projectId, generation);
-    void loadReferences(projectId, generation);
-    void loadWorkspace(projectId, generation);
+    void loadProposals(binding, generation);
+    void loadReferences(binding, generation);
 
     return () => {
       if (generationRef.current === generation) generationRef.current += 1;
@@ -516,54 +744,63 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       unsubscribeProposal();
       unsubscribeReference();
     };
-  }, [loadExports, loadProject, loadProposals, loadReferences, loadRoutes, loadWorkspace, projectId]);
+  }, [binding, loadExports, loadProjectWorkspace, loadProposals, loadReferences, loadRoutes]);
 
-  const refetchProject = useCallback(async (): Promise<StudioRendererProjectV2 | null> => {
-    if (!projectId) return null;
-    return loadProject(projectId, generationRef.current, false);
-  }, [loadProject, projectId]);
+  const refetchProjectWorkspace = useCallback(async (): Promise<StudioRendererProjectV2 | null> => {
+    if (binding.projectId === undefined || activeBindingRef.current !== binding) return null;
+    const generation = generationRef.current;
+    return loadProjectWorkspace(binding, generation, false);
+  }, [binding, loadProjectWorkspace]);
 
   const refetchProposals = useCallback(async (): Promise<void> => {
-    if (projectId) await loadProposals(projectId, generationRef.current);
-  }, [loadProposals, projectId]);
+    if (binding.projectId === undefined || activeBindingRef.current !== binding) return;
+    const generation = generationRef.current;
+    await loadProposals(binding, generation);
+  }, [binding, loadProposals]);
 
   const refetchReferences = useCallback(async (): Promise<void> => {
-    if (projectId) await loadReferences(projectId, generationRef.current);
-  }, [loadReferences, projectId]);
-
-  const refetchWorkspace = useCallback(async (): Promise<void> => {
-    if (projectId) await loadWorkspace(projectId, generationRef.current);
-  }, [loadWorkspace, projectId]);
+    if (binding.projectId === undefined || activeBindingRef.current !== binding) return;
+    const generation = generationRef.current;
+    await loadReferences(binding, generation);
+  }, [binding, loadReferences]);
 
   const refetchRoutes = useCallback(async (): Promise<boolean> => {
-    if (!projectId) return false;
-    return loadRoutes(projectId, generationRef.current);
-  }, [loadRoutes, projectId]);
+    if (binding.projectId === undefined || activeBindingRef.current !== binding) return false;
+    const generation = generationRef.current;
+    return loadRoutes(binding, generation);
+  }, [binding, loadRoutes]);
 
   const refetchExports = useCallback(async (): Promise<boolean> => {
-    if (!projectId) return false;
-    return loadExports(projectId, generationRef.current);
-  }, [loadExports, projectId]);
+    if (binding.projectId === undefined || activeBindingRef.current !== binding) return false;
+    const generation = generationRef.current;
+    return loadExports(binding, generation);
+  }, [binding, loadExports]);
 
   const installExportCatalog = useCallback(
     (catalog: StudioRendererExportCatalogV2): boolean => {
-      if (!projectId || projectRef.current?.id !== projectId) return false;
+      if (
+        binding.projectId === undefined ||
+        activeBindingRef.current !== binding ||
+        projectRef.current?.id !== binding.projectId
+      ) {
+        return false;
+      }
       exportRequestRef.current += 1;
-      return applyExportCatalog(catalog);
+      return applyExportCatalog(binding, catalog);
     },
-    [applyExportCatalog, projectId]
+    [applyExportCatalog, binding]
   );
 
   const refetchAll = useCallback(async (): Promise<void> => {
-    if (!projectId) return;
+    if (binding.projectId === undefined || activeBindingRef.current !== binding) return;
+    const generation = generationRef.current;
     await Promise.all([
-      loadProject(projectId, generationRef.current, false),
-      loadProposals(projectId, generationRef.current),
-      loadReferences(projectId, generationRef.current),
-      loadWorkspace(projectId, generationRef.current),
-      loadExports(projectId, generationRef.current),
+      loadProjectWorkspace(binding, generation, false),
+      loadProposals(binding, generation),
+      loadReferences(binding, generation),
+      loadExports(binding, generation),
     ]);
-  }, [loadExports, loadProject, loadProposals, loadReferences, loadWorkspace, projectId]);
+  }, [binding, loadExports, loadProjectWorkspace, loadProposals, loadReferences]);
 
   return {
     project,
@@ -581,10 +818,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     workspaceErrorMessageKey,
     routeErrorMessageKey,
     exportErrorMessageKey,
-    refetchProject,
+    refetchProjectWorkspace,
     refetchProposals,
     refetchReferences,
-    refetchWorkspace,
     refetchRoutes,
     refetchExports,
     installExportCatalog,

@@ -183,10 +183,9 @@ const StudioProjectPage: React.FC<{
     workspaceErrorMessageKey,
     routeErrorMessageKey,
     exportErrorMessageKey,
-    refetchProject,
+    refetchProjectWorkspace,
     refetchProposals,
     refetchReferences,
-    refetchWorkspace,
     refetchRoutes,
     refetchExports,
     installExportCatalog,
@@ -250,9 +249,9 @@ const StudioProjectPage: React.FC<{
   }, [activeView, navigate, projectId, routeView]);
 
   const afterPaidConfirm = useCallback(async (): Promise<void> => {
-    const [refreshed] = await Promise.all([refetchProject(), refetchWorkspace(), refetchReferences()]);
+    const [refreshed] = await Promise.all([refetchProjectWorkspace(), refetchReferences()]);
     if (refreshed !== null) projectRef.current = refreshed;
-  }, [refetchProject, refetchReferences, refetchWorkspace]);
+  }, [refetchProjectWorkspace, refetchReferences]);
   const spendGate = useSpendGate({ onConfirmed: afterPaidConfirm });
   const spendGateLocked = spendGate.state.phase === 'confirming' || spendGate.state.phase === 'quote_in_use';
   const editSpendGateRoutes = useCallback(
@@ -354,13 +353,12 @@ const StudioProjectPage: React.FC<{
           return null;
         }
         onCommitted?.();
-        const refreshed = await refetchProject();
+        const refreshed = await refetchProjectWorkspace();
         if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
           return null;
         }
         projectRef.current = refreshed;
-        await refetchWorkspace();
         if (projectRef.current?.revision !== result.data.projectRevision) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
           return null;
@@ -374,7 +372,7 @@ const StudioProjectPage: React.FC<{
         setWorkspacePending(false);
       }
     },
-    [refetchProject, refetchWorkspace, setActionErrorMessageKey]
+    [refetchProjectWorkspace, setActionErrorMessageKey]
   );
 
   const runWorkspaceCommit = useCallback(
@@ -427,7 +425,7 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
           return false;
         }
-        const refreshed = await refetchProject();
+        const refreshed = await refetchProjectWorkspace();
         if (refreshed === null || refreshed.id !== current.id || refreshed.revision <= current.revision) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
           return false;
@@ -443,7 +441,6 @@ const StudioProjectPage: React.FC<{
           return false;
         }
         projectRef.current = refreshed;
-        await refetchWorkspace();
         if (projectRef.current?.id !== refreshed.id || projectRef.current.revision !== refreshed.revision) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
           return false;
@@ -457,7 +454,7 @@ const StudioProjectPage: React.FC<{
         setWorkspacePending(false);
       }
     },
-    [refetchProject, refetchWorkspace, setActionErrorMessageKey]
+    [refetchProjectWorkspace, setActionErrorMessageKey]
   );
 
   /**
@@ -651,7 +648,7 @@ const StudioProjectPage: React.FC<{
           }
           let refreshed: StudioRendererProjectV2 | null;
           try {
-            refreshed = await refetchProject();
+            refreshed = await refetchProjectWorkspace();
           } catch {
             reportRuleAdoptionUnconfirmed(adoptionKey);
             return false;
@@ -666,12 +663,6 @@ const StudioProjectPage: React.FC<{
             return false;
           }
           projectRef.current = refreshed;
-          try {
-            await refetchWorkspace();
-          } catch {
-            reportRuleAdoptionUnconfirmed(adoptionKey);
-            return false;
-          }
           if (projectRef.current?.id !== current.id || projectRef.current.revision !== result.data.projectRevision) {
             reportRuleAdoptionUnconfirmed(adoptionKey);
             return false;
@@ -707,9 +698,8 @@ const StudioProjectPage: React.FC<{
     }),
     [
       acknowledgeRuleAdoption,
-      refetchProject,
+      refetchProjectWorkspace,
       refetchRoutes,
-      refetchWorkspace,
       reportRuleAdoptionUnconfirmed,
       runWorkspaceCommit,
       runWorkspaceExclusive,
@@ -801,7 +791,7 @@ const StudioProjectPage: React.FC<{
             return 'failed';
           }
           if (result.data.status === 'cancelled') return 'cancelled';
-          const [refreshed] = await Promise.all([refetchProject(), refetchWorkspace()]);
+          const refreshed = await refetchProjectWorkspace();
           if (refreshed === null || refreshed.revision < result.data.projectRevision) {
             setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
             return 'failed';
@@ -963,8 +953,7 @@ const StudioProjectPage: React.FC<{
       focusDirectorForReviewedRequest,
       mutations,
       projection,
-      refetchProject,
-      refetchWorkspace,
+      refetchProjectWorkspace,
       routeCatalog,
       runJobRecovery,
       runWorkspaceCommit,
@@ -1031,7 +1020,7 @@ const StudioProjectPage: React.FC<{
             return 'failed';
           }
           if (result.data.status === 'cancelled') return 'cancelled';
-          const [refreshed] = await Promise.all([refetchProject(), refetchWorkspace()]);
+          const refreshed = await refetchProjectWorkspace();
           if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
             setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
             return 'failed';
@@ -1060,7 +1049,7 @@ const StudioProjectPage: React.FC<{
             setActionErrorMessageKey(result.error.messageKey);
             return false;
           }
-          const [refreshed] = await Promise.all([refetchProject(), refetchWorkspace()]);
+          const refreshed = await refetchProjectWorkspace();
           if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
             setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
             return false;
@@ -1146,8 +1135,7 @@ const StudioProjectPage: React.FC<{
       boardActions.reorderBeats,
       installExportCatalog,
       refetchExports,
-      refetchProject,
-      refetchWorkspace,
+      refetchProjectWorkspace,
       runWorkspaceCommit,
       runWorkspaceExclusive,
       setActionErrorMessageKey,
@@ -1371,11 +1359,11 @@ const StudioProjectPage: React.FC<{
   }, [closeDirtyDraftCount, flushAllWorkspaceDrafts, onCloseContractChange, project]);
 
   const refreshProposalAuthority = useCallback(async (): Promise<void> => {
-    const [projectOutcome] = await Promise.allSettled([refetchProject(), refetchProposals(), refetchWorkspace()]);
+    const [projectOutcome] = await Promise.allSettled([refetchProjectWorkspace(), refetchProposals()]);
     if (projectOutcome.status === 'fulfilled' && projectOutcome.value !== null) {
       projectRef.current = projectOutcome.value;
     }
-  }, [refetchProject, refetchProposals, refetchWorkspace]);
+  }, [refetchProjectWorkspace, refetchProposals]);
 
   const acceptProposal = useCallback(
     async (proposalId: string): Promise<void> => {

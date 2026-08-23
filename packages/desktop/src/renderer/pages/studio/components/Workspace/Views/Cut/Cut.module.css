@@ -322,6 +322,17 @@
   background: var(--color-mask-bg);
 }
 
+.prewarmMedia {
+  position: absolute;
+  inset-block-start: -1px;
+  inset-inline-start: -1px;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  pointer-events: none;
+}
+
 .previewMedia[data-media-kind='slate'] {
   display: grid;
   align-content: center;
