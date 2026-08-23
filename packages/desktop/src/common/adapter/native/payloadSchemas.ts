@@ -525,14 +525,31 @@ const studioV2PrepareGenerationChoiceSchema = z.discriminatedUnion('purpose', [
     })
     .strict(),
 ]);
-const studioV2PrepareSubmissionSchema = z
+const studioV2OrdinaryPrepareSubmissionSchema = z
   .object({
     ...studioV2MutationRequestShape,
     originReferenceHandoffId: safeIdSchema.nullable(),
     baseChoices: z.array(studioV2PrepareGenerationChoiceSchema).min(1).max(STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST),
     cascadeChoices: z.array(studioV2PrepareGenerationChoiceSchema).max(STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST),
   })
-  .strict()
+  .strict();
+const studioV2ContinuityPrepareSubmissionSchema = z
+  .object({
+    ...studioV2MutationRequestShape,
+    originReferenceHandoffId: z.null(),
+    baseChoices: z.array(studioV2PrepareGenerationChoiceSchema).length(0),
+    cascadeChoices: z.array(studioV2PrepareGenerationChoiceSchema).length(0),
+    continuityChange: z
+      .object({
+        shotId: safeIdSchema,
+        hardCut: z.boolean(),
+        requiresSeedGeneration: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+const studioV2PrepareSubmissionSchema = z
+  .union([studioV2OrdinaryPrepareSubmissionSchema, studioV2ContinuityPrepareSubmissionSchema])
   .superRefine((request, context) => {
     const choices = [...request.baseChoices, ...request.cascadeChoices];
     if (choices.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) {

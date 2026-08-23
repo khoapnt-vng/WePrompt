@@ -984,7 +984,6 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
       shotActionBand: box(visibleShotInspector, '[data-shot-action-band]'),
       shotTakeSummary: box(visibleShotInspector, '[data-shot-take-summary]'),
       shotActions: box(visibleShotInspector, '[data-shot-actions]'),
-      hardCutExplanation: box(visibleShotInspector, '[data-hard-cut-explanation]'),
       playbackTrack: box(panelElement, '[data-testid="studio-coverage-playback"]'),
       coverage: (() => {
         const coverage = panelElement.querySelector<HTMLElement>('[data-beat-coverage]');
@@ -1018,7 +1017,6 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
   expect(geometry.playbackTrack.height).toBeGreaterThanOrEqual(87);
   expect(geometry.playbackTrack.height).toBeLessThanOrEqual(89);
   expect(geometry.coverage.scrollWidth).toBeGreaterThanOrEqual(geometry.coverage.clientWidth);
-  expect(geometry.hardCutExplanation.top).toBeGreaterThanOrEqual(geometry.shotActionBand.bottom + 3);
 
   if (reference.width > 900) {
     expect(geometry.previewColumn.width).toBeGreaterThanOrEqual(403);
@@ -1195,23 +1193,9 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   const headState = shotCard.locator('[data-chain-state="segment_head"]');
   const continuousState = anchorShotCard.locator('[data-chain-state="continuous"]');
   await expect(headState).toHaveText('Head of the chain · Starts from the still');
-  await expect(headState.locator('[data-hard-cut-contained]')).toHaveCount(0);
+  await expect(shotCard.locator('[data-chain-change-trigger]')).toHaveCount(0);
   const firstLine = shotCard.getByRole('textbox', { name: 'Line for Shot 1', exact: true });
   await expect(firstLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
-  const hardCutGroup = shotCard.locator('[data-hard-cut-contained]');
-  await expect(hardCutGroup).toHaveAccessibleName('Start with a hard cut');
-  await expect(hardCutGroup).toHaveAccessibleDescription(
-    'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.'
-  );
-  const hardCutControl = hardCutGroup.getByRole('checkbox', { name: 'Start with a hard cut' });
-  await expect(hardCutControl).toBeDisabled();
-  if (projectBeforeLift.shots[shotId]?.chainBreak === 'hard_cut') {
-    await expect(hardCutControl).toBeChecked();
-  } else {
-    await expect(hardCutControl).not.toBeChecked();
-  }
-  await hardCutControl.evaluate((element: HTMLInputElement) => element.click());
-  expect(await readStudioProject(page, projectId)).toEqual(projectBeforeLift);
 
   await anchorShotSelector.click();
   await expect(anchorShotSelector).toHaveAttribute('aria-pressed', 'true');
@@ -1219,7 +1203,15 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   await expect(anchorShotCard).toBeVisible();
   await expect(shotCard).toBeHidden();
   await expect(continuousState).toHaveText('Continues from Shot 01’s last frame');
-  await expect(continuousState.locator('[data-hard-cut-contained]')).toHaveCount(0);
+  const chainChange = anchorShotCard.getByRole('button', { name: 'Review hard cut…', exact: true });
+  await expect(chainChange).toHaveAttribute('aria-haspopup', 'dialog');
+  await expect(chainChange).toHaveAccessibleDescription(
+    'A hard cut makes Shot 2 start from an eligible still, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.'
+  );
+  await chainChange.click();
+  await expect(page.locator('[data-testid="studio-spend-gate"][data-gate-kind="continuity_change"]')).toBeVisible();
+  expect(await readStudioProject(page, projectId)).toEqual(projectBeforeLift);
+  await page.getByRole('button', { name: 'Close — keep the chain unchanged', exact: true }).click();
   const secondLine = anchorShotCard.getByRole('textbox', { name: 'Line for Shot 2', exact: true });
   await expect(secondLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
 
@@ -2209,7 +2201,9 @@ test.describe('Creative Studio workspace', () => {
         staleAnchorShotCard.locator('[data-chain-state]').getByText('Continuity is out of date', { exact: true })
       ).toHaveCount(0);
       await expect(
-        staleAnchorShotCard.locator('[data-hard-cut-contained]').getByText('Continuity is out of date', { exact: true })
+        staleAnchorShotCard
+          .locator('[data-chain-change-control]')
+          .getByText('Continuity is out of date', { exact: true })
       ).toHaveCount(0);
 
       const trimmed = await readStudioProject(page, projectId);

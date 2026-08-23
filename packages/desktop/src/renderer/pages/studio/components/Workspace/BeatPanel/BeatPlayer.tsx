@@ -109,7 +109,11 @@ const paddedPosition = (position: number): string => String(position).padStart(2
 
 const isEditableDescendant = (target: EventTarget | null, root: HTMLElement): boolean => {
   if (!(target instanceof Element) || target === root) return false;
-  return target.closest('input, textarea, select, button, [role="slider"], [contenteditable="true"]') !== null;
+  return (
+    target.closest(
+      'input, textarea, select, button, video[controls], audio[controls], [role="slider"], [contenteditable="true"]'
+    ) !== null
+  );
 };
 
 /** Owns truthful selected-Take/slate playback and exposes a controlled Beat seek position. */
@@ -839,7 +843,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
                       failMedia(planToken, state.segmentIndex, media);
                       return;
                     }
-                    observeVideoTime(media, segment);
+                    observeVideoTime(media, segment, segment.sourceOutSeconds);
                   }}
                   onError={(event) => failMedia(planToken, state.segmentIndex, event.currentTarget)}
                   onLoadedMetadata={(event) => onLoadedMetadata(event.currentTarget, segment)}

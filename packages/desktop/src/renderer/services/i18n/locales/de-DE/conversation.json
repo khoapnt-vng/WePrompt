@@ -955,7 +955,12 @@
         "lookCounter_one": "{{count}} / {{limit}} Wörter",
         "lookCounter_other": "{{count}} / {{limit}} Wörter",
         "chain": {
+          "hardCutState": "Harter Schnitt · Beginnt mit dem Standbild",
           "hardCutUnavailable": "Änderungen am harten Schnitt sind vorübergehend nicht verfügbar. Zuerst muss die Schätzung für die erforderlichen Ersatzmedien geprüft werden.",
+          "reviewSever": "Harten Schnitt prüfen…",
+          "reviewRejoin": "Wiederverknüpfung prüfen…",
+          "reviewSeverDescription": "Ein harter Schnitt lässt Shot {{shot}} mit einem geeigneten Standbild beginnen und erstellt bei Bedarf eines. Die Bestätigung ersetzt diesen Shot und alle fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt.",
+          "reviewRejoinDescription": "Beim Wiederverknüpfen von Shot {{shot}} wird dessen Startbildauswahl gelöscht und das letzte, schnittgenaue Bild von Shot {{previous}} verwendet. Nach der Bestätigung kann die kostenlose Bildextraktion abgeschlossen werden, bevor dieser Shot und die fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt übermittelt werden.",
           "segmentHead": "Kettenanfang · Beginnt mit dem Standbild",
           "continuous": "Setzt das letzte Bild von Shot {{position}} fort"
         },
@@ -1022,6 +1027,21 @@
         "briefAndRulesTitle": "Brief & Regeln"
       },
       "gate": {
+        "group": { "required": "Erforderlich" },
+        "continuity": {
+          "severTitle": "Harten Schnitt prüfen",
+          "rejoinTitle": "Wiederverknüpfung prüfen",
+          "severSummary": "Diese Schätzung macht diesen Shot zum Kettenanfang, verwendet ein geeignetes Startbild oder erstellt bei Bedarf eines und ersetzt alle betroffenen Videos bis zum nächsten harten Schnitt.",
+          "rejoinSummary": "Diese Schätzung löscht die Startbildauswahl dieses Shots und verbindet ihn mit dem schnittgenauen Vorgängerbild. Die kostenlose Bildextraktion kann nach der Bestätigung abgeschlossen werden, bevor Ersatzvideos bis zum nächsten harten Schnitt übermittelt werden.",
+          "severHeadline": "Harter Schnitt · {{count}} erforderliche Generierungen · {{cost}}",
+          "rejoinHeadline": "Wiederverknüpfung · {{count}} erforderliche Generierungen · {{cost}}",
+          "requiredWork": "Alle aufgeführten Ersatzarbeiten sind für diese Kettenänderung erforderlich.",
+          "confirmSever": "Harten Schnitt + {{count}} Generierungen bestätigen · {{cost}}",
+          "confirmRejoin": "Wiederverknüpfung + {{count}} Generierungen bestätigen · {{cost}}",
+          "close": "Schließen — Kette unverändert lassen",
+          "severConfirmed": "Harter Schnitt bestätigt. Prüfe im Shot den Fortschritt des Startbilds und der Ersatzarbeiten sowie mögliche erforderliche Wiederherstellungsschritte.",
+          "rejoinConfirmed": "Wiederverknüpfung bestätigt. Prüfe im Shot den Fortschritt der Bildextraktion und der Ersatzarbeiten sowie mögliche erforderliche Wiederherstellungsschritte."
+        },
         "errors": {
           "routesUnavailable": "Wähle unter Brief & Regeln einsatzbereite Bild- und Videorouten aus, bevor du diesen Kostenvoranschlag vorbereitest.",
           "pricing": {

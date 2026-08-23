@@ -178,8 +178,10 @@ boundary markers, rerendering, lift/restore, focus handoff, and the non-mutating
 
 - **Money and time at the gate.** Under active discussion with the designer: whether the gate shows a
   single exact total, a range, or nothing, and whether it gains a card about elapsed time. Leave the
-  gate as it is.
+  ordinary render gate as it is. The owner-approved BUG-095 hard-cut exception has one exact mandatory
+  graph and total; it was implemented after this completed brief under direction §13.6.
 - **BUG-109 — video generation is globally serialised at one.** The storyboard's film-scale panel
   depends on parallelism that does not exist. Unresolved; not this task.
-- **HARD CUT as a permanent control**, **RENDERS AS attribution**, and **resume UI beyond the
-  storyboard** — all named as open by the handoff's §3.
+- **The BUG-095 paid HARD CUT control** landed after this completed Beat-panel work. Its atomic
+  main-process gate is the only topology-change authority; never restore the free toggle. **RENDERS AS
+  attribution** and **resume UI beyond the storyboard** remain open from the handoff's §3.

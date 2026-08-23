@@ -11,6 +11,12 @@ conditioning, Bin ownership, route selection, spend authorization, and undo sema
 an individual rendered shot from active coverage. This approved ruling supersedes the earlier
 two-kind-Bin answer and is incorporated throughout this document.
 
+**Approved product amendment — 2026-08-23 (BUG-095):** §13.6 is the owner-approved contract for the
+paid hard-cut topology transition. It closes the first-Shot, seed reuse, re-join conditioning,
+cascade, generation-count, undo, and Director decisions left implicit by §13.1. For this operation
+only, §13.6 supersedes any earlier reading that makes the cascade optional, treats `set_hard_cut` as
+ordinary free authoring, or permits ordinary undo or a Director proposal.
+
 ---
 
 ## 1. What CS3 is
@@ -609,10 +615,11 @@ only — the panel is not redrawn yet, and 13.4 lists what redrawing owes.
 
 ### 13.1 The line is state plus control — but the control is `HARD CUT`, not `CONTINUITY BREAK`
 
-**Always present, always clickable, sets `chainBreak: 'hard_cut'`.** Cutting on a change is
-legitimate authoring, not an exception; an affordance that appears only when the system
-noticed something cannot be found when a person wants it; and a permanent control needs no
-detector in order to ship.
+**Present and gated on every Shot that has a predecessor; sets `chainBreak: 'hard_cut'`.** Cutting on
+a change is legitimate authoring, not an exception; an affordance that appears only when the system
+noticed something cannot be found when a person wants it; and a permanent control needs no detector
+in order to ship. The first Shot is already the Beat's natural chain head and has no hard-cut control
+or topology transition.
 
 But §3 already spent that word. Continuity break is **system-detected** — the frame a shot was
 generated from no longer exists. A hard cut is **authored**. One line cannot be both, so the
@@ -708,3 +715,49 @@ From the reading's own list of claims with no code behind them:
 The **Beat-scoped transport** stays a drawing-only claim, and it should: `0:20 / 0:31` against a
 31s beat is right, and `JOIN ◂ / JOIN ▸` is the correct unit for judging whether two clips
 actually join. It has no code behind it because nothing has been built there yet.
+
+### 13.6 Owner-approved paid hard-cut contract — 2026-08-23
+
+This is one narrow exception to the ordinary render gate and its optional cascade. It applies only to
+a non-first active Shot whose authored topology changes from continuation to hard cut (**sever**) or
+from hard cut to continuation (**re-join**).
+
+**First Shot.** The first Shot of a Beat is already a natural segment head. It has no toggle, creates
+no quote, and is not a valid target for either transition.
+
+**One topology gate, one exact graph.** Prepare snapshots the expected project revision, target Shot,
+direction (`none` → `hard_cut` or `hard_cut` → `none`), current topology, exact conditioning
+authority, exact ordered generation graph, routes, rates, and total. Confirm is the sole authority. It
+re-derives all of that inside the project queue; any mismatch is stale. One successful durable commit
+atomically changes `chainBreak` and persists the spend authorization plus every required job before
+the first provider dispatch. The transition never travels through the free authoring reducer.
+
+Closing or declining the gate, prepare refusal, quote expiry, stale confirmation, confirmation
+validation failure, or persistence failure before that atomic commit changes no project bytes and
+creates no authorization or job. After a successful durable confirmation, extraction and provider
+lifecycle failures are recorded normally and never roll back topology or authorization.
+
+**Sever.** Reuse the exact effective seed still when the target Shot already has one eligible under the
+normal seed rules, and atomically write that asset as the canonical `seedStillId` in the transition
+commit. This deliberately converts moving latest-unpinned semantics into the exact conditioning
+authority the user confirmed. Otherwise the graph contains exactly one new `seed_still` generation on
+the image route and the transition leaves `seedStillId` null until the human binds a primary output of
+that authorized item; the dependent target video waits. In both cases the graph contains exactly one
+replacement `video_take` for the target Shot, conditioned on that exact existing or newly selected
+seed.
+
+**Re-join.** Clear the target Shot's `seedStillId`; the still asset remains immutable history. The
+replacement target video conditions on the predecessor's exact trim-aware played-endpoint frame. If
+that frame is not on disk, the existing free extraction lifecycle is a prerequisite and must complete
+before provider dispatch. Re-join never schedules a paid generation for the predecessor.
+
+**Mandatory downstream.** Sever and re-join both include exactly one replacement `video_take` for
+every downstream Shot up to, but not including, the next authored hard cut. There is no base-only or
+optional-cascade quote for this gate. Every required seed/video item has generation count one; requests
+for alternates use the ordinary render gate instead. Existing human take-selection barriers still
+bind symbolic downstream dependencies; the hard-cut gate does not silently choose among Takes.
+
+**No ordinary reversal paths.** A confirmed transition writes no ordinary authoring undo entry.
+Reversing it is the opposite paid topology transition through a new prepare/confirm gate; it is not
+`undo_last`. The current Director cannot apply or propose either transition, and accepting a legacy
+pending proposal cannot open, manufacture, or confirm this spend authority.

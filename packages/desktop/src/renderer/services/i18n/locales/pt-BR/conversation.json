@@ -962,7 +962,12 @@
         "lookCounter_one": "{{count}} / {{limit}} palavras",
         "lookCounter_other": "{{count}} / {{limit}} palavras",
         "chain": {
+          "hardCutState": "Corte seco · Começa com a imagem fixa",
           "hardCutUnavailable": "As alterações no corte seco estão temporariamente indisponíveis. Primeiro, é necessário revisar a estimativa da mídia de substituição necessária.",
+          "reviewSever": "Revisar corte seco…",
+          "reviewRejoin": "Revisar reconexão…",
+          "reviewSeverDescription": "Um corte seco faz a Tomada {{shot}} começar com uma imagem válida e cria uma se necessário. A confirmação substitui esta Tomada e todas as Tomadas contínuas seguintes até o próximo corte seco.",
+          "reviewRejoinDescription": "Ao reconectar a Tomada {{shot}}, sua seleção de imagem inicial é removida e o último quadro da Tomada {{previous}}, ajustado ao corte, é usado. Após a confirmação, a extração gratuita do quadro pode terminar antes do envio desta Tomada e das Tomadas contínuas seguintes até o próximo corte seco.",
           "segmentHead": "Início da cadeia · Começa no quadro estático",
           "continuous": "Continua do último quadro do Plano {{position}}"
         },
@@ -1029,6 +1034,21 @@
         "briefAndRulesTitle": "Brief e regras"
       },
       "gate": {
+        "group": { "required": "Obrigatório" },
+        "continuity": {
+          "severTitle": "Revisar corte seco",
+          "rejoinTitle": "Revisar reconexão",
+          "severSummary": "Esta estimativa torna esta Tomada o início da cadeia, reutiliza uma imagem inicial válida ou cria uma se necessário e substitui todos os vídeos afetados até o próximo corte seco.",
+          "rejoinSummary": "Esta estimativa remove a seleção de imagem inicial desta Tomada e a reconecta ao quadro anterior ajustado ao corte. A extração gratuita do quadro pode terminar após a confirmação e antes do envio dos vídeos de substituição até o próximo corte seco.",
+          "severHeadline": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",
+          "rejoinHeadline": "Reconexão · {{count}} gerações obrigatórias · {{cost}}",
+          "requiredWork": "Todo o trabalho de substituição listado é obrigatório para esta alteração de cadeia.",
+          "confirmSever": "Confirmar corte seco + {{count}} gerações · {{cost}}",
+          "confirmRejoin": "Confirmar reconexão + {{count}} gerações · {{cost}}",
+          "close": "Fechar — manter a cadeia inalterada",
+          "severConfirmed": "Corte seco confirmado. Verifique no plano o progresso da imagem inicial e da substituição ou qualquer recuperação necessária.",
+          "rejoinConfirmed": "Reconexão confirmada. Verifique no plano o progresso da extração do quadro e da substituição ou qualquer recuperação necessária."
+        },
         "errors": {
           "routesUnavailable": "Escolha rotas de imagem e vídeo prontas em Brief e regras antes de preparar esta estimativa.",
           "pricing": {

@@ -99,12 +99,24 @@ const cloneConditioningInput = (input: StudioConditioningInputSnapshot): StudioC
 const cloneDependency = (
   dependency: StudioAuthorizedConditioningDependency
 ): StudioAuthorizedConditioningDependency => {
-  assertSafeId(dependency.upstreamItemId, 'dependency.upstreamItemId');
   if (dependency.kind === 'authorized_seed') {
+    assertSafeId(dependency.upstreamItemId, 'dependency.upstreamItemId');
     assertSafeId(dependency.shotId, 'dependency.shotId');
     return { kind: 'authorized_seed', upstreamItemId: dependency.upstreamItemId, shotId: dependency.shotId };
   }
+  if (dependency.kind === 'existing_predecessor') {
+    assertSafeId(dependency.predecessorShotId, 'dependency.predecessorShotId');
+    assertSafeId(dependency.takeAssetId, 'dependency.takeAssetId');
+    assertEndpoint(dependency.endpointSeconds);
+    return {
+      kind: 'existing_predecessor',
+      predecessorShotId: dependency.predecessorShotId,
+      takeAssetId: dependency.takeAssetId,
+      endpointSeconds: dependency.endpointSeconds,
+    };
+  }
   if (dependency.kind !== 'authorized_predecessor') throw new TypeError('dependency.kind is invalid');
+  assertSafeId(dependency.upstreamItemId, 'dependency.upstreamItemId');
   assertSafeId(dependency.predecessorShotId, 'dependency.predecessorShotId');
   return {
     kind: 'authorized_predecessor',
@@ -226,7 +238,12 @@ export const materializeStudioGenerationRequestPlan = (
     (dependency.kind === 'authorized_seed' && conditioning.kind === 'seed_still') ||
     (dependency.kind === 'authorized_predecessor' &&
       conditioning.kind === 'predecessor_frame' &&
-      dependency.predecessorShotId === conditioning.predecessorShotId);
+      dependency.predecessorShotId === conditioning.predecessorShotId) ||
+    (dependency.kind === 'existing_predecessor' &&
+      conditioning.kind === 'predecessor_frame' &&
+      dependency.predecessorShotId === conditioning.predecessorShotId &&
+      dependency.takeAssetId === conditioning.takeAssetId &&
+      Object.is(dependency.endpointSeconds, conditioning.endpointSeconds));
   if (!dependencyMatches) throw new TypeError('conditioning input does not satisfy the authorized dependency');
   return { ...template, conditioningInput: conditioning };
 };

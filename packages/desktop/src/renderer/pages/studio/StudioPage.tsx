@@ -30,6 +30,7 @@ import { StudioLibrary } from './components/Library';
 import { DirectorProposals } from './components/Shell/DirectorProposals';
 import {
   SpendGateModal,
+  continuityGateDraft,
   hasGenerationAffectingWorkspaceDrafts,
   handoffGateDraft,
   majorUnitsToMinorUnits,
@@ -39,6 +40,7 @@ import {
   projectWorkspace,
   filmRenderBatchShotIds,
   selectionGateDraft,
+  spendGateRouteIssue,
   useSpendGate,
   useWorkspaceDrafts,
   WorkspaceControls,
@@ -286,7 +288,7 @@ const StudioProjectPage: React.FC<{
     spendGate.open(draft);
   }, [projection, setActionErrorMessageKey, spendGate.open, spendGateLocked]);
   const generationDraftsBlockReview =
-    activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
+    drafts.staleRevision || activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
   const beatPanelReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
@@ -958,6 +960,31 @@ const StudioProjectPage: React.FC<{
           routeCatalog?.video.status !== 'ready'
         ) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.videoRouteBlocked');
+          return;
+        }
+        setActionErrorMessageKey(null);
+        spendGate.open(draft);
+      },
+      reviewContinuity: (shotId, hardCut) => {
+        const current = projectRef.current;
+        if (current === null || projection === null || beatPanelReviewBlockedMessageKey !== null || spendGateLocked) {
+          if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
+          return;
+        }
+        const draft = continuityGateDraft({ project: current, projection, shotId, hardCut });
+        if (draft === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+          return;
+        }
+        const routeIssue = routeCatalog === null ? null : spendGateRouteIssue(routeCatalog, draft);
+        if (routeIssue !== null) {
+          setActionErrorMessageKey(
+            routeIssue === 'image'
+              ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+              : routeIssue === 'video'
+                ? 'conversation.creativeStudio.workspace.controls.videoRouteBlocked'
+                : 'conversation.creativeStudio.workspace.gate.errors.routesUnavailable'
+          );
           return;
         }
         setActionErrorMessageKey(null);

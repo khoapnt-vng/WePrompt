@@ -263,6 +263,43 @@ const projectCascadeProgress = (
       continue;
     }
 
+    if (dependency.kind === 'existing_predecessor') {
+      const upstreamShot = ownValue(project.shots, dependency.predecessorShotId);
+      const selectedAsset = ownValue(project.assets, dependency.takeAssetId);
+      const exactSelectedTake =
+        upstreamShot?.selectedTakeId === dependency.takeAssetId &&
+        selectedAsset?.mediaKind === 'video' &&
+        typeof selectedAsset.durationSeconds === 'number' &&
+        Object.is(selectedAsset.durationSeconds - (upstreamShot.trimOutSeconds ?? 0), dependency.endpointSeconds);
+      let extractionId: string | null = null;
+      try {
+        extractionId = createStudioFrameExtractionId({
+          shotId: dependency.predecessorShotId,
+          takeAssetId: dependency.takeAssetId,
+          endpointSeconds: dependency.endpointSeconds,
+        });
+      } catch {
+        extractionId = null;
+      }
+      const extraction = extractionId === null ? undefined : ownValue(project.frameExtractions, extractionId);
+      const exactExtraction =
+        extraction?.shotId === dependency.predecessorShotId &&
+        extraction.takeAssetId === dependency.takeAssetId &&
+        Object.is(extraction.endpointSeconds, dependency.endpointSeconds)
+          ? extraction
+          : undefined;
+      const failed = exactExtraction?.status === 'failed' || exactExtraction?.status === 'ready';
+      result.push({
+        dependentShotId: location.shotId,
+        upstreamShotId,
+        eligiblePrimaryAssetIds: exactSelectedTake ? [dependency.takeAssetId] : [],
+        canRetryConditioningFrame: failed,
+        canCancelWaiting: canCancelWaitingJobs(siblings),
+        waitingReason: failed ? 'conditioning_failed' : 'conditioning_frame',
+      });
+      continue;
+    }
+
     const upstreamItem = authorizationItems(latest.authorization).find((item) => item.id === dependency.upstreamItemId);
     if (upstreamItem === undefined) continue;
     const eligiblePrimaryAssetIds = primaryAssetIdsForItem(project, latest.authorization.id, upstreamItem);
@@ -325,8 +362,7 @@ const projectCascadeProgress = (
       Object.is(extraction.endpointSeconds, endpointSeconds)
         ? extraction
         : undefined;
-    if (exactExtraction?.status === 'ready') continue;
-    const failed = exactExtraction?.status === 'failed';
+    const failed = exactExtraction?.status === 'failed' || exactExtraction?.status === 'ready';
     result.push({
       dependentShotId: location.shotId,
       upstreamShotId,
@@ -353,6 +389,14 @@ const hasCurrentNonterminalDependencyOwner = (
     if (job.requestPlan.kind === 'after_take_selection') {
       const dependency = job.requestPlan.dependency;
       if (dependency.kind === 'authorized_predecessor' && dependency.predecessorShotId === predecessorShotId) {
+        return true;
+      }
+      if (
+        dependency.kind === 'existing_predecessor' &&
+        dependency.predecessorShotId === predecessorShotId &&
+        dependency.takeAssetId === takeAssetId &&
+        Object.is(dependency.endpointSeconds, endpointSeconds)
+      ) {
         return true;
       }
     }
@@ -619,6 +663,9 @@ const takeHasNonterminalConditioningUse = (project: StudioProjectV2, assetId: st
     if (!NONTERMINAL_JOB_STATUSES.has(job.status)) return false;
     const input = job.requestSnapshot?.conditioningInput;
     return (
+      (job.requestPlan.kind === 'after_take_selection' &&
+        job.requestPlan.dependency.kind === 'existing_predecessor' &&
+        job.requestPlan.dependency.takeAssetId === assetId) ||
       (input?.kind === 'seed_still' && input.assetId === assetId) ||
       (input?.kind === 'predecessor_frame' && input.takeAssetId === assetId)
     );
@@ -633,7 +680,10 @@ const takeIsLastSelectableForWaitingDependency = (project: StudioProjectV2, asse
     (job) =>
       NONTERMINAL_JOB_STATUSES.has(job.status) &&
       job.requestPlan.kind === 'after_take_selection' &&
-      job.requestPlan.dependency.upstreamItemId === producer.authorizationItemId
+      ((job.requestPlan.dependency.kind === 'existing_predecessor' &&
+        job.requestPlan.dependency.takeAssetId === assetId) ||
+        (job.requestPlan.dependency.kind !== 'existing_predecessor' &&
+          job.requestPlan.dependency.upstreamItemId === producer.authorizationItemId))
   );
   if (!hasWaitingDependent) return false;
   const primaryIds = new Set<string>();

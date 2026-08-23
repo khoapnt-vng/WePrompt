@@ -111,6 +111,35 @@ describe('generation request plans', () => {
     });
   });
 
+  it('materializes an existing predecessor only from the exact quoted Take and trim endpoint', () => {
+    const template = createStudioGenerationRequestTemplate(templateInput());
+    const plan = createStudioDeferredGenerationRequestPlan({
+      template,
+      dependency: {
+        kind: 'existing_predecessor',
+        predecessorShotId: 'shot_previous',
+        takeAssetId: 'take_1',
+        endpointSeconds: 6.25,
+      } as never,
+    });
+    const exact = {
+      kind: 'predecessor_frame' as const,
+      predecessorShotId: 'shot_previous',
+      takeAssetId: 'take_1',
+      frameAssetId: 'frame_1',
+      endpointSeconds: 6.25,
+    };
+
+    expect(materializeStudioGenerationRequestPlan(plan, exact)).toEqual({
+      ...template,
+      conditioningInput: exact,
+    });
+    expect(() => materializeStudioGenerationRequestPlan(plan, { ...exact, takeAssetId: 'take_other' })).toThrow(
+      TypeError
+    );
+    expect(() => materializeStudioGenerationRequestPlan(plan, { ...exact, endpointSeconds: 6 })).toThrow(TypeError);
+  });
+
   it('materializes a deferred same-Shot seed choice into the reviewed image input', () => {
     const template = createStudioGenerationRequestTemplate(templateInput());
     const plan = createStudioDeferredGenerationRequestPlan({

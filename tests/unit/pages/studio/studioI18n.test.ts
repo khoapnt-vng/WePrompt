@@ -330,7 +330,12 @@ const expectedLeaves = [
   'beatPanel.fields.durationFor',
   'beatPanel.chain.authorHardCut',
   'beatPanel.chain.hardCut',
+  'beatPanel.chain.hardCutState',
   'beatPanel.chain.hardCutUnavailable',
+  'beatPanel.chain.reviewSever',
+  'beatPanel.chain.reviewRejoin',
+  'beatPanel.chain.reviewSeverDescription',
+  'beatPanel.chain.reviewRejoinDescription',
   'beatPanel.chain.generationOutOfDate',
   'beatPanel.chain.segmentHead',
   'beatPanel.chain.continuous',
@@ -696,9 +701,22 @@ const expectedLeaves = [
   'gate.baseOnly',
   'gate.withCascade',
   'gate.headline',
+  'gate.continuity.severTitle',
+  'gate.continuity.rejoinTitle',
+  'gate.continuity.severSummary',
+  'gate.continuity.rejoinSummary',
+  'gate.continuity.severHeadline',
+  'gate.continuity.rejoinHeadline',
+  'gate.continuity.requiredWork',
+  'gate.continuity.confirmSever',
+  'gate.continuity.confirmRejoin',
+  'gate.continuity.close',
+  'gate.continuity.severConfirmed',
+  'gate.continuity.rejoinConfirmed',
   'gate.rateCardSource',
   'gate.group.base',
   'gate.group.cascade',
+  'gate.group.required',
   'gate.purpose.seed_still',
   'gate.purpose.video_take',
   'gate.route',
@@ -834,6 +852,11 @@ const localizedWorkspaceKeys = [
   'beatPanel.beatFieldsLabel',
   'beatPanel.chain.continuous',
   'beatPanel.chain.hardCutUnavailable',
+  'beatPanel.chain.hardCutState',
+  'beatPanel.chain.reviewSever',
+  'beatPanel.chain.reviewRejoin',
+  'beatPanel.chain.reviewSeverDescription',
+  'beatPanel.chain.reviewRejoinDescription',
   'beatPanel.chain.segmentHead',
   'beatPanel.coverage.boundaryGuidance',
   'beatPanel.coverage.trimGuidance',
@@ -856,6 +879,19 @@ const localizedWorkspaceKeys = [
   ...localizedCutFilmDeltaKeys,
   'controls.briefAndRulesTitle',
   'gate.errors.routesUnavailable',
+  'gate.group.required',
+  'gate.continuity.severTitle',
+  'gate.continuity.rejoinTitle',
+  'gate.continuity.severSummary',
+  'gate.continuity.rejoinSummary',
+  'gate.continuity.severHeadline',
+  'gate.continuity.rejoinHeadline',
+  'gate.continuity.requiredWork',
+  'gate.continuity.confirmSever',
+  'gate.continuity.confirmRejoin',
+  'gate.continuity.close',
+  'gate.continuity.severConfirmed',
+  'gate.continuity.rejoinConfirmed',
   'gate.errors.pricing.invalidQuote',
   'gate.errors.pricing.inactiveShot',
   'gate.errors.pricing.inFlight',
@@ -975,12 +1011,23 @@ describe('Creative Studio workspace translations', () => {
     });
   });
 
-  it('explains the contained hard-cut control without implying that a free mutation occurred', () => {
+  it('explains exact reviewed sever and rejoin without promising lifecycle success', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
-    expect(leaves['beatPanel.chain.hardCutUnavailable']).toBe(
-      'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.'
-    );
+    expect(leaves).toMatchObject({
+      'beatPanel.chain.reviewSever': 'Review hard cut…',
+      'beatPanel.chain.reviewRejoin': 'Review rejoin…',
+      'gate.continuity.requiredWork': 'All listed replacement work is required for this chain change.',
+      'gate.continuity.confirmSever': 'Confirm hard cut + {{count}} generations · {{cost}}',
+      'gate.continuity.confirmRejoin': 'Confirm rejoin + {{count}} generations · {{cost}}',
+      'gate.continuity.close': 'Close — keep the chain unchanged',
+      'gate.continuity.severConfirmed':
+        'Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.',
+      'gate.continuity.rejoinConfirmed':
+        'Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery.',
+    });
+    expect(placeholders(leaves['gate.continuity.confirmSever']!)).toEqual(['cost', 'count']);
+    expect(placeholders(leaves['gate.continuity.confirmRejoin']!)).toEqual(['cost', 'count']);
   });
 
   it('names both unavailable estimate routes and directs recovery to Brief and rules', () => {

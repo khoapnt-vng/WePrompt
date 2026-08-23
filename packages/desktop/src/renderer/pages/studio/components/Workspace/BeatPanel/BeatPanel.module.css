@@ -221,13 +221,24 @@
   color: var(--color-primary-6);
 }
 
-.hardCutControl {
+.chainChangeControl {
   display: flex;
   min-inline-size: 0;
   align-items: center;
 }
 
-.hardCutExplanation {
+.chainChangeControl :global(.arco-btn) {
+  block-size: auto;
+  min-block-size: 32px;
+  white-space: normal;
+}
+
+.chainChangeControl span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.chainChangeDescription {
   max-inline-size: 48ch;
   margin: 0;
   color: var(--color-text-3);

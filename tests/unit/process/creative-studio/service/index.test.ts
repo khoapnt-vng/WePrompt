@@ -751,6 +751,50 @@ describe('CreativeStudioServiceV2', () => {
     };
   };
 
+  const makeContinuityProject = (chainBreak: 'none' | 'hard_cut'): StudioProjectV2 => {
+    const project = makeSchema2ServiceProject();
+    project.beats.section_1!.shotOrder = ['clip_1', 'clip_2'];
+    project.beats.section_2!.shotOrder = [];
+    project.shots.clip_2!.chainBreak = chainBreak;
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    return project;
+  };
+
+  const makeRejoinProject = (): { project: StudioProjectV2; take: StudioAssetV2; seed: StudioAssetV2 } => {
+    const project = makeContinuityProject('hard_cut');
+    const take: StudioAssetV2 = {
+      id: 'take_rejoin_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'take_rejoin_1.mp4' },
+      byteSize: 100,
+      sha256: 'c'.repeat(64),
+      durationSeconds: 10,
+      createdAt: '2026-08-17T00:00:01.000Z',
+    };
+    const seed: StudioAssetV2 = {
+      id: 'seed_rejoin_2',
+      projectId: project.id,
+      shotId: 'clip_2',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'assets', fileName: 'seed_rejoin_2.png' },
+      byteSize: 20,
+      sha256: 'd'.repeat(64),
+      createdAt: '2026-08-17T00:00:01.000Z',
+    };
+    Object.assign(project.assets, { [take.id]: take, [seed.id]: seed });
+    project.shots.clip_1!.assetIds.push(take.id);
+    project.shots.clip_1!.selectedTakeId = take.id;
+    project.shots.clip_1!.trimOutSeconds = 2;
+    project.shots.clip_2!.assetIds.push(seed.id);
+    project.shots.clip_2!.seedStillId = seed.id;
+    return { project, take, seed };
+  };
+
   it('rejects malformed V2 service envelopes before store, media, or paid work', async () => {
     const harness = makeHarness();
     const symbolKeyedBinding = {
@@ -3207,6 +3251,425 @@ describe('CreativeStudioServiceV2', () => {
     expect(admit).not.toHaveBeenCalled();
   });
 
+  it('confirms one rejoin atomically with exact existing-predecessor extraction authority', async () => {
+    const { project, take } = makeRejoinProject();
+    const harness = makeHarness(project);
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: false, requiresSeedGeneration: false },
+    } as never);
+
+    expect(prepared.withCascade).toBeNull();
+    expect(prepared.baseOnly).toMatchObject({
+      baseItems: [{ shotId: 'clip_2', purpose: 'video_take', generationCount: 1, waitsForTakeSelection: false }],
+      cascadeItems: [],
+    });
+    harness.extractConditioningFrameV2.mockRejectedValueOnce(new Error('fixture decoder failure'));
+    harness.store.getProjectV2.mockRejectedValueOnce(new Error('fixture post-commit read failure'));
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'clip_1',
+      takeAssetId: take.id,
+      endpointSeconds: 8,
+    });
+    const committed = harness.getProject();
+    expect(committed.shots.clip_2).toMatchObject({ chainBreak: 'none', seedStillId: null });
+    expect(committed.undoHistory).toEqual(project.undoHistory);
+    expect(committed.frameExtractions[extractionId]).toMatchObject({
+      shotId: 'clip_1',
+      takeAssetId: take.id,
+      endpointSeconds: 8,
+      status: 'pending',
+    });
+    expect(committed.spendAuthorizations).toHaveLength(1);
+    expect(Object.values(committed.jobs)).toEqual([
+      expect.objectContaining({
+        shotId: 'clip_2',
+        status: 'waiting_for_conditioning',
+        requestPlan: {
+          kind: 'after_take_selection',
+          template: expect.any(Object),
+          dependency: {
+            kind: 'existing_predecessor',
+            predecessorShotId: 'clip_1',
+            takeAssetId: take.id,
+            endpointSeconds: 8,
+          },
+        },
+      }),
+    ]);
+    expect(harness.extractConditioningFrameV2).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      extractionId,
+    });
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    await expect(harness.service.getWorkspaceStatus({ projectId: project.id })).resolves.toMatchObject({
+      cascadeProgress: [
+        {
+          dependentShotId: 'clip_2',
+          upstreamShotId: 'clip_1',
+          eligiblePrimaryAssetIds: [take.id],
+          canRetryConditioningFrame: false,
+          canCancelWaiting: true,
+          waitingReason: 'conditioning_frame',
+        },
+      ],
+    });
+  });
+
+  it('rejects rejoin before commit when exact conditioning-frame storage is unavailable', async () => {
+    const { project } = makeRejoinProject();
+    const harness = makeHarness(project, { includeMediaStore: false });
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: false, requiresSeedGeneration: false },
+    });
+    const beforeConfirm = harness.getProject();
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(harness.getProject()).toEqual(beforeConfirm);
+    expect(harness.getProject().spendAuthorizations).toEqual([]);
+    expect(harness.getProject().jobs).toEqual({});
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
+  it('repairs an unverified rejoin frame and binds the exact verified crash frontier without new spend', async () => {
+    const { project, take } = makeRejoinProject();
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: false, requiresSeedGeneration: false },
+    });
+    harness.extractConditioningFrameV2.mockRejectedValueOnce(new Error('fixture first repair failure'));
+    await harness.service.confirmSubmission({
+      projectId: project.id,
+      quoteId: prepared.baseOnly.id,
+      expectedRevision: project.revision,
+    });
+
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'clip_1',
+      takeAssetId: take.id,
+      endpointSeconds: 8,
+    });
+    const frameAsset: StudioAssetV2 = {
+      id: 'frame_rejoin_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'conditioningFrames', fileName: 'frame_rejoin_1.png' },
+      byteSize: 15,
+      sha256: 'f'.repeat(64),
+      createdAt: '2026-08-17T00:00:02.000Z',
+    };
+    const ready = harness.getProject();
+    ready.assets[frameAsset.id] = frameAsset;
+    ready.shots.clip_1!.assetIds.push(frameAsset.id);
+    ready.frameExtractions[extractionId] = {
+      ...ready.frameExtractions[extractionId]!,
+      frameAssetId: frameAsset.id,
+      status: 'ready',
+      errorCode: null,
+    };
+    harness.setProject(ready);
+    harness.extractConditioningFrameV2.mockClear();
+    harness.extractConditioningFrameV2.mockResolvedValueOnce(structuredClone(ready.frameExtractions[extractionId]!));
+    harness.verifyConditioningFrameV2.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      extractionId,
+      shotId: 'clip_1',
+      takeAssetId: take.id,
+      endpointSeconds: 8,
+      frameAssetId: frameAsset.id,
+      byteSize: frameAsset.byteSize,
+      sha256: frameAsset.sha256,
+    });
+    const waitingJob = Object.values(ready.jobs)[0]!;
+
+    await expect(
+      harness.service.retryConditioningFrame({
+        projectId: project.id,
+        expectedRevision: ready.revision,
+        dependentShotId: 'clip_2',
+      })
+    ).resolves.toMatchObject({ cascadeProgress: [] });
+    expect(harness.extractConditioningFrameV2).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      extractionId,
+    });
+    expect(harness.getProject().frameExtractions[extractionId]).toMatchObject({
+      status: 'ready',
+      frameAssetId: frameAsset.id,
+    });
+    expect(harness.getProject().jobs[waitingJob.id]).toMatchObject({
+      status: 'queued_local',
+      requestSnapshot: {
+        conditioningInput: {
+          kind: 'predecessor_frame',
+          predecessorShotId: 'clip_1',
+          takeAssetId: take.id,
+          frameAssetId: frameAsset.id,
+          endpointSeconds: 8,
+        },
+      },
+    });
+    expect(harness.submitShots).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      jobIds: [waitingJob.id],
+    });
+
+    harness.setProject(ready);
+    harness.store.updateProjectV2.mockClear();
+    harness.extractConditioningFrameV2.mockClear();
+    harness.submitShots.mockClear();
+    harness.verifyConditioningFrameV2.mockReset().mockResolvedValueOnce({
+      extractionId,
+      shotId: 'clip_1',
+      takeAssetId: take.id,
+      endpointSeconds: 8,
+      frameAssetId: frameAsset.id,
+      byteSize: frameAsset.byteSize,
+      sha256: frameAsset.sha256,
+    });
+    const authorizationCount = ready.spendAuthorizations.length;
+    const jobIds = Object.keys(ready.jobs);
+    await expect(
+      harness.service.retryConditioningFrame({
+        projectId: project.id,
+        expectedRevision: ready.revision,
+        dependentShotId: 'clip_2',
+      })
+    ).resolves.toMatchObject({ cascadeProgress: [] });
+    expect(harness.extractConditioningFrameV2).not.toHaveBeenCalled();
+    expect(harness.getProject().spendAuthorizations).toHaveLength(authorizationCount);
+    expect(Object.keys(harness.getProject().jobs)).toEqual(jobIds);
+    expect(harness.getProject().jobs[waitingJob.id]).toMatchObject({ status: 'queued_local' });
+    expect(harness.submitShots).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      jobIds: [waitingJob.id],
+    });
+
+    const wrongAuthority = structuredClone(ready);
+    const wrongPlan = wrongAuthority.jobs[waitingJob.id]!.requestPlan;
+    if (wrongPlan.kind !== 'after_take_selection' || wrongPlan.dependency.kind !== 'existing_predecessor') {
+      throw new Error('invalid ready-frame test fixture');
+    }
+    wrongPlan.dependency.endpointSeconds = 7;
+    harness.setProject(wrongAuthority);
+    harness.store.updateProjectV2.mockClear();
+    harness.verifyConditioningFrameV2.mockClear();
+    await expect(
+      harness.service.retryConditioningFrame({
+        projectId: project.id,
+        expectedRevision: wrongAuthority.revision,
+        dependentShotId: 'clip_2',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(harness.getProject()).toEqual(wrongAuthority);
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+    expect(harness.verifyConditioningFrameV2).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['pins the exact reusable seed', true],
+    ['keeps the seed null until the authorized output is selected', false],
+  ])('confirms one mandatory sever graph and %s', async (_label, reuseSeed) => {
+    const project = makeContinuityProject('none');
+    if (reuseSeed) {
+      const seed: StudioAssetV2 = {
+        id: 'seed_sever_2',
+        projectId: project.id,
+        shotId: 'clip_2',
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'seed_sever_2.png' },
+        byteSize: 20,
+        sha256: 'e'.repeat(64),
+        createdAt: '2026-08-17T00:00:01.000Z',
+      };
+      project.assets[seed.id] = seed;
+      project.shots.clip_2!.assetIds.push(seed.id);
+    }
+    const harness = makeHarness(project);
+    const beforePrepare = harness.getProject();
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: true, requiresSeedGeneration: !reuseSeed },
+    });
+
+    expect(harness.getProject()).toEqual(beforePrepare);
+    expect(prepared.withCascade).toBeNull();
+    expect(prepared.baseOnly.baseItems.map(({ purpose, generationCount }) => [purpose, generationCount])).toEqual(
+      reuseSeed
+        ? [['video_take', 1]]
+        : [
+            ['seed_still', 1],
+            ['video_take', 1],
+          ]
+    );
+
+    await harness.service.confirmSubmission({
+      projectId: project.id,
+      quoteId: prepared.baseOnly.id,
+      expectedRevision: project.revision,
+    });
+
+    const committed = harness.getProject();
+    expect(committed.shots.clip_2).toMatchObject({
+      chainBreak: 'hard_cut',
+      seedStillId: reuseSeed ? 'seed_sever_2' : null,
+    });
+    expect(committed.undoHistory).toEqual(project.undoHistory);
+    expect(committed.spendAuthorizations).toEqual([
+      expect.objectContaining({
+        id: prepared.baseOnly.id,
+        baseItems: expect.any(Array),
+        cascadeItems: [],
+      }),
+    ]);
+    expect(
+      Object.values(committed.jobs).map(({ purpose, status, generationIndex }) => [purpose, status, generationIndex])
+    ).toEqual(
+      reuseSeed
+        ? [['video_take', 'queued_local', 0]]
+        : [
+            ['seed_still', 'queued_local', 0],
+            ['video_take', 'waiting_for_conditioning', 0],
+          ]
+    );
+    expect(harness.submitShots).toHaveBeenCalledTimes(1);
+    expect(harness.extractConditioningFrameV2).not.toHaveBeenCalled();
+  });
+
+  it('leaves a failed continuity commit byte-identical, then consumes the sole quote exactly once', async () => {
+    const project = makeContinuityProject('none');
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: true, requiresSeedGeneration: true },
+    });
+    const beforeConfirm = harness.getProject();
+    harness.store.confirmProjectV2.mockRejectedValueOnce(new Error('fixture persistence failure'));
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toThrow('fixture persistence failure');
+    expect(harness.getProject()).toEqual(beforeConfirm);
+    expect(harness.submitShots).not.toHaveBeenCalled();
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+    expect(harness.getProject().spendAuthorizations).toHaveLength(1);
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'quote_not_found' });
+    expect(harness.getProject().spendAuthorizations).toHaveLength(1);
+  });
+
+  it('leaves stale and expired continuity confirmations byte-identical', async () => {
+    const staleProject = makeContinuityProject('none');
+    const staleHarness = makeHarness(staleProject);
+    const stalePrepared = await staleHarness.service.prepareSubmission({
+      projectId: staleProject.id,
+      expectedRevision: staleProject.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: true, requiresSeedGeneration: true },
+    });
+    const concurrentlyChanged = {
+      ...staleHarness.getProject(),
+      revision: staleProject.revision + 1,
+      name: 'Concurrent durable edit',
+    };
+    staleHarness.setProject(concurrentlyChanged);
+
+    await expect(
+      staleHarness.service.confirmSubmission({
+        projectId: staleProject.id,
+        quoteId: stalePrepared.baseOnly.id,
+        expectedRevision: staleProject.revision,
+      })
+    ).rejects.toThrow();
+    expect(staleHarness.getProject()).toEqual(concurrentlyChanged);
+    expect(staleHarness.submitShots).not.toHaveBeenCalled();
+
+    let nowMs = Date.parse('2026-08-17T00:00:00.000Z');
+    const expiringCache = new StudioPreparedSubmissionCacheV2({ now: () => nowMs });
+    const expiringProject = makeContinuityProject('none');
+    const expiringHarness = makeHarness(expiringProject, { preparedSubmissionCache: expiringCache });
+    const expiredPrepared = await expiringHarness.service.prepareSubmission({
+      projectId: expiringProject.id,
+      expectedRevision: expiringProject.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: true, requiresSeedGeneration: true },
+    });
+    const beforeExpiredConfirm = expiringHarness.getProject();
+    nowMs += STUDIO_PREPARED_QUOTE_TTL_SECONDS * 1_000 + 1;
+
+    await expect(
+      expiringHarness.service.confirmSubmission({
+        projectId: expiringProject.id,
+        quoteId: expiredPrepared.baseOnly.id,
+        expectedRevision: expiringProject.revision,
+      })
+    ).rejects.toMatchObject({ code: 'quote_not_found' });
+    expect(expiringHarness.getProject()).toEqual(beforeExpiredConfirm);
+    expect(expiringHarness.submitShots).not.toHaveBeenCalled();
+  });
+
   it('maps a missing base route to invalid_route before rate, resolver, or cache work', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = null;
@@ -3813,6 +4276,19 @@ describe('CreativeStudioServiceV2', () => {
     };
     paid.assets[seedAsset.id] = seedAsset;
     paid.shots.clip_1.assetIds.push(seedAsset.id);
+    const unrelatedSeedAsset: StudioAssetV2 = {
+      id: 'seed_unrelated_import',
+      projectId: paid.id,
+      shotId: 'clip_1',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'seed_unrelated_import.png' },
+      byteSize: 8,
+      sha256: 'd'.repeat(64),
+      createdAt: '2026-08-17T00:00:02.000Z',
+    };
+    paid.assets[unrelatedSeedAsset.id] = unrelatedSeedAsset;
+    paid.shots.clip_1.assetIds.push(unrelatedSeedAsset.id);
     seedJob.status = 'succeeded';
     seedJob.providerJobId = 'remote_seed';
     seedJob.outputAssetIds = [seedAsset.id];
@@ -3833,6 +4309,22 @@ describe('CreativeStudioServiceV2', () => {
     };
     harness.setProject(paid);
     harness.submitShots.mockClear();
+
+    const beforeRejectedSelection = harness.getProject();
+    await expect(
+      harness.service.applyMutations(
+        {
+          schemaVersion: 2,
+          projectId: paid.id,
+          expectedRevision: paid.revision,
+          operations: [{ kind: 'set_seed_still', shotId: 'clip_1', assetId: unrelatedSeedAsset.id }],
+        },
+        { mutationId: 'reject_unrelated_seed', capturedAt: '2026-08-17T00:00:03.000Z' }
+      )
+    ).rejects.toMatchObject({ name: 'StudioMutationErrorV2', reasonCode: 'dependency_blocked' });
+    expect(harness.getProject()).toEqual(beforeRejectedSelection);
+    expect(harness.getProject().shots.clip_1.seedStillId).toBeNull();
+    expect(harness.submitShots).not.toHaveBeenCalled();
 
     await harness.service.applyMutations(
       {

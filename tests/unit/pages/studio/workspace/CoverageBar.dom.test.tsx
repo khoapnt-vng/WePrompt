@@ -697,6 +697,31 @@ describe('CoverageBar', () => {
     expect(marker.querySelector('img')).toBeNull();
   });
 
+  it('keeps an intentional hard-cut boundary gone when stale continuity facts remain', () => {
+    const upstream = makeShot('shot_1', 8, 0, {
+      dirtyCauses: ['generation_out_of_date'],
+    });
+    const segmentHead = makeShot('shot_2', 8, 8, {
+      chainBreak: 'hard_cut',
+      dirtyCauses: ['continuity_stale'],
+      frameBoundary: {
+        upstreamShotId: 'shot_1',
+        dependentShotId: 'shot_2',
+        status: 'on_disk',
+        frameAssetId: 'stale_frame',
+      },
+      segmentHead: true,
+    });
+    renderCoverage([upstream, segmentHead]);
+
+    const marker = screen.getByRole('img', {
+      name: 'Boundary after Shot 01 · Continuity frame missing',
+    });
+    expect(marker).toHaveAttribute('data-boundary-frame', 'gone');
+    expect(marker.querySelector('img')).toBeNull();
+    expect(screen.queryByRole('img', { name: /Continuity frame is out of date/ })).toBeNull();
+  });
+
   it('keeps source copy outside a dedicated trim lane without weakening the sliders', () => {
     renderCoverage([makeSelectedShot()]);
 

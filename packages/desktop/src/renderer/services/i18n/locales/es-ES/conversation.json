@@ -957,7 +957,12 @@
         "lookCounter_one": "{{count}} / {{limit}} palabras",
         "lookCounter_other": "{{count}} / {{limit}} palabras",
         "chain": {
+          "hardCutState": "Corte directo · Comienza desde la imagen fija",
           "hardCutUnavailable": "Temporalmente no se pueden hacer cambios en el corte directo. Primero debe revisarse la estimación del material multimedia de sustitución necesario.",
+          "reviewSever": "Revisar corte directo…",
+          "reviewRejoin": "Revisar reconexión…",
+          "reviewSeverDescription": "Un corte directo hace que la toma {{shot}} comience desde una imagen fija válida y crea una si es necesario. Al confirmar, se sustituyen esta toma y todas las tomas posteriores continuas hasta el siguiente corte directo.",
+          "reviewRejoinDescription": "Al reconectar la toma {{shot}}, se borra su selección de imagen inicial y se usa el último fotograma de la toma {{previous}}, ajustado al recorte. Tras confirmar, la extracción gratuita del fotograma puede terminar antes de enviar esta toma y las tomas posteriores continuas hasta el siguiente corte directo.",
           "segmentHead": "Inicio de la cadena · Empieza desde la imagen fija",
           "continuous": "Continúa desde el último fotograma del plano {{position}}"
         },
@@ -1024,6 +1029,21 @@
         "briefAndRulesTitle": "Brief y reglas"
       },
       "gate": {
+        "group": { "required": "Obligatorio" },
+        "continuity": {
+          "severTitle": "Revisar corte directo",
+          "rejoinTitle": "Revisar reconexión",
+          "severSummary": "Esta estimación convierte esta toma en inicio de cadena, reutiliza una imagen inicial válida o crea una si hace falta y sustituye todos los vídeos afectados hasta el siguiente corte directo.",
+          "rejoinSummary": "Esta estimación borra la selección de imagen inicial de esta toma y la reconecta al fotograma anterior ajustado al recorte. La extracción gratuita del fotograma puede terminar tras confirmar y antes de enviar los vídeos de sustitución hasta el siguiente corte directo.",
+          "severHeadline": "Corte directo · {{count}} generaciones obligatorias · {{cost}}",
+          "rejoinHeadline": "Reconexión · {{count}} generaciones obligatorias · {{cost}}",
+          "requiredWork": "Todo el trabajo de sustitución indicado es obligatorio para este cambio de cadena.",
+          "confirmSever": "Confirmar corte directo + {{count}} generaciones · {{cost}}",
+          "confirmRejoin": "Confirmar reconexión + {{count}} generaciones · {{cost}}",
+          "close": "Cerrar — mantener la cadena sin cambios",
+          "severConfirmed": "Corte directo confirmado. Revisa el plano para ver el progreso de la imagen inicial y del trabajo de sustitución, o cualquier recuperación necesaria.",
+          "rejoinConfirmed": "Reconexión confirmada. Revisa el plano para ver el progreso de la extracción del fotograma y del trabajo de sustitución, o cualquier recuperación necesaria."
+        },
         "errors": {
           "routesUnavailable": "Elige rutas de imagen y vídeo listas en Brief y reglas antes de preparar este presupuesto.",
           "pricing": {

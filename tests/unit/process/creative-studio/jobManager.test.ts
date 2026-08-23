@@ -42,6 +42,7 @@ import {
 } from '@process/services/creative-studio/mediaStore';
 import {
   calculateStudioQuoteTotals,
+  createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
 } from '@process/services/creative-studio/service/schema2/generation';
 import { createStudioSpendReceiptV2 } from '@process/services/creative-studio/service/schema2/pricing';
@@ -1714,6 +1715,197 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       outputAssetIdsByRole: { primary: expect.any(String), poster: expect.any(String) },
       spendReceipt: { totalMinorUnits: 15 },
     });
+  });
+
+  it('recovers an exact existing-predecessor frame and dispatches its waiting job after restart', async () => {
+    let primaryPath = '';
+    const submit = vi.fn(async () => ({
+      kind: 'complete' as const,
+      outputs: [
+        {
+          mediaKind: 'video' as const,
+          role: 'primary' as const,
+          source: { kind: 'file' as const, path: primaryPath },
+          mimeType: 'video/mp4' as const,
+          byteSize: mp4.length,
+          durationSeconds: 5,
+        },
+      ],
+    }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-media-gateway-v1', { submit }), {
+      purpose: 'video_take',
+      probeVideoDurationSecondsV2: async () => 5,
+    });
+    primaryPath = path.join(harness.rootDir, 'provider-recovery-primary.mp4');
+    await writeFile(primaryPath, mp4);
+    await dispatchV2(harness);
+    await expectV2Job(harness, { status: 'succeeded', outputAssetIdsByRole: { primary: expect.any(String) } });
+
+    const loaded = await harness.store.getProjectV2(harness.project.id);
+    if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
+    const takeAssetId = loaded.project.jobs.job_v2_1!.outputAssetIdsByRole.primary!;
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId,
+      endpointSeconds: 5,
+    });
+    const frameAssetId = 'frame_existing_recovery';
+    const frameFileName = `${frameAssetId}.png`;
+    const frameDirectory = path.join(harness.rootDir, harness.project.id, 'conditioningFrames');
+    await nodeFs.mkdir(frameDirectory, { recursive: true });
+    await writeFile(path.join(frameDirectory, frameFileName), png);
+    const frameSha256 = createHash('sha256').update(png).digest('hex');
+
+    await harness.store.updateProjectV2(harness.project.id, (project) => {
+      project.shots.shot_1!.selectedTakeId = takeAssetId;
+      project.beats.beat_1!.shotOrder.push('shot_2');
+      project.shots.shot_2 = {
+        id: 'shot_2',
+        line: 'The paper airplane continues through the same light',
+        derivation: 'derived',
+        derivedFromActionRevision: 1,
+        narration: '',
+        onScreenText: '',
+        durationSeconds: 5,
+        trimInSeconds: null,
+        trimOutSeconds: null,
+        chainBreak: 'none',
+        seedStillId: null,
+        selectedTakeId: null,
+        assetIds: [],
+        jobIds: ['job_existing_recovery'],
+      };
+      const requestPlan: StudioGenerationRequestPlan = {
+        kind: 'after_take_selection',
+        template: {
+          prompt: 'Continue from the exact predecessor frame',
+          aspectRatio: '16:9',
+          resolution: '720p',
+          durationSeconds: 5,
+          referenceInput: null,
+        },
+        dependency: {
+          kind: 'existing_predecessor',
+          predecessorShotId: 'shot_1',
+          takeAssetId,
+          endpointSeconds: 5,
+        },
+      };
+      const item: StudioQuotedGeneration = {
+        id: createStudioQuotedGenerationId({
+          projectId: project.id,
+          projectRevision: project.revision,
+          shotId: 'shot_2',
+          purpose: 'video_take',
+        }),
+        shotId: 'shot_2',
+        purpose: 'video_take',
+        routeId: harness.route.choiceId,
+        generationCount: 1,
+        requestPlan,
+        rateUnit: 'second',
+        rateMinorUnits: 3,
+      };
+      const authorization: StudioSpendAuthorization = {
+        id: 'authorization_existing_recovery',
+        projectId: project.id,
+        projectRevision: project.revision,
+        originReferenceHandoffId: null,
+        rateCardDigest: 'c'.repeat(64),
+        currency: 'USD',
+        baseItems: [item],
+        cascadeItems: [],
+        lowerMinorUnits: 15,
+        upperMinorUnits: 15,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        confirmedAt: '2026-08-17T12:00:01.000Z',
+        providerBindings: [{ itemId: item.id, provider: harness.authorization.providerBindings[0]!.provider }],
+        idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: 'key_existing_recovery' }],
+      };
+      project.spendAuthorizations.push(authorization);
+      project.jobs.job_existing_recovery = {
+        id: 'job_existing_recovery',
+        projectId: project.id,
+        shotId: 'shot_2',
+        status: 'waiting_for_conditioning',
+        provider: harness.authorization.providerBindings[0]!.provider,
+        idempotencyKey: 'key_existing_recovery',
+        providerJobId: null,
+        remoteStartedAt: null,
+        cancellationPolicy: harness.route.cancellationPolicy,
+        outputAssetIds: [],
+        error: null,
+        retryOfJobId: null,
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        createdAt: project.updatedAt,
+        updatedAt: project.updatedAt,
+        purpose: 'video_take',
+        authorizationId: authorization.id,
+        authorizationItemId: item.id,
+        generationIndex: 0,
+        requestPlan,
+        requestSnapshot: null,
+        spendReceipt: null,
+        outputAssetIdsByRole: { primary: null, poster: null },
+      };
+      project.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId,
+        endpointSeconds: 5,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return project;
+    });
+
+    vi.spyOn(harness.mediaStore, 'resumeConditioningFramesV2').mockResolvedValue(undefined);
+    const extract = vi.spyOn(harness.mediaStore, 'extractConditioningFrameV2').mockImplementation(async () => {
+      let ready!: StudioProjectV2['frameExtractions'][string];
+      await harness.store.updateProjectV2(harness.project.id, (project) => {
+        project.assets[frameAssetId] = {
+          id: frameAssetId,
+          projectId: project.id,
+          shotId: 'shot_1',
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'conditioningFrames', fileName: frameFileName },
+          byteSize: png.length,
+          sha256: frameSha256,
+          createdAt: project.updatedAt,
+        };
+        project.shots.shot_1!.assetIds.push(frameAssetId);
+        ready = project.frameExtractions[extractionId] = {
+          ...project.frameExtractions[extractionId]!,
+          frameAssetId,
+          status: 'ready',
+        };
+        return project;
+      });
+      return ready;
+    });
+    vi.spyOn(harness.mediaStore, 'verifyConditioningFrameV2').mockResolvedValue({
+      extractionId,
+      shotId: 'shot_1',
+      takeAssetId,
+      endpointSeconds: 5,
+      frameAssetId,
+      byteSize: png.length,
+      sha256: frameSha256,
+    });
+
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+
+    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    expect(extract).toHaveBeenCalledExactlyOnceWith({ projectId: harness.project.id, extractionId });
+    expect(submit.mock.calls[1]?.[0]).toMatchObject({
+      idempotencyKey: 'key_existing_recovery',
+      firstFrame: { assetId: frameAssetId },
+    });
+    await expectV2Job(harness, { status: 'succeeded' }, 'job_existing_recovery');
   });
 
   it('persists URL-backed V2 video and poster outputs through independent bounded downloads', async () => {

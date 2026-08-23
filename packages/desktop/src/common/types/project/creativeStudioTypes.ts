@@ -387,6 +387,12 @@ export type StudioAuthorizedConditioningDependency =
       kind: 'authorized_predecessor';
       upstreamItemId: string;
       predecessorShotId: string;
+    }
+  | {
+      kind: 'existing_predecessor';
+      predecessorShotId: string;
+      takeAssetId: string;
+      endpointSeconds: number;
     };
 
 export type StudioGenerationRequestTemplate = Omit<StudioGenerationRequestSnapshot, 'conditioningInput'>;
@@ -449,6 +455,13 @@ export type StudioPrepareGenerationChoiceV2 = {
   referenceAssetId: string | null;
 };
 
+export type StudioContinuityChangeV2 = {
+  shotId: string;
+  hardCut: boolean;
+  /** Renderer route-diagnosis hint. Main recomputes and rejects any mismatch. */
+  requiresSeedGeneration: boolean;
+};
+
 /** Safe pricing classifications that may cross from main to the renderer without diagnostics. */
 export const STUDIO_PRICING_REFUSAL_REASONS_V2 = [
   'invalid_quote',
@@ -476,6 +489,8 @@ export type StudioPrepareSubmissionRequestV2 = {
   baseChoices: StudioPrepareGenerationChoiceV2[];
   /** Empty asks main to derive the canonical optional continuation with one generation per row. */
   cascadeChoices: StudioPrepareGenerationChoiceV2[];
+  /** Exact paid continuity review; mutually exclusive with generation choices and reference handoffs. */
+  continuityChange?: StudioContinuityChangeV2;
 };
 
 export type StudioConfirmSubmissionRequestV2 = {

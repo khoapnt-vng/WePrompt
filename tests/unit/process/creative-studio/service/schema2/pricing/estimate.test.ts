@@ -25,6 +25,7 @@ import {
   createStudioRateCardV2,
   createStudioSubmissionQuoteCoreV2,
   deriveStudioSubmissionQuoteCoresV2,
+  deriveStudioSubmissionQuoteGraphV2,
   evaluateStudioBudgetV2,
   studioSubmissionQuoteCoresEqual,
   toStudioRendererSubmissionQuoteV2,
@@ -245,7 +246,180 @@ const choice = (
   referenceAssetId,
 });
 
+const continuityRequest = (
+  shotId: string,
+  hardCut: boolean,
+  requiresSeedGeneration: boolean
+): StudioPrepareSubmissionRequestV2 =>
+  ({
+    projectId: 'project_1',
+    expectedRevision: 7,
+    originReferenceHandoffId: null,
+    baseChoices: [],
+    cascadeChoices: [],
+    continuityChange: { shotId, hardCut, requiresSeedGeneration },
+  }) as unknown as StudioPrepareSubmissionRequestV2;
+
 describe('schema-2 Studio estimates', () => {
+  it('prices one mandatory sever graph from an exact reusable seed through the next hard cut', () => {
+    const project = makeDerivationProject();
+    project.beats.beat_1!.shotOrder.push('shot_4');
+    project.shots.shot_4 = makeShot('shot_4');
+    project.shots.shot_4!.chainBreak = 'hard_cut';
+    const reusableSeed = addDerivationAsset(project, {
+      id: 'seed_2',
+      shotId: 'shot_2',
+      mediaKind: 'image',
+      managedAsset: { collection: 'assets', fileName: 'seed_2.png' },
+    });
+
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: continuityRequest('shot_2', true, false),
+      rateCard: createStudioRateCardV2([imageRate, videoRate]),
+    });
+
+    expect(options.withCascade).toBeNull();
+    expect(options.baseOnly.baseItems).toEqual([
+      expect.objectContaining({
+        shotId: 'shot_2',
+        purpose: 'video_take',
+        generationCount: 1,
+        requestPlan: expect.objectContaining({
+          kind: 'resolved',
+          snapshot: expect.objectContaining({ conditioningInput: { kind: 'seed_still', assetId: reusableSeed.id } }),
+        }),
+      }),
+      expect.objectContaining({
+        shotId: 'shot_3',
+        purpose: 'video_take',
+        generationCount: 1,
+        requestPlan: expect.objectContaining({
+          kind: 'after_take_selection',
+          dependency: expect.objectContaining({
+            kind: 'authorized_predecessor',
+            predecessorShotId: 'shot_2',
+          }),
+        }),
+      }),
+    ]);
+    expect(options.baseOnly.cascadeItems).toEqual([]);
+    expect(JSON.stringify(options)).not.toContain('shot_4');
+  });
+
+  it('prices exactly one new seed and one mandatory replacement per affected Shot when sever has no seed', () => {
+    const project = makeDerivationProject();
+
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: continuityRequest('shot_2', true, true),
+      rateCard: createStudioRateCardV2([imageRate, videoRate]),
+    });
+
+    expect(options.withCascade).toBeNull();
+    expect(
+      options.baseOnly.baseItems.map(({ shotId, purpose, generationCount }) => [shotId, purpose, generationCount])
+    ).toEqual([
+      ['shot_2', 'seed_still', 1],
+      ['shot_2', 'video_take', 1],
+      ['shot_3', 'video_take', 1],
+    ]);
+    expect(options.baseOnly.baseItems[1]?.requestPlan).toEqual(
+      expect.objectContaining({
+        kind: 'after_take_selection',
+        dependency: expect.objectContaining({ kind: 'authorized_seed', shotId: 'shot_2' }),
+      })
+    );
+  });
+
+  it('snapshots the exact trim-aware existing predecessor for one mandatory rejoin graph', () => {
+    const project = makeDerivationProject();
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    const predecessorTake = addDerivationAsset(project, {
+      id: 'take_1',
+      shotId: 'shot_1',
+      mediaKind: 'video',
+      managedAsset: { collection: 'assets', fileName: 'take_1.mp4' },
+      durationSeconds: 10,
+    });
+    project.shots.shot_1!.selectedTakeId = predecessorTake.id;
+    project.shots.shot_1!.trimOutSeconds = 2;
+
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: continuityRequest('shot_2', false, false),
+      rateCard: createStudioRateCardV2([videoRate]),
+    });
+
+    expect(options.withCascade).toBeNull();
+    expect(
+      options.baseOnly.baseItems.map(({ shotId, purpose, generationCount }) => [shotId, purpose, generationCount])
+    ).toEqual([
+      ['shot_2', 'video_take', 1],
+      ['shot_3', 'video_take', 1],
+    ]);
+    expect(options.baseOnly.baseItems[0]?.requestPlan).toEqual(
+      expect.objectContaining({
+        kind: 'after_take_selection',
+        dependency: {
+          kind: 'existing_predecessor',
+          predecessorShotId: 'shot_1',
+          takeAssetId: predecessorTake.id,
+          endpointSeconds: 8,
+        },
+      })
+    );
+  });
+
+  it.each([
+    ['first Shot', continuityRequest('shot_1', true, true)],
+    ['no-op sever', continuityRequest('shot_2', false, false)],
+  ])('rejects a continuity quote for the %s without consulting paid routes', (_label, request) => {
+    expect(() => deriveStudioSubmissionQuoteGraphV2({ project: makeDerivationProject(), request })).toThrow(
+      expect.objectContaining({ code: 'invalid_prepare_request' })
+    );
+  });
+
+  it('rejects a renderer seed-route hint that disagrees with canonical main-owned eligibility', () => {
+    const missingSeed = makeDerivationProject();
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project: missingSeed,
+        request: continuityRequest('shot_2', true, false),
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+
+    const reusableSeed = makeDerivationProject();
+    addDerivationAsset(reusableSeed, {
+      id: 'seed_2',
+      shotId: 'shot_2',
+      mediaKind: 'image',
+      managedAsset: { collection: 'assets', fileName: 'seed_2.png' },
+    });
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project: reusableSeed,
+        request: continuityRequest('shot_2', true, true),
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+  });
+
+  it('refuses an in-flight mandatory continuity row instead of truncating its paid graph', () => {
+    const project = makeDerivationProject();
+    project.jobs.active_downstream = {
+      shotId: 'shot_3',
+      purpose: 'video_take',
+      status: 'running',
+    } as StudioProjectV2['jobs'][string];
+
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project,
+        request: continuityRequest('shot_2', true, true),
+      })
+    ).toThrow(expect.objectContaining({ code: 'in_flight' }));
+  });
+
   it('derives byte-identical base rows and the complete downstream symbolic graph', () => {
     const project = makeDerivationProject();
     const request = prepareRequest(

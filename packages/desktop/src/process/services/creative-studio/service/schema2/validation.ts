@@ -27,6 +27,7 @@ import {
   type StudioAssetV2,
   type StudioBeat,
   type StudioBinItem,
+  type StudioGenerationRequestPlan,
   type StudioJobV2,
   type StudioProjectV2,
   type StudioProviderAdapterId,
@@ -261,6 +262,7 @@ const CONDITIONING_PREDECESSOR_KEYS = new Set([
 ]);
 const DEPENDENCY_SEED_KEYS = new Set(['kind', 'upstreamItemId', 'shotId']);
 const DEPENDENCY_PREDECESSOR_KEYS = new Set(['kind', 'upstreamItemId', 'predecessorShotId']);
+const DEPENDENCY_EXISTING_PREDECESSOR_KEYS = new Set(['kind', 'predecessorShotId', 'takeAssetId', 'endpointSeconds']);
 const FRAME_EXTRACTION_KEYS = new Set([
   'id',
   'shotId',
@@ -788,6 +790,14 @@ const validateDependency = (value: unknown): boolean => {
   if (value.kind === 'authorized_seed') {
     return hasExactKeys(value, DEPENDENCY_SEED_KEYS) && isSafeId(value.upstreamItemId) && isSafeId(value.shotId);
   }
+  if (value.kind === 'existing_predecessor') {
+    return (
+      hasExactKeys(value, DEPENDENCY_EXISTING_PREDECESSOR_KEYS) &&
+      isSafeId(value.predecessorShotId) &&
+      isSafeId(value.takeAssetId) &&
+      isFinitePositive(value.endpointSeconds)
+    );
+  }
   return (
     value.kind === 'authorized_predecessor' &&
     hasExactKeys(value, DEPENDENCY_PREDECESSOR_KEYS) &&
@@ -850,11 +860,23 @@ const requestPlansEqual = (left: unknown, right: unknown): boolean => {
   if (!isRecord(leftDependency) || !isRecord(rightDependency) || leftDependency.kind !== rightDependency.kind) {
     return false;
   }
-  return leftDependency.kind === 'authorized_seed'
-    ? leftDependency.upstreamItemId === rightDependency.upstreamItemId &&
-        leftDependency.shotId === rightDependency.shotId
-    : leftDependency.upstreamItemId === rightDependency.upstreamItemId &&
-        leftDependency.predecessorShotId === rightDependency.predecessorShotId;
+  if (leftDependency.kind === 'authorized_seed') {
+    return (
+      leftDependency.upstreamItemId === rightDependency.upstreamItemId &&
+      leftDependency.shotId === rightDependency.shotId
+    );
+  }
+  if (leftDependency.kind === 'existing_predecessor') {
+    return (
+      leftDependency.predecessorShotId === rightDependency.predecessorShotId &&
+      leftDependency.takeAssetId === rightDependency.takeAssetId &&
+      leftDependency.endpointSeconds === rightDependency.endpointSeconds
+    );
+  }
+  return (
+    leftDependency.upstreamItemId === rightDependency.upstreamItemId &&
+    leftDependency.predecessorShotId === rightDependency.predecessorShotId
+  );
 };
 
 const validateReceipt = (value: unknown): boolean =>
@@ -1639,6 +1661,54 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     purpose: StudioJobV2['purpose']
   ): boolean => asset !== undefined && !binnedTakeIds.has(asset.id) && isCanonicalPrimary(asset, shotId, purpose);
 
+  const isCurrentExistingPredecessor = (
+    dependency: Extract<StudioGenerationRequestPlan, { kind: 'after_take_selection' }>['dependency'],
+    dependentShotId: string
+  ): boolean => {
+    if (dependency.kind !== 'existing_predecessor') return false;
+    const predecessorOwner = shotOwners.get(dependency.predecessorShotId);
+    const dependentOwner = shotOwners.get(dependentShotId);
+    const beat = predecessorOwner === undefined ? undefined : ownValue(project.beats, predecessorOwner);
+    const predecessor = ownValue(project.shots, dependency.predecessorShotId);
+    const dependent = ownValue(project.shots, dependentShotId);
+    const take = ownValue(project.assets, dependency.takeAssetId);
+    const dependentIndex = beat?.shotOrder.indexOf(dependentShotId) ?? -1;
+    if (
+      predecessorOwner === undefined ||
+      dependentOwner !== predecessorOwner ||
+      !activeBeatIds.has(predecessorOwner) ||
+      dependentIndex <= 0 ||
+      beat?.shotOrder[dependentIndex - 1] !== dependency.predecessorShotId ||
+      inactiveShotIds.has(dependency.predecessorShotId) ||
+      inactiveShotIds.has(dependentShotId) ||
+      dependent?.chainBreak !== 'none' ||
+      predecessor?.selectedTakeId !== dependency.takeAssetId ||
+      !isSelectablePrimary(take, dependency.predecessorShotId, 'video_take') ||
+      take.durationSeconds === undefined
+    ) {
+      return false;
+    }
+    const endpointSeconds = take.durationSeconds - (predecessor.trimOutSeconds ?? 0);
+    if (!Object.is(endpointSeconds, dependency.endpointSeconds)) return false;
+    let extractionId: string;
+    try {
+      extractionId = createStudioFrameExtractionId({
+        shotId: dependency.predecessorShotId,
+        takeAssetId: dependency.takeAssetId,
+        endpointSeconds: dependency.endpointSeconds,
+      });
+    } catch {
+      return false;
+    }
+    const extraction = ownValue(project.frameExtractions, extractionId);
+    return (
+      extraction?.id === extractionId &&
+      extraction.shotId === dependency.predecessorShotId &&
+      extraction.takeAssetId === dependency.takeAssetId &&
+      Object.is(extraction.endpointSeconds, dependency.endpointSeconds)
+    );
+  };
+
   for (const shot of Object.values(project.shots)) {
     if (
       shot.seedStillId !== null &&
@@ -1741,6 +1811,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       const item = items[itemIndex]!;
       if (item.requestPlan.kind !== 'after_take_selection') continue;
       const dependency = item.requestPlan.dependency;
+      if (dependency.kind === 'existing_predecessor') continue;
       const upstreamPosition = itemPositions.get(dependency.upstreamItemId);
       const upstream = items[upstreamPosition ?? -1];
       if (upstreamPosition === undefined || upstreamPosition >= itemIndex || upstream === undefined) return false;
@@ -1810,6 +1881,13 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       if ((!isWaiting && !isDependencyFailed && !isPrebindCancelled) || hasProviderAttempt(job) || !hasNoOutput(job)) {
         return false;
       }
+      if (
+        isWaiting &&
+        plan.dependency.kind === 'existing_predecessor' &&
+        !isCurrentExistingPredecessor(plan.dependency, job.shotId)
+      ) {
+        return false;
+      }
     }
 
     const reference = requestReference(job);
@@ -1831,7 +1909,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
           ) {
             return false;
           }
-        } else {
+        } else if (dependency.kind === 'authorized_predecessor') {
           const producer =
             conditioning?.kind === 'predecessor_frame'
               ? outputProducerByAssetId.get(conditioning.takeAssetId)
@@ -1844,6 +1922,13 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
           ) {
             return false;
           }
+        } else if (
+          conditioning?.kind !== 'predecessor_frame' ||
+          conditioning.predecessorShotId !== dependency.predecessorShotId ||
+          conditioning.takeAssetId !== dependency.takeAssetId ||
+          !Object.is(conditioning.endpointSeconds, dependency.endpointSeconds)
+        ) {
+          return false;
         }
       }
       if (conditioning?.kind === 'seed_still') {
@@ -1865,7 +1950,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
           extraction.takeAssetId !== conditioning.takeAssetId ||
           extraction.endpointSeconds !== conditioning.endpointSeconds ||
           extraction.frameAssetId !== conditioning.frameAssetId ||
-          shotOwners.get(conditioning.predecessorShotId) !== shotOwners.get(job.shotId)
+          ((plan.kind !== 'after_take_selection' || plan.dependency.kind !== 'existing_predecessor') &&
+            shotOwners.get(conditioning.predecessorShotId) !== shotOwners.get(job.shotId))
         ) {
           return false;
         }
@@ -1940,6 +2026,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   for (const link of itemLinks.values()) {
     if (link.item.requestPlan.kind !== 'after_take_selection') continue;
     const dependency = link.item.requestPlan.dependency;
+    if (dependency.kind === 'existing_predecessor') continue;
     const upstreamJobs = jobsByItemId.get(dependency.upstreamItemId);
     if (upstreamJobs === undefined) return false;
     const upstreamHasNonterminalJob = upstreamJobs.some((upstreamJob) => !isTerminalJob(upstreamJob));
@@ -1990,8 +2077,15 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         return false;
       }
       if (job.requestPlan.kind === 'after_take_selection') {
-        const upstream = itemLinks.get(job.requestPlan.dependency.upstreamItemId)?.item;
-        if (upstream?.shotId === shotId) return false;
+        const dependency = job.requestPlan.dependency;
+        if (dependency.kind === 'existing_predecessor') {
+          if (job.requestSnapshot === null && !isTerminalJob(job) && dependency.predecessorShotId === shotId) {
+            return false;
+          }
+        } else {
+          const upstream = itemLinks.get(dependency.upstreamItemId)?.item;
+          if (upstream?.shotId === shotId) return false;
+        }
       }
     }
   }

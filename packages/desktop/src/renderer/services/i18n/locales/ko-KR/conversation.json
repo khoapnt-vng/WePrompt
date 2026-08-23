@@ -952,7 +952,12 @@
         "lookCounter_one": "{{count}} / {{limit}}단어",
         "lookCounter_other": "{{count}} / {{limit}}단어",
         "chain": {
+          "hardCutState": "하드 컷 · 스틸에서 시작",
           "hardCutUnavailable": "하드 컷은 일시적으로 변경할 수 없습니다. 필요한 교체용 미디어의 견적을 먼저 검토해야 합니다.",
+          "reviewSever": "하드 컷 검토…",
+          "reviewRejoin": "재연결 검토…",
+          "reviewSeverDescription": "하드 컷을 적용하면 샷 {{shot}}이 적합한 스틸에서 시작하며, 필요하면 새 스틸을 만듭니다. 확인하면 이 샷부터 다음 하드 컷까지 이어지는 모든 샷을 교체합니다.",
+          "reviewRejoinDescription": "샷 {{shot}}을 재연결하면 시드 선택이 지워지고 샷 {{previous}}의 트림 적용 마지막 프레임을 사용합니다. 확인 후 무료 프레임 추출이 완료된 다음 이 샷과 다음 하드 컷까지 이어지는 샷이 제공자에게 전송될 수 있습니다.",
           "segmentHead": "체인의 시작 · 스틸 이미지에서 시작",
           "continuous": "샷 {{position}}의 마지막 프레임에서 이어짐"
         },
@@ -1019,6 +1024,21 @@
         "briefAndRulesTitle": "브리프 및 규칙"
       },
       "gate": {
+        "group": { "required": "필수" },
+        "continuity": {
+          "severTitle": "하드 컷 검토",
+          "rejoinTitle": "재연결 검토",
+          "severSummary": "이 견적은 이 샷을 체인 시작점으로 만들고 적합한 시드를 재사용하거나 필요하면 새로 만들며, 다음 하드 컷까지 영향을 받는 모든 비디오를 교체합니다.",
+          "rejoinSummary": "이 견적은 이 샷의 시드 선택을 지우고 트림이 적용된 이전 프레임에 재연결합니다. 확인 후 무료 프레임 추출이 완료된 다음 다음 하드 컷까지의 교체 비디오가 전송될 수 있습니다.",
+          "severHeadline": "하드 컷 · 필수 생성 {{count}}개 · {{cost}}",
+          "rejoinHeadline": "재연결 · 필수 생성 {{count}}개 · {{cost}}",
+          "requiredWork": "이 체인 변경에는 표시된 모든 교체 작업이 필요합니다.",
+          "confirmSever": "하드 컷 + 생성 {{count}}개 확인 · {{cost}}",
+          "confirmRejoin": "재연결 + 생성 {{count}}개 확인 · {{cost}}",
+          "close": "닫기 — 체인을 변경하지 않음",
+          "severConfirmed": "하드 컷을 확인했습니다. 샷에서 시드와 교체 작업의 진행 상황 또는 필요한 복구 조치를 확인하세요.",
+          "rejoinConfirmed": "재연결을 확인했습니다. 샷에서 프레임 추출과 교체 작업의 진행 상황 또는 필요한 복구 조치를 확인하세요."
+        },
         "errors": {
           "routesUnavailable": "이 견적을 준비하기 전에 브리프 및 규칙에서 준비된 이미지와 비디오 경로를 선택하세요.",
           "pricing": {

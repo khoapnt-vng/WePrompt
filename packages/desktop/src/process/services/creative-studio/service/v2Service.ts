@@ -1543,13 +1543,19 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     quote: StudioSubmissionQuote;
     providerBindings: StudioSpendAuthorization['providerBindings'];
     cancellationPolicies: Array<{ itemId: string; policy: StudioCancellationPolicy }>;
+    continuityChange: StudioPrepareSubmissionRequestV2['continuityChange'] | null;
+  };
+
+  type ConfirmationDispatch = StudioDispatchAuthorizedJobsRequestV2 & {
+    extractionIds: string[];
+    bindingItemIds: string[];
   };
 
   const buildConfirmedProject = (
     project: StudioProjectV2,
     revalidation: ConfirmationRevalidation,
     confirmedAt: string
-  ): { project: StudioProjectV2; dispatch: StudioDispatchAuthorizedJobsRequestV2 } => {
+  ): { project: StudioProjectV2; dispatch: ConfirmationDispatch } => {
     const quote = structuredClone(revalidation.quote);
     if (
       quote.projectId !== project.id ||
@@ -1573,6 +1579,51 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     const alreadyRetriedJobIds = new Set(
       Object.values(project.jobs).flatMap((job) => (job.retryOfJobId === null ? [] : [job.retryOfJobId]))
     );
+
+    const continuityChange = revalidation.continuityChange;
+    if (continuityChange !== null) {
+      const shot = ownValue(project.shots, continuityChange.shotId);
+      if (
+        quote.originReferenceHandoffId !== null ||
+        quote.cascadeItems.length !== 0 ||
+        shot === undefined ||
+        shot.chainBreak !== (continuityChange.hardCut ? 'none' : 'hard_cut')
+      ) {
+        throw invalid('Invalid Studio continuity confirmation');
+      }
+      const targetVideo = quote.baseItems.find((item) => item.shotId === shot.id && item.purpose === 'video_take');
+      if (targetVideo === undefined) throw invalid('Invalid Studio continuity target');
+      if (continuityChange.hardCut) {
+        if (continuityChange.requiresSeedGeneration) {
+          const seedItem = quote.baseItems.find((item) => item.shotId === shot.id && item.purpose === 'seed_still');
+          if (
+            seedItem === undefined ||
+            targetVideo.requestPlan.kind !== 'after_take_selection' ||
+            targetVideo.requestPlan.dependency.kind !== 'authorized_seed' ||
+            targetVideo.requestPlan.dependency.upstreamItemId !== seedItem.id
+          ) {
+            throw invalid('Invalid Studio continuity seed graph');
+          }
+          shot.seedStillId = null;
+        } else {
+          const conditioning =
+            targetVideo.requestPlan.kind === 'resolved' ? targetVideo.requestPlan.snapshot.conditioningInput : null;
+          if (conditioning?.kind !== 'seed_still') throw invalid('Invalid Studio reused continuity seed');
+          shot.seedStillId = conditioning.assetId;
+        }
+        shot.chainBreak = 'hard_cut';
+      } else {
+        if (
+          continuityChange.requiresSeedGeneration ||
+          targetVideo.requestPlan.kind !== 'after_take_selection' ||
+          targetVideo.requestPlan.dependency.kind !== 'existing_predecessor'
+        ) {
+          throw invalid('Invalid Studio rejoin graph');
+        }
+        shot.chainBreak = 'none';
+        shot.seedStillId = null;
+      }
+    }
 
     for (const item of items) {
       const provider = bindingByItem.get(item.id);
@@ -1667,7 +1718,59 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       defineOwn(project.jobs, job.id, job);
       shot.jobIds.push(job.id);
     }
-    return { project, dispatch: { projectId: project.id, jobIds: dispatchJobIds } };
+    const extractionIds: string[] = [];
+    const bindingItemIds: string[] = [];
+    if (continuityChange?.hardCut === false) {
+      const targetVideo = quote.baseItems.find(
+        (item) => item.shotId === continuityChange.shotId && item.purpose === 'video_take'
+      );
+      const dependency =
+        targetVideo?.requestPlan.kind === 'after_take_selection' ? targetVideo.requestPlan.dependency : null;
+      if (targetVideo === undefined || dependency?.kind !== 'existing_predecessor') {
+        throw invalid('Invalid Studio rejoin extraction graph');
+      }
+      const extractionId = createStudioFrameExtractionId({
+        shotId: dependency.predecessorShotId,
+        takeAssetId: dependency.takeAssetId,
+        endpointSeconds: dependency.endpointSeconds,
+      });
+      const existing = ownValue(project.frameExtractions, extractionId);
+      if (
+        existing !== undefined &&
+        (existing.id !== extractionId ||
+          existing.shotId !== dependency.predecessorShotId ||
+          existing.takeAssetId !== dependency.takeAssetId ||
+          !Object.is(existing.endpointSeconds, dependency.endpointSeconds))
+      ) {
+        throw invalid('Invalid Studio rejoin extraction identity');
+      }
+      if (existing === undefined) {
+        defineOwn(project.frameExtractions, extractionId, {
+          id: extractionId,
+          shotId: dependency.predecessorShotId,
+          takeAssetId: dependency.takeAssetId,
+          endpointSeconds: dependency.endpointSeconds,
+          frameAssetId: null,
+          status: 'pending',
+          errorCode: null,
+        });
+      } else if (existing.status === 'failed') {
+        existing.status = 'pending';
+        existing.frameAssetId = null;
+        existing.errorCode = null;
+      }
+      extractionIds.push(extractionId);
+      bindingItemIds.push(targetVideo.id);
+    }
+    return {
+      project,
+      dispatch: {
+        projectId: project.id,
+        jobIds: dispatchJobIds,
+        extractionIds,
+        bindingItemIds,
+      },
+    };
   };
 
   const assertBarrierRequest: (
@@ -1691,7 +1794,10 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     return null;
   };
 
-  const retryableExtractionId = (project: StudioProjectV2, dependentShotId: string): string => {
+  const retryableExtraction = (
+    project: StudioProjectV2,
+    dependentShotId: string
+  ): { extractionId: string; status: 'failed' | 'ready'; bindingItemId: string | null } => {
     const workspaceRows = projectStudioWorkspaceStatusV2(project).cascadeProgress.filter(
       (row) => row.dependentShotId === dependentShotId && row.canRetryConditioningFrame
     );
@@ -1721,15 +1827,47 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     });
     const extraction = ownValue(project.frameExtractions, extractionId);
     if (
-      extraction?.status !== 'failed' ||
-      extraction.frameAssetId !== null ||
+      extraction === undefined ||
+      (extraction.status !== 'failed' && extraction.status !== 'ready') ||
+      (extraction.status === 'failed' ? extraction.frameAssetId !== null : extraction.frameAssetId === null) ||
       extraction.shotId !== predecessor.id ||
       extraction.takeAssetId !== take.id ||
       !Object.is(extraction.endpointSeconds, endpointSeconds)
     ) {
       throw invalid('Studio conditioning frame is not retryable');
     }
-    return extractionId;
+    const bindingItemIds = new Set(
+      Object.values(project.jobs)
+        .filter((job) => {
+          if (
+            job.shotId !== dependentShotId ||
+            job.status !== 'waiting_for_conditioning' ||
+            job.requestSnapshot !== null ||
+            job.requestPlan.kind !== 'after_take_selection'
+          ) {
+            return false;
+          }
+          const dependency = job.requestPlan.dependency;
+          if (dependency.kind === 'authorized_predecessor') {
+            return dependency.predecessorShotId === predecessor.id;
+          }
+          return (
+            dependency.kind === 'existing_predecessor' &&
+            dependency.predecessorShotId === predecessor.id &&
+            dependency.takeAssetId === take.id &&
+            Object.is(dependency.endpointSeconds, endpointSeconds)
+          );
+        })
+        .map((job) => job.authorizationItemId)
+    );
+    if (workspaceRows.length === 1 && bindingItemIds.size !== 1) {
+      throw invalid('Studio conditioning frame authority changed');
+    }
+    return {
+      extractionId,
+      status: extraction.status,
+      bindingItemId: bindingItemIds.size === 1 ? [...bindingItemIds][0]! : null,
+    };
   };
 
   const cancelWaitingItem = (project: StudioProjectV2, dependentShotId: string, cancelledAt: string): void => {
@@ -2487,10 +2625,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       activeClaims.add(claim);
       let durable = false;
       try {
-        const confirmation: StudioProjectConfirmationInputV2<
-          ConfirmationRevalidation,
-          StudioDispatchAuthorizedJobsRequestV2
-        > = {
+        const confirmation: StudioProjectConfirmationInputV2<ConfirmationRevalidation, ConfirmationDispatch> = {
           projectId: input.projectId,
           expectedRevision: input.expectedRevision,
           expiresAt: claim.quote.expiresAt,
@@ -2533,7 +2668,15 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
             if (!jsonEqual(cancellationPolicies, exactSelectedCancellationPolicies(claim))) {
               throw new CreativeStudioServiceError('invalid_route');
             }
-            return { quote: structuredClone(claim.quote), providerBindings, cancellationPolicies };
+            if (claim.session.request.continuityChange?.hardCut === false && deps.mediaStore === undefined) {
+              throw new CreativeStudioStoreError('storage_error', 'Studio conditioning-frame storage is unavailable');
+            }
+            return {
+              quote: structuredClone(claim.quote),
+              providerBindings,
+              cancellationPolicies,
+              continuityChange: structuredClone(claim.session.request.continuityChange ?? null),
+            };
           },
           assertActive: () => assertServiceActive(claim),
           buildCommit: (project, revalidation, confirmedAt) =>
@@ -2542,26 +2685,83 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         };
         const committed =
           claim.quote.originReferenceHandoffId === null
-            ? await deps.store.confirmProjectV2<ConfirmationRevalidation, StudioDispatchAuthorizedJobsRequestV2>(
-                confirmation
-              )
-            : await deps.store.confirmReferenceGenerationHandoffV2<
-                ConfirmationRevalidation,
-                StudioDispatchAuthorizedJobsRequestV2
-              >({ ...confirmation, handoffId: claim.quote.originReferenceHandoffId });
+            ? await deps.store.confirmProjectV2<ConfirmationRevalidation, ConfirmationDispatch>(confirmation)
+            : await deps.store.confirmReferenceGenerationHandoffV2<ConfirmationRevalidation, ConfirmationDispatch>({
+                ...confirmation,
+                handoffId: claim.quote.originReferenceHandoffId,
+              });
         durable = true;
         activeClaims.delete(claim);
-        preparedSubmissionCache.consume(claim);
-        deps.onProjectUpdated(committed.project.id);
-        if (!disposed && committed.dispatch.jobIds.length > 0) {
-          await deps.jobManager
-            .dispatchAuthorizedJobsV2({
-              projectId: committed.dispatch.projectId,
-              jobIds: [...committed.dispatch.jobIds],
-            })
-            .catch((): undefined => undefined);
+        try {
+          preparedSubmissionCache.consume(claim);
+        } catch {
+          // A durable claim remains non-replayable even if cache bookkeeping is already inconsistent.
         }
-        return { projectId: committed.project.id, projectRevision: committed.project.revision };
+        try {
+          deps.onProjectUpdated(committed.project.id);
+        } catch {
+          // Notification is advisory and cannot turn a durable paid commit into a reported failure.
+        }
+
+        let finalProject = committed.project;
+        try {
+          await dispatchBoundJobs(committed.dispatch.projectId, committed.dispatch.jobIds);
+
+          const verifiedReadyExtractions = new Map<string, StudioVerifiedConditioningFrameV2>();
+          if (deps.mediaStore !== undefined) {
+            for (const extractionId of committed.dispatch.extractionIds) {
+              try {
+                // eslint-disable-next-line no-await-in-loop -- one local decoder bounds CPU and memory.
+                const extraction = await deps.mediaStore.extractConditioningFrameV2({
+                  projectId: committed.project.id,
+                  extractionId,
+                });
+                if (extraction.status === 'ready') {
+                  // eslint-disable-next-line no-await-in-loop -- verification is bound to the exact completed extraction.
+                  const verification = await deps.mediaStore.verifyConditioningFrameV2({
+                    projectId: committed.project.id,
+                    extractionId: extraction.id,
+                  });
+                  if (verification !== null) verifiedReadyExtractions.set(verification.extractionId, verification);
+                }
+              } catch (error) {
+                logStudioConditioningFrameFailure(committed.project.id, extractionId, error);
+              }
+            }
+          }
+          if (verifiedReadyExtractions.size > 0) {
+            let boundAfterExtraction: StudioWaitingBindingAdvanceV2 = {
+              dispatchJobIds: [],
+              extractionIds: [],
+              projectChanged: false,
+            };
+            finalProject = await deps.store.updateProjectV2(
+              committed.project.id,
+              (project) => {
+                boundAfterExtraction = advanceStudioWaitingBindingsV2(
+                  project,
+                  readNow().toISOString(),
+                  verifiedReadyExtractions,
+                  new Set(committed.dispatch.bindingItemIds)
+                );
+                return project;
+              },
+              undefined,
+              `bind_conditioning:${claim.quote.id}`
+            );
+            try {
+              deps.onProjectUpdated(finalProject.id);
+            } catch {
+              // Recovery and durable state do not depend on renderer notification delivery.
+            }
+            await dispatchBoundJobs(finalProject.id, boundAfterExtraction.dispatchJobIds);
+          } else if (committed.dispatch.extractionIds.length > 0) {
+            finalProject = await loadSupported(committed.project.id);
+          }
+        } catch {
+          // Once confirmation is durable, recovery owns every queued job and pending extraction.
+        }
+        return { projectId: finalProject.id, projectRevision: finalProject.revision };
       } catch (error) {
         activeClaims.delete(claim);
         if (!durable) preparedSubmissionCache.release(claim);
@@ -2575,21 +2775,100 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     async retryConditioningFrame(input): Promise<StudioRendererWorkspaceStatusV2> {
       assertServiceActive();
       assertBarrierRequest(input);
-      let extractionId = '';
+      const loaded = await loadSupported(input.projectId);
+      if (loaded.revision !== input.expectedRevision) {
+        throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+      }
+      const candidate = retryableExtraction(loaded, input.dependentShotId);
+      const mediaStore = deps.mediaStore;
+      let readyVerification: StudioVerifiedConditioningFrameV2 | null = null;
+      if (candidate.status === 'ready') {
+        if (mediaStore === undefined) {
+          throw new CreativeStudioStoreError('storage_error', 'Studio conditioning-frame storage is unavailable');
+        }
+        try {
+          readyVerification = await mediaStore.verifyConditioningFrameV2({
+            projectId: input.projectId,
+            extractionId: candidate.extractionId,
+          });
+        } catch {
+          throw new CreativeStudioStoreError('storage_error', 'Studio conditioning-frame verification failed');
+        }
+        if (readyVerification !== null && candidate.bindingItemId === null) {
+          throw invalid('Studio conditioning frame has no exact waiting owner');
+        }
+      }
       const committed = await deps.store.updateProjectV2(
         input.projectId,
         (project) => {
-          extractionId = retryableExtractionId(project, input.dependentShotId);
-          const extraction = ownValue(project.frameExtractions, extractionId)!;
-          extraction.status = 'pending';
-          extraction.frameAssetId = null;
-          extraction.errorCode = null;
+          const current = retryableExtraction(project, input.dependentShotId);
+          if (
+            current.extractionId !== candidate.extractionId ||
+            current.status !== candidate.status ||
+            current.bindingItemId !== candidate.bindingItemId
+          ) {
+            throw invalid('Studio conditioning frame authority changed');
+          }
+          const extraction = ownValue(project.frameExtractions, current.extractionId)!;
+          if (current.status === 'failed') {
+            extraction.status = 'pending';
+            extraction.frameAssetId = null;
+            extraction.errorCode = null;
+          }
           return project;
         },
         input.expectedRevision,
         `retry_conditioning_frame:${input.dependentShotId}`
       );
       deps.onProjectUpdated(committed.id);
+      if (candidate.status === 'ready' && mediaStore !== undefined) {
+        try {
+          let verification = readyVerification;
+          if (verification === null) {
+            const repairedExtraction = await mediaStore.extractConditioningFrameV2({
+              projectId: committed.id,
+              extractionId: candidate.extractionId,
+            });
+            verification =
+              repairedExtraction.status === 'ready'
+                ? await mediaStore.verifyConditioningFrameV2({
+                    projectId: committed.id,
+                    extractionId: candidate.extractionId,
+                  })
+                : null;
+          }
+          const bindingItemId = candidate.bindingItemId;
+          if (verification !== null && bindingItemId !== null) {
+            let boundAdvance: StudioWaitingBindingAdvanceV2 = {
+              dispatchJobIds: [],
+              extractionIds: [],
+              projectChanged: false,
+            };
+            const bound = await deps.store.updateProjectV2(
+              committed.id,
+              (project) => {
+                boundAdvance = advanceStudioWaitingBindingsV2(
+                  project,
+                  readNow().toISOString(),
+                  new Map([[verification.extractionId, verification]]),
+                  new Set([bindingItemId])
+                );
+                return project;
+              },
+              undefined,
+              `bind_conditioning_retry:${input.dependentShotId}`
+            );
+            deps.onProjectUpdated(bound.id);
+            await dispatchBoundJobs(bound.id, boundAdvance.dispatchJobIds);
+            return projectStudioWorkspaceStatusV2(bound);
+          }
+          const repaired = await loadSupported(committed.id);
+          deps.onProjectUpdated(repaired.id);
+          return projectStudioWorkspaceStatusV2(repaired);
+        } catch (error) {
+          logStudioConditioningFrameFailure(committed.id, candidate.extractionId, error);
+        }
+      }
       return projectStudioWorkspaceStatusV2(committed);
     },
 

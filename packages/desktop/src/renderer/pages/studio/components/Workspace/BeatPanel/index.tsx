@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Checkbox, Input, InputNumber, Modal, Popconfirm, Select } from '@arco-design/web-react';
+import { Alert, Button, Input, InputNumber, Modal, Popconfirm, Select } from '@arco-design/web-react';
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -82,6 +82,7 @@ export type BeatPanelActions = {
   parkShot: (shotId: string, onCommitted?: () => void) => Promise<boolean>;
   parkBeat: (beatId: string) => Promise<boolean>;
   reviewShot: (triggerShotId: string, choices: readonly [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]) => void;
+  reviewContinuity: (shotId: string, hardCut: boolean) => void;
   retryGenerationJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   cancelGenerationJob: (jobId: string) => Promise<boolean>;
   chooseCascadeAsset: (row: StudioCascadeProgressV2, assetId: string) => Promise<boolean>;
@@ -570,10 +571,11 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const [lifting, setLifting] = useState(false);
   const [recoveringJobId, setRecoveringJobId] = useState<string | null>(null);
   const [restoreLiftFocus, setRestoreLiftFocus] = useState(false);
-  const hardCutUnavailableId = useId();
+  const chainChangeDescriptionId = useId();
   const lineGuidanceId = useId();
   const generationRecoveryId = useId();
   const liftButtonRef = useRef<HTMLButtonElement | null>(null);
+  const shotCardRef = useRef<HTMLElement | null>(null);
   const lineKey = shotDraftKey(shot.id, 'line');
   const narrationKey = shotDraftKey(shot.id, 'narration');
   const onScreenTextKey = shotDraftKey(shot.id, 'onScreenText');
@@ -629,6 +631,16 @@ const ShotCard: React.FC<ShotCardProps> = ({
         (choice.purpose === 'seed_still' ? reviewedShot.seedGenerationBlocked : reviewedShot.videoGenerationBlocked)
       );
     });
+  const chainChangeIntent = shot.chainBreak === 'hard_cut' ? 'rejoin' : 'sever';
+  const chainChangeBlocked = disabled || drafts.staleRevision || dirty || reviewBlocked;
+  const chainState =
+    index === 0
+      ? 'segment_head'
+      : shot.segmentHead
+        ? shot.chainBreak === 'hard_cut'
+          ? 'hard_cut'
+          : 'segment_head'
+        : 'continuous';
 
   const save = async (): Promise<void> => {
     if (!dirty || saving || disabled || drafts.staleRevision) return;
@@ -676,6 +688,18 @@ const ShotCard: React.FC<ShotCardProps> = ({
     setRestoreLiftFocus(false);
   }, [disabled, lifting, restoreLiftFocus]);
 
+  useEffect(() => {
+    if (!hidden) return;
+    shotCardRef.current?.querySelectorAll<HTMLVideoElement>('video[controls]').forEach((video) => {
+      if (video.paused) return;
+      try {
+        video.pause();
+      } catch {
+        // Native media may already be detached or failed; hiding the inspector still proceeds.
+      }
+    });
+  }, [hidden]);
+
   const parkShot = async (): Promise<void> => {
     if (disabled || lifting || !liftAllowed) return;
     setLifting(true);
@@ -713,7 +737,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
 
   const liftBodyKey = downstream.length === 0 ? `${KEY_ROOT}.lift.shotBodyNoStale` : `${KEY_ROOT}.lift.shotBodyStale`;
   return (
-    <article className={styles.shotCard} data-shot-id={shot.id} hidden={hidden}>
+    <article ref={shotCardRef} className={styles.shotCard} data-shot-id={shot.id} hidden={hidden}>
       <header className={styles.shotHeader}>
         <div>
           <h3>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
@@ -722,16 +746,13 @@ const ShotCard: React.FC<ShotCardProps> = ({
               `${KEY_ROOT}.derivation.${shot.derivation === 'derived' ? 'attachedLineGuidance' : 'detachedLineGuidance'}`
             )}
           </span>
-          <p
-            className={styles.chainState}
-            data-chain-state={
-              shot.segmentHead ? (shot.chainBreak === 'hard_cut' ? 'hard_cut' : 'segment_head') : 'continuous'
-            }
-          >
+          <p className={styles.chainState} data-chain-state={chainState}>
             <bdi dir='auto'>
-              {shot.segmentHead
+              {chainState === 'segment_head'
                 ? t(`${KEY_ROOT}.chain.segmentHead`)
-                : t(`${KEY_ROOT}.chain.continuous`, { position: String(index).padStart(2, '0') })}
+                : chainState === 'hard_cut'
+                  ? t(`${KEY_ROOT}.chain.hardCutState`)
+                  : t(`${KEY_ROOT}.chain.continuous`, { position: String(index).padStart(2, '0') })}
             </bdi>
           </p>
           {shot.dirtyCauses.includes('continuity_stale') && shot.chainBreak !== 'hard_cut' ? (
@@ -838,22 +859,37 @@ const ShotCard: React.FC<ShotCardProps> = ({
             <Button disabled={disabled || saving || !dirty} onClick={reset}>
               {t(`${KEY_ROOT}.common.resetShot`)}
             </Button>
-            <div
-              aria-describedby={hardCutUnavailableId}
-              aria-labelledby={`${hardCutUnavailableId}-label`}
-              className={styles.hardCutControl}
-              data-hard-cut-contained
-              role='group'
-            >
-              <Checkbox checked={shot.chainBreak === 'hard_cut'} disabled>
-                <span id={`${hardCutUnavailableId}-label`}>{t(`${KEY_ROOT}.chain.authorHardCut`)}</span>
-              </Checkbox>
-            </div>
+            {index > 0 ? (
+              <div className={styles.chainChangeControl} data-chain-change-control>
+                <Button
+                  aria-describedby={chainChangeDescriptionId}
+                  aria-haspopup='dialog'
+                  data-chain-change-intent={chainChangeIntent}
+                  data-chain-change-trigger
+                  data-shot-id={shot.id}
+                  disabled={chainChangeBlocked}
+                  onClick={() => actions.reviewContinuity(shot.id, chainChangeIntent === 'sever')}
+                >
+                  <span>
+                    {t(
+                      chainChangeIntent === 'sever' ? `${KEY_ROOT}.chain.reviewSever` : `${KEY_ROOT}.chain.reviewRejoin`
+                    )}
+                  </span>
+                </Button>
+              </div>
+            ) : null}
           </div>
         </div>
-        <p className={styles.hardCutExplanation} data-hard-cut-explanation id={hardCutUnavailableId}>
-          {t(`${KEY_ROOT}.chain.hardCutUnavailable`)}
-        </p>
+        {index > 0 ? (
+          <p className={styles.chainChangeDescription} data-chain-change-description id={chainChangeDescriptionId}>
+            {t(
+              chainChangeIntent === 'sever'
+                ? `${KEY_ROOT}.chain.reviewSeverDescription`
+                : `${KEY_ROOT}.chain.reviewRejoinDescription`,
+              { shot: index + 1, previous: index }
+            )}
+          </p>
+        ) : null}
       </div>
 
       <section aria-label={t(`${KEY_ROOT}.derivation.label`, { index: index + 1 })} className={styles.subsection}>

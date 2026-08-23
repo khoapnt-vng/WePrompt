@@ -3093,6 +3093,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     let finalPath: string | null = null;
     let finalIdentity: FileIdentity | null = null;
     let frameAssetId: string | null = repairingReadyAsset?.id ?? null;
+    let staleReadyHandle: Awaited<ReturnType<typeof fs.open>> | null = null;
     try {
       const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
       const extraction = ownRecordValue(project.frameExtractions, input.extractionId);
@@ -3140,6 +3141,47 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         poster.managedAsset.collection === 'thumbnails';
       const partsDirectory = await ensureManagedDirectoryV2(authority, 'parts');
       const framesDirectory = await ensureManagedDirectoryV2(authority, 'conditioningFrames');
+      let staleReadyPath: string | null = null;
+      let staleReadyIdentity: FileIdentity | null = null;
+      if (repairingReadyAsset !== null) {
+        staleReadyPath = conditioningFramePathV2(projectDir, repairingReadyAsset);
+        try {
+          const staleStats = await regularFile(staleReadyPath);
+          if ((await fs.realpath(staleReadyPath)) !== staleReadyPath) {
+            throw new CreativeStudioMediaError('storage_error');
+          }
+          staleReadyIdentity = fileIdentity(staleStats);
+          staleReadyHandle = await fs.open(staleReadyPath, 'r');
+          const openedStats = await staleReadyHandle.stat();
+          const openedIdentity = fileIdentity(openedStats);
+          if (
+            !openedStats.isFile() ||
+            openedIdentity.dev !== staleReadyIdentity.dev ||
+            openedIdentity.ino !== staleReadyIdentity.ino
+          ) {
+            throw new CreativeStudioMediaError('storage_error');
+          }
+          try {
+            await captureManagedFileProofV2(staleReadyPath, staleReadyIdentity, repairingReadyAsset);
+            return structuredClone(extraction);
+          } catch {
+            await assertV2ManagedMutation(authority, [framesDirectory]);
+            const currentStats = await regularFile(staleReadyPath);
+            const currentIdentity = fileIdentity(currentStats);
+            if (
+              currentIdentity.dev !== staleReadyIdentity.dev ||
+              currentIdentity.ino !== staleReadyIdentity.ino ||
+              (await fs.realpath(staleReadyPath)) !== staleReadyPath
+            ) {
+              throw new CreativeStudioMediaError('storage_error');
+            }
+          }
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          staleReadyPath = null;
+          staleReadyIdentity = null;
+        }
+      }
       frameAssetId ??= createId();
       if (!SAFE_ID.test(frameAssetId)) throw new CreativeStudioMediaError('storage_error');
       partPath = path.join(partsDirectory.directory, `${frameAssetId}.part`);
@@ -3184,6 +3226,16 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         throw new StudioConditioningFrameError('decode_failed');
       }
       finalPath = path.join(framesDirectory.directory, `${frameAssetId}.${signature.extension}`);
+      if (staleReadyPath !== null && staleReadyIdentity !== null) {
+        const cleanup = await cleanupManagedPathV2(authority, staleReadyPath, staleReadyIdentity, framesDirectory);
+        if (cleanup !== 'completed') throw new CreativeStudioMediaError('storage_error');
+        try {
+          await fs.lstat(staleReadyPath);
+          throw new CreativeStudioMediaError('storage_error');
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
       finalIdentity = await finalizeManagedPartV2(
         partPath,
         partsDirectory.directory,
@@ -3281,6 +3333,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       }
       if (error instanceof CreativeStudioMediaError || error instanceof StudioConditioningFrameError) throw error;
       throw new CreativeStudioMediaError('storage_error');
+    } finally {
+      await staleReadyHandle?.close().catch((): undefined => undefined);
     }
   };
 

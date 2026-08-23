@@ -17,6 +17,7 @@ import {
   initialSpendGateState,
   formatMinorUnits,
   selectedSpendGateQuote,
+  spendGateContinuityChange,
   spendGateReducer,
   spendGateRouteIssue,
   summarizeQuote,
@@ -212,6 +213,8 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   const { t, i18n } = useTranslation();
   const quote = selectedSpendGateQuote(state);
   const summary = useMemo(() => (quote === null ? null : summarizeQuote(quote)), [quote]);
+  const continuityChange = spendGateContinuityChange(state.draft);
+  const continuityIntent = continuityChange === null ? null : continuityChange.hardCut ? 'sever' : 'rejoin';
   const formatMoney = useCallback(
     (minorUnits: number, currency: string): string =>
       formatMinorUnits(minorUnits, currency, i18n.resolvedLanguage ?? i18n.language),
@@ -220,6 +223,25 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   const visible = state.phase !== 'closed';
   const messageKey = errorMessageKey(state);
   const canClose = state.phase !== 'confirming' && state.phase !== 'quote_in_use';
+  const titleKey =
+    continuityIntent === 'sever'
+      ? 'conversation.creativeStudio.workspace.gate.continuity.severTitle'
+      : continuityIntent === 'rejoin'
+        ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinTitle'
+        : 'conversation.creativeStudio.workspace.gate.title';
+  const displayedCost =
+    summary === null
+      ? ''
+      : summary.exactPrice
+        ? formatMoney(summary.lowerMinorUnits, summary.currency)
+        : `${formatMoney(summary.lowerMinorUnits, summary.currency)}–${formatMoney(
+            summary.upperMinorUnits,
+            summary.currency
+          )}`;
+  const confirmCost =
+    summary === null
+      ? ''
+      : formatMoney(summary.exactPrice ? summary.lowerMinorUnits : summary.upperMinorUnits, summary.currency);
 
   return (
     <Modal
@@ -228,22 +250,37 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
       maskClosable={false}
       closable={canClose}
       unmountOnExit={false}
-      title={t('conversation.creativeStudio.workspace.gate.title')}
+      title={t(titleKey)}
       onCancel={canClose ? close : undefined}
     >
-      <div className={styles.body} data-testid='studio-spend-gate'>
+      <div
+        className={styles.body}
+        data-chain-change-intent={continuityIntent ?? undefined}
+        data-gate-kind={continuityIntent === null ? 'generation' : 'continuity_change'}
+        data-testid='studio-spend-gate'
+      >
         {state.phase === 'choices' ? (
           <>
             <p>{t('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')}</p>
-            <p>
-              {t('conversation.creativeStudio.workspace.gate.requestedShots', {
-                count: new Set(
-                  [...(state.draft?.baseChoices ?? []), ...(state.draft?.cascadeChoices ?? [])].map(
-                    (choice) => choice.shotId
-                  )
-                ).size,
-              })}
-            </p>
+            {continuityIntent === null ? (
+              <p>
+                {t('conversation.creativeStudio.workspace.gate.requestedShots', {
+                  count: new Set(
+                    [...(state.draft?.baseChoices ?? []), ...(state.draft?.cascadeChoices ?? [])].map(
+                      (choice) => choice.shotId
+                    )
+                  ).size,
+                })}
+              </p>
+            ) : (
+              <p data-chain-change-summary data-testid='studio-chain-change-summary'>
+                {t(
+                  continuityIntent === 'sever'
+                    ? 'conversation.creativeStudio.workspace.gate.continuity.severSummary'
+                    : 'conversation.creativeStudio.workspace.gate.continuity.rejoinSummary'
+                )}
+              </p>
+            )}
           </>
         ) : null}
 
@@ -256,7 +293,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
 
         {state.options !== null && quote !== null && summary !== null ? (
           <>
-            {state.options.withCascade !== null ? (
+            {continuityIntent === null && state.options.withCascade !== null ? (
               <Radio.Group
                 aria-label={t('conversation.creativeStudio.workspace.gate.optionsLabel')}
                 value={state.selectedOption}
@@ -268,31 +305,45 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               </Radio.Group>
             ) : null}
             <h3>
-              {t('conversation.creativeStudio.workspace.gate.headline', {
-                count: summary.generationCount,
-                cost: summary.exactPrice
-                  ? formatMoney(summary.lowerMinorUnits, summary.currency)
-                  : `${formatMoney(summary.lowerMinorUnits, summary.currency)}–${formatMoney(
-                      summary.upperMinorUnits,
-                      summary.currency
-                    )}`,
-              })}
+              {t(
+                continuityIntent === 'sever'
+                  ? 'conversation.creativeStudio.workspace.gate.continuity.severHeadline'
+                  : continuityIntent === 'rejoin'
+                    ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinHeadline'
+                    : 'conversation.creativeStudio.workspace.gate.headline',
+                {
+                  count: summary.generationCount,
+                  cost: displayedCost,
+                }
+              )}
             </h3>
+            {continuityIntent !== null ? (
+              <p data-chain-change-required>
+                {t('conversation.creativeStudio.workspace.gate.continuity.requiredWork')}
+              </p>
+            ) : null}
             <p>{t('conversation.creativeStudio.workspace.gate.rateCardSource')}</p>
             <ol className={styles.rows}>
               {summary.rows.map((row, index) => (
-                <li key={`${row.group}:${row.shotId}:${row.purpose}:${index}`}>
+                <li
+                  data-generation-purpose={row.purpose}
+                  data-quote-group={continuityIntent === null ? row.group : 'required'}
+                  data-shot-id={row.shotId}
+                  key={`${row.group}:${row.shotId}:${row.purpose}:${index}`}
+                >
                   <span>
-                    {t(`conversation.creativeStudio.workspace.gate.group.${row.group}`)} ·{' '}
-                    {t(`conversation.creativeStudio.workspace.gate.purpose.${row.purpose}`)} · {row.shotId}
+                    {t(
+                      `conversation.creativeStudio.workspace.gate.group.${continuityIntent === null ? row.group : 'required'}`
+                    )}{' '}
+                    · {t(`conversation.creativeStudio.workspace.gate.purpose.${row.purpose}`)} · {row.shotId}
                   </span>
-                  <span>
+                  <bdi dir='auto'>
                     {t('conversation.creativeStudio.workspace.gate.route', {
                       provider: row.route.providerId,
                       model: row.route.model,
                       choice: row.route.choiceId,
                     })}
-                  </span>
+                  </bdi>
                   <span>
                     {row.durationSeconds === null
                       ? t('conversation.creativeStudio.workspace.gate.durationNotApplicable')
@@ -329,7 +380,16 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
 
         {messageKey !== null ? <Alert type='warning' content={t(messageKey)} /> : null}
         {state.phase === 'confirmed' ? (
-          <Alert type='success' content={t('conversation.creativeStudio.workspace.gate.confirmed')} />
+          <Alert
+            type='success'
+            content={t(
+              continuityIntent === 'sever'
+                ? 'conversation.creativeStudio.workspace.gate.continuity.severConfirmed'
+                : continuityIntent === 'rejoin'
+                  ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinConfirmed'
+                  : 'conversation.creativeStudio.workspace.gate.confirmed'
+            )}
+          />
         ) : null}
 
         <div className={styles.actions}>
@@ -357,6 +417,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
           {(state.phase === 'review' || state.phase === 'confirming' || state.phase === 'quote_in_use') &&
           summary !== null ? (
             <Button
+              data-chain-change-confirm={continuityIntent === null ? undefined : true}
               type='primary'
               loading={state.phase === 'confirming' || state.phase === 'quote_in_use'}
               disabled={
@@ -366,16 +427,25 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               }
               onClick={() => void confirm()}
             >
-              {t('conversation.creativeStudio.workspace.gate.confirm', {
-                count: summary.generationCount,
-                cost: summary.exactPrice
-                  ? formatMoney(summary.lowerMinorUnits, summary.currency)
-                  : formatMoney(summary.upperMinorUnits, summary.currency),
-              })}
+              {t(
+                continuityIntent === 'sever'
+                  ? 'conversation.creativeStudio.workspace.gate.continuity.confirmSever'
+                  : continuityIntent === 'rejoin'
+                    ? 'conversation.creativeStudio.workspace.gate.continuity.confirmRejoin'
+                    : 'conversation.creativeStudio.workspace.gate.confirm',
+                {
+                  count: summary.generationCount,
+                  cost: confirmCost,
+                }
+              )}
             </Button>
           ) : null}
           <Button disabled={!canClose} onClick={close}>
-            {t('conversation.creativeStudio.workspace.gate.close')}
+            {t(
+              continuityIntent === null
+                ? 'conversation.creativeStudio.workspace.gate.close'
+                : 'conversation.creativeStudio.workspace.gate.continuity.close'
+            )}
           </Button>
         </div>
       </div>

@@ -1559,6 +1559,30 @@ describe('native bridge payload schemas', () => {
     expect(({} as { paidAuthority?: boolean }).paidAuthority).toBeUndefined();
   });
 
+  it('accepts only the exact continuity review envelope with empty caller-authored choices', () => {
+    const continuity = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.prepare-submission', continuity)).toEqual(continuity);
+    for (const hostile of [
+      { ...continuity, baseChoices: [VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0]!] },
+      { ...continuity, cascadeChoices: [VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0]!] },
+      { ...continuity, originReferenceHandoffId: 'handoff_1' },
+      { ...continuity, continuityChange: { ...continuity.continuityChange, requiresSeedGeneration: 'yes' } },
+      { ...continuity, continuityChange: { ...continuity.continuityChange, provider: 'private' } },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.prepare-submission', hostile)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
   it('accepts only bounded dense prepare choices with exact renderer-owned keys', () => {
     const makeChoice = (index: number, purpose: 'seed_still' | 'video_take') => ({
       shotId: `shot_${index}`,

@@ -1757,7 +1757,12 @@
         "chain": {
           "authorHardCut": "Start with a hard cut",
           "hardCut": "Hard cut",
+          "hardCutState": "Hard cut · Starts from the still",
           "hardCutUnavailable": "Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.",
+          "reviewSever": "Review hard cut…",
+          "reviewRejoin": "Review rejoin…",
+          "reviewSeverDescription": "A hard cut makes Shot {{shot}} start from an eligible still, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.",
+          "reviewRejoinDescription": "Rejoining Shot {{shot}} clears its seed selection and uses Shot {{previous}}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.",
           "segmentHead": "Head of the chain · Starts from the still",
           "continuous": "Continues from Shot {{position}}’s last frame",
           "systemContinuityStale": "Continuity is out of date",
@@ -2186,10 +2191,25 @@
         "baseOnly": "Selected anchors only",
         "withCascade": "Selected anchors and continuation",
         "headline": "{{count}} generations · {{cost}}",
+        "continuity": {
+          "severTitle": "Review hard cut",
+          "rejoinTitle": "Review rejoin",
+          "severSummary": "This estimate makes this Shot a chain head, reuses an eligible seed or creates one if needed, and replaces every affected video through the next hard cut.",
+          "rejoinSummary": "This estimate clears this Shot’s seed selection and rejoins it to the trim-aware predecessor frame. Free frame extraction may finish after confirmation, before replacement videos are dispatched through the next hard cut.",
+          "severHeadline": "Hard cut · {{count}} required generations · {{cost}}",
+          "rejoinHeadline": "Rejoin · {{count}} required generations · {{cost}}",
+          "requiredWork": "All listed replacement work is required for this chain change.",
+          "confirmSever": "Confirm hard cut + {{count}} generations · {{cost}}",
+          "confirmRejoin": "Confirm rejoin + {{count}} generations · {{cost}}",
+          "close": "Close — keep the chain unchanged",
+          "severConfirmed": "Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.",
+          "rejoinConfirmed": "Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery."
+        },
         "rateCardSource": "This estimate comes from the app's configured rate card, not a provider response.",
         "group": {
           "base": "Base",
-          "cascade": "Continuation"
+          "cascade": "Continuation",
+          "required": "Required"
         },
         "purpose": {
           "seed_still": "Seed still",

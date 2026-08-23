@@ -255,6 +255,34 @@ const makeItem = (
   rateMinorUnits: 2,
 });
 
+const makeSeedItem = (projectRevision: number, shotId: string): StudioQuotedGeneration => ({
+  id: createStudioQuotedGenerationId({
+    projectId: 'project_1',
+    projectRevision,
+    shotId,
+    purpose: 'seed_still',
+  }),
+  shotId,
+  purpose: 'seed_still',
+  routeId: 'image_route',
+  generationCount: 1,
+  requestPlan: resolvedPlan(null),
+  rateUnit: 'generation',
+  rateMinorUnits: 3,
+});
+
+const authorizedSeedPlan = (upstreamItemId: string, shotId: string): StudioGenerationRequestPlan => ({
+  kind: 'after_take_selection',
+  template: {
+    prompt: 'dependent prompt',
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    durationSeconds: 5,
+    referenceInput: null,
+  },
+  dependency: { kind: 'authorized_seed', upstreamItemId, shotId },
+});
+
 const makeAuthorization = (
   id: string,
   projectRevision: number,
@@ -321,6 +349,69 @@ const makeJob = (
   outputAssetIdsByRole: { primary: null, poster: null },
   ...overrides,
 });
+
+const addSucceededSeedJob = (
+  project: StudioProjectV2,
+  authorization: StudioSpendAuthorization,
+  item: StudioQuotedGeneration,
+  jobId: string,
+  assetId: string
+): StudioAssetV2 => {
+  const asset = addImageAsset(project, item.shotId, assetId, 'assets');
+  const job = makeJob(jobId, authorization, item, {
+    status: 'succeeded',
+    providerJobId: `remote_${jobId}`,
+    remoteStartedAt: timestamp,
+    purpose: 'seed_still',
+    outputAssetIds: [asset.id],
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+    spendReceipt: {
+      authorizationId: authorization.id,
+      itemId: item.id,
+      jobId,
+      purpose: 'seed_still',
+      routeId: item.routeId,
+      currency: authorization.currency,
+      rateUnit: 'generation',
+      rateMinorUnits: item.rateMinorUnits,
+      durationSeconds: null,
+      generationIndex: 0,
+      generationCount: 1,
+      totalMinorUnits: item.rateMinorUnits,
+    },
+  });
+  project.jobs[job.id] = job;
+  project.shots[item.shotId]!.jobIds.push(job.id);
+  return asset;
+};
+
+const addWaitingAuthorizedSeedSelection = (
+  project: StudioProjectV2
+): { exactAsset: StudioAssetV2; unrelatedGeneratedAsset: StudioAssetV2; unrelatedImportedAsset: StudioAssetV2 } => {
+  const projectRevision = project.revision - 1;
+  const upstream = makeSeedItem(projectRevision, 'shot_1');
+  const dependent = makeItem(projectRevision, 'shot_1', authorizedSeedPlan(upstream.id, 'shot_1'));
+  const authorization = makeAuthorization('auth_waiting_seed', projectRevision, [upstream], [dependent]);
+  project.spendAuthorizations.push(authorization);
+  const exactAsset = addSucceededSeedJob(project, authorization, upstream, 'job_exact_seed', 'exact_seed');
+  const waitingJob = makeJob('job_waiting_for_seed', authorization, dependent);
+  project.jobs[waitingJob.id] = waitingJob;
+  project.shots.shot_1!.jobIds.push(waitingJob.id);
+
+  const historicalRevision = projectRevision - 1;
+  const unrelatedItem = makeSeedItem(historicalRevision, 'shot_1');
+  const unrelatedAuthorization = makeAuthorization('auth_unrelated_seed', historicalRevision, [unrelatedItem]);
+  project.spendAuthorizations.push(unrelatedAuthorization);
+  const unrelatedGeneratedAsset = addSucceededSeedJob(
+    project,
+    unrelatedAuthorization,
+    unrelatedItem,
+    'job_unrelated_seed',
+    'unrelated_generated_seed'
+  );
+  const unrelatedImportedAsset = addImageAsset(project, 'shot_1', 'unrelated_imported_seed');
+  return { exactAsset, unrelatedGeneratedAsset, unrelatedImportedAsset };
+};
 
 const addSucceededVideoTake = (
   project: StudioProjectV2,
@@ -687,6 +778,47 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
       matchToShotId: 'shot_2',
       bedAssetId: 'bed_1',
       shots: { shot_1: { seedStillId: 'seed_1' } },
+    });
+  });
+
+  it('keeps an authorized-seed waiter null until its exact upstream primary is selected', () => {
+    const project = makeProject();
+    const { exactAsset, unrelatedGeneratedAsset, unrelatedImportedAsset } = addWaitingAuthorizedSeedSelection(project);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    expectReason(
+      project,
+      [{ kind: 'set_seed_still', shotId: 'shot_1', assetId: unrelatedImportedAsset.id }],
+      'dependency_blocked',
+      'mutation_reject_unrelated_imported_seed'
+    );
+    expectReason(
+      project,
+      [{ kind: 'set_seed_still', shotId: 'shot_1', assetId: unrelatedGeneratedAsset.id }],
+      'dependency_blocked',
+      'mutation_reject_unrelated_generated_seed'
+    );
+    expect(project.shots.shot_1!.seedStillId).toBeNull();
+
+    const repairedProject = structuredClone(project);
+    repairedProject.shots.shot_1!.seedStillId = unrelatedImportedAsset.id;
+    expect(validateStudioProjectV2(repairedProject)).toBe(true);
+    const repaired = apply(
+      repairedProject,
+      [{ kind: 'set_seed_still', shotId: 'shot_1', assetId: null }],
+      'mutation_repair_waiting_seed_to_null'
+    );
+    expect(repaired.project.shots.shot_1!.seedStillId).toBeNull();
+
+    const selected = apply(
+      project,
+      [{ kind: 'set_seed_still', shotId: 'shot_1', assetId: exactAsset.id }],
+      'mutation_select_exact_authorized_seed'
+    );
+    expect(selected.project.shots.shot_1!.seedStillId).toBe(exactAsset.id);
+    expect(selected.project.jobs.job_waiting_for_seed).toMatchObject({
+      status: 'waiting_for_conditioning',
+      requestSnapshot: null,
     });
   });
 

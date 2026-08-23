@@ -235,7 +235,8 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
     if (!dependent.segmentHead && exactBoundary === null) return null;
 
     const staleBoundary =
-      upstream.dirtyCauses.includes('generation_out_of_date') || dependent.dirtyCauses.includes('continuity_stale');
+      !dependent.segmentHead &&
+      (upstream.dirtyCauses.includes('generation_out_of_date') || dependent.dirtyCauses.includes('continuity_stale'));
     const source =
       !staleBoundary && exactBoundary?.status === 'on_disk'
         ? createManagedStudioAssetUrl(projectId, exactBoundary.frameAssetId)

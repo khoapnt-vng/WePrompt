@@ -1032,6 +1032,87 @@ describe('StudioPage schema-2 cutover', () => {
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
+  it('opens an exact paid continuity draft without using the free authoring bridge', async () => {
+    const authority = projectWithDraftBatch(1);
+    authority.beats.beat_0!.shotOrder.push('shot_1');
+    authority.beats.beat_0!.targetSeconds = 8;
+    authority.shots.shot_1 = {
+      ...authority.shots.shot_0!,
+      id: 'shot_1',
+      line: 'Shot 2',
+      chainBreak: 'none',
+    };
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => capturedBeatPanelActions().reviewContinuity('shot_1', true));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        continuityChange: { shotId: 'shot_1', hardCut: true, requiresSeedGeneration: true },
+      })
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks paid continuity review before opening the gate when both required routes are unavailable', async () => {
+    const authority = projectWithDraftBatch(1);
+    authority.beats.beat_0!.shotOrder.push('shot_1');
+    authority.beats.beat_0!.targetSeconds = 8;
+    authority.shots.shot_1 = {
+      ...authority.shots.shot_0!,
+      id: 'shot_1',
+      line: 'Shot 2',
+      chainBreak: 'none',
+    };
+    mockSupportedProject(authority);
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'unavailable',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [],
+        },
+        video: {
+          status: 'unavailable',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [],
+        },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => capturedBeatPanelActions().reviewContinuity('shot_1', true));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.gate.errors.routesUnavailable')
+    ).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
   it('exposes exactly one level-two heading for the Cut view', async () => {
     renderStudio('/studio/project_1/cut');
 

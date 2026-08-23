@@ -956,7 +956,12 @@
         "lookCounter_one": "{{count}} / {{limit}} kelime",
         "lookCounter_other": "{{count}} / {{limit}} kelime",
         "chain": {
+          "hardCutState": "Sert kesme · Sabit görüntüden başlar",
           "hardCutUnavailable": "Sert kesmede geçici olarak değişiklik yapılamıyor. Önce gerekli ikame medya için hazırlanan tahminin incelenmesi gerekiyor.",
+          "reviewSever": "Sert kesmeyi incele…",
+          "reviewRejoin": "Yeniden bağlanmayı incele…",
+          "reviewSeverDescription": "Sert kesme, Çekim {{shot}} için uygun bir sabit görüntüyle başlangıç yapar ve gerekirse yeni bir tane oluşturur. Onaylandığında bu Çekim ve sonraki sert kesmeye kadar devam eden tüm çekimler değiştirilir.",
+          "reviewRejoinDescription": "Çekim {{shot}} yeniden bağlandığında başlangıç görüntüsü seçimi temizlenir ve Çekim {{previous}} için kırpmaya göre son kare kullanılır. Onaydan sonra bu Çekim ve sonraki sert kesmeye kadar devam eden çekimler sağlayıcıya gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
           "segmentHead": "Zincirin başı · Sabit görüntüden başlar",
           "continuous": "{{position}}. çekimin son karesinden devam eder"
         },
@@ -1023,6 +1028,21 @@
         "briefAndRulesTitle": "Brief ve kurallar"
       },
       "gate": {
+        "group": { "required": "Zorunlu" },
+        "continuity": {
+          "severTitle": "Sert kesmeyi incele",
+          "rejoinTitle": "Yeniden bağlanmayı incele",
+          "severSummary": "Bu tahmin, bu Çekimi zincir başı yapar, uygun bir başlangıç görüntüsünü yeniden kullanır veya gerekirse oluşturur ve sonraki sert kesmeye kadar etkilenen tüm videoları değiştirir.",
+          "rejoinSummary": "Bu tahmin, bu Çekimin başlangıç görüntüsü seçimini temizler ve kırpmaya göre önceki kareye yeniden bağlar. Onaydan sonra, sonraki sert kesmeye kadar ikame videolar gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
+          "severHeadline": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
+          "rejoinHeadline": "Yeniden bağlanma · {{count}} zorunlu üretim · {{cost}}",
+          "requiredWork": "Listelenen tüm ikame çalışmaları bu zincir değişikliği için zorunludur.",
+          "confirmSever": "Sert kesme + {{count}} üretimi onayla · {{cost}}",
+          "confirmRejoin": "Yeniden bağlanma + {{count}} üretimi onayla · {{cost}}",
+          "close": "Kapat — zinciri değiştirme",
+          "severConfirmed": "Sert kesme onaylandı. Shot'ta başlangıç görüntüsü ve ikame ilerlemesini ya da gereken kurtarma işlemlerini inceleyin.",
+          "rejoinConfirmed": "Yeniden bağlanma onaylandı. Shot'ta kare çıkarma ve ikame ilerlemesini ya da gereken kurtarma işlemlerini inceleyin."
+        },
         "errors": {
           "routesUnavailable": "Bu tahmini hazırlamadan önce Brief ve kurallar bölümünde hazır görsel ve video rotalarını seçin.",
           "pricing": {

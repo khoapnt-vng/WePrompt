@@ -23,8 +23,8 @@ CSS Modules and UnoCSS, native bridge schemas, MCP SDK, Vitest, Testing Library/
 i18next across 12 locales, repository-managed media URLs.
 
 **Spec:**
-[creative-studio-3-direction-and-answers.md](./creative-studio-3-direction-and-answers.md) (§1–§11),
-SHA-256 `c5ed4f533f0f354208fb38df21b036fbaa3cf95151501e5c9cacc7fc33c3ff4e`; frozen visual reference
+[creative-studio-3-direction-and-answers.md](./creative-studio-3-direction-and-answers.md) (§1–§13),
+SHA-256 `f4b89684ec17fb94560632254744e5443a57a4ed3c16b48450c148848fe0df0e`; frozen visual reference
 [creative-studio-3-beat-and-shot-reference.html.txt](./creative-studio-3-beat-and-shot-reference.html.txt),
 SHA-256 `642c8b16a56c2799d119c6077c7282969c1d612bd9aca606e39da51c710846ee`. The reference is the
 offline bundle of the prototype the review was conducted against; the direction document refers to
@@ -35,7 +35,9 @@ it by its authoring name, `Creative Studio 3 - Beat and Shot.dc.html`.
 > repository text as authoritative, including the parked-shot amendment recorded at its top. That
 > approval supersedes the earlier authoring-copy comparison requirement for this revision. Any later
 > semantic edit still requires explicit product approval, an independent contract review, and a new
-> pin. A hash is only an anchor if it names the file everyone approved.
+> pin. On 2026-08-23 the product owner approved the independently audited BUG-095 contract now
+> recorded in §13.6; the §1–§13 hash above is its new pin and supersedes the former §1–§11 pin. A hash
+> is only an anchor if it names the file everyone approved.
 
 **Execution baseline:** `7176e3f6b` on `codex/creative-studio-table-board-ui-design` — CS2 Tasks 1–5
 complete and Gate 1 closed after the independent review/fix sequence through `12a8d7fe7`. The three
@@ -1792,7 +1794,8 @@ not create undo entries; undo never reverses external spend.
   later item names one earlier authorized seed/predecessor item and waits for the human to select one
   canonical `primary` produced by one of that item's succeeded generation jobs. Posters and unroled
   outputs never bind a dependency. The provider never receives a symbolic input, and no output is
-  auto-selected.
+  auto-selected. The one exception is §13.6's paid hard-cut topology transition: its downstream
+  replacement graph is mandatory through the next hard cut and has no base-only quote.
 - **Trim asymmetry:** head trims are always free and never break continuity. Tail trims break
   continuity unless the shot is last in its chain segment.
 - **Reordering shots inside a beat rewrites the chain and is not free.** Reordering beats is free.
@@ -2151,6 +2154,42 @@ folded into the contract above. Recorded so a later reader can tell a ruling fro
     only after the human selects a canonical primary output of that exact item and main durably binds
     the concrete request once. Frontier-only repeated confirms and automatic output selection are
     both rejected.
+
+## BUG-095 decision closed on 2026-08-23
+
+The product owner approved direction §13.6 after independent contract audit. This block supersedes
+every older checklist line that treats `set_hard_cut` as ordinary free authoring, gives a hard-cut
+transition an optional cascade, makes it undoable through `undo_last`, or permits the current Director
+to propose it.
+
+- The first Shot is already a natural segment head and has no hard-cut control or transition. Only a
+  later active Shot may prepare an exact sever (`none` → `hard_cut`) or re-join (`hard_cut` → `none`).
+- This is a distinct main-owned paid topology protocol. Its prepare snapshot binds the project
+  revision, target and direction, current topology and conditioning authority, exact ordered job graph,
+  routes, rates, and total. A renderer `requiresSeedGeneration` field is a route-diagnosis hint only:
+  main independently derives canonical seed eligibility and exact-rejects any mismatch before rate
+  lookup, quote/cache admission, or route binding. Confirm re-derives the authoritative inputs inside
+  the project queue.
+- One successful confirmation commits the topology change, authorization, and all required job
+  records in one project revision before provider dispatch. Decline/close, prepare refusal, expiry,
+  staleness, validation failure, or persistence failure before that commit writes no project bytes.
+  Post-commit extraction/provider lifecycle failures remain durable history and never roll back the
+  topology or authorization.
+- Sever reuses the exact eligible effective seed if one exists and atomically pins that asset as
+  `seedStillId`; otherwise it creates exactly one image-route seed job and leaves the pin null until
+  the human binds that authorized output. It always creates exactly one replacement target-video job,
+  which waits for that binding when the seed was newly generated.
+- Re-join clears `seedStillId` without deleting the still asset and creates exactly one replacement
+  target-video job conditioned on the predecessor's exact trim-aware endpoint. Missing endpoint bytes
+  use the free durable extraction lifecycle before provider dispatch; no predecessor generation is
+  authorized.
+- Both directions include exactly one replacement-video generation for every downstream Shot before
+  the next hard cut. The graph is mandatory, not a base/cascade choice. All required items have count
+  one; alternate Takes stay on the ordinary render gate and human selection still binds downstream
+  symbolic dependencies.
+- Confirmation creates no ordinary undo entry. The inverse is a new paid transition. The current
+  Director may neither apply nor propose it; legacy pending hard-cut proposals remain readable only so
+  acceptance can fail closed without publishing project or decision bytes.
 
 ### Blocker closure ledger
 
@@ -3117,7 +3156,8 @@ Carries CS2 Task 3 almost intact. Only the seam type signatures change.
 - [ ] Freeze Director policy in executable capability checks, not prompt prose.
       `studio_apply_edits` validates the full edit catalog, then the current Director capability
       permits only direct-safe text/pre-picture operations; structural/staleness changes require the
-      proposal capability. Motion/take decisions (`select_take`, take park/restore), Cut choices,
+      proposal capability, except for §13.6's paid hard-cut topology transition, which the current
+      Director may neither apply nor propose. Motion/take decisions (`select_take`, take park/restore), Cut choices,
       undo, and lifted-beat/shot park/restore parse as known future MCP gestures but return exact
       `operation_not_permitted` before writer/publication/reducer access for the current Director. A
       re-split proposal must persist each active fixed Shot and its exact canonical reason rows inside
@@ -3845,13 +3885,14 @@ crosses.
       a touched authored fragment changed outside the journal, or any restored reference is no longer
       valid. The entry remains available after conflict.
 - [ ] RED restart and exact inverse behavior for re-split, detach/rederive, beat/shot/take
-      park/restore, project settings, trim, shot/beat reorder, hard cut, seed/take selection, routes,
+      park/restore, project settings, trim, shot/beat reorder, seed/take selection, routes,
       spend policy, direct bed selection, imported-bed selection, and match-to. Imported-bed undo
       restores the prior bed/null while retaining its new canonical import and bytes. Shot
       park/restore undo changes only the owning beat membership and Bin fragment;
       it reuses the current shot record and cannot replace, delete, or rewind any retained paid
       lineage. Director-applied free edits are undoable; proposal rejection and paid confirmation are
-      not.
+      not. §13.6 hard-cut transitions are paid confirmations and therefore never enter this journal;
+      their inverse is another paid transition.
 - [ ] Line history is the undo substrate for **text**. `RESET` is not: it discards the renderer draft
       through the existing `useDraftPersistence`, writes nothing to history, and never reaches main.
       It is deliberately absent from the mutation vocabulary — RED that no reducer operation exists

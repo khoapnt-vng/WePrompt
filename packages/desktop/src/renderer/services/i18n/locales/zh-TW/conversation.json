@@ -952,7 +952,12 @@
         "lookCounter_one": "{{count}} / {{limit}} 個詞",
         "lookCounter_other": "{{count}} / {{limit}} 個詞",
         "chain": {
+          "hardCutState": "硬切 · 從靜幀開始",
           "hardCutUnavailable": "暫時無法變更硬切。必須先審閱所需替換媒體的估價。",
+          "reviewSever": "審閱硬切…",
+          "reviewRejoin": "審閱重新銜接…",
+          "reviewSeverDescription": "硬切會讓鏡頭 {{shot}} 從符合條件的靜幀開始；如有需要，會建立一個新靜幀。確認後，將替換此鏡頭及其後所有連續鏡頭，直到下一個硬切。",
+          "reviewRejoinDescription": "重新銜接鏡頭 {{shot}} 會清除其種子圖選擇，並使用鏡頭 {{previous}} 經裁剪後的最後一幀。確認後，免費的畫面擷取可能會先完成，再將此鏡頭及其後直到下一個硬切的連續鏡頭送交提供者。",
           "segmentHead": "鏈首 · 從靜幀開始",
           "continuous": "承接鏡頭 {{position}} 的最後一幀"
         },
@@ -1019,6 +1024,21 @@
         "briefAndRulesTitle": "簡報與規則"
       },
       "gate": {
+        "group": { "required": "必要" },
+        "continuity": {
+          "severTitle": "審閱硬切",
+          "rejoinTitle": "審閱重新銜接",
+          "severSummary": "此估價會將該鏡頭設為鏈頭，重用符合條件的種子圖或在需要時建立一個，並替換直到下一個硬切之前所有受影響的影片。",
+          "rejoinSummary": "此估價會清除該鏡頭的種子圖選擇，並將其重新銜接到經裁剪的前序畫面。確認後，免費的畫面擷取可能會先完成，再送交直到下一個硬切之前的替換影片。",
+          "severHeadline": "硬切 · {{count}} 次必要生成 · {{cost}}",
+          "rejoinHeadline": "重新銜接 · {{count}} 次必要生成 · {{cost}}",
+          "requiredWork": "此鏈變更必須完成列出的全部替換工作。",
+          "confirmSever": "確認硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin": "確認重新銜接 + {{count}} 次生成 · {{cost}}",
+          "close": "關閉 — 保持鏈不變",
+          "severConfirmed": "已確認硬切。請在鏡頭中查看種子圖和替換算圖的進度，以及任何必要的復原操作。",
+          "rejoinConfirmed": "已確認重新銜接。請在鏡頭中查看畫面擷取和替換算圖的進度，以及任何必要的復原操作。"
+        },
         "errors": {
           "routesUnavailable": "準備此估算前，請在「簡報與規則」中選擇可用的圖片與影片路線。",
           "pricing": {

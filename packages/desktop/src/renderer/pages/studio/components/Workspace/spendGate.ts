@@ -7,6 +7,7 @@
 import type {
   StudioPrepareGenerationChoiceV2,
   StudioPrepareSubmissionRequestV2,
+  StudioContinuityChangeV2,
   StudioPricingRefusalReasonV2,
   StudioRendererPreparedSubmissionOptionsV2,
   StudioRendererProjectV2,
@@ -24,11 +25,29 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import type { WorkspaceProjection } from './workspaceProjection';
 
+export type SpendGateContinuityChange = StudioContinuityChangeV2;
+
 export type SpendGateDraft = StudioPrepareSubmissionRequestV2;
 
 export type SpendGateSelectedOption = 'baseOnly' | 'withCascade';
 
 export type SpendGateRouteIssue = 'image' | 'video' | 'image_and_video';
+
+const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
+
+export const spendGateContinuityChange = (draft: SpendGateDraft | null): SpendGateContinuityChange | null => {
+  const change = draft?.continuityChange;
+  return change !== undefined &&
+    SAFE_STUDIO_ID.test(change.shotId) &&
+    typeof change.hardCut === 'boolean' &&
+    typeof change.requiresSeedGeneration === 'boolean'
+    ? {
+        shotId: change.shotId,
+        hardCut: change.hardCut,
+        requiresSeedGeneration: change.requiresSeedGeneration,
+      }
+    : null;
+};
 
 export type SpendGatePhase =
   | 'closed'
@@ -113,6 +132,17 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
         };
   }
   if (action.type === 'prepare_succeeded') {
+    if (spendGateContinuityChange(state.draft) !== null && action.options.withCascade !== null) {
+      return {
+        ...state,
+        phase: 'error',
+        options: null,
+        selectedOption: 'baseOnly',
+        errorCode: 'storage_error',
+        pricingRefusalReason: null,
+        routeIssue: null,
+      };
+    }
     return state.draft === null
       ? state
       : {
@@ -166,8 +196,10 @@ export const spendGateRouteIssue = (
   draft: SpendGateDraft
 ): SpendGateRouteIssue | null => {
   const choices = [...draft.baseChoices, ...draft.cascadeChoices];
-  const needsImage = choices.some((choice) => choice.purpose === 'seed_still');
-  const needsVideo = choices.some((choice) => choice.purpose === 'video_take');
+  const continuityChange = spendGateContinuityChange(draft);
+  const needsImage =
+    continuityChange?.requiresSeedGeneration === true || choices.some((choice) => choice.purpose === 'seed_still');
+  const needsVideo = continuityChange !== null || choices.some((choice) => choice.purpose === 'video_take');
   const imageUnavailable = needsImage && catalog.image.status !== 'ready';
   const videoUnavailable = needsVideo && catalog.video.status !== 'ready';
   if (imageUnavailable && videoUnavailable) return 'image_and_video';
@@ -302,6 +334,51 @@ const activeShotLocations = (project: StudioRendererProjectV2): Map<string, Acti
     }
   }
   return locations;
+};
+
+/** Builds the free review request for one exact prospective continuity change. */
+export const continuityGateDraft = (input: {
+  project: StudioRendererProjectV2;
+  projection: WorkspaceProjection;
+  shotId: string;
+  hardCut: boolean;
+}): SpendGateDraft | null => {
+  if (
+    !SAFE_STUDIO_ID.test(input.shotId) ||
+    input.projection.projectId !== input.project.id ||
+    input.projection.projectRevision !== input.project.revision ||
+    !input.projection.workspaceStatusReady ||
+    !input.projection.chainStatusReady
+  ) {
+    return null;
+  }
+  const location = activeShotLocations(input.project).get(input.shotId);
+  const shot = Object.hasOwn(input.project.shots, input.shotId) ? input.project.shots[input.shotId] : undefined;
+  const projectedShot = input.projection.activeBeats
+    .flatMap((beat) => beat.shots)
+    .find((candidate) => candidate.id === input.shotId);
+  if (
+    location === undefined ||
+    location.shotIndex === 0 ||
+    shot?.id !== input.shotId ||
+    projectedShot?.id !== input.shotId ||
+    projectedShot.chainBreak !== shot.chainBreak ||
+    (input.hardCut ? shot.chainBreak !== 'none' : shot.chainBreak !== 'hard_cut')
+  ) {
+    return null;
+  }
+  return {
+    projectId: input.project.id,
+    expectedRevision: input.project.revision,
+    originReferenceHandoffId: null,
+    baseChoices: [],
+    cascadeChoices: [],
+    continuityChange: {
+      shotId: input.shotId,
+      hardCut: input.hardCut,
+      requiresSeedGeneration: input.hardCut && !projectedShot.imageTakes.some((take) => take.binReason === null),
+    },
+  };
 };
 
 const withinNativeSubmissionBounds = (

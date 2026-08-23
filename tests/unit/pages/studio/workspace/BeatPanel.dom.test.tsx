@@ -127,8 +127,11 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.chain.continuous':
           'Continues from Shot {{position}}’s last frame',
         'conversation.creativeStudio.workspace.beatPanel.chain.hardCut': 'Hard cut',
+        'conversation.creativeStudio.workspace.beatPanel.chain.hardCutState': 'Hard cut · Starts from the still',
         'conversation.creativeStudio.workspace.beatPanel.chain.hardCutUnavailable':
           'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.',
+        'conversation.creativeStudio.workspace.beatPanel.chain.reviewSever': 'Review hard cut…',
+        'conversation.creativeStudio.workspace.beatPanel.chain.reviewRejoin': 'Review rejoin…',
         'conversation.creativeStudio.workspace.beatPanel.chain.generationOutOfDate': 'Generated work is out of date',
         'conversation.creativeStudio.workspace.beatPanel.chain.segmentHead':
           'Head of the chain · Starts from the still',
@@ -264,6 +267,12 @@ vi.mock('react-i18next', () => ({
       }
       if (key.endsWith('.chain.continuous')) {
         return `Continues from Shot ${String(values?.position)}’s last frame`;
+      }
+      if (key.endsWith('.chain.reviewSeverDescription')) {
+        return `A hard cut makes Shot ${String(values?.shot)} start from an eligible still, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.`;
+      }
+      if (key.endsWith('.chain.reviewRejoinDescription')) {
+        return `Rejoining Shot ${String(values?.shot)} clears its seed selection and uses Shot ${String(values?.previous)}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.`;
       }
       if (key.endsWith('.fields.lineFor')) return `Line for Shot ${String(values?.index)}`;
       if (key.endsWith('For')) return `${key.split('.').at(-1)?.replace('For', '')} Shot ${String(values?.index)}`;
@@ -541,6 +550,7 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   parkShot: vi.fn().mockResolvedValue(true),
   parkBeat: vi.fn().mockResolvedValue(true),
   reviewShot: vi.fn(),
+  reviewContinuity: vi.fn(),
   retryGenerationJob: vi.fn().mockResolvedValue(true),
   cancelGenerationJob: vi.fn().mockResolvedValue(true),
   chooseCascadeAsset: vi.fn().mockResolvedValue(true),
@@ -1143,6 +1153,30 @@ describe('BeatPlayer', () => {
     play.mockRestore();
   });
 
+  it('completes playback when native media ends within the accepted trim-out epsilon', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const beat = makeBeat('beat_1', [playableBeat().shots[0]!], { actualSeconds: 8, targetSeconds: 8 });
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+        {(playback) => <output data-position={playback.positionSeconds} data-testid='epsilon-ended-position' />}
+      </BeatPlayer>
+    );
+    const video = previewVideo();
+    const media = installMediaFacts(video);
+    fireEvent.loadedMetadata(video);
+    fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+
+    media.setCurrentTime(8.9995);
+    fireEvent.ended(video);
+
+    expect(screen.getByTestId('epsilon-ended-position')).toHaveAttribute('data-position', '8');
+    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeEnabled();
+    result.unmount();
+    pause.mockRestore();
+    play.mockRestore();
+  });
+
   it('restarts from the end, navigates joins both ways, toggles looping off, and ignores modified keys', () => {
     const beat = makeBeat('beat_1', [makeShot('shot_1', 0), makeShot('shot_2', 1), makeShot('shot_3', 2)]);
     const result = render(
@@ -1257,7 +1291,9 @@ describe('BeatPanel', () => {
       'Continues from Shot 01’s last frame'
     );
     expect(laterNaturalHead.querySelector('[data-chain-state="segment_head"]')).toHaveTextContent(headCopy);
-    expect(authoredHead.querySelector('[data-chain-state="hard_cut"]')).toHaveTextContent(headCopy);
+    expect(authoredHead.querySelector('[data-chain-state="hard_cut"]')).toHaveTextContent(
+      'Hard cut · Starts from the still'
+    );
     expect(defensiveContinuation.querySelector('[data-chain-state="continuous"]')).toHaveTextContent(
       'Continues from Shot 04’s last frame'
     );
@@ -1265,10 +1301,10 @@ describe('BeatPanel', () => {
     inspectShot(container, 'shot_private_2');
     const continuityWarning = within(continuation).getByText('System continuity is stale');
     const continuationState = continuation.querySelector<HTMLElement>('[data-chain-state="continuous"]');
-    const hardCutGroup = within(continuation).getByRole('group', { name: 'Author hard cut' });
+    const chainChangeControl = continuation.querySelector<HTMLElement>('[data-chain-change-control]');
     expect(continuityWarning).toBeVisible();
     expect(continuationState).not.toContainElement(continuityWarning);
-    expect(hardCutGroup).not.toContainElement(continuityWarning);
+    expect(chainChangeControl).not.toContainElement(continuityWarning);
     expect(within(continuation).getByText('Generated work is out of date')).toBeVisible();
 
     inspectShot(container, 'shot_private_1');
@@ -1291,9 +1327,15 @@ describe('BeatPanel', () => {
     expect(within(laterNaturalHead).getByText('Detached · Yours')).toBeVisible();
 
     inspectShot(container, 'shot_private_4');
-    expect(within(authoredHead).getByRole('checkbox', { name: 'Author hard cut' })).toBeChecked();
+    expect(within(authoredHead).getByRole('button', { name: 'Review rejoin…' })).toHaveAttribute(
+      'data-chain-change-intent',
+      'rejoin'
+    );
     inspectShot(container, 'shot_private_5');
-    expect(within(defensiveContinuation).getByRole('checkbox', { name: 'Author hard cut' })).toBeChecked();
+    expect(within(defensiveContinuation).getByRole('button', { name: 'Review rejoin…' })).toHaveAttribute(
+      'data-chain-change-intent',
+      'rejoin'
+    );
     expect(container.querySelector('video')).toHaveProperty('controls', true);
     expect(container).toHaveTextContent('Shot 1 image 1');
     expect(container).toHaveTextContent('Shot 2 take 1');
@@ -1301,48 +1343,81 @@ describe('BeatPanel', () => {
     expect(container.textContent).not.toContain('shot_private');
   });
 
-  it('retains canonical hard-cut state while containing every unavailable change attempt', () => {
+  it('presents a legacy hard-cut first Shot as the natural segment head without changing later hard cuts', () => {
+    const beat = makeBeat('beat_1', [
+      makeShot('shot_legacy_head', 0, { chainBreak: 'hard_cut', segmentHead: true }),
+      makeShot('shot_later_hard_cut', 1, { chainBreak: 'hard_cut', segmentHead: true }),
+    ]);
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
+
+    expect(
+      shotCard(container, 'shot_legacy_head').querySelector('[data-chain-state="segment_head"]')
+    ).toHaveTextContent('Head of the chain · Starts from the still');
+    expect(shotCard(container, 'shot_later_hard_cut').querySelector('[data-chain-state="hard_cut"]')).toHaveTextContent(
+      'Hard cut · Starts from the still'
+    );
+  });
+
+  it('keeps canonical chain state while opening reviewed sever and rejoin without a free mutation path', () => {
     const actions = makeActions();
     const beat = makeBeat('beat_1', [
-      makeShot('shot_continuous', 0, { chainBreak: 'none' }),
-      makeShot('shot_hard_cut', 1, { chainBreak: 'hard_cut', segmentHead: true }),
+      makeShot('shot_natural_head', 0, { chainBreak: 'none', segmentHead: true }),
+      makeShot('shot_continuous', 1, { chainBreak: 'none', segmentHead: false }),
+      makeShot('shot_hard_cut', 2, { chainBreak: 'hard_cut', segmentHead: true }),
     ]);
     const props = panelProps(beat, makeDrafts(), actions, makeProjection([beat]));
     const { container, rerender } = render(<BeatPanel {...props} />);
-    const continuousGroup = within(shotCard(container, 'shot_continuous')).getByRole('group', {
-      name: 'Author hard cut',
+    expect(shotCard(container, 'shot_natural_head').querySelector('[data-chain-change-trigger]')).toBeNull();
+    inspectShot(container, 'shot_continuous');
+    const continuousControl = within(shotCard(container, 'shot_continuous')).getByRole('button', {
+      name: 'Review hard cut…',
     });
-    const continuousControl = within(continuousGroup).getByRole('checkbox', { name: 'Author hard cut' });
     inspectShot(container, 'shot_hard_cut');
-    const hardCutGroup = within(shotCard(container, 'shot_hard_cut')).getByRole('group', {
-      name: 'Author hard cut',
+    const hardCutControl = within(shotCard(container, 'shot_hard_cut')).getByRole('button', {
+      name: 'Review rejoin…',
     });
-    const hardCutControl = within(hardCutGroup).getByRole('checkbox', { name: 'Author hard cut' });
 
-    expect(continuousControl).not.toBeChecked();
-    expect(hardCutControl).toBeChecked();
-    for (const [group, control] of [
-      [continuousGroup, continuousControl],
-      [hardCutGroup, hardCutControl],
-    ]) {
-      expect(control).toBeDisabled();
-      const descriptionId = group.getAttribute('aria-describedby');
+    for (const control of [continuousControl, hardCutControl]) {
+      expect(control).toBeEnabled();
+      expect(control).toHaveAttribute('aria-haspopup', 'dialog');
+      const descriptionId = control.getAttribute('aria-describedby');
       expect(descriptionId).not.toBeNull();
       const description = document.getElementById(descriptionId!);
-      expect(description).toHaveTextContent(
-        'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.'
-      );
-      expect(group).not.toContainElement(description);
-      fireEvent.click(control);
-      fireEvent.keyDown(control, { key: ' ' });
-      fireEvent.change(control, { target: { checked: !control.hasAttribute('checked') } });
+      expect(description).toHaveTextContent(/Shot/);
     }
+    fireEvent.click(continuousControl);
+    fireEvent.click(hardCutControl);
+    expect(actions.reviewContinuity).toHaveBeenNthCalledWith(1, 'shot_continuous', true);
+    expect(actions.reviewContinuity).toHaveBeenNthCalledWith(2, 'shot_hard_cut', false);
 
     rerender(<BeatPanel {...props} />);
-    expect(continuousControl).not.toBeChecked();
-    expect(hardCutControl).toBeChecked();
-    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
+    expect(shotCard(container, 'shot_continuous')).toHaveTextContent('Continues from Shot 01’s last frame');
+    expect(shotCard(container, 'shot_hard_cut')).toHaveTextContent('Hard cut · Starts from the still');
     expect(actions).not.toHaveProperty('setHardCut');
+  });
+
+  it('locks reviewed chain changes for stale, dirty, pending, and open-gate authority', () => {
+    const beat = makeBeat('beat_1', [
+      makeShot('shot_head', 0),
+      makeShot('shot_continuous', 1, { chainBreak: 'none', segmentHead: false }),
+    ]);
+    const assertions = [
+      panelProps(beat, makeDrafts({}, { staleRevision: true }), makeActions()),
+      panelProps(beat, makeDrafts({ 'shot.shot_continuous.line': 'dirty' }), makeActions(), makeProjection([beat]), {
+        reviewBlockedMessageKey: 'conversation.creativeStudio.workspace.controls.saveBeforeReview',
+      }),
+      panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), { pending: true }),
+      panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), { gateLocked: true }),
+    ];
+
+    for (const props of assertions) {
+      const view = render(<BeatPanel {...props} />);
+      inspectShot(view.container, 'shot_continuous');
+      expect(
+        within(shotCard(view.container, 'shot_continuous')).getByRole('button', { name: 'Review hard cut…' })
+      ).toBeDisabled();
+      view.unmount();
+    }
   });
 
   it('keeps Action and Look as adjacent semantic groups above the target and actions band', () => {
@@ -1411,6 +1486,48 @@ describe('BeatPanel', () => {
     expect(screen.getByRole('region', { name: 'Shots' })).toHaveAttribute('data-inspected-shot-id', 'shot_new');
     expect(shotCard(result.container, 'shot_new')).not.toHaveAttribute('hidden');
     expect(shotCard(result.container, 'shot_2')).toHaveAttribute('hidden');
+  });
+
+  it('leaves native Take media keyboard controls outside Beat transport shortcuts', () => {
+    const take = makeTake('take_native_controls', 'video');
+    const shot = makeShot('shot_1', 0, { videoTakes: [take] });
+    const beat = makeBeat('beat_1', [shot]);
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
+    const video = within(takeCard(container, take.assetId)).getByLabelText('Player Shot 1 take 1');
+    const seekRail = screen.getByRole('slider', { name: 'Beat seek rail' });
+    const space = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Space', key: ' ' });
+    const arrow = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' });
+
+    fireEvent(video, space);
+    fireEvent(video, arrow);
+
+    expect(video).toHaveProperty('controls', true);
+    expect(space.defaultPrevented).toBe(false);
+    expect(arrow.defaultPrevented).toBe(false);
+    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeInTheDocument();
+    expect(seekRail).toHaveAttribute('aria-valuenow', '0');
+  });
+
+  it('pauses every native Take video when its mounted Shot inspector becomes hidden', () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const first = makeShot('shot_1', 0, {
+      videoTakes: [makeTake('take_1', 'video'), makeTake('take_2', 'video')],
+    });
+    const second = makeShot('shot_2', 1);
+    const beat = makeBeat('beat_1', [first, second]);
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
+    const firstCard = shotCard(container, first.id);
+    const takeVideos = Array.from(firstCard.querySelectorAll<HTMLVideoElement>('video[controls]'));
+    takeVideos.forEach((video) => Object.defineProperty(video, 'paused', { configurable: true, value: false }));
+    pause.mockClear();
+
+    inspectShot(container, second.id);
+
+    expect(firstCard).toHaveAttribute('hidden');
+    expect(takeVideos).toHaveLength(2);
+    expect(pause).toHaveBeenCalledTimes(2);
+    expect(pause.mock.instances).toEqual(takeVideos);
+    pause.mockRestore();
   });
 
   it('keeps every Shot inspectable when coverage geometry fails closed', () => {
@@ -1545,8 +1662,9 @@ describe('BeatPanel', () => {
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { gateLocked: true })} />
     );
     expect(screen.getByRole('textbox', { name: 'Action' })).toBeDisabled();
+    inspectShot(stale.container, 'shot_2');
     expect(
-      within(shotCard(stale.container, 'shot_1')).getByRole('checkbox', { name: 'Author hard cut' })
+      within(shotCard(stale.container, 'shot_2')).getByRole('button', { name: 'Review hard cut…' })
     ).toBeDisabled();
     expect(screen.getByRole('slider', { name: 'Boundary after Shot 1' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Play Beat' })).toBeEnabled();

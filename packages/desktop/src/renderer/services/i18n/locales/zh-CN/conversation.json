@@ -952,7 +952,12 @@
         "lookCounter_one": "{{count}} / {{limit}} 个词",
         "lookCounter_other": "{{count}} / {{limit}} 个词",
         "chain": {
+          "hardCutState": "硬切 · 从静帧开始",
           "hardCutUnavailable": "暂时无法更改硬切。必须先审阅所需替换媒体的报价。",
+          "reviewSever": "审阅硬切…",
+          "reviewRejoin": "审阅重新衔接…",
+          "reviewSeverDescription": "硬切会让镜头 {{shot}} 从符合条件的静帧开始；如有需要，会创建一个新静帧。确认后，将替换此镜头及其后所有连续镜头，直到下一个硬切。",
+          "reviewRejoinDescription": "重新衔接镜头 {{shot}} 会清除其种子图选择，并使用镜头 {{previous}} 经裁剪后的最后一帧。确认后，免费的帧提取可能会先完成，再将此镜头及其后直到下一个硬切的连续镜头提交给提供商。",
           "segmentHead": "链首 · 从静帧开始",
           "continuous": "承接镜头 {{position}} 的最后一帧"
         },
@@ -1019,6 +1024,21 @@
         "briefAndRulesTitle": "简报与规则"
       },
       "gate": {
+        "group": { "required": "必需" },
+        "continuity": {
+          "severTitle": "审阅硬切",
+          "rejoinTitle": "审阅重新衔接",
+          "severSummary": "此报价会将该镜头设为链头，复用符合条件的种子图或在需要时创建一个，并替换直到下一个硬切之前所有受影响的视频。",
+          "rejoinSummary": "此报价会清除该镜头的种子图选择，并将其重新衔接到经裁剪的前序帧。确认后，免费的帧提取可能会先完成，再提交直到下一个硬切之前的替换视频。",
+          "severHeadline": "硬切 · {{count}} 次必需生成 · {{cost}}",
+          "rejoinHeadline": "重新衔接 · {{count}} 次必需生成 · {{cost}}",
+          "requiredWork": "此链变更必须完成列出的全部替换工作。",
+          "confirmSever": "确认硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
+          "close": "关闭 — 保持链不变",
+          "severConfirmed": "已确认硬切。请在镜头中查看种子图和替换工作的进度，以及任何必要的恢复操作。",
+          "rejoinConfirmed": "已确认重新衔接。请在镜头中查看帧提取和替换工作的进度，以及任何必要的恢复操作。"
+        },
         "errors": {
           "routesUnavailable": "准备此估算前，请在“简报与规则”中选择可用的图像和视频路线。",
           "pricing": {

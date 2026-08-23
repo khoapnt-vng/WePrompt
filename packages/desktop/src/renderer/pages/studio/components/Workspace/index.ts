@@ -15,6 +15,7 @@ export type {
   BeatPanelShotSave,
 } from './BeatPanel';
 export {
+  continuityGateDraft,
   formatMinorUnits,
   handoffGateDraft,
   initialSpendGateState,
@@ -23,9 +24,12 @@ export {
   filmRenderBatchShotIds,
   selectionGateDraft,
   spendGateReducer,
+  spendGateRouteIssue,
+  spendGateContinuityChange,
   summarizeQuote,
 } from './spendGate';
 export type {
+  SpendGateContinuityChange,
   SpendGateDraft,
   SpendGatePhase,
   SpendGateQuoteSummary,

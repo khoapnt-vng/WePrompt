@@ -36,6 +36,18 @@ vi.mock('react-i18next', () => ({
       if (key === 'conversation.creativeStudio.workspace.controls.dirtyCause.continuity_stale') {
         return 'continuity changed';
       }
+      if (key === 'conversation.creativeStudio.workspace.gate.continuity.confirmSever') {
+        return `Confirm hard cut + ${String(values?.count)} generations · ${String(values?.cost)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.continuity.confirmRejoin') {
+        return `Confirm rejoin + ${String(values?.count)} generations · ${String(values?.cost)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.continuity.severConfirmed') {
+        return 'Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.';
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.continuity.rejoinConfirmed') {
+        return 'Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery.';
+      }
       return values === undefined ? key : `${key}:${JSON.stringify(values)}`;
     },
     i18n: { language: 'en-US', resolvedLanguage: 'en-US' },
@@ -46,6 +58,7 @@ import {
   SpendGateModal,
   WorkspaceControls,
   WorkspaceProjectMenu,
+  continuityGateDraft,
   formatMinorUnits,
   handoffGateDraft,
   initialSpendGateState,
@@ -55,6 +68,7 @@ import {
   filmRenderBatchShotIds,
   selectionGateDraft,
   spendGateReducer,
+  spendGateRouteIssue,
   useWorkspaceDrafts,
   useSpendGate,
   type BeatPanelActions,
@@ -220,6 +234,40 @@ const options = (): StudioRendererPreparedSubmissionOptionsV2 => ({
   withCascade: quote('quote_cascade', true),
 });
 
+const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
+  id: 'quote_continuity',
+  projectId: 'project_1',
+  projectRevision: 3,
+  expiresAt: '2026-08-19T01:00:00.000Z',
+  currency: 'USD',
+  baseItems: [
+    {
+      shotId: 'shot_2',
+      purpose: 'seed_still',
+      route: { choiceId: 'image_choice', providerId: 'safe_provider', model: 'safe_model' },
+      generationCount: 1,
+      durationSeconds: null,
+      oneGenerationMinorUnits: 125,
+      requestedTotalMinorUnits: 125,
+      waitsForTakeSelection: false,
+    },
+    {
+      shotId: 'shot_2',
+      purpose: 'video_take',
+      route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
+      generationCount: 1,
+      durationSeconds: 4,
+      oneGenerationMinorUnits: 400,
+      requestedTotalMinorUnits: 400,
+      waitsForTakeSelection: true,
+    },
+  ],
+  cascadeItems: [],
+  lowerMinorUnits: 525,
+  upperMinorUnits: 525,
+  budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 1_000 },
+});
+
 const draft = {
   projectId: 'project_1',
   expectedRevision: 3,
@@ -288,6 +336,7 @@ const beatPanelActions = (): BeatPanelActions => ({
   parkShot: vi.fn(async () => true),
   parkBeat: vi.fn(async () => true),
   reviewShot: vi.fn(),
+  reviewContinuity: vi.fn(),
   chooseCascadeAsset: vi.fn(async () => true),
   retryGenerationJob: vi.fn(async () => true),
   cancelGenerationJob: vi.fn(async () => true),
@@ -689,6 +738,76 @@ describe('spend gate draft graph', () => {
     expect(spendGateReducer(closed, { type: 'confirm_failed', error: { code: 'unexpected_failure' } }).phase).toBe(
       'error'
     );
+
+    const continuityDraft = {
+      ...draft,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    };
+    const continuityOpened = spendGateReducer(closed, { type: 'open', draft: continuityDraft });
+    const refusedSiblingQuote = spendGateReducer(continuityOpened, {
+      type: 'prepare_succeeded',
+      options: options(),
+    });
+    expect(refusedSiblingQuote).toMatchObject({ phase: 'error', options: null, errorCode: 'storage_error' });
+    expect(selectedSpendGateQuote(refusedSiblingQuote)).toBeNull();
+  });
+
+  it('builds only exact non-first continuity drafts and diagnoses their required video route', () => {
+    const project = makeProject();
+    const projection = readyProjection(project);
+    expect(continuityGateDraft({ project, projection, shotId: 'shot_1', hardCut: true })).toBeNull();
+    expect(continuityGateDraft({ project, projection, shotId: 'shot_2', hardCut: false })).toBeNull();
+    expect(continuityGateDraft({ project, projection, shotId: 'shot_2', hardCut: true })).toEqual({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    });
+
+    const continuityDraft = continuityGateDraft({ project, projection, shotId: 'shot_2', hardCut: true });
+    expect(continuityDraft).not.toBeNull();
+    expect(spendGateRouteIssue(routeCatalog('ready', 'unavailable'), continuityDraft!)).toBe('video');
+    expect(spendGateRouteIssue(routeCatalog('unavailable', 'ready'), continuityDraft!)).toBe('image');
+    expect(spendGateRouteIssue(routeCatalog('unavailable', 'unavailable'), continuityDraft!)).toBe('image_and_video');
+
+    project.assets.seed_existing = makeAsset('seed_existing', 'shot_2');
+    project.shots.shot_2!.assetIds.push('seed_existing');
+    const reusable = continuityGateDraft({
+      project,
+      projection: readyProjection(project),
+      shotId: 'shot_2',
+      hardCut: true,
+    });
+    expect(reusable?.continuityChange).toEqual({
+      shotId: 'shot_2',
+      hardCut: true,
+      requiresSeedGeneration: false,
+    });
+    expect(spendGateRouteIssue(routeCatalog('unavailable', 'ready'), reusable!)).toBeNull();
+
+    project.bin.push({ kind: 'take', assetId: 'seed_existing', reason: 'lifted' });
+    expect(
+      continuityGateDraft({
+        project,
+        projection: readyProjection(project),
+        shotId: 'shot_2',
+        hardCut: true,
+      })?.continuityChange.requiresSeedGeneration
+    ).toBe(true);
+
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    expect(
+      continuityGateDraft({
+        project,
+        projection: readyProjection(project),
+        shotId: 'shot_2',
+        hardCut: false,
+      })?.continuityChange
+    ).toEqual({ shotId: 'shot_2', hardCut: false, requiresSeedGeneration: false });
   });
 });
 
@@ -1154,6 +1273,76 @@ describe('SpendGateModal', () => {
         expectedRevision: 3,
       })
     );
+  });
+
+  it('makes a continuity cascade mandatory, hides optional radios, and names the exact paid action', async () => {
+    const continuityDraft = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    };
+    mocks.prepare.mockResolvedValue({
+      ok: true,
+      data: { baseOnly: continuityQuote(), withCascade: null },
+    });
+    render(<Harness gateDraft={continuityDraft} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
+    expect(modal).toHaveAttribute('data-chain-change-intent', 'sever');
+    expect(within(modal).getByTestId('studio-chain-change-summary')).toBeVisible();
+    expect(within(modal).queryByRole('radio')).toBeNull();
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    await waitFor(() => expect(within(modal).getByText(/safe_video/)).toBeVisible());
+    expect(within(modal).queryByRole('radio')).toBeNull();
+    const requiredRows = within(modal).getAllByRole('listitem');
+    expect(requiredRows[0]).toHaveAttribute('data-quote-group', 'required');
+    expect(requiredRows[0]).toHaveTextContent('conversation.creativeStudio.workspace.gate.group.required');
+    const confirm = within(modal).getByRole('button', {
+      name: 'Confirm hard cut + 2 generations · $5.25',
+    });
+    expect(confirm).toHaveAttribute('data-chain-change-confirm');
+    expect(confirm).not.toHaveTextContent(/up to/i);
+    fireEvent.click(confirm);
+
+    await waitFor(() =>
+      expect(mocks.confirm).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        quoteId: 'quote_continuity',
+        expectedRevision: 3,
+      })
+    );
+    expect(
+      await within(modal).findByText(
+        'Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.'
+      )
+    ).toBeVisible();
+  });
+
+  it('fails closed when a continuity prepare response exposes a forbidden sibling quote', async () => {
+    const continuityDraft = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    };
+    mocks.prepare.mockResolvedValue({ ok: true, data: options() });
+    render(<Harness gateDraft={continuityDraft} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    expect(await within(modal).findByText('conversation.creativeStudio.workspace.gate.errors.generic')).toBeVisible();
+    expect(within(modal).queryByRole('radio')).toBeNull();
+    expect(within(modal).queryByText(/safe_provider/)).toBeNull();
+    expect(within(modal).queryByRole('button', { name: /workspace\.gate\.continuity\.confirm/ })).toBeNull();
+    expect(mocks.confirm).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -59,6 +59,24 @@ const deferredSeedPlan = (): StudioGenerationRequestPlan => ({
   dependency: { kind: 'authorized_seed', upstreamItemId: 'item_upstream', shotId: 'shot_1' },
 });
 
+const existingPredecessorPlan = (): StudioGenerationRequestPlan =>
+  ({
+    kind: 'after_take_selection',
+    template: {
+      prompt: 'existing predecessor prompt',
+      aspectRatio: '16:9',
+      resolution: '1080p',
+      durationSeconds: 5,
+      referenceInput: null,
+    },
+    dependency: {
+      kind: 'existing_predecessor',
+      predecessorShotId: 'shot_1',
+      takeAssetId: 'primary_video',
+      endpointSeconds: 8,
+    },
+  }) as StudioGenerationRequestPlan;
+
 const item = (
   id: string,
   shotId: string,
@@ -260,7 +278,92 @@ const installPrimary = (project: StudioProjectV2, mediaKind: 'image' | 'video'):
   return primary;
 };
 
+const existingPredecessorProject = (): StudioProjectV2 => {
+  const project = projectFixture('predecessor');
+  const primary = installPrimary(project, 'video');
+  const authorization = project.spendAuthorizations[0]!;
+  const dependent = authorization.cascadeItems[0]!;
+  const dependentJob = project.jobs.job_dependent_0!;
+  const plan = existingPredecessorPlan();
+  dependent.requestPlan = structuredClone(plan);
+  dependentJob.requestPlan = structuredClone(plan);
+  authorization.baseItems = [dependent];
+  authorization.cascadeItems = [];
+  authorization.providerBindings = authorization.providerBindings.filter(({ itemId }) => itemId === dependent.id);
+  authorization.idempotencyKeys = authorization.idempotencyKeys.filter(({ itemId }) => itemId === dependent.id);
+  delete project.jobs.job_upstream;
+  project.shots.shot_1!.jobIds = [];
+  expect(primary.id).toBe('primary_video');
+  return project;
+};
+
 describe('advanceStudioWaitingBindingsV2', () => {
+  it('holds an existing predecessor authorization to the exact selected Take, endpoint, and live boundary', () => {
+    const project = existingPredecessorProject();
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'primary_video',
+      endpointSeconds: 8,
+    });
+
+    expect(advanceStudioWaitingBindingsV2(project, capturedAt)).toEqual({
+      dispatchJobIds: [],
+      extractionIds: [extractionId],
+      projectChanged: true,
+    });
+    expect(project.jobs.job_dependent_0!.status).toBe('waiting_for_conditioning');
+
+    project.shots.shot_1!.trimOutSeconds = 1;
+    expect(advanceStudioWaitingBindingsV2(project, capturedAt)).toEqual({
+      dispatchJobIds: [],
+      extractionIds: [],
+      projectChanged: false,
+    });
+    expect(project.jobs.job_dependent_0!.status).toBe('waiting_for_conditioning');
+    project.shots.shot_1!.trimOutSeconds = 2;
+
+    const frame = asset('frame_existing', 'shot_1', 'image', 'conditioningFrames');
+    project.assets[frame.id] = frame;
+    project.shots.shot_1!.assetIds.push(frame.id);
+    project.frameExtractions[extractionId] = {
+      ...project.frameExtractions[extractionId]!,
+      status: 'ready',
+      frameAssetId: frame.id,
+    };
+    expect(
+      advanceStudioWaitingBindingsV2(
+        project,
+        capturedAt,
+        new Map([
+          [
+            extractionId,
+            {
+              extractionId,
+              shotId: 'shot_1',
+              takeAssetId: 'primary_video',
+              endpointSeconds: 8,
+              frameAssetId: frame.id,
+              byteSize: frame.byteSize,
+              sha256: frame.sha256,
+            },
+          ],
+        ])
+      )
+    ).toEqual({ dispatchJobIds: ['job_dependent_0'], extractionIds: [], projectChanged: true });
+    expect(project.jobs.job_dependent_0).toMatchObject({
+      status: 'queued_local',
+      requestSnapshot: {
+        conditioningInput: {
+          kind: 'predecessor_frame',
+          predecessorShotId: 'shot_1',
+          takeAssetId: 'primary_video',
+          endpointSeconds: 8,
+          frameAssetId: frame.id,
+        },
+      },
+    });
+  });
+
   it('binds every non-cancelled sibling to an explicitly selected seed from the exact upstream item', () => {
     const project = projectFixture('seed', 3);
     const primary = installPrimary(project, 'image');

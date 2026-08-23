@@ -76,14 +76,20 @@ const isSelectablePrimary = (
   });
 
 /** Fails only pristine, unbound dependents whose exact earlier item is exhausted without a primary. */
-export const terminalizeStudioUnboundDependenciesV2 = (project: StudioProjectV2, capturedAt: string): string[] => {
+export const terminalizeStudioUnboundDependenciesV2 = (
+  project: StudioProjectV2,
+  capturedAt: string,
+  authorizationItemIds: ReadonlySet<string> | null = null
+): string[] => {
   const failedJobIds: string[] = [];
   const binnedTakeIds = new Set(project.bin.flatMap((item) => (item.kind === 'take' ? [item.assetId] : [])));
   for (const authorization of project.spendAuthorizations) {
     const items = quotedItems(authorization);
     for (const item of items) {
+      if (authorizationItemIds !== null && !authorizationItemIds.has(item.id)) continue;
       if (item.requestPlan.kind !== 'after_take_selection') continue;
       const dependency = item.requestPlan.dependency;
+      if (dependency.kind === 'existing_predecessor') continue;
       const siblings = Object.values(project.jobs)
         .filter((job) => job.authorizationId === authorization.id && job.authorizationItemId === item.id)
         .sort((left, right) => left.generationIndex - right.generationIndex);
@@ -137,17 +143,19 @@ export const terminalizeStudioUnboundDependenciesV2 = (project: StudioProjectV2,
 export const advanceStudioWaitingBindingsV2 = (
   project: StudioProjectV2,
   capturedAt: string,
-  verifiedReadyExtractions: ReadonlyMap<string, StudioVerifiedConditioningFrameV2> = new Map()
+  verifiedReadyExtractions: ReadonlyMap<string, StudioVerifiedConditioningFrameV2> = new Map(),
+  authorizationItemIds: ReadonlySet<string> | null = null
 ): StudioWaitingBindingAdvanceV2 => {
   const dispatchJobIds: string[] = [];
   const extractionIds: string[] = [];
   const seenExtractions = new Set<string>();
   const binnedTakeIds = new Set(project.bin.flatMap((item) => (item.kind === 'take' ? [item.assetId] : [])));
-  let projectChanged = terminalizeStudioUnboundDependenciesV2(project, capturedAt).length > 0;
+  let projectChanged = terminalizeStudioUnboundDependenciesV2(project, capturedAt, authorizationItemIds).length > 0;
 
   for (const authorization of project.spendAuthorizations) {
     const items = quotedItems(authorization);
     for (const item of items) {
+      if (authorizationItemIds !== null && !authorizationItemIds.has(item.id)) continue;
       if (item.requestPlan.kind !== 'after_take_selection') continue;
       const siblings = Object.values(project.jobs)
         .filter((job) => job.authorizationId === authorization.id && job.authorizationItemId === item.id)
@@ -174,27 +182,33 @@ export const advanceStudioWaitingBindingsV2 = (
       }
 
       const dependency = item.requestPlan.dependency;
-      const upstreamItem = items.find((candidate) => candidate.id === dependency.upstreamItemId);
-      if (upstreamItem === undefined) continue;
+      const upstreamItem =
+        dependency.kind === 'existing_predecessor'
+          ? null
+          : items.find((candidate) => candidate.id === dependency.upstreamItemId);
+      if (dependency.kind !== 'existing_predecessor' && upstreamItem === undefined) continue;
       const upstreamShotId = dependency.kind === 'authorized_seed' ? dependency.shotId : dependency.predecessorShotId;
       const upstreamShot = ownValue(project.shots, upstreamShotId);
       const selectedAssetId =
         dependency.kind === 'authorized_seed' ? upstreamShot?.seedStillId : upstreamShot?.selectedTakeId;
       if (upstreamShot === undefined || selectedAssetId === undefined || selectedAssetId === null) continue;
 
-      const producers = Object.values(project.jobs).filter(
-        (job) =>
-          job.authorizationId === authorization.id &&
-          job.authorizationItemId === upstreamItem.id &&
-          job.shotId === upstreamShot.id &&
-          job.purpose === upstreamItem.purpose &&
-          job.status === 'succeeded' &&
-          job.outputAssetIdsByRole.primary === selectedAssetId &&
-          job.outputAssetIds.filter((assetId) => assetId === selectedAssetId).length === 1
-      );
+      const producers =
+        upstreamItem === null
+          ? []
+          : Object.values(project.jobs).filter(
+              (job) =>
+                job.authorizationId === authorization.id &&
+                job.authorizationItemId === upstreamItem.id &&
+                job.shotId === upstreamShot.id &&
+                job.purpose === upstreamItem.purpose &&
+                job.status === 'succeeded' &&
+                job.outputAssetIdsByRole.primary === selectedAssetId &&
+                job.outputAssetIds.filter((assetId) => assetId === selectedAssetId).length === 1
+            );
       const selectedAsset = ownValue(project.assets, selectedAssetId);
       if (
-        producers.length !== 1 ||
+        (dependency.kind !== 'existing_predecessor' && producers.length !== 1) ||
         selectedAsset === undefined ||
         selectedAsset.projectId !== project.id ||
         selectedAsset.shotId !== upstreamShot.id ||
@@ -207,6 +221,24 @@ export const advanceStudioWaitingBindingsV2 = (
         continue;
       }
 
+      if (dependency.kind === 'existing_predecessor') {
+        let liveBoundary = false;
+        for (const beatId of project.beatOrder) {
+          const beat = ownValue(project.beats, beatId);
+          const dependentIndex = beat?.shotOrder.indexOf(item.shotId) ?? -1;
+          if (
+            beat !== undefined &&
+            dependentIndex > 0 &&
+            beat.shotOrder[dependentIndex - 1] === dependency.predecessorShotId &&
+            ownValue(project.shots, item.shotId)?.chainBreak === 'none'
+          ) {
+            liveBoundary = true;
+            break;
+          }
+        }
+        if (!liveBoundary || selectedAsset.id !== dependency.takeAssetId) continue;
+      }
+
       let conditioningInput: StudioConditioningInputSnapshot;
       if (dependency.kind === 'authorized_seed') {
         conditioningInput = { kind: 'seed_still', assetId: selectedAsset.id };
@@ -214,6 +246,9 @@ export const advanceStudioWaitingBindingsV2 = (
         if (selectedAsset.durationSeconds === undefined) continue;
         const endpointSeconds = selectedAsset.durationSeconds - (upstreamShot.trimOutSeconds ?? 0);
         if (!Number.isFinite(endpointSeconds) || endpointSeconds <= 0) continue;
+        if (dependency.kind === 'existing_predecessor' && !Object.is(endpointSeconds, dependency.endpointSeconds)) {
+          continue;
+        }
         const extractionId = createStudioFrameExtractionId({
           shotId: upstreamShot.id,
           takeAssetId: selectedAsset.id,

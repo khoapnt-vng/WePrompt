@@ -677,7 +677,12 @@ const hasBoundNonterminalJob = (
   predicate: (job: StudioJobV2) => boolean = () => true
 ): boolean =>
   Object.values(project.jobs).some(
-    (job) => NONTERMINAL_JOB_STATUSES.has(job.status) && job.requestSnapshot !== null && predicate(job)
+    (job) =>
+      NONTERMINAL_JOB_STATUSES.has(job.status) &&
+      (job.requestSnapshot !== null ||
+        (job.requestPlan.kind === 'after_take_selection' &&
+          job.requestPlan.dependency.kind === 'existing_predecessor')) &&
+      predicate(job)
   );
 
 const takeHasNonterminalConditioningUse = (project: StudioProjectV2, assetId: string): boolean =>
@@ -685,6 +690,9 @@ const takeHasNonterminalConditioningUse = (project: StudioProjectV2, assetId: st
     if (!NONTERMINAL_JOB_STATUSES.has(job.status)) return false;
     const conditioning = job.requestSnapshot?.conditioningInput;
     return (
+      (job.requestPlan.kind === 'after_take_selection' &&
+        job.requestPlan.dependency.kind === 'existing_predecessor' &&
+        job.requestPlan.dependency.takeAssetId === assetId) ||
       (conditioning?.kind === 'seed_still' && conditioning.assetId === assetId) ||
       (conditioning?.kind === 'predecessor_frame' && conditioning.takeAssetId === assetId)
     );
@@ -699,7 +707,10 @@ const takeIsLastSelectableForWaitingDependency = (project: StudioProjectV2, asse
     (job) =>
       NONTERMINAL_JOB_STATUSES.has(job.status) &&
       job.requestPlan.kind === 'after_take_selection' &&
-      job.requestPlan.dependency.upstreamItemId === producer.authorizationItemId
+      ((job.requestPlan.dependency.kind === 'existing_predecessor' &&
+        job.requestPlan.dependency.takeAssetId === assetId) ||
+        (job.requestPlan.dependency.kind !== 'existing_predecessor' &&
+          job.requestPlan.dependency.upstreamItemId === producer.authorizationItemId))
   );
   if (!hasWaitingDependent) return false;
   const selectablePrimaryIds = new Set<string>();
@@ -719,6 +730,58 @@ const takeIsLastSelectableForWaitingDependency = (project: StudioProjectV2, asse
     }
   }
   return selectablePrimaryIds.size === 1 && selectablePrimaryIds.has(assetId);
+};
+
+const seedMatchesWaitingAuthorizedDependencies = (
+  project: StudioProjectV2,
+  shotId: string,
+  assetId: string | null
+): boolean => {
+  const waitingJobs = Object.values(project.jobs).filter(
+    (job) =>
+      job.shotId === shotId &&
+      job.purpose === 'video_take' &&
+      job.status === 'waiting_for_conditioning' &&
+      job.requestSnapshot === null &&
+      job.requestPlan.kind === 'after_take_selection' &&
+      job.requestPlan.dependency.kind === 'authorized_seed'
+  );
+  if (waitingJobs.length === 0 || assetId === null) return true;
+
+  return waitingJobs.every((waitingJob) => {
+    if (
+      waitingJob.requestPlan.kind !== 'after_take_selection' ||
+      waitingJob.requestPlan.dependency.kind !== 'authorized_seed'
+    ) {
+      return false;
+    }
+    const dependency = waitingJob.requestPlan.dependency;
+    const authorization = project.spendAuthorizations.find((candidate) => candidate.id === waitingJob.authorizationId);
+    const upstreamItem = authorization
+      ? [...authorization.baseItems, ...authorization.cascadeItems].find(
+          (item) => item.id === dependency.upstreamItemId
+        )
+      : undefined;
+    if (
+      authorization === undefined ||
+      dependency.shotId !== shotId ||
+      upstreamItem?.shotId !== shotId ||
+      upstreamItem.purpose !== 'seed_still'
+    ) {
+      return false;
+    }
+
+    return Object.values(project.jobs).some(
+      (producer) =>
+        producer.authorizationId === authorization.id &&
+        producer.authorizationItemId === upstreamItem.id &&
+        producer.shotId === shotId &&
+        producer.purpose === 'seed_still' &&
+        producer.status === 'succeeded' &&
+        producer.outputAssetIdsByRole.primary === assetId &&
+        producer.outputAssetIds.includes(assetId)
+    );
+  });
 };
 
 const projectFields = (project: StudioProjectV2): Extract<StudioUndoPatch, { kind: 'project_fields' }>['before'] => ({
@@ -883,7 +946,7 @@ const jobReferencesShot = (project: StudioProjectV2, job: StudioJobV2, shotId: s
     const dependency = job.requestPlan.dependency;
     if (
       (dependency.kind === 'authorized_seed' && dependency.shotId === shotId) ||
-      (dependency.kind === 'authorized_predecessor' && dependency.predecessorShotId === shotId)
+      (dependency.kind !== 'authorized_seed' && dependency.predecessorShotId === shotId)
     ) {
       return true;
     }
@@ -1521,6 +1584,9 @@ export const applyStudioMutationBatchV2 = (
         if (shot === undefined || findActiveShotOwner(draft, shot.id) === undefined) fail('invalid_operation');
         if (operation.assetId !== null) assertCanonicalSeed(draft, shot.id, operation.assetId);
         if (shot.seedStillId === operation.assetId) fail('invalid_operation');
+        if (!seedMatchesWaitingAuthorizedDependencies(draft, shot.id, operation.assetId)) {
+          fail('dependency_blocked');
+        }
         if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id)) fail('dependency_blocked');
         touchShot(tracker, draft, shot.id);
         defineOwn(draft.shots, shot.id, { ...shot, seedStillId: operation.assetId });

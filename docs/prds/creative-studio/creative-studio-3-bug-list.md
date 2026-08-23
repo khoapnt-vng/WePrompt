@@ -473,7 +473,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - Dev workaround, no repo change: put the bundled binary first on PATH.
   - **Fixed by `fa777eb6b`.** Unclassified backend startup and database-open failures now use neutral localized startup copy and diagnostics instead of asserting an incomplete installation, while proven missing-resource failures retain their specific guidance.
 
-- [ ] **[BUG-095][P2][Creative Studio] Severing the chain is a free toggle where the ruling makes it a gated, costed action** — found 2026-08-21 reconciling the designer's fifth round against the build
+- [x] **[BUG-095][P2][Creative Studio] Severing the chain is a free toggle where the ruling makes it a gated, costed action** — found 2026-08-21 reconciling the designer's fifth round against the build
   - §13.1 rules that `HARD CUT` is a permanent authored control, and that **severing is not free**: the shot becomes a chain head, so it needs a still on the image route, and its existing take was generated from a first frame it no longer starts from. It is to be gated in the render gate's shape — the third gate after render and chain — and re-joining is symmetrical and equally gated.
   - The build dispatches it as an ordinary authoring mutation. `StudioPage.tsx:537` sends `{ kind: 'set_hard_cut', shotId, hardCut }` through `applyAuthoringBatch`, and `mutations/index.ts:1496` applies it with no quote, no confirmation and no still.
   - **Partial credit where it is due.** The mutation calls `touchShot` on the shot, which reaches the projection's `dirtyShotIds` and renders the shot `stale` (`workspaceProjection.ts:746`). So the take is marked, not silently kept. And `hasBoundNonterminalJob` blocks the toggle while a job is in flight on that shot. What is missing is the money, not the bookkeeping.
@@ -481,6 +481,8 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - One existing guard is worth keeping in view: `directorCommandContracts.ts:297` already classifies `set_hard_cut` as `proposal`, so the Director cannot sever a chain on its own. The gap is the human's click, not the Director's.
   - **Stale as filed, corrected 2026-08-22.** The Shot-provenance slice made the hard-cut control **read-only**: it is now a disabled checkbox reflecting canonical state inside a labelled group. So severing is not a free toggle — it cannot be done at all. The ruling in §13.1 still stands and the gate still has to be built; what changed is that the risk is now an absent capability rather than an unpriced one.
   - **Bounded fail-closed containment fixed 2026-08-22; BUG-095 remains open for the atomic paid gate.** The Beat panel preserves the canonical checked or unchecked hard-cut state but now marks changes unavailable, with localized copy explaining that a reviewed estimate for replacement media must come first. The renderer no longer exposes a free `set_hard_cut` action, new Director commands cannot propose it, and the mutation authority rejects direct toggles, coverage-authored hard-cut transitions and exact undo reversals before persistence. A valid pre-fix pending proposal remains readable but cannot be accepted or publish decision/project bytes. This containment prevents another unquoted chain change; it does not supply the required still, replacement video, mandatory cascade, quote confirmation or re-join workflow, so the bug must not be closed.
+  - **Owner-approved contract recorded 2026-08-23; BUG-095 remains open until GREEN verification.** The first Shot has no toggle. A sever atomically pins and reuses its exact eligible seed or generates one still whose authorized output requires human binding, then replaces the target video; a re-join clears the seed selection and waits on the predecessor's free trim-aware frame extraction before replacing the target video. Both directions mandatorily replace every downstream video through the next hard cut, with exactly one generation per required item and no optional base/cascade quote. Confirmation atomically commits topology, authorization and jobs; all pre-commit refusal/failure paths are zero-byte, while post-confirm lifecycle failures remain durable and never roll topology back. Ordinary undo is absent—the inverse is another paid transition—and the Director remains forbidden. Direction §13.6 and the implementation-plan authority pin carry the full contract.
+  - **Fixed 2026-08-23.** The Beat panel now opens one reviewed, localized sever/re-join gate for every non-first Shot. Main derives and revalidates the sole mandatory quote, distrusts the renderer's seed hint, and atomically commits topology, authorization, jobs and re-join extraction authority before dispatch. Exact seed selection, trim-aware predecessor binding, restart recovery, corrupt/missing continuity-frame repair and every free/Director/undo bypass fail closed. Verification is GREEN for TypeScript, formatting, i18n, lint (zero errors), the production package, and the thresholded full suite: 652 files and 9,480 tests passed, with every listed file above 80% lines and branches. The focused five-case Electron lifecycle was attempted but could not reach the Studio route: the local backend stayed at port 0 because the SHA-verified pinned AionCore v0.1.51 archive lacks the required `migration-lineage.json` and was correctly rejected. No E2E product assertion ran, so this note does not claim E2E GREEN.
 
 - [x] **[BUG-096][P3][Creative Studio] The Brief's route pickers show an opaque choice id where a model name belongs** — found 2026-08-22 verifying Slice 1a
   - With both routes bound, the pickers read `choice_000290ca7fd86013f59825d5` and `choice_442687563c09dd91be3844cb`. A person cannot tell which model their film will be rendered with, or whether the two are even the same provider.
@@ -746,21 +748,20 @@ a fidelity fix, so it is filed as BUG-073.
 ## The designer's fifth round — what it settles, and what the build already satisfies
 
 `creative-studio-3-direction-and-answers.md` §12–13 arrived 2026-08-21 and answers the three Beat
-panel questions. Four of its rulings are checkable against the build today; three already hold.
+panel questions. Four of its rulings are checkable against the build today; all four now hold.
 
 | Ruling                                            | Build                                                                                                |
 | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
 | §13.5 the density tier's name must not be visible | holds — `CoverageDensity` is an internal type, and `WIDE · FULL DETAIL` exists only in the prototype |
 | §5 `AUTO-DUCKED` must come out                    | holds — absent                                                                                       |
 | §13.5 the 25-word Look cap is soft                | holds — `BeatPanel/index.tsx:1149` warns above 25 and never blocks                                   |
-| §13.1 severing the chain is gated and costed      | **does not hold — BUG-095**                                                                          |
+| §13.1 severing the chain is gated and costed      | holds — the atomic paid sever/re-join gate closed BUG-095 on 2026-08-23                              |
 
-The answers also carry work the drawing does not yet show, listed in §13.4 and not filed as defects
-because nothing was built wrong: the state line splitting into `CONTINUES FROM 02` plus a permanent
-`HARD CUT` control, the detected continuity break moving to the alert row, `RENDERS AS` gaining
-per-part attribution and a staleness flag, and the join `+` gaining a conditional quote.
+The answers also carry remaining work the drawing does not yet show, listed in §13.4 and not filed as
+defects because nothing was built wrong: `RENDERS AS` gaining per-part attribution and a staleness
+flag, and the join `+` gaining a conditional quote.
 
-Two of those carry a constraint worth keeping visible when they are built. `RENDERS AS` **must read
+Both carry a constraint worth keeping visible when they are built. `RENDERS AS` **must read
 from the same compose function the job uses** (§13.2) — a readout assembled separately for display is
 a lie the moment dispatch changes, and one that costs money to discover. And the join `+` quotes
 **only mid-beat** (§13.3); at the end of the beat nothing moves and it is free, because a cost hint on

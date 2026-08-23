@@ -945,6 +945,74 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
+  it('validates an unbound existing predecessor against live topology but preserves materialized history', () => {
+    const project = makeProject();
+    project.beats.beat_1!.shotOrder.push('shot_2');
+    project.shots.shot_2 = makeShot('shot_2');
+    const take = addSucceededVideoTake(project, 'shot_1', 'take_existing');
+    project.shots.shot_1!.trimOutSeconds = 2;
+    const plan = {
+      kind: 'after_take_selection' as const,
+      template: {
+        prompt: 'existing predecessor video prompt',
+        aspectRatio: '16:9' as const,
+        resolution: '1080p' as const,
+        durationSeconds: 8,
+        referenceInput: null,
+      },
+      dependency: {
+        kind: 'existing_predecessor' as const,
+        predecessorShotId: 'shot_1',
+        takeAssetId: take.id,
+        endpointSeconds: 8,
+      },
+    } as unknown as StudioGenerationRequestPlan;
+    const item = makeItem(project.revision, 'shot_2', 'video_take', plan);
+    const authorization = makeAuthorization('auth_existing_predecessor', project.revision, [item]);
+    const dependent = makeJob('job_existing_predecessor', authorization, item);
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: take.id,
+      endpointSeconds: 8,
+    });
+    project.frameExtractions[extractionId] = {
+      id: extractionId,
+      shotId: 'shot_1',
+      takeAssetId: take.id,
+      endpointSeconds: 8,
+      frameAssetId: null,
+      status: 'pending',
+      errorCode: null,
+    };
+    addAuthorizationWithJobs(project, authorization, [dependent]);
+
+    expect(validateStudioProjectV2(project)).toBe(true);
+    project.shots.shot_1!.trimOutSeconds = 1;
+    expect(validateStudioProjectV2(project)).toBe(false);
+    project.shots.shot_1!.trimOutSeconds = 2;
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    expect(validateStudioProjectV2(project)).toBe(false);
+    project.shots.shot_2!.chainBreak = 'none';
+
+    const frameAssetId = addReadyFrame(project, take.id, 8);
+    dependent.status = 'queued_local';
+    dependent.requestSnapshot = {
+      ...plan.template,
+      conditioningInput: {
+        kind: 'predecessor_frame',
+        predecessorShotId: 'shot_1',
+        takeAssetId: take.id,
+        frameAssetId,
+        endpointSeconds: 8,
+      },
+    };
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    project.shots.shot_1!.trimOutSeconds = 1;
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
   it('rejects two nonterminal authorization items for one Shot/purpose and releases terminal history', () => {
     const project = makeProject();
     const firstItem = makeItem(1, 'shot_1', 'seed_still', seedPlan());

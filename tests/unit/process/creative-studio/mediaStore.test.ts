@@ -3199,6 +3199,196 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await expect(fs.readFile(framePath)).resolves.toEqual(png);
   });
 
+  it('replaces corrupt ready-frame bytes without changing the asset or extraction identity', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const conditioningFrameExtractor = vi.fn(async (input: { destinationPath: string }) => {
+      await fs.writeFile(input.destinationPath, png);
+      return { source: 'local_decode' as const };
+    });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'frame_asset_1', 'must_not_allocate'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_1',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+    await media.extractConditioningFrameV2({ projectId: project.id, extractionId });
+    const framePath = path.join(rootDir, project.id, 'conditioningFrames', 'frame_asset_1.png');
+    await fs.writeFile(framePath, Buffer.concat([png, Buffer.from([0x01])]));
+    await expect(media.verifyConditioningFrameV2({ projectId: project.id, extractionId })).resolves.toBeNull();
+
+    await expect(media.extractConditioningFrameV2({ projectId: project.id, extractionId })).resolves.toMatchObject({
+      id: extractionId,
+      status: 'ready',
+      frameAssetId: 'frame_asset_1',
+    });
+
+    expect(conditioningFrameExtractor).toHaveBeenCalledTimes(2);
+    await expect(fs.readFile(framePath)).resolves.toEqual(png);
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        frameExtractions: { [extractionId]: { id: extractionId, frameAssetId: 'frame_asset_1', status: 'ready' } },
+        assets: { frame_asset_1: { id: 'frame_asset_1' } },
+      },
+    });
+    await expect(media.verifyConditioningFrameV2({ projectId: project.id, extractionId })).resolves.toMatchObject({
+      extractionId,
+      frameAssetId: 'frame_asset_1',
+    });
+  });
+
+  it('refuses a ready-frame symlink without decoding or touching its target', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const conditioningFrameExtractor = vi.fn(async (input: { destinationPath: string }) => {
+      await fs.writeFile(input.destinationPath, png);
+      return { source: 'local_decode' as const };
+    });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'frame_asset_1', 'must_not_allocate'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_1',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+    await media.extractConditioningFrameV2({ projectId: project.id, extractionId });
+    const framePath = path.join(rootDir, project.id, 'conditioningFrames', 'frame_asset_1.png');
+    const outsidePath = path.join(rootDir, 'outside.png');
+    const outsideBytes = Buffer.concat([png, Buffer.from([0x02])]);
+    await fs.writeFile(outsidePath, outsideBytes);
+    await fs.rm(framePath);
+    await fs.symlink(outsidePath, framePath);
+    const before = await store.getProjectV2(project.id);
+
+    await expect(media.extractConditioningFrameV2({ projectId: project.id, extractionId })).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+
+    expect(conditioningFrameExtractor).toHaveBeenCalledTimes(1);
+    expect((await fs.lstat(framePath)).isSymbolicLink()).toBe(true);
+    await expect(fs.readFile(outsidePath)).resolves.toEqual(outsideBytes);
+    await expect(store.getProjectV2(project.id)).resolves.toEqual(before);
+  });
+
+  it('preserves a replacement that wins the ready-frame cleanup ownership race', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const setupMedia = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'frame_asset_1'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor: async (input) => {
+        await fs.writeFile(input.destinationPath, png);
+        return { source: 'local_decode' };
+      },
+    });
+    await setupMedia.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      takeAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        takeAssetId: 'take_1',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+      };
+      return current;
+    });
+    await setupMedia.extractConditioningFrameV2({ projectId: project.id, extractionId });
+    const framePath = path.join(rootDir, project.id, 'conditioningFrames', 'frame_asset_1.png');
+    await fs.writeFile(framePath, Buffer.concat([png, Buffer.from([0x01])]));
+    const winningBytes = Buffer.concat([png, Buffer.from([0x02])]);
+    let replaced = false;
+    const repairMedia = createStudioMediaStore({
+      store,
+      createId: () => 'must_not_allocate',
+      conditioningFrameExtractor: async (input) => {
+        await fs.writeFile(input.destinationPath, png);
+        return { source: 'local_decode' };
+      },
+      beforeCleanupOwnership: async (filePath) => {
+        if (path.basename(filePath) !== 'frame_asset_1.png' || replaced) return;
+        replaced = true;
+        await fs.rm(filePath);
+        await fs.writeFile(filePath, winningBytes);
+      },
+    });
+    const before = await store.getProjectV2(project.id);
+
+    await expect(repairMedia.extractConditioningFrameV2({ projectId: project.id, extractionId })).rejects.toMatchObject(
+      {
+        code: 'storage_error',
+      }
+    );
+
+    expect(replaced).toBe(true);
+    await expect(fs.readFile(framePath)).resolves.toEqual(winningBytes);
+    await expect(store.getProjectV2(project.id)).resolves.toEqual(before);
+  });
+
   it('removes a refused ready-frame repair even when the stale asset id remains recorded', async () => {
     const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
     const extract = async (input: { destinationPath: string }): Promise<{ source: 'local_decode' }> => {
