@@ -146,8 +146,21 @@ ids: it carries no role and no subject, so it never produced a `cast` or `look` 
 from importing a file. And a `video_take` request may not carry a Brief reference at all, so a
 subject reaches a chain through its head Shot's **seed still**, not through each Shot.
 
-_Done when:_ two shots in one Beat visibly share a subject. **Not met** — importing needs a native
-file dialog that cannot be driven headlessly, so the generated half is still unproven.
+_Done when:_ two shots in one Beat visibly share a subject. **Met 2026-08-23.** A three-Shot film of
+a red vintage bicycle in the rain rendered its first two Shots through the chain, and the owner
+confirmed the subject holds: _"still the same bicycle"_. The subject travels by conditioning — Shot 1
+from its seed still, Shot 2 from Shot 1's last frame — which is the mechanism cast references feed.
+
+**The reference round trip is proven separately and completely:** imported through the new panel,
+stored as `briefReferenceRole: 'cast'`, read by the Director (which said unprompted that it would use
+it to keep the subject consistent), and offered in the Beat panel's per-Shot picker — the picker that
+had never had an option before BUG-107.
+
+**One caveat that outlives this slice.** The subject here is an object. `bytedance/seedance-2.0`
+refuses any first frame it believes depicts a real person (BUG-112), so cast references cannot yet
+hold a _human_ subject on the only first-frame-capable model bound today. That is a model-policy
+question, not a Studio one, and it needs answering before cast consistency is promised to pilot
+users.
 
 ## 4. Explicitly out, and why
 
