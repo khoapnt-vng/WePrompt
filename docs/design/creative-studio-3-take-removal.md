@@ -144,34 +144,43 @@ as a cleanup pass afterward.
 
 Filed the same day and belonging here, because it is the failure this change does **not** fix.
 
-The Open Sea Beat's seed still came back from the image provider as a **2×2 variation grid** — one
-1408×768 file containing four different compositions. Studio accepted it as a single still and handed
-it to the video model as a first frame. The model animated all four panels, and the corruption
-propagated down the whole chain:
+Two of the film's eight seed stills came back from the image provider as **2×2 grids** — one
+1408×768 file holding four separate pictures. Studio accepted each as a single still and handed it to
+the video model as a first frame, which animated all four panels. The two are not even the same kind
+of artefact: Open Sea's is four variations of one scene between bright dividers, Storm Drain's is
+four _different_ journey locations between dark ones.
+
+In Open Sea it propagated down the whole chain:
 
 ```
 seed still (grid) → sea_01 (grid) → continuity frame (grid) → sea_02 (grid) → … → sea_03 (grid)
 ```
 
-Three video generations wasted, the film's entire final Beat unusable, and **every gate, status and
-test passed**. Nothing in the system asks whether a picture is a picture.
+Storm Drain's did not propagate past its head Shot. **Four of the film's thirty Shots are ruined**,
+three of them the whole closing Beat, and **every gate, status and test passed**. Nothing in the
+system asks whether a picture is a picture.
 
 Takes would not have helped — the _first_ still was the bad one, so there was nothing better to
 select. What is missing is a check before a still becomes three paid videos.
 
-**The guard:** before a still is accepted as a conditioning frame, measure the brightness of the
-centre column and centre row against their neighbours. Across the eight stills in the paper-boat
-film the separation is unambiguous:
+**The guard, and a warning about how to build it.** On rejection the seed-still job should fail with a
+new `StudioJobErrorV2` code and **no video dispatched** — that part is settled, and it is already the
+chain's rule: _a Beat whose still fails never dispatches a video generation; the cheap failure is the
+right one._
 
-|                        | centre-column delta | centre-row delta |
-| ---------------------- | ------------------- | ---------------- |
-| the grid (Open Sea)    | +191                | +208             |
-| all seven clean stills | ≤ +9                | ≤ +9             |
+What is **not** settled is the detector, and the first attempt at one is instructive. Measuring
+centre-line brightness against its neighbours separates Open Sea's grid from clean stills by two
+orders of magnitude (+191/+208 against ≤ +9) and looks decisive. It is not: it scores Storm Drain's
+grid at −16/−53, because that divider is dark rather than bright, so a threshold tuned on the first
+example misses the second entirely. Cross-seam correlation has the mirror flaw — it catches Storm
+Drain, whose panels are different scenes, and misses Open Sea, whose panels are near-identical.
+Divider uniformity does best of the three, but Storm Drain still lands between the populations
+(0.49/0.54) rather than outside them.
 
-A threshold of **40** sits an order of magnitude clear of both populations. On rejection the
-seed-still job fails with a new `StudioJobErrorV2` code and **no video is dispatched** — which is
-already the chain's rule: _a Beat whose still fails never dispatches a video generation; the cheap
-failure is the right one._
+**Do not ship a hand-tuned pixel threshold derived from this sample.** Two positives is not a corpus.
+Prefer constraining the request and validating the response with the provider; if a pixel check is
+used at all, calibrate it against a real body of generations and treat it as advisory — quarantining
+the still for review rather than trusted to decide alone.
 
 ## Non-goals
 
