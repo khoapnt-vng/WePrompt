@@ -467,6 +467,24 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **It degrades free actions too.** During the finishing pass on the paper-boat film, `Select Take` blinked in and out of existence: roughly half of about twenty scripted passes found no affordance at all while Shots were still uncovered, because each selection bumps the revision and drops the panel back to `status_pending`.
   - **The guard is right; the cadence is wrong.** An unready projection genuinely cannot be reasoned about, and failing closed is correct. The fix is that the project and its status should be **one read**, so there is nothing left to disagree about.
   - **Evidence.** Same Beat, mid-render with twelve generations in flight: all four Shots `STATUS UNAVAILABLE`. Settled at revision 504 with no code change: all four read `Rendered · 1 Take`.
+- [ ] **[BUG-118][P1][Creative Studio] Every Shot boundary stalls for about a second, because the first touch of a clip costs a second and nothing is prefetched** — measured 2026-08-23
+  - Playing a Beat, or the film in the Cut, the picture freezes at each Shot boundary. Reported as _"the move is so choppy when switching between Shots"_.
+  - **Measured in the running app**, loading real clips through `weprompt-studio://`:
+
+    |                           | first load | repeat   |
+    | ------------------------- | ---------- | -------- |
+    | video A (2.6 MB)          | **991 ms** | **3 ms** |
+    | video A again             | —          | 16 ms    |
+    | video B (2.6 MB)          | **982 ms** | —        |
+    | seed still (880 kB image) | 0 ms       | 0 ms     |
+
+  - **It is not protocol overhead and not transfer size.** An 880 kB image through the same handler resolves in 0 ms. The cost is per-video decoder setup, paid once per clip and fully cached afterward — `canplay` fires **1 ms** after `loadedmetadata`, so nothing is waiting on buffering either. `preload='auto'` measures the same as `preload='metadata'`; the setting is irrelevant to this cost.
+  - **The arithmetic.** One second of dead air on a four-second Shot, at all 30 seams — roughly **30 seconds of stall in a 122-second film**. This is not a perception problem.
+  - **Both players are affected identically.** `BeatPlayer.tsx:827` and `CutPlayer.tsx:932` carry the same `key={…${state.segmentIndex}…}` and the same `preload='metadata'`, and neither file contains any prefetch, double-buffer, or next-segment warm-up. One fix, applied twice.
+  - The `key` containing `segmentIndex` forces a full remount at each seam, but that is **not** the culprit — changing `src` on a retained element pays the same first-touch cost. Removing the remount alone would not help.
+  - **Fix: prefetch segment N+1 while N plays.** The cost is one second, a Shot lasts four, and a warm clip loads in 3 ms. The repeat measurement was taken on a **freshly created element**, which is exactly the prefetch case — so warming a hidden element for the next segment provably moves the seam onto the 3 ms path.
+  - **Falsifiable check, ten seconds:** play the same Beat twice without reloading. The second pass should be markedly smoother, every clip now being warm. If it is not, this diagnosis is wrong.
+  - Worth noting this makes the "no stitched film file" decision more defensible than it appeared. The seam cost is a warm-up problem with a cheap fix, not an inherent cost of clip-by-clip playback.
 
 ## Correctness and honesty of failures
 
