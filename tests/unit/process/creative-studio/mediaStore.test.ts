@@ -38,7 +38,14 @@ import {
   openVerifiedReadStream,
 } from '@process/services/creative-studio/mediaStore';
 
-const { createHashSpy } = vi.hoisted(() => ({ createHashSpy: vi.fn() }));
+const { createHashSpy, spawnCalls } = vi.hoisted(() => ({
+  createHashSpy: vi.fn(),
+  spawnCalls: [] as Array<{
+    command: string;
+    args: readonly string[];
+    options: Parameters<typeof import('node:child_process').spawn>[2];
+  }>,
+}));
 
 vi.mock('node:crypto', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:crypto')>();
@@ -47,6 +54,18 @@ vi.mock('node:crypto', async (importOriginal) => {
     createHash: (...args: Parameters<typeof actual.createHash>) => {
       createHashSpy(...args);
       return actual.createHash(...args);
+    },
+  };
+});
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawn: (...args: Parameters<typeof actual.spawn>) => {
+      const [command, commandArgs, options] = args;
+      spawnCalls.push({ command, args: [...commandArgs], options });
+      return actual.spawn(...args);
     },
   };
 });
@@ -422,6 +441,7 @@ const createAmbiguousProjectCommitFs = (
 };
 
 afterEach(async () => {
+  spawnCalls.length = 0;
   await Promise.all(created.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
@@ -925,7 +945,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     expect(restarted.status === 'supported' ? restarted.project.assets.take_1!.durationSeconds : null).toBe(10);
   });
 
-  it('uses the production ffprobe path for valid and undecodable video outputs', async () => {
+  it('hands a verified video to production ffprobe through a seekable inherited descriptor', async () => {
     const valid = await makeStoreV2({ purpose: 'video_take' });
     const validMedia = createStudioMediaStore({ store: valid.store, createId: () => 'decoded_video' });
     await expect(
@@ -939,6 +959,26 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       })
     ).resolves.toMatchObject({ id: 'decoded_video', durationSeconds: 10 });
 
+    expect(spawnCalls).toEqual([
+      {
+        command: expect.any(String),
+        args: [
+          '-v',
+          'error',
+          '-show_entries',
+          'format=duration',
+          '-of',
+          'default=noprint_wrappers=1:nokey=1',
+          '-fd',
+          '3',
+          'fd:',
+        ],
+        options: { stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)], windowsHide: true },
+      },
+    ]);
+  });
+
+  it('uses the production ffprobe path to reject and clean an undecodable video output', async () => {
     const invalid = await makeStoreV2({ purpose: 'video_take' });
     const invalidMedia = createStudioMediaStore({ store: invalid.store, createId: () => 'undecodable_video' });
     await expect(
@@ -1476,11 +1516,10 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     }
   );
 
-  it('fully decodes the production WAV probe and rejects a corrupt single audio stream', async () => {
+  it('hands verified WAV metadata to production ffprobe through a seekable inherited descriptor', async () => {
     const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
     const validPath = path.join(rootDir, 'decoded-score.wav');
-    const corruptPath = path.join(rootDir, 'corrupt-adpcm.wav');
-    await Promise.all([fs.writeFile(validPath, wav), fs.writeFile(corruptPath, createCorruptAdpcmWav())]);
+    await fs.writeFile(validPath, wav);
     const media = createStudioMediaStore({
       store,
       createId: () => 'decoded_bed',
@@ -1499,6 +1538,84 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       id: 'decoded_bed',
       mimeType: 'audio/wav',
       durationSeconds: 1,
+    });
+
+    expect(spawnCalls[0]).toEqual({
+      command: process.env.FFPROBE_PATH ?? 'ffprobe',
+      args: [
+        '-v',
+        'error',
+        '-show_entries',
+        'stream=codec_type,duration:format=duration',
+        '-of',
+        'json',
+        '-fd',
+        '3',
+        'fd:',
+      ],
+      options: { stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)], windowsHide: true },
+    });
+  });
+
+  it('hands a verified WAV decode to production ffmpeg through a seekable inherited descriptor', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const validPath = path.join(rootDir, 'decoded-score.wav');
+    await fs.writeFile(validPath, wav);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'decoded_bed',
+      createMutationId: () => 'decoded_bed_mutation',
+      now: () => '2026-08-17T12:05:00.000Z',
+      ffprobeBinary: process.env.FFPROBE_PATH ?? 'ffprobe',
+      ffmpegBinary: process.env.FFMPEG_PATH ?? 'ffmpeg',
+    });
+
+    await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath: validPath,
+      expectedRevision: project.revision,
+    });
+
+    expect(spawnCalls[1]).toEqual({
+      command: process.env.FFMPEG_PATH ?? 'ffmpeg',
+      args: [
+        '-nostdin',
+        '-v',
+        'error',
+        '-xerror',
+        '-fd',
+        '3',
+        '-i',
+        'fd:',
+        '-map',
+        '0:a:0',
+        '-progress',
+        'pipe:1',
+        '-nostats',
+        '-f',
+        'null',
+        '-',
+      ],
+      options: { stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)], windowsHide: true },
+    });
+  });
+
+  it('rejects a corrupt single audio stream through configured and environment production binaries', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
+    const validPath = path.join(rootDir, 'decoded-score.wav');
+    const corruptPath = path.join(rootDir, 'corrupt-adpcm.wav');
+    await Promise.all([fs.writeFile(validPath, wav), fs.writeFile(corruptPath, createCorruptAdpcmWav())]);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'decoded_bed',
+      createMutationId: () => 'decoded_bed_mutation',
+      now: () => '2026-08-17T12:05:00.000Z',
+      probeBedAudioV2: async () => ({ durationSeconds: 1, audioStreamCount: 1, otherStreamCount: 0 }),
+    });
+    const imported = await media.importBedAudioFromPathV2({
+      projectId: project.id,
+      sourcePath: validPath,
+      expectedRevision: project.revision,
     });
 
     const defaultMedia = createStudioMediaStore({ store, createId: () => 'corrupt_bed' });

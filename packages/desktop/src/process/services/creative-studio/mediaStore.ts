@@ -1049,7 +1049,17 @@ const runFfprobeDurationV2 = async (binary: string, handle: Awaited<ReturnType<t
   new Promise<number>((resolve, reject) => {
     const child = spawn(
       binary,
-      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', 'pipe:3'],
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'format=duration',
+        '-of',
+        'default=noprint_wrappers=1:nokey=1',
+        '-fd',
+        '3',
+        'fd:',
+      ],
       { stdio: ['ignore', 'pipe', 'ignore', handle.fd], windowsHide: true }
     );
     let stdout = '';
@@ -1102,7 +1112,7 @@ const runFfprobeBedAudioV2 = async (
   new Promise<StudioBedAudioProbeV2>((resolve, reject) => {
     const child = spawn(
       binary,
-      ['-v', 'error', '-show_entries', 'stream=codec_type,duration:format=duration', '-of', 'json', 'pipe:3'],
+      ['-v', 'error', '-show_entries', 'stream=codec_type,duration:format=duration', '-of', 'json', '-fd', '3', 'fd:'],
       { stdio: ['ignore', 'pipe', 'ignore', handle.fd], windowsHide: true }
     );
     let stdout = '';
@@ -1186,8 +1196,10 @@ const runFfmpegBedAudioDecodeV2 = async (
         '-v',
         'error',
         '-xerror',
+        '-fd',
+        '3',
         '-i',
-        'pipe:3',
+        'fd:',
         '-map',
         '0:a:0',
         '-progress',
