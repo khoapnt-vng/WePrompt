@@ -667,6 +667,7 @@ const expectedLeaves = [
   'gate.purpose.seed_still',
   'gate.purpose.video_take',
   'gate.route',
+  'gate.routeShared',
   'gate.duration',
   'gate.durationNotApplicable',
   'gate.rowCost',

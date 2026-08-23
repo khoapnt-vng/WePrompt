@@ -1393,7 +1393,9 @@ describe('SpendGateModal', () => {
     expect(within(modal).getByText(/safe_video/)).toBeVisible();
     const requiredRows = within(modal).getAllByRole('listitem');
     expect(requiredRows[0]).toHaveAttribute('data-quote-group', 'required');
-    expect(requiredRows[0]).toHaveTextContent('conversation.creativeStudio.workspace.gate.group.required');
+    // The panel already states that all listed work is required, so the row does not repeat it;
+    // the group survives as the data attribute asserted above.
+    expect(requiredRows[0]).toHaveTextContent('shot_2');
     const confirm = within(modal).getByRole('button', {
       name: 'Confirm hard cut + 2 generations · $5.25',
     });
