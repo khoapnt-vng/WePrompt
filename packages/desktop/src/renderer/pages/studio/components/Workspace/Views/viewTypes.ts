@@ -7,7 +7,6 @@
 import type {
   StudioBriefRule,
   StudioBriefRuleDraft,
-  StudioCascadeProgressV2,
   StudioEditableProjectSettingsChanges,
   StudioRendererAuthoringOperationV2,
   StudioRendererExportCatalogV2,
@@ -35,7 +34,6 @@ export type WorkspaceMutationCallbacks = {
   undo: (entryId: string) => Promise<boolean>;
   retryConditioning: (dependentShotId: string) => Promise<boolean>;
   cancelWaiting: (dependentShotId: string) => Promise<boolean>;
-  chooseCascadeAsset: (row: StudioCascadeProgressV2, assetId: string) => Promise<boolean>;
 };
 
 export type WorkspaceControlsProps = {

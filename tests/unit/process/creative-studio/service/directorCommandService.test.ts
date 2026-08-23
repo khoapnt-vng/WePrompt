@@ -52,7 +52,7 @@ const makeCommandV2 = (
   operations: StudioDirectorOperationV2[],
   overrides: Partial<StudioDirectorCommandRecordV2> = {}
 ): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   commandId: 'command_v2',
   projectId: project.id,
   expectedRevision: project.revision,

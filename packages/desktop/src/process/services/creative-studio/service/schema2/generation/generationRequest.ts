@@ -26,17 +26,11 @@ const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
 const ASPECT_RATIOS: ReadonlySet<StudioAspectRatio> = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
 const RESOLUTIONS: ReadonlySet<StudioResolution> = new Set(['720p', '1080p']);
 
-export type StudioGenerationMatchToPromptInput = {
-  look: string;
-  line: string;
-};
-
 export type StudioGenerationPromptInput = {
   brief: string;
   rules: readonly StudioBriefRule[];
   look: string;
   line: string;
-  matchTo: StudioGenerationMatchToPromptInput | null;
 };
 
 export type StudioGenerationRequestTemplateInput = StudioGenerationPromptInput & {
@@ -158,14 +152,11 @@ export const composeStudioGenerationPrompt = (input: StudioGenerationPromptInput
   const rules = renderStudioRulesBlock(input.rules).trim();
   const look = input.look.trim();
   const line = input.line.trim();
-  const matchToLook = input.matchTo?.look.trim() ?? '';
-  const matchToLine = input.matchTo?.line.trim() ?? '';
   const sections = [
     ...(brief.length === 0 ? [] : [`BRIEF\n${brief}`]),
     ...(rules.length === 0 ? [] : [rules]),
     ...(look.length === 0 ? [] : [`LOOK\n${look}`]),
     ...(line.length === 0 ? [] : [`SHOT\n${line}`]),
-    ...(input.matchTo === null ? [] : [`MATCH TO\nLOOK\n${matchToLook}\nSHOT\n${matchToLine}`]),
   ];
   const prompt = sections.join('\n\n');
   if (prompt.length === 0 || prompt.length > STUDIO_MAX_GENERATION_PROMPT_LENGTH) {

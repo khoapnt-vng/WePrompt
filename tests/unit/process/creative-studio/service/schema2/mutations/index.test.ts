@@ -10,7 +10,6 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   STUDIO_MAX_BEATS,
-  STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_LINE_HISTORY_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_SHOTS_PER_BEAT,
@@ -80,7 +79,8 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
-  selectedTakeId: null,
+  videoAssetId: null,
+  supersededVideoAssetIds: [],
   assetIds: [],
   jobIds: [],
   ...overrides,
@@ -99,7 +99,7 @@ const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<Studi
 });
 
 const makeProject = (): StudioProjectV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   revision: 7,
   id: 'project_1',
   name: 'Project One',
@@ -120,7 +120,6 @@ const makeProject = (): StudioProjectV2 => ({
   },
   bin: [],
   bedAssetId: null,
-  matchToShotId: null,
   spendPolicy: null,
   spendAuthorizations: [],
   frameExtractions: {},
@@ -305,13 +304,7 @@ const makeAuthorization = (
     expiresAt: '2026-08-17T00:05:00.000Z',
     confirmedAt: laterTimestamp,
     providerBindings: items.map((item) => ({ itemId: item.id, provider })),
-    idempotencyKeys: items.flatMap((item) =>
-      Array.from({ length: item.generationCount }, (_, generationIndex) => ({
-        itemId: item.id,
-        generationIndex,
-        key: `idem_${id}_${item.id}_${generationIndex}`,
-      }))
-    ),
+    idempotencyKeys: items.map((item) => ({ itemId: item.id, key: `idem_${id}_${item.id}` })),
   };
 };
 
@@ -326,9 +319,7 @@ const makeJob = (
   shotId: item.shotId,
   status: item.requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
   provider,
-  idempotencyKey: authorization.idempotencyKeys.find(
-    (entry) => entry.itemId === item.id && entry.generationIndex === 0
-  )!.key,
+  idempotencyKey: authorization.idempotencyKeys.find((entry) => entry.itemId === item.id)!.key,
   providerJobId: null,
   cancellationPolicy: 'queued_and_running',
   outputAssetIds: [],
@@ -342,7 +333,6 @@ const makeJob = (
   purpose: 'video_take',
   authorizationId: authorization.id,
   authorizationItemId: item.id,
-  generationIndex: 0,
   requestPlan: item.requestPlan,
   requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
   spendReceipt: null,
@@ -375,7 +365,6 @@ const addSucceededSeedJob = (
       rateUnit: 'generation',
       rateMinorUnits: item.rateMinorUnits,
       durationSeconds: null,
-      generationIndex: 0,
       generationCount: 1,
       totalMinorUnits: item.rateMinorUnits,
     },
@@ -417,7 +406,7 @@ const addSucceededVideoTake = (
   project: StudioProjectV2,
   shotId: string,
   assetId: string,
-  selected: boolean
+  _selected: boolean
 ): StudioAssetV2 => {
   const shot = project.shots[shotId]!;
   const seed = addImageAsset(project, shotId, `seed_${assetId}`);
@@ -445,7 +434,6 @@ const addSucceededVideoTake = (
       rateUnit: item.rateUnit,
       rateMinorUnits: item.rateMinorUnits,
       durationSeconds: 5,
-      generationIndex: 0,
       generationCount: 1,
       totalMinorUnits: 10,
     },
@@ -453,7 +441,8 @@ const addSucceededVideoTake = (
   project.spendAuthorizations.push(authorization);
   project.jobs[job.id] = job;
   shot.jobIds.push(job.id);
-  if (selected) shot.selectedTakeId = asset.id;
+  if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+  shot.videoAssetId = asset.id;
   return asset;
 };
 
@@ -484,7 +473,6 @@ const addWaitingDependentOnOnlyTake = (project: StudioProjectV2): StudioAssetV2 
       rateUnit: upstream.rateUnit,
       rateMinorUnits: upstream.rateMinorUnits,
       durationSeconds: 5,
-      generationIndex: 0,
       generationCount: 1,
       totalMinorUnits: 10,
     },
@@ -494,6 +482,7 @@ const addWaitingDependentOnOnlyTake = (project: StudioProjectV2): StudioAssetV2 
   project.jobs[upstreamJob.id] = upstreamJob;
   project.jobs[dependentJob.id] = dependentJob;
   upstreamShot.jobIds.push(upstreamJob.id);
+  upstreamShot.videoAssetId = take.id;
   project.shots.shot_2!.jobIds.push(dependentJob.id);
   return take;
 };
@@ -504,10 +493,10 @@ const addFrameExtraction = (
   status: 'pending' | 'ready'
 ): { extractionId: string; frameAssetId: string | null } => {
   const shot = project.shots[shotId]!;
-  const takeId = shot.selectedTakeId!;
+  const takeId = shot.videoAssetId!;
   const take = project.assets[takeId]!;
   const endpointSeconds = take.durationSeconds!;
-  const extractionId = createStudioFrameExtractionId({ shotId, takeAssetId: takeId, endpointSeconds });
+  const extractionId = createStudioFrameExtractionId({ shotId, videoAssetId: takeId, endpointSeconds });
   const frameAssetId = status === 'ready' ? `frame_${shotId}` : null;
   if (frameAssetId !== null) {
     project.assets[frameAssetId] = makeImageAsset(frameAssetId, shotId, 'conditioningFrames');
@@ -516,7 +505,7 @@ const addFrameExtraction = (
   project.frameExtractions[extractionId] = {
     id: extractionId,
     shotId,
-    takeAssetId: takeId,
+    videoAssetId: takeId,
     endpointSeconds,
     frameAssetId,
     status,
@@ -527,7 +516,6 @@ const addFrameExtraction = (
 
 const bindWaitingDependent = (project: StudioProjectV2): StudioJobV2 => {
   const take = addWaitingDependentOnOnlyTake(project);
-  project.shots.shot_1!.selectedTakeId = take.id;
   const { frameAssetId } = addFrameExtraction(project, 'shot_1', 'ready');
   const dependent = project.jobs.job_dependent!;
   if (dependent.requestPlan.kind !== 'after_take_selection' || frameAssetId === null) {
@@ -552,7 +540,7 @@ const completeBoundDependent = (project: StudioProjectV2): StudioJobV2 => {
   const take = makeVideoAsset('dependent_take', dependent.shotId);
   project.assets[take.id] = take;
   project.shots[dependent.shotId]!.assetIds.push(take.id);
-  project.shots[dependent.shotId]!.selectedTakeId = take.id;
+  project.shots[dependent.shotId]!.videoAssetId = take.id;
   dependent.status = 'succeeded';
   dependent.providerJobId = 'remote_dependent';
   dependent.remoteStartedAt = timestamp;
@@ -568,7 +556,6 @@ const completeBoundDependent = (project: StudioProjectV2): StudioJobV2 => {
     rateUnit: 'second',
     rateMinorUnits: 2,
     durationSeconds: 5,
-    generationIndex: 0,
     generationCount: 1,
     totalMinorUnits: 10,
   };
@@ -576,7 +563,7 @@ const completeBoundDependent = (project: StudioProjectV2): StudioJobV2 => {
 };
 
 const mutationBatch = (project: StudioProjectV2, operations: StudioMutationOperationV2[]): StudioMutationBatchV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   projectId: project.id,
   expectedRevision: project.revision,
   operations,
@@ -636,22 +623,28 @@ const FINAL_OPERATION_KINDS = [
   'redetach_line',
   'rederive_line',
   'restore_line',
-  'park_take',
-  'add_alternate_take',
-  'restore_take',
   'reorder_bin',
-  'select_take',
   'set_routes',
   'set_spend_policy',
-  'set_match_to',
   'set_bed',
   'undo_last',
 ] as const satisfies readonly StudioMutationOperationV2['kind'][];
 
 describe('applyStudioMutationBatchV2 final operation contract', () => {
-  it('keeps the exact exhaustive 32-operation catalog', () => {
-    expect(FINAL_OPERATION_KINDS).toHaveLength(32);
+  it('keeps the exact exhaustive 27-operation catalog', () => {
+    expect(FINAL_OPERATION_KINDS).toHaveLength(27);
     expect(new Set(FINAL_OPERATION_KINDS).size).toBe(FINAL_OPERATION_KINDS.length);
+  });
+
+  it.each(['park_take', 'add_alternate_take', 'restore_take', 'select_take'] as const)(
+    'refuses removed Take operation %s at the exact parser boundary',
+    (kind) => {
+      expect(validateStudioMutationOperationV2({ kind, shotId: 'shot_1', assetId: 'take_1' })).toBe(false);
+    }
+  );
+
+  it('refuses the removed Match To operation at the exact parser boundary', () => {
+    expect(validateStudioMutationOperationV2({ kind: 'set_match_to', shotId: null })).toBe(false);
   });
 
   it('applies ordered project, rule, Beat, and alternate-Beat edits without advancing persistence fields', () => {
@@ -759,7 +752,7 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
     expect(restored.project.bin).toEqual([]);
   });
 
-  it('applies seed, route, spend, Match To, and bed settings through exact final fields', () => {
+  it('applies seed, route, spend, and bed settings through exact final fields', () => {
     const project = makeProject();
     addImageAsset(project, 'shot_1', 'seed_1');
     project.assets.bed_1 = makeAudioAsset('bed_1');
@@ -767,7 +760,6 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
       { kind: 'set_seed_still', shotId: 'shot_1', assetId: 'seed_1' },
       { kind: 'set_routes', imageRouteId: 'image_route', videoRouteId: 'video_route' },
       { kind: 'set_spend_policy', policy: { currency: 'USD', maxPerBatchMinorUnits: 500 } },
-      { kind: 'set_match_to', shotId: 'shot_2' },
       { kind: 'set_bed', assetId: 'bed_1' },
     ]);
 
@@ -775,7 +767,6 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
       imageRouteId: 'image_route',
       videoRouteId: 'video_route',
       spendPolicy: { currency: 'USD', maxPerBatchMinorUnits: 500 },
-      matchToShotId: 'shot_2',
       bedAssetId: 'bed_1',
       shots: { shot_1: { seedStillId: 'seed_1' } },
     });
@@ -822,38 +813,14 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
     });
   });
 
-  it('parks, alternates, reorders, and restores takes without implicit selection', () => {
-    const project = makeProject();
-    addImageAsset(project, 'shot_1', 'take_1');
-    addImageAsset(project, 'shot_1', 'take_2');
-    const result = apply(project, [
-      { kind: 'park_take', shotId: 'shot_1', assetId: 'take_1' },
-      { kind: 'add_alternate_take', shotId: 'shot_1', assetId: 'take_2' },
-      {
-        kind: 'reorder_bin',
-        bin: [
-          { kind: 'take', assetId: 'take_2', reason: 'alternate' },
-          { kind: 'take', assetId: 'take_1', reason: 'lifted' },
-        ],
-      },
-      { kind: 'restore_take', shotId: 'shot_1', assetId: 'take_1' },
-    ]);
-
-    expect(result.project.bin).toEqual([{ kind: 'take', assetId: 'take_2', reason: 'alternate' }]);
-    expect(result.project.shots.shot_1!.selectedTakeId).toBeNull();
-  });
-
-  it('selects and trims a canonical generated video Take', () => {
+  it('trims the canonical current video picture without a selection mutation', () => {
     const project = makeProject();
     addSucceededVideoTake(project, 'shot_1', 'take_video', false);
     expect(validateStudioProjectV2(project)).toBe(true);
-    const result = apply(project, [
-      { kind: 'select_take', shotId: 'shot_1', assetId: 'take_video' },
-      { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: 1, trimOutSeconds: 2 },
-    ]);
+    const result = apply(project, [{ kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: 1, trimOutSeconds: 2 }]);
 
     expect(result.project.shots.shot_1).toMatchObject({
-      selectedTakeId: 'take_video',
+      videoAssetId: 'take_video',
       trimInSeconds: 1,
       trimOutSeconds: 2,
     });
@@ -864,11 +831,10 @@ describe('applyStudioMutationBatchV2 coverage and fixed shots', () => {
   const everyFixedReason = [
     'owned_asset',
     'owned_job',
-    'selected_take',
+    'video_asset',
     'seed_still',
     'conditioning_frame',
     'conditioning_input',
-    'match_to',
     'narration',
     'on_screen_text',
   ] as const;
@@ -1054,14 +1020,13 @@ describe('applyStudioMutationBatchV2 coverage and fixed shots', () => {
     expect(JSON.stringify(project)).toBe(before);
   });
 
-  it('derives all nine fixed reasons in canonical order and preserves the exact paid Shot through re-split', () => {
+  it('derives all eight fixed reasons in canonical order and preserves the exact paid Shot through re-split', () => {
     const project = makeProject();
     const fixed = project.shots.shot_1!;
     fixed.narration = 'Persistent narration';
     fixed.onScreenText = 'Persistent title';
     addSucceededVideoTake(project, fixed.id, 'fixed_take', true);
     addFrameExtraction(project, fixed.id, 'ready');
-    project.matchToShotId = fixed.id;
     expect(validateStudioProjectV2(project)).toBe(true);
     const retained = structuredClone({
       shot: fixed,
@@ -1175,11 +1140,11 @@ describe('applyStudioMutationBatchV2 coverage and fixed shots', () => {
           fixedShots: [
             {
               shotId: 'shot_2',
-              reasons: ['owned_asset', 'owned_job', 'selected_take', 'conditioning_frame', 'conditioning_input'],
+              reasons: ['owned_asset', 'owned_job', 'video_asset', 'conditioning_frame', 'conditioning_input'],
             },
             {
               shotId: 'shot_3',
-              reasons: ['owned_asset', 'owned_job', 'selected_take'],
+              reasons: ['owned_asset', 'owned_job', 'video_asset'],
             },
           ],
         },
@@ -1475,25 +1440,18 @@ describe('applyStudioMutationBatchV2 line history and unified undo', () => {
 });
 
 describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
-  it('rejects Shot and Take parking when their owner Beat is retained only in the Bin', () => {
+  it('rejects Shot parking when its owner Beat is retained only in the Bin', () => {
     const project = makeProject();
-    addImageAsset(project, 'shot_1', 'inactive_take');
     project.beatOrder = ['beat_2'];
     project.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'lifted' });
     expect(validateStudioProjectV2(project)).toBe(true);
     const before = JSON.stringify(project);
 
     expectReason(project, [{ kind: 'park_shot', shotId: 'shot_1' }], 'invalid_operation', 'mutation_binned_beat_shot');
-    expectReason(
-      project,
-      [{ kind: 'park_take', shotId: 'shot_1', assetId: 'inactive_take' }],
-      'invalid_operation',
-      'mutation_binned_beat_take'
-    );
     expect(JSON.stringify(project)).toBe(before);
   });
 
-  it('parks terminal paid Shot lineage without dropping any asset, job, authorization, or selection', () => {
+  it('parks terminal paid Shot lineage without dropping any asset, job, authorization, or current picture', () => {
     const project = makeProject();
     addSucceededVideoTake(project, 'shot_1', 'terminal_take', true);
     expect(validateStudioProjectV2(project)).toBe(true);
@@ -1602,10 +1560,6 @@ describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
       expectReason(project, [{ kind: 'park_beat', beatId: 'beat_1' }], 'dependency_blocked', `${label}_beat`);
     };
 
-    const matchTo = makeProject();
-    matchTo.matchToShotId = 'shot_1';
-    assertBlocked(matchTo, ['current_match_to'], 'mutation_blocker_match');
-
     const ownBound = makeProject();
     const seed = addImageAsset(ownBound, 'shot_1', 'own_bound_seed');
     ownBound.shots.shot_1!.seedStillId = seed.id;
@@ -1658,11 +1612,7 @@ describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
     ]);
   });
 
-  it('refuses Match To and in-flight blockers before changing a Shot or containing Beat', () => {
-    const matchProject = makeProject();
-    matchProject.matchToShotId = 'shot_1';
-    expectReason(matchProject, [{ kind: 'park_shot', shotId: 'shot_1' }], 'dependency_blocked', 'mutation_match_block');
-
+  it('refuses in-flight blockers before changing a Shot or containing Beat', () => {
     const inFlight = makeProject();
     const seed = addImageAsset(inFlight, 'shot_1', 'inflight_seed');
     inFlight.shots.shot_1!.seedStillId = seed.id;
@@ -1674,61 +1624,6 @@ describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
     inFlight.shots.shot_1!.jobIds.push(job.id);
     expect(validateStudioProjectV2(inFlight)).toBe(true);
     expectReason(inFlight, [{ kind: 'park_beat', beatId: 'beat_1' }], 'dependency_blocked', 'mutation_beat_inflight');
-  });
-
-  it('refuses selected and seed takes without clearing either pin', () => {
-    const selected = makeProject();
-    addSucceededVideoTake(selected, 'shot_1', 'selected_take', true);
-    expectReason(
-      selected,
-      [{ kind: 'park_take', shotId: 'shot_1', assetId: 'selected_take' }],
-      'dependency_blocked',
-      'mutation_selected_take'
-    );
-    expect(selected.shots.shot_1!.selectedTakeId).toBe('selected_take');
-
-    const seeded = makeProject();
-    addImageAsset(seeded, 'shot_1', 'seed_take');
-    seeded.shots.shot_1!.seedStillId = 'seed_take';
-    expectReason(
-      seeded,
-      [{ kind: 'park_take', shotId: 'shot_1', assetId: 'seed_take' }],
-      'dependency_blocked',
-      'mutation_seed_take'
-    );
-    expect(seeded.shots.shot_1!.seedStillId).toBe('seed_take');
-  });
-
-  it('refuses an unpinned Take that a nonterminal concrete request is consuming', () => {
-    const project = makeProject();
-    const take = addImageAsset(project, 'shot_1', 'conditioned_take');
-    const item = makeItem(project.revision - 1, 'shot_1', resolvedPlan({ kind: 'seed_still', assetId: take.id }));
-    const authorization = makeAuthorization('auth_conditioned_take', project.revision - 1, [item]);
-    const job = makeJob('job_conditioned_take', authorization, item);
-    project.spendAuthorizations.push(authorization);
-    project.jobs[job.id] = job;
-    project.shots.shot_1!.jobIds.push(job.id);
-    expect(validateStudioProjectV2(project)).toBe(true);
-
-    expectReason(
-      project,
-      [{ kind: 'park_take', shotId: 'shot_1', assetId: take.id }],
-      'dependency_blocked',
-      'mutation_conditioned_take'
-    );
-  });
-
-  it('refuses the last selectable primary while an authorized dependent waits for that item', () => {
-    const project = makeProject();
-    const take = addWaitingDependentOnOnlyTake(project);
-    expect(validateStudioProjectV2(project)).toBe(true);
-
-    expectReason(
-      project,
-      [{ kind: 'park_take', shotId: 'shot_1', assetId: take.id }],
-      'dependency_blocked',
-      'mutation_waiting_last_take'
-    );
   });
 });
 
@@ -1750,12 +1645,10 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
         bin: [
           { kind: 'beat', beatId: 'beat_1', reason: 'alternate' },
           { kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' },
-          { kind: 'take', assetId: 'take_1', reason: 'lifted' },
         ],
       },
       { kind: 'set_routes', imageRouteId: null, videoRouteId: null },
       { kind: 'set_spend_policy', policy: null },
-      { kind: 'set_match_to', shotId: null },
       { kind: 'set_bed', assetId: null },
       { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: 0, trimOutSeconds: null },
     ];
@@ -1920,7 +1813,7 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
       { kind: 'set_spend_policy', policy: {} },
       { kind: 'set_spend_policy', policy: { currency: 'US', maxPerBatchMinorUnits: 1 } },
       { kind: 'set_spend_policy', policy: { currency: 'USD', maxPerBatchMinorUnits: -1 } },
-      { kind: 'set_match_to', shotId: '../shot' },
+      { kind: 'set_match_to', shotId: null },
       { kind: 'set_bed', assetId: '../asset' },
       { kind: 'undo_last', entryId: '../entry' },
     ];
@@ -2058,7 +1951,6 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
       { operation: { kind: 'rederive_line', shotId: 'shot_1', line: '' }, reason: 'invalid_operation' },
       { operation: { kind: 'set_routes', imageRouteId: null, videoRouteId: null }, reason: 'invalid_operation' },
       { operation: { kind: 'set_spend_policy', policy: null }, reason: 'invalid_operation' },
-      { operation: { kind: 'set_match_to', shotId: null }, reason: 'invalid_operation' },
       { operation: { kind: 'set_bed', assetId: null }, reason: 'invalid_operation' },
     ];
 
@@ -2221,23 +2113,6 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
     );
   });
 
-  it('refuses the 97th Take alias at the exact Bin capacity without mutation', () => {
-    const project = makeProject();
-    for (let index = 0; index <= STUDIO_MAX_BIN_TAKE_ITEMS; index += 1) {
-      addImageAsset(project, 'shot_1', `take_${index}`);
-      if (index < STUDIO_MAX_BIN_TAKE_ITEMS) {
-        project.bin.push({ kind: 'take', assetId: `take_${index}`, reason: 'alternate' });
-      }
-    }
-    expect(validateStudioProjectV2(project)).toBe(true);
-    expectReason(
-      project,
-      [{ kind: 'park_take', shotId: 'shot_1', assetId: `take_${STUDIO_MAX_BIN_TAKE_ITEMS}` }],
-      'take_bin_capacity_reached',
-      'mutation_take_capacity'
-    );
-  });
-
   it('rolls back an earlier valid operation when a later duration fails', () => {
     const project = makeProject();
     expectReason(
@@ -2273,7 +2148,7 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
     expect(() =>
       applyStudioMutationBatchV2(
         project,
-        { schemaVersion: 2, projectId: project.id, expectedRevision: project.revision, operations: sparseOperations },
+        { schemaVersion: 3, projectId: project.id, expectedRevision: project.revision, operations: sparseOperations },
         { mutationId: 'mutation_sparse', capturedAt: laterTimestamp }
       )
     ).toThrowError(StudioMutationErrorV2);

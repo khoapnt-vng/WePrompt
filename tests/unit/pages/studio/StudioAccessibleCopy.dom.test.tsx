@@ -56,11 +56,10 @@ const coverageProposal: StudioProposalV2 = {
             reasons: [
               'owned_asset',
               'owned_job',
-              'selected_take',
+              'video_asset',
               'seed_still',
               'conditioning_frame',
               'conditioning_input',
-              'match_to',
               'narration',
               'on_screen_text',
             ],
@@ -162,11 +161,10 @@ describe('Creative Studio workspace accessible copy', () => {
     expect(review).toHaveTextContent('Fixed Shot 1 · shot-fixed');
     expect(review).toHaveTextContent('It owns media.');
     expect(review).toHaveTextContent('It owns generation work.');
-    expect(review).toHaveTextContent('It has a selected Take.');
+    expect(review).toHaveTextContent('It has a current picture.');
     expect(review).toHaveTextContent('It has a pinned seed still.');
     expect(review).toHaveTextContent('It owns a continuity frame.');
     expect(review).toHaveTextContent('A generation request uses it as conditioning input.');
-    expect(review).toHaveTextContent("It is the project's Match To reference.");
     expect(review).toHaveTextContent('It has authored narration.');
     expect(review).toHaveTextContent('It has authored on-screen text.');
     const rederivedShotId = screen.getByText('shot-detached', { selector: 'bdi' });

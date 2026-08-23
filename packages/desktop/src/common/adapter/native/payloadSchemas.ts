@@ -20,11 +20,9 @@ import {
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
-  STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOT_SECONDS,
@@ -391,26 +389,17 @@ const studioV2BinItemSchema = z.discriminatedUnion('kind', [
   z
     .object({ kind: z.literal('shot'), beatId: safeIdSchema, shotId: safeIdSchema, reason: z.literal('lifted') })
     .strict(),
-  z.object({ kind: z.literal('take'), assetId: safeIdSchema, reason: z.enum(['lifted', 'alternate']) }).strict(),
 ]);
 const studioV2BinSchema = z
   .array(studioV2BinItemSchema)
-  .max(STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS + STUDIO_MAX_BIN_TAKE_ITEMS)
+  .max(STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS)
   .refine(
     (items) =>
-      new Set(
-        items.map((item) =>
-          item.kind === 'beat'
-            ? `beat:${item.beatId}`
-            : item.kind === 'shot'
-              ? `shot:${item.shotId}`
-              : `take:${item.assetId}`
-        )
-      ).size === items.length
+      new Set(items.map((item) => (item.kind === 'beat' ? `beat:${item.beatId}` : `shot:${item.shotId}`))).size ===
+      items.length
   )
   .refine((items) => items.filter((item) => item.kind === 'beat').length <= STUDIO_MAX_BIN_BEAT_ITEMS)
-  .refine((items) => items.filter((item) => item.kind === 'shot').length <= STUDIO_MAX_BIN_SHOT_ITEMS)
-  .refine((items) => items.filter((item) => item.kind === 'take').length <= STUDIO_MAX_BIN_TAKE_ITEMS);
+  .refine((items) => items.filter((item) => item.kind === 'shot').length <= STUDIO_MAX_BIN_SHOT_ITEMS);
 const studioV2TrimBoundarySchema = z
   .number()
   .finite()
@@ -491,9 +480,6 @@ const studioV2CapturedPosterSchema = z
     height: z.number().finite().int().min(1).max(16_384),
   })
   .strict();
-const studioV2TakeActionSchema = z
-  .object({ ...studioV2MutationRequestShape, shotId: safeIdSchema, assetId: safeIdSchema })
-  .strict();
 const studioV2ReferenceDecisionSchema = z
   .object({
     ...studioV2MutationRequestShape,
@@ -507,7 +493,6 @@ const studioV2ReferenceDecisionSchema = z
   .strict();
 const studioV2PrepareGenerationChoiceShape = {
   shotId: safeIdSchema,
-  generationCount: z.number().finite().int().min(1).max(STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION),
 };
 const studioV2PrepareGenerationChoiceSchema = z.discriminatedUnion('purpose', [
   z
@@ -879,10 +864,6 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.restore-shot': z
     .object({ ...studioV2MutationRequestShape, shotId: safeIdSchema, beforeShotId: safeIdSchema.nullable() })
     .strict(),
-  'creative-studio.park-take': studioV2TakeActionSchema,
-  'creative-studio.add-alternate-take': studioV2TakeActionSchema,
-  'creative-studio.restore-take': studioV2TakeActionSchema,
-  'creative-studio.select-take': studioV2TakeActionSchema,
   'creative-studio.reorder-bin': z.object({ ...studioV2MutationRequestShape, bin: studioV2BinSchema }).strict(),
   'creative-studio.delete-project': z.object(studioV2MutationRequestShape).strict(),
   'creative-studio.persist-captured-poster': studioV2CapturedPosterSchema,
@@ -904,9 +885,6 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.import-bed-audio': z.object(studioV2MutationRequestShape).strict(),
   'creative-studio.detach-bed-audio': z.object({ ...studioV2MutationRequestShape, assetId: safeIdSchema }).strict(),
   'creative-studio.set-bed': z.object({ ...studioV2MutationRequestShape, assetId: safeIdSchema.nullable() }).strict(),
-  'creative-studio.set-match-to': z
-    .object({ ...studioV2MutationRequestShape, shotId: safeIdSchema.nullable() })
-    .strict(),
   'creative-studio.create-export': z.discriminatedUnion('shape', [
     z
       .object({

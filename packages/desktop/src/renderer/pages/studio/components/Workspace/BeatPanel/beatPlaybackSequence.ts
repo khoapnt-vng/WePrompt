@@ -6,12 +6,7 @@
 
 import { STUDIO_MAX_SHOT_SECONDS, STUDIO_MIN_SHOT_SECONDS } from '@/common/types/project/creativeStudioTypes';
 
-import type {
-  WorkspaceBeatProjection,
-  WorkspaceProjection,
-  WorkspaceShotProjection,
-  WorkspaceTakeProjection,
-} from '../workspaceProjection';
+import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../workspaceProjection';
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 
@@ -67,14 +62,16 @@ const finiteSafeNonnegative = (value: unknown): value is number =>
 
 const finiteSafePositive = (value: unknown): value is number => finiteSafeNonnegative(value) && value > 0;
 
-const exactSelectedVideo = (
+const exactCurrentPicture = (
   shot: WorkspaceShotProjection
 ): Pick<
   BeatPlaybackVideoSegment,
   'assetId' | 'posterAssetId' | 'sourceDurationSeconds' | 'sourceInSeconds' | 'sourceOutSeconds' | 'durationSeconds'
 > | null => {
-  const assetId = shot.selectedTakeId;
-  const sourceDurationSeconds = shot.selectedTakeSourceDurationSeconds;
+  const picture = shot.currentPicture;
+  if (picture === null) return null;
+  const assetId = picture.assetId;
+  const sourceDurationSeconds = picture.sourceDurationSeconds;
   if (!safeId(assetId) || !finiteSafePositive(sourceDurationSeconds)) return null;
 
   const sourceInSeconds = shot.trimInSeconds ?? 0;
@@ -93,31 +90,13 @@ const exactSelectedVideo = (
   const durationSeconds = sourceDurationSeconds - sourceInSeconds - trimOutSeconds;
   if (!finiteSafePositive(durationSeconds) || shot.playedDurationSeconds !== durationSeconds) return null;
 
-  const allTakes: WorkspaceTakeProjection[] = [...shot.imageTakes, ...shot.videoTakes];
-  if (allTakes.some((take) => typeof take.selected !== 'boolean')) return null;
-  const matchingRows = shot.videoTakes.filter((take) => take.assetId === assetId);
-  const selectedRows = allTakes.filter((take) => take.selected);
-  if (
-    matchingRows.length !== 1 ||
-    selectedRows.length !== 1 ||
-    selectedRows[0] !== matchingRows[0] ||
-    shot.imageTakes.some((take) => take.assetId === assetId)
-  ) {
-    return null;
-  }
-  const selected = matchingRows[0]!;
-  if (
-    selected.mediaKind !== 'video' ||
-    selected.binReason !== null ||
-    selected.sourceDurationSeconds !== sourceDurationSeconds ||
-    (selected.posterAssetId !== null && !safeId(selected.posterAssetId))
-  ) {
+  if (picture.posterAssetId !== null && !safeId(picture.posterAssetId)) {
     return null;
   }
 
   return {
     assetId,
-    posterAssetId: selected.posterAssetId,
+    posterAssetId: picture.posterAssetId,
     sourceDurationSeconds,
     sourceInSeconds,
     sourceOutSeconds,
@@ -127,22 +106,20 @@ const exactSelectedVideo = (
 
 const exactSlateDuration = (shot: WorkspaceShotProjection): number | null => {
   if (
-    shot.selectedTakeId !== null ||
-    shot.selectedTakeSourceDurationSeconds !== null ||
+    shot.currentPicture !== null ||
     shot.trimInSeconds !== null ||
     shot.trimOutSeconds !== null ||
     !Number.isSafeInteger(shot.durationSeconds) ||
     shot.durationSeconds < STUDIO_MIN_SHOT_SECONDS ||
     shot.durationSeconds > STUDIO_MAX_SHOT_SECONDS ||
-    shot.playedDurationSeconds !== shot.durationSeconds ||
-    [...shot.imageTakes, ...shot.videoTakes].some((take) => typeof take.selected !== 'boolean' || take.selected)
+    shot.playedDurationSeconds !== shot.durationSeconds
   ) {
     return null;
   }
   return shot.durationSeconds;
 };
 
-/** Builds the exact selected-Take/slate sequence owned by one active Beat. */
+/** Builds the exact current-picture/slate sequence owned by one active Beat. */
 export const buildBeatPlaybackSequence = (
   projectId: string,
   beat: WorkspaceBeatProjection,
@@ -219,8 +196,8 @@ export const buildBeatPlaybackSequence = (
     seenShotIds.add(shot.id);
     planningCursor = boundary.endSeconds;
 
-    const selected = shot.selectedTakeId === null ? null : exactSelectedVideo(shot);
-    const durationSeconds = selected?.durationSeconds ?? exactSlateDuration(shot);
+    const picture = shot.currentPicture === null ? null : exactCurrentPicture(shot);
+    const durationSeconds = picture?.durationSeconds ?? exactSlateDuration(shot);
     if (durationSeconds === null) return null;
     const beatEndSeconds = beatCursor + durationSeconds;
     if (!finiteSafePositive(beatEndSeconds) || beatEndSeconds <= beatCursor) return null;
@@ -233,7 +210,7 @@ export const buildBeatPlaybackSequence = (
       beatStartSeconds: beatCursor,
       beatEndSeconds,
     };
-    segments.push(selected === null ? { kind: 'slate', ...common } : { kind: 'video', ...common, ...selected });
+    segments.push(picture === null ? { kind: 'slate', ...common } : { kind: 'video', ...common, ...picture });
     beatCursor = beatEndSeconds;
   }
 
@@ -255,7 +232,7 @@ export const formatBeatPlaybackClock = (seconds: number, maximumSeconds: number)
   return `${minutes}:${String(whole - minutes * 60).padStart(2, '0')}`;
 };
 
-/** Resolves one Beat-relative position to its exact Shot and selected-Take offset. */
+/** Resolves one Beat-relative position to its exact Shot and current-picture offset. */
 export const resolveBeatPlaybackLocation = (
   sequence: BeatPlaybackSequence,
   requestedSeconds: number

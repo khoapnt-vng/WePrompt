@@ -5,7 +5,6 @@ export type { WorkspaceShotSegmentState } from './BeatPanel/segmentState';
 export type {
   BeatPanelActions,
   BeatPanelBriefReferenceOption,
-  BeatPanelGenerationCount,
   BeatPanelImportResult,
   BeatPanelProps,
   BeatPanelReviewChoice,
@@ -54,7 +53,6 @@ export { buildStudioBarStats, projectWorkspace } from './workspaceProjection';
 export type {
   WorkspaceBinnedBeatProjection,
   WorkspaceBinnedShotProjection,
-  WorkspaceBinnedTakeProjection,
   WorkspaceBinItemProjection,
   WorkspaceBeatDisplayState,
   WorkspaceBeatProjection,
@@ -65,8 +63,9 @@ export type {
   WorkspaceCutCoverCandidateProjection,
   WorkspaceCutProjection,
   WorkspaceProjection,
+  WorkspaceCurrentPictureProjection,
+  WorkspaceSeedStillProjection,
   WorkspaceShotProjection,
-  WorkspaceTakeProjection,
   StudioBarStats,
 } from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';

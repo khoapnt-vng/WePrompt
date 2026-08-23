@@ -175,7 +175,7 @@
 .blocker,
 .muted,
 .chainState,
-.takeDetails p,
+.mediaDetails p,
 .subsection p,
 .recoveryCard p {
   margin: 0;
@@ -276,46 +276,6 @@
   justify-content: flex-end;
 }
 
-.takeSummary {
-  display: flex;
-  min-inline-size: 0;
-  align-items: center;
-  gap: 8px 14px;
-  flex-wrap: nowrap;
-  margin: 0;
-}
-
-.takeSummary > div {
-  display: flex;
-  min-inline-size: 0;
-  align-items: center;
-  gap: 6px;
-}
-
-.takeSummary dt {
-  color: var(--color-text-3);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-weight: var(--fw-bold);
-  letter-spacing: 0.04em;
-  overflow-wrap: anywhere;
-  text-transform: uppercase;
-}
-
-.takeSummary dd {
-  min-inline-size: 24px;
-  margin: 0;
-  padding-block: 2px;
-  padding-inline: 7px;
-  border-radius: 999px;
-  color: var(--color-text-2);
-  background: var(--color-fill-2);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-}
-
 .subsection {
   display: grid;
   min-inline-size: 0;
@@ -324,7 +284,7 @@
   border-block-start: 1px solid var(--color-border-1);
 }
 
-.takeGrid {
+.mediaStrip {
   display: flex;
   min-inline-size: 0;
   gap: 10px;
@@ -336,7 +296,7 @@
   scrollbar-gutter: stable;
 }
 
-.takeCard {
+.mediaCard {
   display: grid;
   flex: 0 0 134px;
   box-sizing: border-box;
@@ -351,22 +311,17 @@
   scroll-snap-align: start;
 }
 
-.takeCard > .actions {
+.mediaCard > .actions {
   align-self: end;
   justify-content: space-between;
 }
 
-.takeCard[data-selected='true'],
-.takeCard[data-effective-seed='true'] {
+.mediaCard[data-effective-seed='true'] {
   border-color: var(--color-primary-6);
   box-shadow: var(--ring-focus);
 }
 
-.takeCard[data-bin-reason] {
-  opacity: 0.78;
-}
-
-.takePreview {
+.mediaPreview {
   display: block;
   inline-size: 100%;
   aspect-ratio: 16 / 9;
@@ -375,13 +330,13 @@
   background: var(--color-fill-2);
 }
 
-.takeDetails {
+.mediaDetails {
   display: grid;
   min-inline-size: 0;
   gap: 6px;
 }
 
-.takeIdentity {
+.mediaIdentity {
   composes: meta from '../../../StudioTypography.module.css';
   color: var(--text-primary);
   overflow-wrap: anywhere;
@@ -770,10 +725,6 @@ div.previewMedia {
   border-inline-end: 0;
 }
 
-.playbackSegment[data-selected-take='true'] {
-  background: var(--color-primary-light-1);
-}
-
 .boundaryGutter {
   position: relative;
   flex: 0 0 24px;
@@ -1131,8 +1082,7 @@ div.previewMedia {
     flex-wrap: wrap;
   }
 
-  .shotActionBand > .editorActions,
-  .takeSummary {
+  .shotActionBand > .editorActions {
     flex-wrap: wrap;
   }
 }

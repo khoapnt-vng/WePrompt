@@ -29,7 +29,6 @@ import {
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
 } from '@/common/types/project/creativeStudioTypes';
 
 const VALID_PAYLOADS = {
@@ -256,7 +255,6 @@ const VALID_PAYLOADS = {
       {
         shotId: 'shot_1',
         purpose: 'video_take',
-        generationCount: 2,
         referenceAssetId: null,
       },
     ],
@@ -331,30 +329,6 @@ const VALID_PAYLOADS = {
     shotId: 'shot_1',
     beforeShotId: null,
   },
-  'creative-studio.park-take': {
-    projectId: 'project_1',
-    expectedRevision: 1,
-    shotId: 'shot_1',
-    assetId: 'asset_1',
-  },
-  'creative-studio.add-alternate-take': {
-    projectId: 'project_1',
-    expectedRevision: 1,
-    shotId: 'shot_1',
-    assetId: 'asset_1',
-  },
-  'creative-studio.restore-take': {
-    projectId: 'project_1',
-    expectedRevision: 1,
-    shotId: 'shot_1',
-    assetId: 'asset_1',
-  },
-  'creative-studio.select-take': {
-    projectId: 'project_1',
-    expectedRevision: 1,
-    shotId: 'shot_1',
-    assetId: 'asset_1',
-  },
   'creative-studio.reorder-bin': { projectId: 'project_1', expectedRevision: 1, bin: [] },
   'creative-studio.delete-project': { projectId: 'project_1', expectedRevision: 1 },
   'creative-studio.persist-captured-poster': {
@@ -379,7 +353,6 @@ const VALID_PAYLOADS = {
   'creative-studio.import-bed-audio': { projectId: 'project_1', expectedRevision: 1 },
   'creative-studio.detach-bed-audio': { projectId: 'project_1', expectedRevision: 1, assetId: 'asset_1' },
   'creative-studio.set-bed': { projectId: 'project_1', expectedRevision: 1, assetId: 'asset_1' },
-  'creative-studio.set-match-to': { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1' },
   'creative-studio.create-export': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -1080,7 +1053,7 @@ const INVALID_PAYLOADS = [
     'creative-studio.apply-authoring-batch',
     'renderer supplied reducer envelope',
     {
-      schemaVersion: 2,
+      schemaVersion: 3,
       projectId: 'project_1',
       expectedRevision: 1,
       operations: [{ kind: 'set_brief', brief: 'x' }],
@@ -1170,11 +1143,6 @@ const INVALID_PAYLOADS = [
     { projectId: 'project_1', expectedRevision: 1, assetId: '../bed' },
   ],
   ['creative-studio.set-bed', 'missing asset identity', { projectId: 'project_1', expectedRevision: 1 }],
-  [
-    'creative-studio.set-match-to',
-    'unsafe shot identity',
-    { projectId: 'project_1', expectedRevision: 1, shotId: '../shot' },
-  ],
   [
     'creative-studio.create-export',
     'missing catalog revision',
@@ -1411,14 +1379,13 @@ describe('native bridge payload schemas', () => {
     expect(parseNativeBridgePayload('creative-studio.apply-authoring-batch', payload)).toEqual(payload);
   });
 
-  it('preserves the reviewed order of mixed beat, shot, and take bin entries', () => {
+  it('preserves the reviewed order of mixed Beat and Shot Bin entries', () => {
     const payload = {
       projectId: 'project_1',
       expectedRevision: 3,
       bin: [
         { kind: 'beat' as const, beatId: 'beat_1', reason: 'alternate' as const },
         { kind: 'shot' as const, beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' as const },
-        { kind: 'take' as const, assetId: 'asset_1', reason: 'alternate' as const },
       ],
     };
 
@@ -1587,7 +1554,6 @@ describe('native bridge payload schemas', () => {
     const makeChoice = (index: number, purpose: 'seed_still' | 'video_take') => ({
       shotId: `shot_${index}`,
       purpose,
-      generationCount: STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
       referenceAssetId: purpose === 'seed_still' ? `asset_${index}` : null,
     });
     const maximum = {
@@ -1623,17 +1589,15 @@ describe('native bridge payload schemas', () => {
     ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
-  it('rejects prepare choice underflow, overflow, duplicates, and nested authority', () => {
+  it('rejects legacy prepare counts, duplicates, and nested authority', () => {
     const valid = VALID_PAYLOADS['creative-studio.prepare-submission'];
     const choice = valid.baseChoices[0];
-    for (const generationCount of [0, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION + 1]) {
-      expect(() =>
-        parseNativeBridgePayload('creative-studio.prepare-submission', {
-          ...valid,
-          baseChoices: [{ ...choice, generationCount }],
-        })
-      ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
-    }
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', {
+        ...valid,
+        baseChoices: [{ ...choice, generationCount: 1 }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
     expect(() =>
       parseNativeBridgePayload('creative-studio.prepare-submission', {
         ...valid,
@@ -1741,16 +1705,11 @@ describe('native bridge payload schemas', () => {
       'creative-studio.restore-beat',
       'creative-studio.park-shot',
       'creative-studio.restore-shot',
-      'creative-studio.park-take',
-      'creative-studio.add-alternate-take',
-      'creative-studio.restore-take',
-      'creative-studio.select-take',
       'creative-studio.reorder-bin',
       'creative-studio.import-seed-still',
       'creative-studio.import-bed-audio',
       'creative-studio.detach-bed-audio',
       'creative-studio.set-bed',
-      'creative-studio.set-match-to',
       'creative-studio.create-export',
       'creative-studio.list-exports',
       'creative-studio.copy-export',
@@ -1783,6 +1742,11 @@ describe('native bridge payload schemas', () => {
       'creative-studio.fit-storyboard',
       'creative-studio.submit-scenes',
       'creative-studio.retry-download',
+      'creative-studio.park-take',
+      'creative-studio.add-alternate-take',
+      'creative-studio.restore-take',
+      'creative-studio.select-take',
+      'creative-studio.set-match-to',
     ] as const;
     const providerKeys = collectBridgeBuildProviderKeys(readFileSync(IPC_BRIDGE_PATH, 'utf8'));
     const schemaKeys = Object.keys(nativeBridgePayloadSchemas);
@@ -1797,7 +1761,6 @@ describe('native bridge payload schemas', () => {
       'creative-studio.import-bed-audio',
       'creative-studio.detach-bed-audio',
       'creative-studio.set-bed',
-      'creative-studio.set-match-to',
       'creative-studio.create-export',
       'creative-studio.list-exports',
       'creative-studio.copy-export',
@@ -1814,9 +1777,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);
@@ -2113,7 +2076,7 @@ describe('native bridge payload schemas', () => {
     }
   });
 
-  it('accepts explicit clear intents for bed and Match To without accepting missing fields', () => {
+  it('accepts an explicit clear intent for bed without accepting a missing field', () => {
     expect(
       parseNativeBridgePayload('creative-studio.set-bed', {
         projectId: 'project_1',
@@ -2121,13 +2084,6 @@ describe('native bridge payload schemas', () => {
         assetId: null,
       })
     ).toEqual({ projectId: 'project_1', expectedRevision: 7, assetId: null });
-    expect(
-      parseNativeBridgePayload('creative-studio.set-match-to', {
-        projectId: 'project_1',
-        expectedRevision: 7,
-        shotId: null,
-      })
-    ).toEqual({ projectId: 'project_1', expectedRevision: 7, shotId: null });
   });
 
   it.each(VOID_PROVIDER_KEYS)('rejects a supplied payload for void provider %s', (providerKey) => {

@@ -11,7 +11,6 @@ import {
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
-  STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_LINE_HISTORY_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
@@ -39,6 +38,7 @@ import {
   validateStudioProjectV2,
   validateStudioProposedShotV2,
 } from '@/process/services/creative-studio/service/schema2/validation';
+import { createStudioSpendReceiptV2 } from '@/process/services/creative-studio/service/schema2/pricing';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 const confirmedAt = '2026-08-17T00:00:01.000Z';
@@ -58,7 +58,8 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
-  selectedTakeId: null,
+  videoAssetId: null,
+  supersededVideoAssetIds: [],
   assetIds: [],
   jobIds: [],
   ...overrides,
@@ -77,7 +78,7 @@ const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<Studi
 });
 
 const makeProject = (projectId = 'project_1'): StudioProjectV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   revision: 1,
   id: projectId,
   name: `Project ${projectId}`,
@@ -92,7 +93,6 @@ const makeProject = (projectId = 'project_1'): StudioProjectV2 => ({
   shots: { shot_1: makeShot('shot_1') },
   bin: [],
   bedAssetId: null,
-  matchToShotId: null,
   spendPolicy: null,
   spendAuthorizations: [],
   frameExtractions: {},
@@ -230,13 +230,7 @@ const makeAuthorization = (
     expiresAt,
     confirmedAt,
     providerBindings: items.map((item) => ({ itemId: item.id, provider })),
-    idempotencyKeys: items.flatMap((item) =>
-      Array.from({ length: item.generationCount }, (_, generationIndex) => ({
-        itemId: item.id,
-        generationIndex,
-        key: `idem_${id}_${item.id}_${generationIndex}`,
-      }))
-    ),
+    idempotencyKeys: items.map((item) => ({ itemId: item.id, key: `idem_${id}_${item.id}` })),
   };
 };
 
@@ -244,7 +238,6 @@ const makeJob = (
   id: string,
   authorization: StudioSpendAuthorization,
   item: StudioQuotedGeneration,
-  generationIndex = 0,
   overrides: Partial<StudioJobV2> = {}
 ): StudioJobV2 => ({
   id,
@@ -252,9 +245,7 @@ const makeJob = (
   shotId: item.shotId,
   status: item.requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
   provider,
-  idempotencyKey: authorization.idempotencyKeys.find(
-    (entry) => entry.itemId === item.id && entry.generationIndex === generationIndex
-  )!.key,
+  idempotencyKey: authorization.idempotencyKeys.find((entry) => entry.itemId === item.id)!.key,
   providerJobId: null,
   cancellationPolicy: 'queued_and_running',
   outputAssetIds: [],
@@ -268,7 +259,6 @@ const makeJob = (
   purpose: item.purpose,
   authorizationId: authorization.id,
   authorizationItemId: item.id,
-  generationIndex,
   requestPlan: item.requestPlan,
   requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
   spendReceipt: null,
@@ -298,7 +288,7 @@ const addFailedSeedAuthorization = (
   const item = makeItem(project.revision, 'shot_1', 'seed_still', seedPlan(), 1, project.id);
   const authorization = makeAuthorization(authorizationId, project.revision, [item], [], project.id);
   authorization.originReferenceHandoffId = originReferenceHandoffId;
-  const job = makeJob(`job_${authorizationId}`, authorization, item, 0, {
+  const job = makeJob(`job_${authorizationId}`, authorization, item, {
     status: 'failed',
     error: { code: 'timeout', messageKey: 'timeout' },
     retryOfJobId,
@@ -317,7 +307,8 @@ const addHumanSeed = (project: StudioProjectV2, shotId = 'shot_1', assetId = 'se
 
 const addSucceededVideoTake = (project: StudioProjectV2, shotId = 'shot_1', assetId = 'take_1'): StudioAssetV2 => {
   const shot = project.shots[shotId]!;
-  const seed = addHumanSeed(project, shotId, `seed_${shotId}`);
+  const seedId = `seed_${shotId}`;
+  const seed = project.assets[seedId] ?? addHumanSeed(project, shotId, seedId);
   shot.seedStillId = seed.id;
   const projectRevision = project.revision;
   const item = makeItem(projectRevision, shotId, 'video_take', videoPlan({ kind: 'seed_still', assetId: seed.id }));
@@ -326,7 +317,7 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId = 'shot_1', asse
   project.assets[asset.id] = asset;
   shot.assetIds.push(asset.id);
   const jobId = `job_${projectRevision}`;
-  const job = makeJob(jobId, authorization, item, 0, {
+  const job = makeJob(jobId, authorization, item, {
     status: 'succeeded',
     providerJobId: `remote_${projectRevision}`,
     remoteStartedAt: timestamp,
@@ -342,25 +333,25 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId = 'shot_1', asse
       rateUnit: item.rateUnit,
       rateMinorUnits: item.rateMinorUnits,
       durationSeconds: 8,
-      generationIndex: 0,
       generationCount: 1,
       totalMinorUnits: 16,
     },
   });
   addAuthorizationWithJobs(project, authorization, [job]);
-  shot.selectedTakeId = asset.id;
+  if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+  shot.videoAssetId = asset.id;
   return asset;
 };
 
 const addReadyFrame = (project: StudioProjectV2, takeId = 'take_1', endpointSeconds = 10): string => {
-  const frameId = createStudioFrameExtractionId({ shotId: 'shot_1', takeAssetId: takeId, endpointSeconds });
+  const frameId = createStudioFrameExtractionId({ shotId: 'shot_1', videoAssetId: takeId, endpointSeconds });
   const frameAssetId = `frame_asset_${endpointSeconds}`;
   project.assets[frameAssetId] = makeImageAsset(frameAssetId, 'shot_1', 'conditioningFrames');
   project.shots.shot_1!.assetIds.push(frameAssetId);
   project.frameExtractions[frameId] = {
     id: frameId,
     shotId: 'shot_1',
-    takeAssetId: takeId,
+    videoAssetId: takeId,
     endpointSeconds,
     frameAssetId,
     status: 'ready',
@@ -369,51 +360,39 @@ const addReadyFrame = (project: StudioProjectV2, takeId = 'take_1', endpointSeco
   return frameAssetId;
 };
 
-const makeWaitingDependencyProject = (primaryCount: number): StudioProjectV2 => {
+const makeWaitingDependencyProject = (): StudioProjectV2 => {
   const project = makeProject();
   project.beats.beat_1!.shotOrder.push('shot_2');
   project.shots.shot_2 = makeShot('shot_2');
   addHumanSeed(project);
-  const upstream = makeItem(
-    1,
-    'shot_1',
-    'video_take',
-    videoPlan({ kind: 'seed_still', assetId: 'seed_1' }),
-    primaryCount
-  );
+  const upstream = makeItem(1, 'shot_1', 'video_take', videoPlan({ kind: 'seed_still', assetId: 'seed_1' }), 1);
   const dependent = makeItem(1, 'shot_2', 'video_take', deferredVideoPlan(upstream.id, 'shot_1'));
   const authorization = makeAuthorization('auth_waiting_take', 1, [upstream], [dependent]);
-  const upstreamJobs = Array.from({ length: primaryCount }, (_, generationIndex) => {
-    const asset = makeVideoAsset(`take_${generationIndex + 1}`);
-    project.assets[asset.id] = asset;
-    project.shots.shot_1!.assetIds.push(asset.id);
-    const jobId = `job_upstream_${generationIndex}`;
-    return makeJob(jobId, authorization, upstream, generationIndex, {
-      status: 'succeeded',
-      providerJobId: `remote_${generationIndex}`,
-      remoteStartedAt: timestamp,
-      outputAssetIds: [asset.id],
-      outputAssetIdsByRole: { primary: asset.id, poster: null },
-      spendReceipt: {
-        authorizationId: authorization.id,
-        itemId: upstream.id,
-        jobId,
-        purpose: upstream.purpose,
-        routeId: upstream.routeId,
-        currency: authorization.currency,
-        rateUnit: upstream.rateUnit,
-        rateMinorUnits: upstream.rateMinorUnits,
-        durationSeconds: 8,
-        generationIndex,
-        generationCount: primaryCount,
-        totalMinorUnits: 16,
-      },
-    });
+  const asset = makeVideoAsset('take_1');
+  project.assets[asset.id] = asset;
+  project.shots.shot_1!.assetIds.push(asset.id);
+  const upstreamJob = makeJob('job_upstream', authorization, upstream, {
+    status: 'succeeded',
+    providerJobId: 'remote_upstream',
+    remoteStartedAt: timestamp,
+    outputAssetIds: [asset.id],
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+    spendReceipt: {
+      authorizationId: authorization.id,
+      itemId: upstream.id,
+      jobId: 'job_upstream',
+      purpose: upstream.purpose,
+      routeId: upstream.routeId,
+      currency: authorization.currency,
+      rateUnit: upstream.rateUnit,
+      rateMinorUnits: upstream.rateMinorUnits,
+      durationSeconds: 8,
+      generationCount: 1,
+      totalMinorUnits: 16,
+    },
   });
-  addAuthorizationWithJobs(project, authorization, [
-    ...upstreamJobs,
-    makeJob('job_dependent', authorization, dependent),
-  ]);
+  addAuthorizationWithJobs(project, authorization, [upstreamJob, makeJob('job_dependent', authorization, dependent)]);
+  project.shots.shot_1!.videoAssetId = asset.id;
   return project;
 };
 
@@ -427,6 +406,19 @@ const addShots = (project: StudioProjectV2, beatId: string, count: number, offse
 };
 
 describe('validateStudioProjectV2 exact project and authorship contract', () => {
+  it('accepts only the schema-3 one-picture Shot shape and refuses the legacy schema-2 shape', () => {
+    const legacy = structuredClone(makeProject()) as unknown as Record<string, unknown>;
+    legacy.schemaVersion = 2;
+    const legacyShots = legacy.shots as Record<string, Record<string, unknown>>;
+    delete legacyShots.shot_1!.videoAssetId;
+    delete legacyShots.shot_1!.supersededVideoAssetIds;
+    legacyShots.shot_1!.selectedTakeId = null;
+    expect(validateStudioProjectV2(legacy)).toBe(false);
+
+    const onePicture = makeProject();
+    expect(validateStudioProjectV2(onePicture)).toBe(true);
+  });
+
   it('accepts the minimal project and an empty-coverage Beat with null or authored target', () => {
     const project = makeProject();
     project.beats.beat_1!.shotOrder = [];
@@ -438,6 +430,7 @@ describe('validateStudioProjectV2 exact project and authorship contract', () => 
 
   it.each([
     ['project', (project: StudioProjectV2) => Object.assign(project, { unexpected: true })],
+    ['legacy Match To field', (project: StudioProjectV2) => Object.assign(project, { matchToShotId: null })],
     ['Beat', (project: StudioProjectV2) => Object.assign(project.beats.beat_1!, { unexpected: true })],
     ['Shot', (project: StudioProjectV2) => Object.assign(project.shots.shot_1!, { unexpected: true })],
     [
@@ -570,19 +563,6 @@ describe('validateStudioProjectV2 total ownership and capacities', () => {
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
-  it('enforces the independently reachable Take Bin maximum', () => {
-    const project = makeProject();
-    for (let index = 1; index <= STUDIO_MAX_BIN_TAKE_ITEMS; index += 1) {
-      const assetId = `seed_${index}`;
-      addHumanSeed(project, 'shot_1', assetId);
-      project.bin.push({ kind: 'take', assetId, reason: 'alternate' });
-    }
-    expect(validateStudioProjectV2(project)).toBe(true);
-    addHumanSeed(project, 'shot_1', 'seed_97');
-    project.bin.push({ kind: 'take', assetId: 'seed_97', reason: 'alternate' });
-    expect(validateStudioProjectV2(project)).toBe(false);
-  });
-
   it('enforces line history at 20 and 21 entries', () => {
     const project = makeProject();
     project.beats.beat_1!.lineHistory = Array.from({ length: STUDIO_MAX_LINE_HISTORY_PER_BEAT }, (_, index) => ({
@@ -687,13 +667,30 @@ describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
     expect(validateStudioProjectV2(missingAudio)).toBe(false);
   });
 
-  it('accepts a selected 10-second Take with an 8-second Shot plan', () => {
+  it('accepts one current 10-second video picture with an 8-second Shot plan', () => {
     const project = makeProject();
     addSucceededVideoTake(project);
     expect(validateStudioProjectV2(project)).toBe(true);
   });
 
-  it('validates trims against selected source duration, not planning duration', () => {
+  it('requires the current picture and superseded history to follow successful video jobs in order', () => {
+    const project = makeProject();
+    addSucceededVideoTake(project, 'shot_1', 'video_1');
+    addSucceededVideoTake(project, 'shot_1', 'video_2');
+    expect(project.shots.shot_1).toMatchObject({
+      videoAssetId: 'video_2',
+      supersededVideoAssetIds: ['video_1'],
+    });
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    project.shots.shot_1!.supersededVideoAssetIds = [];
+    expect(validateStudioProjectV2(project)).toBe(false);
+    project.shots.shot_1!.supersededVideoAssetIds = ['video_1'];
+    project.shots.shot_1!.videoAssetId = 'video_1';
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('validates trims against current picture duration, not planning duration', () => {
     const project = makeProject();
     addSucceededVideoTake(project);
     project.shots.shot_1!.trimInSeconds = 1;
@@ -707,7 +704,7 @@ describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
-  it('rejects trims without a selected canonical video Take', () => {
+  it('rejects trims without a current canonical video picture', () => {
     const project = makeProject();
     project.shots.shot_1!.trimInSeconds = 1;
     expect(validateStudioProjectV2(project)).toBe(false);
@@ -792,11 +789,33 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     job.outputAssetIdsByRole = { primary: null, poster: null };
     delete project.assets.take_1;
     project.shots.shot_1!.assetIds = project.shots.shot_1!.assetIds.filter((id) => id !== 'take_1');
-    project.shots.shot_1!.selectedTakeId = null;
+    project.shots.shot_1!.videoAssetId = null;
     job.spendReceipt = receipt;
     expect(validateStudioProjectV2(project)).toBe(true);
+    job.error = {
+      code: 'seed_still_variation_grid',
+      messageKey: 'conversation.creativeStudio.jobs.errors.seedStillVariationGrid',
+    };
+    expect(validateStudioProjectV2(project)).toBe(false);
+    job.error = { code: 'download_failed', messageKey: 'download_failed' };
     job.status = 'queued_local';
     job.error = null;
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('requires the paid seed purpose and receipt for a variation-grid failure', () => {
+    const project = makeProject();
+    const job = addFailedSeedAuthorization(project, 'auth_grid', null);
+    const authorization = project.spendAuthorizations[0]!;
+    const item = authorization.baseItems[0]!;
+    job.error = {
+      code: 'seed_still_variation_grid',
+      messageKey: 'conversation.creativeStudio.jobs.errors.seedStillVariationGrid',
+    };
+    job.spendReceipt = createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId: job.id });
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    job.spendReceipt = null;
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
@@ -820,32 +839,20 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(true);
   });
 
-  it('rejects mixed waiting/bound siblings in one deferred item', () => {
+  it('rejects quoted generation counts other than exactly one', () => {
     const project = makeProject();
-    project.beats.beat_1!.shotOrder.push('shot_2');
-    project.shots.shot_2 = makeShot('shot_2');
-    addHumanSeed(project);
-    const upstream = makeItem(1, 'shot_1', 'video_take', videoPlan({ kind: 'seed_still', assetId: 'seed_1' }));
-    const dependent = makeItem(1, 'shot_2', 'video_take', deferredVideoPlan(upstream.id, 'shot_1'), 2);
-    const authorization = makeAuthorization('auth_deferred', 1, [upstream], [dependent]);
-    const upstreamJob = makeJob('job_upstream', authorization, upstream, 0, {
-      status: 'failed',
-      error: { code: 'timeout', messageKey: 'timeout' },
-    });
-    const first = makeJob('job_dependent_0', authorization, dependent, 0);
-    const template = dependent.requestPlan.kind === 'after_take_selection' ? dependent.requestPlan.template : null;
-    const second = makeJob('job_dependent_1', authorization, dependent, 1, {
-      status: 'queued_local',
-      requestSnapshot: { ...template!, conditioningInput: { kind: 'seed_still', assetId: 'seed_1' } },
-    });
-    addAuthorizationWithJobs(project, authorization, [upstreamJob, first, second]);
+    const item = makeItem(1, 'shot_1', 'seed_still', seedPlan());
+    const authorization = makeAuthorization('auth_exact_one', 1, [item]);
+    addAuthorizationWithJobs(project, authorization, [makeJob('job_exact_one', authorization, item)]);
+    expect(validateStudioProjectV2(project)).toBe(true);
+    item.generationCount = 2;
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
   it('keeps symbolic predecessor endpoints concrete-only and binds only the exact upstream item primary', () => {
-    const project = makeWaitingDependencyProject(1);
+    const project = makeWaitingDependencyProject();
     const predecessor = project.shots.shot_1!;
-    predecessor.selectedTakeId = 'take_1';
+    predecessor.videoAssetId = 'take_1';
     const frameAssetId = addReadyFrame(project, 'take_1', 10);
     const dependent = project.jobs.job_dependent!;
     const template = dependent.requestPlan.kind === 'after_take_selection' ? dependent.requestPlan.template : null;
@@ -897,7 +904,7 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     project.assets[generatedSeed.id] = generatedSeed;
     project.shots.shot_1!.assetIds.push(generatedSeed.id);
     project.shots.shot_1!.seedStillId = generatedSeed.id;
-    const upstreamJob = makeJob('job_seed_upstream', authorization, upstream, 0, {
+    const upstreamJob = makeJob('job_seed_upstream', authorization, upstream, {
       status: 'succeeded',
       providerJobId: 'remote_seed_upstream',
       remoteStartedAt: timestamp,
@@ -913,12 +920,11 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
         rateUnit: upstream.rateUnit,
         rateMinorUnits: upstream.rateMinorUnits,
         durationSeconds: null,
-        generationIndex: 0,
         generationCount: 1,
         totalMinorUnits: upstream.rateMinorUnits,
       },
     });
-    const dependentJob = makeJob('job_seed_dependent', authorization, dependentItem, 0, {
+    const dependentJob = makeJob('job_seed_dependent', authorization, dependentItem, {
       status: 'queued_local',
       requestSnapshot: {
         ...dependentPlan.template,
@@ -937,7 +943,7 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
   });
 
   it('rejects a speculative endpoint field on a symbolic predecessor dependency', () => {
-    const project = makeWaitingDependencyProject(1);
+    const project = makeWaitingDependencyProject();
     const plan = project.spendAuthorizations[0]!.cascadeItems[0]!.requestPlan;
     expect(plan.kind).toBe('after_take_selection');
     if (plan.kind !== 'after_take_selection') throw new Error('expected deferred plan');
@@ -972,13 +978,13 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     const dependent = makeJob('job_existing_predecessor', authorization, item);
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
     });
     project.frameExtractions[extractionId] = {
       id: extractionId,
       shotId: 'shot_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
       frameAssetId: null,
       status: 'pending',
@@ -1037,11 +1043,11 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     const upstream = makeItem(1, 'shot_1', 'video_take', videoPlan({ kind: 'seed_still', assetId: 'seed_1' }));
     const dependent = makeItem(1, 'shot_2', 'video_take', deferredVideoPlan(upstream.id, 'shot_1'));
     const authorization = makeAuthorization('auth_dependency', 1, [upstream], [dependent]);
-    const upstreamJob = makeJob('job_upstream', authorization, upstream, 0, {
+    const upstreamJob = makeJob('job_upstream', authorization, upstream, {
       status: 'failed',
       error: { code: 'timeout', messageKey: 'timeout' },
     });
-    const dependentJob = makeJob('job_dependent', authorization, dependent, 0, {
+    const dependentJob = makeJob('job_dependent', authorization, dependent, {
       status: 'failed',
       error: { code: 'dependency_failed', messageKey: 'dependency_failed' },
     });
@@ -1068,51 +1074,13 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
 });
 
 describe('validateStudioProjectV2 Bin and inactive-lineage safety', () => {
-  it('accepts all three exact Bin kinds and rejects a fourth', () => {
+  it('accepts the exact Beat and Shot Bin kinds and rejects a third kind', () => {
     const project = makeProject();
-    addHumanSeed(project, 'shot_1', 'alternate_seed');
-    project.bin.push({ kind: 'take', assetId: 'alternate_seed', reason: 'alternate' });
+    project.beatOrder = [];
+    project.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'alternate' });
     expect(validateStudioProjectV2(project)).toBe(true);
     project.bin.push({ kind: 'other' } as never);
     expect(validateStudioProjectV2(project)).toBe(false);
-  });
-
-  it('rejects Take aliases naming the selected Take or explicit seed', () => {
-    const selected = makeProject();
-    addSucceededVideoTake(selected);
-    selected.bin.push({ kind: 'take', assetId: 'take_1', reason: 'lifted' });
-    expect(validateStudioProjectV2(selected)).toBe(false);
-    const seed = makeProject();
-    addHumanSeed(seed);
-    seed.shots.shot_1!.seedStillId = 'seed_1';
-    seed.bin.push({ kind: 'take', assetId: 'seed_1', reason: 'lifted' });
-    expect(validateStudioProjectV2(seed)).toBe(false);
-  });
-
-  it('refuses lifting the last selectable primary needed by a waiting dependency', () => {
-    const project = makeWaitingDependencyProject(1);
-    expect(validateStudioProjectV2(project)).toBe(true);
-    project.bin.push({ kind: 'take', assetId: 'take_1', reason: 'alternate' });
-    expect(validateStudioProjectV2(project)).toBe(false);
-  });
-
-  it('allows lifting one alternate primary while another remains selectable', () => {
-    const project = makeWaitingDependencyProject(2);
-    project.bin.push({ kind: 'take', assetId: 'take_1', reason: 'alternate' });
-    expect(validateStudioProjectV2(project)).toBe(true);
-  });
-
-  it('requires dependency_failed once every terminal upstream primary is binned', () => {
-    const project = makeWaitingDependencyProject(2);
-    project.bin.push(
-      { kind: 'take', assetId: 'take_1', reason: 'alternate' },
-      { kind: 'take', assetId: 'take_2', reason: 'alternate' }
-    );
-    expect(validateStudioProjectV2(project)).toBe(false);
-    const dependent = project.jobs.job_dependent!;
-    dependent.status = 'failed';
-    dependent.error = { code: 'dependency_failed', messageKey: 'dependency_failed' };
-    expect(validateStudioProjectV2(project)).toBe(true);
   });
 
   it('accepts a binned Shot with terminal paid lineage and rejects nonterminal work', () => {
@@ -1128,18 +1096,16 @@ describe('validateStudioProjectV2 Bin and inactive-lineage safety', () => {
     job.spendReceipt = null;
     delete project.assets.take_1;
     project.shots.shot_1!.assetIds = project.shots.shot_1!.assetIds.filter((id) => id !== 'take_1');
-    project.shots.shot_1!.selectedTakeId = null;
+    project.shots.shot_1!.videoAssetId = null;
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
-  it('accepts a binned Beat with terminal lineage and rejects current Match To', () => {
+  it('accepts a binned Beat with terminal lineage', () => {
     const project = makeProject();
     addSucceededVideoTake(project);
     project.beatOrder = [];
     project.bin.push({ kind: 'beat', beatId: 'beat_1', reason: 'lifted' });
     expect(validateStudioProjectV2(project)).toBe(true);
-    project.matchToShotId = 'shot_1';
-    expect(validateStudioProjectV2(project)).toBe(false);
   });
 });
 
@@ -1222,22 +1188,12 @@ describe('validateStudioProjectV2 hostile persisted data totality', () => {
       })(),
       (() => {
         const project = makeProject();
-        project.shots.shot_1!.selectedTakeId = id;
+        project.shots.shot_1!.videoAssetId = id;
         return project;
       })(),
       (() => {
         const project = makeProject();
         project.shots.shot_1!.seedStillId = id;
-        return project;
-      })(),
-      (() => {
-        const project = makeProject();
-        project.matchToShotId = id;
-        return project;
-      })(),
-      (() => {
-        const project = makeProject();
-        project.bin.push({ kind: 'take', assetId: id, reason: 'lifted' });
         return project;
       })(),
       (() => {
@@ -1297,7 +1253,7 @@ describe('validateStudioProjectV2 hostile persisted data totality', () => {
       const sourceRevision = index + 1;
       const item = makeItem(sourceRevision, 'shot_1', 'seed_still', seedPlan());
       const authorization = makeAuthorization(`auth_${index}`, sourceRevision, [item]);
-      const job = makeJob(`job_${index}`, authorization, item, 0, {
+      const job = makeJob(`job_${index}`, authorization, item, {
         status: 'failed',
         error: { code: 'timeout', messageKey: 'timeout' },
         retryOfJobId: index === 0 ? null : `job_${index - 1}`,
@@ -1330,11 +1286,10 @@ describe('proposal row validators', () => {
     const reasons = [
       'owned_asset',
       'owned_job',
-      'selected_take',
+      'video_asset',
       'seed_still',
       'conditioning_frame',
       'conditioning_input',
-      'match_to',
       'narration',
       'on_screen_text',
     ] as const satisfies readonly StudioFixedShotReasonV2[];
@@ -1344,7 +1299,7 @@ describe('proposal row validators', () => {
       expect(validateStudioFixedShotReviewV2({ shotId: 'shot_1', reasons: [reason] }), reason).toBe(true);
     }
     expect(validateStudioFixedShotReviewV2({ ...row, reasons: [] })).toBe(false);
-    expect(validateStudioFixedShotReviewV2({ ...row, reasons: ['selected_take', 'owned_asset'] })).toBe(false);
+    expect(validateStudioFixedShotReviewV2({ ...row, reasons: ['video_asset', 'owned_asset'] })).toBe(false);
     expect(validateStudioFixedShotReviewV2({ ...row, reasons: ['owned_asset', 'owned_asset'] })).toBe(false);
     expect(validateStudioFixedShotReviewV2({ ...row, reasons: ['unknown_reason'] })).toBe(false);
     expect(validateStudioFixedShotReviewV2({ ...row, unexpected: true })).toBe(false);

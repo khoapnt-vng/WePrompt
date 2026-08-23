@@ -5,7 +5,6 @@
  */
 
 import {
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   type StudioGenerationRequestPlan,
@@ -46,13 +45,7 @@ const requestDuration = (plan: StudioGenerationRequestPlan): number =>
 export const calculateStudioQuotedGenerationAmounts = (
   item: StudioQuotedGenerationForSpend
 ): StudioQuotedGenerationAmounts | null => {
-  if (
-    !Number.isSafeInteger(item.rateMinorUnits) ||
-    item.rateMinorUnits <= 0 ||
-    !Number.isSafeInteger(item.generationCount) ||
-    item.generationCount < 1 ||
-    item.generationCount > STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION
-  ) {
+  if (!Number.isSafeInteger(item.rateMinorUnits) || item.rateMinorUnits <= 0 || item.generationCount !== 1) {
     return null;
   }
 

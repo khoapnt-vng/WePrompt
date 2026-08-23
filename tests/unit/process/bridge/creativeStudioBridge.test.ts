@@ -53,10 +53,6 @@ const providerNames = [
   'restoreBeat',
   'parkShot',
   'restoreShot',
-  'parkTake',
-  'addAlternateTake',
-  'restoreTake',
-  'selectTake',
   'reorderBin',
   'deleteProject',
   'persistCapturedPoster',
@@ -66,7 +62,6 @@ const providerNames = [
   'importBedAudio',
   'detachBedAudio',
   'setBed',
-  'setMatchTo',
   'createExport',
   'listExports',
   'copyExport',
@@ -113,10 +108,6 @@ const mocks = vi.hoisted(() => ({
       'restoreBeat',
       'parkShot',
       'restoreShot',
-      'parkTake',
-      'addAlternateTake',
-      'restoreTake',
-      'selectTake',
       'reorderBin',
       'deleteProject',
       'persistCapturedPoster',
@@ -126,7 +117,6 @@ const mocks = vi.hoisted(() => ({
       'importBedAudio',
       'detachBedAudio',
       'setBed',
-      'setMatchTo',
       'createExport',
       'listExports',
       'copyExport',
@@ -187,16 +177,15 @@ const preparedSubmission = {
         shotId: 'shot_1',
         purpose: 'seed_still',
         route: { choiceId: 'route_image_1', providerId: 'provider_1', model: 'image-model' },
-        generationCount: 2,
+        generationCount: 1,
         durationSeconds: null,
         oneGenerationMinorUnits: 125,
-        requestedTotalMinorUnits: 250,
-        waitsForTakeSelection: false,
+        requestedTotalMinorUnits: 125,
       },
     ],
     cascadeItems: [],
-    lowerMinorUnits: 250,
-    upperMinorUnits: 250,
+    lowerMinorUnits: 125,
+    upperMinorUnits: 125,
     budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 500 },
   },
   withCascade: {
@@ -210,11 +199,10 @@ const preparedSubmission = {
         shotId: 'shot_1',
         purpose: 'seed_still',
         route: { choiceId: 'route_image_1', providerId: 'provider_1', model: 'image-model' },
-        generationCount: 2,
+        generationCount: 1,
         durationSeconds: null,
         oneGenerationMinorUnits: 125,
-        requestedTotalMinorUnits: 250,
-        waitsForTakeSelection: false,
+        requestedTotalMinorUnits: 125,
       },
     ],
     cascadeItems: [
@@ -226,11 +214,10 @@ const preparedSubmission = {
         durationSeconds: 8,
         oneGenerationMinorUnits: 800,
         requestedTotalMinorUnits: 800,
-        waitsForTakeSelection: true,
       },
     ],
-    lowerMinorUnits: 250,
-    upperMinorUnits: 1_050,
+    lowerMinorUnits: 125,
+    upperMinorUnits: 925,
     budget: { kind: 'over_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 500 },
   },
 } satisfies StudioRendererPreparedSubmissionOptionsV2;
@@ -481,26 +468,6 @@ describe('initCreativeStudioBridge', () => {
       { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', beforeShotId: null },
       { kind: 'restore_shot', shotId: 'shot_1', beforeShotId: null },
     ],
-    [
-      'parkTake',
-      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', assetId: 'asset_1' },
-      { kind: 'park_take', shotId: 'shot_1', assetId: 'asset_1' },
-    ],
-    [
-      'addAlternateTake',
-      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', assetId: 'asset_1' },
-      { kind: 'add_alternate_take', shotId: 'shot_1', assetId: 'asset_1' },
-    ],
-    [
-      'restoreTake',
-      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', assetId: 'asset_1' },
-      { kind: 'restore_take', shotId: 'shot_1', assetId: 'asset_1' },
-    ],
-    [
-      'selectTake',
-      { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1', assetId: 'asset_1' },
-      { kind: 'select_take', shotId: 'shot_1', assetId: 'asset_1' },
-    ],
     ['reorderBin', { projectId: 'project_1', expectedRevision: 1, bin: [] }, { kind: 'reorder_bin', bin: [] }],
   ] as const)('maps %s to one same-named reducer operation', async (providerName, input, operation) => {
     initCreativeStudioBridge(dependencies);
@@ -550,10 +517,8 @@ describe('initCreativeStudioBridge', () => {
       projectId: 'project_1',
       expectedRevision: 7,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still' as const, generationCount: 2, referenceAssetId: null }],
-      cascadeChoices: [
-        { shotId: 'shot_2', purpose: 'video_take' as const, generationCount: 1, referenceAssetId: null },
-      ],
+      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still' as const, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'shot_2', purpose: 'video_take' as const, referenceAssetId: null }],
     };
 
     const result = (await registeredHandler('prepareSubmission')(input as never)) as {
@@ -588,7 +553,6 @@ describe('initCreativeStudioBridge', () => {
           'requestedTotalMinorUnits',
           'route',
           'shotId',
-          'waitsForTakeSelection',
         ]);
         expect(Object.keys(item.route).toSorted()).toEqual(['choiceId', 'model', 'providerId']);
       }
@@ -657,7 +621,6 @@ describe('initCreativeStudioBridge', () => {
       shotId: 'shot_1',
       status: 'queued_remote' as const,
       purpose: 'video_take' as const,
-      generationIndex: 0,
       provider: { choiceId: 'route_1', providerId: 'provider_1', model: 'model_1' },
       outputAssetIds: [],
       outputAssetIdsByRole: { primary: null, poster: null },
@@ -719,7 +682,7 @@ describe('initCreativeStudioBridge', () => {
         projectId: 'project_1',
         expectedRevision: 7,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
         cascadeChoices: [],
       } as never)
     ).resolves.toEqual({
@@ -739,8 +702,8 @@ describe('initCreativeStudioBridge', () => {
         projectId: 'project_1',
         expectedRevision: 6,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-        cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
+        cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
       } as never)
     ).resolves.toEqual({
       ok: false,
@@ -760,7 +723,7 @@ describe('initCreativeStudioBridge', () => {
       projectId: 'project_1',
       expectedRevision: 7,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
       cascadeChoices: [],
     } as never);
 
@@ -789,7 +752,7 @@ describe('initCreativeStudioBridge', () => {
       projectId: 'project_1',
       expectedRevision: 7,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
       cascadeChoices: [],
     } as never);
 
@@ -885,7 +848,7 @@ describe('initCreativeStudioBridge', () => {
     expect(service.importBedAudioFromPath).not.toHaveBeenCalled();
   });
 
-  it('projects bed detach and sends bed and Match To through one exact reducer operation', async () => {
+  it('projects bed detach and sends bed through one exact reducer operation', async () => {
     vi.mocked(service.applyMutations).mockResolvedValue({
       project: rendererProject,
       createdBeatIds: [],
@@ -906,34 +869,17 @@ describe('initCreativeStudioBridge', () => {
       ok: true,
       data: { projectId: 'project_1', projectRevision: 7, createdBeatIds: [], createdShotIds: [] },
     });
-    await expect(
-      registeredHandler('setMatchTo')({ projectId: 'project_1', expectedRevision: 7, shotId: null } as never)
-    ).resolves.toEqual({
-      ok: true,
-      data: { projectId: 'project_1', projectRevision: 7, createdBeatIds: [], createdShotIds: [] },
-    });
     expect(service.detachBedAudio).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedRevision: 6,
       assetId: 'bed_1',
     });
-    expect(service.applyMutations).toHaveBeenNthCalledWith(
-      1,
+    expect(service.applyMutations).toHaveBeenCalledWith(
       {
         schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: 'project_1',
         expectedRevision: 7,
         operations: [{ kind: 'set_bed', assetId: 'bed_1' }],
-      },
-      { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
-    );
-    expect(service.applyMutations).toHaveBeenNthCalledWith(
-      2,
-      {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
-        projectId: 'project_1',
-        expectedRevision: 7,
-        operations: [{ kind: 'set_match_to', shotId: null }],
       },
       { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
     );

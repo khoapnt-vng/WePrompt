@@ -1225,7 +1225,8 @@
         "submissionUnknown": "The submission outcome is unknown. Review the duplicate-charge warning before retrying.",
         "downloadFailed": "Generation completed, but the output could not be downloaded.",
         "unsupported": "This provider does not support the requested operation.",
-        "unknown": "The generation job failed for an unknown reason."
+        "unknown": "The generation job failed for an unknown reason.",
+        "seedStillVariationGrid": "The generated seed still contains a multi-panel variation grid and cannot be used for video."
       }
     },
     "preview": {
@@ -1506,7 +1507,7 @@
         "reorderFailed": "Beat order was not changed.",
         "liftBeat": "Move to Bin",
         "liftConfirmTitle": "Move {{title}} to the Bin?",
-        "liftConfirmContent": "This Beat leaves the film. All authored work and Takes are kept in the Bin.",
+        "liftConfirmContent": "This Beat leaves the film. All authored and paid work is kept in the Bin.",
         "liftUnavailable": "Refresh the current workspace status before lifting this Beat.",
         "liftDirtyDraft": "Save or reset local edits before lifting this Beat.",
         "liftSucceeded": "Beat moved to the Bin.",
@@ -1536,8 +1537,6 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Shot {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Slate · No coverage",
           "noMedia": "No film preview is available.",
-          "awaitingTakeOne": "Beat {{beatPosition}} · Shot {{shotPosition}} needs a Take chosen before the film can play.",
-          "awaitingTakeMany": "{{count}} Shots need a Take chosen before the film can play.",
           "mediaError": "This preview could not be loaded.",
           "play": "Play film",
           "pause": "Pause film",
@@ -1548,7 +1547,9 @@
           "previousJoin": "Previous join",
           "nextJoin": "Next join",
           "loopJoin": "Loop join",
-          "buffering": "Loading preview frame"
+          "buffering": "Loading preview frame",
+          "awaitingPictureOne": "Beat {{beatPosition}}, Shot {{shotPosition}} has no current picture yet.",
+          "awaitingPictureMany": "{{count}} Shots have no current picture yet."
         },
         "dragHandle": "Reorder {{title}} at position {{position}}",
         "moveEarlier": "Move {{title}} earlier",
@@ -1585,7 +1586,7 @@
           "refreshFailed": "Export assets could not be refreshed.",
           "catalogUnavailable": "Refresh the export assets before creating or opening an export.",
           "editorFolderTitle": "Editor folder",
-          "editorFolderDescription": "Selected video Takes, target slates, timeline data and the optional bed in film order.",
+          "editorFolderDescription": "Current Shot pictures, target slates, timeline data and the optional bed in film order.",
           "createEditorFolder": "Create editor folder",
           "stillTitle": "Still",
           "stillDescription": "Copy one active Shot's current canonical cover.",
@@ -1661,8 +1662,7 @@
         "listLabel": "Ordered Bin items",
         "kind": {
           "beat": "Beat",
-          "shot": "Shot",
-          "take": "Take"
+          "shot": "Shot"
         },
         "reason": {
           "lifted": "Lifted",
@@ -1675,9 +1675,6 @@
         "shotCount": "{{count}} shots",
         "shotCount_one": "{{count}} shot",
         "shotCount_other": "{{count}} shots",
-        "takeCount": "{{count}} Takes",
-        "takeCount_one": "{{count}} Take",
-        "takeCount_other": "{{count}} Takes",
         "retainedWork": "Authored and generated work retained",
         "stale": "Downstream continuity is out of date",
         "coverAlt": "{{kind}} preview for {{title}}",
@@ -1690,12 +1687,7 @@
           "beforeBeat": "Before Beat {{position}}",
           "beforeShot": "Before Shot {{position}}",
           "beat": "Restore Beat",
-          "shot": "Restore Shot",
-          "take": "Restore Take"
-        },
-        "media": {
-          "image": "Image",
-          "video": "Video"
+          "shot": "Restore Shot"
         },
         "blocker": {
           "statusUnavailable": "Refresh the current workspace status before restoring this item.",
@@ -1765,7 +1757,6 @@
           "trimGuidance": "Edge · Trim · Free",
           "boundaryGuidance": "Boundary · Costs a re-render",
           "segmentState": {
-            "noTake": "No Take",
             "queued": "Queued",
             "nextUp": "Next up",
             "waitingOnShot": "Waiting on {{position}}",
@@ -1774,8 +1765,6 @@
             "renderingProgress": "Rendering · {{progress}}%",
             "renderingStill": "Rendering · Showing the still",
             "rendered": "Rendered",
-            "renderedOneTake": "Rendered · 1 Take",
-            "selectedTake": "{{count}} Takes · T{{take}} in the Cut",
             "untouched": "Untouched",
             "needsRerender": "Needs a re-render",
             "staleStillPlays": "Stale · Still plays",
@@ -1783,7 +1772,8 @@
             "neverDispatched": "Never dispatched",
             "shotKept": "Shot {{position}} · Kept",
             "statusPending": "Status unavailable",
-            "needsAttention": "Needs attention"
+            "needsAttention": "Needs attention",
+            "noPicture": "No picture"
           },
           "boundaryFrame": {
             "empty": "Boundary after Shot {{position}} · Waiting for continuity frame",
@@ -1835,54 +1825,27 @@
         "seeds": {
           "label": "Seed stills for Shot {{index}}",
           "title": "Seed stills",
-          "imageLabel": "Image Takes for Shot {{index}}",
-          "imageTitle": "Image Takes",
           "pending": "A seed still is required before video generation.",
           "latestDefault": "The latest eligible image is the current default.",
           "pinned": "A seed still is pinned.",
           "import": "Import seed still",
           "pin": "Pin as seed",
           "clearPin": "Clear seed pin",
-          "empty": "No seed stills yet."
-        },
-        "takes": {
-          "imageTakeLabel": "Shot {{shotIndex}}, image Take {{takeIndex}}",
-          "videoTakeLabel": "Shot {{shotIndex}}, video Take {{takeIndex}}",
-          "previewAlt": "{{label}} preview",
-          "videoPreview": "Play {{label}}",
-          "selected": "Selected Take",
-          "effectiveSeed": "Current seed",
-          "pinnedSeed": "Pinned seed",
-          "binReason": {
-            "lifted": "Lifted",
-            "alternate": "Alternate"
-          },
-          "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s source",
-          "select": "Select Take",
-          "trimIncompatible": "The current trims do not fit this Take.",
-          "park": "Move to Bin",
-          "parkConfirmTitle": "Move this Take to the Bin?",
-          "parkConfirmBody": "The Take stays with the project and moves out of active choices.",
-          "addAlternate": "Move to alternates",
-          "alternateConfirmTitle": "Move this Take to alternates?",
-          "alternateConfirmBody": "The Take stays with the project as an alternate.",
-          "restore": "Restore Take",
-          "unavailable": "This Take cannot be previewed safely.",
-          "videoLabel": "Video Takes for Shot {{index}}",
-          "videoTitle": "Video Takes",
-          "empty": "No video Takes yet."
+          "empty": "No seed stills yet.",
+          "stillLabel": "Seed still {{stillIndex}} for Shot {{shotIndex}}",
+          "previewAlt": "Preview · {{label}}",
+          "effective": "Current seed",
+          "pinnedBadge": "Pinned"
         },
         "generation": {
           "gateLocked": "Finish or close the current generation review before opening another.",
           "generateSeed": "Review seed generation",
-          "renderVideo": "Review video generation",
+          "renderVideo": "Generate again",
           "choiceLabel": "Beat {{beatIndex}}, Shot {{shotIndex}} · {{purpose}}",
-          "countForChoice": "Generation count for {{choice}}",
           "referenceForChoice": "Brief reference for {{choice}}",
           "noReference": "No Brief reference",
           "purpose": {
-            "seedStill": "seed still",
-            "videoTake": "video Take"
+            "seedStill": "seed still"
           },
           "reviewUnavailable": "Save or reset every generation-affecting edit and refresh the current workspace before reviewing generation."
         },
@@ -1903,17 +1866,12 @@
         "blocker": {
           "statusUnavailable": "Current lift eligibility is unavailable. Refresh the workspace before trying again.",
           "unsavedDrafts": "Save or reset the unsaved Beat and Shot edits first.",
-          "currentMatchTo": "This Shot is the current Match To reference.",
           "ownNonterminalJob": "This item has generation work in progress.",
           "ownPendingFrame": "This item has a continuity-frame extraction in progress.",
           "downstreamNonterminalJob": "Downstream generation is still using this item.",
           "downstreamPendingFrame": "A downstream continuity-frame extraction is still using this item.",
           "waitingAuthorizationDependency": "An authorized waiting item still depends on this item.",
           "boundNonterminalRequest": "This item belongs to a generation request that is still active.",
-          "currentSelectedTake": "This is the currently selected Take.",
-          "currentSeedStill": "This is the current seed still.",
-          "nonterminalConditioningUse": "Generation in progress is using this Take for conditioning.",
-          "takeBinCapacityReached": "The Take Bin is full.",
           "beatShotCapacityReached": "This Beat already has the maximum number of active Shots."
         },
         "recovery": {
@@ -1922,15 +1880,12 @@
           "reason": {
             "upstream_running": "Waiting for upstream generation to finish.",
             "choose_seed": "Choose an eligible seed still to continue the existing authorization.",
-            "choose_take": "Choose an eligible video Take to continue the existing authorization.",
             "conditioning_frame": "Preparing the continuity frame.",
             "conditioning_failed": "Continuity-frame preparation failed.",
             "dependency_failed": "An upstream dependency failed.",
             "cancelled": "This waiting item was cancelled."
           },
           "freshQuoteRequired": "A fresh reviewed quote is required before trying this generation again.",
-          "chooseImage": "Use Beat {{beatIndex}}, Shot {{shotIndex}}, image Take {{takeIndex}}",
-          "chooseVideo": "Use Beat {{beatIndex}}, Shot {{shotIndex}}, video Take {{takeIndex}}",
           "retryFree": "Retry continuity frame (free)",
           "cancelWaiting": "Cancel waiting item",
           "cancelTitle": "Cancel this waiting item?",
@@ -1941,7 +1896,7 @@
         "preview": {
           "label": "Beat preview",
           "noMedia": "Beat preview unavailable",
-          "mediaError": "The selected Take could not be previewed.",
+          "mediaError": "The current picture could not be previewed.",
           "videoLabel": "Shot {{position}} video · {{line}}",
           "slateLabel": "Shot {{position}} planning slate · {{line}}",
           "slate": "Planning slate",
@@ -1955,11 +1910,19 @@
           "nextJoin": "Next join",
           "loopJoin": "Loop nearest join",
           "keyboardGuidance": "Space play · Arrows seek · [ ] joins · L loop"
+        },
+        "picture": {
+          "title": "Current picture",
+          "label": "Current picture for Shot {{index}}",
+          "empty": "Nothing rendered yet",
+          "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} seconds source",
+          "unavailable": "Current picture unavailable",
+          "videoPreview": "Player · {{label}}"
         }
       },
       "library": {
         "title": "Creative Studio",
-        "subtitle": "Plan stories as beats and shots, then review every generated take.",
+        "subtitle": "Plan stories as Beats and Shots, then review every current picture.",
         "loading": "Loading projects…",
         "empty": "Describe a new project to begin.",
         "sectionLabel": "Projects",
@@ -1981,13 +1944,10 @@
         "shotCount": "{{count}} shots",
         "shotCount_one": "{{count}} shot",
         "shotCount_other": "{{count}} shots",
-        "selectedTakeCount": "{{count}} selected takes",
-        "selectedTakeCount_one": "{{count}} selected take",
-        "selectedTakeCount_other": "{{count}} selected takes",
         "updated": "Updated {{relative}}",
         "status": {
-          "complete": "All shots have selected takes",
-          "partial": "Some shots have selected takes",
+          "complete": "All Shots have current pictures",
+          "partial": "Some Shots have current pictures",
           "spineOnly": "Story spine"
         },
         "composer": {
@@ -1998,7 +1958,10 @@
           "durationGuess": "{{seconds}} sec",
           "submit": "Create project",
           "empty": "Describe the project before creating it."
-        }
+        },
+        "pictureCount": "{{count}} pictures ready",
+        "pictureCount_one": "{{count}} picture ready",
+        "pictureCount_other": "{{count}} pictures ready"
       },
       "proposals": {
         "title": "Director proposal",
@@ -2030,13 +1993,12 @@
         "fixedReason": {
           "owned_asset": "It owns media.",
           "owned_job": "It owns generation work.",
-          "selected_take": "It has a selected Take.",
           "seed_still": "It has a pinned seed still.",
           "conditioning_frame": "It owns a continuity frame.",
           "conditioning_input": "A generation request uses it as conditioning input.",
-          "match_to": "It is the project's Match To reference.",
           "narration": "It has authored narration.",
-          "on_screen_text": "It has authored on-screen text."
+          "on_screen_text": "It has authored on-screen text.",
+          "video_asset": "It has a current picture."
         },
         "rederiveTitle": "Proposed line re-derivation",
         "rederiveShot": "Shot",
@@ -2102,14 +2064,8 @@
         },
         "shotState": {
           "draft": "Draft",
-          "seed_ready": "Seed ready",
-          "takes_available": "Takes available",
-          "selected_take": "Selected take"
+          "seed_ready": "Seed ready"
         },
-        "takeCount": "{{count}} takes",
-        "takeCount_one": "{{count}} take",
-        "takeCount_other": "{{count}} takes",
-        "generationChoices": "Generation counts and optional seed references",
         "undo": "Undo: {{label}}",
         "undoLabel": {
           "edit_project": "project settings",
@@ -2134,14 +2090,9 @@
           "redetach_line": "detach line",
           "rederive_line": "rederive line",
           "restore_line": "restore line",
-          "park_take": "park take",
-          "add_alternate_take": "add alternate take",
-          "restore_take": "restore take",
           "reorder_bin": "reorder Bin",
-          "select_take": "select take",
           "set_routes": "generation routes",
           "set_spend_policy": "spend policy",
-          "set_match_to": "match-to shot",
           "set_bed": "audio bed",
           "mutation_batch": "authoring changes",
           "unknown": "last authoring change"
@@ -2155,7 +2106,6 @@
         "cascadeReason": {
           "upstream_running": "Waiting for the upstream generation.",
           "choose_seed": "Choose the authorized seed to continue without another cost confirmation.",
-          "choose_take": "Choose the authorized take to continue without another cost confirmation.",
           "conditioning_frame": "Preparing the predecessor frame.",
           "conditioning_failed": "The predecessor frame failed. Retry for free, choose another eligible primary, or cancel.",
           "dependency_failed": "The authorized dependency failed.",
@@ -2201,13 +2151,12 @@
         },
         "purpose": {
           "seed_still": "Seed still",
-          "video_take": "Video take"
+          "video_take": "Video"
         },
         "route": "{{provider}} · {{model}} · {{choice}}",
         "duration": "{{seconds}} seconds",
         "durationNotApplicable": "Still image",
-        "rowCost": "{{count}} × {{each}} · {{cost}} total",
-        "waitsForTakeSelection": "Waits for your take choice",
+        "rowCost": "{{cost}} total",
         "budget": {
           "no_policy": "No project spend cap is set.",
           "within_cap": "Within the project spend cap.",
@@ -2233,7 +2182,7 @@
             "invalidDependency": "The continuation dependency is no longer valid. Refresh the project and prepare again.",
             "invalidPrepareRequest": "The generation selection could not be prepared safely. Review it and prepare again.",
             "invalidReference": "A selected reference is no longer valid for this generation. Choose another reference and prepare again.",
-            "missingConditioning": "A video take has no eligible seed or predecessor frame. Add or select the required image, then prepare again.",
+            "missingConditioning": "A video has no eligible seed or predecessor frame. Add the required image, then prepare again.",
             "unsafeTotal": "The estimate total could not be represented safely. Reduce the selection; nothing was submitted."
           }
         }

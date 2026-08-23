@@ -904,10 +904,20 @@
       "importError": "Die Referenz konnte nicht hinzugefügt werden. Versuche es erneut."
     },
     "workspace": {
+      "library": {
+        "subtitle": "Plane Geschichten als Beats und Shots und prüfe dann das aktuelle Bild jedes Shots.",
+        "pictureCount": "{{count}} Bilder bereit",
+        "pictureCount_one": "{{count}} Bild bereit",
+        "pictureCount_other": "{{count}} Bilder bereit",
+        "status": {
+          "complete": "Alle Shots haben ein aktuelles Bild",
+          "partial": "Einige Shots haben ein aktuelles Bild"
+        }
+      },
       "board": {
         "liftBeat": "In den Papierkorb verschieben",
         "liftConfirmTitle": "{{title}} in den Papierkorb verschieben?",
-        "liftConfirmContent": "Dieser Beat wird aus dem Film entfernt. Alle erstellten und bezahlten Inhalte sowie alle Takes bleiben im Papierkorb erhalten."
+        "liftConfirmContent": "Dieser Beat wird aus dem Film entfernt. Alle erstellten und bezahlten Inhalte bleiben im Papierkorb erhalten."
       },
       "cut": {
         "preview": {
@@ -918,8 +928,8 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Shot {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Platzhalter · Keine Abdeckung",
           "noMedia": "Keine Filmvorschau verfügbar.",
-          "awaitingTakeOne": "Für Beat {{beatPosition}} · Shot {{shotPosition}} muss ein Take gewählt werden, bevor der Film abgespielt werden kann.",
-          "awaitingTakeMany": "Für {{count}} Shots muss ein Take gewählt werden, bevor der Film abgespielt werden kann.",
+          "awaitingPictureOne": "Beat {{beatPosition}}, Shot {{shotPosition}} hat noch kein aktuelles Bild.",
+          "awaitingPictureMany": "{{count}} Shots haben noch kein aktuelles Bild.",
           "mediaError": "Diese Vorschau konnte nicht geladen werden.",
           "play": "Film abspielen",
           "pause": "Film pausieren",
@@ -931,6 +941,9 @@
           "nextJoin": "Nächster Schnitt",
           "loopJoin": "Schnitt wiederholen",
           "buffering": "Vorschaubild wird geladen"
+        },
+        "exports": {
+          "editorFolderDescription": "Aktuelle Shot-Bilder, Zielplatzhalter, Timeline-Daten und das optionale Audiobett in Filmreihenfolge."
         },
         "film": {
           "under": "{{clock}} unter Ziel",
@@ -945,11 +958,28 @@
           "openBeat": "Beat ohne Abdeckung öffnen"
         }
       },
+      "proposals": {
+        "fixedReason": {
+          "video_asset": "Dieser Shot hat ein aktuelles Bild."
+        }
+      },
       "beatPanel": {
-        "takes": {
-          "park": "In den Papierkorb verschieben",
-          "parkConfirmTitle": "Diesen Take in den Papierkorb verschieben?",
-          "parkConfirmBody": "Der Take bleibt im Projekt erhalten und wird aus den aktiven Auswahlmöglichkeiten entfernt."
+        "seeds": {
+          "stillLabel": "Seed-Standbild {{stillIndex}} für Shot {{shotIndex}}",
+          "previewAlt": "Vorschau · {{label}}",
+          "effective": "Aktueller Seed",
+          "pinnedBadge": "Angeheftet"
+        },
+        "picture": {
+          "title": "Aktuelles Bild",
+          "label": "Aktuelles Bild für Shot {{index}}",
+          "empty": "Noch nichts gerendert",
+          "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} Sekunden Quelle",
+          "unavailable": "Aktuelles Bild nicht verfügbar",
+          "videoPreview": "Player · {{label}}"
+        },
+        "generation": {
+          "renderVideo": "Erneut generieren"
         },
         "lift": {
           "shot": "In den Papierkorb verschieben",
@@ -996,7 +1026,7 @@
           "trimGuidance": "Kante · Trimmen · Kostenlos",
           "boundaryGuidance": "Grenze · Erfordert neues Rendern",
           "segmentState": {
-            "noTake": "Kein Take",
+            "noPicture": "Kein Bild",
             "queued": "In Warteschlange",
             "nextUp": "Als Nächstes",
             "waitingOnShot": "Wartet auf Shot {{position}}",
@@ -1005,8 +1035,6 @@
             "renderingProgress": "Wird gerendert · {{progress}} %",
             "renderingStill": "Wird gerendert · Standbild wird angezeigt",
             "rendered": "Gerendert",
-            "renderedOneTake": "Gerendert · 1 Take",
-            "selectedTake": "{{count}} Takes · T{{take}} im Schnitt",
             "untouched": "Unverändert",
             "needsRerender": "Muss neu gerendert werden",
             "staleStillPlays": "Veraltet · Weiterhin abspielbar",
@@ -1029,7 +1057,7 @@
         "preview": {
           "label": "Beat-Vorschau",
           "noMedia": "Beat-Vorschau nicht verfügbar",
-          "mediaError": "Der ausgewählte Take konnte nicht angezeigt werden.",
+          "mediaError": "Das aktuelle Bild konnte nicht angezeigt werden.",
           "videoLabel": "Video von Shot {{position}} · {{line}}",
           "slateLabel": "Planungsplatzhalter von Shot {{position}} · {{line}}",
           "slate": "Planungsplatzhalter",
@@ -1564,6 +1592,7 @@
         "submissionUnknown": "Das Übermittlungsergebnis ist unbekannt. Prüfe vor einer Wiederholung die Warnung vor einer Doppelbelastung.",
         "downloadFailed": "Die Generierung wurde abgeschlossen, aber die Ausgabe konnte nicht heruntergeladen werden.",
         "unsupported": "Der Anbieter unterstützt den angeforderten Vorgang nicht.",
+        "seedStillVariationGrid": "Das generierte Seed-Standbild enthält ein mehrteiliges Variationsraster und kann nicht für Videos verwendet werden.",
         "unknown": "Der Generierungsauftrag ist aus unbekanntem Grund fehlgeschlagen."
       }
     },

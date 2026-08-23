@@ -53,8 +53,8 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
   const posterSource = project.poster ? createManagedStudioAssetUrl(project.id, project.poster.assetId) : null;
   const [failedPosterSource, setFailedPosterSource] = useState<string | null>(null);
   const showPlaceholder = posterSource === null || failedPosterSource === posterSource;
-  const complete = project.shotCount > 0 && project.selectedTakeCount >= project.shotCount;
-  const partial = !complete && project.selectedTakeCount > 0;
+  const complete = project.shotCount > 0 && project.pictureCount >= project.shotCount;
+  const partial = !complete && project.pictureCount > 0;
   const statusKey = complete
     ? 'conversation.creativeStudio.workspace.library.status.complete'
     : partial
@@ -114,8 +114,8 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
         <span>{t('conversation.creativeStudio.workspace.library.shotCount', { count: project.shotCount })}</span>
         {' · '}
         <span>
-          {t('conversation.creativeStudio.workspace.library.selectedTakeCount', {
-            count: project.selectedTakeCount,
+          {t('conversation.creativeStudio.workspace.library.pictureCount', {
+            count: project.pictureCount,
           })}
         </span>
       </p>

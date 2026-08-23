@@ -48,14 +48,15 @@ const makeShot = (id: string, chainBreak: StudioShot['chainBreak']): StudioShot 
   trimOutSeconds: null,
   chainBreak,
   seedStillId: null,
-  selectedTakeId: null,
+  videoAssetId: null,
+  supersededVideoAssetIds: [],
   assetIds: [],
   jobIds: [],
 });
 
 const makeProject = (): StudioProjectV2 => {
   const project: StudioProjectV2 = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: 1,
     id: 'project_1',
     name: 'Editor package',
@@ -94,7 +95,6 @@ const makeProject = (): StudioProjectV2 => {
     },
     bin: [],
     bedAssetId: 'bed_1',
-    matchToShotId: null,
     spendPolicy: null,
     spendAuthorizations: [],
     frameExtractions: {},
@@ -164,7 +164,7 @@ const makeProject = (): StudioProjectV2 => {
       createdAt: NOW,
     };
     shot.seedStillId = seedId;
-    shot.selectedTakeId = assetId;
+    shot.videoAssetId = assetId;
     shot.assetIds = [seedId, assetId];
     shot.jobIds = [`job_${index + 1}`];
   }
@@ -194,7 +194,6 @@ const makeProject = (): StudioProjectV2 => {
     providerBindings: items.map((item) => ({ itemId: item.id, provider })),
     idempotencyKeys: items.map((item, index) => ({
       itemId: item.id,
-      generationIndex: 0,
       key: `key_${index + 1}`,
     })),
   };
@@ -224,10 +223,9 @@ const makeProject = (): StudioProjectV2 => {
       purpose: 'video_take',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
-      generationIndex: 0,
       requestPlan: item.requestPlan,
       requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
-      spendReceipt: createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId, generationIndex: 0 }),
+      spendReceipt: createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId }),
       outputAssetIdsByRole: { primary: assetId, poster: null },
     };
     project.jobs[jobId] = job;
@@ -329,12 +327,12 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
     };
     authorization.baseItems.push(item);
     authorization.providerBindings.push({ itemId: item.id, provider });
-    authorization.idempotencyKeys.push({ itemId: item.id, generationIndex: 0, key: `key_${index}` });
+    authorization.idempotencyKeys.push({ itemId: item.id, key: `key_${index}` });
 
     project.shots[shotId] = {
       ...makeShot(shotId, 'hard_cut'),
       seedStillId: seedId,
-      selectedTakeId: assetId,
+      videoAssetId: assetId,
       assetIds: [seedId, assetId],
       jobIds: [jobId],
     };
@@ -393,10 +391,9 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
       purpose: 'video_take',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
-      generationIndex: 0,
       requestPlan: item.requestPlan,
       requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
-      spendReceipt: createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId, generationIndex: 0 }),
+      spendReceipt: createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId }),
       outputAssetIdsByRole: { primary: assetId, poster: null },
     };
   }
@@ -431,7 +428,7 @@ describe('composeStudioEditorFolderV2', () => {
           {
             kind: 'shot',
             shotId: 'shot_1',
-            takeAssetId: 'take_1',
+            videoAssetId: 'take_1',
             relativePath: 'media/shot-001.mp4',
             timelineStartSeconds: 0,
             sourceInSeconds: 1,
@@ -442,7 +439,7 @@ describe('composeStudioEditorFolderV2', () => {
           {
             kind: 'shot',
             shotId: 'shot_2',
-            takeAssetId: 'take_2',
+            videoAssetId: 'take_2',
             relativePath: 'media/shot-002.mp4',
             timelineStartSeconds: 7,
             sourceInSeconds: 0,
@@ -540,23 +537,45 @@ describe('composeStudioEditorFolderV2', () => {
     }
   });
 
-  it('refuses zero-selected and partially selected covered beats instead of substituting slates', () => {
-    for (const selectedCount of [0, 1]) {
+  it('refuses covered beats with zero or only some pictures instead of substituting slates', () => {
+    for (const pictureCount of [0, 1]) {
       const project = makeProject();
-      for (let index = selectedCount; index < 2; index += 1) {
-        project.shots[`shot_${index + 1}`]!.selectedTakeId = null;
-        project.shots[`shot_${index + 1}`]!.trimInSeconds = null;
-        project.shots[`shot_${index + 1}`]!.trimOutSeconds = null;
+      for (let index = pictureCount; index < 2; index += 1) {
+        const shotId = `shot_${index + 1}`;
+        const assetId = `take_${index + 1}`;
+        const jobId = `job_${index + 1}`;
+        const shot = project.shots[shotId]!;
+        shot.videoAssetId = null;
+        shot.assetIds = shot.assetIds.filter((id) => id !== assetId);
+        shot.jobIds = [];
+        shot.trimInSeconds = null;
+        shot.trimOutSeconds = null;
+        delete project.assets[assetId];
+        delete project.jobs[jobId];
       }
-      const selectedIds = Array.from({ length: selectedCount }, (_, index) => `take_${index + 1}`);
+      const authorization = project.spendAuthorizations[0]!;
+      authorization.baseItems = authorization.baseItems.filter((item) => project.shots[item.shotId]!.videoAssetId);
+      authorization.providerBindings = authorization.providerBindings.filter(({ itemId }) =>
+        authorization.baseItems.some((item) => item.id === itemId)
+      );
+      authorization.idempotencyKeys = authorization.idempotencyKeys.filter(({ itemId }) =>
+        authorization.baseItems.some((item) => item.id === itemId)
+      );
+      if (authorization.baseItems.length === 0) project.spendAuthorizations = [];
+      else {
+        const totals = calculateStudioQuoteTotals(authorization.baseItems)!;
+        authorization.lowerMinorUnits = totals.lowerMinorUnits;
+        authorization.upperMinorUnits = totals.upperMinorUnits;
+      }
+      const pictureIds = Array.from({ length: pictureCount }, (_, index) => `take_${index + 1}`);
       expectCode(
-        () => composeStudioEditorFolderV2(project, proofsFor(project, ...selectedIds, 'bed_1')),
+        () => composeStudioEditorFolderV2(project, proofsFor(project, ...pictureIds, 'bed_1')),
         'coverage_incomplete'
       );
     }
   });
 
-  it('refuses pending empty-beat duration, missing/replaced proof, extra proof, and a binned selected take', () => {
+  it('refuses pending empty-beat duration, invalid proof sets, and a noncanonical picture pointer', () => {
     const pending = makeProject();
     pending.beats.beat_2!.targetSeconds = null;
     expectCode(
@@ -575,10 +594,10 @@ describe('composeStudioEditorFolderV2', () => {
     ];
     expectCode(() => composeStudioEditorFolderV2(missing, extra), 'invalid_media');
 
-    const binned = makeProject();
-    binned.bin.push({ kind: 'take', assetId: 'take_1', reason: 'lifted' });
+    const malformed = makeProject();
+    malformed.shots.shot_1!.videoAssetId = 'seed_1';
     expectCode(
-      () => composeStudioEditorFolderV2(binned, proofsFor(binned, 'take_1', 'take_2', 'bed_1')),
+      () => composeStudioEditorFolderV2(malformed, proofsFor(malformed, 'take_1', 'take_2', 'bed_1')),
       'invalid_project'
     );
   });

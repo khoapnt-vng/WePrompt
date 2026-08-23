@@ -31,7 +31,6 @@ const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
 ]);
 
 export type StudioInboundShotReferenceKindV2 =
-  | 'current_match_to'
   | 'own_nonterminal_job'
   | 'own_pending_frame'
   | 'downstream_nonterminal_job'
@@ -48,7 +47,6 @@ export type StudioInboundShotReferenceV2 = {
 type ActiveShotLocation = { beatId: string; shotIndex: number };
 
 const REFERENCE_KIND_ORDER: readonly StudioInboundShotReferenceKindV2[] = [
-  'current_match_to',
   'own_nonterminal_job',
   'own_pending_frame',
   'downstream_nonterminal_job',
@@ -73,17 +71,13 @@ const activeShotLocations = (project: StudioProjectV2): Map<string, ActiveShotLo
   return result;
 };
 
-const isBinnedTake = (project: StudioProjectV2, assetId: string): boolean =>
-  project.bin.some((item) => item.kind === 'take' && item.assetId === assetId);
-
 const selectedVideoTake = (project: StudioProjectV2, shot: StudioShot): StudioAssetV2 | null => {
-  if (shot.selectedTakeId === null || isBinnedTake(project, shot.selectedTakeId)) return null;
-  const asset = ownValue(project.assets, shot.selectedTakeId);
+  if (shot.videoAssetId === null) return null;
+  const asset = ownValue(project.assets, shot.videoAssetId);
   return asset?.mediaKind === 'video' && isCanonicalStudioGeneratedTakeV2(asset, project.id, shot) ? asset : null;
 };
 
 const eligibleSeed = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
-  if (isBinnedTake(project, assetId)) return null;
   const asset = ownValue(project.assets, assetId);
   return asset?.id === assetId &&
     asset.projectId === project.id &&
@@ -146,14 +140,6 @@ const currentReferenceInput = (project: StudioProjectV2, job: StudioJobV2) => {
     : null;
 };
 
-const currentMatchTo = (project: StudioProjectV2) => {
-  if (project.matchToShotId === null) return null;
-  const matchShot = ownValue(project.shots, project.matchToShotId);
-  if (matchShot === undefined) return null;
-  const owner = Object.values(project.beats).find((beat) => beat.shotOrder.includes(matchShot.id));
-  return owner === undefined ? null : { look: owner.look, line: matchShot.line };
-};
-
 const currentRequestTemplate = (project: StudioProjectV2, shot: StudioShot, job: StudioJobV2) => {
   const owner = Object.values(project.beats).find((beat) => beat.shotOrder.includes(shot.id));
   if (owner === undefined) return null;
@@ -164,7 +150,6 @@ const currentRequestTemplate = (project: StudioProjectV2, shot: StudioShot, job:
       rules: project.rules,
       look: owner.look,
       line: shot.line,
-      matchTo: currentMatchTo(project),
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
       durationSeconds: shot.durationSeconds,
@@ -205,7 +190,7 @@ const currentConditioningInput = (
   try {
     extractionId = createStudioFrameExtractionId({
       shotId: predecessor.id,
-      takeAssetId: endpoint.take.id,
+      videoAssetId: endpoint.take.id,
       endpointSeconds: endpoint.endpointSeconds,
     });
   } catch {
@@ -217,7 +202,7 @@ const currentConditioningInput = (
     extraction.status !== 'ready' ||
     extraction.frameAssetId === null ||
     extraction.shotId !== predecessor.id ||
-    extraction.takeAssetId !== endpoint.take.id ||
+    extraction.videoAssetId !== endpoint.take.id ||
     !Object.is(extraction.endpointSeconds, endpoint.endpointSeconds)
   ) {
     return null;
@@ -333,9 +318,6 @@ export const deriveStudioInboundShotReferencesV2 = (
     }
   };
 
-  if (project.matchToShotId !== null && targets.has(project.matchToShotId)) {
-    add(project.matchToShotId, null, 'current_match_to');
-  }
   for (const job of Object.values(project.jobs)) {
     if (!NONTERMINAL_JOB_STATUSES.has(job.status)) continue;
     if (targets.has(job.shotId)) {

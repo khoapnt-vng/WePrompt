@@ -50,7 +50,10 @@ import { createCreativeStudioStore, type CreativeStudioStore } from '@process/se
 import type { RemoteMediaBudget } from '@process/services/remote-media';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
+const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==',
+  'base64'
+);
 const mp4 = Buffer.from('000000186674797069736f6d00000000', 'hex');
 const REMOTE_POLL_DEADLINE_MS = 30 * 60_000;
 const provider: IProvider = {
@@ -124,10 +127,7 @@ type V2Harness = {
 
 type V2HarnessOptions = {
   purpose?: StudioJobV2['purpose'];
-  generationCount?: number;
   requestPlan?: StudioGenerationRequestPlan;
-  jobIds?: string[];
-  idempotencyKeys?: string[];
   sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
   jitterMs?: StudioJobManagerDeps['jitterMs'] | null;
   now?: () => string;
@@ -138,7 +138,7 @@ type V2HarnessOptions = {
   outputDownloader?: StudioJobManagerDeps['outputDownloader'];
   decorateMediaStore?: (mediaStore: StudioMediaStore) => StudioMediaStore;
   probeVideoDurationSecondsV2?: StudioMediaStoreDeps['probeVideoDurationSecondsV2'];
-  jobOverrides?: (generationIndex: number) => Partial<StudioJobV2>;
+  jobOverrides?: () => Partial<StudioJobV2>;
 };
 
 const v2Harnesses: V2Harness[] = [];
@@ -165,7 +165,6 @@ const createV2Harness = async (
   const fixedNow = options.now ?? (() => '2026-08-17T12:00:02.000Z');
   const store = createCreativeStudioStore({ rootDir, fs: fsWithoutDiskBarriers, now: fixedNow });
   const purpose = options.purpose ?? 'seed_still';
-  const generationCount = options.generationCount ?? 1;
   const providerBinding: StudioProviderRef = {
     providerId: provider.id,
     adapterId: adapter.id,
@@ -224,7 +223,8 @@ const createV2Harness = async (
         trimOutSeconds: null,
         chainBreak: 'none',
         seedStillId: null,
-        selectedTakeId: null,
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
         assetIds: [],
         jobIds: [],
       },
@@ -275,16 +275,15 @@ const createV2Harness = async (
     shotId: 'shot_1',
     purpose,
     routeId,
-    generationCount,
+    generationCount: 1,
     requestPlan,
     rateUnit: purpose === 'seed_still' ? 'generation' : 'second',
     rateMinorUnits: 3,
   };
   const totals = calculateStudioQuoteTotals([item]);
   if (totals === null) throw new Error('invalid V2 quote fixture');
-  const jobIds = options.jobIds ?? Array.from({ length: generationCount }, (_, index) => `job_v2_${index + 1}`);
-  const idempotencyKeys =
-    options.idempotencyKeys ?? Array.from({ length: generationCount }, (_, index) => `key_v2_${index + 1}`);
+  const jobId = 'job_v2_1';
+  const idempotencyKey = 'key_v2_1';
   const authorization: StudioSpendAuthorization = {
     id: 'authorization_v2',
     projectId: quotedProject.id,
@@ -299,20 +298,16 @@ const createV2Harness = async (
     expiresAt: '2026-08-17T12:05:00.000Z',
     confirmedAt: '2026-08-17T12:00:01.000Z',
     providerBindings: [{ itemId: item.id, provider: providerBinding }],
-    idempotencyKeys: idempotencyKeys.map((key, generationIndex) => ({
-      itemId: item.id,
-      generationIndex,
-      key,
-    })),
+    idempotencyKeys: [{ itemId: item.id, key: idempotencyKey }],
   };
   const timestamp = quotedProject.updatedAt;
-  const jobs = jobIds.map<StudioJobV2>((id, generationIndex) => ({
-    id,
+  const job: StudioJobV2 = {
+    id: jobId,
     projectId: quotedProject.id,
     shotId: 'shot_1',
     status: requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
     provider: providerBinding,
-    idempotencyKey: idempotencyKeys[generationIndex]!,
+    idempotencyKey,
     providerJobId: null,
     remoteStartedAt: null,
     cancellationPolicy: route.cancellationPolicy,
@@ -327,13 +322,13 @@ const createV2Harness = async (
     purpose,
     authorizationId: authorization.id,
     authorizationItemId: item.id,
-    generationIndex,
     requestPlan,
     requestSnapshot: requestPlan.kind === 'resolved' ? requestPlan.snapshot : null,
     spendReceipt: null,
     outputAssetIdsByRole: { primary: null, poster: null },
-    ...options.jobOverrides?.(generationIndex),
-  }));
+    ...options.jobOverrides?.(),
+  };
+  const jobs = [job];
   const project = await store.updateProjectV2(quotedProject.id, (current) => {
     current.spendAuthorizations = [authorization];
     current.jobs = Object.fromEntries(jobs.map((job) => [job.id, job]));
@@ -486,7 +481,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
             authorization: harness.authorization,
             itemId: harness.item.id,
             jobId: job.id,
-            generationIndex: job.generationIndex,
           }),
         })
       )
@@ -569,7 +563,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
             authorization: harness.authorization,
             itemId: harness.item.id,
             jobId: job.id,
-            generationIndex: job.generationIndex,
           }),
         })
       )
@@ -973,150 +966,33 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     }
   });
 
-  it('refuses a partial generation-item sibling set before resolver or provider work', async () => {
-    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
-    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
-      generationCount: 2,
-    });
-    const listGenerationRoutes = vi.spyOn(harness.providerResolver, 'listGenerationRoutes');
-
-    await expect(dispatchV2(harness, ['job_v2_1'])).rejects.toMatchObject({ code: 'invalid_request' });
-
-    expect(listGenerationRoutes).not.toHaveBeenCalled();
-    expect(submit).not.toHaveBeenCalled();
-    const loaded = await harness.store.getProjectV2(harness.project.id);
-    expect(loaded.status === 'supported' ? Object.values(loaded.project.jobs).map((job) => job.status) : null).toEqual([
-      'queued_local',
-      'queued_local',
-    ]);
-  });
-
-  it('resolves the complete item before either provider call and bills each generation exactly once', async () => {
+  it('resolves and bills the exact-one generation item exactly once', async () => {
     let harness!: V2Harness;
     let listGenerationRoutes!: ReturnType<typeof vi.spyOn>;
     const submit = vi.fn(async () => {
-      expect(listGenerationRoutes).toHaveBeenCalledTimes(2);
+      expect(listGenerationRoutes).toHaveBeenCalledOnce();
       return { kind: 'complete' as const, outputs: [] };
     });
-    harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
-      generationCount: 2,
-    });
+    harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
     listGenerationRoutes = vi.spyOn(harness.providerResolver, 'listGenerationRoutes');
     const before = structuredClone(harness.project);
 
     await expect(dispatchV2(harness)).resolves.toEqual([
       expect.objectContaining({ id: 'job_v2_1', status: 'queued_local', idempotencyKey: 'key_v2_1' }),
-      expect.objectContaining({ id: 'job_v2_2', status: 'queued_local', idempotencyKey: 'key_v2_2' }),
     ]);
-    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
     await expectV2Job(harness, { status: 'failed', error: { code: 'no_output' } }, 'job_v2_1');
-    await expectV2Job(harness, { status: 'failed', error: { code: 'no_output' } }, 'job_v2_2');
 
     const loaded = await harness.store.getProjectV2(harness.project.id);
     if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
     expect(loaded.project.spendAuthorizations).toEqual(before.spendAuthorizations);
-    expect(Object.keys(loaded.project.jobs)).toEqual(['job_v2_1', 'job_v2_2']);
+    expect(Object.keys(loaded.project.jobs)).toEqual(['job_v2_1']);
     expect(Object.values(loaded.project.jobs).map((job) => job.spendReceipt)).toEqual([
-      expect.objectContaining({ jobId: 'job_v2_1', generationIndex: 0, totalMinorUnits: 3 }),
-      expect.objectContaining({ jobId: 'job_v2_2', generationIndex: 1, totalMinorUnits: 3 }),
+      expect.objectContaining({ jobId: 'job_v2_1', generationCount: 1, totalMinorUnits: 3 }),
     ]);
     expect(submit.mock.calls.map(([request]) => request)).toEqual([
       expect.objectContaining({ prompt: 'A frozen seed prompt', idempotencyKey: 'key_v2_1' }),
-      expect.objectContaining({ prompt: 'A frozen seed prompt', idempotencyKey: 'key_v2_2' }),
     ]);
-  });
-
-  it('recovers a valid sibling after a route failure aborts its original dispatch wave', async () => {
-    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
-    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
-      generationCount: 2,
-    });
-    const catalog = {
-      routes: [harness.route],
-      diagnostics: [],
-      generationCatalogVersion: 'catalog_v2',
-    };
-    const listGenerationRoutes = vi
-      .spyOn(harness.providerResolver, 'listGenerationRoutes')
-      .mockResolvedValueOnce(catalog)
-      .mockRejectedValueOnce(new Error('catalog temporarily unavailable'));
-
-    await expect(dispatchV2(harness)).rejects.toMatchObject({ code: 'provider_error' });
-    await expectV2Job(harness, { status: 'queued_local', providerJobId: null }, 'job_v2_1');
-    await expectV2Job(
-      harness,
-      { status: 'needs_attention', providerJobId: null, error: { code: 'provider_unavailable' } },
-      'job_v2_2'
-    );
-    expect(submit).not.toHaveBeenCalled();
-
-    listGenerationRoutes.mockResolvedValue(catalog);
-    await harness.manager.resumePendingJobsV2([harness.project.id]);
-
-    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
-    expect(submit).toHaveBeenCalledWith(
-      expect.objectContaining({ idempotencyKey: 'key_v2_1' }),
-      expect.objectContaining({ id: provider.id }),
-      expect.anything()
-    );
-  });
-
-  it('lets two video generations reach the provider at once, because serialising them serialises every film', async () => {
-    let live = 0;
-    let peak = 0;
-    const releases: Array<() => void> = [];
-    const submit = vi.fn(async () => {
-      live += 1;
-      peak = Math.max(peak, live);
-      await new Promise<void>((resolve) => releases.push(resolve));
-      live -= 1;
-      return { kind: 'complete' as const, outputs: [] };
-    });
-    const harness = await createV2Harness(controllableAdapter('weprompt-media-gateway-v1', { submit }), {
-      purpose: 'video_take',
-      generationCount: 2,
-    });
-
-    const dispatched = dispatchV2(harness);
-    try {
-      await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
-    } finally {
-      for (const release of releases) release();
-      await dispatched.catch(() => undefined);
-    }
-
-    expect(peak).toBe(2);
-  });
-
-  it('recovers a video wave after a raw conditioning-media resolution failure aborts preparation', async () => {
-    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
-    let resolutionCount = 0;
-    let failSecondResolution = true;
-    const harness = await createV2Harness(controllableAdapter('weprompt-media-gateway-v1', { submit }), {
-      purpose: 'video_take',
-      generationCount: 2,
-      decorateMediaStore: (mediaStore) => ({
-        ...mediaStore,
-        resolveProviderInputV2: async (...args) => {
-          resolutionCount += 1;
-          if (failSecondResolution && resolutionCount === 2) throw new Error('media resolution failed');
-          return mediaStore.resolveProviderInputV2(...args);
-        },
-      }),
-    });
-
-    await expect(dispatchV2(harness)).rejects.toThrow('media resolution failed');
-    const interrupted = await harness.store.getProjectV2(harness.project.id);
-    expect(
-      interrupted.status === 'supported' ? Object.values(interrupted.project.jobs).map((job) => job.status) : null
-    ).toEqual(['queued_local', 'queued_local']);
-    expect(submit).not.toHaveBeenCalled();
-
-    failSecondResolution = false;
-    await harness.manager.resumePendingJobsV2([harness.project.id]);
-
-    await waitFor(() => expect(submit).toHaveBeenCalledTimes(2));
-    expect(submit.mock.calls.map(([request]) => request.idempotencyKey)).toEqual(['key_v2_1', 'key_v2_2']);
   });
 
   it('persists a fresh V2 remote identity, queued/running progress, and one billable terminal receipt', async () => {
@@ -1699,7 +1575,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       outputAssetIdsByRole: { primary: primaryId, poster: null },
       spendReceipt: { jobId: job.id, totalMinorUnits: 3 },
     });
-    expect(loaded.project.shots.shot_1).toMatchObject({ selectedTakeId: null, seedStillId: null });
+    expect(loaded.project.shots.shot_1).toMatchObject({ videoAssetId: null, seedStillId: null });
     expect(loaded.project.assets[primaryId!]).toMatchObject({
       shotId: 'shot_1',
       mediaKind: 'image',
@@ -1780,7 +1656,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     const takeAssetId = loaded.project.jobs.job_v2_1!.outputAssetIdsByRole.primary!;
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId,
+      videoAssetId: takeAssetId,
       endpointSeconds: 5,
     });
     const frameAssetId = 'frame_existing_recovery';
@@ -1791,7 +1667,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     const frameSha256 = createHash('sha256').update(png).digest('hex');
 
     await harness.store.updateProjectV2(harness.project.id, (project) => {
-      project.shots.shot_1!.selectedTakeId = takeAssetId;
       project.beats.beat_1!.shotOrder.push('shot_2');
       project.shots.shot_2 = {
         id: 'shot_2',
@@ -1805,7 +1680,8 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         trimOutSeconds: null,
         chainBreak: 'none',
         seedStillId: null,
-        selectedTakeId: null,
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
         assetIds: [],
         jobIds: ['job_existing_recovery'],
       };
@@ -1854,7 +1730,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         expiresAt: '2026-08-17T12:05:00.000Z',
         confirmedAt: '2026-08-17T12:00:01.000Z',
         providerBindings: [{ itemId: item.id, provider: harness.authorization.providerBindings[0]!.provider }],
-        idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: 'key_existing_recovery' }],
+        idempotencyKeys: [{ itemId: item.id, key: 'key_existing_recovery' }],
       };
       project.spendAuthorizations.push(authorization);
       project.jobs.job_existing_recovery = {
@@ -1878,7 +1754,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         purpose: 'video_take',
         authorizationId: authorization.id,
         authorizationItemId: item.id,
-        generationIndex: 0,
         requestPlan,
         requestSnapshot: null,
         spendReceipt: null,
@@ -1887,7 +1762,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       project.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId,
+        videoAssetId: takeAssetId,
         endpointSeconds: 5,
         frameAssetId: null,
         status: 'pending',
@@ -1924,7 +1799,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     vi.spyOn(harness.mediaStore, 'verifyConditioningFrameV2').mockResolvedValue({
       extractionId,
       shotId: 'shot_1',
-      takeAssetId,
+      videoAssetId: takeAssetId,
       endpointSeconds: 5,
       frameAssetId,
       byteSize: png.length,
@@ -2314,7 +2189,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       authorization: second.authorization,
       itemId: second.item.id,
       jobId: 'job_v2_1',
-      generationIndex: 0,
     });
     const receiptBearing = await second.store.updateProjectV2(second.project.id, (project) => {
       const job = project.jobs.job_v2_1!;
@@ -2640,66 +2514,14 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     await expect(
       harness.manager.retryJobV2({ projectId: parked.id, jobId: 'job_v2_1', expectedRevision: parked.revision })
     ).rejects.toMatchObject({ code: 'invalid_request' });
-
-    const siblings = await createV2Harness(controllableAdapter('weprompt-image-v1'), { generationCount: 2 });
-    const busy = await siblings.store.updateProjectV2(siblings.project.id, (project) => {
-      const job = project.jobs.job_v2_1!;
-      job.status = 'failed';
-      job.error = { code: 'provider_unavailable', messageKey: 'providerUnavailable' };
-      return project;
-    });
-    await expect(
-      siblings.manager.retryJobV2({ projectId: busy.id, jobId: 'job_v2_1', expectedRevision: busy.revision })
-    ).rejects.toMatchObject({ code: 'invalid_request' });
   });
 
-  it('resumes independent same-provider attempts for generation siblings without a false busy lock', async () => {
-    const poll = vi.fn(
-      async (): Promise<ProviderJobSnapshot> => ({
-        status: 'failed',
-        error: { code: 'provider_unavailable' },
-      })
-    );
-    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { poll }), {
-      generationCount: 2,
-      nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
-    });
-    const attention = await harness.store.updateProjectV2(harness.project.id, (project) => {
-      for (const [index, jobId] of ['job_v2_1', 'job_v2_2'].entries()) {
-        const job = project.jobs[jobId]!;
-        job.status = 'needs_attention';
-        job.providerJobId = `remote_${index + 1}`;
-        job.remoteStartedAt = '2026-08-17T12:00:02.000Z';
-        job.error = { code: 'provider_unavailable', messageKey: 'providerUnavailable' };
-      }
-      return project;
-    });
-
-    await expect(
-      harness.manager.retryJobV2({
-        projectId: attention.id,
-        jobId: 'job_v2_1',
-        expectedRevision: attention.revision,
-      })
-    ).resolves.toMatchObject({ id: 'job_v2_1', status: 'queued_remote' });
-    const afterFirst = await harness.store.getProjectV2(attention.id);
-    if (afterFirst.status !== 'supported') throw new Error('missing sibling retry fixture project');
-    await expect(
-      harness.manager.retryJobV2({
-        projectId: afterFirst.project.id,
-        jobId: 'job_v2_2',
-        expectedRevision: afterFirst.project.revision,
-      })
-    ).resolves.toMatchObject({ id: 'job_v2_2', status: 'queued_remote' });
-  });
-
-  it('bounds V2 download retry across absent remotes, adapters, siblings, and terminal provider results', async () => {
+  it('bounds V2 download retry across absent remotes, adapters, and terminal provider results', async () => {
     const receiptFor = (harness: V2Harness) =>
       createStudioSpendReceiptV2({
         authorization: harness.authorization,
         itemId: harness.item.id,
         jobId: 'job_v2_1',
-        generationIndex: 0,
       });
     const markDownloadFailed = (harness: V2Harness, providerJobId: string | null) =>
       harness.store.updateProjectV2(harness.project.id, (project) => {
@@ -2759,21 +2581,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       })
     ).rejects.toMatchObject({ code: 'invalid_route' });
 
-    const busyHarness = await createV2Harness(
-      controllableAdapter('weprompt-image-v1', { poll: async () => ({ status: 'queued' }) }),
-      {
-        generationCount: 2,
-      }
-    );
-    const busyFailure = await markDownloadFailed(busyHarness, 'remote_busy');
-    await expect(
-      busyHarness.manager.retryDownloadV2({
-        projectId: busyFailure.id,
-        jobId: 'job_v2_1',
-        expectedRevision: busyFailure.revision,
-      })
-    ).rejects.toMatchObject({ code: 'busy' });
-
     const snapshots = [
       { status: 'failed' as const, error: { code: 'unknown' as const } },
       { status: 'expired' as const, error: { code: 'unknown' as const } },
@@ -2830,7 +2637,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
           authorization: harness.authorization,
           itemId: harness.item.id,
           jobId: 'job_v2_1',
-          generationIndex: 0,
         });
         const parked = await harness.store.updateProjectV2(harness.project.id, (project) => {
           const job = project.jobs.job_v2_1!;
@@ -2895,7 +2701,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       authorization: harness.authorization,
       itemId: harness.item.id,
       jobId: 'job_v2_1',
-      generationIndex: 0,
     });
     const failed = await harness.store.updateProjectV2(harness.project.id, (project) => {
       const job = project.jobs.job_v2_1!;

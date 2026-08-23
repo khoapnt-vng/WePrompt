@@ -377,9 +377,7 @@ export const createStudioDirectorCommandProcessorV2 = (
             terminal = expired(command, project.revision, 'deadline_elapsed');
           } else {
             const reasonCode: StudioDirectorCommandRejectionCodeV2 =
-              error.reasonCode === 'take_bin_capacity_reached' || error.reasonCode === 'undo_conflict'
-                ? 'invalid_operation'
-                : error.reasonCode;
+              error.reasonCode === 'undo_conflict' ? 'invalid_operation' : error.reasonCode;
             terminal = rejected(command, project.revision, reasonCode);
           }
         } else if (isStoreError(error, 'stale_project')) {

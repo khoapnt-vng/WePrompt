@@ -16,7 +16,6 @@ import type {
   WorkspaceCutProjection,
   WorkspaceProjection,
   WorkspaceShotProjection,
-  WorkspaceTakeProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 import {
   buildCutFilmSummary,
@@ -26,7 +25,7 @@ import {
 import { buildCutFilmstrip } from '@/renderer/pages/studio/components/Workspace/Views/Cut/filmstrip';
 import {
   buildCutPlaybackSequence,
-  cutPlaybackShotsAwaitingTake,
+  cutPlaybackShotsAwaitingPicture,
   formatCutPlaybackClock,
   type CutPlaybackSequence,
 } from '@/renderer/pages/studio/components/Workspace/Views/Cut/playbackSequence';
@@ -190,11 +189,11 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
       if (key.endsWith('.preview.pictureOnly')) return 'Picture only — the bed is muted here';
       if (key.endsWith('.preview.noMedia')) return 'No film preview is available.';
-      if (key.endsWith('.preview.awaitingTakeOne')) {
-        return `Beat ${String(values?.beatPosition)} · Shot ${String(values?.shotPosition)} needs a Take chosen before the film can play.`;
+      if (key.endsWith('.preview.awaitingPictureOne')) {
+        return `Beat ${String(values?.beatPosition)} · Shot ${String(values?.shotPosition)} needs a current picture before the film can play.`;
       }
-      if (key.endsWith('.preview.awaitingTakeMany')) {
-        return `${String(values?.count)} Shots need a Take chosen before the film can play.`;
+      if (key.endsWith('.preview.awaitingPictureMany')) {
+        return `${String(values?.count)} Shots need a current picture before the film can play.`;
       }
       if (key.endsWith('.preview.mediaError')) return 'This preview could not be loaded.';
       if (key.endsWith('.preview.label')) return 'Film preview';
@@ -288,30 +287,13 @@ const projection = (cutProjection = cut(), activeBeats: WorkspaceProjection['act
     chainStatusReady: true,
     requestShapeLocked: false,
     cut: cutProjection,
-    bin: { items: [], beats: [], shots: [], takes: [] },
+    bin: { items: [], beats: [], shots: [] },
     undoTop: null,
     dirtyShots: [],
     cascadeProgress: [],
     parkEligibility: [],
     conditioningFailures: [],
   }) as WorkspaceProjection;
-
-const playbackTake = (
-  assetId: string,
-  sourceDurationSeconds: number,
-  overrides: Partial<WorkspaceTakeProjection> = {}
-): WorkspaceTakeProjection => ({
-  assetId,
-  mediaKind: 'video',
-  createdAt: '2026-08-19T00:00:00.000Z',
-  selected: true,
-  explicitSeed: false,
-  effectiveSeed: false,
-  binReason: null,
-  sourceDurationSeconds,
-  posterAssetId: `${assetId}_poster`,
-  ...overrides,
-});
 
 const playbackShot = (
   id: string,
@@ -334,25 +316,29 @@ const playbackShot = (
     derivationStale: false,
     trimInSeconds,
     trimOutSeconds,
-    selectedTakeId: assetId,
-    selectedTakeSourceDurationSeconds: sourceDurationSeconds,
+    currentPicture: {
+      assetId,
+      sourceDurationSeconds,
+      posterAssetId: `${assetId}_poster`,
+    },
     playedDurationSeconds,
     explicitSeedAssetId: null,
     effectiveSeedAssetId: null,
     segmentHead: false,
     planningBoundary: null,
     frameBoundary: null,
-    segmentState: { kind: 'rendered', takeCount: 1, selectedTakeNumber: 1 },
+    segmentState: { kind: 'rendered' },
     dirtyCauses: [],
     downstreamShotIds: [],
-    imageTakes: [],
-    videoTakes: [playbackTake(assetId, sourceDurationSeconds)],
+    seedStills: [],
     coverAssetId: `${assetId}_poster`,
-    takeCount: 1,
-    displayState: 'selected_take',
+    displayState: 'rendered',
     retainedWork: true,
     videoGenerationInFlight: false,
     seedGenerationInFlight: false,
+    videoGenerationBlocked: false,
+    seedGenerationBlocked: false,
+    attentionJobs: [],
     hasEffectiveSeed: false,
     ...overrides,
   };
@@ -434,7 +420,7 @@ const playableProjection = (): WorkspaceProjection => {
 };
 
 describe('the truthful Cut playback sequence', () => {
-  it('projects selected video Takes and a zero-Shot slate in exact film order with source and film intervals', () => {
+  it('projects current pictures and a zero-Shot slate in exact film order with source and film intervals', () => {
     const expected: CutPlaybackSequence = {
       projectId: 'project_1',
       projectRevision: 7,
@@ -504,6 +490,23 @@ describe('the truthful Cut playback sequence', () => {
     };
 
     expect(buildCutPlaybackSequence(playableProjection())).toEqual(expected);
+  });
+
+  it('reads each playable Shot from its one current-picture projection without a gallery', () => {
+    const current = playableProjection();
+    for (const beat of current.activeBeats) {
+      for (const shot of beat.shots) {
+        expect(shot).not.toHaveProperty('videoTakes');
+        expect(shot).not.toHaveProperty('selectedTakeId');
+      }
+    }
+
+    expect(buildCutPlaybackSequence(current)?.segments[0]).toMatchObject({
+      kind: 'video',
+      shotId: 'shot_1',
+      assetId: 'take_1',
+      sourceDurationSeconds: 10,
+    });
   });
 
   it('matches projection grouped duration arithmetic for fractional Shots across Beats', () => {
@@ -657,12 +660,12 @@ describe('the truthful Cut playback sequence', () => {
     expect(buildCutPlaybackSequence(current)).toBeNull();
   });
 
-  it('uses only selected-media and timing authority, not freshness or generation display state', () => {
+  it('uses only current-picture and timing authority, not freshness or generation display state', () => {
     const current = playableProjection();
     current.workspaceStatusReady = false;
     current.chainStatusReady = false;
     current.activeBeats[0]!.displayState = 'stale';
-    current.activeBeats[0]!.shots[0]!.displayState = 'selected_take';
+    current.activeBeats[0]!.shots[0]!.displayState = 'rendered';
     current.activeBeats[0]!.shots[0]!.dirtyCauses = ['generation_out_of_date'];
     current.activeBeats[0]!.shots[0]!.videoGenerationInFlight = true;
 
@@ -692,53 +695,21 @@ describe('the truthful Cut playback sequence', () => {
     ['an active Beat aggregate mismatch', (value) => void (value.activeBeats[0]!.actualSeconds = 12)],
     ['a film aggregate mismatch', (value) => void (value.cut.filmDurationSeconds = 24)],
     ['a non-finite film total', (value) => void (value.cut.filmDurationSeconds = Number.POSITIVE_INFINITY)],
-    ['a covered Shot without a selected Take', (value) => void (value.activeBeats[0]!.shots[0]!.selectedTakeId = null)],
-    ['a selected Take absent from its video rows', (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes = [])],
     [
-      'a selected row not marked selected',
-      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.selected = false),
+      'a covered Shot without a current picture',
+      (value) => void (value.activeBeats[0]!.shots[0]!.currentPicture = null),
     ],
     [
-      'a selected row parked in the Bin',
-      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.binReason = 'lifted'),
+      'an unsafe current-picture asset id',
+      (value) => void (value.activeBeats[0]!.shots[0]!.currentPicture!.assetId = '../picture_1'),
     ],
     [
-      'a selected row with the wrong media kind',
-      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.mediaKind = 'image'),
-    ],
-    ['an unsafe selected asset id', (value) => void (value.activeBeats[0]!.shots[0]!.selectedTakeId = '../take_1')],
-    [
-      'an unsafe selected poster id',
-      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.posterAssetId = '../poster'),
+      'an unsafe current-picture poster id',
+      (value) => void (value.activeBeats[0]!.shots[0]!.currentPicture!.posterAssetId = '../poster'),
     ],
     [
-      'duplicate selected video authority',
-      (value) =>
-        void value.activeBeats[0]!.shots[0]!.videoTakes.push({
-          ...value.activeBeats[0]!.shots[0]!.videoTakes[0]!,
-        }),
-    ],
-    [
-      'a concurrently selected image row',
-      (value) =>
-        void value.activeBeats[0]!.shots[0]!.imageTakes.push(
-          playbackTake('image_selected_too', 10, { mediaKind: 'image', selected: true })
-        ),
-    ],
-    [
-      'a truthy non-boolean selected flag',
-      (value) =>
-        void Object.assign(value.activeBeats[0]!.shots[0]!.videoTakes[0]! as unknown as { selected: unknown }, {
-          selected: 'yes',
-        }),
-    ],
-    [
-      'a selected source-duration mismatch',
-      (value) => void (value.activeBeats[0]!.shots[0]!.videoTakes[0]!.sourceDurationSeconds = 9),
-    ],
-    [
-      'a non-finite selected source duration',
-      (value) => void (value.activeBeats[0]!.shots[0]!.selectedTakeSourceDurationSeconds = Number.NaN),
+      'a non-finite current-picture source duration',
+      (value) => void (value.activeBeats[0]!.shots[0]!.currentPicture!.sourceDurationSeconds = Number.NaN),
     ],
     ['a negative-zero trim', (value) => void (value.activeBeats[0]!.shots[0]!.trimInSeconds = -0)],
     ['trims that consume the source', (value) => void (value.activeBeats[0]!.shots[0]!.trimOutSeconds = 9)],
@@ -755,27 +726,23 @@ describe('the truthful Cut playback sequence', () => {
     expect(buildCutPlaybackSequence(current)).toBeNull();
   });
 
-  it('names nothing while every covered Shot already has its Take', () => {
-    expect(cutPlaybackShotsAwaitingTake(playableProjection())).toEqual([]);
+  it('names nothing while every covered Shot already has its current picture', () => {
+    expect(cutPlaybackShotsAwaitingPicture(playableProjection())).toEqual([]);
   });
 
-  it('names the Shot whose Take was never chosen, which is the one refusal a director can act on', () => {
+  it('names the Shot whose current picture has not rendered, which is the one refusal a director can act on', () => {
     const current = playableProjection();
-    current.activeBeats[0]!.shots[0]!.selectedTakeId = null;
+    current.activeBeats[0]!.shots[0]!.currentPicture = null;
 
-    expect(cutPlaybackShotsAwaitingTake(current)).toEqual([
+    expect(cutPlaybackShotsAwaitingPicture(current)).toEqual([
       { beatPosition: 1, shotPosition: 1, shotId: current.activeBeats[0]!.shots[0]!.id },
     ]);
   });
 
   it.each([
     [
-      'a selected Take absent from its video rows',
-      (v: WorkspaceProjection) => void (v.activeBeats[0]!.shots[0]!.videoTakes = []),
-    ],
-    [
-      'an unsafe selected asset id',
-      (v: WorkspaceProjection) => void (v.activeBeats[0]!.shots[0]!.selectedTakeId = '../take_1'),
+      'an unsafe current-picture asset id',
+      (v: WorkspaceProjection) => void (v.activeBeats[0]!.shots[0]!.currentPicture!.assetId = '../picture_1'),
     ],
     [
       'a played-duration mismatch',
@@ -786,7 +753,7 @@ describe('the truthful Cut playback sequence', () => {
     mutate(current);
 
     expect(buildCutPlaybackSequence(current)).toBeNull();
-    expect(cutPlaybackShotsAwaitingTake(current)).toEqual([]);
+    expect(cutPlaybackShotsAwaitingPicture(current)).toEqual([]);
   });
 
   it('floors and clamps the live playback clock independently of rounded summary copy', () => {
@@ -809,7 +776,7 @@ const renderCutPlayer = (
 
 const mediaElement = (): HTMLVideoElement => {
   const media = document.querySelector<HTMLVideoElement>('[data-cut-preview-media][data-media-kind="video"]');
-  if (media === null) throw new Error('Expected the selected video Take in the Cut preview');
+  if (media === null) throw new Error('Expected the current picture in the Cut preview');
   return media;
 };
 
@@ -827,28 +794,28 @@ const slateFirstProjection = (): WorkspaceProjection => {
 };
 
 describe('the truthful Cut player and transport', () => {
-  it('says which Shot still needs a Take instead of refusing without a reason', () => {
+  it('says which Shot still needs a current picture instead of refusing without a reason', () => {
     const current = playableProjection();
-    current.activeBeats[0]!.shots[0]!.selectedTakeId = null;
+    current.activeBeats[0]!.shots[0]!.currentPicture = null;
 
     renderCutPlayer(current);
 
-    expect(screen.getByText('Beat 1 · Shot 1 needs a Take chosen before the film can play.')).toBeVisible();
+    expect(screen.getByText('Beat 1 · Shot 1 needs a current picture before the film can play.')).toBeVisible();
     expect(screen.queryByText('No film preview is available.')).toBeNull();
     expect(screen.getByRole('button', { name: 'Play film' })).toBeDisabled();
   });
 
   it('counts the Shots when more than one is still waiting to be chosen', () => {
     const current = playableProjection();
-    current.activeBeats[0]!.shots[0]!.selectedTakeId = null;
-    current.activeBeats[2]!.shots[0]!.selectedTakeId = null;
+    current.activeBeats[0]!.shots[0]!.currentPicture = null;
+    current.activeBeats[2]!.shots[0]!.currentPicture = null;
 
     renderCutPlayer(current);
 
-    expect(screen.getByText('2 Shots need a Take chosen before the film can play.')).toBeVisible();
+    expect(screen.getByText('2 Shots need a current picture before the film can play.')).toBeVisible();
   });
 
-  it('keeps the reasonless refusal for a fault that choosing a Take would not fix', () => {
+  it('keeps the reasonless refusal for a fault that rendering a picture would not fix', () => {
     const current = playableProjection();
     current.activeBeats[0]!.shots[0]!.playedDurationSeconds = 6;
 
@@ -868,7 +835,7 @@ describe('the truthful Cut player and transport', () => {
     play: vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined),
   });
 
-  it('renders the first selected Take through the managed protocol with a custom muted transport', () => {
+  it('renders the first current picture through the managed protocol with a custom muted transport', () => {
     renderCutPlayer();
 
     const preview = document.querySelector<HTMLElement>('[data-cut-preview]');
@@ -1028,7 +995,7 @@ describe('the truthful Cut player and transport', () => {
     });
   });
 
-  it('ignores a queued ended event after the user has paused the current Take', async () => {
+  it('ignores a queued ended event after the user has paused the current picture', async () => {
     mockMedia();
     renderCutPlayer();
     const video = mediaElement();

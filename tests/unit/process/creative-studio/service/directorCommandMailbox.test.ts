@@ -100,7 +100,7 @@ const makeCommandV2 = (
   commandId: string,
   overrides: Partial<StudioDirectorCommandRecordV2> = {}
 ): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   commandId,
   projectId,
   expectedRevision: 1,
@@ -115,7 +115,7 @@ const makeSlotV2 = (
   commandId: string,
   overrides: Partial<StudioDirectorCommandSlotV2> = {}
 ): StudioDirectorCommandSlotV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   commandId,
   reservedAt: NOW,
   deadlineAt: '2026-08-16T12:00:15.000Z',
@@ -130,7 +130,7 @@ const makeLeaseV2 = (input: {
 }): StudioDirectorCommandSlotLeaseV2 => {
   const acquiredAt = input.acquiredAt ?? NOW;
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     leaseId: input.leaseId,
     owner: input.owner,
     commandId: input.slot.commandId,
@@ -147,7 +147,7 @@ const makeReceiptV2 = (
   overrides: Partial<StudioDirectorCommandReceiptV2> = {}
 ): StudioDirectorCommandReceiptV2 =>
   ({
-    schemaVersion: 2,
+    schemaVersion: 3,
     commandId,
     projectId,
     expectedRevision: 1,
@@ -165,7 +165,7 @@ const makeRejectedReceiptV2 = (input: {
   expectedRevision: number | null;
   reasonCode: 'malformed_record' | 'unsupported_version';
 }): StudioDirectorCommandReceiptV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   commandId: input.commandId,
   projectId: input.projectId,
   expectedRevision: input.expectedRevision,
@@ -384,7 +384,7 @@ describe('Studio Director schema-2 command mailbox', () => {
       code: 'invalid_payload',
     });
     await expect(
-      mailbox.writeReceipt(projectId, { ...makeReceiptV2(projectId, 'future_receipt'), schemaVersion: 3 } as never)
+      mailbox.writeReceipt(projectId, { ...makeReceiptV2(projectId, 'future_receipt'), schemaVersion: 4 } as never)
     ).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(existsSync(path.join(rootDir, projectId, 'commands'))).toBe(false);
   });
@@ -611,7 +611,7 @@ describe('Studio Director schema-2 command mailbox', () => {
       reasonCode: 'unsupported_version' as const,
       pending: (boundProjectId: string, commandId: string): unknown => ({
         ...makeCommandV2(boundProjectId, commandId),
-        schemaVersion: 3,
+        schemaVersion: 4,
       }),
     },
   ])('finishes an exactly rejected $label while retaining its receipt', async (testCase) => {
@@ -904,7 +904,7 @@ describe('Studio Director schema-2 command mailbox', () => {
       const receipt: StudioDirectorCommandReceiptV2 =
         status === 'applied'
           ? {
-              schemaVersion: 2,
+              schemaVersion: 3,
               commandId: command.commandId,
               projectId,
               expectedRevision: 2,
@@ -915,7 +915,7 @@ describe('Studio Director schema-2 command mailbox', () => {
               createdShotIds: [],
             }
           : {
-              schemaVersion: 2,
+              schemaVersion: 3,
               commandId: command.commandId,
               projectId,
               expectedRevision: 2,

@@ -23,7 +23,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.planningLane': 'Planning lane',
         'conversation.creativeStudio.workspace.beatPanel.coverage.trimGuidance': 'Edge · Trim · Free',
         'conversation.creativeStudio.workspace.beatPanel.coverage.boundaryGuidance': 'Boundary · Costs a re-render',
-        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.noTake': 'No Take',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.noPicture': 'No picture',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.queued': 'Queued',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.nextUp': 'Next up',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.waitingOnFrame': 'Waiting on the frame',
@@ -31,7 +31,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderingStill':
           'Rendering · Showing the still',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendered': 'Rendered',
-        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderedOneTake': 'Rendered · 1 Take',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.untouched': 'Untouched',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.staleStillPlays': 'Stale · Still plays',
@@ -53,9 +52,6 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.seekValue')) return `${String(values?.current)} of ${String(values?.total)}`;
       if (key.endsWith('.segmentState.waitingOnShot')) return `Waiting on ${String(values?.position)}`;
       if (key.endsWith('.segmentState.renderingProgress')) return `Rendering · ${String(values?.progress)}%`;
-      if (key.endsWith('.segmentState.selectedTake')) {
-        return `${String(values?.count)} Takes · T${String(values?.take)} in the Cut`;
-      }
       if (key.endsWith('.segmentState.shotKept')) return `Shot ${String(values?.position)} · Kept`;
       if (key.endsWith('.boundaryFrame.empty')) {
         return `Boundary after Shot ${String(values?.position)} · Waiting for continuity frame`;
@@ -149,6 +145,12 @@ const installPointerCapture = (element: HTMLElement, captured = true) => {
   return { setPointerCapture, hasPointerCapture, releasePointerCapture };
 };
 
+const currentPicture = (assetId: string, sourceDurationSeconds: number) => ({
+  assetId,
+  posterAssetId: null,
+  sourceDurationSeconds,
+});
+
 const makeShot = (
   id: string,
   durationSeconds: number,
@@ -166,8 +168,7 @@ const makeShot = (
   derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
-  selectedTakeId: null,
-  selectedTakeSourceDurationSeconds: null,
+  currentPicture: null,
   playedDurationSeconds: durationSeconds,
   explicitSeedAssetId: null,
   effectiveSeedAssetId: null,
@@ -176,15 +177,13 @@ const makeShot = (
   frameBoundary: null,
   segmentState:
     overrides.segmentState ??
-    (overrides.selectedTakeId === undefined || overrides.selectedTakeId === null
-      ? { kind: 'no_take' }
-      : { kind: 'rendered', takeCount: 1, selectedTakeNumber: 1 }),
+    (overrides.currentPicture === undefined || overrides.currentPicture === null
+      ? { kind: 'no_picture' }
+      : { kind: 'rendered' }),
   dirtyCauses: [],
   downstreamShotIds: [],
-  imageTakes: [],
-  videoTakes: [],
+  seedStills: [],
   coverAssetId: null,
-  takeCount: 0,
   displayState: 'draft',
   retainedWork: false,
   videoGenerationInFlight: false,
@@ -193,10 +192,9 @@ const makeShot = (
   ...overrides,
 });
 
-const makeSelectedShot = (overrides: Partial<WorkspaceShotProjection> = {}): WorkspaceShotProjection =>
+const makePictureShot = (overrides: Partial<WorkspaceShotProjection> = {}): WorkspaceShotProjection =>
   makeShot('shot_1', 8, 0, {
-    selectedTakeId: 'take_1',
-    selectedTakeSourceDurationSeconds: 10,
+    currentPicture: { assetId: 'video_1', posterAssetId: null, sourceDurationSeconds: 10 },
     trimInSeconds: 1,
     trimOutSeconds: 1,
     playedDurationSeconds: 8,
@@ -234,11 +232,10 @@ const renderCoverage = (
 };
 
 describe('coverage geometry', () => {
-  it('keeps selected 10-second playback distinct from its authoritative 8-second planning boundary', () => {
+  it('keeps 10-second current-picture playback distinct from its authoritative 8-second planning boundary', () => {
     const geometry = buildCoverageGeometry([
       makeShot('shot_1', 8, 0, {
-        selectedTakeId: 'take_1',
-        selectedTakeSourceDurationSeconds: 10,
+        currentPicture: currentPicture('video_1', 10),
         trimInSeconds: 1,
         trimOutSeconds: 1,
         playedDurationSeconds: 8,
@@ -259,7 +256,7 @@ describe('coverage geometry', () => {
           playedStartSeconds: 1,
           playedEndSeconds: 9,
           playedDurationSeconds: 8,
-          selectedTake: true,
+          hasCurrentPicture: true,
         },
         {
           shotId: 'shot_2',
@@ -270,7 +267,7 @@ describe('coverage geometry', () => {
           playedStartSeconds: 0,
           playedEndSeconds: 4,
           playedDurationSeconds: 4,
-          selectedTake: false,
+          hasCurrentPicture: false,
         },
       ],
     });
@@ -282,15 +279,16 @@ describe('coverage geometry', () => {
     expect(buildCoverageGeometry([makeShot('shot_1', 8, 1)])).toBeNull();
     expect(
       buildCoverageGeometry([
-        makeShot('shot_1', 8, 0, { selectedTakeId: 'take_1', selectedTakeSourceDurationSeconds: null }),
+        makeShot('shot_1', 8, 0, {
+          currentPicture: { ...currentPicture('video_1', 8), sourceDurationSeconds: null as never },
+        }),
       ])
     ).toBeNull();
     expect(buildCoverageGeometry([makeShot('shot_1', 8, 0, { trimInSeconds: 0.5 })])).toBeNull();
     expect(
       buildCoverageGeometry([
         makeShot('shot_1', 8, 0, {
-          selectedTakeId: 'take_1',
-          selectedTakeSourceDurationSeconds: 8,
+          currentPicture: currentPicture('video_1', 8),
           trimInSeconds: 4,
           trimOutSeconds: 4,
           playedDurationSeconds: 0,
@@ -416,8 +414,7 @@ describe('coverage geometry', () => {
   it('maps Beat time piecewise through trims so the seek head and pointer align with source-width segments', () => {
     const geometry = buildCoverageGeometry([
       makeShot('shot_1', 8, 0, {
-        selectedTakeId: 'take_1',
-        selectedTakeSourceDurationSeconds: 10,
+        currentPicture: currentPicture('video_1', 10),
         trimInSeconds: 4,
         trimOutSeconds: 4,
         playedDurationSeconds: 2,
@@ -510,11 +507,10 @@ describe('CoverageBar', () => {
     expect(onCommitTrim).not.toHaveBeenCalled();
   });
 
-  it('renders 10-second selected playback with a separate 8-second planning overlay and no density label', () => {
+  it('renders 10-second picture playback with a separate 8-second planning overlay and no density label', () => {
     renderCoverage([
       makeShot('shot_1', 8, 0, {
-        selectedTakeId: 'take_1',
-        selectedTakeSourceDurationSeconds: 10,
+        currentPicture: currentPicture('video_1', 10),
         playedDurationSeconds: 10,
       }),
       makeShot('shot_2', 8, 8),
@@ -539,7 +535,7 @@ describe('CoverageBar', () => {
 
   it('uses a pressed segment button to request the inspected Shot without nesting trim controls', () => {
     const onInspectShot = vi.fn();
-    renderCoverage([makeSelectedShot(), makeShot('shot_2', 8, 8)], {
+    renderCoverage([makePictureShot(), makeShot('shot_2', 8, 8)], {
       inspectedShotId: 'shot_2',
       onInspectShot,
     });
@@ -560,16 +556,14 @@ describe('CoverageBar', () => {
 
   it.each([
     [{ kind: 'status_pending' } as const, 'Status unavailable'],
-    [{ kind: 'no_take' } as const, 'No Take'],
+    [{ kind: 'no_picture' } as const, 'No picture'],
     [{ kind: 'queued' } as const, 'Queued'],
     [{ kind: 'waiting_on_shot', upstreamShotNumber: 1 } as const, 'Waiting on 01'],
     [{ kind: 'waiting_on_frame' } as const, 'Waiting on the frame'],
     [{ kind: 'rendering', progressPercent: null, showingStill: false } as const, 'Rendering'],
     [{ kind: 'rendering', progressPercent: null, showingStill: true } as const, 'Rendering · Showing the still'],
     [{ kind: 'rendering', progressPercent: 39.6, showingStill: true } as const, 'Rendering · 39.6%'],
-    [{ kind: 'rendered', takeCount: 1, selectedTakeNumber: 1 } as const, 'Rendered · 1 Take'],
-    [{ kind: 'rendered', takeCount: 2, selectedTakeNumber: 2 } as const, '2 Takes · T2 in the Cut'],
-    [{ kind: 'rendered', takeCount: 2, selectedTakeNumber: null } as const, 'Rendered'],
+    [{ kind: 'rendered' } as const, 'Rendered'],
     [{ kind: 'needs_rerender' } as const, 'Needs a re-render'],
     [{ kind: 'stale' } as const, 'Stale · Still plays'],
     [{ kind: 'failed_unbilled' } as const, 'Failed · Not billed'],
@@ -583,8 +577,20 @@ describe('CoverageBar', () => {
     expect(screen.getByRole('button', { name: new RegExp(`Shot 1.*8s plan.*${copy}`) })).toContainElement(state);
   });
 
-  it('keeps stale selected media playable while rendering exact empty, verified, and hard-cut boundary markers', () => {
-    const first = makeSelectedShot({ segmentState: { kind: 'stale' } });
+  it('renders one collapsed Rendered fact without counts or selection ordinals', () => {
+    renderCoverage([
+      makeShot('shot_1', 8, 0, {
+        segmentState: { kind: 'rendered' },
+      }),
+    ]);
+
+    const state = document.querySelector<HTMLElement>('[data-segment-state="rendered"]');
+    expect(state).toHaveTextContent('Rendered');
+    expect(state).not.toHaveTextContent(/Take|T2/u);
+  });
+
+  it('keeps a stale current picture playable while rendering exact empty, verified, and hard-cut markers', () => {
+    const first = makePictureShot({ segmentState: { kind: 'stale' } });
     const second = makeShot('shot_2', 8, 8, {
       frameBoundary: {
         upstreamShotId: 'shot_1',
@@ -669,11 +675,10 @@ describe('CoverageBar', () => {
     );
   });
 
-  it('keeps a stale dependent Take playable but marks its incoming verified frame red', () => {
-    const upstream = makeSelectedShot();
+  it('keeps a stale dependent picture playable but marks its incoming verified frame red', () => {
+    const upstream = makePictureShot();
     const dependent = makeShot('shot_2', 8, 8, {
-      selectedTakeId: 'take_2',
-      selectedTakeSourceDurationSeconds: 10,
+      currentPicture: currentPicture('video_2', 10),
       trimInSeconds: 1,
       trimOutSeconds: 1,
       playedDurationSeconds: 8,
@@ -783,7 +788,7 @@ describe('CoverageBar', () => {
   });
 
   it('keeps source copy outside a dedicated trim lane without weakening the sliders', () => {
-    renderCoverage([makeSelectedShot()]);
+    renderCoverage([makePictureShot()]);
 
     const sourceDuration = screen.getByText('10s source');
     const trimIn = screen.getByRole('slider', { name: 'Trim in Shot 1' });
@@ -803,7 +808,7 @@ describe('CoverageBar', () => {
   });
 
   it('keeps trim and boundary consequences visible beside the coverage controls', () => {
-    renderCoverage([makeSelectedShot(), makeShot('shot_2', 8, 8)]);
+    renderCoverage([makePictureShot(), makeShot('shot_2', 8, 8)]);
 
     const trimGuidance = screen.getByText('Edge · Trim · Free');
     const boundaryGuidance = screen.getByText('Boundary · Costs a re-render');
@@ -849,8 +854,7 @@ describe('CoverageBar', () => {
     renderCoverage(
       [
         makeShot('shot_1', 8, 0, {
-          selectedTakeId: 'take_1',
-          selectedTakeSourceDurationSeconds: 12,
+          currentPicture: currentPicture('video_1', 12),
           trimInSeconds: 4,
           trimOutSeconds: 6,
           playedDurationSeconds: 2,
@@ -893,10 +897,9 @@ describe('CoverageBar', () => {
   });
 
   it('describes each slider with the matching stable consequence across rerenders', () => {
-    const first = makeSelectedShot();
+    const first = makePictureShot();
     const second = makeShot('shot_2', 8, 8, {
-      selectedTakeId: 'take_2',
-      selectedTakeSourceDurationSeconds: 10,
+      currentPicture: currentPicture('video_2', 10),
       trimInSeconds: 1,
       trimOutSeconds: 1,
       playedDurationSeconds: 8,
@@ -1157,15 +1160,14 @@ describe('CoverageBar', () => {
   it('commits half-second trim keys once and warns only when a tail trim has a continuity successor', async () => {
     const onCommitTrim = vi.fn().mockResolvedValue(true);
     const first = makeShot('shot_1', 8, 0, {
-      selectedTakeId: 'take_1',
-      selectedTakeSourceDurationSeconds: 10,
+      currentPicture: currentPicture('video_1', 10),
       trimInSeconds: 1,
       trimOutSeconds: 1,
       playedDurationSeconds: 8,
     });
     const result = renderCoverage([first, makeShot('shot_2', 8, 8, { segmentHead: false })], { onCommitTrim });
     const warning = screen.getByText('Tail trim makes the next Shot stale');
-    const selector = screen.getByRole('button', { name: /Shot 1.*10s source.*Rendered · 1 Take/ });
+    const selector = screen.getByRole('button', { name: /Shot 1.*10s source.*Rendered/ });
     expect(warning).toBeVisible();
     expect(selector).not.toContainElement(warning);
     expect(selector).toHaveAccessibleDescription('Tail trim makes the next Shot stale');
@@ -1192,7 +1194,7 @@ describe('CoverageBar', () => {
 
   it('supports both trim edges, endpoint keys, no-op keys, and RTL horizontal mirroring', async () => {
     const onCommitTrim = vi.fn().mockResolvedValue(true);
-    renderCoverage([makeSelectedShot({ trimInSeconds: 1, trimOutSeconds: 2, playedDurationSeconds: 7 })], {
+    renderCoverage([makePictureShot({ trimInSeconds: 1, trimOutSeconds: 2, playedDurationSeconds: 7 })], {
       onCommitTrim,
     });
     const trimIn = screen.getByRole('slider', { name: 'Trim in Shot 1' });
@@ -1241,7 +1243,7 @@ describe('CoverageBar', () => {
 
   it('does not commit an unchanged or disabled trim keyboard gesture', () => {
     const onCommitTrim = vi.fn().mockResolvedValue(true);
-    const shot = makeSelectedShot({
+    const shot = makePictureShot({
       trimInSeconds: null,
       trimOutSeconds: null,
       playedDurationSeconds: 10,
@@ -1268,7 +1270,7 @@ describe('CoverageBar', () => {
 
   it('previews and commits each trim pointer edge once while cancellation and mismatched pointers are no-ops', async () => {
     const onCommitTrim = vi.fn().mockResolvedValue(true);
-    renderCoverage([makeSelectedShot()], { onCommitTrim });
+    renderCoverage([makePictureShot()], { onCommitTrim });
     const trimIn = screen.getByRole('slider', { name: 'Trim in Shot 1' });
     const trimOut = screen.getByRole('slider', { name: 'Trim out Shot 1' });
     const segment = trimIn.parentElement!;
@@ -1311,7 +1313,7 @@ describe('CoverageBar', () => {
 
   it('discards an active trim preview on lost capture or changed Shot facts and tolerates capture failures', async () => {
     const onCommitTrim = vi.fn().mockResolvedValue(true);
-    const shot = makeSelectedShot();
+    const shot = makePictureShot();
     const result = renderCoverage([shot], { onCommitTrim });
     const trimIn = screen.getByRole('slider', { name: 'Trim in Shot 1' });
     const segment = trimIn.parentElement!;
@@ -1333,7 +1335,7 @@ describe('CoverageBar', () => {
         onCommitTrim={onCommitTrim}
         onInspectShot={result.onInspectShot}
         projectId='project_1'
-        shots={[makeSelectedShot({ trimInSeconds: 2, trimOutSeconds: 1, playedDurationSeconds: 7 })]}
+        shots={[makePictureShot({ trimInSeconds: 2, trimOutSeconds: 1, playedDurationSeconds: 7 })]}
       />
     );
     expect(capture.releasePointerCapture).toHaveBeenCalledWith(13);

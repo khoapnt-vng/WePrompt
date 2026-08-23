@@ -21,7 +21,6 @@ import {
   isStudioPricingRefusalReasonV2,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
 } from '@/common/types/project/creativeStudioTypes';
 import type { WorkspaceProjection } from './workspaceProjection';
 
@@ -221,12 +220,11 @@ export type SpendGateQuoteSummary = {
   projectRevision: number;
   expiresAt: string;
   rows: SpendGateSummaryRow[];
-  generationCount: number;
+  choiceCount: number;
   currency: string;
   lowerMinorUnits: number;
   upperMinorUnits: number;
   exactPrice: boolean;
-  hasWaitingRows: boolean;
   budget: StudioRendererSubmissionQuoteV2['budget'];
 };
 
@@ -242,12 +240,11 @@ export const summarizeQuote = (quote: StudioRendererSubmissionQuoteV2): SpendGat
     projectRevision: quote.projectRevision,
     expiresAt: quote.expiresAt,
     rows,
-    generationCount: rows.reduce((total, row) => total + row.generationCount, 0),
+    choiceCount: rows.length,
     currency: quote.currency,
     lowerMinorUnits: quote.lowerMinorUnits,
     upperMinorUnits: quote.upperMinorUnits,
     exactPrice: quote.lowerMinorUnits === quote.upperMinorUnits,
-    hasWaitingRows: rows.some((row) => row.waitsForTakeSelection),
     budget: { ...quote.budget },
   };
 };
@@ -301,13 +298,9 @@ const choiceForShot = (
     .find((candidate) => candidate.id === shotId);
   if (projectedShot === undefined) return null;
   if (segmentHead && !projectedShot.hasEffectiveSeed) {
-    return projectedShot.seedGenerationInFlight
-      ? null
-      : { shotId, purpose: 'seed_still', generationCount: 1, referenceAssetId: null };
+    return projectedShot.seedGenerationInFlight ? null : { shotId, purpose: 'seed_still', referenceAssetId: null };
   }
-  return projectedShot.videoGenerationInFlight
-    ? null
-    : { shotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null };
+  return projectedShot.videoGenerationInFlight ? null : { shotId, purpose: 'video_take', referenceAssetId: null };
 };
 
 type ActiveShotLocation = {
@@ -376,7 +369,7 @@ export const continuityGateDraft = (input: {
     continuityChange: {
       shotId: input.shotId,
       hardCut: input.hardCut,
-      requiresSeedGeneration: input.hardCut && !projectedShot.imageTakes.some((take) => take.binReason === null),
+      requiresSeedGeneration: input.hardCut && projectedShot.seedStills.length === 0,
     },
   };
 };
@@ -393,15 +386,29 @@ const withinNativeSubmissionBounds = (
 };
 
 const validGenerationChoice = (
-  choice: StudioPrepareGenerationChoiceV2,
+  choice: unknown,
   locations: ReadonlyMap<string, ActiveShotLocation>
-): boolean =>
-  locations.has(choice.shotId) &&
-  Number.isSafeInteger(choice.generationCount) &&
-  choice.generationCount >= 1 &&
-  choice.generationCount <= STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION &&
-  (choice.referenceAssetId === null ||
-    (choice.purpose === 'seed_still' && /^[A-Za-z0-9_-]{1,256}$/.test(choice.referenceAssetId)));
+): choice is StudioPrepareGenerationChoiceV2 => {
+  if (choice === null || typeof choice !== 'object' || Array.isArray(choice)) return false;
+  const candidate = choice as Record<PropertyKey, unknown>;
+  if (
+    Reflect.ownKeys(candidate).length !== 3 ||
+    !Object.hasOwn(candidate, 'shotId') ||
+    !Object.hasOwn(candidate, 'purpose') ||
+    !Object.hasOwn(candidate, 'referenceAssetId')
+  ) {
+    return false;
+  }
+  const { shotId, purpose, referenceAssetId } = candidate;
+  return (
+    typeof shotId === 'string' &&
+    SAFE_STUDIO_ID.test(shotId) &&
+    locations.has(shotId) &&
+    (purpose === 'seed_still' || purpose === 'video_take') &&
+    (referenceAssetId === null ||
+      (purpose === 'seed_still' && typeof referenceAssetId === 'string' && SAFE_STUDIO_ID.test(referenceAssetId)))
+  );
+};
 
 /**
  * The largest batch that can legally be submitted at once.
@@ -469,13 +476,13 @@ export const filmRenderBatchShotIds = (input: {
   const batch: { shotId: string; filmIndex: number; coveredShotIds: string[] }[] = [];
   for (const bucket of segments.values()) {
     const ordered = bucket.toSorted((left, right) => left.shotIndex - right.shotIndex);
-    // "Render the film" means render what is missing. A segment whose every Shot already has a Take
+    // "Render the film" means render what is missing. A segment whose every Shot already has a picture
     // needs nothing, and packing it anyway both re-charges finished work and consumes cap that the
     // unrendered Beats behind it then never get — a partly-rendered film could not be finished at all.
     if (
       ordered.every(({ shotId }) => {
         const shot = projected.get(shotId);
-        return shot !== undefined && (shot.selectedTakeId !== null || shot.videoTakes.length > 0);
+        return shot?.currentPicture !== null && shot?.currentPicture !== undefined;
       })
     ) {
       continue;
@@ -488,12 +495,12 @@ export const filmRenderBatchShotIds = (input: {
     ) {
       continue;
     }
-    // Start where the work actually is. Re-rendering a Shot that already has a Take pays for it twice
-    // and drags the rest of its chain along behind it, so the first Shot still missing a Take is the
+    // Start where the work actually is. Re-rendering a Shot that already has a picture pays for it twice
+    // and drags the rest of its chain along behind it, so the first Shot still missing a picture is the
     // one to begin from — its upstream frame already exists.
     const needsWork = ({ shotId }: { shotId: string }): boolean => {
       const shot = projected.get(shotId);
-      return shot === undefined || (shot.selectedTakeId === null && shot.videoTakes.length === 0);
+      return shot?.currentPicture == null;
     };
     let nextChoice: StudioPrepareGenerationChoiceV2 | null = null;
     const admissible = ({
@@ -629,7 +636,6 @@ export const selectionGateDraft = (input: {
       cascadeByPair.set(`${downstreamId}\0video_take`, {
         shotId: downstreamId,
         purpose: 'video_take',
-        generationCount: 1,
         referenceAssetId: null,
       });
     }
@@ -690,7 +696,7 @@ export const handoffGateDraft = (
     if (location === undefined || seen.has(shotId) || location.filmIndex <= previousIndex) return null;
     seen.add(shotId);
     previousIndex = location.filmIndex;
-    baseChoices.push({ shotId, purpose: 'seed_still', generationCount: 1, referenceAssetId: null });
+    baseChoices.push({ shotId, purpose: 'seed_still', referenceAssetId: null });
   }
   if (baseChoices.length === 0 || !withinNativeSubmissionBounds(baseChoices, [])) return null;
   return {

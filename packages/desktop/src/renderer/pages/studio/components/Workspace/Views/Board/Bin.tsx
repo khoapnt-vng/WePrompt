@@ -29,31 +29,22 @@ const BEAT_PANEL_KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel';
 const END_ANCHOR = ':bin-end:';
 
 const BLOCKER_KEYS = {
-  current_match_to: `${BEAT_PANEL_KEY_ROOT}.blocker.currentMatchTo`,
   own_nonterminal_job: `${BEAT_PANEL_KEY_ROOT}.blocker.ownNonterminalJob`,
   own_pending_frame: `${BEAT_PANEL_KEY_ROOT}.blocker.ownPendingFrame`,
   downstream_nonterminal_job: `${BEAT_PANEL_KEY_ROOT}.blocker.downstreamNonterminalJob`,
   downstream_pending_frame: `${BEAT_PANEL_KEY_ROOT}.blocker.downstreamPendingFrame`,
   waiting_authorization_dependency: `${BEAT_PANEL_KEY_ROOT}.blocker.waitingAuthorizationDependency`,
   bound_nonterminal_request: `${BEAT_PANEL_KEY_ROOT}.blocker.boundNonterminalRequest`,
-  current_selected_take: `${BEAT_PANEL_KEY_ROOT}.blocker.currentSelectedTake`,
-  current_seed_still: `${BEAT_PANEL_KEY_ROOT}.blocker.currentSeedStill`,
-  nonterminal_conditioning_use: `${BEAT_PANEL_KEY_ROOT}.blocker.nonterminalConditioningUse`,
-  take_bin_capacity_reached: `${BEAT_PANEL_KEY_ROOT}.blocker.takeBinCapacityReached`,
   beat_shot_capacity_reached: `${BEAT_PANEL_KEY_ROOT}.blocker.beatShotCapacityReached`,
 } as const satisfies Record<StudioRendererParkBlockerCodeV2, string>;
 
 export type BinActions = {
   restoreBeat: (beatId: string, beforeBeatId: string | null) => Promise<boolean>;
   restoreShot: (shotId: string, beforeShotId: string | null) => Promise<boolean>;
-  restoreTake: (shotId: string, assetId: string) => Promise<boolean>;
   reorderBin: (bin: readonly StudioBinItem[]) => Promise<boolean>;
 };
 
-export type BinRestoreResult =
-  | { kind: 'beat'; beatId: string }
-  | { kind: 'shot'; beatId: string; shotId: string }
-  | { kind: 'take'; beatId: string; shotId: string; assetId: string };
+export type BinRestoreResult = { kind: 'beat'; beatId: string } | { kind: 'shot'; beatId: string; shotId: string };
 
 export type BinProps = {
   projectId: string;
@@ -67,21 +58,17 @@ export type BinProps = {
 
 export const binItemFocusKey = (item: StudioBinItem): string => {
   if (item.kind === 'beat') return `beat:${item.beatId}`;
-  if (item.kind === 'shot') return `shot:${item.shotId}`;
-  return `take:${item.assetId}`;
+  return `shot:${item.shotId}`;
 };
 
 const cloneBinIdentity = (item: StudioBinItem): StudioBinItem => {
   if (item.kind === 'beat') return { kind: 'beat', beatId: item.beatId, reason: item.reason };
-  if (item.kind === 'shot') {
-    return { kind: 'shot', beatId: item.beatId, shotId: item.shotId, reason: item.reason };
-  }
-  return { kind: 'take', assetId: item.assetId, reason: item.reason };
+  return { kind: 'shot', beatId: item.beatId, shotId: item.shotId, reason: item.reason };
 };
 
 const exactEligibility = (
   projection: WorkspaceProjection,
-  identity: Pick<StudioRendererParkEligibilityV2, 'subject' | 'action' | 'beatId' | 'shotId' | 'assetId'>
+  identity: Pick<StudioRendererParkEligibilityV2, 'subject' | 'action' | 'beatId' | 'shotId'>
 ): StudioRendererParkEligibilityV2 | null => {
   if (!projection.workspaceStatusReady) return null;
   const matches = projection.parkEligibility.filter(
@@ -89,8 +76,7 @@ const exactEligibility = (
       row.subject === identity.subject &&
       row.action === identity.action &&
       row.beatId === identity.beatId &&
-      row.shotId === identity.shotId &&
-      row.assetId === identity.assetId
+      row.shotId === identity.shotId
   );
   return matches.length === 1 ? matches[0]! : null;
 };
@@ -158,14 +144,11 @@ const exactEntryIdentity = (entry: WorkspaceBinItemProjection, index: number): b
   if (entry.kind === 'beat') {
     return entry.value.id === entry.identity.beatId && entry.value.reason === entry.identity.reason;
   }
-  if (entry.kind === 'shot') {
-    return (
-      entry.value.id === entry.identity.shotId &&
-      entry.value.beatId === entry.identity.beatId &&
-      entry.value.reason === entry.identity.reason
-    );
-  }
-  return entry.value.assetId === entry.identity.assetId && entry.value.reason === entry.identity.reason;
+  return (
+    entry.value.id === entry.identity.shotId &&
+    entry.value.beatId === entry.identity.beatId &&
+    entry.value.reason === entry.identity.reason
+  );
 };
 
 const exactGlobalItems = (items: readonly WorkspaceBinItemProjection[]): boolean => {
@@ -345,17 +328,9 @@ export const Bin: React.FC<BinProps> = ({
       if (entry.kind === 'beat') {
         restored = await actions.restoreBeat(entry.identity.beatId, anchor);
         result = { kind: 'beat', beatId: entry.identity.beatId };
-      } else if (entry.kind === 'shot') {
+      } else {
         restored = await actions.restoreShot(entry.identity.shotId, anchor);
         result = { kind: 'shot', beatId: owner.beat.id, shotId: entry.identity.shotId };
-      } else {
-        restored = await actions.restoreTake(owner.shot!.id, entry.identity.assetId);
-        result = {
-          kind: 'take',
-          beatId: owner.beat.id,
-          shotId: owner.shot!.id,
-          assetId: entry.identity.assetId,
-        };
       }
       if (restored && currentProjectIdentity.current === operationProjectIdentity) {
         setAnchors((current) => {
@@ -394,28 +369,14 @@ export const Bin: React.FC<BinProps> = ({
         <ol className={styles.binList} aria-label={t(`${KEY_ROOT}.listLabel`)}>
           {items.map((entry, index) => {
             const key = binItemFocusKey(entry.identity);
-            const beatId =
-              entry.kind === 'beat'
-                ? entry.identity.beatId
-                : entry.kind === 'shot'
-                  ? entry.identity.beatId
-                  : entry.value.beatId;
-            const shotId =
-              entry.kind === 'take' ? entry.value.shotId : entry.kind === 'shot' ? entry.identity.shotId : null;
+            const beatId = entry.identity.beatId;
+            const shotId = entry.kind === 'shot' ? entry.identity.shotId : null;
             const candidateOwner = typeof beatId === 'string' ? exactOwner(projection, beatId, shotId) : null;
             const owner =
-              candidateOwner !== null &&
-              (entry.kind === 'beat' ||
-                (entry.value.beatTitle === candidateOwner.beat.title &&
-                  (entry.kind === 'shot' || entry.value.shotLine === candidateOwner.shot?.line)))
+              candidateOwner !== null && (entry.kind === 'beat' || entry.value.beatTitle === candidateOwner.beat.title)
                 ? candidateOwner
                 : null;
-            const title =
-              entry.kind === 'beat'
-                ? entry.value.title
-                : entry.kind === 'shot'
-                  ? entry.value.line
-                  : (owner?.shot?.line ?? t(`${KEY_ROOT}.ownerUnavailable`));
+            const title = entry.kind === 'beat' ? entry.value.title : entry.value.line;
             const coverAssetId = entry.value.coverAssetId;
             const reason = entry.identity.reason;
             const kindLabel = t(`${KEY_ROOT}.kind.${entry.kind}`);
@@ -428,13 +389,12 @@ export const Bin: React.FC<BinProps> = ({
             const anchor = selectedAnchor(key);
             const beatAnchorIds = uniqueIds(projection.activeBeats.map((beat) => beat.id));
             const shotAnchorIds = owner === null ? [] : uniqueIds(owner.beat.shots.map((shot) => shot.id));
-            const anchorIds = entry.kind === 'beat' ? beatAnchorIds : entry.kind === 'shot' ? shotAnchorIds : [];
-            const anchorValid = entry.kind === 'take' || anchor === null || anchorIds.includes(anchor);
+            const anchorIds = entry.kind === 'beat' ? beatAnchorIds : shotAnchorIds;
+            const anchorValid = anchor === null || anchorIds.includes(anchor);
             const anchorSetValid =
-              entry.kind === 'take' ||
-              (entry.kind === 'beat'
+              entry.kind === 'beat'
                 ? beatAnchorIds.length === projection.activeBeats.length
-                : owner !== null && shotAnchorIds.length === owner.beat.shots.length);
+                : owner !== null && shotAnchorIds.length === owner.beat.shots.length;
             const eligibility =
               owner === null
                 ? null
@@ -443,23 +403,12 @@ export const Bin: React.FC<BinProps> = ({
                     action: 'restore',
                     beatId: owner.beat.id,
                     shotId: entry.kind === 'beat' ? null : (owner.shot?.id ?? null),
-                    assetId: entry.kind === 'take' ? entry.identity.assetId : null,
                   });
             const blockers = restoreBlockers(entry, owner, eligibility, anchorValid, anchorSetValid);
             const disabled = pending || busyItemKey !== null || blockers.length > 0;
-            const takeCount = entry.kind === 'shot' ? entry.value.takeCount : null;
-            const retainedWork =
-              entry.kind === 'shot'
-                ? entry.value.retainedWork
-                : entry.kind === 'beat'
-                  ? entry.value.retainedWork
-                  : false;
+            const retainedWork = entry.value.retainedWork;
             const stale =
-              entry.kind === 'shot'
-                ? entry.value.dirtyCauses.length > 0
-                : entry.kind === 'beat'
-                  ? entry.value.displayState === 'stale'
-                  : false;
+              entry.kind === 'shot' ? entry.value.dirtyCauses.length > 0 : entry.value.displayState === 'stale';
 
             return (
               <li
@@ -518,16 +467,10 @@ export const Bin: React.FC<BinProps> = ({
                     {entry.kind === 'beat' && (
                       <p className={styles.binMeta}>{t(`${KEY_ROOT}.shotCount`, { count: entry.value.shotCount })}</p>
                     )}
-                    {takeCount !== null && (
-                      <p className={styles.binMeta}>{t(`${KEY_ROOT}.takeCount`, { count: takeCount })}</p>
-                    )}
-                    {entry.kind === 'take' && (
-                      <p className={styles.binMeta}>{t(`${KEY_ROOT}.media.${entry.value.mediaKind}`)}</p>
-                    )}
-                    {(entry.kind === 'beat' || entry.kind === 'shot') && retainedWork && (
+                    {retainedWork && (
                       <p className={styles.binStatus}>
                         {t(`${KEY_ROOT}.retainedWork`, {
-                          count: entry.kind === 'shot' ? entry.value.takeCount : entry.value.shotCount,
+                          count: entry.kind === 'shot' ? 1 : entry.value.shotCount,
                           retained: retainedWork,
                         })}
                       </p>
@@ -572,38 +515,36 @@ export const Bin: React.FC<BinProps> = ({
                         }}
                       />
 
-                      {entry.kind !== 'take' && (
-                        <Select
-                          ref={(handle) => labelSelectHandle(handle, restorePositionLabel)}
-                          className={styles.binAnchor}
-                          size='small'
-                          value={anchor ?? END_ANCHOR}
-                          disabled={pending || busyItemKey !== null || owner === null}
-                          onChange={(nextValue) => {
-                            const value = String(nextValue);
-                            setAnchors((current) => ({ ...current, [key]: value === END_ANCHOR ? null : value }));
-                          }}
-                        >
-                          <Select.Option value={END_ANCHOR}>{t(`${KEY_ROOT}.restore.atEnd`)}</Select.Option>
-                          {anchorIds.map((anchorId) => {
-                            const label =
-                              entry.kind === 'beat'
-                                ? (projection.activeBeats.find((beat) => beat.id === anchorId)?.title ?? anchorId)
-                                : (owner?.beat.shots.find((shot) => shot.id === anchorId)?.line ?? anchorId);
-                            return (
-                              <Select.Option key={anchorId} value={anchorId}>
-                                {t(`${KEY_ROOT}.restore.${entry.kind === 'beat' ? 'beforeBeat' : 'beforeShot'}`, {
-                                  title: label,
-                                  position:
-                                    entry.kind === 'beat'
-                                      ? projection.activeBeats.findIndex((beat) => beat.id === anchorId) + 1
-                                      : (owner?.beat.shots.findIndex((shot) => shot.id === anchorId) ?? -1) + 1,
-                                })}
-                              </Select.Option>
-                            );
-                          })}
-                        </Select>
-                      )}
+                      <Select
+                        ref={(handle) => labelSelectHandle(handle, restorePositionLabel)}
+                        className={styles.binAnchor}
+                        size='small'
+                        value={anchor ?? END_ANCHOR}
+                        disabled={pending || busyItemKey !== null || owner === null}
+                        onChange={(nextValue) => {
+                          const value = String(nextValue);
+                          setAnchors((current) => ({ ...current, [key]: value === END_ANCHOR ? null : value }));
+                        }}
+                      >
+                        <Select.Option value={END_ANCHOR}>{t(`${KEY_ROOT}.restore.atEnd`)}</Select.Option>
+                        {anchorIds.map((anchorId) => {
+                          const label =
+                            entry.kind === 'beat'
+                              ? (projection.activeBeats.find((beat) => beat.id === anchorId)?.title ?? anchorId)
+                              : (owner?.beat.shots.find((shot) => shot.id === anchorId)?.line ?? anchorId);
+                          return (
+                            <Select.Option key={anchorId} value={anchorId}>
+                              {t(`${KEY_ROOT}.restore.${entry.kind === 'beat' ? 'beforeBeat' : 'beforeShot'}`, {
+                                title: label,
+                                position:
+                                  entry.kind === 'beat'
+                                    ? projection.activeBeats.findIndex((beat) => beat.id === anchorId) + 1
+                                    : (owner?.beat.shots.findIndex((shot) => shot.id === anchorId) ?? -1) + 1,
+                              })}
+                            </Select.Option>
+                          );
+                        })}
+                      </Select>
 
                       <Button
                         type='primary'

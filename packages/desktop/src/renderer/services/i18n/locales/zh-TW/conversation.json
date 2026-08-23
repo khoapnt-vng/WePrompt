@@ -901,10 +901,20 @@
       "importError": "無法新增參考圖，請再試一次。"
     },
     "workspace": {
+      "library": {
+        "subtitle": "以節拍和鏡頭規劃故事，然後檢視每個鏡頭的目前畫面。",
+        "pictureCount": "{{count}} 個畫面已就緒",
+        "pictureCount_one": "{{count}} 個畫面已就緒",
+        "pictureCount_other": "{{count}} 個畫面已就緒",
+        "status": {
+          "complete": "所有鏡頭都有目前畫面",
+          "partial": "部分鏡頭有目前畫面"
+        }
+      },
       "board": {
         "liftBeat": "移到垃圾桶",
         "liftConfirmTitle": "將「{{title}}」移到垃圾桶？",
-        "liftConfirmContent": "此節拍將從影片中移除。所有已創作內容、付費產生的素材和鏡次都會保留在垃圾桶中。"
+        "liftConfirmContent": "此節拍將從影片中移除。所有已創作內容和付費產生的素材都會保留在垃圾桶中。"
       },
       "cut": {
         "preview": {
@@ -915,8 +925,8 @@
           "videoLabel": "節拍 {{beatPosition}} · {{beatTitle}} · 鏡頭 {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "節拍 {{beatPosition}} · {{beatTitle}} · 場記卡 · 無鏡頭素材",
           "noMedia": "暫無影片預覽。",
-          "awaitingTakeOne": "播放影片前，請為節拍 {{beatPosition}} · 鏡頭 {{shotPosition}} 選擇鏡次。",
-          "awaitingTakeMany": "播放影片前，請為 {{count}} 個鏡頭選擇鏡次。",
+          "awaitingPictureOne": "節拍 {{beatPosition}}、鏡頭 {{shotPosition}} 尚無目前畫面。",
+          "awaitingPictureMany": "{{count}} 個鏡頭尚無目前畫面。",
           "mediaError": "無法載入此預覽。",
           "play": "播放影片",
           "pause": "暫停影片",
@@ -928,6 +938,9 @@
           "nextJoin": "下一個接點",
           "loopJoin": "循環接點",
           "buffering": "正在載入預覽畫面"
+        },
+        "exports": {
+          "editorFolderDescription": "依影片順序匯出目前鏡頭畫面、目標場記板、時間軸資料和可選音軌。"
         },
         "film": {
           "under": "少 {{clock}}",
@@ -942,11 +955,28 @@
           "openBeat": "開啟無鏡頭素材的節拍"
         }
       },
+      "proposals": {
+        "fixedReason": {
+          "video_asset": "此鏡頭有目前畫面。"
+        }
+      },
       "beatPanel": {
-        "takes": {
-          "park": "移到垃圾桶",
-          "parkConfirmTitle": "將此鏡次移到垃圾桶？",
-          "parkConfirmBody": "此鏡次會保留在專案中，並從目前選項中移出。"
+        "seeds": {
+          "stillLabel": "鏡頭 {{shotIndex}} 的種子靜態畫面 {{stillIndex}}",
+          "previewAlt": "預覽 · {{label}}",
+          "effective": "目前種子",
+          "pinnedBadge": "已釘選"
+        },
+        "picture": {
+          "title": "目前畫面",
+          "label": "鏡頭 {{index}} 的目前畫面",
+          "empty": "尚未產生畫面",
+          "sourceDuration": "來源影片 {{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} 秒",
+          "unavailable": "目前畫面無法使用",
+          "videoPreview": "播放器 · {{label}}"
+        },
+        "generation": {
+          "renderVideo": "再次產生"
         },
         "lift": {
           "shot": "移到垃圾桶",
@@ -993,7 +1023,7 @@
           "trimGuidance": "邊緣 · 修剪 · 免費",
           "boundaryGuidance": "邊界 · 需要重新渲染",
           "segmentState": {
-            "noTake": "暫無鏡次",
+            "noPicture": "暫無畫面",
             "queued": "已加入佇列",
             "nextUp": "下一個",
             "waitingOnShot": "等待鏡頭 {{position}}",
@@ -1002,8 +1032,6 @@
             "renderingProgress": "正在算繪 · {{progress}}%",
             "renderingStill": "正在算繪 · 正在顯示靜幀",
             "rendered": "已算繪",
-            "renderedOneTake": "已算繪 · 1 個鏡次",
-            "selectedTake": "{{count}} 個鏡次 · 剪輯中使用 T{{take}}",
             "untouched": "未變更",
             "needsRerender": "需要重新算繪",
             "staleStillPlays": "已過時 · 仍可播放",
@@ -1026,7 +1054,7 @@
         "preview": {
           "label": "節拍預覽",
           "noMedia": "節拍預覽無法使用",
-          "mediaError": "無法預覽所選成片。",
+          "mediaError": "無法預覽目前畫面。",
           "videoLabel": "鏡頭 {{position}} 影片 · {{line}}",
           "slateLabel": "鏡頭 {{position}} 規劃場記卡 · {{line}}",
           "slate": "規劃場記卡",
@@ -1545,6 +1573,7 @@
         "submissionUnknown": "提交結果不明。重試前請檢視重複收費警告。",
         "downloadFailed": "產生已完成，但無法下載輸出。",
         "unsupported": "此服務供應商不支援要求的操作。",
+        "seedStillVariationGrid": "產生的種子靜態畫面包含多面板變體網格，無法用於影片。",
         "unknown": "產生工作因不明原因失敗。"
       }
     },

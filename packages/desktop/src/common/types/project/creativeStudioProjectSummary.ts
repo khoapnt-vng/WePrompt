@@ -35,7 +35,7 @@ export const studioProjectSummaryV2Schema = z
     resolution: z.enum(['720p', '1080p']),
     beatCount: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     shotCount: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    selectedTakeCount: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    pictureCount: z.number().finite().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
     poster: z
       .object({
         beatId: safeStudioIdSchema,
@@ -54,7 +54,7 @@ export const studioProjectSummaryV2Schema = z
 const canonicalVideoPosterV2 = (
   project: StudioProjectV2,
   shot: StudioShot,
-  selectedTakeId: string
+  videoAssetId: string
 ): StudioAssetV2 | null => {
   const producingJobs = shot.jobIds.flatMap((jobId) => {
     const job = project.jobs[jobId];
@@ -63,8 +63,8 @@ const canonicalVideoPosterV2 = (
       job.shotId === shot.id &&
       job.status === 'succeeded' &&
       job.purpose === 'video_take' &&
-      job.outputAssetIdsByRole.primary === selectedTakeId &&
-      job.outputAssetIds.filter((assetId) => assetId === selectedTakeId).length === 1
+      job.outputAssetIdsByRole.primary === videoAssetId &&
+      job.outputAssetIds.filter((assetId) => assetId === videoAssetId).length === 1
       ? [job]
       : [];
   });
@@ -123,12 +123,12 @@ export const studioPlanningShotBoundariesV2 = (
   return boundaries;
 };
 
-/** Returns one active Shot's played duration, using selected source media when it exists. */
+/** Returns one active Shot's played duration, using its rendered picture when it exists. */
 export const studioShotPlayedDurationV2 = (
   project: Pick<StudioProjectV2, 'id' | 'assets'>,
   shot: StudioShot
 ): number | null => {
-  if (shot.selectedTakeId === null) {
+  if (shot.videoAssetId === null) {
     return shot.trimInSeconds === null &&
       shot.trimOutSeconds === null &&
       Number.isSafeInteger(shot.durationSeconds) &&
@@ -137,10 +137,10 @@ export const studioShotPlayedDurationV2 = (
       ? shot.durationSeconds
       : null;
   }
-  if (!Object.hasOwn(project.assets, shot.selectedTakeId)) return null;
-  const selected = project.assets[shot.selectedTakeId];
+  if (!Object.hasOwn(project.assets, shot.videoAssetId)) return null;
+  const selected = project.assets[shot.videoAssetId];
   if (
-    selected?.id !== shot.selectedTakeId ||
+    selected?.id !== shot.videoAssetId ||
     selected.mediaKind !== 'video' ||
     selected.durationSeconds === undefined ||
     !Number.isFinite(selected.durationSeconds) ||
@@ -223,7 +223,7 @@ export const toStudioFilmDurationV2 = (project: StudioProjectV2): StudioFilmDura
 /** Projects a schema-2 project into its strict active-content library summary. */
 export const toStudioProjectSummaryV2 = (project: StudioProjectV2): StudioProjectSummaryV2 => {
   let shotCount = 0;
-  let selectedTakeCount = 0;
+  let pictureCount = 0;
   let poster: StudioProjectSummaryV2['poster'];
   project.beatOrder.forEach((beatId, beatIndex) => {
     const beat = project.beats[beatId];
@@ -231,8 +231,8 @@ export const toStudioProjectSummaryV2 = (project: StudioProjectV2): StudioProjec
     shotCount += beat.shotOrder.length;
     beat.shotOrder.forEach((shotId, shotIndex) => {
       const shot = project.shots[shotId];
-      if (shot?.id !== shotId || shot.selectedTakeId === null) return;
-      const selected = project.assets[shot.selectedTakeId];
+      if (shot?.id !== shotId || shot.videoAssetId === null) return;
+      const selected = project.assets[shot.videoAssetId];
       if (
         selected === undefined ||
         selected.mediaKind !== 'video' ||
@@ -240,7 +240,7 @@ export const toStudioProjectSummaryV2 = (project: StudioProjectV2): StudioProjec
       ) {
         return;
       }
-      selectedTakeCount += 1;
+      pictureCount += 1;
       if (poster !== undefined) return;
       const posterAsset = canonicalVideoPosterV2(project, shot, selected.id);
       if (posterAsset === null) return;
@@ -262,7 +262,7 @@ export const toStudioProjectSummaryV2 = (project: StudioProjectV2): StudioProjec
     resolution: project.resolution,
     beatCount: project.beatOrder.length,
     shotCount,
-    selectedTakeCount,
+    pictureCount,
     ...(poster === undefined ? {} : { poster }),
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,

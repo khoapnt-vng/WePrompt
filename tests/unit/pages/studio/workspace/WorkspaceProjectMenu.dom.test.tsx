@@ -84,7 +84,7 @@ const makeProject = (
   overrides: Partial<StudioRendererProjectV2> = {}
 ): StudioRendererProjectV2 =>
   ({
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: 7,
     id: 'project_1',
     name: 'Launch film',
@@ -98,7 +98,6 @@ const makeProject = (
     shots: {},
     bin: [],
     bedAssetId: null,
-    matchToShotId: null,
     spendPolicy: null,
     imageRouteId: 'route_image',
     videoRouteId: 'route_video',

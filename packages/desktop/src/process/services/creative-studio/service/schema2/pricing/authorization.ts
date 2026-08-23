@@ -6,7 +6,6 @@
 
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   type StudioJobV2,
   type StudioProviderRef,
   type StudioQuotedGeneration,
@@ -55,7 +54,7 @@ export type StudioSpendAuthorizationInputV2 = {
 
 export type StudioSpendReceiptJobLinkV2 = Pick<
   StudioJobV2,
-  'id' | 'authorizationId' | 'authorizationItemId' | 'generationIndex' | 'idempotencyKey' | 'purpose'
+  'id' | 'authorizationId' | 'authorizationItemId' | 'idempotencyKey' | 'purpose'
 >;
 
 const fail = (code: StudioAuthorizationErrorCodeV2): never => {
@@ -171,30 +170,25 @@ export const createStudioSpendAuthorizationV2 = (input: StudioSpendAuthorization
     return { itemId: binding.itemId, provider: cloneProvider(binding.provider) };
   });
 
-  const expectedKeyCount = items.reduce((sum, item) => sum + item.generationCount, 0);
-  if (!dense(input.idempotencyKeys) || input.idempotencyKeys.length !== expectedKeyCount) {
+  if (!dense(input.idempotencyKeys) || input.idempotencyKeys.length !== items.length) {
     fail('invalid_idempotency');
   }
   const seenKeys = new Set<string>();
   const idempotencyKeys: StudioSpendAuthorization['idempotencyKeys'] = [];
-  let keyIndex = 0;
-  for (const item of items) {
-    for (let generationIndex = 0; generationIndex < item.generationCount; generationIndex += 1) {
-      const entry = input.idempotencyKeys[keyIndex];
-      if (
-        entry === undefined ||
-        Reflect.ownKeys(entry).length !== 3 ||
-        entry.itemId !== item.id ||
-        entry.generationIndex !== generationIndex ||
-        !SAFE_ID.test(entry.key) ||
-        seenKeys.has(entry.key)
-      ) {
-        return fail('invalid_idempotency');
-      }
-      seenKeys.add(entry.key);
-      idempotencyKeys.push({ ...entry });
-      keyIndex += 1;
+  for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
+    const item = items[itemIndex]!;
+    const entry = input.idempotencyKeys[itemIndex];
+    if (
+      entry === undefined ||
+      Reflect.ownKeys(entry).length !== 2 ||
+      entry.itemId !== item.id ||
+      !SAFE_ID.test(entry.key) ||
+      seenKeys.has(entry.key)
+    ) {
+      return fail('invalid_idempotency');
     }
+    seenKeys.add(entry.key);
+    idempotencyKeys.push({ ...entry });
   }
 
   const quote = structuredClone(input.quote);
@@ -206,20 +200,13 @@ export const createStudioSpendAuthorizationV2 = (input: StudioSpendAuthorization
   };
 };
 
-const findAuthorizationItem = (
-  authorization: StudioSpendAuthorization,
-  itemId: string,
-  generationIndex: number
-): StudioQuotedGeneration => {
-  if (!SAFE_ID.test(itemId) || !Number.isSafeInteger(generationIndex) || generationIndex < 0) {
-    return fail('invalid_receipt');
-  }
+const findAuthorizationItem = (authorization: StudioSpendAuthorization, itemId: string): StudioQuotedGeneration => {
+  if (!SAFE_ID.test(itemId)) return fail('invalid_receipt');
   const item = combinedItems(authorization).find((candidate) => candidate.id === itemId);
   if (
     item === undefined ||
-    generationIndex >= item.generationCount ||
-    generationIndex >= STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION ||
-    !authorization.idempotencyKeys.some((entry) => entry.itemId === itemId && entry.generationIndex === generationIndex)
+    item.generationCount !== 1 ||
+    !authorization.idempotencyKeys.some((entry) => entry.itemId === itemId)
   ) {
     return fail('invalid_receipt');
   }
@@ -231,10 +218,9 @@ export const createStudioSpendReceiptV2 = (input: {
   authorization: StudioSpendAuthorization;
   itemId: string;
   jobId: string;
-  generationIndex: number;
 }): StudioSpendReceipt => {
   if (!SAFE_ID.test(input.jobId)) fail('invalid_receipt');
-  const item = findAuthorizationItem(input.authorization, input.itemId, input.generationIndex);
+  const item = findAuthorizationItem(input.authorization, input.itemId);
   const amounts = calculateStudioQuotedGenerationAmounts(item);
   if (amounts === null) return fail('invalid_receipt');
   const durationSeconds =
@@ -253,7 +239,6 @@ export const createStudioSpendReceiptV2 = (input: {
     rateUnit: item.rateUnit,
     rateMinorUnits: item.rateMinorUnits,
     durationSeconds,
-    generationIndex: input.generationIndex,
     generationCount: item.generationCount,
     totalMinorUnits: amounts.oneGenerationMinorUnits,
   };
@@ -270,11 +255,8 @@ export const studioSpendReceiptMatchesJobV2 = (
       authorization,
       itemId: job.authorizationItemId,
       jobId: job.id,
-      generationIndex: job.generationIndex,
     });
-    const key = authorization.idempotencyKeys.find(
-      (entry) => entry.itemId === job.authorizationItemId && entry.generationIndex === job.generationIndex
-    );
+    const key = authorization.idempotencyKeys.find((entry) => entry.itemId === job.authorizationItemId);
     return (
       job.authorizationId === authorization.id &&
       job.purpose === expected.purpose &&

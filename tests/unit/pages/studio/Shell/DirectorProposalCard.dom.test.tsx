@@ -68,11 +68,11 @@ const reviewedCoverageProposal = (): StudioProposalV2 => ({
         fixedShots: [
           {
             shotId: 'shot-fixed-z',
-            reasons: ['conditioning_frame', 'owned_asset', 'selected_take', 'owned_job', 'seed_still', 'owned_asset'],
+            reasons: ['conditioning_frame', 'owned_asset', 'video_asset', 'owned_job', 'seed_still', 'owned_asset'],
           },
           {
             shotId: 'shot-fixed-a',
-            reasons: ['on_screen_text', 'match_to', 'conditioning_input', 'narration'],
+            reasons: ['on_screen_text', 'conditioning_input', 'narration'],
           },
         ],
       },
@@ -173,7 +173,7 @@ describe('DirectorProposalCard', () => {
     ).toEqual([
       'conversation.creativeStudio.workspace.proposals.fixedReason.conditioning_frame',
       'conversation.creativeStudio.workspace.proposals.fixedReason.owned_asset',
-      'conversation.creativeStudio.workspace.proposals.fixedReason.selected_take',
+      'conversation.creativeStudio.workspace.proposals.fixedReason.video_asset',
       'conversation.creativeStudio.workspace.proposals.fixedReason.owned_job',
       'conversation.creativeStudio.workspace.proposals.fixedReason.seed_still',
       'conversation.creativeStudio.workspace.proposals.fixedReason.owned_asset',
@@ -182,7 +182,6 @@ describe('DirectorProposalCard', () => {
       Array.from(screen.getByTestId('studio-fixed-reasons-0-1').querySelectorAll('li'), (node) => node.textContent)
     ).toEqual([
       'conversation.creativeStudio.workspace.proposals.fixedReason.on_screen_text',
-      'conversation.creativeStudio.workspace.proposals.fixedReason.match_to',
       'conversation.creativeStudio.workspace.proposals.fixedReason.conditioning_input',
       'conversation.creativeStudio.workspace.proposals.fixedReason.narration',
     ]);

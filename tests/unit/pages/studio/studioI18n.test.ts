@@ -145,8 +145,8 @@ const expectedLeaves = [
   'cut.preview.videoLabel',
   'cut.preview.slateLabel',
   'cut.preview.noMedia',
-  'cut.preview.awaitingTakeOne',
-  'cut.preview.awaitingTakeMany',
+  'cut.preview.awaitingPictureOne',
+  'cut.preview.awaitingPictureMany',
   'cut.preview.mediaError',
   'cut.preview.play',
   'cut.preview.pause',
@@ -255,7 +255,6 @@ const expectedLeaves = [
   'bin.listLabel',
   'bin.kind.beat',
   'bin.kind.shot',
-  'bin.kind.take',
   'bin.reason.lifted',
   'bin.reason.alternate',
   'bin.position',
@@ -265,9 +264,6 @@ const expectedLeaves = [
   'bin.shotCount',
   'bin.shotCount_one',
   'bin.shotCount_other',
-  'bin.takeCount',
-  'bin.takeCount_one',
-  'bin.takeCount_other',
   'bin.retainedWork',
   'bin.stale',
   'bin.coverAlt',
@@ -280,9 +276,6 @@ const expectedLeaves = [
   'bin.restore.beforeShot',
   'bin.restore.beat',
   'bin.restore.shot',
-  'bin.restore.take',
-  'bin.media.image',
-  'bin.media.video',
   'bin.blocker.statusUnavailable',
   'bin.blocker.ownerUnavailable',
   'bin.blocker.anchorUnavailable',
@@ -345,7 +338,7 @@ const expectedLeaves = [
   'controls.renderFilmEmpty',
   'beatPanel.coverage.trimGuidance',
   'beatPanel.coverage.boundaryGuidance',
-  'beatPanel.coverage.segmentState.noTake',
+  'beatPanel.coverage.segmentState.noPicture',
   'beatPanel.coverage.segmentState.queued',
   'beatPanel.coverage.segmentState.nextUp',
   'beatPanel.coverage.segmentState.waitingOnShot',
@@ -354,8 +347,6 @@ const expectedLeaves = [
   'beatPanel.coverage.segmentState.renderingProgress',
   'beatPanel.coverage.segmentState.renderingStill',
   'beatPanel.coverage.segmentState.rendered',
-  'beatPanel.coverage.segmentState.renderedOneTake',
-  'beatPanel.coverage.segmentState.selectedTake',
   'beatPanel.coverage.segmentState.untouched',
   'beatPanel.coverage.segmentState.needsRerender',
   'beatPanel.coverage.segmentState.staleStillPlays',
@@ -414,8 +405,10 @@ const expectedLeaves = [
   'beatPanel.derivation.restoreHistory',
   'beatPanel.seeds.label',
   'beatPanel.seeds.title',
-  'beatPanel.seeds.imageLabel',
-  'beatPanel.seeds.imageTitle',
+  'beatPanel.seeds.stillLabel',
+  'beatPanel.seeds.previewAlt',
+  'beatPanel.seeds.effective',
+  'beatPanel.seeds.pinnedBadge',
   'beatPanel.seeds.pending',
   'beatPanel.seeds.latestDefault',
   'beatPanel.seeds.pinned',
@@ -423,38 +416,19 @@ const expectedLeaves = [
   'beatPanel.seeds.pin',
   'beatPanel.seeds.clearPin',
   'beatPanel.seeds.empty',
-  'beatPanel.takes.imageTakeLabel',
-  'beatPanel.takes.videoTakeLabel',
-  'beatPanel.takes.previewAlt',
-  'beatPanel.takes.videoPreview',
-  'beatPanel.takes.selected',
-  'beatPanel.takes.effectiveSeed',
-  'beatPanel.takes.pinnedSeed',
-  'beatPanel.takes.binReason.lifted',
-  'beatPanel.takes.binReason.alternate',
-  'beatPanel.takes.sourceDuration',
-  'beatPanel.takes.select',
-  'beatPanel.takes.trimIncompatible',
-  'beatPanel.takes.park',
-  'beatPanel.takes.parkConfirmTitle',
-  'beatPanel.takes.parkConfirmBody',
-  'beatPanel.takes.addAlternate',
-  'beatPanel.takes.alternateConfirmTitle',
-  'beatPanel.takes.alternateConfirmBody',
-  'beatPanel.takes.restore',
-  'beatPanel.takes.unavailable',
-  'beatPanel.takes.videoLabel',
-  'beatPanel.takes.videoTitle',
-  'beatPanel.takes.empty',
+  'beatPanel.picture.title',
+  'beatPanel.picture.label',
+  'beatPanel.picture.empty',
+  'beatPanel.picture.sourceDuration',
+  'beatPanel.picture.unavailable',
+  'beatPanel.picture.videoPreview',
   'beatPanel.generation.gateLocked',
   'beatPanel.generation.generateSeed',
   'beatPanel.generation.renderVideo',
   'beatPanel.generation.choiceLabel',
-  'beatPanel.generation.countForChoice',
   'beatPanel.generation.referenceForChoice',
   'beatPanel.generation.noReference',
   'beatPanel.generation.purpose.seedStill',
-  'beatPanel.generation.purpose.videoTake',
   'beatPanel.generation.reviewUnavailable',
   'beatPanel.lift.shot',
   'beatPanel.lift.shotTitle',
@@ -470,30 +444,22 @@ const expectedLeaves = [
   'beatPanel.lift.confirmBeat',
   'beatPanel.blocker.statusUnavailable',
   'beatPanel.blocker.unsavedDrafts',
-  'beatPanel.blocker.currentMatchTo',
   'beatPanel.blocker.ownNonterminalJob',
   'beatPanel.blocker.ownPendingFrame',
   'beatPanel.blocker.downstreamNonterminalJob',
   'beatPanel.blocker.downstreamPendingFrame',
   'beatPanel.blocker.waitingAuthorizationDependency',
   'beatPanel.blocker.boundNonterminalRequest',
-  'beatPanel.blocker.currentSelectedTake',
-  'beatPanel.blocker.currentSeedStill',
-  'beatPanel.blocker.nonterminalConditioningUse',
-  'beatPanel.blocker.takeBinCapacityReached',
   'beatPanel.blocker.beatShotCapacityReached',
   'beatPanel.recovery.label',
   'beatPanel.recovery.title',
   'beatPanel.recovery.reason.upstream_running',
   'beatPanel.recovery.reason.choose_seed',
-  'beatPanel.recovery.reason.choose_take',
   'beatPanel.recovery.reason.conditioning_frame',
   'beatPanel.recovery.reason.conditioning_failed',
   'beatPanel.recovery.reason.dependency_failed',
   'beatPanel.recovery.reason.cancelled',
   'beatPanel.recovery.freshQuoteRequired',
-  'beatPanel.recovery.chooseImage',
-  'beatPanel.recovery.chooseVideo',
   'beatPanel.recovery.retryFree',
   'beatPanel.recovery.cancelWaiting',
   'beatPanel.recovery.cancelTitle',
@@ -523,9 +489,9 @@ const expectedLeaves = [
   'library.shotCount',
   'library.shotCount_one',
   'library.shotCount_other',
-  'library.selectedTakeCount',
-  'library.selectedTakeCount_one',
-  'library.selectedTakeCount_other',
+  'library.pictureCount',
+  'library.pictureCount_one',
+  'library.pictureCount_other',
   'library.updated',
   'library.status.complete',
   'library.status.partial',
@@ -563,11 +529,10 @@ const expectedLeaves = [
   'proposals.fixedShot',
   'proposals.fixedReason.owned_asset',
   'proposals.fixedReason.owned_job',
-  'proposals.fixedReason.selected_take',
+  'proposals.fixedReason.video_asset',
   'proposals.fixedReason.seed_still',
   'proposals.fixedReason.conditioning_frame',
   'proposals.fixedReason.conditioning_input',
-  'proposals.fixedReason.match_to',
   'proposals.fixedReason.narration',
   'proposals.fixedReason.on_screen_text',
   'proposals.rederiveTitle',
@@ -626,12 +591,6 @@ const expectedLeaves = [
   'controls.routeStatus.unavailable',
   'controls.shotState.draft',
   'controls.shotState.seed_ready',
-  'controls.shotState.takes_available',
-  'controls.shotState.selected_take',
-  'controls.takeCount',
-  'controls.takeCount_one',
-  'controls.takeCount_other',
-  'controls.generationChoices',
   'controls.undo',
   'controls.undoLabel.edit_project',
   'controls.undoLabel.set_brief',
@@ -655,14 +614,9 @@ const expectedLeaves = [
   'controls.undoLabel.redetach_line',
   'controls.undoLabel.rederive_line',
   'controls.undoLabel.restore_line',
-  'controls.undoLabel.park_take',
-  'controls.undoLabel.add_alternate_take',
-  'controls.undoLabel.restore_take',
   'controls.undoLabel.reorder_bin',
-  'controls.undoLabel.select_take',
   'controls.undoLabel.set_routes',
   'controls.undoLabel.set_spend_policy',
-  'controls.undoLabel.set_match_to',
   'controls.undoLabel.set_bed',
   'controls.undoLabel.mutation_batch',
   'controls.undoLabel.unknown',
@@ -672,7 +626,6 @@ const expectedLeaves = [
   'controls.cascadeTitle',
   'controls.cascadeReason.upstream_running',
   'controls.cascadeReason.choose_seed',
-  'controls.cascadeReason.choose_take',
   'controls.cascadeReason.conditioning_frame',
   'controls.cascadeReason.conditioning_failed',
   'controls.cascadeReason.dependency_failed',
@@ -713,7 +666,6 @@ const expectedLeaves = [
   'gate.duration',
   'gate.durationNotApplicable',
   'gate.rowCost',
-  'gate.waitsForTakeSelection',
   'gate.budget.no_policy',
   'gate.budget.within_cap',
   'gate.budget.over_cap',
@@ -766,8 +718,8 @@ const localizedCutPreviewKeys = [
   'cut.preview.videoLabel',
   'cut.preview.slateLabel',
   'cut.preview.noMedia',
-  'cut.preview.awaitingTakeOne',
-  'cut.preview.awaitingTakeMany',
+  'cut.preview.awaitingPictureOne',
+  'cut.preview.awaitingPictureMany',
   'cut.preview.mediaError',
   'cut.preview.play',
   'cut.preview.pause',
@@ -811,7 +763,7 @@ const localizedBeatPlaybackKeys = [
 ] as const;
 
 const localizedBeatSegmentKeys = [
-  'beatPanel.coverage.segmentState.noTake',
+  'beatPanel.coverage.segmentState.noPicture',
   'beatPanel.coverage.segmentState.queued',
   'beatPanel.coverage.segmentState.nextUp',
   'beatPanel.coverage.segmentState.waitingOnShot',
@@ -820,8 +772,6 @@ const localizedBeatSegmentKeys = [
   'beatPanel.coverage.segmentState.renderingProgress',
   'beatPanel.coverage.segmentState.renderingStill',
   'beatPanel.coverage.segmentState.rendered',
-  'beatPanel.coverage.segmentState.renderedOneTake',
-  'beatPanel.coverage.segmentState.selectedTake',
   'beatPanel.coverage.segmentState.untouched',
   'beatPanel.coverage.segmentState.needsRerender',
   'beatPanel.coverage.segmentState.staleStillPlays',
@@ -838,13 +788,24 @@ const localizedBeatSegmentKeys = [
 
 const localizedCutFilmDeltaKeys = ['cut.film.under', 'cut.film.over'] as const;
 
+const localizedCurrentPictureKeys = [
+  'beatPanel.seeds.stillLabel',
+  'beatPanel.seeds.previewAlt',
+  'beatPanel.seeds.effective',
+  'beatPanel.seeds.pinnedBadge',
+  'beatPanel.picture.title',
+  'beatPanel.picture.label',
+  'beatPanel.picture.empty',
+  'beatPanel.picture.sourceDuration',
+  'beatPanel.picture.unavailable',
+  'beatPanel.picture.videoPreview',
+  'beatPanel.generation.renderVideo',
+] as const;
+
 const localizedMoveToBinKeys = [
   'board.liftBeat',
   'board.liftConfirmTitle',
   'board.liftConfirmContent',
-  'beatPanel.takes.park',
-  'beatPanel.takes.parkConfirmTitle',
-  'beatPanel.takes.parkConfirmBody',
   'beatPanel.lift.shot',
   'beatPanel.lift.shotTitle',
   'beatPanel.lift.shotBodyNoStale',
@@ -855,6 +816,14 @@ const localizedMoveToBinKeys = [
   'beatPanel.lift.beatBodyNoStale',
   'beatPanel.lift.beatBodyStale',
   'beatPanel.lift.confirmBeat',
+] as const;
+
+const localizedOnePicturePresentationKeys = [
+  'library.subtitle',
+  'library.status.complete',
+  'library.status.partial',
+  'cut.exports.editorFolderDescription',
+  'proposals.fixedReason.video_asset',
 ] as const;
 
 const localizedWorkspaceKeys = [
@@ -881,6 +850,11 @@ const localizedWorkspaceKeys = [
   'beatPanel.lookCounter',
   'beatPanel.lookCounter_one',
   'beatPanel.lookCounter_other',
+  ...localizedCurrentPictureKeys,
+  'library.pictureCount',
+  'library.pictureCount_one',
+  'library.pictureCount_other',
+  ...localizedOnePicturePresentationKeys,
   ...localizedCutPreviewKeys,
   ...localizedCutCompositionKeys,
   ...localizedBeatPlaybackKeys,
@@ -974,7 +948,7 @@ describe('Creative Studio workspace translations', () => {
       'beatPanel.coverage.seekValue': '{{current}} of {{total}}',
       'beatPanel.preview.label': 'Beat preview',
       'beatPanel.preview.noMedia': 'Beat preview unavailable',
-      'beatPanel.preview.mediaError': 'The selected Take could not be previewed.',
+      'beatPanel.preview.mediaError': 'The current picture could not be previewed.',
       'beatPanel.preview.videoLabel': 'Shot {{position}} video · {{line}}',
       'beatPanel.preview.slateLabel': 'Shot {{position}} planning slate · {{line}}',
       'beatPanel.preview.slate': 'Planning slate',
@@ -995,7 +969,7 @@ describe('Creative Studio workspace translations', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
-      'beatPanel.coverage.segmentState.noTake': 'No Take',
+      'beatPanel.coverage.segmentState.noPicture': 'No picture',
       'beatPanel.coverage.segmentState.queued': 'Queued',
       'beatPanel.coverage.segmentState.nextUp': 'Next up',
       'beatPanel.coverage.segmentState.waitingOnShot': 'Waiting on {{position}}',
@@ -1004,8 +978,6 @@ describe('Creative Studio workspace translations', () => {
       'beatPanel.coverage.segmentState.renderingProgress': 'Rendering · {{progress}}%',
       'beatPanel.coverage.segmentState.renderingStill': 'Rendering · Showing the still',
       'beatPanel.coverage.segmentState.rendered': 'Rendered',
-      'beatPanel.coverage.segmentState.renderedOneTake': 'Rendered · 1 Take',
-      'beatPanel.coverage.segmentState.selectedTake': '{{count}} Takes · T{{take}} in the Cut',
       'beatPanel.coverage.segmentState.untouched': 'Untouched',
       'beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
       'beatPanel.coverage.segmentState.staleStillPlays': 'Stale · Still plays',
@@ -1062,16 +1034,20 @@ describe('Creative Studio workspace translations', () => {
     expect(placeholders(leaves['beatPanel.chain.continuous']!)).toEqual(['position']);
   });
 
-  it('names removal actions as Move to Bin while preserving durable Bin states and alternates', () => {
+  it('prices each generation choice once without per-choice count interpolation', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves['gate.rowCost']).toBe('{{cost}} total');
+    expect(placeholders(leaves['gate.rowCost']!)).toEqual(['cost']);
+  });
+
+  it('names Beat and Shot removal actions as Move to Bin while preserving durable Bin states', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
       'board.liftBeat': 'Move to Bin',
       'board.liftConfirmTitle': 'Move {{title}} to the Bin?',
-      'board.liftConfirmContent': 'This Beat leaves the film. All authored work and Takes are kept in the Bin.',
-      'beatPanel.takes.park': 'Move to Bin',
-      'beatPanel.takes.parkConfirmTitle': 'Move this Take to the Bin?',
-      'beatPanel.takes.parkConfirmBody': 'The Take stays with the project and moves out of active choices.',
+      'board.liftConfirmContent': 'This Beat leaves the film. All authored and paid work is kept in the Bin.',
       'beatPanel.lift.shot': 'Move to Bin',
       'beatPanel.lift.shotTitle': 'Move Shot {{index}} to the Bin?',
       'beatPanel.lift.shotBodyNoStale': 'Authored and paid work stays with this Shot. Move it to the Bin?',
@@ -1087,8 +1063,20 @@ describe('Creative Studio workspace translations', () => {
       'beatPanel.lift.confirmBeat': 'Move to Bin',
     });
     expect(leaves['bin.reason.lifted']).toBe('Lifted');
-    expect(leaves['beatPanel.takes.binReason.lifted']).toBe('Lifted');
-    expect(leaves['beatPanel.takes.addAlternate']).toBe('Move to alternates');
+  });
+
+  it('uses the one-picture model in visible Library, Cut, and proposal copy', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'library.subtitle': 'Plan stories as Beats and Shots, then review every current picture.',
+      'library.status.complete': 'All Shots have current pictures',
+      'library.status.partial': 'Some Shots have current pictures',
+      'cut.exports.editorFolderDescription':
+        'Current Shot pictures, target slates, timeline data and the optional bed in film order.',
+      'proposals.fixedReason.video_asset': 'It has a current picture.',
+    });
+    for (const key of localizedOnePicturePresentationKeys) expect(placeholders(leaves[key]!)).toEqual([]);
   });
 
   it('keeps one/other variants paired with identical interpolation parameters', () => {
@@ -1097,7 +1085,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(19);
+    expect(pluralBases).toHaveLength(17);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
@@ -1114,7 +1102,7 @@ describe('Creative Studio workspace translations', () => {
     ['cut.actualDuration', 1440, '1440s actual'],
     ['cut.targetDuration', 15.6, '16s target slate'],
     ['beatPanel.coverage.sourceDuration', 15.069002, '15s source'],
-    ['beatPanel.takes.sourceDuration', 15.069002, '15s source'],
+    ['beatPanel.picture.sourceDuration', 15.069002, '15 seconds source'],
   ])(
     'rounds provider duration facts at the translation boundary for %s at %s seconds',
     async (key, seconds, expected) => {
@@ -1256,6 +1244,11 @@ describe('Creative Studio workspace translations', () => {
         ...localizedCutCompositionKeys,
         ...localizedBeatPlaybackKeys,
         ...localizedBeatSegmentKeys,
+        ...localizedCurrentPictureKeys,
+        'library.pictureCount',
+        'library.pictureCount_one',
+        'library.pictureCount_other',
+        ...localizedOnePicturePresentationKeys,
         ...localizedMoveToBinKeys,
       ]) {
         const englishCopy = englishLeaves[key];
@@ -1291,6 +1284,24 @@ describe('Creative Studio workspace translations', () => {
 
     expect(errors.mediaInUse).toBe(
       'This reference is in use by a queued paid request. Finish or cancel that request before detaching it.'
+    );
+  });
+
+  it('localizes the seed-still variation-grid refusal in every configured locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const conversation = loadConversation(locale);
+      const creativeStudio = asObject(conversation.creativeStudio, `${locale}.creativeStudio`);
+      const jobs = asObject(creativeStudio.jobs, `${locale}.creativeStudio.jobs`);
+      const errors = asObject(jobs.errors, `${locale}.creativeStudio.jobs.errors`);
+      expect(errors.seedStillVariationGrid, locale).toBeTypeOf('string');
+      expect((errors.seedStillVariationGrid as string).trim(), locale).not.toBe('');
+    }
+
+    const creativeStudio = asObject(englishConversation.creativeStudio, 'creativeStudio');
+    const jobs = asObject(creativeStudio.jobs, 'creativeStudio.jobs');
+    const errors = asObject(jobs.errors, 'creativeStudio.jobs.errors');
+    expect(errors.seedStillVariationGrid).toBe(
+      'The generated seed still contains a multi-panel variation grid and cannot be used for video.'
     );
   });
 

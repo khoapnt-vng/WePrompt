@@ -5,7 +5,6 @@
  */
 
 import {
-  STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_SHOTS_PER_BEAT,
   type StudioAssetV2,
   type StudioCascadeProgressV2,
@@ -35,17 +34,12 @@ const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
 ]);
 
 const BLOCKER_CODE_ORDER: readonly StudioRendererParkBlockerCodeV2[] = [
-  'current_match_to',
   'own_nonterminal_job',
   'own_pending_frame',
   'downstream_nonterminal_job',
   'downstream_pending_frame',
   'waiting_authorization_dependency',
   'bound_nonterminal_request',
-  'current_selected_take',
-  'current_seed_still',
-  'nonterminal_conditioning_use',
-  'take_bin_capacity_reached',
   'beat_shot_capacity_reached',
 ];
 
@@ -75,20 +69,6 @@ const activeShotLocations = (project: StudioProjectV2): ActiveShotLocation[] => 
   return result;
 };
 
-const shotOwners = (project: StudioProjectV2): Map<string, string> => {
-  const result = new Map<string, string>();
-  for (const beat of Object.values(project.beats)) {
-    for (const shotId of beat.shotOrder) result.set(shotId, beat.id);
-  }
-  for (const item of project.bin) {
-    if (item.kind === 'shot') result.set(item.shotId, item.beatId);
-  }
-  return result;
-};
-
-const isBinnedTake = (project: StudioProjectV2, assetId: string): boolean =>
-  project.bin.some((item) => item.kind === 'take' && item.assetId === assetId);
-
 const isCanonicalTake = (
   project: StudioProjectV2,
   shot: StudioShot,
@@ -105,7 +85,7 @@ const isCanonicalTake = (
 const jobsForItem = (project: StudioProjectV2, authorizationId: string, itemId: string): StudioJobV2[] =>
   Object.values(project.jobs)
     .filter((job) => job.authorizationId === authorizationId && job.authorizationItemId === itemId)
-    .sort((left, right) => left.generationIndex - right.generationIndex || left.id.localeCompare(right.id));
+    .sort((left, right) => left.id.localeCompare(right.id));
 
 const authorizationItems = (authorization: StudioSpendAuthorization): StudioQuotedGeneration[] => [
   ...authorization.baseItems,
@@ -124,7 +104,7 @@ const primaryAssetIdsForItem = (
   for (const job of jobsForItem(project, authorizationId, item.id)) {
     if (job.shotId !== item.shotId || job.purpose !== item.purpose) continue;
     const assetId = job.status === 'succeeded' ? job.outputAssetIdsByRole.primary : null;
-    if (assetId === null || seen.has(assetId) || isBinnedTake(project, assetId)) continue;
+    if (assetId === null || seen.has(assetId)) continue;
     const asset = ownValue(project.assets, assetId);
     if (
       !isCanonicalTake(project, shot, asset) ||
@@ -267,7 +247,7 @@ const projectCascadeProgress = (
       const upstreamShot = ownValue(project.shots, dependency.predecessorShotId);
       const selectedAsset = ownValue(project.assets, dependency.takeAssetId);
       const exactSelectedTake =
-        upstreamShot?.selectedTakeId === dependency.takeAssetId &&
+        upstreamShot?.videoAssetId === dependency.takeAssetId &&
         selectedAsset?.mediaKind === 'video' &&
         typeof selectedAsset.durationSeconds === 'number' &&
         Object.is(selectedAsset.durationSeconds - (upstreamShot.trimOutSeconds ?? 0), dependency.endpointSeconds);
@@ -275,7 +255,7 @@ const projectCascadeProgress = (
       try {
         extractionId = createStudioFrameExtractionId({
           shotId: dependency.predecessorShotId,
-          takeAssetId: dependency.takeAssetId,
+          videoAssetId: dependency.takeAssetId,
           endpointSeconds: dependency.endpointSeconds,
         });
       } catch {
@@ -284,7 +264,7 @@ const projectCascadeProgress = (
       const extraction = extractionId === null ? undefined : ownValue(project.frameExtractions, extractionId);
       const exactExtraction =
         extraction?.shotId === dependency.predecessorShotId &&
-        extraction.takeAssetId === dependency.takeAssetId &&
+        extraction.videoAssetId === dependency.takeAssetId &&
         Object.is(extraction.endpointSeconds, dependency.endpointSeconds)
           ? extraction
           : undefined;
@@ -318,7 +298,7 @@ const projectCascadeProgress = (
 
     const upstreamShot = ownValue(project.shots, upstreamShotId);
     const selectedAssetId =
-      dependency.kind === 'authorized_seed' ? upstreamShot?.seedStillId : upstreamShot?.selectedTakeId;
+      dependency.kind === 'authorized_seed' ? upstreamShot?.seedStillId : upstreamShot?.videoAssetId;
     if (
       selectedAssetId === undefined ||
       selectedAssetId === null ||
@@ -330,7 +310,7 @@ const projectCascadeProgress = (
         eligiblePrimaryAssetIds,
         canRetryConditioningFrame: false,
         canCancelWaiting,
-        waitingReason: dependency.kind === 'authorized_seed' ? 'choose_seed' : 'choose_take',
+        waitingReason: dependency.kind === 'authorized_seed' ? 'choose_seed' : 'upstream_running',
       });
       continue;
     }
@@ -348,7 +328,7 @@ const projectCascadeProgress = (
     try {
       extractionId = createStudioFrameExtractionId({
         shotId: upstreamShot.id,
-        takeAssetId: selectedAssetId,
+        videoAssetId: selectedAssetId,
         endpointSeconds,
       });
     } catch {
@@ -358,7 +338,7 @@ const projectCascadeProgress = (
     const exactExtraction =
       extraction?.id === extractionId &&
       extraction.shotId === upstreamShot.id &&
-      extraction.takeAssetId === selectedAssetId &&
+      extraction.videoAssetId === selectedAssetId &&
       Object.is(extraction.endpointSeconds, endpointSeconds)
         ? extraction
         : undefined;
@@ -421,13 +401,12 @@ const projectConditioningFailures = (
     if (shot === undefined || beat === undefined || shot.chainBreak === 'hard_cut') continue;
     const predecessorShotId = beat.shotOrder[location.shotIndex - 1];
     const predecessor = predecessorShotId === undefined ? undefined : ownValue(project.shots, predecessorShotId);
-    if (predecessor?.selectedTakeId === null || predecessor === undefined) continue;
-    const take = ownValue(project.assets, predecessor.selectedTakeId);
+    if (predecessor?.videoAssetId === null || predecessor === undefined) continue;
+    const take = ownValue(project.assets, predecessor.videoAssetId);
     if (
       !isCanonicalTake(project, predecessor, take) ||
       take.mediaKind !== 'video' ||
       take.managedAsset.collection !== 'assets' ||
-      isBinnedTake(project, take.id) ||
       typeof take.durationSeconds !== 'number'
     ) {
       continue;
@@ -438,7 +417,7 @@ const projectConditioningFailures = (
     try {
       extractionId = createStudioFrameExtractionId({
         shotId: predecessor.id,
-        takeAssetId: take.id,
+        videoAssetId: take.id,
         endpointSeconds,
       });
     } catch {
@@ -449,7 +428,7 @@ const projectConditioningFailures = (
       extraction?.id !== extractionId ||
       extraction.status !== 'failed' ||
       extraction.shotId !== predecessor.id ||
-      extraction.takeAssetId !== take.id ||
+      extraction.videoAssetId !== take.id ||
       !Object.is(extraction.endpointSeconds, endpointSeconds)
     ) {
       continue;
@@ -473,7 +452,7 @@ type StudioChainBoundaryFactV2 =
       dependentShotId: string;
       status: 'ready';
       extractionId: string;
-      takeAssetId: string;
+      videoAssetId: string;
       endpointSeconds: number;
       frameAssetId: string;
     };
@@ -512,16 +491,15 @@ const projectStudioChainBoundaryFactsV2 = (project: StudioProjectV2): StudioChai
       const gone = (): void => {
         result.push({ upstreamShotId, dependentShotId, status: 'gone' });
       };
-      if (upstream.selectedTakeId === null) {
+      if (upstream.videoAssetId === null) {
         empty();
         continue;
       }
-      const take = ownValue(project.assets, upstream.selectedTakeId);
+      const take = ownValue(project.assets, upstream.videoAssetId);
       if (
         !isCanonicalTake(project, upstream, take) ||
         take.mediaKind !== 'video' ||
         take.managedAsset.collection !== 'assets' ||
-        isBinnedTake(project, take.id) ||
         typeof take.durationSeconds !== 'number'
       ) {
         empty();
@@ -536,7 +514,7 @@ const projectStudioChainBoundaryFactsV2 = (project: StudioProjectV2): StudioChai
       try {
         extractionId = createStudioFrameExtractionId({
           shotId: upstream.id,
-          takeAssetId: take.id,
+          videoAssetId: take.id,
           endpointSeconds,
         });
       } catch {
@@ -551,7 +529,7 @@ const projectStudioChainBoundaryFactsV2 = (project: StudioProjectV2): StudioChai
       if (
         extraction.id !== extractionId ||
         extraction.shotId !== upstream.id ||
-        extraction.takeAssetId !== take.id ||
+        extraction.videoAssetId !== take.id ||
         !Object.is(extraction.endpointSeconds, endpointSeconds)
       ) {
         gone();
@@ -570,7 +548,7 @@ const projectStudioChainBoundaryFactsV2 = (project: StudioProjectV2): StudioChai
         dependentShotId,
         status: 'ready',
         extractionId,
-        takeAssetId: take.id,
+        videoAssetId: take.id,
         endpointSeconds,
         frameAssetId: extraction.frameAssetId,
       });
@@ -605,7 +583,7 @@ const verifiedBoundary = (
     !frameIsCanonical ||
     verification?.extractionId !== boundary.extractionId ||
     verification.shotId !== boundary.upstreamShotId ||
-    verification.takeAssetId !== boundary.takeAssetId ||
+    verification.videoAssetId !== boundary.videoAssetId ||
     !Object.is(verification.endpointSeconds, boundary.endpointSeconds) ||
     verification.frameAssetId !== boundary.frameAssetId ||
     verification.byteSize !== frameAsset.byteSize ||
@@ -658,63 +636,6 @@ const inboundBlockers = (project: StudioProjectV2, shotIds: readonly string[]): 
     shotIds
   );
 
-const takeHasNonterminalConditioningUse = (project: StudioProjectV2, assetId: string): boolean =>
-  Object.values(project.jobs).some((job) => {
-    if (!NONTERMINAL_JOB_STATUSES.has(job.status)) return false;
-    const input = job.requestSnapshot?.conditioningInput;
-    return (
-      (job.requestPlan.kind === 'after_take_selection' &&
-        job.requestPlan.dependency.kind === 'existing_predecessor' &&
-        job.requestPlan.dependency.takeAssetId === assetId) ||
-      (input?.kind === 'seed_still' && input.assetId === assetId) ||
-      (input?.kind === 'predecessor_frame' && input.takeAssetId === assetId)
-    );
-  });
-
-const takeIsLastSelectableForWaitingDependency = (project: StudioProjectV2, assetId: string): boolean => {
-  const producer = Object.values(project.jobs).find(
-    (job) => job.status === 'succeeded' && job.outputAssetIdsByRole.primary === assetId
-  );
-  if (producer === undefined) return false;
-  const hasWaitingDependent = Object.values(project.jobs).some(
-    (job) =>
-      NONTERMINAL_JOB_STATUSES.has(job.status) &&
-      job.requestPlan.kind === 'after_take_selection' &&
-      ((job.requestPlan.dependency.kind === 'existing_predecessor' &&
-        job.requestPlan.dependency.takeAssetId === assetId) ||
-        (job.requestPlan.dependency.kind !== 'existing_predecessor' &&
-          job.requestPlan.dependency.upstreamItemId === producer.authorizationItemId))
-  );
-  if (!hasWaitingDependent) return false;
-  const primaryIds = new Set<string>();
-  for (const sibling of Object.values(project.jobs)) {
-    if (sibling.authorizationItemId !== producer.authorizationItemId || sibling.status !== 'succeeded') continue;
-    const primaryId = sibling.outputAssetIdsByRole.primary;
-    if (primaryId === null || isBinnedTake(project, primaryId)) continue;
-    const shot = ownValue(project.shots, producer.shotId);
-    if (shot !== undefined && isCanonicalTake(project, shot, ownValue(project.assets, primaryId))) {
-      primaryIds.add(primaryId);
-    }
-  }
-  return primaryIds.size === 1 && primaryIds.has(assetId);
-};
-
-const takeBlockers = (project: StudioProjectV2, shot: StudioShot, assetId: string) => {
-  const blockers: StudioRendererParkBlockerV2[] = [];
-  if (shot.selectedTakeId === assetId) blockers.push({ shotId: shot.id, code: 'current_selected_take' });
-  if (shot.seedStillId === assetId) blockers.push({ shotId: shot.id, code: 'current_seed_still' });
-  if (takeHasNonterminalConditioningUse(project, assetId)) {
-    blockers.push({ shotId: shot.id, code: 'nonterminal_conditioning_use' });
-  }
-  if (takeIsLastSelectableForWaitingDependency(project, assetId)) {
-    blockers.push({ shotId: shot.id, code: 'waiting_authorization_dependency' });
-  }
-  if (project.bin.filter((item) => item.kind === 'take').length >= STUDIO_MAX_BIN_TAKE_ITEMS) {
-    blockers.push({ shotId: shot.id, code: 'take_bin_capacity_reached' });
-  }
-  return dedupeAndSortBlockers(blockers, [shot.id]);
-};
-
 const eligibilityRow = (
   identity: Omit<StudioRendererParkEligibilityV2, 'allowed' | 'blockers'>,
   blockers: StudioRendererParkBlockerV2[]
@@ -727,7 +648,7 @@ const projectParkEligibility = (project: StudioProjectV2): StudioRendererParkEli
     if (beat === undefined) continue;
     result.push(
       eligibilityRow(
-        { subject: 'beat', action: 'park', beatId, shotId: null, assetId: null },
+        { subject: 'beat', action: 'park', beatId, shotId: null },
         inboundBlockers(project, beat.shotOrder)
       )
     );
@@ -735,30 +656,14 @@ const projectParkEligibility = (project: StudioProjectV2): StudioRendererParkEli
       const shot = ownValue(project.shots, shotId);
       if (shot === undefined) continue;
       result.push(
-        eligibilityRow(
-          { subject: 'shot', action: 'park', beatId, shotId, assetId: null },
-          inboundBlockers(project, [shotId])
-        )
+        eligibilityRow({ subject: 'shot', action: 'park', beatId, shotId }, inboundBlockers(project, [shotId]))
       );
-      for (const assetId of shot.assetIds) {
-        const asset = ownValue(project.assets, assetId);
-        if (!isCanonicalTake(project, shot, asset) || isBinnedTake(project, assetId)) continue;
-        result.push(
-          eligibilityRow(
-            { subject: 'take', action: 'park', beatId, shotId, assetId },
-            takeBlockers(project, shot, assetId)
-          )
-        );
-      }
     }
   }
 
-  const owners = shotOwners(project);
   for (const item of project.bin) {
     if (item.kind === 'beat') {
-      result.push(
-        eligibilityRow({ subject: 'beat', action: 'restore', beatId: item.beatId, shotId: null, assetId: null }, [])
-      );
+      result.push(eligibilityRow({ subject: 'beat', action: 'restore', beatId: item.beatId, shotId: null }, []));
       continue;
     }
     if (item.kind === 'shot') {
@@ -768,18 +673,9 @@ const projectParkEligibility = (project: StudioProjectV2): StudioRendererParkEli
           ? [{ shotId: null, code: 'beat_shot_capacity_reached' as const }]
           : [];
       result.push(
-        eligibilityRow(
-          { subject: 'shot', action: 'restore', beatId: item.beatId, shotId: item.shotId, assetId: null },
-          blockers
-        )
+        eligibilityRow({ subject: 'shot', action: 'restore', beatId: item.beatId, shotId: item.shotId }, blockers)
       );
-      continue;
     }
-    const asset = ownValue(project.assets, item.assetId);
-    const shot = asset?.shotId === null || asset === undefined ? undefined : ownValue(project.shots, asset.shotId);
-    const beatId = shot === undefined ? undefined : owners.get(shot.id);
-    if (shot === undefined || beatId === undefined || !isCanonicalTake(project, shot, asset)) continue;
-    result.push(eligibilityRow({ subject: 'take', action: 'restore', beatId, shotId: shot.id, assetId: asset.id }, []));
   }
   return result;
 };

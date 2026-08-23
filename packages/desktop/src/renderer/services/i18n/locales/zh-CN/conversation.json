@@ -901,10 +901,20 @@
       "importError": "无法添加参考图，请重试。"
     },
     "workspace": {
+      "library": {
+        "subtitle": "以节拍和镜头规划故事，然后检查每个镜头的当前画面。",
+        "pictureCount": "{{count}} 个画面已就绪",
+        "pictureCount_one": "{{count}} 个画面已就绪",
+        "pictureCount_other": "{{count}} 个画面已就绪",
+        "status": {
+          "complete": "所有镜头都有当前画面",
+          "partial": "部分镜头有当前画面"
+        }
+      },
       "board": {
         "liftBeat": "移到废纸篓",
         "liftConfirmTitle": "将“{{title}}”移到废纸篓？",
-        "liftConfirmContent": "此节拍将从影片中移除。所有已创作内容、付费生成的素材和镜次都会保留在废纸篓中。"
+        "liftConfirmContent": "此节拍将从影片中移除。所有已创作内容和付费生成的素材都会保留在废纸篓中。"
       },
       "cut": {
         "preview": {
@@ -915,8 +925,8 @@
           "videoLabel": "节拍 {{beatPosition}} · {{beatTitle}} · 镜头 {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "节拍 {{beatPosition}} · {{beatTitle}} · 场记卡 · 无镜头素材",
           "noMedia": "暂无影片预览。",
-          "awaitingTakeOne": "播放影片前，请为节拍 {{beatPosition}} · 镜头 {{shotPosition}} 选择镜次。",
-          "awaitingTakeMany": "播放影片前，请为 {{count}} 个镜头选择镜次。",
+          "awaitingPictureOne": "节拍 {{beatPosition}}、镜头 {{shotPosition}} 尚无当前画面。",
+          "awaitingPictureMany": "{{count}} 个镜头尚无当前画面。",
           "mediaError": "无法加载此预览。",
           "play": "播放影片",
           "pause": "暂停影片",
@@ -928,6 +938,9 @@
           "nextJoin": "下一个接点",
           "loopJoin": "循环接点",
           "buffering": "正在加载预览画面"
+        },
+        "exports": {
+          "editorFolderDescription": "按影片顺序导出当前镜头画面、目标场记板、时间线数据和可选音轨。"
         },
         "film": {
           "under": "少 {{clock}}",
@@ -942,11 +955,28 @@
           "openBeat": "打开无镜头素材的节拍"
         }
       },
+      "proposals": {
+        "fixedReason": {
+          "video_asset": "此镜头有当前画面。"
+        }
+      },
       "beatPanel": {
-        "takes": {
-          "park": "移到废纸篓",
-          "parkConfirmTitle": "将此镜次移到废纸篓？",
-          "parkConfirmBody": "该镜次会保留在项目中，并从当前选项中移出。"
+        "seeds": {
+          "stillLabel": "镜头 {{shotIndex}} 的种子静帧 {{stillIndex}}",
+          "previewAlt": "预览 · {{label}}",
+          "effective": "当前种子",
+          "pinnedBadge": "已固定"
+        },
+        "picture": {
+          "title": "当前画面",
+          "label": "镜头 {{index}} 的当前画面",
+          "empty": "尚未生成画面",
+          "sourceDuration": "源视频 {{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} 秒",
+          "unavailable": "当前画面不可用",
+          "videoPreview": "播放器 · {{label}}"
+        },
+        "generation": {
+          "renderVideo": "再次生成"
         },
         "lift": {
           "shot": "移到废纸篓",
@@ -993,7 +1023,7 @@
           "trimGuidance": "边缘 · 修剪 · 免费",
           "boundaryGuidance": "边界 · 需要重新渲染",
           "segmentState": {
-            "noTake": "暂无镜次",
+            "noPicture": "暂无画面",
             "queued": "已加入队列",
             "nextUp": "下一个",
             "waitingOnShot": "等待镜头 {{position}}",
@@ -1002,8 +1032,6 @@
             "renderingProgress": "正在渲染 · {{progress}}%",
             "renderingStill": "正在渲染 · 正在显示静帧",
             "rendered": "已渲染",
-            "renderedOneTake": "已渲染 · 1 个镜次",
-            "selectedTake": "{{count}} 个镜次 · 剪辑中使用 T{{take}}",
             "untouched": "未更改",
             "needsRerender": "需要重新渲染",
             "staleStillPlays": "已过时 · 仍可播放",
@@ -1026,7 +1054,7 @@
         "preview": {
           "label": "节拍预览",
           "noMedia": "节拍预览不可用",
-          "mediaError": "无法预览所选成片。",
+          "mediaError": "无法预览当前画面。",
           "videoLabel": "镜头 {{position}} 视频 · {{line}}",
           "slateLabel": "镜头 {{position}} 规划场记卡 · {{line}}",
           "slate": "规划场记卡",
@@ -1545,6 +1573,7 @@
         "submissionUnknown": "提交结果未知。重试前请查看重复扣费警告。",
         "downloadFailed": "生成已完成，但无法下载输出。",
         "unsupported": "此服务商不支持请求的操作。",
+        "seedStillVariationGrid": "生成的种子静帧包含多面板变体网格，无法用于视频。",
         "unknown": "生成任务因未知原因失败。"
       }
     },

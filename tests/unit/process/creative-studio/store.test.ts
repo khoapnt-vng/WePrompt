@@ -54,7 +54,10 @@ import type {
   StudioRouteCatalogV2,
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
+} from '@/common/types/project/creativeStudioTypes';
 import {
   allocateStudioBriefReferenceLabel,
   STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH,
@@ -115,14 +118,14 @@ const makeStudioMutationBatchV2 = (
   operations: StudioMutationBatchV2['operations'],
   expectedRevision = project.revision
 ): StudioMutationBatchV2 => ({
-  schemaVersion: 2,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   projectId: project.id,
   expectedRevision,
   operations,
 });
 
 const makeBoundaryMutationBatchV2 = (projectId: string, expectedRevision = 1): StudioMutationBatchV2 => ({
-  schemaVersion: 2,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   projectId,
   expectedRevision,
   operations: [{ kind: 'set_brief', brief: 'Updated without a commit tag' }],
@@ -199,7 +202,7 @@ describe('schema-2 creative studio project store', () => {
     };
     const proposalId = input.proposalId ?? 'proposal_v2';
     const proposal: StudioProposalRecordV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: proposalId,
       projectId: project.id,
       status: 'pending',
@@ -211,7 +214,11 @@ describe('schema-2 creative studio project store', () => {
       createdAt: input.createdAt ?? timestamp,
       decidedAt: null,
     };
-    const slot: StudioProposalSlotV2 = { schemaVersion: 2, proposalId, reservedAt: proposal.createdAt };
+    const slot: StudioProposalSlotV2 = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      proposalId,
+      reservedAt: proposal.createdAt,
+    };
     writeFileSync(path.join(directories.pending, `${proposalId}.json`), JSON.stringify(proposal));
     writeFileSync(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
     return { proposal, slot, directories };
@@ -237,7 +244,7 @@ describe('schema-2 creative studio project store', () => {
     };
     const requestId = input.requestId ?? 'reference_request_v2';
     const request: StudioReferenceRequestV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: requestId,
       projectId: project.id,
       shotIds: input.shotIds ?? ['shot_reference'],
@@ -245,7 +252,7 @@ describe('schema-2 creative studio project store', () => {
       createdAt: input.createdAt ?? timestamp,
     };
     const slot: StudioReferenceRequestSlotV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       requestId,
       reservedAt: request.createdAt,
     };
@@ -307,7 +314,12 @@ describe('schema-2 creative studio project store', () => {
     ];
     return (
       await store.applyMutationBatchV2(
-        { schemaVersion: 2, projectId: project.id, expectedRevision: project.revision, operations },
+        {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          projectId: project.id,
+          expectedRevision: project.revision,
+          operations,
+        },
         { mutationId: `seed_${project.id}`, capturedAt: timestamp }
       )
     ).project;
@@ -364,7 +376,7 @@ describe('schema-2 creative studio project store', () => {
       expiresAt: '2026-08-17T12:05:00.000Z',
       confirmedAt: '2026-08-17T12:00:03.000Z',
       providerBindings: [{ itemId: item.id, provider }],
-      idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: `idem_${handoffId}` }],
+      idempotencyKeys: [{ itemId: item.id, key: `idem_${handoffId}` }],
     };
     const job: StudioJobV2 = {
       id: `job_${handoffId}`,
@@ -378,7 +390,6 @@ describe('schema-2 creative studio project store', () => {
       purpose: 'seed_still',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
-      generationIndex: 0,
       requestPlan,
       requestSnapshot: requestPlan.snapshot,
       spendReceipt: null,
@@ -553,7 +564,8 @@ describe('schema-2 creative studio project store', () => {
       trimOutSeconds: null,
       chainBreak: 'none',
       seedStillId: 'asset_seed',
-      selectedTakeId: 'asset_video',
+      videoAssetId: 'asset_video',
+      supersededVideoAssetIds: [],
       assetIds: ['asset_seed', 'asset_video', 'asset_thumbnail'],
       jobIds: ['job_video'],
     };
@@ -637,7 +649,7 @@ describe('schema-2 creative studio project store', () => {
       expiresAt: '2026-08-17T12:05:00.000Z',
       confirmedAt: timestamp,
       providerBindings: [{ itemId: item.id, provider }],
-      idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: 'idem_job_video' }],
+      idempotencyKeys: [{ itemId: item.id, key: 'idem_job_video' }],
     };
     const job: StudioJobV2 = {
       id: 'job_video',
@@ -652,7 +664,6 @@ describe('schema-2 creative studio project store', () => {
       purpose: 'video_take',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
-      generationIndex: 0,
       requestPlan,
       requestSnapshot: requestPlan.snapshot,
       spendReceipt: {
@@ -665,7 +676,6 @@ describe('schema-2 creative studio project store', () => {
         rateUnit: 'second',
         rateMinorUnits: item.rateMinorUnits,
         durationSeconds: 4,
-        generationIndex: 0,
         generationCount: 1,
         totalMinorUnits: 8,
       },
@@ -763,18 +773,24 @@ describe('schema-2 creative studio project store', () => {
     expect(typeof store.removeConnection).toBe('function');
   });
 
-  it('returns exact load discriminants without parsing a schema-1 payload as schema 2', async () => {
+  it('returns exact load discriminants without parsing schema-1 or schema-2 payloads as schema 3', async () => {
     const prototypeId = 'prototype_minimal';
     mkdirSync(path.join(rootDir, prototypeId));
     writeFileSync(
       path.join(rootDir, prototypeId, 'project.json'),
       JSON.stringify({ schemaVersion: 1, id: prototypeId, deliberatelyNotAProject: true })
     );
+    const previousSchemaId = 'schema_2_project';
+    mkdirSync(path.join(rootDir, previousSchemaId));
+    writeFileSync(
+      path.join(rootDir, previousSchemaId, 'project.json'),
+      JSON.stringify({ schemaVersion: 2, id: previousSchemaId, deliberatelyNotMigrated: true })
+    );
     const malformedId = 'malformed_v2';
     mkdirSync(path.join(rootDir, malformedId));
     writeFileSync(
       path.join(rootDir, malformedId, 'project.json'),
-      JSON.stringify({ schemaVersion: 2, id: malformedId })
+      JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: malformedId })
     );
     const project = createEmptyStudioProjectV2(inputV2, 'supported_v2', timestamp);
     seedProjectV2(project);
@@ -788,9 +804,45 @@ describe('schema-2 creative studio project store', () => {
     const missing: StudioProjectStoreLoadResultV2 = { status: 'not_found', projectId: 'missing_v2' };
     await expect(store.getProjectV2(project.id)).resolves.toEqual(supported);
     await expect(store.getProjectV2(prototypeId)).resolves.toEqual(unsupported);
+    await expect(store.getProjectV2(previousSchemaId)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId: previousSchemaId,
+    });
     await expect(store.getProjectV2('missing_v2')).resolves.toEqual(missing);
     await expect(store.getProjectV2(malformedId)).rejects.toMatchObject({ code: 'storage_error' });
     expect(prototypeIndexAccesses).toEqual([]);
+  });
+
+  it('refuses a schema-2 project without recovering or deleting its interrupted Brief sidecars', async () => {
+    const projectId = 'schema_2_brief_transaction';
+    const directory = path.join(rootDir, projectId);
+    mkdirSync(directory);
+    const projectBytes = JSON.stringify({ schemaVersion: 2, id: projectId, deliberatelyNotMigrated: true });
+    const briefBytes = 'Schema-2 Brief bytes stay untouched';
+    const transactionBytes = JSON.stringify({
+      schemaVersion: 1,
+      projectId,
+      baseManifestSha256: createHash('sha256').update(projectBytes).digest('hex'),
+      baseBriefSha256: createHash('sha256').update(briefBytes).digest('hex'),
+      candidateManifestSha256: 'c'.repeat(64),
+      candidateBrief: 'A schema-2 candidate must never be recovered',
+    });
+    writeFileSync(path.join(directory, 'project.json'), projectBytes);
+    writeFileSync(path.join(directory, 'brief.md'), briefBytes);
+    writeFileSync(path.join(directory, '.brief-transaction.json'), transactionBytes);
+    const before = new Map(
+      readdirSync(directory).map((name) => [name, readFileSync(path.join(directory, name))] as const)
+    );
+    const { store } = createStoreV2();
+
+    await expect(store.getProjectV2(projectId)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId,
+    });
+    await expect(store.listProjectsV2()).resolves.toMatchObject({ unsupportedProjectIds: [projectId] });
+
+    expect(readdirSync(directory).toSorted()).toEqual([...before.keys()].toSorted());
+    for (const [name, bytes] of before) expect(readFileSync(path.join(directory, name))).toEqual(bytes);
   });
 
   it('keeps every read and mutation boundary non-allocating when the configured root is absent', async () => {
@@ -1327,12 +1379,15 @@ describe('schema-2 creative studio project store', () => {
       resolution: winner.resolution,
       beatCount: 0,
       shotCount: 0,
-      selectedTakeCount: 0,
+      pictureCount: 0,
       createdAt: winner.createdAt,
       updatedAt: winner.updatedAt,
     };
     expectPersistedProjectV2(winner);
-    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({ schemaVersion: 2, projects: [summary] });
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({
+      schemaVersion: 2,
+      projects: [summary],
+    });
     const restarted = createStoreV2().store;
     await expect(restarted.getProjectV2(projectId)).resolves.toEqual({ status: 'supported', project: winner });
     await expect(restarted.listProjectsV2()).resolves.toEqual({
@@ -1413,7 +1468,7 @@ describe('schema-2 creative studio project store', () => {
       now: () => timestamp,
     });
     const oversizedBatch: StudioMutationBatchV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       projectId: oversizedId,
       expectedRevision: 1,
       operations: [{ kind: 'set_brief', brief: 'must not reach storage' }],
@@ -1599,7 +1654,7 @@ describe('schema-2 creative studio project store', () => {
     );
     writeFileSync(
       path.join(rootDir, 'malformed_boundary_v2', 'project.json'),
-      JSON.stringify({ schemaVersion: 2, id: 'malformed_boundary_v2' })
+      JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'malformed_boundary_v2' })
     );
     const { store, prototypeIndexAccesses } = createStoreV2();
 
@@ -2147,7 +2202,7 @@ describe('schema-2 creative studio project store', () => {
           resolution: '1080p',
           beatCount: 0,
           shotCount: 0,
-          selectedTakeCount: 0,
+          pictureCount: 0,
           createdAt: timestamp,
           updatedAt: timestamp,
         },
@@ -2179,7 +2234,7 @@ describe('schema-2 creative studio project store', () => {
             resolution: '4k',
             beatCount: 9,
             shotCount: 9,
-            selectedTakeCount: 9,
+            pictureCount: 9,
             createdAt: timestamp,
             updatedAt: timestamp,
           },
@@ -2196,7 +2251,7 @@ describe('schema-2 creative studio project store', () => {
     mkdirSync(path.join(rootDir, malformedId));
     writeFileSync(
       path.join(rootDir, malformedId, 'project.json'),
-      JSON.stringify({ schemaVersion: 2, id: malformedId })
+      JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: malformedId })
     );
     if (indexBytes !== null) writeFileSync(path.join(rootDir, 'projects-v2.json'), indexBytes);
     const prototypeIndexBefore = readFileSync(path.join(rootDir, 'projects.json'));
@@ -2209,7 +2264,7 @@ describe('schema-2 creative studio project store', () => {
       resolution: project.resolution,
       beatCount: 0,
       shotCount: 0,
-      selectedTakeCount: 0,
+      pictureCount: 0,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
@@ -2241,7 +2296,7 @@ describe('schema-2 creative studio project store', () => {
       resolution: '1080p',
       beatCount: 1,
       shotCount: 1,
-      selectedTakeCount: 1,
+      pictureCount: 1,
       poster: {
         beatId: 'section_1',
         shotId: 'clip_video',
@@ -2258,7 +2313,10 @@ describe('schema-2 creative studio project store', () => {
       unsupportedProjectIds: [prototype.id],
       quarantinedProjectIds: [],
     });
-    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({ schemaVersion: 2, projects: [summary] });
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({
+      schemaVersion: 2,
+      projects: [summary],
+    });
     expect(prototypeIndexAccesses).toEqual([]);
   });
 
@@ -2602,7 +2660,8 @@ describe('schema-2 creative studio project store', () => {
   it('reports a busy V2 delete before stale revision when both conditions apply', async () => {
     const project = makePosterProjectV2('busy_delete_v2');
     const shot = project.shots.clip_video!;
-    shot.selectedTakeId = null;
+    shot.videoAssetId = null;
+    shot.supersededVideoAssetIds = [];
     shot.assetIds = ['asset_seed'];
     delete project.assets.asset_video;
     delete project.assets.asset_thumbnail;
@@ -2775,7 +2834,7 @@ describe('schema-2 creative studio project store', () => {
       temporaryMarker,
       JSON.stringify(
         {
-          schemaVersion: 2,
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
           projectId: project.id,
           expectedRevision: project.revision,
           directoryDev: directory.dev,
@@ -2935,7 +2994,10 @@ describe('schema-2 creative studio project store', () => {
     expect(existsSync(path.join(rootDir, project.id))).toBe(false);
     expect(readFileSync(path.join(rootDir, prototype.id, 'project.json'))).toEqual(prototypeManifest);
     expect(readFileSync(path.join(rootDir, 'projects.json'))).toEqual(prototypeIndex);
-    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({ schemaVersion: 2, projects: [] });
+    expect(readJson(path.join(rootDir, 'projects-v2.json'))).toEqual({
+      schemaVersion: 2,
+      projects: [],
+    });
     expect(prototypeIndexAccesses).toEqual([]);
   });
 
@@ -2945,7 +3007,7 @@ describe('schema-2 creative studio project store', () => {
     mkdirSync(path.join(rootDir, malformedId));
     writeFileSync(
       path.join(rootDir, malformedId, 'project.json'),
-      JSON.stringify({ schemaVersion: 2, id: malformedId })
+      JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: malformedId })
     );
     const ids = ['inventory_a', 'inventory_b'];
     const { store, prototypeIndexAccesses } = createStoreV2({
@@ -3492,7 +3554,7 @@ describe('schema-2 creative studio project store', () => {
           resolution: updated.resolution,
           beatCount: 0,
           shotCount: 0,
-          selectedTakeCount: 0,
+          pictureCount: 0,
           createdAt: updated.createdAt,
           updatedAt: updated.updatedAt,
         },
@@ -3850,7 +3912,7 @@ describe('schema-2 creative studio project store', () => {
     mkdirSync(path.join(rootDir, malformedId));
     writeFileSync(
       path.join(rootDir, malformedId, 'project.json'),
-      JSON.stringify({ schemaVersion: 2, id: malformedId })
+      JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: malformedId })
     );
     const update = vi.fn((project: StudioProjectV2): StudioProjectV2 => project);
     const { store, prototypeIndexAccesses } = createStoreV2();
@@ -4174,7 +4236,7 @@ describe('schema-2 creative studio project store', () => {
     const { proposal, directories } = await seedProposalV2(store, project, { proposalId: 'proposal_mismatch' });
     const projectBytes = readFileSync(path.join(rootDir, project.id, 'project.json'), 'utf8');
     const attribution: StudioProposalCommitAttributionV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       proposalId: proposal.id,
       projectId: project.id,
       baseRevision: project.revision,
@@ -4204,7 +4266,7 @@ describe('schema-2 creative studio project store', () => {
     const seeded = await seedProposalV2(store, project, { proposalId: 'proposal_attribution_clock' });
     const projectBytes = readFileSync(path.join(rootDir, project.id, 'project.json'), 'utf8');
     const attribution: StudioProposalCommitAttributionV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       proposalId: seeded.proposal.id,
       projectId: project.id,
       baseRevision: project.revision,
@@ -4257,7 +4319,11 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(path.join(first.directories.pending, `${expiredProposal.id}.json`), JSON.stringify(expiredProposal));
     writeFileSync(
       path.join(first.directories.slots, '1.slot'),
-      JSON.stringify({ schemaVersion: 2, proposalId: expiredProposal.id, reservedAt: expiredProposal.createdAt })
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        proposalId: expiredProposal.id,
+        reservedAt: expiredProposal.createdAt,
+      })
     );
     await store.reapAbandonedProposalsV2();
     await expect(store.listProposalsV2(project.id)).resolves.toEqual(
@@ -4425,7 +4491,7 @@ describe('schema-2 creative studio project store', () => {
       result: { kind: 'dismissed' },
     });
     expect(dismissed.receipt).toEqual({
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       handoffId: 'handoff_lifecycle_v2',
       requestId: request.id,
       completedAt: '2026-08-17T12:00:02.000Z',
@@ -4884,7 +4950,7 @@ describe('schema-2 creative studio project store', () => {
               writeFileSync(
                 receiptFile,
                 JSON.stringify({
-                  schemaVersion: 2,
+                  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
                   handoffId: generated.handoffId,
                   requestId: generated.request.id,
                   completedAt: '2026-08-17T12:00:03.000Z',
@@ -4990,7 +5056,7 @@ describe('schema-2 creative studio project store', () => {
     ).rejects.toMatchObject({ code: 'invalid_payload' });
     const deleted = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: withReference.id,
         expectedRevision: withReference.revision,
         operations: [{ kind: 'delete_shot', shotId: 'shot_reference' }],
@@ -5538,7 +5604,7 @@ describe('schema-2 creative studio project store', () => {
       path.join(directories.receipts, `${handoffId}.json`)
     );
     expect(receipt).toEqual({
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       handoffId,
       requestId: request.id,
       completedAt: '2026-08-17T12:00:03.000Z',
@@ -5661,7 +5727,7 @@ describe('schema-2 creative studio project store', () => {
     const project = await addActiveReferenceShotsV2(store, created);
     const generated = await seedGenerationHandoffV2(store, project, { requestId: `relation_request_${mutate}` });
     const receipt: StudioReferenceGenerationHandoffReceiptV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       handoffId: mutate === 'handoff' ? 'different_handoff' : generated.handoffId,
       requestId: mutate === 'request' ? 'different_request' : generated.request.id,
       completedAt: timestamp,
@@ -5698,7 +5764,7 @@ describe('schema-2 creative studio project store', () => {
     }
     if (result !== null) {
       const receipt: StudioReferenceGenerationHandoffReceiptV2 = {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         handoffId: generated.handoffId,
         requestId: generated.request.id,
         completedAt: '2026-08-17T12:00:03.000Z',
@@ -5792,7 +5858,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       `${proposalDecisionFile}.publish`,
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         proposalId: proposal.proposal.id,
         status: 'rejected',
         decidedAt: timestamp,
@@ -5806,7 +5872,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       `${referenceDecisionFile}.publish`,
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         requestId: reference.request.id,
         projectId: project.id,
         decidedAt: timestamp,
@@ -5838,7 +5904,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       publicationFile,
       JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         proposalId: proposal.proposal.id,
         status: 'rejected',
         decidedAt: '2026-08-16T23:59:59.999Z',
@@ -5930,7 +5996,11 @@ describe('schema-2 creative studio project store', () => {
     const collidedSlotReady = `${proposalSlot}.123_21.ready`;
     writeFileSync(
       collidedSlotTemporary,
-      JSON.stringify({ schemaVersion: 2, proposalId: 'proposal_collision', reservedAt: timestamp })
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        proposalId: 'proposal_collision',
+        reservedAt: timestamp,
+      })
     );
     linkSync(collidedSlotTemporary, collidedSlotReady);
     await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
@@ -5955,7 +6025,11 @@ describe('schema-2 creative studio project store', () => {
     );
     writeFileSync(
       path.join(proposal.directories.slots, '9.slot.123_5.tmp'),
-      JSON.stringify({ schemaVersion: 2, proposalId: rolledBackProposal.id, reservedAt: timestamp })
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        proposalId: rolledBackProposal.id,
+        reservedAt: timestamp,
+      })
     );
     await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(1);
     expect(readdirSync(proposal.directories.pending)).toEqual([`${proposal.proposal.id}.json`]);
@@ -5969,7 +6043,11 @@ describe('schema-2 creative studio project store', () => {
     linkSync(readyProposalTemporary, readyProposalPhase);
     writeFileSync(
       path.join(proposal.directories.slots, '2.slot'),
-      JSON.stringify({ schemaVersion: 2, proposalId: readyProposal.id, reservedAt: timestamp })
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        proposalId: readyProposal.id,
+        reservedAt: timestamp,
+      })
     );
     await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(2);
     expect(lstatSync(readyProposalFile).ino).toBe(lstatSync(readyProposalPhase).ino);
@@ -5980,7 +6058,11 @@ describe('schema-2 creative studio project store', () => {
     const orphanProposalPhase = `${orphanProposalSlot}.123_33.ready`;
     writeFileSync(
       orphanProposalTemporary,
-      JSON.stringify({ schemaVersion: 2, proposalId: 'proposal_orphan_ready', reservedAt: timestamp })
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        proposalId: 'proposal_orphan_ready',
+        reservedAt: timestamp,
+      })
     );
     linkSync(orphanProposalTemporary, orphanProposalPhase);
     await expect(store.listProposalsV2(project.id)).resolves.toHaveLength(2);
@@ -6021,7 +6103,11 @@ describe('schema-2 creative studio project store', () => {
     );
     writeFileSync(
       path.join(reference.directories.slots, '9.slot.123_10.tmp'),
-      JSON.stringify({ schemaVersion: 2, requestId: rolledBackReference.id, reservedAt: timestamp })
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: rolledBackReference.id,
+        reservedAt: timestamp,
+      })
     );
     await expect(store.listReferenceRequestsV2(project.id)).resolves.toHaveLength(1);
     expect(readdirSync(reference.directories.pending)).toEqual([`${reference.request.id}.json`]);
@@ -6035,7 +6121,11 @@ describe('schema-2 creative studio project store', () => {
     linkSync(readyReferenceTemporary, readyReferencePhase);
     writeFileSync(
       path.join(reference.directories.slots, '2.slot'),
-      JSON.stringify({ schemaVersion: 2, requestId: readyReference.id, reservedAt: timestamp })
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: readyReference.id,
+        reservedAt: timestamp,
+      })
     );
     await expect(store.listReferenceRequestsV2(project.id)).resolves.toHaveLength(2);
     expect(lstatSync(readyReferenceFile).ino).toBe(lstatSync(readyReferencePhase).ino);
@@ -6288,7 +6378,7 @@ describe('schema-2 creative studio project store', () => {
     for (let index = 0; index < STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT; index += 1) {
       const proposalId = `terminal_${index}`;
       const proposal: StudioProposalRecordV2 = {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         id: proposalId,
         projectId: project.id,
         status: 'pending',
@@ -6297,7 +6387,12 @@ describe('schema-2 creative studio project store', () => {
         createdAt: timestamp,
         decidedAt: null,
       };
-      const decision = { schemaVersion: 2, proposalId, status: 'rejected', decidedAt: timestamp };
+      const decision = {
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        proposalId,
+        status: 'rejected',
+        decidedAt: timestamp,
+      };
       writeFileSync(path.join(proposalPaths.pendingDir, `${proposalId}.json`), JSON.stringify(proposal));
       writeFileSync(path.join(proposalRoot, 'decisions', `${proposalId}.json`), JSON.stringify(decision));
     }
@@ -6312,7 +6407,7 @@ describe('schema-2 creative studio project store', () => {
       writeFileSync(path.join(live.directories.pending, `${proposalId}.json`), JSON.stringify(proposal));
       writeFileSync(
         path.join(live.directories.slots, `${index}.slot`),
-        JSON.stringify({ schemaVersion: 2, proposalId, reservedAt: timestamp })
+        JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, proposalId, reservedAt: timestamp })
       );
     }
     await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
@@ -6327,7 +6422,7 @@ describe('schema-2 creative studio project store', () => {
     for (let index = 0; index < STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT; index += 1) {
       const requestId = `terminal_reference_${index}`;
       const request: StudioReferenceRequestV2 = {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         id: requestId,
         projectId: referenceProject.id,
         shotIds: ['historical_shot'],
@@ -6335,7 +6430,7 @@ describe('schema-2 creative studio project store', () => {
         createdAt: timestamp,
       };
       const decision: StudioReferenceRequestDecisionV2 = {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         requestId,
         projectId: referenceProject.id,
         decidedAt: timestamp,
@@ -6356,7 +6451,7 @@ describe('schema-2 creative studio project store', () => {
       writeFileSync(path.join(liveReference.directories.pending, `${requestId}.json`), JSON.stringify(request));
       writeFileSync(
         path.join(liveReference.directories.slots, `${index}.slot`),
-        JSON.stringify({ schemaVersion: 2, requestId, reservedAt: timestamp })
+        JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, requestId, reservedAt: timestamp })
       );
     }
     await expect(referenceStore.listReferenceRequestsV2(referenceProject.id)).rejects.toMatchObject({
@@ -6443,7 +6538,7 @@ describe('schema-2 creative studio project store', () => {
     mkdirSync(path.join(rootDir, malformedId));
     writeFileSync(
       path.join(rootDir, malformedId, 'project.json'),
-      JSON.stringify({ schemaVersion: 2, id: malformedId })
+      JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: malformedId })
     );
     const orphanId = 'path_without_manifest_v2';
     mkdirSync(path.join(rootDir, orphanId));

@@ -13,11 +13,9 @@ import type {
   WorkspaceBeatProjection,
   WorkspaceBinnedBeatProjection,
   WorkspaceBinnedShotProjection,
-  WorkspaceBinnedTakeProjection,
   WorkspaceBinItemProjection,
   WorkspaceProjection,
   WorkspaceShotProjection,
-  WorkspaceTakeProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 
 vi.mock('@arco-design/web-react', async () => {
@@ -83,7 +81,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.bin.listLabel': 'Ordered Bin items',
         'conversation.creativeStudio.workspace.bin.kind.beat': 'Beat',
         'conversation.creativeStudio.workspace.bin.kind.shot': 'Shot',
-        'conversation.creativeStudio.workspace.bin.kind.take': 'Take',
         'conversation.creativeStudio.workspace.bin.reason.lifted': 'Lifted',
         'conversation.creativeStudio.workspace.bin.reason.alternate': 'Alternate',
         'conversation.creativeStudio.workspace.bin.ownerLabel': 'Recorded owner Beat',
@@ -95,14 +92,10 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.bin.restore.atEnd': 'At the end',
         'conversation.creativeStudio.workspace.bin.restore.beat': 'Restore Beat',
         'conversation.creativeStudio.workspace.bin.restore.shot': 'Restore Shot',
-        'conversation.creativeStudio.workspace.bin.restore.take': 'Restore Take',
-        'conversation.creativeStudio.workspace.bin.media.image': 'Image',
-        'conversation.creativeStudio.workspace.bin.media.video': 'Video',
         'conversation.creativeStudio.workspace.bin.blocker.statusUnavailable': 'Current status unavailable',
         'conversation.creativeStudio.workspace.bin.blocker.ownerUnavailable': 'Recorded owner is unavailable',
         'conversation.creativeStudio.workspace.bin.blocker.anchorUnavailable': 'Restore position is stale',
         'conversation.creativeStudio.workspace.beatPanel.blocker.beatShotCapacityReached': 'Beat is full',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.currentMatchTo': 'Current Match To target',
         'conversation.creativeStudio.workspace.beatPanel.blocker.ownNonterminalJob': 'Own job is running',
         'conversation.creativeStudio.workspace.beatPanel.blocker.ownPendingFrame': 'Own frame is pending',
         'conversation.creativeStudio.workspace.beatPanel.blocker.downstreamNonterminalJob': 'Downstream job is running',
@@ -110,11 +103,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.blocker.waitingAuthorizationDependency':
           'Authorization is waiting',
         'conversation.creativeStudio.workspace.beatPanel.blocker.boundNonterminalRequest': 'Request is bound',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.currentSelectedTake': 'Current selected Take',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.currentSeedStill': 'Current seed still',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.nonterminalConditioningUse':
-          'Conditioning is using this Take',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.takeBinCapacityReached': 'Take Bin is full',
       };
       if (key.endsWith('.bin.position')) {
         return `Position ${String(values?.position)} of ${String(values?.total)}`;
@@ -125,7 +113,6 @@ vi.mock('react-i18next', () => ({
         )}`;
       }
       if (key.endsWith('.bin.shotCount')) return `${String(values?.count)} shots`;
-      if (key.endsWith('.bin.takeCount')) return `${String(values?.count)} Takes`;
       if (key.endsWith('.bin.coverAlt')) {
         return `${String(values?.kind)} preview for ${String(values?.title)}`;
       }
@@ -151,18 +138,6 @@ import {
   type BinProps,
 } from '@/renderer/pages/studio/components/Workspace/Views/Board/Bin';
 
-const makeTake = (assetId: string, mediaKind: WorkspaceTakeProjection['mediaKind']): WorkspaceTakeProjection => ({
-  assetId,
-  mediaKind,
-  createdAt: '2025-01-01T00:00:00.000Z',
-  selected: false,
-  explicitSeed: false,
-  effectiveSeed: false,
-  binReason: null,
-  sourceDurationSeconds: mediaKind === 'video' ? 4 : null,
-  posterAssetId: mediaKind === 'video' ? `${assetId}_poster` : null,
-});
-
 const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}): WorkspaceShotProjection => ({
   id,
   line: `Line ${id}`,
@@ -175,25 +150,25 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
   derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
-  selectedTakeId: null,
-  selectedTakeSourceDurationSeconds: null,
+  currentPicture: null,
   playedDurationSeconds: null,
   explicitSeedAssetId: null,
   effectiveSeedAssetId: null,
   segmentHead: false,
   planningBoundary: null,
   frameBoundary: null,
-  segmentState: { kind: 'no_take' },
+  segmentState: { kind: 'no_picture' },
   dirtyCauses: [],
   downstreamShotIds: [],
-  imageTakes: [],
-  videoTakes: [],
+  seedStills: [],
   coverAssetId: null,
-  takeCount: 0,
   displayState: 'draft',
   retainedWork: false,
   videoGenerationInFlight: false,
   seedGenerationInFlight: false,
+  videoGenerationBlocked: false,
+  seedGenerationBlocked: false,
+  attentionJobs: [],
   hasEffectiveSeed: false,
   ...overrides,
 });
@@ -222,14 +197,12 @@ const makeBeat = (
 const eligibility = (
   subject: StudioRendererParkEligibilityV2['subject'],
   beatId: string,
-  shotId: string | null,
-  assetId: string | null
+  shotId: string | null
 ): StudioRendererParkEligibilityV2 => ({
   subject,
   action: 'restore',
   beatId,
   shotId,
-  assetId,
   allowed: true,
   blockers: [],
 });
@@ -258,33 +231,13 @@ const makeProjection = (): WorkspaceProjection => {
       line: 'Lifted retained shot',
       coverAssetId: 'cover_shot',
       dirtyCauses: ['continuity_stale'],
-      imageTakes: [makeTake('shot_image', 'image')],
-      videoTakes: [
-        makeTake('shot_video', 'video'),
-        { ...makeTake('take_alternate', 'video'), binReason: 'alternate', posterAssetId: 'cover_take' },
-      ],
       segmentState: { kind: 'status_pending' },
-      takeCount: 3,
       retainedWork: true,
     }),
     beatId: 'beat_parked',
     beatTitle: 'Parked owner',
     ownerBeatBinned: true,
     reason: 'lifted',
-  };
-  const binnedTake: WorkspaceBinnedTakeProjection = {
-    assetId: 'take_alternate',
-    shotId: 'shot_parked',
-    shotLine: 'Lifted retained shot',
-    beatId: 'beat_parked',
-    beatTitle: 'Parked owner',
-    ownerBeatBinned: true,
-    reason: 'alternate',
-    mediaKind: 'video',
-    createdAt: '2025-01-02T00:00:00.000Z',
-    sourceDurationSeconds: 4,
-    posterAssetId: 'cover_take',
-    coverAssetId: 'cover_take',
   };
   const items: WorkspaceBinItemProjection[] = [
     {
@@ -294,14 +247,8 @@ const makeProjection = (): WorkspaceProjection => {
       value: binnedShot,
     },
     {
-      kind: 'take',
-      position: 2,
-      identity: { kind: 'take', assetId: 'take_alternate', reason: 'alternate' },
-      value: binnedTake,
-    },
-    {
       kind: 'beat',
-      position: 3,
+      position: 2,
       identity: { kind: 'beat', beatId: 'beat_parked', reason: 'lifted' },
       value: binnedBeat,
     },
@@ -316,15 +263,11 @@ const makeProjection = (): WorkspaceProjection => {
     workspaceStatusReady: true,
     chainStatusReady: true,
     requestShapeLocked: false,
-    bin: { items, beats: [binnedBeat], shots: [binnedShot], takes: [binnedTake] },
+    bin: { items, beats: [binnedBeat], shots: [binnedShot] },
     undoTop: null,
     dirtyShots: [],
     cascadeProgress: [],
-    parkEligibility: [
-      eligibility('shot', 'beat_parked', 'shot_parked', null),
-      eligibility('take', 'beat_parked', 'shot_parked', 'take_alternate'),
-      eligibility('beat', 'beat_parked', null, null),
-    ],
+    parkEligibility: [eligibility('shot', 'beat_parked', 'shot_parked'), eligibility('beat', 'beat_parked', null)],
     conditioningFailures: [],
   };
 };
@@ -332,7 +275,6 @@ const makeProjection = (): WorkspaceProjection => {
 const makeActions = (result = true): BinActions => ({
   restoreBeat: vi.fn(async () => result),
   restoreShot: vi.fn(async () => result),
-  restoreTake: vi.fn(async () => result),
   reorderBin: vi.fn(async () => result),
 });
 
@@ -368,21 +310,33 @@ describe('Bin', () => {
     document.documentElement.dir = 'ltr';
   });
 
-  it('renders exactly Beat, Shot, and Take in global heterogeneous order with reason, owner, position, and retained facts', () => {
+  it('surfaces only parked Beats and Shots, never a Take restore surface', () => {
+    renderBin(makeProjection());
+
+    const list = screen.getByRole('list', { name: 'Ordered Bin items' });
+    expect(
+      within(list)
+        .getAllByRole('listitem')
+        .map((item) => item.dataset.binKind)
+    ).toEqual(['shot', 'beat']);
+    expect(document.querySelector('[data-bin-kind="take"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Restore Take' })).toBeNull();
+  });
+
+  it('renders exactly Beat and Shot in global heterogeneous order with reason, owner, position, and retained facts', () => {
     renderBin(makeProjection());
 
     const list = screen.getByRole('list', { name: 'Ordered Bin items' });
     const items = within(list).getAllByRole('listitem');
-    expect(items.map((item) => item.dataset.binKind)).toEqual(['shot', 'take', 'beat']);
-    expect(items.map((item) => item.dataset.binReason)).toEqual(['lifted', 'alternate', 'lifted']);
-    expect(items.map((item) => item.getAttribute('aria-posinset'))).toEqual(['1', '2', '3']);
-    expect(items.every((item) => item.getAttribute('aria-setsize') === '3')).toBe(true);
+    expect(items.map((item) => item.dataset.binKind)).toEqual(['shot', 'beat']);
+    expect(items.map((item) => item.dataset.binReason)).toEqual(['lifted', 'lifted']);
+    expect(items.map((item) => item.getAttribute('aria-posinset'))).toEqual(['1', '2']);
+    expect(items.every((item) => item.getAttribute('aria-setsize') === '2')).toBe(true);
 
     const shot = itemFor('shot:shot_parked');
-    expect(shot).toHaveAccessibleName(/Shot, Lifted, position 1 of 3 Recorded owner Beat Parked owner/u);
+    expect(shot).toHaveAccessibleName(/Shot, Lifted, position 1 of 2 Recorded owner Beat Parked owner/u);
     expect(shot).toHaveTextContent('Lifted retained shot');
     expect(shot).toHaveTextContent('Recorded owner Beat Parked owner');
-    expect(shot).toHaveTextContent('3 Takes');
     expect(shot).toHaveTextContent('Authored and generated work retained');
     expect(shot).toHaveTextContent('Downstream continuity is out of date');
     expect(shot).toHaveAttribute('data-retained-work', 'true');
@@ -392,41 +346,21 @@ describe('Bin', () => {
       'aion-studio://project_1/cover_shot'
     );
 
-    const take = itemFor('take:take_alternate');
-    expect(take).toHaveAccessibleName(/Take, Alternate, position 2 of 3 Recorded owner Beat Parked owner/u);
-    expect(take).toHaveTextContent('Lifted retained shot');
-    expect(take).toHaveTextContent('Video');
-    expect(within(take).getByRole('img', { name: 'Take preview for Lifted retained shot' })).toHaveAttribute(
-      'src',
-      'aion-studio://project_1/cover_take'
-    );
-
     expect(itemFor('beat:beat_parked')).toHaveTextContent('2 shots');
-    expect(screen.getAllByRole('button', { name: /^Restore (Beat|Shot|Take)$/u })).toHaveLength(3);
-    expect(screen.getAllByRole('button', { name: /^Reorder/u })).toHaveLength(3);
+    expect(screen.getAllByRole('button', { name: /^Restore (Beat|Shot)$/u })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: /^Reorder/u })).toHaveLength(2);
     expect(screen.queryByRole('button', { name: /generate|retry|select|remove/u })).not.toBeInTheDocument();
   });
 
-  it('shows a zero retained-Take fact without making the affirmative retained-work claim', () => {
+  it('omits the retained-work claim when the parked Shot has no retained work', () => {
     const projection = makeProjection();
     const shotEntry = projection.bin.items.find((entry) => entry.kind === 'shot')!;
     if (shotEntry.kind !== 'shot') throw new Error('Missing Shot fixture');
-    shotEntry.value.imageTakes = [];
-    shotEntry.value.videoTakes = [];
-    shotEntry.value.takeCount = 0;
     shotEntry.value.retainedWork = false;
     shotEntry.value.coverAssetId = null;
     projection.bin.shots = [shotEntry.value];
-    projection.bin.items = projection.bin.items.filter((entry) => entry.kind !== 'take');
-    projection.bin.items.forEach((entry, index) => {
-      entry.position = index + 1;
-    });
-    projection.bin.takes = [];
-    projection.parkEligibility = projection.parkEligibility.filter((row) => row.subject !== 'take');
-
     renderBin(projection);
     const shot = itemFor('shot:shot_parked');
-    expect(shot).toHaveTextContent('0 Takes');
     expect(shot).toHaveAttribute('data-retained-work', 'false');
     expect(within(shot).queryByText('Authored and generated work retained')).not.toBeInTheDocument();
   });
@@ -447,12 +381,11 @@ describe('Bin', () => {
     );
 
     expect(screen.queryAllByRole('img')).toHaveLength(0);
-    expect(screen.getAllByText('Preview unavailable')).toHaveLength(3);
+    expect(screen.getAllByText('Preview unavailable')).toHaveLength(2);
     expect(screen.getAllByRole('button').every((button) => button.hasAttribute('disabled'))).toBe(true);
     expect(document.body.innerHTML).not.toContain('aion-studio://foreign_project');
     expect(actions.restoreBeat).not.toHaveBeenCalled();
     expect(actions.restoreShot).not.toHaveBeenCalled();
-    expect(actions.restoreTake).not.toHaveBeenCalled();
     expect(actions.reorderBin).not.toHaveBeenCalled();
   });
 
@@ -462,7 +395,7 @@ describe('Bin', () => {
     renderBin(makeProjection(), actions, { onRestoreSuccess });
 
     const beatPosition = screen.getByRole('combobox', {
-      name: 'Restore position Beat Parked owner Position 3 of 3',
+      name: 'Restore position Beat Parked owner Position 2 of 2',
     });
     expect(
       within(beatPosition)
@@ -477,7 +410,7 @@ describe('Bin', () => {
     await waitFor(() => expect(restoreBeat).not.toBeDisabled());
 
     const shotPosition = screen.getByRole('combobox', {
-      name: 'Restore position Shot Lifted retained shot Position 1 of 3',
+      name: 'Restore position Shot Lifted retained shot Position 1 of 2',
     });
     expect(
       within(shotPosition)
@@ -496,14 +429,6 @@ describe('Bin', () => {
     });
     await waitFor(() => expect(restoreShot).not.toBeDisabled());
 
-    fireEvent.click(within(itemFor('take:take_alternate')).getByRole('button', { name: 'Restore Take' }));
-    await waitFor(() => expect(actions.restoreTake).toHaveBeenCalledWith('shot_parked', 'take_alternate'));
-    expect(onRestoreSuccess).toHaveBeenLastCalledWith({
-      kind: 'take',
-      beatId: 'beat_parked',
-      shotId: 'shot_parked',
-      assetId: 'take_alternate',
-    });
     expect(actions.reorderBin).not.toHaveBeenCalled();
   });
 
@@ -512,7 +437,6 @@ describe('Bin', () => {
     const shotRow = projection.parkEligibility.find((row) => row.subject === 'shot')!;
     shotRow.allowed = false;
     shotRow.blockers = [{ shotId: 'shot_parked', code: 'beat_shot_capacity_reached' }];
-    projection.parkEligibility = projection.parkEligibility.filter((row) => row.subject !== 'take');
     const beatRow = projection.parkEligibility.find((row) => row.subject === 'beat')!;
     projection.parkEligibility.push({ ...beatRow, blockers: [] });
     const actions = makeActions();
@@ -523,14 +447,13 @@ describe('Bin', () => {
     const blockerList = screen.getByText('Beat is full').closest('ul');
     expect(blockerList).toHaveAttribute('aria-live', 'polite');
     expect(within(blockerList!).getAllByRole('listitem')).toHaveLength(1);
-    expect(screen.getAllByText('Current status unavailable')).toHaveLength(2);
-    for (const button of screen.getAllByRole('button', { name: /^Restore (Beat|Shot|Take)$/u })) {
+    expect(screen.getAllByText('Current status unavailable')).toHaveLength(1);
+    for (const button of screen.getAllByRole('button', { name: /^Restore (Beat|Shot)$/u })) {
       expect(button).toBeDisabled();
       fireEvent.click(button);
     }
     expect(actions.restoreBeat).not.toHaveBeenCalled();
     expect(actions.restoreShot).not.toHaveBeenCalled();
-    expect(actions.restoreTake).not.toHaveBeenCalled();
     expect(onRestoreSuccess).not.toHaveBeenCalled();
   });
 
@@ -539,26 +462,26 @@ describe('Bin', () => {
     staleProjection.workspaceStatusReady = false;
     const staleActions = makeActions();
     const staleView = renderBin(staleProjection, staleActions);
-    expect(screen.getAllByText('Current status unavailable')).toHaveLength(3);
+    expect(screen.getAllByText('Current status unavailable')).toHaveLength(2);
     expect(
       screen.getAllByRole('button', { name: /^Restore/u }).every((button) => button.hasAttribute('disabled'))
     ).toBe(true);
     staleView.unmount();
 
     const wrongOwnerProjection = makeProjection();
-    const takeEntry = wrongOwnerProjection.bin.items.find((entry) => entry.kind === 'take')!;
-    if (takeEntry.kind === 'take') takeEntry.value.beatTitle = 'Wrong owner';
+    const shotEntry = wrongOwnerProjection.bin.items.find((entry) => entry.kind === 'shot')!;
+    if (shotEntry.kind === 'shot') shotEntry.value.beatTitle = 'Wrong owner';
     const wrongActions = makeActions();
     const wrongView = renderBin(wrongOwnerProjection, wrongActions);
-    expect(within(itemFor('take:take_alternate')).getByText('Recorded owner is unavailable')).toBeInTheDocument();
-    expect(within(itemFor('take:take_alternate')).getByRole('button', { name: 'Restore Take' })).toBeDisabled();
+    expect(within(itemFor('shot:shot_parked')).getByText('Recorded owner is unavailable')).toBeInTheDocument();
+    expect(within(itemFor('shot:shot_parked')).getByRole('button', { name: 'Restore Shot' })).toBeDisabled();
     wrongView.unmount();
 
     const projection = makeProjection();
     const actions = makeActions();
     const view = renderBin(projection, actions);
     const position = screen.getByRole('combobox', {
-      name: 'Restore position Beat Parked owner Position 3 of 3',
+      name: 'Restore position Beat Parked owner Position 2 of 2',
     });
     fireEvent.change(position, { target: { value: 'active_second' } });
     const changed = makeProjection();
@@ -577,7 +500,7 @@ describe('Bin', () => {
     const projection = makeProjection();
     const actions = makeActions();
     const view = renderBin(projection, actions);
-    const label = 'Restore position Beat Parked owner Position 3 of 3';
+    const label = 'Restore position Beat Parked owner Position 2 of 2';
     fireEvent.change(screen.getByRole('combobox', { name: label }), { target: { value: 'active_second' } });
     expect(screen.getByRole('combobox', { name: label })).toHaveValue('active_second');
 
@@ -612,11 +535,11 @@ describe('Bin', () => {
     const actions = makeActions(false);
     const onRestoreSuccess = vi.fn();
     renderBin(makeProjection(), actions, { onRestoreSuccess });
-    const button = within(itemFor('take:take_alternate')).getByRole('button', { name: 'Restore Take' });
+    const button = within(itemFor('shot:shot_parked')).getByRole('button', { name: 'Restore Shot' });
     act(() => button.focus());
     fireEvent.click(button);
 
-    await waitFor(() => expect(actions.restoreTake).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(actions.restoreShot).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(button).not.toBeDisabled());
     expect(button).toHaveFocus();
     expect(onRestoreSuccess).not.toHaveBeenCalled();
@@ -633,34 +556,28 @@ describe('Bin', () => {
     act(() => shotHandle.focus());
     fireEvent.keyDown(shotHandle, { key: 'ArrowDown' });
     await waitFor(() => expect(actions.reorderBin).toHaveBeenCalledTimes(1));
-    expect(actions.reorderBin).toHaveBeenLastCalledWith([expected[1], expected[0], expected[2]]);
+    expect(actions.reorderBin).toHaveBeenLastCalledWith([expected[1], expected[0]]);
     const firstPayload = vi.mocked(actions.reorderBin).mock.calls[0]![0];
     firstPayload.forEach((item, index) => {
-      const source = [expected[1], expected[0], expected[2]][index]!;
+      const source = [expected[1], expected[0]][index]!;
       expect(item).toEqual(source);
       expect(item).not.toBe(source);
     });
     await waitFor(() => expect(shotHandle).toHaveFocus());
-    expect(screen.getByText('Moved Lifted Shot from position 1 to 2 of 3')).toBeInTheDocument();
+    expect(screen.getByText('Moved Lifted Shot from position 1 to 2 of 2')).toBeInTheDocument();
 
     const beatHandle = dragHandleFor('beat:beat_parked');
     fireEvent.keyDown(beatHandle, { key: 'Home' });
     await waitFor(() => expect(actions.reorderBin).toHaveBeenCalledTimes(2));
-    expect(actions.reorderBin).toHaveBeenLastCalledWith([expected[2], expected[0], expected[1]]);
+    expect(actions.reorderBin).toHaveBeenLastCalledWith([expected[1], expected[0]]);
     await waitFor(() => expect(beatHandle).toHaveFocus());
 
     fireEvent.keyDown(shotHandle, { key: 'End' });
     await waitFor(() => expect(actions.reorderBin).toHaveBeenCalledTimes(3));
-    expect(actions.reorderBin).toHaveBeenLastCalledWith([expected[1], expected[2], expected[0]]);
+    expect(actions.reorderBin).toHaveBeenLastCalledWith([expected[1], expected[0]]);
     await waitFor(() => expect(shotHandle).toHaveFocus());
-
-    const takeHandle = dragHandleFor('take:take_alternate');
-    fireEvent.keyDown(takeHandle, { key: 'ArrowUp' });
-    await waitFor(() => expect(actions.reorderBin).toHaveBeenCalledTimes(4));
-    expect(actions.reorderBin).toHaveBeenLastCalledWith([expected[1], expected[0], expected[2]]);
     expect(actions.restoreBeat).not.toHaveBeenCalled();
     expect(actions.restoreShot).not.toHaveBeenCalled();
-    expect(actions.restoreTake).not.toHaveBeenCalled();
   });
 
   it('uses the same exact reorder provider for native drag and restores focus to the moved handle', async () => {
@@ -677,10 +594,10 @@ describe('Bin', () => {
     fireEvent.dragStart(handle, { dataTransfer });
     fireEvent.dragOver(target, { dataTransfer });
     fireEvent.drop(target, { dataTransfer });
-    await waitFor(() => expect(actions.reorderBin).toHaveBeenCalledWith([identities[1], identities[2], identities[0]]));
+    await waitFor(() => expect(actions.reorderBin).toHaveBeenCalledWith([identities[1], identities[0]]));
     expect(setData).toHaveBeenCalledWith('text/plain', 'shot:shot_parked');
     await waitFor(() => expect(handle).toHaveFocus());
-    expect(screen.getByText('Moved Lifted Shot from position 1 to 3 of 3')).toBeInTheDocument();
+    expect(screen.getByText('Moved Lifted Shot from position 1 to 2 of 2')).toBeInTheDocument();
   });
 
   it('makes endpoint keys, foreign drops, and cancelled drags exact zero-provider no-ops', () => {
@@ -688,7 +605,7 @@ describe('Bin', () => {
     renderBin(makeProjection(), actions);
     const first = dragHandleFor('shot:shot_parked');
     const last = dragHandleFor('beat:beat_parked');
-    const target = itemFor('take:take_alternate');
+    const target = itemFor('shot:shot_parked');
     const dataTransfer = { effectAllowed: 'none', setData: vi.fn() };
 
     fireEvent.keyDown(first, { key: 'ArrowUp' });
@@ -703,7 +620,6 @@ describe('Bin', () => {
     expect(actions.reorderBin).not.toHaveBeenCalled();
     expect(actions.restoreBeat).not.toHaveBeenCalled();
     expect(actions.restoreShot).not.toHaveBeenCalled();
-    expect(actions.restoreTake).not.toHaveBeenCalled();
   });
 
   it('settles a requested post-lift focus key once and follows later exact requests', async () => {
@@ -711,11 +627,16 @@ describe('Bin', () => {
     const actions = makeActions();
     const onFocusItemSettled = vi.fn();
     const view = renderBin(projection, actions, {
-      focusItemKey: binItemFocusKey({ kind: 'take', assetId: 'take_alternate', reason: 'alternate' }),
+      focusItemKey: binItemFocusKey({
+        kind: 'shot',
+        beatId: 'beat_parked',
+        shotId: 'shot_parked',
+        reason: 'lifted',
+      }),
       onFocusItemSettled,
     });
 
-    await waitFor(() => expect(dragHandleFor('take:take_alternate')).toHaveFocus());
+    await waitFor(() => expect(dragHandleFor('shot:shot_parked')).toHaveFocus());
     expect(onFocusItemSettled).toHaveBeenCalledTimes(1);
     view.rerender(<Bin {...view.props} />);
     expect(onFocusItemSettled).toHaveBeenCalledTimes(1);

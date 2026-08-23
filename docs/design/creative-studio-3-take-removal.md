@@ -1,6 +1,6 @@
 # Removing takes — one Shot, one picture
 
-**Date:** 2026-08-23 · **Status:** proposed, not started
+**Date:** 2026-08-23 · **Status:** one-picture model implemented; seed-still detector deferred
 **Related:** [bug list](../prds/creative-studio/creative-studio-3-bug-list.md) ·
 [Beat panel model](../prds/creative-studio/creative-studio-3-beat-panel-model.md) ·
 [chain handoff review](creative-studio-3-chain-handoff-review.md)
@@ -91,7 +91,7 @@ none.**
 | `StudioShot.selectedTakeId`                      | → `videoAssetId`                                                                                                                                           |
 | `select_take`, `park_take` mutations             | [`mutations/index.ts`](../../packages/desktop/src/process/services/creative-studio/service/schema2/mutations/index.ts) lines 125, 129, 497, 500, 1697–1723 |
 | `StudioBinItem` `{ kind: 'take' }`               | the bin keeps `beat` and `shot` lifts                                                                                                                      |
-| `'alternate'` bin reason                         | only reachable through take parking                                                                                                                        |
+| Take parking's `'alternate'` path                | removed; Beat `reason: 'alternate'` remains for `add_binned_beat`                                                                                          |
 | `StudioJobV2.generationIndex`                    | always 0 once a submission is one generation; fold into `authorizationItemId` for idempotency                                                              |
 | `STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION` | [`creativeStudioTypes.ts:119`](../../packages/desktop/src/common/types/project/creativeStudioTypes.ts)                                                     |
 
@@ -216,7 +216,26 @@ Each slice ships its own locale changes and leaves the suite green.
 2. **Projection and segment state** — `rendered` collapses; take counts leave the input type.
 3. **Beat panel** — takes section → single picture card; footer reduced to the reference picker.
 4. **Gate and pricing** — `generationCount` out; totals become choice counts.
-5. **Seed-still guard** — panel-seam check, new error code, no dispatch on rejection.
+5. **Seed-still failure contract** — the distinct paid failure and no-dependent-dispatch outcome are
+   implemented. Detection remains deferred until it has provider authority or a calibrated corpus;
+   no hand-tuned pixel threshold ships.
+
+## Implementation evidence
+
+The one-picture model was implemented on 2026-08-23 with schema version 3 and no migration or
+fold-forward path. The seed-still failure outcome is retained for an authoritative future detector;
+the rejected centre-seam threshold and its production invocation were removed.
+
+- `bun run test`: 652 files passed, 3 skipped; 9,464 tests passed, 24 skipped.
+- `bun run test:coverage:creative-studio`: the same 9,464 tests passed under V8 instrumentation;
+  aggregate Creative Studio coverage is 91.07% lines and 84.50% branches, and every file in the
+  explicit manifest cleared the 80% lines/branches threshold.
+- `bun run i18n:types`, `node scripts/check-i18n.js`, and `bunx tsc --noEmit` pass. All changed
+  format-supported files pass Oxfmt; Oxlint reports zero errors.
+- The focused rendered-Shot lifecycle Playwright case was attempted with the development fake
+  adapter. Electron launched, but the renderer stopped at **Local backend could not start** and
+  `ensureRendererReady` timed out before the first Studio route or product assertion. This is an
+  environment bootstrap blocker, not an E2E pass, so no E2E-green claim is made here.
 
 ## What this closes
 
@@ -226,4 +245,3 @@ Each slice ships its own locale changes and leaves the suite green.
   to BUG-115's interaction cost
 - `Select Take` / `Use Beat N…` and their intermittent disappearance under the revision race
 - the generation-count control nobody could identify
-- one bad seed still silently costing an entire Beat

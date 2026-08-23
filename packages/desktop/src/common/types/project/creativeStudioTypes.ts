@@ -89,6 +89,7 @@ export type StudioJobErrorCode =
   | 'timeout'
   | 'poll_deadline'
   | 'no_output'
+  | 'seed_still_variation_grid'
   | 'submission_unknown'
   | 'download_failed'
   | 'unsupported'
@@ -103,20 +104,18 @@ export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown';
 
 export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_running';
 
-export const STUDIO_PROJECT_SCHEMA_VERSION = 2 as const;
+export const STUDIO_PROJECT_SCHEMA_VERSION = 3 as const;
 export const STUDIO_MAX_BEATS = 24;
 export const STUDIO_MAX_SHOTS_PER_BEAT = 8;
 export const STUDIO_MAX_SHOTS_PER_PROJECT = 96;
 export const STUDIO_MAX_BIN_BEAT_ITEMS = 24;
 export const STUDIO_MAX_BIN_SHOT_ITEMS = 96;
-export const STUDIO_MAX_BIN_TAKE_ITEMS = 96;
 export const STUDIO_MAX_LINE_HISTORY_PER_BEAT = 20;
 export const STUDIO_MAX_UNDO_ENTRIES = 20;
 export const STUDIO_MAX_UNDO_PATCHES_PER_ENTRY = 2 + STUDIO_MAX_BEATS + STUDIO_MAX_SHOTS_PER_PROJECT;
 export const STUDIO_MAX_UNDO_LABEL_LENGTH = 256;
 export const STUDIO_MIN_SHOT_SECONDS = 4;
 export const STUDIO_MAX_SHOT_SECONDS = 15;
-export const STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION = 4;
 export const STUDIO_MAX_GENERATION_PROMPT_LENGTH = 32 * 1024;
 export const STUDIO_LOOK_SOFT_WORD_LIMIT = 25;
 export const STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST = 24;
@@ -137,7 +136,6 @@ export const STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT = 50;
 export const STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const STUDIO_MAX_DIRTY_SHOTS_REPORTED = 96;
-export const STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SHOT = 24;
 export const STUDIO_MAX_MUTATION_OPERATIONS = 32;
 
 /**
@@ -308,15 +306,15 @@ export type StudioShot = {
   trimOutSeconds: number | null;
   chainBreak: 'none' | 'hard_cut';
   seedStillId: string | null;
-  selectedTakeId: string | null;
+  videoAssetId: string | null;
+  supersededVideoAssetIds: string[];
   assetIds: string[];
   jobIds: string[];
 };
 
 export type StudioBinItem =
   | { kind: 'beat'; beatId: string; reason: 'lifted' | 'alternate' }
-  | { kind: 'shot'; beatId: string; shotId: string; reason: 'lifted' }
-  | { kind: 'take'; assetId: string; reason: 'lifted' | 'alternate' };
+  | { kind: 'shot'; beatId: string; shotId: string; reason: 'lifted' };
 
 export type StudioProposedShot = {
   shotId: string;
@@ -330,11 +328,10 @@ export type StudioProposedShot = {
 export type StudioFixedShotReasonV2 =
   | 'owned_asset'
   | 'owned_job'
-  | 'selected_take'
+  | 'video_asset'
   | 'seed_still'
   | 'conditioning_frame'
   | 'conditioning_input'
-  | 'match_to'
   | 'narration'
   | 'on_screen_text';
 
@@ -408,7 +405,7 @@ export type StudioGenerationRequestPlan =
 export type StudioFrameExtraction = {
   id: string;
   shotId: string;
-  takeAssetId: string;
+  videoAssetId: string;
   endpointSeconds: number;
   frameAssetId: string | null;
   status: 'pending' | 'extracting' | 'ready' | 'failed';
@@ -451,7 +448,6 @@ export type StudioSubmissionQuote = StudioSubmissionQuoteCore & {
 export type StudioPrepareGenerationChoiceV2 = {
   shotId: string;
   purpose: 'seed_still' | 'video_take';
-  generationCount: number;
   referenceAssetId: string | null;
 };
 
@@ -523,7 +519,6 @@ export type StudioRendererQuotedGenerationV2 = {
   durationSeconds: number | null;
   oneGenerationMinorUnits: number;
   requestedTotalMinorUnits: number;
-  waitsForTakeSelection: boolean;
 };
 
 export type StudioRendererBudgetVerdictV2 =
@@ -628,7 +623,6 @@ export type StudioCascadeProgressV2 = {
   waitingReason:
     | 'upstream_running'
     | 'choose_seed'
-    | 'choose_take'
     | 'conditioning_frame'
     | 'conditioning_failed'
     | 'dependency_failed'
@@ -657,13 +651,6 @@ export type StudioParkShotRequestV2 = {
 
 export type StudioRestoreShotRequestV2 = StudioParkShotRequestV2 & { beforeShotId: string | null };
 
-export type StudioTakeActionRequestV2 = {
-  projectId: string;
-  expectedRevision: number;
-  shotId: string;
-  assetId: string;
-};
-
 export type StudioReorderBinRequestV2 = {
   projectId: string;
   expectedRevision: number;
@@ -683,7 +670,6 @@ export type StudioImportBedAudioRequestV2 = {
 
 export type StudioDetachBedAudioRequestV2 = StudioImportBedAudioRequestV2 & { assetId: string };
 export type StudioSetBedRequestV2 = StudioImportBedAudioRequestV2 & { assetId: string | null };
-export type StudioSetMatchToRequestV2 = StudioImportBedAudioRequestV2 & { shotId: string | null };
 
 export type StudioImportManagedMediaResultV2 =
   | { status: 'cancelled' }
@@ -783,17 +769,12 @@ export type StudioRendererDirtyShotV2 = {
 };
 
 export type StudioRendererParkBlockerCodeV2 =
-  | 'current_match_to'
   | 'own_nonterminal_job'
   | 'own_pending_frame'
   | 'downstream_nonterminal_job'
   | 'downstream_pending_frame'
   | 'waiting_authorization_dependency'
   | 'bound_nonterminal_request'
-  | 'current_selected_take'
-  | 'current_seed_still'
-  | 'nonterminal_conditioning_use'
-  | 'take_bin_capacity_reached'
   | 'beat_shot_capacity_reached';
 
 export type StudioRendererParkBlockerV2 = {
@@ -802,11 +783,10 @@ export type StudioRendererParkBlockerV2 = {
 };
 
 export type StudioRendererParkEligibilityV2 = {
-  subject: 'beat' | 'shot' | 'take';
+  subject: 'beat' | 'shot';
   action: 'park' | 'restore';
   beatId: string;
   shotId: string | null;
-  assetId: string | null;
   allowed: boolean;
   blockers: StudioRendererParkBlockerV2[];
 };
@@ -827,7 +807,7 @@ export type StudioRendererWorkspaceStatusV2 = {
 export type StudioSpendAuthorization = StudioSubmissionQuote & {
   confirmedAt: string;
   providerBindings: { itemId: string; provider: StudioProviderRef }[];
-  idempotencyKeys: { itemId: string; generationIndex: number; key: string }[];
+  idempotencyKeys: { itemId: string; key: string }[];
 };
 
 export type StudioSpendReceipt = {
@@ -840,7 +820,6 @@ export type StudioSpendReceipt = {
   rateUnit: 'generation' | 'second';
   rateMinorUnits: number;
   durationSeconds: number | null;
-  generationIndex: number;
   generationCount: number;
   totalMinorUnits: number;
 };
@@ -936,7 +915,7 @@ export type StudioEditorFolderTimelineEntryV2 =
   | {
       kind: 'shot';
       shotId: string;
-      takeAssetId: string;
+      videoAssetId: string;
       relativePath: string;
       timelineStartSeconds: number;
       sourceInSeconds: number;
@@ -1012,7 +991,6 @@ export type StudioJobV2 = {
   purpose: 'seed_still' | 'video_take';
   authorizationId: string;
   authorizationItemId: string;
-  generationIndex: number;
   requestPlan: StudioGenerationRequestPlan;
   requestSnapshot: StudioGenerationRequestSnapshot | null;
   spendReceipt: StudioSpendReceipt | null;
@@ -1027,7 +1005,6 @@ export type StudioRendererSpendReceiptV2 = Pick<
   | 'rateUnit'
   | 'rateMinorUnits'
   | 'durationSeconds'
-  | 'generationIndex'
   | 'generationCount'
   | 'totalMinorUnits'
 >;
@@ -1074,7 +1051,6 @@ export type StudioUndoPatch =
         videoRouteId: string | null;
         spendPolicy: StudioSpendPolicy | null;
         bedAssetId: string | null;
-        matchToShotId: string | null;
       };
       afterDigest: string;
     }
@@ -1135,7 +1111,6 @@ export type StudioProjectV2 = {
   shots: Record<string, StudioShot>;
   bin: StudioBinItem[];
   bedAssetId: string | null;
-  matchToShotId: string | null;
   spendPolicy: StudioSpendPolicy | null;
   spendAuthorizations: StudioSpendAuthorization[];
   frameExtractions: Record<string, StudioFrameExtraction>;
@@ -1164,7 +1139,7 @@ export type StudioProjectSummaryV2 = {
   resolution: StudioResolution;
   beatCount: number;
   shotCount: number;
-  selectedTakeCount: number;
+  pictureCount: number;
   poster?: {
     beatId: string;
     shotId: string;
@@ -1236,14 +1211,9 @@ export type StudioMutationOperationV2 =
   | { kind: 'redetach_line'; shotId: string; line: string }
   | { kind: 'rederive_line'; shotId: string; line: string }
   | { kind: 'restore_line'; shotId: string; historyEntryId: string }
-  | { kind: 'park_take'; shotId: string; assetId: string }
-  | { kind: 'add_alternate_take'; shotId: string; assetId: string }
-  | { kind: 'restore_take'; shotId: string; assetId: string }
   | { kind: 'reorder_bin'; bin: StudioBinItem[] }
-  | { kind: 'select_take'; shotId: string; assetId: string }
   | { kind: 'set_routes'; imageRouteId: string | null; videoRouteId: string | null }
   | { kind: 'set_spend_policy'; policy: StudioSpendPolicy | null }
-  | { kind: 'set_match_to'; shotId: string | null }
   | { kind: 'set_bed'; assetId: string | null }
   | { kind: 'undo_last'; entryId: string };
 

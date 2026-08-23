@@ -114,11 +114,8 @@ const makeAdmission = (options: AdmissionOptions = {}): StudioPreparedSubmission
     projectId,
     expectedRevision: 7,
     originReferenceHandoffId: null,
-    baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-    cascadeChoices:
-      withCascade === null
-        ? []
-        : [{ shotId: 'shot_2', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
+    cascadeChoices: withCascade === null ? [] : [{ shotId: 'shot_2', purpose: 'video_take', referenceAssetId: null }],
   };
   const quoteForBindings = withCascade ?? baseOnly;
   const providerBindings: StudioSpendAuthorization['providerBindings'] = [

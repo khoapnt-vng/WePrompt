@@ -244,13 +244,12 @@ export const composeStudioEditorFolderV2 = (
       for (const shotId of beat.shotOrder) {
         const shot = ownRecordValue(project.shots, shotId);
         if (shot === undefined) return fail('invalid_project');
-        if (shot.selectedTakeId === null) return fail('coverage_incomplete');
-        const take = ownRecordValue(project.assets, shot.selectedTakeId);
+        if (shot.videoAssetId === null) return fail('coverage_incomplete');
+        const take = ownRecordValue(project.assets, shot.videoAssetId);
         if (
           take === undefined ||
           take.mediaKind !== 'video' ||
           !isCanonicalStudioGeneratedTakeV2(take, project.id, shot) ||
-          project.bin.some((item) => item.kind === 'take' && item.assetId === take.id) ||
           !Number.isFinite(take.durationSeconds) ||
           take.durationSeconds === undefined ||
           take.durationSeconds <= 0
@@ -276,7 +275,7 @@ export const composeStudioEditorFolderV2 = (
         entries.push({
           kind: 'shot',
           shotId,
-          takeAssetId: take.id,
+          videoAssetId: take.id,
           relativePath,
           timelineStartSeconds,
           sourceInSeconds,

@@ -10,11 +10,9 @@ import {
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
-  STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_PROMPT_LENGTH,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   STUDIO_MAX_LINE_HISTORY_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
@@ -78,6 +76,7 @@ const JOB_ERROR_CODES = new Set([
   'timeout',
   'poll_deadline',
   'no_output',
+  'seed_still_variation_grid',
   'submission_unknown',
   'download_failed',
   'unsupported',
@@ -92,11 +91,10 @@ const FRAME_ERROR_CODES = new Set(['decode_failed', 'source_missing', 'storage_e
 const FIXED_SHOT_REASONS = [
   'owned_asset',
   'owned_job',
-  'selected_take',
+  'video_asset',
   'seed_still',
   'conditioning_frame',
   'conditioning_input',
-  'match_to',
   'narration',
   'on_screen_text',
 ] as const;
@@ -116,7 +114,6 @@ const PROJECT_REQUIRED_KEYS = new Set([
   'shots',
   'bin',
   'bedAssetId',
-  'matchToShotId',
   'spendPolicy',
   'spendAuthorizations',
   'frameExtractions',
@@ -152,7 +149,8 @@ const SHOT_KEYS = new Set([
   'trimOutSeconds',
   'chainBreak',
   'seedStillId',
-  'selectedTakeId',
+  'videoAssetId',
+  'supersededVideoAssetIds',
   'assetIds',
   'jobIds',
 ]);
@@ -189,7 +187,6 @@ const JOB_REQUIRED_KEYS = new Set([
   'purpose',
   'authorizationId',
   'authorizationItemId',
-  'generationIndex',
   'requestPlan',
   'requestSnapshot',
   'spendReceipt',
@@ -210,7 +207,6 @@ const RULE_KEYS = new Set(['id', 'scope', 'text', 'predicate', 'createdAt']);
 const RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
 const BIN_BEAT_KEYS = new Set(['kind', 'beatId', 'reason']);
 const BIN_SHOT_KEYS = new Set(['kind', 'beatId', 'shotId', 'reason']);
-const BIN_TAKE_KEYS = new Set(['kind', 'assetId', 'reason']);
 const SPEND_POLICY_KEYS = new Set(['currency', 'maxPerBatchMinorUnits']);
 const AUTHORIZATION_KEYS = new Set([
   'id',
@@ -239,7 +235,7 @@ const QUOTED_ITEM_KEYS = new Set([
   'rateMinorUnits',
 ]);
 const PROVIDER_BINDING_KEYS = new Set(['itemId', 'provider']);
-const IDEMPOTENCY_ENTRY_KEYS = new Set(['itemId', 'generationIndex', 'key']);
+const IDEMPOTENCY_ENTRY_KEYS = new Set(['itemId', 'key']);
 const REQUEST_PLAN_RESOLVED_KEYS = new Set(['kind', 'snapshot']);
 const REQUEST_PLAN_DEFERRED_KEYS = new Set(['kind', 'template', 'dependency']);
 const REQUEST_SNAPSHOT_KEYS = new Set([
@@ -266,7 +262,7 @@ const DEPENDENCY_EXISTING_PREDECESSOR_KEYS = new Set(['kind', 'predecessorShotId
 const FRAME_EXTRACTION_KEYS = new Set([
   'id',
   'shotId',
-  'takeAssetId',
+  'videoAssetId',
   'endpointSeconds',
   'frameAssetId',
   'status',
@@ -282,7 +278,6 @@ const RECEIPT_KEYS = new Set([
   'rateUnit',
   'rateMinorUnits',
   'durationSeconds',
-  'generationIndex',
   'generationCount',
   'totalMinorUnits',
 ]);
@@ -300,7 +295,6 @@ const PROJECT_PATCH_BEFORE_KEYS = new Set([
   'videoRouteId',
   'spendPolicy',
   'bedAssetId',
-  'matchToShotId',
 ]);
 const BEAT_PATCH_KEYS = new Set(['kind', 'beatId', 'before', 'afterDigest']);
 const SHOT_PATCH_KEYS = new Set(['kind', 'shotId', 'before', 'beforeBeatId', 'beforeIndex', 'afterDigest']);
@@ -614,7 +608,8 @@ const validateShotRecord = (
   isNullableTrim(value.trimOutSeconds) &&
   (value.chainBreak === 'none' || value.chainBreak === 'hard_cut') &&
   isNullableSafeId(value.seedStillId) &&
-  isNullableSafeId(value.selectedTakeId) &&
+  isNullableSafeId(value.videoAssetId) &&
+  isUniqueSafeIdArray(value.supersededVideoAssetIds) &&
   (!requireMembership || (isUniqueSafeIdArray(value.assetIds) && isUniqueSafeIdArray(value.jobIds)));
 
 const validateShot = (shotId: string, value: unknown): value is StudioShot =>
@@ -894,8 +889,7 @@ const validateReceipt = (value: unknown): boolean =>
   isIntegerInRange(value.rateMinorUnits, 1, Number.MAX_SAFE_INTEGER) &&
   (value.durationSeconds === null ||
     isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS)) &&
-  isIntegerInRange(value.generationIndex, 0, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION - 1) &&
-  isIntegerInRange(value.generationCount, 1, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION) &&
+  value.generationCount === 1 &&
   isIntegerInRange(value.totalMinorUnits, 0, Number.MAX_SAFE_INTEGER);
 
 const validateJob = (jobId: string, projectId: string, value: unknown): value is StudioJobV2 => {
@@ -935,7 +929,6 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
     PURPOSES.has(value.purpose) &&
     isSafeId(value.authorizationId) &&
     isSafeId(value.authorizationItemId) &&
-    isIntegerInRange(value.generationIndex, 0, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION - 1) &&
     validateRequestPlan(value.requestPlan) &&
     (value.requestSnapshot === null || validateRequestSnapshot(value.requestSnapshot)) &&
     (value.spendReceipt === null || validateReceipt(value.spendReceipt)) &&
@@ -996,23 +989,15 @@ const binItemIsExact = (value: unknown): value is StudioBinItem => {
       value.reason === 'lifted'
     );
   }
-  if (value.kind === 'take') {
-    return (
-      hasExactKeys(value, BIN_TAKE_KEYS) &&
-      isSafeId(value.assetId) &&
-      (value.reason === 'lifted' || value.reason === 'alternate')
-    );
-  }
   return false;
 };
 
 const validateBinStructure = (value: unknown): value is StudioBinItem[] => {
-  if (!isDenseArray(value, STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS + STUDIO_MAX_BIN_TAKE_ITEMS)) {
+  if (!isDenseArray(value, STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS)) {
     return false;
   }
   let beatCount = 0;
   let shotCount = 0;
-  let takeCount = 0;
   const identities = new Set<string>();
   for (let index = 0; index < value.length; index += 1) {
     const item = value[index];
@@ -1021,19 +1006,11 @@ const validateBinStructure = (value: unknown): value is StudioBinItem[] => {
     if (item.kind === 'beat') {
       beatCount += 1;
       identity = `beat:${item.beatId}`;
-    } else if (item.kind === 'shot') {
+    } else {
       shotCount += 1;
       identity = `shot:${item.shotId}`;
-    } else {
-      takeCount += 1;
-      identity = `take:${item.assetId}`;
     }
-    if (
-      beatCount > STUDIO_MAX_BIN_BEAT_ITEMS ||
-      shotCount > STUDIO_MAX_BIN_SHOT_ITEMS ||
-      takeCount > STUDIO_MAX_BIN_TAKE_ITEMS ||
-      identities.has(identity)
-    ) {
+    if (beatCount > STUDIO_MAX_BIN_BEAT_ITEMS || shotCount > STUDIO_MAX_BIN_SHOT_ITEMS || identities.has(identity)) {
       return false;
     }
     identities.add(identity);
@@ -1057,7 +1034,7 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
     typeof value.purpose !== 'string' ||
     !PURPOSES.has(value.purpose) ||
     !isSafeId(value.routeId) ||
-    !isIntegerInRange(value.generationCount, 1, STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION) ||
+    value.generationCount !== 1 ||
     !validateRequestPlan(value.requestPlan) ||
     typeof value.rateUnit !== 'string' ||
     !RATE_UNITS.has(value.rateUnit) ||
@@ -1159,35 +1136,24 @@ const validateAuthorizationShape = (value: unknown, projectId: string, currentRe
       return false;
     }
   }
-  let expectedIdempotencyEntryCount = 0;
-  for (const item of items) {
-    expectedIdempotencyEntryCount += (item as Record<string, unknown>).generationCount as number;
-  }
-  if (
-    !isDenseArray(value.idempotencyKeys, expectedIdempotencyEntryCount) ||
-    value.idempotencyKeys.length !== expectedIdempotencyEntryCount
-  ) {
+  if (!isDenseArray(value.idempotencyKeys, items.length) || value.idempotencyKeys.length !== items.length) {
     return false;
   }
-  let entryIndex = 0;
   const keys = new Set<string>();
-  for (const item of items) {
+  for (let entryIndex = 0; entryIndex < items.length; entryIndex += 1) {
+    const item = items[entryIndex];
     const quoted = item as Record<string, unknown>;
-    for (let generationIndex = 0; generationIndex < (quoted.generationCount as number); generationIndex += 1) {
-      const entry = value.idempotencyKeys[entryIndex];
-      if (
-        !isRecord(entry) ||
-        !hasExactKeys(entry, IDEMPOTENCY_ENTRY_KEYS) ||
-        entry.itemId !== quoted.id ||
-        entry.generationIndex !== generationIndex ||
-        !isSafeId(entry.key) ||
-        keys.has(entry.key)
-      ) {
-        return false;
-      }
-      keys.add(entry.key);
-      entryIndex += 1;
+    const entry = value.idempotencyKeys[entryIndex];
+    if (
+      !isRecord(entry) ||
+      !hasExactKeys(entry, IDEMPOTENCY_ENTRY_KEYS) ||
+      entry.itemId !== quoted.id ||
+      !isSafeId(entry.key) ||
+      keys.has(entry.key)
+    ) {
+      return false;
     }
+    keys.add(entry.key);
   }
   return true;
 };
@@ -1199,7 +1165,7 @@ const validateFrameExtractionShape = (frameId: string, value: unknown): boolean 
     value.id !== frameId ||
     !isSafeId(frameId) ||
     !isSafeId(value.shotId) ||
-    !isSafeId(value.takeAssetId) ||
+    !isSafeId(value.videoAssetId) ||
     !isFinitePositive(value.endpointSeconds) ||
     !isNullableSafeId(value.frameAssetId) ||
     typeof value.status !== 'string' ||
@@ -1212,7 +1178,7 @@ const validateFrameExtractionShape = (frameId: string, value: unknown): boolean 
     value.id !==
     createStudioFrameExtractionId({
       shotId: value.shotId as string,
-      takeAssetId: value.takeAssetId as string,
+      videoAssetId: value.videoAssetId as string,
       endpointSeconds: value.endpointSeconds as number,
     })
   ) {
@@ -1238,8 +1204,7 @@ const validateProjectPatchBefore = (value: unknown): boolean =>
   isNullableRouteId(value.imageRouteId) &&
   isNullableRouteId(value.videoRouteId) &&
   validateSpendPolicy(value.spendPolicy) &&
-  isNullableSafeId(value.bedAssetId) &&
-  isNullableSafeId(value.matchToShotId);
+  isNullableSafeId(value.bedAssetId);
 
 const validateUndoPatch = (value: unknown): boolean => {
   if (!isRecord(value) || !isLowercaseDigest(value.afterDigest)) return false;
@@ -1369,7 +1334,6 @@ const validateReceiptAgainstJob = (
     receipt.rateUnit === item.rateUnit &&
     receipt.rateMinorUnits === item.rateMinorUnits &&
     receipt.durationSeconds === expectedDuration &&
-    receipt.generationIndex === job.generationIndex &&
     receipt.generationCount === item.generationCount &&
     receipt.totalMinorUnits === amounts.oneGenerationMinorUnits
   );
@@ -1404,7 +1368,6 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     !isRecord(value.shots) ||
     !validateBinStructure(value.bin) ||
     !isNullableSafeId(value.bedAssetId) ||
-    !isNullableSafeId(value.matchToShotId) ||
     !validateSpendPolicy(value.spendPolicy) ||
     !isDenseArray(value.spendAuthorizations) ||
     !isRecord(value.frameExtractions) ||
@@ -1435,17 +1398,14 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   const activeBeatIds = new Set(arrayMap(project.beatOrder, (beatId) => beatId));
   const binnedBeatIds = new Set<string>();
   const binnedShotOwnerIds = new Map<string, string>();
-  const binnedTakeIds = new Set<string>();
   for (let binIndex = 0; binIndex < project.bin.length; binIndex += 1) {
     const item = project.bin[binIndex]!;
     if (item.kind === 'beat') {
       if (!Object.hasOwn(project.beats, item.beatId) || activeBeatIds.has(item.beatId)) return false;
       binnedBeatIds.add(item.beatId);
-    } else if (item.kind === 'shot') {
+    } else {
       if (!Object.hasOwn(project.beats, item.beatId) || !Object.hasOwn(project.shots, item.shotId)) return false;
       binnedShotOwnerIds.set(item.shotId, item.beatId);
-    } else {
-      binnedTakeIds.add(item.assetId);
     }
   }
   for (const beatId of beatIds) {
@@ -1515,12 +1475,6 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       return false;
     }
   }
-  if (project.matchToShotId !== null) {
-    const ownerId = shotOwners.get(project.matchToShotId);
-    if (ownerId === undefined || inactiveShotIds.has(project.matchToShotId) || !activeBeatIds.has(ownerId))
-      return false;
-  }
-
   for (const job of Object.values(project.jobs)) {
     const shot = ownValue(project.shots, job.shotId);
     if (shot === undefined || !shotJobPositionsByShotId.get(shot.id)?.has(job.id)) return false;
@@ -1599,7 +1553,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   for (const frameId of Object.keys(project.frameExtractions)) {
     const frame = ownValue(project.frameExtractions, frameId);
     if (frame === undefined || !validateFrameExtractionShape(frameId, frame)) return false;
-    const take = ownValue(project.assets, frame.takeAssetId);
+    const take = ownValue(project.assets, frame.videoAssetId);
     const takeProducer = take === undefined ? undefined : outputProducerByAssetId.get(take.id);
     if (
       !isCanonicalVideoTake(take, frame.shotId) ||
@@ -1655,12 +1609,6 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       producer.outputAssetIdsByRole.primary === asset.id
     );
   };
-  const isSelectablePrimary = (
-    asset: StudioAssetV2 | undefined,
-    shotId: string,
-    purpose: StudioJobV2['purpose']
-  ): boolean => asset !== undefined && !binnedTakeIds.has(asset.id) && isCanonicalPrimary(asset, shotId, purpose);
-
   const isCurrentExistingPredecessor = (
     dependency: Extract<StudioGenerationRequestPlan, { kind: 'after_take_selection' }>['dependency'],
     dependentShotId: string
@@ -1682,8 +1630,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       inactiveShotIds.has(dependency.predecessorShotId) ||
       inactiveShotIds.has(dependentShotId) ||
       dependent?.chainBreak !== 'none' ||
-      predecessor?.selectedTakeId !== dependency.takeAssetId ||
-      !isSelectablePrimary(take, dependency.predecessorShotId, 'video_take') ||
+      predecessor?.videoAssetId !== dependency.takeAssetId ||
+      !isCanonicalPrimary(take, dependency.predecessorShotId, 'video_take') ||
       take.durationSeconds === undefined
     ) {
       return false;
@@ -1694,7 +1642,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     try {
       extractionId = createStudioFrameExtractionId({
         shotId: dependency.predecessorShotId,
-        takeAssetId: dependency.takeAssetId,
+        videoAssetId: dependency.takeAssetId,
         endpointSeconds: dependency.endpointSeconds,
       });
     } catch {
@@ -1704,7 +1652,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     return (
       extraction?.id === extractionId &&
       extraction.shotId === dependency.predecessorShotId &&
-      extraction.takeAssetId === dependency.takeAssetId &&
+      extraction.videoAssetId === dependency.takeAssetId &&
       Object.is(extraction.endpointSeconds, dependency.endpointSeconds)
     );
   };
@@ -1712,16 +1660,31 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   for (const shot of Object.values(project.shots)) {
     if (
       shot.seedStillId !== null &&
-      !isSelectablePrimary(ownValue(project.assets, shot.seedStillId), shot.id, 'seed_still')
+      !isCanonicalPrimary(ownValue(project.assets, shot.seedStillId), shot.id, 'seed_still')
     ) {
       return false;
     }
-    if (shot.selectedTakeId === null) {
+    const successfulVideoAssetIds = shot.jobIds.flatMap((jobId) => {
+      const job = ownValue(project.jobs, jobId);
+      return job?.status === 'succeeded' && job.purpose === 'video_take' && job.outputAssetIdsByRole.primary !== null
+        ? [job.outputAssetIdsByRole.primary]
+        : [];
+    });
+    const expectedVideoAssetId = successfulVideoAssetIds.at(-1) ?? null;
+    const expectedSupersededVideoAssetIds = successfulVideoAssetIds.slice(0, -1);
+    if (
+      shot.videoAssetId !== expectedVideoAssetId ||
+      shot.supersededVideoAssetIds.length !== expectedSupersededVideoAssetIds.length ||
+      shot.supersededVideoAssetIds.some((assetId, index) => assetId !== expectedSupersededVideoAssetIds[index])
+    ) {
+      return false;
+    }
+    if (shot.videoAssetId === null) {
       if (shot.trimInSeconds !== null || shot.trimOutSeconds !== null) return false;
       continue;
     }
-    const selected = ownValue(project.assets, shot.selectedTakeId);
-    if (!isSelectablePrimary(selected, shot.id, 'video_take')) return false;
+    const selected = ownValue(project.assets, shot.videoAssetId);
+    if (!isCanonicalPrimary(selected, shot.id, 'video_take')) return false;
     const trimIn = shot.trimInSeconds ?? 0;
     const trimOut = shot.trimOutSeconds ?? 0;
     if (
@@ -1768,7 +1731,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     authorization: Authorization;
     item: QuotedItem;
     provider: Authorization['providerBindings'][number]['provider'];
-    idempotencyKeys: Map<number, string>;
+    idempotencyKey: string;
   };
   const authorizationIds = new Set<string>();
   const referenceHandoffOriginIds = new Set<string>();
@@ -1793,18 +1756,14 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       const item = items[itemIndex]!;
       if (!Object.hasOwn(project.shots, item.shotId) || itemLinks.has(item.id)) return false;
       itemPositions.set(item.id, itemIndex);
-      const idempotencyKeys = new Map<number, string>();
-      for (const entry of authorization.idempotencyKeys) {
-        if (entry.itemId !== item.id) continue;
-        if (globalIdempotencyKeys.has(entry.key)) return false;
-        globalIdempotencyKeys.add(entry.key);
-        idempotencyKeys.set(entry.generationIndex, entry.key);
-      }
+      const idempotencyKey = authorization.idempotencyKeys[itemIndex]!.key;
+      if (globalIdempotencyKeys.has(idempotencyKey)) return false;
+      globalIdempotencyKeys.add(idempotencyKey);
       itemLinks.set(item.id, {
         authorization,
         item,
         provider: authorization.providerBindings[itemIndex]!.provider,
-        idempotencyKeys,
+        idempotencyKey,
       });
     }
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
@@ -1846,11 +1805,11 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       link.item.purpose !== job.purpose ||
       !requestPlansEqual(link.item.requestPlan, job.requestPlan) ||
       !providersEqual(link.provider, job.provider) ||
-      link.idempotencyKeys.get(job.generationIndex) !== job.idempotencyKey
+      link.idempotencyKey !== job.idempotencyKey
     ) {
       return false;
     }
-    const logicalEntry = `${job.authorizationId}\0${job.authorizationItemId}\0${job.generationIndex}`;
+    const logicalEntry = `${job.authorizationId}\0${job.authorizationItemId}`;
     if (jobsByLogicalEntry.has(logicalEntry)) return false;
     jobsByLogicalEntry.set(logicalEntry, job);
     const itemJobs = jobsByItemId.get(job.authorizationItemId) ?? [];
@@ -1947,7 +1906,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
           frame.managedAsset.collection !== 'conditioningFrames' ||
           extraction?.status !== 'ready' ||
           extraction.shotId !== conditioning.predecessorShotId ||
-          extraction.takeAssetId !== conditioning.takeAssetId ||
+          extraction.videoAssetId !== conditioning.takeAssetId ||
           extraction.endpointSeconds !== conditioning.endpointSeconds ||
           extraction.frameAssetId !== conditioning.frameAssetId ||
           ((plan.kind !== 'after_take_selection' || plan.dependency.kind !== 'existing_predecessor') &&
@@ -1958,9 +1917,17 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       }
     }
 
+    const seedStillVariationGridFailure = job.status === 'failed' && job.error?.code === 'seed_still_variation_grid';
+    if (
+      job.error?.code === 'seed_still_variation_grid' &&
+      (!seedStillVariationGridFailure || job.purpose !== 'seed_still')
+    ) {
+      return false;
+    }
     const receiptRequired =
       job.status === 'succeeded' ||
-      (job.status === 'failed' && (job.error?.code === 'no_output' || job.error?.code === 'download_failed'));
+      (job.status === 'failed' &&
+        (job.error?.code === 'no_output' || seedStillVariationGridFailure || job.error?.code === 'download_failed'));
     const receiptAllowed = receiptRequired || job.status === 'running';
     if (
       (receiptRequired && job.spendReceipt === null) ||
@@ -1973,11 +1940,9 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
 
   for (const link of itemLinks.values()) {
     const jobs = jobsByItemId.get(link.item.id);
-    if (jobs === undefined || jobs.length !== link.item.generationCount) return false;
-    for (let generationIndex = 0; generationIndex < link.item.generationCount; generationIndex += 1) {
-      const logicalEntry = `${link.authorization.id}\0${link.item.id}\0${generationIndex}`;
-      if (!jobsByLogicalEntry.has(logicalEntry)) return false;
-    }
+    if (jobs === undefined || jobs.length !== 1) return false;
+    const logicalEntry = `${link.authorization.id}\0${link.item.id}`;
+    if (!jobsByLogicalEntry.has(logicalEntry)) return false;
     if (!jobs.every((job) => requestPlansEqual(job.requestPlan, link.item.requestPlan))) return false;
     if (link.item.requestPlan.kind === 'after_take_selection') {
       const concreteJobs = jobs.filter((job) => job.requestSnapshot !== null);
@@ -2030,11 +1995,11 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const upstreamJobs = jobsByItemId.get(dependency.upstreamItemId);
     if (upstreamJobs === undefined) return false;
     const upstreamHasNonterminalJob = upstreamJobs.some((upstreamJob) => !isTerminalJob(upstreamJob));
-    const upstreamHasSelectablePrimary = upstreamJobs.some(
+    const upstreamHasCanonicalPrimary = upstreamJobs.some(
       (upstreamJob) =>
         upstreamJob.status === 'succeeded' &&
         upstreamJob.outputAssetIdsByRole.primary !== null &&
-        isSelectablePrimary(
+        isCanonicalPrimary(
           ownValue(project.assets, upstreamJob.outputAssetIdsByRole.primary),
           upstreamJob.shotId,
           upstreamJob.purpose
@@ -2042,7 +2007,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     );
     for (const job of jobsByItemId.get(link.item.id) ?? []) {
       if (job.requestSnapshot !== null || job.status === 'cancelled') continue;
-      const dependencyIsExhausted = !upstreamHasNonterminalJob && !upstreamHasSelectablePrimary;
+      const dependencyIsExhausted = !upstreamHasNonterminalJob && !upstreamHasCanonicalPrimary;
       if (
         (job.error?.code === 'dependency_failed' && !dependencyIsExhausted) ||
         (job.status === 'waiting_for_conditioning' && dependencyIsExhausted)
@@ -2054,7 +2019,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
 
   for (const shotId of inactiveShotIds) {
     const shot = ownValue(project.shots, shotId);
-    if (shot === undefined || project.matchToShotId === shotId) return false;
+    if (shot === undefined) return false;
     if (shot.jobIds.some((jobId) => !isTerminalJob(ownValue(project.jobs, jobId)!))) return false;
     if (
       Object.values(project.frameExtractions).some(
@@ -2087,38 +2052,6 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
           if (upstream?.shotId === shotId) return false;
         }
       }
-    }
-  }
-
-  for (const assetId of binnedTakeIds) {
-    const asset = ownValue(project.assets, assetId);
-    if (asset?.shotId === null || asset === undefined) return false;
-    const shot = ownValue(project.shots, asset.shotId);
-    const purpose = asset.mediaKind === 'image' ? 'seed_still' : asset.mediaKind === 'video' ? 'video_take' : null;
-    if (
-      shot === undefined ||
-      purpose === null ||
-      !isCanonicalPrimary(asset, shot.id, purpose) ||
-      shot.selectedTakeId === asset.id ||
-      shot.seedStillId === asset.id
-    ) {
-      return false;
-    }
-    if (
-      Object.values(project.frameExtractions).some(
-        (frame) => frame.takeAssetId === asset.id && (frame.status === 'pending' || frame.status === 'extracting')
-      ) ||
-      Object.values(project.jobs).some((job) => {
-        if (isTerminalJob(job)) return false;
-        const conditioning = job.requestSnapshot?.conditioningInput;
-        return (
-          (conditioning?.kind === 'seed_still' && conditioning.assetId === asset.id) ||
-          (conditioning?.kind === 'predecessor_frame' &&
-            (conditioning.takeAssetId === asset.id || conditioning.frameAssetId === asset.id))
-        );
-      })
-    ) {
-      return false;
     }
   }
 

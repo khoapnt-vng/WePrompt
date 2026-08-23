@@ -774,20 +774,6 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
       applyOperations(input, [{ kind: 'restore_shot', shotId: input.shotId, beforeShotId: input.beforeShotId }])
     )
   );
-  ipcBridge.creativeStudio.parkTake.provider((input) =>
-    runCommand(() => applyOperations(input, [{ kind: 'park_take', shotId: input.shotId, assetId: input.assetId }]))
-  );
-  ipcBridge.creativeStudio.addAlternateTake.provider((input) =>
-    runCommand(() =>
-      applyOperations(input, [{ kind: 'add_alternate_take', shotId: input.shotId, assetId: input.assetId }])
-    )
-  );
-  ipcBridge.creativeStudio.restoreTake.provider((input) =>
-    runCommand(() => applyOperations(input, [{ kind: 'restore_take', shotId: input.shotId, assetId: input.assetId }]))
-  );
-  ipcBridge.creativeStudio.selectTake.provider((input) =>
-    runCommand(() => applyOperations(input, [{ kind: 'select_take', shotId: input.shotId, assetId: input.assetId }]))
-  );
   ipcBridge.creativeStudio.reorderBin.provider((input) =>
     runCommand(() => applyOperations(input, [{ kind: 'reorder_bin', bin: input.bin }]))
   );
@@ -862,9 +848,6 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   );
   ipcBridge.creativeStudio.setBed.provider((input) =>
     runCommand(() => applyOperations(input, [{ kind: 'set_bed', assetId: input.assetId }]))
-  );
-  ipcBridge.creativeStudio.setMatchTo.provider((input) =>
-    runCommand(() => applyOperations(input, [{ kind: 'set_match_to', shotId: input.shotId }]))
   );
   ipcBridge.creativeStudio.createExport.provider((input) =>
     runCommand(() => dependencies.getService().createExport(input).then(toRendererExportCatalog))

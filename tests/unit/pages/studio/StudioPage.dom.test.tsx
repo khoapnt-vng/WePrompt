@@ -85,10 +85,6 @@ const mocks = vi.hoisted(() => {
       editProject: { invoke: vi.fn() },
       setRules: { invoke: vi.fn() },
       importSeedStill: { invoke: vi.fn() },
-      selectTake: { invoke: vi.fn() },
-      parkTake: { invoke: vi.fn() },
-      addAlternateTake: { invoke: vi.fn() },
-      restoreTake: { invoke: vi.fn() },
       parkShot: { invoke: vi.fn() },
       parkBeat: { invoke: vi.fn() },
       restoreBeat: { invoke: vi.fn() },
@@ -184,7 +180,7 @@ const deferred = <T,>() => {
 };
 
 const project = (): StudioRendererProjectV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   revision: 3,
   id: 'project_1',
   name: 'Launch film',
@@ -199,7 +195,6 @@ const project = (): StudioRendererProjectV2 => ({
   shots: {},
   bin: [],
   bedAssetId: null,
-  matchToShotId: null,
   spendPolicy: null,
   imageRouteId: null,
   videoRouteId: null,
@@ -234,7 +229,8 @@ const projectWithHandoffShot = (): StudioRendererProjectV2 => {
     trimOutSeconds: null,
     chainBreak: 'hard_cut',
     seedStillId: null,
-    selectedTakeId: null,
+    videoAssetId: null,
+    supersededVideoAssetIds: [],
     assetIds: [],
     jobIds: [],
   };
@@ -269,7 +265,8 @@ const projectWithDraftBatch = (beatCount: number): StudioRendererProjectV2 => {
       trimOutSeconds: null,
       chainBreak: index === 0 ? 'hard_cut' : 'none',
       seedStillId: null,
-      selectedTakeId: null,
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
       assetIds: [],
       jobIds: [],
     };
@@ -318,7 +315,8 @@ const projectWithRecovery = (revision = 3): StudioRendererProjectV2 => {
       trimOutSeconds: null,
       chainBreak: index === 0 || index === 2 ? 'hard_cut' : 'none',
       seedStillId: null,
-      selectedTakeId: null,
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
       assetIds: [],
       jobIds: [],
     };
@@ -328,6 +326,7 @@ const projectWithRecovery = (revision = 3): StudioRendererProjectV2 => {
   value.assets = { [seed.id]: seed, [take.id]: take };
   value.shots.upstream_seed!.assetIds.push(seed.id);
   value.shots.upstream_take!.assetIds.push(take.id);
+  value.shots.upstream_take!.videoAssetId = take.id;
   return value;
 };
 
@@ -360,7 +359,6 @@ const projectWithAttentionJob = (
     duplicateChargeAcknowledged: false,
     duplicateChargeAcknowledgedAt: null,
     purpose: 'video_take',
-    generationIndex: 0,
     spendReceipt: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -445,7 +443,6 @@ const workspaceStatus = (source: number | StudioRendererProjectV2, locked = fals
             action: 'park' as const,
             beatId: 'beat_1',
             shotId: 'shot_1',
-            assetId: null,
             allowed: false,
             blockers: [{ shotId: 'shot_1', code: 'bound_nonterminal_request' as const }],
           },
@@ -474,7 +471,7 @@ const commit = (revision: number) =>
   ok({ projectId: 'project_1', projectRevision: revision, createdBeatIds: [], createdShotIds: [] });
 
 const proposal = (): StudioProposalV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: 'proposal_1',
   projectId: 'project_1',
   status: 'pending',
@@ -491,7 +488,7 @@ const pinRuleProposal = (): StudioProposalV2 => ({
 });
 
 const referenceRequest = (): StudioReferenceRequestV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   id: 'reference_1',
   projectId: 'project_1',
   shotIds: ['shot_1', 'shot_2'],
@@ -738,10 +735,6 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.bridge.createExport.invoke.mockResolvedValue(ok({ revision: 2, artifacts: [] }));
     mocks.bridge.copyExport.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
     mocks.bridge.revealExport.invoke.mockResolvedValue(ok({ status: 'revealed' }));
-    mocks.bridge.selectTake.invoke.mockResolvedValue(commit(4));
-    mocks.bridge.parkTake.invoke.mockResolvedValue(commit(4));
-    mocks.bridge.addAlternateTake.invoke.mockResolvedValue(commit(4));
-    mocks.bridge.restoreTake.invoke.mockResolvedValue(commit(4));
     mocks.bridge.parkShot.invoke.mockResolvedValue(commit(4));
     mocks.bridge.parkBeat.invoke.mockResolvedValue(commit(4));
     mocks.bridge.restoreBeat.invoke.mockResolvedValue(commit(4));
@@ -762,7 +755,7 @@ describe('StudioPage schema-2 cutover', () => {
     );
     mocks.bridge.decideReferenceRequest.invoke.mockResolvedValue(
       ok({
-        schemaVersion: 2,
+        schemaVersion: 3,
         requestId: 'reference_1',
         projectId: 'project_1',
         decidedAt: '2026-01-01T00:00:05.000Z',
@@ -1174,10 +1167,6 @@ describe('StudioPage schema-2 cutover', () => {
       retryConditioning: mocks.bridge.retryConditioningFrame.invoke.mock.calls.length,
       cancelWaiting: mocks.bridge.cancelWaitingCascade.invoke.mock.calls.length,
       importSeedStill: mocks.bridge.importSeedStill.invoke.mock.calls.length,
-      selectTake: mocks.bridge.selectTake.invoke.mock.calls.length,
-      parkTake: mocks.bridge.parkTake.invoke.mock.calls.length,
-      addAlternateTake: mocks.bridge.addAlternateTake.invoke.mock.calls.length,
-      restoreTake: mocks.bridge.restoreTake.invoke.mock.calls.length,
       parkShot: mocks.bridge.parkShot.invoke.mock.calls.length,
       parkBeat: mocks.bridge.parkBeat.invoke.mock.calls.length,
       restoreBeat: mocks.bridge.restoreBeat.invoke.mock.calls.length,
@@ -1250,10 +1239,6 @@ describe('StudioPage schema-2 cutover', () => {
       retryConditioning: mocks.bridge.retryConditioningFrame.invoke.mock.calls.length,
       cancelWaiting: mocks.bridge.cancelWaitingCascade.invoke.mock.calls.length,
       importSeedStill: mocks.bridge.importSeedStill.invoke.mock.calls.length,
-      selectTake: mocks.bridge.selectTake.invoke.mock.calls.length,
-      parkTake: mocks.bridge.parkTake.invoke.mock.calls.length,
-      addAlternateTake: mocks.bridge.addAlternateTake.invoke.mock.calls.length,
-      restoreTake: mocks.bridge.restoreTake.invoke.mock.calls.length,
       parkShot: mocks.bridge.parkShot.invoke.mock.calls.length,
       parkBeat: mocks.bridge.parkBeat.invoke.mock.calls.length,
       restoreBeat: mocks.bridge.restoreBeat.invoke.mock.calls.length,
@@ -1396,7 +1381,7 @@ describe('StudioPage schema-2 cutover', () => {
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('preserves the complete reviewed per-choice graph while an unavailable cascade route leaves seed review open', async () => {
+  it('preserves the reviewed seed reference while an unavailable cascade route leaves seed review open', async () => {
     const generativeProject = projectWithHandoffShot();
     const briefReference: StudioAssetV2 = {
       id: 'brief_ref',
@@ -1416,8 +1401,8 @@ describe('StudioPage schema-2 cutover', () => {
       'gate.choices': {
         baseValue: '{}',
         value: JSON.stringify({
-          'shot_3:seed_still': { generationCount: 2, referenceAssetId: 'brief_ref' },
-          'shot_3:video_take': { generationCount: 3, referenceAssetId: null },
+          'shot_3:seed_still': { referenceAssetId: 'brief_ref' },
+          'shot_3:video_take': { referenceAssetId: null },
         }),
       },
     });
@@ -1456,7 +1441,6 @@ describe('StudioPage schema-2 cutover', () => {
           {
             shotId: 'shot_3',
             purpose: 'seed_still',
-            generationCount: 2,
             referenceAssetId: 'brief_ref',
           },
         ],
@@ -1464,7 +1448,6 @@ describe('StudioPage schema-2 cutover', () => {
           {
             shotId: 'shot_3',
             purpose: 'video_take',
-            generationCount: 3,
             referenceAssetId: null,
           },
         ],
@@ -2242,56 +2225,6 @@ describe('StudioPage schema-2 cutover', () => {
     expect(mocks.bridge.listExports.invoke).not.toHaveBeenCalled();
   });
 
-  it('routes projected recovery choices through exact revisioned providers', async () => {
-    const projects = [3, 4, 5].map(projectWithRecovery);
-    mocks.bridge.getProject.invoke
-      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[0]! }))
-      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[1]! }))
-      .mockResolvedValue(ok({ status: 'supported', project: projects[2]! }));
-    for (const authority of projects) {
-      mocks.bridge.getWorkspaceStatus.invoke.mockResolvedValueOnce(ok(recoveryStatus(authority)));
-      mocks.bridge.getChainStatus.invoke.mockResolvedValueOnce(ok(chainStatus(authority)));
-    }
-    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
-    mocks.bridge.selectTake.invoke.mockResolvedValue(commit(5));
-
-    renderStudio();
-    const recoveryRow = await screen.findByRole('row', {
-      name: /Recovery Beat/,
-    });
-    fireEvent.click(recoveryRow);
-
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: /conversation\.creativeStudio\.workspace\.beatPanel\.recovery\.chooseImage/,
-      })
-    );
-    await waitFor(() =>
-      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
-        projectId: 'project_1',
-        expectedRevision: 3,
-        operations: [{ kind: 'set_seed_still', shotId: 'upstream_seed', assetId: 'seed_asset' }],
-      })
-    );
-
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: /conversation\.creativeStudio\.workspace\.beatPanel\.recovery\.chooseVideo/,
-      })
-    );
-    await waitFor(() =>
-      expect(mocks.bridge.selectTake.invoke).toHaveBeenCalledWith({
-        projectId: 'project_1',
-        expectedRevision: 4,
-        shotId: 'upstream_take',
-        assetId: 'take_asset',
-      })
-    );
-
-    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
-    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
-  });
-
   it('routes projected recovery retry and cancellation through exact revisioned providers', async () => {
     const projects = [3, 4, 5].map(projectWithRecovery);
     mocks.bridge.getProject.invoke
@@ -2408,7 +2341,6 @@ describe('StudioPage schema-2 cutover', () => {
       value.assets[current.id] = current;
       value.assets[old.id] = old;
       value.bedAssetId = revision >= 5 ? current.id : null;
-      value.matchToShotId = revision >= 6 ? 'shot_3' : null;
       if (revision >= 8) {
         const imported = recoveryAsset('audio_imported', null, 'audio');
         imported.durationSeconds = 22;
@@ -2578,10 +2510,6 @@ describe('StudioPage schema-2 cutover', () => {
       return commit(revision);
     };
     mocks.bridge.applyAuthoringBatch.invoke.mockImplementation(nextCommit);
-    mocks.bridge.selectTake.invoke.mockImplementation(nextCommit);
-    mocks.bridge.parkTake.invoke.mockImplementation(nextCommit);
-    mocks.bridge.addAlternateTake.invoke.mockImplementation(nextCommit);
-    mocks.bridge.restoreTake.invoke.mockImplementation(nextCommit);
     mocks.bridge.parkShot.invoke.mockImplementation(nextCommit);
     mocks.bridge.parkBeat.invoke.mockImplementation(nextCommit);
     mocks.bridge.restoreBeat.invoke.mockImplementation(nextCommit);
@@ -2623,19 +2551,19 @@ describe('StudioPage schema-2 cutover', () => {
     await expectSuccessfulBeatPanelAction(() => actions.reorderShots('beat_0', ['shot_1', 'shot_0']));
     await expectSuccessfulBeatPanelAction(() => actions.redetachLine('shot_0', 'Detached line'));
     await expectSuccessfulBeatPanelAction(() => actions.restoreLine('shot_0', 'history_1'));
-    await expectSuccessfulBeatPanelAction(() => actions.selectTake('shot_0', 'take_1'));
-    await expectSuccessfulBeatPanelAction(() => actions.parkTake('shot_0', 'take_1'));
-    await expectSuccessfulBeatPanelAction(() => actions.addAlternateTake('shot_0', 'take_2'));
-    await expectSuccessfulBeatPanelAction(() => actions.restoreTake('shot_0', 'take_1'));
+    expect(actions).not.toHaveProperty('selectTake');
+    expect(actions).not.toHaveProperty('parkTake');
+    expect(actions).not.toHaveProperty('addAlternateTake');
+    expect(actions).not.toHaveProperty('restoreTake');
     await expectSuccessfulBeatPanelAction(() => actions.parkShot('shot_0'));
     await expectSuccessfulBeatPanelAction(() => actions.parkBeat('beat_0'));
     await expectSuccessfulBeatPanelAction(() => board.reorderBeats(['beat_1', 'beat_0']));
     await expectSuccessfulBeatPanelAction(() => board.restoreBeat('beat_2', 'beat_1'));
     await expectSuccessfulBeatPanelAction(() => board.restoreShot('shot_2', 'shot_1'));
-    await expectSuccessfulBeatPanelAction(() => board.restoreTake('shot_0', 'take_1'));
+    expect(board).not.toHaveProperty('restoreTake');
     await expectSuccessfulBeatPanelAction(() =>
       board.reorderBin([
-        { kind: 'take', assetId: 'take_2', reason: 'alternate' },
+        { kind: 'beat', beatId: 'beat_2', reason: 'lifted' },
         { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
       ])
     );
@@ -2690,71 +2618,41 @@ describe('StudioPage schema-2 cutover', () => {
       },
       {
         projectId: 'project_1',
-        expectedRevision: 16,
+        expectedRevision: 12,
         operations: [{ kind: 'reorder_beats', beatOrder: ['beat_1', 'beat_0'] }],
       },
     ]);
-    expect(mocks.bridge.selectTake.invoke).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 10,
-      shotId: 'shot_0',
-      assetId: 'take_1',
-    });
-    expect(mocks.bridge.parkTake.invoke).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 11,
-      shotId: 'shot_0',
-      assetId: 'take_1',
-    });
-    expect(mocks.bridge.addAlternateTake.invoke).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 12,
-      shotId: 'shot_0',
-      assetId: 'take_2',
-    });
-    expect(mocks.bridge.restoreTake.invoke).toHaveBeenCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 13,
-      shotId: 'shot_0',
-      assetId: 'take_1',
-    });
     expect(mocks.bridge.parkShot.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 14,
+      expectedRevision: 10,
       shotId: 'shot_0',
     });
     expect(mocks.bridge.parkBeat.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 15,
+      expectedRevision: 11,
       beatId: 'beat_0',
     });
     expect(mocks.bridge.restoreBeat.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 17,
+      expectedRevision: 13,
       beatId: 'beat_2',
       beforeBeatId: 'beat_1',
     });
     expect(mocks.bridge.restoreShot.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 18,
+      expectedRevision: 14,
       shotId: 'shot_2',
       beforeShotId: 'shot_1',
     });
-    expect(mocks.bridge.restoreTake.invoke).toHaveBeenLastCalledWith({
-      projectId: 'project_1',
-      expectedRevision: 19,
-      shotId: 'shot_0',
-      assetId: 'take_1',
-    });
     expect(mocks.bridge.reorderBin.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 20,
+      expectedRevision: 15,
       bin: [
-        { kind: 'take', assetId: 'take_2', reason: 'alternate' },
+        { kind: 'beat', beatId: 'beat_2', reason: 'lifted' },
         { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
       ],
     });
-    expect(revision).toBe(21);
+    expect(revision).toBe(16);
   });
 
   it('projects malformed topology defensively through both render and close-save traversal', async () => {
@@ -3001,8 +2899,8 @@ describe('StudioPage schema-2 cutover', () => {
     const actions = capturedBeatPanelActions();
     const validChoices = () =>
       [
-        { shotId: 'shot_3', purpose: 'seed_still' as const, generationCount: 1 as const, referenceAssetId: null },
-        { shotId: 'shot_3', purpose: 'video_take' as const, generationCount: 1 as const, referenceAssetId: null },
+        { shotId: 'shot_3', purpose: 'seed_still' as const, referenceAssetId: null },
+        { shotId: 'shot_3', purpose: 'video_take' as const, referenceAssetId: null },
       ] as const;
 
     act(() => actions.reviewShot('missing_shot', validChoices()));
@@ -3012,9 +2910,7 @@ describe('StudioPage schema-2 cutover', () => {
     for (const choices of [
       [{ ...validChoices()[0], shotId: 'shot_other' }, validChoices()[1]],
       [{ ...validChoices()[0], purpose: 'video_take' as const }, validChoices()[1]],
-      [{ ...validChoices()[0], generationCount: 1.5 }, validChoices()[1]],
-      [{ ...validChoices()[0], generationCount: 0 }, validChoices()[1]],
-      [{ ...validChoices()[0], generationCount: 5 }, validChoices()[1]],
+      [{ ...validChoices()[0], generationCount: 1 }, validChoices()[1]],
       [validChoices()[0], { ...validChoices()[1], referenceAssetId: 'brief_ref' }],
       [{ ...validChoices()[0], referenceAssetId: 'unknown_reference' }, validChoices()[1]],
     ]) {

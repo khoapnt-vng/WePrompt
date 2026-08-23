@@ -222,7 +222,7 @@ describe('local bridge', () => {
       projectId: 'project_1',
       expectedRevision: 1,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
       cascadeChoices: [],
     });
 

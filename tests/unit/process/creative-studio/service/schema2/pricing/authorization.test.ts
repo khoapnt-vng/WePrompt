@@ -53,7 +53,8 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
-  selectedTakeId: null,
+  videoAssetId: null,
+  supersededVideoAssetIds: [],
   assetIds: [],
   jobIds: [],
 });
@@ -87,7 +88,7 @@ const makeQuote = () => {
         shotId: 'shot_1',
         purpose: 'seed_still',
         routeId: imageRate.routeId,
-        generationCount: 2,
+        generationCount: 1,
         requestPlan: createStudioResolvedGenerationRequestPlan({
           purpose: 'seed_still',
           template,
@@ -98,7 +99,7 @@ const makeQuote = () => {
         shotId: 'shot_2',
         purpose: 'video_take',
         routeId: videoRate.routeId,
-        generationCount: 3,
+        generationCount: 1,
         requestPlan: createStudioResolvedGenerationRequestPlan({
           purpose: 'video_take',
           template,
@@ -128,11 +129,8 @@ const makeAuthorizationInput = () => {
       },
     ],
     idempotencyKeys: [
-      { itemId: seed!.id, generationIndex: 0, key: 'key_seed_0' },
-      { itemId: seed!.id, generationIndex: 1, key: 'key_seed_1' },
-      { itemId: video!.id, generationIndex: 0, key: 'key_video_0' },
-      { itemId: video!.id, generationIndex: 1, key: 'key_video_1' },
-      { itemId: video!.id, generationIndex: 2, key: 'key_video_2' },
+      { itemId: seed!.id, key: 'key_seed' },
+      { itemId: video!.id, key: 'key_video' },
     ],
   };
 };
@@ -146,19 +144,19 @@ describe('schema-2 Studio spend authorization', () => {
       id: 'authorization_1',
       confirmedAt: '2026-08-18T00:04:00.000Z',
       lowerMinorUnits: 81,
-      upperMinorUnits: 218,
+      upperMinorUnits: 81,
     });
     expect(authorization.providerBindings.map((binding) => binding.itemId)).toEqual(
       authorization.baseItems.map((item) => item.id)
     );
-    expect(authorization.idempotencyKeys).toHaveLength(5);
+    expect(authorization.idempotencyKeys).toHaveLength(2);
 
     input.quote.baseItems[0]!.rateMinorUnits = 999;
     input.providerBindings[0]!.provider.model = 'changed';
     input.idempotencyKeys[0]!.key = 'changed';
     expect(authorization.baseItems[0]!.rateMinorUnits).toBe(25);
     expect(authorization.providerBindings[0]!.provider.model).toBe('image-model');
-    expect(authorization.idempotencyKeys[0]!.key).toBe('key_seed_0');
+    expect(authorization.idempotencyKeys[0]!.key).toBe('key_seed');
   });
 
   it('rejects exact-expiry confirmation and incomplete or ambiguous maps', () => {
@@ -173,13 +171,13 @@ describe('schema-2 Studio spend authorization', () => {
     );
 
     const wrongPair = makeAuthorizationInput();
-    wrongPair.idempotencyKeys[2]!.generationIndex = 1;
+    wrongPair.idempotencyKeys[1]!.itemId = wrongPair.idempotencyKeys[0]!.itemId;
     expect(() => createStudioSpendAuthorizationV2(wrongPair)).toThrow(
       expect.objectContaining({ code: 'invalid_idempotency' })
     );
 
     const duplicateKey = makeAuthorizationInput();
-    duplicateKey.idempotencyKeys[4]!.key = duplicateKey.idempotencyKeys[0]!.key;
+    duplicateKey.idempotencyKeys[1]!.key = duplicateKey.idempotencyKeys[0]!.key;
     expect(() => createStudioSpendAuthorizationV2(duplicateKey)).toThrow(
       expect.objectContaining({ code: 'invalid_idempotency' })
     );
@@ -190,7 +188,6 @@ describe('schema-2 Studio spend authorization', () => {
     badId.quote.baseItems[0]!.id = 'item_random';
     badId.providerBindings[0]!.itemId = 'item_random';
     badId.idempotencyKeys[0]!.itemId = 'item_random';
-    badId.idempotencyKeys[1]!.itemId = 'item_random';
     expect(() => createStudioSpendAuthorizationV2(badId)).toThrow(
       expect.objectContaining({ code: 'invalid_authorization' })
     );
@@ -202,24 +199,20 @@ describe('schema-2 Studio spend authorization', () => {
     );
   });
 
-  it('derives per-job seed and video receipts without multiplying by generation count', () => {
+  it('derives exact-one seed and video receipts', () => {
     const authorization = createStudioSpendAuthorizationV2(makeAuthorizationInput());
     const [seed, video] = authorization.baseItems;
 
-    expect(
-      createStudioSpendReceiptV2({ authorization, itemId: seed!.id, jobId: 'job_seed_1', generationIndex: 1 })
-    ).toMatchObject({
+    expect(createStudioSpendReceiptV2({ authorization, itemId: seed!.id, jobId: 'job_seed' })).toMatchObject({
       purpose: 'seed_still',
       durationSeconds: null,
-      generationCount: 2,
+      generationCount: 1,
       totalMinorUnits: 25,
     });
-    expect(
-      createStudioSpendReceiptV2({ authorization, itemId: video!.id, jobId: 'job_video_2', generationIndex: 2 })
-    ).toMatchObject({
+    expect(createStudioSpendReceiptV2({ authorization, itemId: video!.id, jobId: 'job_video' })).toMatchObject({
       purpose: 'video_take',
       durationSeconds: 8,
-      generationCount: 3,
+      generationCount: 1,
       totalMinorUnits: 56,
     });
   });
@@ -230,22 +223,18 @@ describe('schema-2 Studio spend authorization', () => {
     const receipt = createStudioSpendReceiptV2({
       authorization,
       itemId: item.id,
-      jobId: 'job_video_1',
-      generationIndex: 1,
+      jobId: 'job_video',
     });
     const job = {
-      id: 'job_video_1',
+      id: 'job_video',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
-      generationIndex: 1,
-      idempotencyKey: 'key_video_1',
+      idempotencyKey: 'key_video',
       purpose: 'video_take',
     } as const;
 
     expect(studioSpendReceiptMatchesJobV2(receipt, authorization, job)).toBe(true);
-    expect(studioSpendReceiptMatchesJobV2(receipt, authorization, { ...job, idempotencyKey: 'key_seed_0' })).toBe(
-      false
-    );
+    expect(studioSpendReceiptMatchesJobV2(receipt, authorization, { ...job, idempotencyKey: 'key_seed' })).toBe(false);
   });
 
   it('keeps historical receipts unchanged after a current rate-card change', () => {
@@ -254,8 +243,7 @@ describe('schema-2 Studio spend authorization', () => {
     const before = createStudioSpendReceiptV2({
       authorization,
       itemId: item.id,
-      jobId: 'job_video_0',
-      generationIndex: 0,
+      jobId: 'job_video',
     });
 
     createStudioRateCardV2([imageRate, { ...videoRate, rateMinorUnits: 99 }]);
@@ -263,8 +251,7 @@ describe('schema-2 Studio spend authorization', () => {
       createStudioSpendReceiptV2({
         authorization,
         itemId: item.id,
-        jobId: 'job_video_0',
-        generationIndex: 0,
+        jobId: 'job_video',
       })
     ).toEqual(before);
   });

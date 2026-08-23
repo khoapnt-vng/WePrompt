@@ -9,7 +9,6 @@ import { createReadStream, promises as fs } from 'node:fs';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   type StudioJobV2,
   type StudioJobError,
   type StudioJobErrorCode,
@@ -396,6 +395,7 @@ const errorMessageKey = (code: StudioJobErrorCode): string =>
     timeout: 'conversation.creativeStudio.jobs.errors.timeout',
     poll_deadline: 'conversation.creativeStudio.jobs.errors.pollDeadline',
     no_output: 'conversation.creativeStudio.jobs.errors.noOutput',
+    seed_still_variation_grid: 'conversation.creativeStudio.jobs.errors.seedStillVariationGrid',
     submission_unknown: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
     download_failed: 'conversation.creativeStudio.jobs.errors.downloadFailed',
     unsupported: 'conversation.creativeStudio.jobs.errors.unsupported',
@@ -855,7 +855,6 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           authorization: authority.authorization,
           itemId: current.authorizationItemId,
           jobId: current.id,
-          generationIndex: current.generationIndex,
         });
       }
       current.status = 'running';
@@ -998,6 +997,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       }
       if (error instanceof CreativeStudioMediaError && error.code === 'invalid_media') {
         return transitionFailureV2(context.projectId, context.jobId, 'failed', 'no_output');
+      }
+      if (error instanceof CreativeStudioMediaError && error.code === 'seed_still_variation_grid') {
+        return transitionFailureV2(context.projectId, context.jobId, 'failed', 'seed_still_variation_grid');
       }
       return transitionFailureV2(context.projectId, context.jobId, 'failed', 'download_failed');
     }
@@ -1272,10 +1274,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       !hasExactKeysV2(input, DISPATCH_AUTHORIZED_JOBS_KEYS_V2) ||
       typeof input.projectId !== 'string' ||
       !SAFE_ID.test(input.projectId) ||
-      !isDenseArrayV2(
-        input.jobIds,
-        STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST * STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION
-      ) ||
+      !isDenseArrayV2(input.jobIds, STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) ||
       input.jobIds.length === 0 ||
       input.jobIds.some((jobId) => typeof jobId !== 'string' || !SAFE_ID.test(jobId)) ||
       new Set(input.jobIds).size !== input.jobIds.length
@@ -1311,7 +1310,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
             candidate.authorizationItemId === job.authorizationItemId &&
             candidate.status === 'queued_local'
         )
-        .sort((left, right) => left.generationIndex - right.generationIndex);
+        .sort((left, right) => left.id.localeCompare(right.id));
       const requestedSiblings = candidateJobs.filter(
         (candidate) =>
           candidate.authorizationId === job.authorizationId && candidate.authorizationItemId === job.authorizationItemId

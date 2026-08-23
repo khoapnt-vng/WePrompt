@@ -288,7 +288,14 @@ const MIME_SIGNATURES = [
 ] as const;
 
 export class CreativeStudioMediaError extends Error {
-  readonly code: 'invalid_media' | 'storage_error' | 'stale_project' | 'not_found' | 'job_inactive' | 'media_in_use';
+  readonly code:
+    | 'invalid_media'
+    | 'seed_still_variation_grid'
+    | 'storage_error'
+    | 'stale_project'
+    | 'not_found'
+    | 'job_inactive'
+    | 'media_in_use';
 
   constructor(code: CreativeStudioMediaError['code']) {
     super(code);
@@ -594,7 +601,7 @@ const captureStudioProjectPathAuthorityV2 = async (
       briefAfter.mtimeMs !== briefBefore.mtimeMs ||
       decoded === null ||
       !decoded.synchronized ||
-      decoded.project.schemaVersion !== 2 ||
+      decoded.project.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
       decoded.project.id !== projectId
     ) {
       throw new CreativeStudioMediaError('storage_error');
@@ -3105,7 +3112,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       ) {
         throw new CreativeStudioMediaError('job_inactive');
       }
-      const take = ownRecordValue(project.assets, extraction.takeAssetId);
+      const take = ownRecordValue(project.assets, extraction.videoAssetId);
       const shot = ownRecordValue(project.shots, extraction.shotId);
       if (
         take === undefined ||
@@ -3283,7 +3290,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
               currentExtraction === undefined ||
               currentShot === undefined ||
               currentTake === undefined ||
-              currentExtraction.takeAssetId !== take.id ||
+              currentExtraction.videoAssetId !== take.id ||
               currentExtraction.endpointSeconds !== extraction.endpointSeconds ||
               (repairingReadyAsset === null
                 ? currentExtraction.status !== 'extracting' ||
@@ -3376,7 +3383,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     return {
       extractionId: extraction.id,
       shotId: extraction.shotId,
-      takeAssetId: extraction.takeAssetId,
+      videoAssetId: extraction.videoAssetId,
       endpointSeconds: extraction.endpointSeconds,
       frameAssetId: frameAsset.id,
       byteSize: frameAsset.byteSize,
@@ -3533,7 +3540,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     const video = ownRecordValue(project.assets, input.videoAssetId);
     if (!shot || !video) throw new CreativeStudioMediaError('not_found');
     if (
-      shot.selectedTakeId !== input.videoAssetId ||
+      shot.videoAssetId !== input.videoAssetId ||
       !shot.assetIds.includes(input.videoAssetId) ||
       video.projectId !== input.projectId ||
       video.shotId !== input.shotId ||
@@ -3782,6 +3789,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         asset.sourceLook = job.requestSnapshot?.prompt ?? `${beat.look.trim()}\n\n${shot.line.trim()}`;
         defineRecordValue(current.assets, asset.id, asset);
         shot.assetIds.push(asset.id);
+        if (job.purpose === 'video_take') {
+          if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+          shot.videoAssetId = asset.id;
+        }
         job.status = 'succeeded';
         job.outputAssetIds = [asset.id];
         job.outputAssetIdsByRole.primary = asset.id;

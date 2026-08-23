@@ -81,14 +81,13 @@ const item = (
   id: string,
   shotId: string,
   purpose: 'seed_still' | 'video_take',
-  requestPlan: StudioGenerationRequestPlan,
-  generationCount = 1
+  requestPlan: StudioGenerationRequestPlan
 ): StudioQuotedGeneration => ({
   id,
   shotId,
   purpose,
   routeId: `${purpose}_route`,
-  generationCount,
+  generationCount: 1,
   requestPlan,
   rateUnit: purpose === 'seed_still' ? 'generation' : 'second',
   rateMinorUnits: 1,
@@ -113,7 +112,6 @@ const job = (
   purpose: 'video_take',
   authorizationId: 'auth_1',
   authorizationItemId,
-  generationIndex: 0,
   requestPlan,
   requestSnapshot: requestPlan.kind === 'resolved' ? requestPlan.snapshot : null,
   spendReceipt: null,
@@ -146,18 +144,12 @@ const asset = (
   createdAt,
 });
 
-const projectFixture = (dependency: 'seed' | 'predecessor', siblingCount = 1): StudioProjectV2 => {
+const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => {
   const upstreamPurpose = dependency === 'seed' ? 'seed_still' : 'video_take';
   const upstreamPlan = resolvedPlan(upstreamPurpose);
   const dependentPlan = dependency === 'seed' ? deferredSeedPlan() : deferredPredecessorPlan();
   const upstream = item('item_upstream', 'shot_1', upstreamPurpose, upstreamPlan);
-  const dependent = item(
-    'item_dependent',
-    dependency === 'seed' ? 'shot_1' : 'shot_2',
-    'video_take',
-    dependentPlan,
-    siblingCount
-  );
+  const dependent = item('item_dependent', dependency === 'seed' ? 'shot_1' : 'shot_2', 'video_take', dependentPlan);
   const authorization: StudioSpendAuthorization = {
     id: 'auth_1',
     projectId: 'project_1',
@@ -176,12 +168,8 @@ const projectFixture = (dependency: 'seed' | 'predecessor', siblingCount = 1): S
       provider: { providerId: 'provider_1', adapterId: 'openrouter-video-v1', model: 'model_1' },
     })),
     idempotencyKeys: [
-      { itemId: upstream.id, generationIndex: 0, key: 'key_upstream' },
-      ...Array.from({ length: siblingCount }, (_, generationIndex) => ({
-        itemId: dependent.id,
-        generationIndex,
-        key: `key_dependent_${generationIndex}`,
-      })),
+      { itemId: upstream.id, key: 'key_upstream' },
+      { itemId: dependent.id, key: 'key_dependent' },
     ],
   };
   const upstreamJob = job('job_upstream', 'shot_1', upstream.id, upstreamPlan, {
@@ -189,11 +177,9 @@ const projectFixture = (dependency: 'seed' | 'predecessor', siblingCount = 1): S
     purpose: upstreamPurpose,
     providerJobId: 'remote_upstream',
   });
-  const dependentJobs = Array.from({ length: siblingCount }, (_, generationIndex) =>
-    job(`job_dependent_${generationIndex}`, dependent.shotId, dependent.id, dependentPlan, { generationIndex })
-  );
+  const dependentJob = job('job_dependent', dependent.shotId, dependent.id, dependentPlan);
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: 7,
     id: 'project_1',
     name: 'Project',
@@ -229,9 +215,10 @@ const projectFixture = (dependency: 'seed' | 'predecessor', siblingCount = 1): S
         trimOutSeconds: dependency === 'predecessor' ? 2 : null,
         chainBreak: 'none',
         seedStillId: null,
-        selectedTakeId: null,
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
         assetIds: [],
-        jobIds: [upstreamJob.id, ...(dependency === 'seed' ? dependentJobs.map(({ id }) => id) : [])],
+        jobIds: [upstreamJob.id, ...(dependency === 'seed' ? [dependentJob.id] : [])],
       },
       shot_2: {
         id: 'shot_2',
@@ -245,14 +232,14 @@ const projectFixture = (dependency: 'seed' | 'predecessor', siblingCount = 1): S
         trimOutSeconds: null,
         chainBreak: 'none',
         seedStillId: null,
-        selectedTakeId: null,
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
         assetIds: [],
-        jobIds: dependency === 'predecessor' ? dependentJobs.map(({ id }) => id) : [],
+        jobIds: dependency === 'predecessor' ? [dependentJob.id] : [],
       },
     },
     bin: [],
     bedAssetId: null,
-    matchToShotId: null,
     spendPolicy: null,
     spendAuthorizations: [authorization],
     frameExtractions: {},
@@ -260,7 +247,7 @@ const projectFixture = (dependency: 'seed' | 'predecessor', siblingCount = 1): S
     imageRouteId: 'seed_still_route',
     videoRouteId: 'video_take_route',
     assets: {},
-    jobs: Object.fromEntries([upstreamJob, ...dependentJobs].map((entry) => [entry.id, entry])),
+    jobs: Object.fromEntries([upstreamJob, dependentJob].map((entry) => [entry.id, entry])),
     createdAt,
     updatedAt: createdAt,
   };
@@ -274,7 +261,7 @@ const installPrimary = (project: StudioProjectV2, mediaKind: 'image' | 'video'):
   producer.outputAssetIds = [primary.id];
   producer.outputAssetIdsByRole.primary = primary.id;
   if (mediaKind === 'image') project.shots.shot_1!.seedStillId = primary.id;
-  else project.shots.shot_1!.selectedTakeId = primary.id;
+  else project.shots.shot_1!.videoAssetId = primary.id;
   return primary;
 };
 
@@ -283,7 +270,7 @@ const existingPredecessorProject = (): StudioProjectV2 => {
   const primary = installPrimary(project, 'video');
   const authorization = project.spendAuthorizations[0]!;
   const dependent = authorization.cascadeItems[0]!;
-  const dependentJob = project.jobs.job_dependent_0!;
+  const dependentJob = project.jobs.job_dependent!;
   const plan = existingPredecessorPlan();
   dependent.requestPlan = structuredClone(plan);
   dependentJob.requestPlan = structuredClone(plan);
@@ -298,11 +285,11 @@ const existingPredecessorProject = (): StudioProjectV2 => {
 };
 
 describe('advanceStudioWaitingBindingsV2', () => {
-  it('holds an existing predecessor authorization to the exact selected Take, endpoint, and live boundary', () => {
+  it('holds an existing predecessor authorization to the exact current picture, endpoint, and live boundary', () => {
     const project = existingPredecessorProject();
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'primary_video',
+      videoAssetId: 'primary_video',
       endpointSeconds: 8,
     });
 
@@ -311,7 +298,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
       extractionIds: [extractionId],
       projectChanged: true,
     });
-    expect(project.jobs.job_dependent_0!.status).toBe('waiting_for_conditioning');
+    expect(project.jobs.job_dependent!.status).toBe('waiting_for_conditioning');
 
     project.shots.shot_1!.trimOutSeconds = 1;
     expect(advanceStudioWaitingBindingsV2(project, capturedAt)).toEqual({
@@ -319,7 +306,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
       extractionIds: [],
       projectChanged: false,
     });
-    expect(project.jobs.job_dependent_0!.status).toBe('waiting_for_conditioning');
+    expect(project.jobs.job_dependent!.status).toBe('waiting_for_conditioning');
     project.shots.shot_1!.trimOutSeconds = 2;
 
     const frame = asset('frame_existing', 'shot_1', 'image', 'conditioningFrames');
@@ -340,7 +327,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
             {
               extractionId,
               shotId: 'shot_1',
-              takeAssetId: 'primary_video',
+              videoAssetId: 'primary_video',
               endpointSeconds: 8,
               frameAssetId: frame.id,
               byteSize: frame.byteSize,
@@ -349,8 +336,8 @@ describe('advanceStudioWaitingBindingsV2', () => {
           ],
         ])
       )
-    ).toEqual({ dispatchJobIds: ['job_dependent_0'], extractionIds: [], projectChanged: true });
-    expect(project.jobs.job_dependent_0).toMatchObject({
+    ).toEqual({ dispatchJobIds: ['job_dependent'], extractionIds: [], projectChanged: true });
+    expect(project.jobs.job_dependent).toMatchObject({
       status: 'queued_local',
       requestSnapshot: {
         conditioningInput: {
@@ -364,36 +351,33 @@ describe('advanceStudioWaitingBindingsV2', () => {
     });
   });
 
-  it('binds every non-cancelled sibling to an explicitly selected seed from the exact upstream item', () => {
-    const project = projectFixture('seed', 3);
+  it('binds the exact dependent job to the canonical seed from its authorized upstream item', () => {
+    const project = projectFixture('seed');
     const primary = installPrimary(project, 'image');
-    project.jobs.job_dependent_1!.status = 'cancelled';
 
     const result = advanceStudioWaitingBindingsV2(project, capturedAt);
 
     expect(result).toEqual({
-      dispatchJobIds: ['job_dependent_0', 'job_dependent_2'],
+      dispatchJobIds: ['job_dependent'],
       extractionIds: [],
       projectChanged: true,
     });
-    expect(project.jobs.job_dependent_0).toMatchObject({
+    expect(project.jobs.job_dependent).toMatchObject({
       status: 'queued_local',
       updatedAt: capturedAt,
       requestSnapshot: { conditioningInput: { kind: 'seed_still', assetId: primary.id } },
     });
-    expect(project.jobs.job_dependent_2!.requestSnapshot).toEqual(project.jobs.job_dependent_0!.requestSnapshot);
-    expect(project.jobs.job_dependent_1).toMatchObject({ status: 'cancelled', requestSnapshot: null });
 
     const replay = advanceStudioWaitingBindingsV2(project, capturedAt);
     expect(replay).toEqual({ dispatchJobIds: [], extractionIds: [], projectChanged: false });
   });
 
-  it('derives the selected Take endpoint, persists one frame request, then binds to the ready frame', () => {
-    const project = projectFixture('predecessor', 2);
+  it('derives the current-picture endpoint, persists one frame request, then binds to the ready frame', () => {
+    const project = projectFixture('predecessor');
     const primary = installPrimary(project, 'video');
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: primary.id,
+      videoAssetId: primary.id,
       endpointSeconds: 8,
     });
 
@@ -405,7 +389,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
     expect(project.frameExtractions[extractionId]).toEqual({
       id: extractionId,
       shotId: 'shot_1',
-      takeAssetId: primary.id,
+      videoAssetId: primary.id,
       endpointSeconds: 8,
       frameAssetId: null,
       status: 'pending',
@@ -439,7 +423,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
           {
             extractionId,
             shotId: 'shot_1',
-            takeAssetId: primary.id,
+            videoAssetId: primary.id,
             endpointSeconds: 8,
             frameAssetId: frame.id,
             byteSize: frame.byteSize,
@@ -449,11 +433,11 @@ describe('advanceStudioWaitingBindingsV2', () => {
       ])
     );
     expect(bound).toEqual({
-      dispatchJobIds: ['job_dependent_0', 'job_dependent_1'],
+      dispatchJobIds: ['job_dependent'],
       extractionIds: [],
       projectChanged: true,
     });
-    expect(project.jobs.job_dependent_0!.requestSnapshot?.conditioningInput).toEqual({
+    expect(project.jobs.job_dependent!.requestSnapshot?.conditioningInput).toEqual({
       kind: 'predecessor_frame',
       predecessorShotId: 'shot_1',
       takeAssetId: primary.id,
@@ -487,13 +471,6 @@ describe('advanceStudioWaitingBindingsV2', () => {
       {
         mutate: (project) => {
           const primary = installPrimary(project, 'image');
-          project.bin.push({ kind: 'take', assetId: primary.id, reason: 'lifted' });
-        },
-        terminalizes: true,
-      },
-      {
-        mutate: (project) => {
-          const primary = installPrimary(project, 'image');
           project.jobs.job_upstream!.outputAssetIdsByRole = { primary: null, poster: primary.id };
         },
         terminalizes: true,
@@ -510,7 +487,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
         projectChanged: terminalizes,
       });
       if (terminalizes) {
-        expect(project.jobs.job_dependent_0).toMatchObject({
+        expect(project.jobs.job_dependent).toMatchObject({
           status: 'failed',
           error: { code: 'dependency_failed', messageKey: 'dependency_failed' },
           updatedAt: capturedAt,
@@ -521,18 +498,18 @@ describe('advanceStudioWaitingBindingsV2', () => {
     }
   });
 
-  it('does not bind failed frames, all-cancelled items, attempted siblings, or a non-asset video primary', () => {
+  it('does not bind failed frames, a cancelled or attempted job, or a non-asset video primary', () => {
     const failedFrame = projectFixture('predecessor');
     const primary = installPrimary(failedFrame, 'video');
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: primary.id,
+      videoAssetId: primary.id,
       endpointSeconds: 8,
     });
     failedFrame.frameExtractions[extractionId] = {
       id: extractionId,
       shotId: 'shot_1',
-      takeAssetId: primary.id,
+      videoAssetId: primary.id,
       endpointSeconds: 8,
       frameAssetId: null,
       status: 'failed',
@@ -542,52 +519,27 @@ describe('advanceStudioWaitingBindingsV2', () => {
 
     const cancelled = projectFixture('seed');
     installPrimary(cancelled, 'image');
-    cancelled.jobs.job_dependent_0!.status = 'cancelled';
+    cancelled.jobs.job_dependent!.status = 'cancelled';
     expect(advanceStudioWaitingBindingsV2(cancelled, capturedAt).projectChanged).toBe(false);
 
     const attempted = projectFixture('seed');
     installPrimary(attempted, 'image');
-    attempted.jobs.job_dependent_0!.providerJobId = 'already_attempted';
+    attempted.jobs.job_dependent!.providerJobId = 'already_attempted';
     expect(advanceStudioWaitingBindingsV2(attempted, capturedAt).projectChanged).toBe(false);
 
     const importedVideo = projectFixture('predecessor');
     const imported = installPrimary(importedVideo, 'video');
     imported.managedAsset.collection = 'imports';
     expect(advanceStudioWaitingBindingsV2(importedVideo, capturedAt).projectChanged).toBe(true);
-    expect(importedVideo.jobs.job_dependent_0).toMatchObject({
+    expect(importedVideo.jobs.job_dependent).toMatchObject({
       status: 'failed',
       error: { code: 'dependency_failed', messageKey: 'dependency_failed' },
     });
   });
 
-  it('atomically dependency-fails the transitive unbound frontier only after the upstream item is exhausted', () => {
-    const project = projectFixture('seed', 2);
+  it('atomically dependency-fails the unbound video frontier when the one seed job is rejected as a grid', () => {
+    const project = projectFixture('seed');
     const authorization = project.spendAuthorizations[0]!;
-    const upstream = authorization.baseItems[0]!;
-    upstream.generationCount = 2;
-    authorization.idempotencyKeys.splice(1, 0, {
-      itemId: upstream.id,
-      generationIndex: 1,
-      key: 'key_upstream_1',
-    });
-    const secondUpstream = structuredClone(project.jobs.job_upstream!);
-    secondUpstream.id = 'job_upstream_1';
-    secondUpstream.idempotencyKey = 'key_upstream_1';
-    secondUpstream.generationIndex = 1;
-    secondUpstream.status = 'running';
-    secondUpstream.providerJobId = 'remote_upstream_1';
-    project.jobs[secondUpstream.id] = secondUpstream;
-    project.shots.shot_1!.jobIds.splice(1, 0, secondUpstream.id);
-    project.jobs.job_upstream!.status = 'failed';
-    project.jobs.job_upstream!.error = { code: 'no_output', messageKey: 'no_output' };
-
-    expect(advanceStudioWaitingBindingsV2(project, capturedAt)).toEqual({
-      dispatchJobIds: [],
-      extractionIds: [],
-      projectChanged: false,
-    });
-    expect(project.jobs.job_dependent_0!.status).toBe('waiting_for_conditioning');
-
     const transitivePlan: StudioGenerationRequestPlan = {
       kind: 'after_take_selection',
       template: {
@@ -605,22 +557,23 @@ describe('advanceStudioWaitingBindingsV2', () => {
       itemId: transitiveItem.id,
       provider: { providerId: 'provider_1', adapterId: 'openrouter-video-v1', model: 'model_1' },
     });
-    authorization.idempotencyKeys.push({ itemId: transitiveItem.id, generationIndex: 0, key: 'key_transitive' });
+    authorization.idempotencyKeys.push({ itemId: transitiveItem.id, key: 'key_transitive' });
     const transitiveJob = job('job_transitive', 'shot_2', transitiveItem.id, transitivePlan);
     project.jobs[transitiveJob.id] = transitiveJob;
     project.shots.shot_2!.jobIds.push(transitiveJob.id);
-    project.jobs.job_dependent_1!.status = 'cancelled';
-    secondUpstream.status = 'failed';
-    secondUpstream.error = { code: 'no_output', messageKey: 'no_output' };
+    project.jobs.job_upstream!.status = 'failed';
+    project.jobs.job_upstream!.error = {
+      code: 'seed_still_variation_grid',
+      messageKey: 'conversation.creativeStudio.jobs.errors.seedStillVariationGrid',
+    };
 
     const terminalized = advanceStudioWaitingBindingsV2(project, capturedAt);
     expect(terminalized).toEqual({ dispatchJobIds: [], extractionIds: [], projectChanged: true });
-    expect(project.jobs.job_dependent_0).toMatchObject({
+    expect(project.jobs.job_dependent).toMatchObject({
       status: 'failed',
       error: { code: 'dependency_failed' },
       updatedAt: capturedAt,
     });
-    expect(project.jobs.job_dependent_1).toMatchObject({ status: 'cancelled', error: null });
     expect(project.jobs.job_transitive).toMatchObject({ status: 'failed', error: { code: 'dependency_failed' } });
   });
 });

@@ -226,7 +226,7 @@ const createHarness = (
     copy: vi.fn(),
     resolveRevealPath: vi.fn(),
     repair: vi.fn(async () => ({
-      schemaVersion: 2 as const,
+      schemaVersion: 3 as const,
       projectId: 'runtime_recovery',
       revision: 1,
       artifacts: [],
@@ -669,7 +669,8 @@ describe('Creative Studio schema-2 runtime activation', () => {
       trimOutSeconds: null,
       chainBreak: 'none',
       seedStillId: null,
-      selectedTakeId: null,
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
       assetIds: [],
       jobIds: [],
     };
@@ -688,8 +689,8 @@ describe('Creative Studio schema-2 runtime activation', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
     });
 
     expect(prepared.baseOnly).toMatchObject({

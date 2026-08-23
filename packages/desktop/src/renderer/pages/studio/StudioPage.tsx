@@ -14,7 +14,6 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ipcBridge } from '@/common';
 import {
   STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
   STUDIO_MAX_MUTATION_OPERATIONS,
   type StudioBinItem,
   type StudioBriefRuleDraft,
@@ -126,10 +125,7 @@ const containsUnavailableHardCutOperation = (operations: readonly StudioRenderer
 
 const cloneBinItem = (item: StudioBinItem): StudioBinItem => {
   if (item.kind === 'beat') return { kind: 'beat', beatId: item.beatId, reason: item.reason };
-  if (item.kind === 'shot') {
-    return { kind: 'shot', beatId: item.beatId, shotId: item.shotId, reason: 'lifted' };
-  }
-  return { kind: 'take', assetId: item.assetId, reason: item.reason };
+  return { kind: 'shot', beatId: item.beatId, shotId: item.shotId, reason: 'lifted' };
 };
 
 const projectDraftValues = (project: StudioRendererProjectV2): Record<string, WorkspaceDraftValue> => {
@@ -708,26 +704,6 @@ const StudioProjectPage: React.FC<{
             dependentShotId,
           })
         ),
-      chooseCascadeAsset: async (row, assetId) => {
-        if (row.waitingReason === 'choose_seed') {
-          return runWorkspaceCommit((current) =>
-            ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
-              projectId: current.id,
-              expectedRevision: current.revision,
-              operations: [{ kind: 'set_seed_still', shotId: row.upstreamShotId, assetId }],
-            })
-          );
-        }
-        if (row.waitingReason !== 'choose_take' && row.waitingReason !== 'conditioning_failed') return false;
-        return runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.selectTake.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            shotId: row.upstreamShotId,
-            assetId,
-          })
-        );
-      },
     }),
     [
       acknowledgeRuleAdoption,
@@ -840,42 +816,6 @@ const StudioProjectPage: React.FC<{
           setWorkspacePending(false);
         }
       },
-      selectTake: async (shotId, assetId) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.selectTake.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            shotId,
-            assetId,
-          })
-        ),
-      parkTake: async (shotId, assetId) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.parkTake.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            shotId,
-            assetId,
-          })
-        ),
-      addAlternateTake: async (shotId, assetId) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.addAlternateTake.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            shotId,
-            assetId,
-          })
-        ),
-      restoreTake: async (shotId, assetId) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.restoreTake.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            shotId,
-            assetId,
-          })
-        ),
       parkShot: async (shotId, onCommitted) =>
         runWorkspaceCommit(
           (current) =>
@@ -913,11 +853,12 @@ const StudioProjectPage: React.FC<{
             const expected = expectedChoices[index];
             return (
               expected === undefined ||
+              Reflect.ownKeys(choice).length !== 3 ||
+              !Object.hasOwn(choice, 'shotId') ||
+              !Object.hasOwn(choice, 'purpose') ||
+              !Object.hasOwn(choice, 'referenceAssetId') ||
               choice.shotId !== expected.shotId ||
               choice.purpose !== expected.purpose ||
-              !Number.isSafeInteger(choice.generationCount) ||
-              choice.generationCount < 1 ||
-              choice.generationCount > STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION ||
               (choice.purpose === 'video_take' && choice.referenceAssetId !== null) ||
               (choice.referenceAssetId !== null && !referenceIds.has(choice.referenceAssetId))
             );
@@ -929,12 +870,10 @@ const StudioProjectPage: React.FC<{
         const reviewedChoice = (index: number): BeatPanelReviewChoice => choices[index]!;
         const baseChoices = defaultDraft.baseChoices.map((choice, index) => ({
           ...choice,
-          generationCount: reviewedChoice(index).generationCount,
           referenceAssetId: reviewedChoice(index).referenceAssetId,
         }));
         const cascadeChoices = defaultDraft.cascadeChoices.map((choice, index) => ({
           ...choice,
-          generationCount: reviewedChoice(defaultDraft.baseChoices.length + index).generationCount,
           referenceAssetId: reviewedChoice(defaultDraft.baseChoices.length + index).referenceAssetId,
         }));
         const draft = selectionGateDraft({
@@ -1013,7 +952,6 @@ const StudioProjectPage: React.FC<{
               expectedRevision: current.revision,
             })
         ),
-      chooseCascadeAsset: mutations.chooseCascadeAsset,
       retryConditioning: mutations.retryConditioning,
       cancelWaiting: mutations.cancelWaiting,
       requestReviewedRederive: focusDirectorForReviewedRequest,
@@ -1065,7 +1003,6 @@ const StudioProjectPage: React.FC<{
             beforeShotId,
           })
         ),
-      restoreTake: beatPanelActions.restoreTake,
       reorderBin: async (bin) =>
         runWorkspaceCommit((current) =>
           ipcBridge.creativeStudio.reorderBin.invoke({

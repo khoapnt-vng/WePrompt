@@ -315,7 +315,7 @@ describe('Studio Director subprocess command writer', () => {
       await readFile(path.join(pendingDir, 'command_v2.json'), 'utf8')
     ) as StudioDirectorCommandRecordV2;
     expect(command).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       commandId: 'command_v2',
       projectId: PROJECT_ID,
       expectedRevision: 7,
@@ -562,7 +562,7 @@ describe('Studio Director subprocess command writer', () => {
         { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'Closer' } },
         { kind: 'delete_shot', shotId: 'clip_old' },
         { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
-        { kind: 'reorder_bin', bin: [{ kind: 'take', assetId: 'take_3', reason: 'alternate' }] },
+        { kind: 'reorder_bin', bin: [{ kind: 'beat', beatId: 'section_3', reason: 'alternate' }] },
       ],
     };
 
@@ -577,7 +577,7 @@ describe('Studio Director subprocess command writer', () => {
     const writer = writerWithIdsV2(['command_v2_receipt', 'lease_v2_receipt']);
     await writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Schema two' }] });
     const receipt: StudioDirectorCommandReceiptV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       commandId: 'command_v2_receipt',
       projectId: PROJECT_ID,
       expectedRevision: 7,
@@ -606,7 +606,7 @@ describe('Studio Director subprocess command writer', () => {
       const receipt: StudioDirectorCommandReceiptV2 =
         status === 'applied'
           ? {
-              schemaVersion: 2,
+              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
               commandId,
               projectId: PROJECT_ID,
               expectedRevision: 8,
@@ -617,7 +617,7 @@ describe('Studio Director subprocess command writer', () => {
               createdShotIds: [],
             }
           : {
-              schemaVersion: 2,
+              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
               commandId,
               projectId: PROJECT_ID,
               expectedRevision: 8,
@@ -651,7 +651,7 @@ describe('Studio Director subprocess command writer', () => {
   it('keeps an absent-pending valid receipt as receipt-first terminal authority', async () => {
     const commandId = 'command_v2_receipt_first';
     const receipt: StudioDirectorCommandReceiptV2 = {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       commandId,
       projectId: PROJECT_ID,
       expectedRevision: 11,
@@ -677,7 +677,7 @@ describe('Studio Director subprocess command writer', () => {
         await writeFile(
           receiptFile,
           JSON.stringify({
-            schemaVersion: 2,
+            schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
             commandId,
             projectId: PROJECT_ID,
             expectedRevision: 8,

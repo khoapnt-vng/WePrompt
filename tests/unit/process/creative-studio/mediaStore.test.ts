@@ -51,7 +51,10 @@ vi.mock('node:crypto', async (importOriginal) => {
   };
 });
 
-const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
+const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==',
+  'base64'
+);
 const mp4 = Buffer.from('000000186674797069736f6d00000000', 'hex');
 const decodedMp4 = Buffer.from(
   'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAPBbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAJxAAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAArV0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAJxAAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAACcQAACAAAABAAAAAAItbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAACgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAAB2G1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAZhzdGJsAAAAwHN0c2QAAAAAAAAAAQAAALBhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFExhdmM2My4xLjEwMSBsaWJ4MjY0AAAAAAAAAAAAAAAAGP//AAAANmF2Y0MBZAAK/+EAGWdkAAqscgRewEQAAAMABAAAAwAIPEiWEYABAAZo6EOPLIv9+PgAAAAAEHBhc3AAAAABAAAAAQAAABRidHJ0AAAAAAAAApYAAAAAAAAAGHN0dHMAAAAAAAAAAQAAAAoAAEAAAAAAFHN0c3MAAAAAAAAAAQAAAAEAAAA4Y3R0cwAAAAAAAAAFAAAAAQAAgAAAAAABAAKAAAAAAAEAAQAAAAAAAwAAAAAAAAAEAABAAAAAABxzdHNjAAAAAAAAAAEAAAABAAAACgAAAAEAAAA8c3RzegAAAAAAAAAAAAAACgAAAscAAAANAAAADQAAAA0AAAANAAAADQAAAA0AAAANAAAADQAAAA0AAAAUc3RjbwAAAAAAAAABAAAD8QAAAJh1ZHRhAAAAkG1ldGEAAAAAAAAAIWhkbHIAAAAAAAAAAG1kaXJhcHBsAAAAAAAAAAAAAAAAY2lsc3QAAAAkqXRvbwAAABxkYXRhAAAAAQAAAABMYXZmNjMuMS4xMDEAAAA3qWNtdAAAAC9kYXRhAAAAAQAAAABTVFVESU9fUkFXX09VVFBVVF9CT0RZX1NFTlRJTkVMAAAACGZyZWUAAANEbWRhdAAAAq8GBf//q9xF6b3m2Ui3lizYINkj7u94MjY0IC0gY29yZSAxNjUgcjMyMjIgYjM1NjA1YSAtIEguMjY0L01QRUctNCBBVkMgY29kZWMgLSBDb3B5bGVmdCAyMDAzLTIwMjUgLSBodHRwOi8vd3d3LnZpZGVvbGFuLm9yZy94MjY0Lmh0bWwgLSBvcHRpb25zOiBjYWJhYz0xIHJlZj0xNiBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgzOjB4MTMzIG1lPXVtaCBzdWJtZT0xMCBwc3k9MSBwc3lfcmQ9MS4wMDowLjAwIG1peGVkX3JlZj0xIG1lX3JhbmdlPTI0IGNocm9tYV9tZT0xIHRyZWxsaXM9MiA4eDhkY3Q9MSBjcW09MCBkZWFkem9uZT0yMSwxMSBmYXN0X3Bza2lwPTEgY2hyb21hX3FwX29mZnNldD0tMiB0aHJlYWRzPTEgbG9va2FoZWFkX3RocmVhZHM9MSBzbGljZWRfdGhyZWFkcz0wIG5yPTAgZGVjaW1hdGU9MSBpbnRlcmxhY2VkPTAgYmx1cmF5X2NvbXBhdD0wIGNvbnN0cmFpbmVkX2ludHJhPTAgYmZyYW1lcz04IGJfcHlyYW1pZD0yIGJfYWRhcHQ9MiBiX2JpYXM9MCBkaXJlY3Q9MyB3ZWlnaHRiPTEgb3Blbl9nb3A9MCB3ZWlnaHRwPTIga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD02MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjAwAIAAAAAQZYiBAAL//vfUt8yy7gcjgQAAAAlBmgktiCv//vAAAAAJQZ4QhxBf/4aBAAAACQGeGCaIK/+SgAAAAAkBnhhGiCv/koEAAAAJAZ4YZogr/5KBAAAACQGeGK1IK/+SgQAAAAkBnhjNSCv/koEAAAAJAZ4Y7Ugr/5KAAAAACQGeGQ1IK/+SgA==',
@@ -168,7 +171,8 @@ const makeStoreV2 = async (
         trimOutSeconds: null,
         chainBreak: 'none',
         seedStillId: null,
-        selectedTakeId: null,
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
         assetIds: [],
         jobIds: [],
       },
@@ -186,7 +190,8 @@ const makeStoreV2 = async (
               trimOutSeconds: null,
               chainBreak: 'none' as const,
               seedStillId: null,
-              selectedTakeId: null,
+              videoAssetId: null,
+              supersededVideoAssetIds: [],
               assetIds: [],
               jobIds: [],
             },
@@ -289,13 +294,12 @@ const makeStoreV2 = async (
     expiresAt: '2026-08-17T12:05:00.000Z',
     confirmedAt: '2026-08-17T12:00:01.000Z',
     providerBindings: [{ itemId: item.id, provider }],
-    idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: 'key_1' }],
+    idempotencyKeys: [{ itemId: item.id, key: 'key_1' }],
   };
   const receipt = createStudioSpendReceiptV2({
     authorization,
     itemId: item.id,
     jobId: 'job_1',
-    generationIndex: 0,
   });
   const project = await store.updateProjectV2(quoteBase.id, (current) => {
     const job: StudioJobV2 = {
@@ -318,7 +322,6 @@ const makeStoreV2 = async (
       purpose,
       authorizationId: authorization.id,
       authorizationItemId: item.id,
-      generationIndex: 0,
       requestPlan,
       requestSnapshot: requestPlan.snapshot,
       spendReceipt: receipt,
@@ -855,7 +858,8 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         shots: {
           shot_1: {
             seedStillId: null,
-            selectedTakeId: null,
+            videoAssetId: null,
+            supersededVideoAssetIds: [],
             assetIds: ['seed_output_1'],
             jobIds: ['job_1'],
           },
@@ -897,6 +901,21 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       byteSize: mp4.length,
       sha256: createHash('sha256').update(mp4).digest('hex'),
     });
+    const committed = await store.getProjectV2(project.id);
+    expect(committed).toMatchObject({
+      status: 'supported',
+      project: {
+        shots: {
+          shot_1: {
+            videoAssetId: 'take_1',
+            supersededVideoAssetIds: [],
+          },
+        },
+      },
+    });
+    expect(
+      committed.status === 'supported' ? Object.hasOwn(committed.project.shots.shot_1!, 'selectedTakeId') : true
+    ).toBe(false);
     const edited = await store.updateProjectV2(project.id, (current) => {
       current.shots.shot_1!.durationSeconds = 8;
       return current;
@@ -1142,7 +1161,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     expect(loaded).toMatchObject({
       status: 'supported',
       project: {
-        shots: { shot_1: { selectedTakeId: null } },
+        shots: { shot_1: { videoAssetId: 'take_1', supersededVideoAssetIds: [] } },
         jobs: {
           job_1: {
             outputAssetIds: ['take_1', 'poster_1'],
@@ -1169,7 +1188,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     expect(consumed).toBe(false);
   });
 
-  it('persists a renderer-captured V2 poster only after the canonical video is selected', async () => {
+  it('persists a renderer-captured V2 poster for the atomically assigned current picture', async () => {
     const { store, project } = await makeStoreV2({ purpose: 'video_take' });
     const media = createStudioMediaStore({
       store,
@@ -1194,13 +1213,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       declaredByteSize: png.length,
       body: Readable.from([png]),
     };
-    await expect(media.persistCapturedPosterV2(capturedInput)).rejects.toMatchObject({ code: 'job_inactive' });
-
-    await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_captured';
-      return current;
-    });
-    const poster = await media.persistCapturedPosterV2({ ...capturedInput, body: Readable.from([png]) });
+    const poster = await media.persistCapturedPosterV2(capturedInput);
     expect(poster).toMatchObject({
       id: 'poster_captured',
       shotId: 'shot_1',
@@ -1217,7 +1230,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
             outputAssetIdsByRole: { primary: 'take_captured', poster: 'poster_captured' },
           },
         },
-        shots: { shot_1: { selectedTakeId: 'take_captured' } },
+        shots: { shot_1: { videoAssetId: 'take_captured', supersededVideoAssetIds: [] } },
       },
     });
   });
@@ -1249,7 +1262,8 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         shot_1: {
           assetIds: ['human_seed_1'],
           seedStillId: null,
-          selectedTakeId: null,
+          videoAssetId: null,
+          supersededVideoAssetIds: [],
           jobIds: [],
         },
       },
@@ -1346,7 +1360,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
 
     const undone = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'undo_last', entryId: 'bed_import_mutation_1' }],
@@ -1651,7 +1665,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -1767,7 +1781,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -1816,7 +1830,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -1913,7 +1927,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       });
       const cleared = await store.applyMutationBatchV2(
         {
-          schemaVersion: 2,
+          schemaVersion: 3,
           projectId: project.id,
           expectedRevision: imported.project.revision,
           operations: [{ kind: 'set_bed', assetId: null }],
@@ -1982,7 +1996,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2042,7 +2056,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       fs.writeFile(
         intentPath,
         `${JSON.stringify({
-          schemaVersion: 2,
+          schemaVersion: 3,
           kind: 'detach_bed_audio',
           projectId: project.id,
           expectedRevision: imported.project.revision,
@@ -2088,7 +2102,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await fs.writeFile(
       intentPath,
       `${JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         kind: 'import_bed_audio',
         projectId: project.id,
         expectedRevision: project.revision,
@@ -2123,7 +2137,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: 3,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2138,7 +2152,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await fs.writeFile(
       intentPath,
       `${JSON.stringify({
-        schemaVersion: 2,
+        schemaVersion: 3,
         kind: 'detach_bed_audio',
         projectId: project.id,
         expectedRevision: cleared.project.revision,
@@ -2681,7 +2695,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     base.frameExtractions[extractionId] = {
       id: extractionId,
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 5,
       status: 'ready',
       frameAssetId: frameId,
@@ -2835,16 +2849,16 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 8,
     });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.shots.shot_1!.videoAssetId = 'take_1';
       current.shots.shot_1!.trimOutSeconds = 2;
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_1',
+        videoAssetId: 'take_1',
         endpointSeconds: 8,
         frameAssetId: null,
         status: 'pending',
@@ -2901,7 +2915,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await expect(media.verifyConditioningFrameV2({ projectId: project.id, extractionId })).resolves.toEqual({
       extractionId,
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 8,
       frameAssetId: 'frame_asset_1',
       byteSize: png.length,
@@ -2945,15 +2959,15 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 10,
     });
     const before = await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.shots.shot_1!.videoAssetId = 'take_1';
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_1',
+        videoAssetId: 'take_1',
         endpointSeconds: 10,
         frameAssetId: null,
         status: 'pending',
@@ -2998,15 +3012,15 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_for_failures',
+      videoAssetId: 'take_for_failures',
       endpointSeconds: 10,
     });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_for_failures';
+      current.shots.shot_1!.videoAssetId = 'take_for_failures';
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_for_failures',
+        videoAssetId: 'take_for_failures',
         endpointSeconds: 10,
         frameAssetId: null,
         status: 'pending',
@@ -3113,15 +3127,15 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 10,
     });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.shots.shot_1!.videoAssetId = 'take_1';
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_1',
+        videoAssetId: 'take_1',
         endpointSeconds: 10,
         frameAssetId: null,
         status: 'pending',
@@ -3165,15 +3179,15 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 10,
     });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.shots.shot_1!.videoAssetId = 'take_1';
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_1',
+        videoAssetId: 'take_1',
         endpointSeconds: 10,
         frameAssetId: null,
         status: 'pending',
@@ -3221,15 +3235,15 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 10,
     });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.shots.shot_1!.videoAssetId = 'take_1';
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_1',
+        videoAssetId: 'take_1',
         endpointSeconds: 10,
         frameAssetId: null,
         status: 'pending',
@@ -3285,15 +3299,15 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 10,
     });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.shots.shot_1!.videoAssetId = 'take_1';
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_1',
+        videoAssetId: 'take_1',
         endpointSeconds: 10,
         frameAssetId: null,
         status: 'pending',
@@ -3341,15 +3355,15 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 10,
     });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_1';
+      current.shots.shot_1!.videoAssetId = 'take_1';
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_1',
+        videoAssetId: 'take_1',
         endpointSeconds: 10,
         frameAssetId: null,
         status: 'pending',
@@ -3411,15 +3425,15 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: 'take_for_refused_repair',
+      videoAssetId: 'take_for_refused_repair',
       endpointSeconds: 10,
     });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.selectedTakeId = 'take_for_refused_repair';
+      current.shots.shot_1!.videoAssetId = 'take_for_refused_repair';
       current.frameExtractions[extractionId] = {
         id: extractionId,
         shotId: 'shot_1',
-        takeAssetId: 'take_for_refused_repair',
+        videoAssetId: 'take_for_refused_repair',
         endpointSeconds: 10,
         frameAssetId: null,
         status: 'pending',

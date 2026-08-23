@@ -69,7 +69,7 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
-  selectedTakeId: null,
+  videoAssetId: null,
   assetIds: [],
   jobIds: [],
 });
@@ -134,12 +134,12 @@ const makeInput = (): StudioSubmissionQuoteEstimateInputV2 => {
     project: makeProject(),
     originReferenceHandoffId: null,
     rateCard: createStudioRateCardV2([imageRate, videoRate]),
-    baseItems: [draft('shot_1', 'seed_still', 2, resolvedSeed())],
+    baseItems: [draft('shot_1', 'seed_still', 1, resolvedSeed())],
     cascadeItems: [
       draft(
         'shot_1',
         'video_take',
-        3,
+        1,
         createStudioDeferredGenerationRequestPlan({
           template,
           dependency: { kind: 'authorized_seed', upstreamItemId: seedId, shotId: 'shot_1' },
@@ -148,7 +148,7 @@ const makeInput = (): StudioSubmissionQuoteEstimateInputV2 => {
       draft(
         'shot_2',
         'video_take',
-        4,
+        1,
         createStudioDeferredGenerationRequestPlan({
           template,
           dependency: {
@@ -237,12 +237,10 @@ const prepareRequest = (
 const choice = (
   shotId: string,
   purpose: StudioQuotedGeneration['purpose'],
-  generationCount = 1,
   referenceAssetId: string | null = null
 ): StudioPrepareSubmissionRequestV2['baseChoices'][number] => ({
   shotId,
   purpose,
-  generationCount,
   referenceAssetId,
 });
 
@@ -342,7 +340,7 @@ describe('schema-2 Studio estimates', () => {
       managedAsset: { collection: 'assets', fileName: 'take_1.mp4' },
       durationSeconds: 10,
     });
-    project.shots.shot_1!.selectedTakeId = predecessorTake.id;
+    project.shots.shot_1!.videoAssetId = predecessorTake.id;
     project.shots.shot_1!.trimOutSeconds = 2;
 
     const options = deriveStudioSubmissionQuoteCoresV2({
@@ -423,8 +421,8 @@ describe('schema-2 Studio estimates', () => {
   it('derives byte-identical base rows and the complete downstream symbolic graph', () => {
     const project = makeDerivationProject();
     const request = prepareRequest(
-      [choice('shot_1', 'video_take', 2)],
-      [choice('shot_2', 'video_take', 3), choice('shot_3', 'video_take', 4)]
+      [choice('shot_1', 'video_take')],
+      [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
     );
 
     const options = deriveStudioSubmissionQuoteCoresV2({
@@ -471,8 +469,8 @@ describe('schema-2 Studio estimates', () => {
       ],
     ]);
     expect(options.baseOnly.lowerMinorUnits).toBe(56);
-    expect(options.baseOnly.upperMinorUnits).toBe(112);
-    expect(options.withCascade).toMatchObject({ lowerMinorUnits: 168, upperMinorUnits: 504 });
+    expect(options.baseOnly.upperMinorUnits).toBe(56);
+    expect(options.withCascade).toMatchObject({ lowerMinorUnits: 168, upperMinorUnits: 168 });
   });
 
   it('derives a same-shot video barrier after a reviewed head seed', () => {
@@ -480,7 +478,7 @@ describe('schema-2 Studio estimates', () => {
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
       request: prepareRequest(
-        [choice('shot_1', 'seed_still', 2)],
+        [choice('shot_1', 'seed_still')],
         [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
       ),
       rateCard: createStudioRateCardV2([imageRate, videoRate]),
@@ -505,7 +503,7 @@ describe('schema-2 Studio estimates', () => {
     const project = makeDerivationProject();
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
-      request: prepareRequest([choice('shot_1', 'seed_still', 2)], []),
+      request: prepareRequest([choice('shot_1', 'seed_still')], []),
       rateCard: createStudioRateCardV2([imageRate, videoRate]),
     });
 
@@ -558,7 +556,7 @@ describe('schema-2 Studio estimates', () => {
   it('keeps an exact seed base quote when only its cascade route or rate is unavailable', () => {
     const project = makeDerivationProject();
     const request = prepareRequest(
-      [choice('shot_1', 'seed_still', 2)],
+      [choice('shot_1', 'seed_still')],
       [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
     );
     const available = deriveStudioSubmissionQuoteCoresV2({
@@ -632,8 +630,7 @@ describe('schema-2 Studio estimates', () => {
 
   it.each([
     ['video purpose', [choice('shot_2', 'video_take')], []],
-    ['multiple generations', [choice('shot_2', 'seed_still', 2)], []],
-    ['reference asset', [choice('shot_2', 'seed_still', 1, 'brief_ref')], []],
+    ['reference asset', [choice('shot_2', 'seed_still', 'brief_ref')], []],
     ['cascade row', [choice('shot_2', 'seed_still')], [choice('shot_2', 'video_take')]],
   ])('rejects a reference handoff with %s', (_label, baseChoices, cascadeChoices) => {
     expect(() =>
@@ -657,7 +654,7 @@ describe('schema-2 Studio estimates', () => {
       managedAsset: { collection: 'assets', fileName: 'take_1.mp4' },
       durationSeconds: 10,
     });
-    project.shots.shot_1!.selectedTakeId = take.id;
+    project.shots.shot_1!.videoAssetId = take.id;
     project.shots.shot_1!.trimOutSeconds = 2;
     const frame = addDerivationAsset(project, {
       id: 'frame_1',
@@ -667,13 +664,13 @@ describe('schema-2 Studio estimates', () => {
     });
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
     });
     project.frameExtractions[extractionId] = {
       id: extractionId,
       shotId: 'shot_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
       frameAssetId: frame.id,
       status: 'ready',
@@ -718,7 +715,7 @@ describe('schema-2 Studio estimates', () => {
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
       request: prepareRequest(
-        [choice('shot_1', 'seed_still', 1, reference.id)],
+        [choice('shot_1', 'seed_still', reference.id)],
         [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
       ),
       rateCard: createStudioRateCardV2([imageRate, videoRate]),
@@ -737,7 +734,7 @@ describe('schema-2 Studio estimates', () => {
       deriveStudioSubmissionQuoteCoresV2({
         project,
         request: prepareRequest(
-          [choice('shot_1', 'seed_still', 1, reference.id)],
+          [choice('shot_1', 'seed_still', reference.id)],
           [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
         ),
         rateCard: createStudioRateCardV2([imageRate, videoRate]),
@@ -810,7 +807,7 @@ describe('schema-2 Studio estimates', () => {
     expect(inFlightOptions.withCascade).toBeNull();
   });
 
-  it('rejects malformed counts, video references, missing inputs, and hostile request shapes', () => {
+  it('rejects legacy counts, video references, missing inputs, and hostile request shapes', () => {
     const project = makeDerivationProject();
     const rateCard = createStudioRateCardV2([imageRate, videoRate]);
     const derive = (request: unknown) => deriveStudioSubmissionQuoteCoresV2({ project, request, rateCard });
@@ -818,7 +815,7 @@ describe('schema-2 Studio estimates', () => {
     expect(() =>
       derive(
         prepareRequest(
-          [choice('shot_1', 'video_take', 0)],
+          [{ ...choice('shot_1', 'video_take'), generationCount: 0 } as never],
           [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
         )
       )
@@ -826,7 +823,7 @@ describe('schema-2 Studio estimates', () => {
     expect(() =>
       derive(
         prepareRequest(
-          [choice('shot_1', 'video_take', 5)],
+          [{ ...choice('shot_1', 'video_take'), generationCount: 1 } as never],
           [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
         )
       )
@@ -834,7 +831,7 @@ describe('schema-2 Studio estimates', () => {
     expect(() =>
       derive(
         prepareRequest(
-          [choice('shot_1', 'video_take', 1, 'brief_ref')],
+          [choice('shot_1', 'video_take', 'brief_ref')],
           [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
         )
       )
@@ -961,6 +958,10 @@ describe('schema-2 Studio estimates', () => {
     } as unknown as StudioUnpricedQuotedGenerationV2;
     expectQuoteCode(wrongPurpose, 'invalid_quote');
 
+    const repeatedGeneration = makeInput();
+    repeatedGeneration.baseItems[0] = { ...repeatedGeneration.baseItems[0]!, generationCount: 2 };
+    expectQuoteCode(repeatedGeneration, 'invalid_quote');
+
     const symbolicSeed = makeInput();
     symbolicSeed.baseItems[0] = draft(
       'shot_1',
@@ -988,7 +989,7 @@ describe('schema-2 Studio estimates', () => {
       })
     );
     expect(quote.lowerMinorUnits).toBe(137);
-    expect(quote.upperMinorUnits).toBe(442);
+    expect(quote.upperMinorUnits).toBe(137);
     expect(quote.currency).toBe('USD');
     expect(quote.cascadeItems.map((item) => item.requestPlan.kind)).toEqual([
       'after_take_selection',
@@ -1077,14 +1078,14 @@ describe('schema-2 Studio estimates', () => {
     const quote = createStudioSubmissionQuoteCoreV2(makeInput());
 
     expect(evaluateStudioBudgetV2(quote, null)).toEqual({ allowed: true, verdict: { kind: 'no_policy' } });
-    expect(evaluateStudioBudgetV2(quote, { currency: 'USD', maxPerBatchMinorUnits: 442 })).toEqual({
+    expect(evaluateStudioBudgetV2(quote, { currency: 'USD', maxPerBatchMinorUnits: 137 })).toEqual({
       allowed: true,
-      verdict: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 442 },
+      verdict: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 137 },
     });
-    expect(evaluateStudioBudgetV2(quote, { currency: 'USD', maxPerBatchMinorUnits: 441 })).toEqual({
+    expect(evaluateStudioBudgetV2(quote, { currency: 'USD', maxPerBatchMinorUnits: 136 })).toEqual({
       allowed: false,
       reason: 'over_cap',
-      verdict: { kind: 'over_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 441 },
+      verdict: { kind: 'over_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 136 },
     });
     expect(evaluateStudioBudgetV2(quote, { currency: 'EUR', maxPerBatchMinorUnits: 999 })).toEqual({
       allowed: false,
@@ -1118,18 +1119,17 @@ describe('schema-2 Studio estimates', () => {
     expect(projected).toMatchObject({
       id: 'quote_1',
       lowerMinorUnits: 137,
-      upperMinorUnits: 442,
+      upperMinorUnits: 137,
       budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 500 },
     });
     expect(projected.baseItems[0]).toEqual({
       shotId: 'shot_1',
       purpose: 'seed_still',
       route: { choiceId: 'image_route', providerId: 'image-provider', model: 'image-model' },
-      generationCount: 2,
+      generationCount: 1,
       durationSeconds: null,
       oneGenerationMinorUnits: 25,
-      requestedTotalMinorUnits: 50,
-      waitsForTakeSelection: false,
+      requestedTotalMinorUnits: 25,
     });
     const serialized = JSON.stringify(projected);
     expect(serialized).not.toContain('requestPlan');

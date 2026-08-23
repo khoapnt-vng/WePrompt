@@ -13,7 +13,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { CreateStudioProjectInputV2 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type CreateStudioProjectInputV2,
+} from '@/common/types/project/creativeStudioTypes';
 import { createCreativeStudioStore, type StudioProjectCommitFacts } from '@process/services/creative-studio/store';
 import { createCreativeStudioServiceV2 } from '@process/services/creative-studio/service';
 
@@ -634,7 +637,7 @@ describe('Creative Studio schema-2 storage cutover', () => {
     const store = createCreativeStudioStore(dependencies);
 
     const created = await store.createProjectV2(makeV2Input());
-    expect(created).toMatchObject({ schemaVersion: 2, id: V2_PROJECT_ID, revision: 1 });
+    expect(created).toMatchObject({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: V2_PROJECT_ID, revision: 1 });
 
     observed.clearMutations();
     await expect(store.getProjectV2(V2_PROJECT_ID)).resolves.toMatchObject({
@@ -642,7 +645,7 @@ describe('Creative Studio schema-2 storage cutover', () => {
       project: { id: V2_PROJECT_ID, revision: 1 },
     });
     await expect(store.listProjectsV2()).resolves.toMatchObject({
-      projects: [{ id: V2_PROJECT_ID, beatCount: 0, shotCount: 0, selectedTakeCount: 0 }],
+      projects: [{ id: V2_PROJECT_ID, beatCount: 0, shotCount: 0, pictureCount: 0 }],
       unsupportedProjectIds: [V1_PROJECT_ID],
       quarantinedProjectIds: [],
     });
@@ -677,7 +680,7 @@ describe('Creative Studio schema-2 storage cutover', () => {
 
     const applied = await restartedStore.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: V2_PROJECT_ID,
         expectedRevision: 1,
         operations: [{ kind: 'set_brief', brief: 'Committed after restart' }],

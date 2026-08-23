@@ -22,7 +22,7 @@ export type CoverageSegmentGeometry = {
   playedStartSeconds: number;
   playedEndSeconds: number;
   playedDurationSeconds: number;
-  selectedTake: boolean;
+  hasCurrentPicture: boolean;
 };
 
 export type CoverageGeometry = {
@@ -47,7 +47,7 @@ const finitePositive = (value: number): boolean => Number.isFinite(value) && val
 
 /**
  * Keeps the shared planning boundary authoritative while deriving a distinct playback lane.
- * A selected Take must have a probed source duration; invalid or partial facts fail closed.
+ * A current picture must have a probed source duration; invalid or partial facts fail closed.
  */
 export const buildCoverageGeometry = (shots: readonly WorkspaceShotProjection[]): CoverageGeometry | null => {
   if (shots.length === 0) return { segments: [], planningTotalSeconds: 0, playbackTotalSeconds: 0 };
@@ -70,14 +70,14 @@ export const buildCoverageGeometry = (shots: readonly WorkspaceShotProjection[])
       return null;
     }
 
-    const selectedTake = shot.selectedTakeId !== null;
-    const playbackWidthSeconds = selectedTake ? shot.selectedTakeSourceDurationSeconds : shot.durationSeconds;
-    if (playbackWidthSeconds === null || !finitePositive(playbackWidthSeconds)) return null;
+    const hasCurrentPicture = shot.currentPicture !== null;
+    const playbackWidthSeconds = hasCurrentPicture ? shot.currentPicture!.sourceDurationSeconds : shot.durationSeconds;
+    if (!finitePositive(playbackWidthSeconds)) return null;
 
-    const trimInSeconds = selectedTake ? (shot.trimInSeconds ?? 0) : 0;
-    const trimOutSeconds = selectedTake ? (shot.trimOutSeconds ?? 0) : 0;
+    const trimInSeconds = hasCurrentPicture ? (shot.trimInSeconds ?? 0) : 0;
+    const trimOutSeconds = hasCurrentPicture ? (shot.trimOutSeconds ?? 0) : 0;
     if (
-      (!selectedTake && (shot.trimInSeconds !== null || shot.trimOutSeconds !== null)) ||
+      (!hasCurrentPicture && (shot.trimInSeconds !== null || shot.trimOutSeconds !== null)) ||
       !Number.isFinite(trimInSeconds) ||
       !Number.isFinite(trimOutSeconds) ||
       trimInSeconds < 0 ||
@@ -109,7 +109,7 @@ export const buildCoverageGeometry = (shots: readonly WorkspaceShotProjection[])
       playedStartSeconds: trimInSeconds,
       playedEndSeconds: playbackWidthSeconds - trimOutSeconds,
       playedDurationSeconds,
-      selectedTake,
+      hasCurrentPicture,
     });
     expectedPlanningStart = boundary.endSeconds;
   }

@@ -30,7 +30,7 @@ const makeItem = (overrides: Partial<StudioQuotedGeneration> = {}): StudioQuoted
   shotId: 'shot_1',
   purpose: 'video_take',
   routeId: 'route_1',
-  generationCount: 3,
+  generationCount: 1,
   requestPlan: resolvedPlan(),
   rateUnit: 'second',
   rateMinorUnits: 25,
@@ -38,23 +38,22 @@ const makeItem = (overrides: Partial<StudioQuotedGeneration> = {}): StudioQuoted
 });
 
 describe('calculateStudioQuotedGenerationAmounts', () => {
-  it('prices seed generations once per generated image', () => {
+  it('prices one seed generation', () => {
     expect(
       calculateStudioQuotedGenerationAmounts(
         makeItem({
           purpose: 'seed_still',
-          generationCount: 4,
           rateUnit: 'generation',
           rateMinorUnits: 125,
         })
       )
-    ).toEqual({ oneGenerationMinorUnits: 125, requestedTotalMinorUnits: 500 });
+    ).toEqual({ oneGenerationMinorUnits: 125, requestedTotalMinorUnits: 125 });
   });
 
-  it('prices each video generation from the frozen request duration', () => {
+  it('prices one video generation from the frozen request duration', () => {
     expect(calculateStudioQuotedGenerationAmounts(makeItem())).toEqual({
       oneGenerationMinorUnits: 200,
-      requestedTotalMinorUnits: 600,
+      requestedTotalMinorUnits: 200,
     });
   });
 
@@ -62,7 +61,7 @@ describe('calculateStudioQuotedGenerationAmounts', () => {
     makeItem({ purpose: 'seed_still', rateUnit: 'second' }),
     makeItem({ purpose: 'video_take', rateUnit: 'generation' }),
     makeItem({ generationCount: 0 }),
-    makeItem({ generationCount: 5 }),
+    makeItem({ generationCount: 2 }),
     makeItem({ rateMinorUnits: Number.MAX_SAFE_INTEGER }),
     makeItem({ requestPlan: resolvedPlan(16) }),
   ])('rejects a mismatched or unsafe item %#', (item) => {
@@ -79,12 +78,11 @@ describe('calculateStudioQuoteTotals', () => {
           id: 'item_2',
           shotId: 'shot_2',
           purpose: 'seed_still',
-          generationCount: 2,
           rateUnit: 'generation',
           rateMinorUnits: 75,
         }),
       ])
-    ).toEqual({ lowerMinorUnits: 275, upperMinorUnits: 750 });
+    ).toEqual({ lowerMinorUnits: 275, upperMinorUnits: 275 });
   });
 
   it('returns exact zero totals for an empty mathematical input', () => {

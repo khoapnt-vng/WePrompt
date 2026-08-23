@@ -28,7 +28,7 @@ describe('createEmptyStudioProjectV2', () => {
     );
 
     expect(project).toEqual({
-      schemaVersion: 2,
+      schemaVersion: 3,
       revision: 1,
       id: 'project_1',
       name: 'Project One',
@@ -44,7 +44,6 @@ describe('createEmptyStudioProjectV2', () => {
       shots: {},
       bin: [],
       bedAssetId: null,
-      matchToShotId: null,
       spendPolicy: null,
       spendAuthorizations: [],
       frameExtractions: {},

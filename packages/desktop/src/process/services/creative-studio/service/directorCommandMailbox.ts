@@ -349,7 +349,7 @@ const createStudioDirectorCommandMailboxInternal = (
       typeof value !== 'object' ||
       value === null ||
       Array.isArray(value) ||
-      (value as { schemaVersion?: unknown }).schemaVersion !== 2 ||
+      (value as { schemaVersion?: unknown }).schemaVersion !== STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 ||
       (value as { id?: unknown }).id !== authority.projectId
     ) {
       throw new RecordIoError('unsafe_file');

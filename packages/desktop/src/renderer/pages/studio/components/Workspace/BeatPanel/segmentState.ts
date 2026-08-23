@@ -13,12 +13,12 @@ import type {
 
 export type WorkspaceShotSegmentState =
   | { kind: 'status_pending' }
-  | { kind: 'no_take' }
+  | { kind: 'no_picture' }
   | { kind: 'queued' }
   | { kind: 'waiting_on_shot'; upstreamShotNumber: number }
   | { kind: 'waiting_on_frame' }
   | { kind: 'rendering'; progressPercent: number | null; showingStill: boolean }
-  | { kind: 'rendered'; takeCount: number; selectedTakeNumber: number | null }
+  | { kind: 'rendered' }
   | { kind: 'needs_rerender' }
   | { kind: 'stale' }
   | { kind: 'failed_unbilled' }
@@ -27,7 +27,7 @@ export type WorkspaceShotSegmentState =
 
 type SegmentStateJob = Pick<
   StudioRendererJobV2,
-  'id' | 'status' | 'progress' | 'spendReceipt' | 'generationIndex' | 'outputAssetIds' | 'outputAssetIdsByRole'
+  'id' | 'status' | 'progress' | 'spendReceipt' | 'outputAssetIds' | 'outputAssetIdsByRole'
 >;
 
 export type WorkspaceShotSegmentStateInput = {
@@ -39,9 +39,7 @@ export type WorkspaceShotSegmentStateInput = {
   frameBoundary: StudioRendererChainBoundaryV2 | null;
   currentVideoJobs: readonly SegmentStateJob[] | null;
   dirtyCauses: readonly StudioRendererDirtyShotV2['causes'][number][];
-  activeVideoTakeCount: number;
-  visibleVideoTakeCount: number;
-  selectedTakeNumber: number | null;
+  hasCurrentPicture: boolean;
 };
 
 const progressFromOneRunningJob = (jobs: readonly SegmentStateJob[]): number | null => {
@@ -64,7 +62,6 @@ export const deriveWorkspaceShotSegmentState = (input: WorkspaceShotSegmentState
     case 'cancelled':
       return { kind: 'never_dispatched' };
     case 'choose_seed':
-    case 'choose_take':
       return { kind: 'needs_attention' };
     case 'conditioning_frame':
       return { kind: 'waiting_on_frame' };
@@ -109,12 +106,6 @@ export const deriveWorkspaceShotSegmentState = (input: WorkspaceShotSegmentState
 
   if (input.dirtyCauses.includes('continuity_stale')) return { kind: 'stale' };
   if (input.dirtyCauses.includes('generation_out_of_date')) return { kind: 'needs_rerender' };
-  if (input.activeVideoTakeCount > 0) {
-    return {
-      kind: 'rendered',
-      takeCount: input.visibleVideoTakeCount,
-      selectedTakeNumber: input.selectedTakeNumber,
-    };
-  }
-  return { kind: 'no_take' };
+  if (input.hasCurrentPicture) return { kind: 'rendered' };
+  return { kind: 'no_picture' };
 };

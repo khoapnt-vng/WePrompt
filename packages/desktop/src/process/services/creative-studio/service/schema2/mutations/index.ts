@@ -10,7 +10,6 @@ import { studioPlanningShotBoundariesV2 } from '@/common/types/project/creativeS
 import {
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
-  STUDIO_MAX_BIN_TAKE_ITEMS,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_LINE_HISTORY_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
@@ -50,7 +49,6 @@ export type StudioMutationReasonV2 =
   | 'beat_capacity_reached'
   | 'beat_shot_capacity_reached'
   | 'project_shot_capacity_reached'
-  | 'take_bin_capacity_reached'
   | 'invalid_shot_duration'
   | 'dependency_blocked'
   | 'identity_collision'
@@ -98,7 +96,6 @@ const RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
 const SPEND_POLICY_KEYS = new Set(['currency', 'maxPerBatchMinorUnits']);
 const BIN_BEAT_KEYS = new Set(['kind', 'beatId', 'reason']);
 const BIN_SHOT_KEYS = new Set(['kind', 'beatId', 'shotId', 'reason']);
-const BIN_TAKE_KEYS = new Set(['kind', 'assetId', 'reason']);
 const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], ReadonlySet<string>>> = {
   edit_project: new Set(['kind', 'changes']),
   set_brief: new Set(['kind', 'brief']),
@@ -122,14 +119,9 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   redetach_line: new Set(['kind', 'shotId', 'line']),
   rederive_line: new Set(['kind', 'shotId', 'line']),
   restore_line: new Set(['kind', 'shotId', 'historyEntryId']),
-  park_take: new Set(['kind', 'shotId', 'assetId']),
-  add_alternate_take: new Set(['kind', 'shotId', 'assetId']),
-  restore_take: new Set(['kind', 'shotId', 'assetId']),
   reorder_bin: new Set(['kind', 'bin']),
-  select_take: new Set(['kind', 'shotId', 'assetId']),
   set_routes: new Set(['kind', 'imageRouteId', 'videoRouteId']),
   set_spend_policy: new Set(['kind', 'policy']),
-  set_match_to: new Set(['kind', 'shotId']),
   set_bed: new Set(['kind', 'assetId']),
   undo_last: new Set(['kind', 'entryId']),
 };
@@ -367,31 +359,20 @@ const isBinItem = (value: unknown): value is StudioBinItem => {
       value.reason === 'lifted'
     );
   }
-  if (value.kind === 'take') {
-    return (
-      hasExactKeys(value, BIN_TAKE_KEYS) &&
-      isSafeId(value.assetId) &&
-      (value.reason === 'lifted' || value.reason === 'alternate')
-    );
-  }
   return false;
 };
 
 const isBinItemArray = (value: unknown): value is StudioBinItem[] => {
-  if (!isDenseArray(value, STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS + STUDIO_MAX_BIN_TAKE_ITEMS)) {
+  if (!isDenseArray(value, STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS)) {
     return false;
   }
-  const counts = { beat: 0, shot: 0, take: 0 };
+  const counts = { beat: 0, shot: 0 };
   for (let index = 0; index < value.length; index += 1) {
     const item = value[index];
     if (!isBinItem(item)) return false;
     counts[item.kind] += 1;
   }
-  return (
-    counts.beat <= STUDIO_MAX_BIN_BEAT_ITEMS &&
-    counts.shot <= STUDIO_MAX_BIN_SHOT_ITEMS &&
-    counts.take <= STUDIO_MAX_BIN_TAKE_ITEMS
-  );
+  return counts.beat <= STUDIO_MAX_BIN_BEAT_ITEMS && counts.shot <= STUDIO_MAX_BIN_SHOT_ITEMS;
 };
 
 const assertOperationShape: (value: unknown) => asserts value is StudioMutationOperationV2 = (value) => {
@@ -494,12 +475,6 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
     case 'restore_line':
       if (!isSafeId(operation.shotId) || !isSafeId(operation.historyEntryId)) fail('invalid_operation');
       return;
-    case 'park_take':
-    case 'add_alternate_take':
-    case 'restore_take':
-    case 'select_take':
-      if (!isSafeId(operation.shotId) || !isSafeId(operation.assetId)) fail('invalid_operation');
-      return;
     case 'reorder_bin':
       if (!isBinItemArray(operation.bin)) fail('invalid_operation');
       return;
@@ -508,9 +483,6 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
       return;
     case 'set_spend_policy':
       if (operation.policy !== null && !isSpendPolicy(operation.policy)) fail('invalid_operation');
-      return;
-    case 'set_match_to':
-      if (!isSafeAnchor(operation.shotId)) fail('invalid_operation');
       return;
     case 'set_bed':
       if (!isSafeAnchor(operation.assetId)) fail('invalid_operation');
@@ -590,7 +562,7 @@ const copyArray = <T>(value: readonly T[]): T[] => {
 };
 
 const binIdentity = (item: StudioBinItem): string =>
-  item.kind === 'beat' ? `beat:${item.beatId}` : item.kind === 'shot' ? `shot:${item.shotId}` : `take:${item.assetId}`;
+  item.kind === 'beat' ? `beat:${item.beatId}` : `shot:${item.shotId}`;
 
 const findActiveShotOwner = (project: StudioProjectV2, shotId: string): StudioBeat | undefined => {
   for (const beatId of project.beatOrder) {
@@ -609,9 +581,6 @@ const shotOwnerLocation = (
   const binned = project.bin.find((item) => item.kind === 'shot' && item.shotId === shotId);
   return binned?.kind === 'shot' ? { beatId: binned.beatId, index: null } : { beatId: null, index: null };
 };
-
-const binHasTake = (project: StudioProjectV2, assetId: string): boolean =>
-  project.bin.some((item) => item.kind === 'take' && item.assetId === assetId);
 
 const assertCanonicalTake = (
   project: StudioProjectV2,
@@ -658,19 +627,12 @@ const assertCanonicalSeed = (
     asset.shotId !== shot.id ||
     asset.mediaKind !== 'image' ||
     (asset.managedAsset.collection !== 'assets' && asset.managedAsset.collection !== 'imports') ||
-    !shot.assetIds.includes(asset.id) ||
-    binHasTake(project, asset.id)
+    !shot.assetIds.includes(asset.id)
   ) {
     fail('invalid_operation');
   }
   return [shot, asset];
 };
-
-const binCounts = (bin: readonly StudioBinItem[]): { beats: number; shots: number; takes: number } => ({
-  beats: bin.filter((item) => item.kind === 'beat').length,
-  shots: bin.filter((item) => item.kind === 'shot').length,
-  takes: bin.filter((item) => item.kind === 'take').length,
-});
 
 const hasBoundNonterminalJob = (
   project: StudioProjectV2,
@@ -684,53 +646,6 @@ const hasBoundNonterminalJob = (
           job.requestPlan.dependency.kind === 'existing_predecessor')) &&
       predicate(job)
   );
-
-const takeHasNonterminalConditioningUse = (project: StudioProjectV2, assetId: string): boolean =>
-  Object.values(project.jobs).some((job) => {
-    if (!NONTERMINAL_JOB_STATUSES.has(job.status)) return false;
-    const conditioning = job.requestSnapshot?.conditioningInput;
-    return (
-      (job.requestPlan.kind === 'after_take_selection' &&
-        job.requestPlan.dependency.kind === 'existing_predecessor' &&
-        job.requestPlan.dependency.takeAssetId === assetId) ||
-      (conditioning?.kind === 'seed_still' && conditioning.assetId === assetId) ||
-      (conditioning?.kind === 'predecessor_frame' && conditioning.takeAssetId === assetId)
-    );
-  });
-
-const takeIsLastSelectableForWaitingDependency = (project: StudioProjectV2, assetId: string): boolean => {
-  const producer = Object.values(project.jobs).find(
-    (job) => job.status === 'succeeded' && job.outputAssetIdsByRole.primary === assetId
-  );
-  if (producer === undefined) return false;
-  const hasWaitingDependent = Object.values(project.jobs).some(
-    (job) =>
-      NONTERMINAL_JOB_STATUSES.has(job.status) &&
-      job.requestPlan.kind === 'after_take_selection' &&
-      ((job.requestPlan.dependency.kind === 'existing_predecessor' &&
-        job.requestPlan.dependency.takeAssetId === assetId) ||
-        (job.requestPlan.dependency.kind !== 'existing_predecessor' &&
-          job.requestPlan.dependency.upstreamItemId === producer.authorizationItemId))
-  );
-  if (!hasWaitingDependent) return false;
-  const selectablePrimaryIds = new Set<string>();
-  for (const sibling of Object.values(project.jobs)) {
-    if (sibling.authorizationItemId !== producer.authorizationItemId || sibling.status !== 'succeeded') continue;
-    const primaryId = sibling.outputAssetIdsByRole.primary;
-    if (primaryId === null || binHasTake(project, primaryId)) continue;
-    const asset = ownValue(project.assets, primaryId);
-    if (
-      asset !== undefined &&
-      asset.projectId === project.id &&
-      asset.shotId === producer.shotId &&
-      (asset.mediaKind === 'image' || asset.mediaKind === 'video') &&
-      ownValue(project.shots, producer.shotId)?.assetIds.includes(asset.id)
-    ) {
-      selectablePrimaryIds.add(primaryId);
-    }
-  }
-  return selectablePrimaryIds.size === 1 && selectablePrimaryIds.has(assetId);
-};
 
 const seedMatchesWaitingAuthorizedDependencies = (
   project: StudioProjectV2,
@@ -796,7 +711,6 @@ const projectFields = (project: StudioProjectV2): Extract<StudioUndoPatch, { kin
   videoRouteId: project.videoRouteId,
   spendPolicy: project.spendPolicy === null ? null : { ...project.spendPolicy },
   bedAssetId: project.bedAssetId,
-  matchToShotId: project.matchToShotId,
 });
 
 const authoredShot = (shot: StudioShot): Omit<StudioShot, 'assetIds' | 'jobIds'> => {
@@ -932,11 +846,10 @@ const archiveDetachedLine = (
 const FIXED_REASON_ORDER: readonly StudioFixedShotReasonV2[] = [
   'owned_asset',
   'owned_job',
-  'selected_take',
+  'video_asset',
   'seed_still',
   'conditioning_frame',
   'conditioning_input',
-  'match_to',
   'narration',
   'on_screen_text',
 ];
@@ -961,13 +874,12 @@ const fixedReasons = (project: StudioProjectV2, shot: StudioShot): StudioFixedSh
   const present = new Set<StudioFixedShotReasonV2>();
   if (shot.assetIds.length > 0) present.add('owned_asset');
   if (shot.jobIds.length > 0) present.add('owned_job');
-  if (shot.selectedTakeId !== null) present.add('selected_take');
+  if (shot.videoAssetId !== null) present.add('video_asset');
   if (shot.seedStillId !== null) present.add('seed_still');
   if (Object.values(project.frameExtractions).some((frame) => frame.shotId === shot.id))
     present.add('conditioning_frame');
   if (Object.values(project.jobs).some((job) => jobReferencesShot(project, job, shot.id)))
     present.add('conditioning_input');
-  if (project.matchToShotId === shot.id) present.add('match_to');
   if (shot.narration.length > 0) present.add('narration');
   if (shot.onScreenText.length > 0) present.add('on_screen_text');
   return FIXED_REASON_ORDER.filter((reason) => present.has(reason));
@@ -976,11 +888,10 @@ const fixedReasons = (project: StudioProjectV2, shot: StudioShot): StudioFixedSh
 const shotHasDestructiveDependency = (project: StudioProjectV2, shot: StudioShot): boolean =>
   shot.assetIds.length > 0 ||
   shot.jobIds.length > 0 ||
-  shot.selectedTakeId !== null ||
+  shot.videoAssetId !== null ||
   shot.seedStillId !== null ||
   shot.narration.length > 0 ||
   shot.onScreenText.length > 0 ||
-  project.bin.some((item) => item.kind === 'take' && ownValue(project.assets, item.assetId)?.shotId === shot.id) ||
   Object.values(project.frameExtractions).some((frame) => frame.shotId === shot.id) ||
   deriveStudioInboundShotReferencesV2(project, [shot.id]).length > 0;
 
@@ -1224,11 +1135,7 @@ export const applyStudioMutationBatchV2 = (
         }
         const actionChanged = Object.hasOwn(operation.changes, 'action') && operation.changes.action !== beat.action;
         const lookChanged = Object.hasOwn(operation.changes, 'look') && operation.changes.look !== beat.look;
-        const ownsMatchTarget = draft.matchToShotId !== null && beat.shotOrder.includes(draft.matchToShotId);
-        if (
-          lookChanged &&
-          hasBoundNonterminalJob(draft, (job) => beat.shotOrder.includes(job.shotId) || ownsMatchTarget)
-        ) {
+        if (lookChanged && hasBoundNonterminalJob(draft, (job) => beat.shotOrder.includes(job.shotId))) {
           fail('dependency_blocked');
         }
         if (actionChanged && beat.actionRevision >= Number.MAX_SAFE_INTEGER) {
@@ -1304,7 +1211,8 @@ export const applyStudioMutationBatchV2 = (
           trimOutSeconds: null,
           chainBreak: 'none',
           seedStillId: null,
-          selectedTakeId: null,
+          videoAssetId: null,
+          supersededVideoAssetIds: [],
           assetIds: [],
           jobIds: [],
         };
@@ -1334,11 +1242,7 @@ export const applyStudioMutationBatchV2 = (
           Object.hasOwn(operation.changes, 'durationSeconds') &&
           operation.changes.durationSeconds !== current.durationSeconds;
         if (
-          (lineChanged &&
-            hasBoundNonterminalJob(
-              draft,
-              (job) => job.shotId === current.id || (draft.matchToShotId === current.id && job.shotId !== current.id)
-            )) ||
+          (lineChanged && hasBoundNonterminalJob(draft, (job) => job.shotId === current.id)) ||
           (durationChanged && hasBoundNonterminalJob(draft, (job) => job.shotId === current.id))
         ) {
           fail('dependency_blocked');
@@ -1529,7 +1433,8 @@ export const applyStudioMutationBatchV2 = (
               trimOutSeconds: null,
               chainBreak: proposed.chainBreak,
               seedStillId: null,
-              selectedTakeId: null,
+              videoAssetId: null,
+              supersededVideoAssetIds: [],
               assetIds: [],
               jobIds: [],
             });
@@ -1596,8 +1501,8 @@ export const applyStudioMutationBatchV2 = (
       case 'trim_shot': {
         const shot = ownValue(draft.shots, operation.shotId);
         if (shot === undefined || findActiveShotOwner(draft, shot.id) === undefined) fail('invalid_operation');
-        if (shot.selectedTakeId === null) fail('invalid_operation');
-        const [, selected] = assertCanonicalVideoTake(draft, shot.id, shot.selectedTakeId);
+        if (shot.videoAssetId === null) fail('invalid_operation');
+        const [, selected] = assertCanonicalVideoTake(draft, shot.id, shot.videoAssetId);
         const sourceDuration = selected.durationSeconds;
         if (
           typeof sourceDuration !== 'number' ||
@@ -1629,7 +1534,7 @@ export const applyStudioMutationBatchV2 = (
         const shot = ownValue(draft.shots, operation.shotId);
         if (shot === undefined || findActiveShotOwner(draft, shot.id) === undefined) fail('invalid_operation');
         if (shot.line === operation.line && shot.derivation === 'detached') fail('invalid_operation');
-        if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id || draft.matchToShotId === shot.id)) {
+        if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id)) {
           fail('dependency_blocked');
         }
         touchShot(tracker, draft, shot.id);
@@ -1656,7 +1561,7 @@ export const applyStudioMutationBatchV2 = (
         ) {
           fail('invalid_operation');
         }
-        if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id || draft.matchToShotId === shot.id)) {
+        if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id)) {
           fail('dependency_blocked');
         }
         touchShot(tracker, draft, shot.id);
@@ -1678,7 +1583,7 @@ export const applyStudioMutationBatchV2 = (
         const history = owner?.lineHistory.find((entry) => entry.id === operation.historyEntryId);
         if (shot === undefined || owner === undefined || history === undefined) fail('invalid_operation');
         if (shot.line === history.text && shot.derivation === 'detached') fail('invalid_operation');
-        if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id || draft.matchToShotId === shot.id)) {
+        if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id)) {
           fail('dependency_blocked');
         }
         touchShot(tracker, draft, shot.id);
@@ -1691,39 +1596,6 @@ export const applyStudioMutationBatchV2 = (
           derivation: 'detached',
           derivedFromActionRevision: null,
         });
-        break;
-      }
-
-      case 'park_take':
-      case 'add_alternate_take': {
-        const [shot] = assertCanonicalTake(draft, operation.shotId, operation.assetId);
-        if (findActiveShotOwner(draft, shot.id) === undefined) fail('invalid_operation');
-        if (binHasTake(draft, operation.assetId)) fail('invalid_operation');
-        if (shot.selectedTakeId === operation.assetId || shot.seedStillId === operation.assetId) {
-          fail('dependency_blocked');
-        }
-        if (
-          takeHasNonterminalConditioningUse(draft, operation.assetId) ||
-          takeIsLastSelectableForWaitingDependency(draft, operation.assetId)
-        ) {
-          fail('dependency_blocked');
-        }
-        if (binCounts(draft.bin).takes >= STUDIO_MAX_BIN_TAKE_ITEMS) fail('take_bin_capacity_reached');
-        touchBin(tracker, draft);
-        draft.bin.push({
-          kind: 'take',
-          assetId: operation.assetId,
-          reason: operation.kind === 'park_take' ? 'lifted' : 'alternate',
-        });
-        break;
-      }
-
-      case 'restore_take': {
-        assertCanonicalTake(draft, operation.shotId, operation.assetId);
-        const binIndex = draft.bin.findIndex((item) => item.kind === 'take' && item.assetId === operation.assetId);
-        if (binIndex < 0) fail('invalid_operation');
-        touchBin(tracker, draft);
-        draft.bin = [...draft.bin.slice(0, binIndex), ...draft.bin.slice(binIndex + 1)];
         break;
       }
 
@@ -1741,28 +1613,6 @@ export const applyStudioMutationBatchV2 = (
         touchBin(tracker, draft);
         draft.bin = structuredClone(operation.bin);
         break;
-
-      case 'select_take': {
-        const [shot, asset] = assertCanonicalVideoTake(draft, operation.shotId, operation.assetId);
-        if (findActiveShotOwner(draft, shot.id) === undefined) fail('invalid_operation');
-        if (binHasTake(draft, operation.assetId)) fail('invalid_operation');
-        if (shot.selectedTakeId === operation.assetId) fail('invalid_operation');
-        const duration = asset.durationSeconds;
-        if (
-          typeof duration !== 'number' ||
-          (shot.trimInSeconds ?? 0) >= duration ||
-          (shot.trimOutSeconds ?? 0) >= duration ||
-          (shot.trimInSeconds ?? 0) + (shot.trimOutSeconds ?? 0) >= duration
-        ) {
-          fail('invalid_operation');
-        }
-        if (hasBoundNonterminalJob(draft, (job) => jobReferencesShot(draft, job, shot.id))) {
-          fail('dependency_blocked');
-        }
-        touchShot(tracker, draft, shot.id);
-        defineOwn(draft.shots, shot.id, { ...shot, selectedTakeId: operation.assetId });
-        break;
-      }
 
       case 'set_routes': {
         if (draft.imageRouteId === operation.imageRouteId && draft.videoRouteId === operation.videoRouteId) {
@@ -1790,16 +1640,6 @@ export const applyStudioMutationBatchV2 = (
         if (sameValue(draft.spendPolicy, operation.policy)) fail('invalid_operation');
         touchProject(tracker, draft);
         draft.spendPolicy = operation.policy === null ? null : { ...operation.policy };
-        break;
-
-      case 'set_match_to':
-        if (operation.shotId !== null && findActiveShotOwner(draft, operation.shotId) === undefined) {
-          fail('invalid_operation');
-        }
-        if (draft.matchToShotId === operation.shotId) fail('invalid_operation');
-        if (hasBoundNonterminalJob(draft)) fail('dependency_blocked');
-        touchProject(tracker, draft);
-        draft.matchToShotId = operation.shotId;
         break;
 
       case 'set_bed': {

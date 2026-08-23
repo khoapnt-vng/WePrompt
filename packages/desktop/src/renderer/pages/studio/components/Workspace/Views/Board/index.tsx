@@ -37,17 +37,12 @@ const STATE_KEYS = {
 } as const satisfies Record<WorkspaceBeatProjection['displayState'], string>;
 
 const BLOCKER_KEYS = {
-  current_match_to: `${BEAT_PANEL_ROOT}.blocker.currentMatchTo`,
   own_nonterminal_job: `${BEAT_PANEL_ROOT}.blocker.ownNonterminalJob`,
   own_pending_frame: `${BEAT_PANEL_ROOT}.blocker.ownPendingFrame`,
   downstream_nonterminal_job: `${BEAT_PANEL_ROOT}.blocker.downstreamNonterminalJob`,
   downstream_pending_frame: `${BEAT_PANEL_ROOT}.blocker.downstreamPendingFrame`,
   waiting_authorization_dependency: `${BEAT_PANEL_ROOT}.blocker.waitingAuthorizationDependency`,
   bound_nonterminal_request: `${BEAT_PANEL_ROOT}.blocker.boundNonterminalRequest`,
-  current_selected_take: `${BEAT_PANEL_ROOT}.blocker.currentSelectedTake`,
-  current_seed_still: `${BEAT_PANEL_ROOT}.blocker.currentSeedStill`,
-  nonterminal_conditioning_use: `${BEAT_PANEL_ROOT}.blocker.nonterminalConditioningUse`,
-  take_bin_capacity_reached: `${BEAT_PANEL_ROOT}.blocker.takeBinCapacityReached`,
   beat_shot_capacity_reached: `${BEAT_PANEL_ROOT}.blocker.beatShotCapacityReached`,
 } as const satisfies Record<StudioRendererParkBlockerCodeV2, string>;
 
@@ -56,7 +51,6 @@ export type BoardActions = {
   parkBeat: (beatId: string) => Promise<boolean>;
   restoreBeat: (beatId: string, beforeBeatId: string | null) => Promise<boolean>;
   restoreShot: (shotId: string, beforeShotId: string | null) => Promise<boolean>;
-  restoreTake: (shotId: string, assetId: string) => Promise<boolean>;
   reorderBin: (bin: readonly StudioBinItem[]) => Promise<boolean>;
 };
 
@@ -85,12 +79,7 @@ const exactBeatParkEligibility = (
 ): StudioRendererParkEligibilityV2 | null => {
   if (projection.projectId !== projectId || !projection.workspaceStatusReady) return null;
   const matches = projection.parkEligibility.filter(
-    (row) =>
-      row.subject === 'beat' &&
-      row.action === 'park' &&
-      row.beatId === beatId &&
-      row.shotId === null &&
-      row.assetId === null
+    (row) => row.subject === 'beat' && row.action === 'park' && row.beatId === beatId && row.shotId === null
   );
   return matches.length === 1 ? matches[0]! : null;
 };

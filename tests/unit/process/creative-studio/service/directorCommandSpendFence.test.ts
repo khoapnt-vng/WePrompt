@@ -173,7 +173,7 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
         section_1: { action: 'A precise opening beat', shotOrder: ['clip_1'] },
       },
       shots: {
-        clip_1: { line: 'A tighter product composition', selectedTakeId: null },
+        clip_1: { line: 'A tighter product composition', videoAssetId: null, supersededVideoAssetIds: [] },
       },
       bin: [],
     });
@@ -219,7 +219,8 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       trimOutSeconds: null,
       chainBreak: 'none',
       seedStillId: 'seed_1',
-      selectedTakeId: 'take_1',
+      videoAssetId: 'take_1',
+      supersededVideoAssetIds: [],
       assetIds: ['seed_1', 'take_1'],
       jobIds: ['job_1'],
     };
@@ -256,7 +257,6 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
         rules: project.rules,
         look: project.beats.beat_1.look,
         line: shot.line,
-        matchTo: null,
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: shot.durationSeconds,
@@ -296,7 +296,7 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       expiresAt: '2026-08-17T00:05:00.000Z',
       confirmedAt,
       providerBindings: [{ itemId: item.id, provider }],
-      idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: 'idem_job_1' }],
+      idempotencyKeys: [{ itemId: item.id, key: 'idem_job_1' }],
     };
     const job: StudioJobV2 = {
       id: 'job_1',
@@ -319,7 +319,6 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       purpose: item.purpose,
       authorizationId: authorization.id,
       authorizationItemId: item.id,
-      generationIndex: 0,
       requestPlan: item.requestPlan,
       requestSnapshot,
       spendReceipt: {
@@ -332,7 +331,6 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
         rateUnit: item.rateUnit,
         rateMinorUnits: item.rateMinorUnits,
         durationSeconds: shot.durationSeconds,
-        generationIndex: 0,
         generationCount: item.generationCount,
         totalMinorUnits: totals.upperMinorUnits,
       },

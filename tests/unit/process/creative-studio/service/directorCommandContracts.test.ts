@@ -150,10 +150,7 @@ describe('Studio Director V2 command contracts', () => {
     { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
     {
       kind: 'reorder_bin',
-      bin: [
-        { kind: 'take', assetId: 'asset_1', reason: 'alternate' },
-        { kind: 'beat', beatId: 'section_1', reason: 'lifted' },
-      ],
+      bin: [{ kind: 'beat', beatId: 'section_1', reason: 'lifted' }],
     },
   ];
 
@@ -184,7 +181,7 @@ describe('Studio Director V2 command contracts', () => {
     expect(source).not.toMatch(/export function parseStudioDirectorCommandReceipt\s*\(/u);
   });
 
-  it('freezes an exhaustive 32-kind capability table and rejects unknown provenance', () => {
+  it('freezes an exhaustive 27-kind capability table and rejects unknown provenance', () => {
     const expected = {
       edit_project: 'operation_not_permitted',
       set_brief: 'direct',
@@ -208,14 +205,9 @@ describe('Studio Director V2 command contracts', () => {
       redetach_line: 'proposal',
       rederive_line: 'proposal',
       restore_line: 'operation_not_permitted',
-      park_take: 'operation_not_permitted',
-      add_alternate_take: 'operation_not_permitted',
-      restore_take: 'operation_not_permitted',
       reorder_bin: 'direct',
-      select_take: 'operation_not_permitted',
       set_routes: 'operation_not_permitted',
       set_spend_policy: 'operation_not_permitted',
-      set_match_to: 'operation_not_permitted',
       set_bed: 'operation_not_permitted',
       undo_last: 'operation_not_permitted',
     } as const satisfies Readonly<
@@ -223,12 +215,12 @@ describe('Studio Director V2 command contracts', () => {
     >;
 
     expect(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2).toEqual(expected);
-    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(32);
+    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(27);
     expect(Object.isFrozen(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toBe(true);
     for (const [kind, disposition] of Object.entries(expected)) {
       expect(classifyStudioDirectorOperationV2(kind), kind).toBe(disposition);
     }
-    for (const unknown of ['future_operation', 'constructor', 'toString', '__proto__', null, {}, 1]) {
+    for (const unknown of ['set_match_to', 'future_operation', 'constructor', 'toString', '__proto__', null, {}, 1]) {
       expect(classifyStudioDirectorOperationV2(unknown)).toBeNull();
     }
   });
@@ -236,7 +228,7 @@ describe('Studio Director V2 command contracts', () => {
   it.each([
     { kind: 'edit_project', changes: { name: 'Not direct' } },
     { kind: 'park_beat', beatId: 'section_1' },
-    { kind: 'select_take', shotId: 'clip_1', assetId: 'asset_1' },
+    { kind: 'set_routes', imageRouteId: null, videoRouteId: null },
     { kind: 'undo_last', entryId: 'mutation_1' },
   ])('rejects the known but unavailable $kind capability', (operation) => {
     expect(parsePendingV2(validCommandV2({ operations: [operation as never] })).status).toBe('invalid');
@@ -379,7 +371,7 @@ describe('Studio Director V2 command contracts', () => {
   });
 
   it('distinguishes unknown versions from malformed schema-2 records', () => {
-    expect(parsePendingV2({ ...validCommandV2(), schemaVersion: 3 })).toEqual({
+    expect(parsePendingV2({ ...validCommandV2(), schemaVersion: 4 })).toEqual({
       status: 'invalid',
       commandId: 'command_1',
       expectedRevision: 4,
@@ -483,7 +475,7 @@ describe('Studio Director V2 slot and lease contracts', () => {
     ['slot unknown key', () => parseStudioDirectorCommandSlotV2({ ...validSlotV2(), extra: true }, NOW, WAIT_MS)],
     [
       'slot unknown version',
-      () => parseStudioDirectorCommandSlotV2({ ...validSlotV2(), schemaVersion: 3 }, NOW, WAIT_MS),
+      () => parseStudioDirectorCommandSlotV2({ ...validSlotV2(), schemaVersion: 4 }, NOW, WAIT_MS),
     ],
     [
       'lease partial identity',

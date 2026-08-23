@@ -150,8 +150,6 @@ import type {
   StudioRestoreShotRequestV2,
   StudioSetRulesRequestV2,
   StudioSetBedRequestV2,
-  StudioSetMatchToRequestV2,
-  StudioTakeActionRequestV2,
   StudioUndoLastRequestV2,
   StudioConnectionInventory,
   StudioConnectionRecord,
@@ -1335,20 +1333,6 @@ export const creativeStudio = {
     StudioCommandResult<StudioRendererProjectCommitResultV2>,
     StudioRestoreShotRequestV2
   >('creative-studio.restore-shot'),
-  parkTake: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioTakeActionRequestV2>(
-    'creative-studio.park-take'
-  ),
-  addAlternateTake: bridge.buildProvider<
-    StudioCommandResult<StudioRendererProjectCommitResultV2>,
-    StudioTakeActionRequestV2
-  >('creative-studio.add-alternate-take'),
-  restoreTake: bridge.buildProvider<
-    StudioCommandResult<StudioRendererProjectCommitResultV2>,
-    StudioTakeActionRequestV2
-  >('creative-studio.restore-take'),
-  selectTake: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioTakeActionRequestV2>(
-    'creative-studio.select-take'
-  ),
   reorderBin: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioReorderBinRequestV2>(
     'creative-studio.reorder-bin'
   ),
@@ -1380,9 +1364,6 @@ export const creativeStudio = {
   >('creative-studio.detach-bed-audio'),
   setBed: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioSetBedRequestV2>(
     'creative-studio.set-bed'
-  ),
-  setMatchTo: bridge.buildProvider<StudioCommandResult<StudioRendererProjectCommitResultV2>, StudioSetMatchToRequestV2>(
-    'creative-studio.set-match-to'
   ),
   createExport: bridge.buildProvider<StudioCommandResult<StudioRendererExportCatalogV2>, StudioCreateExportRequestV2>(
     'creative-studio.create-export'

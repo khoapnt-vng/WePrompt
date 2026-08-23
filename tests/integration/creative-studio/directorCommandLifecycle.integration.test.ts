@@ -13,12 +13,13 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type {
-  StudioAssetV2,
-  StudioJobV2,
-  StudioProjectV2,
-  StudioQuotedGeneration,
-  StudioSpendAuthorization,
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioAssetV2,
+  type StudioJobV2,
+  type StudioProjectV2,
+  type StudioQuotedGeneration,
+  type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import { createStudioDirectorCommandWriterV2 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import { registerStudioToolsV2 } from '@process/resources/builtinMcp/studioServer';
@@ -144,7 +145,7 @@ const addTerminalPaidShotLineage = (project: StudioProjectV2, shotId: string): S
     expiresAt: '2026-08-19T00:05:00.000Z',
     confirmedAt: '2026-08-19T00:00:01.000Z',
     providerBindings: [{ itemId: item.id, provider }],
-    idempotencyKeys: [{ itemId: item.id, generationIndex: 0, key: `${shotId}_idempotency` }],
+    idempotencyKeys: [{ itemId: item.id, key: `${shotId}_idempotency` }],
   };
   const job: StudioJobV2 = {
     id: jobId,
@@ -167,7 +168,6 @@ const addTerminalPaidShotLineage = (project: StudioProjectV2, shotId: string): S
     purpose: 'video_take',
     authorizationId,
     authorizationItemId: item.id,
-    generationIndex: 0,
     requestPlan: item.requestPlan,
     requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
     spendReceipt: {
@@ -180,7 +180,6 @@ const addTerminalPaidShotLineage = (project: StudioProjectV2, shotId: string): S
       rateUnit: 'second',
       rateMinorUnits: 2,
       durationSeconds: shot.durationSeconds,
-      generationIndex: 0,
       generationCount: 1,
       totalMinorUnits: shot.durationSeconds * 2,
     },
@@ -192,7 +191,7 @@ const addTerminalPaidShotLineage = (project: StudioProjectV2, shotId: string): S
   next.jobs[jobId] = job;
   next.spendAuthorizations.push(authorization);
   shot.seedStillId = seedId;
-  shot.selectedTakeId = takeId;
+  shot.videoAssetId = takeId;
   shot.assetIds.push(seedId, takeId);
   shot.jobIds.push(jobId);
   return next;
@@ -270,7 +269,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
     processor.trigger(project.id, commandId);
 
     await expect(applying).resolves.toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       status: 'applied',
       appliedRevision: project.revision + 1,
       createdBeatIds: ['section_v2'],
@@ -320,7 +319,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
     });
     const authored = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: project.revision,
         operations: [
@@ -370,7 +369,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
 
     const parked = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: paid.revision,
         operations: [{ kind: 'park_beat', beatId: 'beat_paid' }],
@@ -387,7 +386,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
     });
     const resplit = await restartedStore.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: parked.project.revision,
         operations: [
@@ -422,7 +421,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
     const secondRestart = createCreativeStudioStore({ rootDir, now: () => now });
     const restored = await secondRestart.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: resplit.project.revision,
         operations: [{ kind: 'restore_beat', beatId: 'beat_paid', beforeBeatId: 'beat_neighbor' }],
@@ -459,7 +458,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
     });
     const seeded = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: project.revision,
         operations: [
@@ -549,11 +548,10 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
       const fixedReasons = [
         'owned_asset',
         'owned_job',
-        'selected_take',
+        'video_asset',
         'seed_still',
         'conditioning_frame',
         'conditioning_input',
-        'match_to',
         'narration',
         'on_screen_text',
       ] as const;
@@ -676,7 +674,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
     });
     const seeded = await store.applyMutationBatchV2(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: project.revision,
         operations: [
@@ -767,7 +765,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
       if (pending === undefined) throw new Error('schema-2 reference request was not listed');
       expect(pending).toEqual({
         request: expect.objectContaining({
-          schemaVersion: 2,
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
           projectId: project.id,
           shotIds: ['shot_reference_1', 'shot_reference_2'],
           status: 'pending',

@@ -48,7 +48,6 @@ export const createEmptyStudioProjectV2 = (
     shots: {},
     bin: [],
     bedAssetId: null,
-    matchToShotId: null,
     spendPolicy: null,
     spendAuthorizations: [],
     frameExtractions: {},

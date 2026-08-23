@@ -21,8 +21,8 @@ import type {
 import type {
   WorkspaceBeatProjection,
   WorkspaceProjection,
+  WorkspaceSeedStillProjection,
   WorkspaceShotProjection,
-  WorkspaceTakeProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 
 const modalConfirm = vi.hoisted(() => vi.fn());
@@ -237,8 +237,8 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.generation.generateSeed': 'Generate seed',
         'conversation.creativeStudio.workspace.beatPanel.generation.noReference': 'No Brief reference',
         'conversation.creativeStudio.workspace.beatPanel.generation.purpose.seedStill': 'seed still',
-        'conversation.creativeStudio.workspace.beatPanel.generation.purpose.videoTake': 'video take',
-        'conversation.creativeStudio.workspace.beatPanel.generation.renderVideo': 'Render Shot',
+        'conversation.creativeStudio.scene.video': 'Video',
+        'conversation.creativeStudio.workspace.beatPanel.generation.renderVideo': 'Generate again',
         'conversation.creativeStudio.workspace.beatPanel.generation.reviewUnavailable':
           'Generation review is unavailable',
         'conversation.creativeStudio.workspace.beatPanel.lift.beat': 'Move to Bin',
@@ -260,33 +260,20 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.reorder.nextShort': 'Down',
         'conversation.creativeStudio.workspace.beatPanel.reorder.previousShort': 'Up',
         'conversation.creativeStudio.workspace.beatPanel.seeds.clearPin': 'Clear seed pin',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.empty': 'No image takes',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.empty': 'No seed stills',
         'conversation.creativeStudio.workspace.beatPanel.seeds.import': 'Import seed still',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.imageTitle': 'Retained image takes',
         'conversation.creativeStudio.workspace.beatPanel.seeds.latestDefault': 'Latest image is the default',
         'conversation.creativeStudio.workspace.beatPanel.seeds.pending': 'Seed pending',
         'conversation.creativeStudio.workspace.beatPanel.seeds.pin': 'Pin as seed',
         'conversation.creativeStudio.workspace.beatPanel.seeds.pinned': 'Seed pinned',
         'conversation.creativeStudio.workspace.beatPanel.seeds.title': 'Seed stills',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.effective': 'Current seed',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.pinnedBadge': 'Pinned',
         'conversation.creativeStudio.workspace.beatPanel.shots.empty': 'No coverage yet',
         'conversation.creativeStudio.workspace.beatPanel.shots.label': 'Shots',
-        'conversation.creativeStudio.workspace.beatPanel.takes.addAlternate': 'Move to alternates',
-        'conversation.creativeStudio.workspace.beatPanel.takes.alternateConfirmBody':
-          'The Take stays with the project as an alternate.',
-        'conversation.creativeStudio.workspace.beatPanel.takes.alternateConfirmTitle': 'Move this Take to alternates?',
-        'conversation.creativeStudio.workspace.beatPanel.takes.effectiveSeed': 'Effective seed',
-        'conversation.creativeStudio.workspace.beatPanel.takes.empty': 'No video takes',
-        'conversation.creativeStudio.workspace.beatPanel.takes.park': 'Move to Bin',
-        'conversation.creativeStudio.workspace.beatPanel.takes.parkConfirmBody':
-          'The Take stays with the project and moves out of active choices.',
-        'conversation.creativeStudio.workspace.beatPanel.takes.parkConfirmTitle': 'Move this Take to the Bin?',
-        'conversation.creativeStudio.workspace.beatPanel.takes.pinnedSeed': 'Pinned seed',
-        'conversation.creativeStudio.workspace.beatPanel.takes.restore': 'Restore take',
-        'conversation.creativeStudio.workspace.beatPanel.takes.select': 'Select Take',
-        'conversation.creativeStudio.workspace.beatPanel.takes.selected': 'Selected',
-        'conversation.creativeStudio.workspace.beatPanel.takes.trimIncompatible': 'Current trims do not fit this take',
-        'conversation.creativeStudio.workspace.beatPanel.takes.unavailable': 'Preview unavailable',
-        'conversation.creativeStudio.workspace.beatPanel.takes.videoTitle': 'Video takes',
+        'conversation.creativeStudio.workspace.beatPanel.picture.empty': 'Nothing rendered yet',
+        'conversation.creativeStudio.workspace.beatPanel.picture.title': 'Current picture',
+        'conversation.creativeStudio.workspace.beatPanel.picture.unavailable': 'Current picture unavailable',
         'conversation.creativeStudio.workspace.beatPanel.previousBeat': 'Previous Beat',
         'conversation.creativeStudio.workspace.beatPanel.previousBeatShort': 'Previous',
         'conversation.creativeStudio.workspace.beatPanel.nextBeat': 'Next Beat',
@@ -296,7 +283,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.unavailable': 'Coverage unavailable',
         'conversation.creativeStudio.workspace.beatPanel.coverage.playbackLane': 'Playback lane',
         'conversation.creativeStudio.workspace.beatPanel.coverage.planningLane': 'Planning lane',
-        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.noTake': 'No Take',
+        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.noPicture': 'No picture',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.queued': 'Queued',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.nextUp': 'Next up',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.waitingOnFrame': 'Waiting on the frame',
@@ -304,7 +291,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderingStill':
           'Rendering · Showing the still',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendered': 'Rendered',
-        'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderedOneTake': 'Rendered · 1 Take',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.untouched': 'Untouched',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.staleStillPlays': 'Stale · Still plays',
@@ -317,7 +303,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.preview.label': 'Beat preview',
         'conversation.creativeStudio.workspace.beatPanel.preview.noMedia': 'Beat preview unavailable',
         'conversation.creativeStudio.workspace.beatPanel.preview.mediaError':
-          'The selected Take could not be previewed.',
+          'The current picture could not be previewed.',
         'conversation.creativeStudio.workspace.beatPanel.preview.slate': 'Planning slate',
         'conversation.creativeStudio.workspace.beatPanel.preview.play': 'Play Beat',
         'conversation.creativeStudio.workspace.beatPanel.preview.pause': 'Pause Beat',
@@ -358,15 +344,13 @@ vi.mock('react-i18next', () => ({
       }
       if (key.endsWith('.derivation.label')) return `Derivation for Shot ${String(values?.index)}`;
       if (key.endsWith('.seeds.label')) return `Seed stills for Shot ${String(values?.index)}`;
-      if (key.endsWith('.takes.videoLabel')) return `Video takes for Shot ${String(values?.index)}`;
-      if (key.endsWith('.takes.imageTakeLabel')) {
-        return `Shot ${String(values?.shotIndex)} image ${String(values?.takeIndex)}`;
+      if (key.endsWith('.picture.label')) return `Current picture for Shot ${String(values?.index)}`;
+      if (key.endsWith('.picture.sourceDuration')) return `${String(values?.seconds)} seconds source`;
+      if (key.endsWith('.picture.videoPreview')) return `Player · ${String(values?.label)}`;
+      if (key.endsWith('.seeds.stillLabel')) {
+        return `Seed still ${String(values?.stillIndex)} for Shot ${String(values?.shotIndex)}`;
       }
-      if (key.endsWith('.takes.videoTakeLabel')) {
-        return `Shot ${String(values?.shotIndex)} take ${String(values?.takeIndex)}`;
-      }
-      if (key.endsWith('.takes.previewAlt')) return `Preview ${String(values?.label)}`;
-      if (key.endsWith('.takes.videoPreview')) return `Player ${String(values?.label)}`;
+      if (key.endsWith('.seeds.previewAlt')) return `Preview · ${String(values?.label)}`;
       if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
       if (key.endsWith('.preview.videoLabel')) {
         return `Shot ${String(values?.position)} video · ${String(values?.line)}`;
@@ -380,9 +364,6 @@ vi.mock('react-i18next', () => ({
       }
       if (key.endsWith('.segmentState.waitingOnShot')) return `Waiting on ${String(values?.position)}`;
       if (key.endsWith('.segmentState.renderingProgress')) return `Rendering · ${String(values?.progress)}%`;
-      if (key.endsWith('.segmentState.selectedTake')) {
-        return `${String(values?.count)} Takes · T${String(values?.take)} in the Cut`;
-      }
       if (key.endsWith('.segmentState.shotKept')) return `Shot ${String(values?.position)} · Kept`;
       if (key.endsWith('.boundaryFrame.empty')) {
         return `Boundary after Shot ${String(values?.position)} · Waiting for continuity frame`;
@@ -396,14 +377,10 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.boundaryFrame.stale')) {
         return `Boundary after Shot ${String(values?.position)} · Continuity frame is out of date`;
       }
-      if (key.endsWith('.takes.sourceDuration')) return `${String(values?.seconds)} seconds source`;
       if (key.endsWith('.generation.choiceLabel')) {
         return `Beat ${String(values?.beatIndex)} Shot ${String(values?.shotIndex)} ${String(values?.purpose)}`;
       }
-      if (key.endsWith('.generation.countForChoice')) return `Generation count for ${String(values?.choice)}`;
       if (key.endsWith('.generation.referenceForChoice')) return `Brief reference for ${String(values?.choice)}`;
-      if (key.endsWith('.takes.binReason.lifted')) return 'Lifted';
-      if (key.endsWith('.takes.binReason.alternate')) return 'Alternate';
       if (key.endsWith('.lift.shotTitle')) return `Move Shot ${String(values?.index)} to the Bin?`;
       if (key.endsWith('.lift.shotBodyNoStale')) {
         return 'Authored and paid work stays with this Shot. Move it to the Bin?';
@@ -416,12 +393,6 @@ vi.mock('react-i18next', () => ({
       }
       if (key.endsWith('.lift.beatBodyStale')) {
         return `Every Shot and all authored and paid work stay with this Beat. Moving it to the Bin makes ${String(values?.shots)} stale.`;
-      }
-      if (key.endsWith('.recovery.chooseImage')) {
-        return `Use image Beat ${String(values?.beatIndex)} Shot ${String(values?.shotIndex)} Take ${String(values?.takeIndex)}`;
-      }
-      if (key.endsWith('.recovery.chooseVideo')) {
-        return `Use video Beat ${String(values?.beatIndex)} Shot ${String(values?.shotIndex)} Take ${String(values?.takeIndex)}`;
       }
       if (key.includes('.recovery.reason.')) return `Reason ${key.split('.').at(-1)}`;
       if (key.endsWith('.coverage.shotLabel')) return `Shot ${String(values?.index)}`;
@@ -452,21 +423,21 @@ class NoopResizeObserver implements ResizeObserver {
   unobserve = vi.fn();
 }
 
-const makeTake = (
+const makeSeedStill = (
   assetId: string,
-  mediaKind: WorkspaceTakeProjection['mediaKind'],
-  overrides: Partial<WorkspaceTakeProjection> = {}
-): WorkspaceTakeProjection => ({
+  overrides: Partial<WorkspaceSeedStillProjection> = {}
+): WorkspaceSeedStillProjection => ({
   assetId,
-  mediaKind,
   createdAt: '2026-08-20T00:00:00.000Z',
-  selected: false,
   explicitSeed: false,
   effectiveSeed: false,
-  binReason: null,
-  sourceDurationSeconds: mediaKind === 'video' ? 8 : null,
-  posterAssetId: null,
   ...overrides,
+});
+
+const makeCurrentPicture = (assetId: string, sourceDurationSeconds = 8, posterAssetId: string | null = null) => ({
+  assetId,
+  sourceDurationSeconds,
+  posterAssetId,
 });
 
 const makeShot = (
@@ -485,8 +456,7 @@ const makeShot = (
   derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
-  selectedTakeId: null,
-  selectedTakeSourceDurationSeconds: null,
+  currentPicture: null,
   playedDurationSeconds: 8,
   explicitSeedAssetId: null,
   effectiveSeedAssetId: null,
@@ -495,19 +465,19 @@ const makeShot = (
   frameBoundary: null,
   segmentState:
     overrides.segmentState ??
-    (overrides.selectedTakeId === undefined || overrides.selectedTakeId === null
-      ? { kind: 'no_take' }
-      : { kind: 'rendered', takeCount: 1, selectedTakeNumber: 1 }),
+    (overrides.currentPicture === undefined || overrides.currentPicture === null
+      ? { kind: 'no_picture' }
+      : { kind: 'rendered' }),
   dirtyCauses: [],
   downstreamShotIds: [],
-  imageTakes: [],
-  videoTakes: [],
+  seedStills: [],
   coverAssetId: null,
-  takeCount: 0,
   displayState: 'draft',
   retainedWork: false,
   videoGenerationInFlight: false,
   seedGenerationInFlight: false,
+  videoGenerationBlocked: false,
+  seedGenerationBlocked: false,
   attentionJobs: [],
   hasEffectiveSeed: false,
   ...overrides,
@@ -538,7 +508,6 @@ const eligibilityFor = (beats: readonly WorkspaceBeatProjection[]): StudioRender
       action: 'park' as const,
       beatId: beat.id,
       shotId: null,
-      assetId: null,
       allowed: true,
       blockers: [],
     },
@@ -548,19 +517,9 @@ const eligibilityFor = (beats: readonly WorkspaceBeatProjection[]): StudioRender
         action: 'park' as const,
         beatId: beat.id,
         shotId: shot.id,
-        assetId: null,
         allowed: true,
         blockers: [],
       },
-      ...[...shot.imageTakes, ...shot.videoTakes].map((take) => ({
-        subject: 'take' as const,
-        action: take.binReason === null ? ('park' as const) : ('restore' as const),
-        beatId: beat.id,
-        shotId: shot.id,
-        assetId: take.assetId,
-        allowed: true,
-        blockers: [],
-      })),
     ]),
   ]);
 
@@ -577,7 +536,7 @@ const makeProjection = (
   workspaceStatusReady: true,
   chainStatusReady: true,
   requestShapeLocked: false,
-  bin: { beats: [], shots: [], takes: [] },
+  bin: { items: [], beats: [], shots: [] },
   undoTop: null,
   dirtyShots: [],
   cascadeProgress: [],
@@ -621,17 +580,12 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   redetachLine: vi.fn().mockResolvedValue(true),
   restoreLine: vi.fn().mockResolvedValue(true),
   importSeedStill: vi.fn().mockResolvedValue('cancelled' as const),
-  selectTake: vi.fn().mockResolvedValue(true),
-  parkTake: vi.fn().mockResolvedValue(true),
-  addAlternateTake: vi.fn().mockResolvedValue(true),
-  restoreTake: vi.fn().mockResolvedValue(true),
   parkShot: vi.fn().mockResolvedValue(true),
   parkBeat: vi.fn().mockResolvedValue(true),
   reviewShot: vi.fn(),
   reviewContinuity: vi.fn(),
   retryGenerationJob: vi.fn().mockResolvedValue(true),
   cancelGenerationJob: vi.fn().mockResolvedValue(true),
-  chooseCascadeAsset: vi.fn().mockResolvedValue(true),
   retryConditioning: vi.fn().mockResolvedValue(true),
   cancelWaiting: vi.fn().mockResolvedValue(true),
   requestReviewedRederive: vi.fn(),
@@ -647,7 +601,6 @@ describe('BeatPanel generation recovery', () => {
         {
           id: 'job_remote',
           purpose: 'video_take',
-          generationIndex: 0,
           error: {
             code: 'provider_unavailable',
             messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
@@ -658,7 +611,6 @@ describe('BeatPanel generation recovery', () => {
         {
           id: 'job_unknown',
           purpose: 'video_take',
-          generationIndex: 1,
           error: {
             code: 'submission_unknown',
             messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
@@ -675,7 +627,7 @@ describe('BeatPanel generation recovery', () => {
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
 
     const remote = container.querySelector<HTMLElement>('[data-job-id="job_remote"]')!;
-    expect(screen.getByRole('button', { name: 'Render Shot' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate again' })).toBeDisabled();
     fireEvent.click(within(remote).getByRole('button', { name: 'conversation.creativeStudio.jobs.retry' }));
     await waitFor(() => expect(actions.retryGenerationJob).toHaveBeenCalledWith('job_remote', false));
     fireEvent.click(within(remote).getByRole('button', { name: 'conversation.creativeStudio.jobs.cancel' }));
@@ -732,6 +684,12 @@ const shotCard = (container: HTMLElement, shotId: string): HTMLElement => {
   return card;
 };
 
+const assetCard = (container: HTMLElement, assetId: string): HTMLElement => {
+  const card = container.querySelector<HTMLElement>(`[data-asset-id="${assetId}"]`);
+  if (card === null) throw new Error(`Missing asset card ${assetId}`);
+  return card;
+};
+
 const inspectShot = (container: HTMLElement, shotId: string): HTMLElement => {
   const selector = container.querySelector<HTMLButtonElement>(
     `[data-testid="studio-coverage-playback"] [data-shot-id="${shotId}"] [data-coverage-shot-selector]`
@@ -739,12 +697,6 @@ const inspectShot = (container: HTMLElement, shotId: string): HTMLElement => {
   if (selector === null) throw new Error(`Missing Shot inspector selector ${shotId}`);
   fireEvent.click(selector);
   return shotCard(container, shotId);
-};
-
-const takeCard = (container: HTMLElement, assetId: string): HTMLElement => {
-  const card = container.querySelector<HTMLElement>(`[data-asset-id="${assetId}"]`);
-  if (card === null) throw new Error(`Missing Take card ${assetId}`);
-  return card;
 };
 
 type ModalConfirmOptions = {
@@ -802,19 +754,12 @@ const installMediaFacts = (
 };
 
 describe('Beat playback sequence', () => {
-  it('maps one exact selected Take and one explicit no-Take slate onto the Beat clock', () => {
-    const selected = makeTake('take_1', 'video', {
-      selected: true,
-      posterAssetId: 'poster_1',
-      sourceDurationSeconds: 10,
-    });
+  it('maps one exact current picture and one explicit planning slate onto the Beat clock', () => {
     const first = makeShot('shot_1', 0, {
+      currentPicture: makeCurrentPicture('video_1', 10, 'poster_1'),
       playedDurationSeconds: 8,
-      selectedTakeId: 'take_1',
-      selectedTakeSourceDurationSeconds: 10,
       trimInSeconds: 1,
       trimOutSeconds: 1,
-      videoTakes: [selected],
     });
     const second = makeShot('shot_2', 1, {
       durationSeconds: 6,
@@ -834,7 +779,7 @@ describe('Beat playback sequence', () => {
           shotId: 'shot_1',
           shotPosition: 1,
           shotLine: 'Canonical line 1',
-          assetId: 'take_1',
+          assetId: 'video_1',
           posterAssetId: 'poster_1',
           sourceDurationSeconds: 10,
           sourceInSeconds: 1,
@@ -856,11 +801,9 @@ describe('Beat playback sequence', () => {
     });
   });
 
-  it('fails the whole preview closed instead of degrading malformed selected authority to a slate', () => {
+  it('fails the whole preview closed instead of degrading malformed picture authority to a slate', () => {
     const shot = makeShot('shot_1', 0, {
-      selectedTakeId: 'take_1',
-      selectedTakeSourceDurationSeconds: 8,
-      videoTakes: [makeTake('take_1', 'video', { selected: false })],
+      currentPicture: makeCurrentPicture('../unsafe', 8),
     });
     const beat = makeBeat('beat_1', [shot]);
 
@@ -868,14 +811,11 @@ describe('Beat playback sequence', () => {
   });
 
   it('maps Beat seeks to trim-relative source time and exposes only authored Shot joins', () => {
-    const selected = makeTake('take_1', 'video', { selected: true, sourceDurationSeconds: 10 });
     const first = makeShot('shot_1', 0, {
+      currentPicture: makeCurrentPicture('video_1', 10),
       playedDurationSeconds: 8,
-      selectedTakeId: 'take_1',
-      selectedTakeSourceDurationSeconds: 10,
       trimInSeconds: 1,
       trimOutSeconds: 1,
-      videoTakes: [selected],
     });
     const second = makeShot('shot_2', 1);
     const beat = makeBeat('beat_1', [first, second]);
@@ -895,24 +835,19 @@ describe('Beat playback sequence', () => {
     expect(formatBeatPlaybackClock(65.9, 80)).toBe('1:05');
   });
 
-  it('rejects duplicate active Shot identity and non-boolean slate selection authority', () => {
+  it('rejects duplicate active Shot identity and malformed planning authority', () => {
     const first = makeBeat('beat_1', [makeShot('shot_duplicate', 0)]);
     const second = makeBeat('beat_2', [makeShot('shot_duplicate', 0)]);
     expect(buildBeatPlaybackSequence('project_1', first, makeProjection([first, second]))).toBeNull();
 
-    const malformedSlate = makeShot('shot_1', 0, {
-      imageTakes: [makeTake('image_1', 'image', { selected: 0 as unknown as boolean })],
-    });
+    const malformedSlate = makeShot('shot_1', 0, { trimInSeconds: 0.5 });
     const beat = makeBeat('beat_1', [malformedSlate]);
     expect(buildBeatPlaybackSequence('project_1', beat, makeProjection([beat]))).toBeNull();
 
-    const selected = makeTake('take_1', 'video', { selected: true });
     const invalidPlan = makeShot('shot_1', 0, {
+      currentPicture: makeCurrentPicture('video_1', 8),
       durationSeconds: 2,
       planningBoundary: { shotId: 'shot_1', startSeconds: 0, endSeconds: 2 },
-      selectedTakeId: 'take_1',
-      selectedTakeSourceDurationSeconds: 8,
-      videoTakes: [selected],
     });
     const invalidPlanBeat = makeBeat('beat_1', [invalidPlan], { actualSeconds: 8 });
     expect(buildBeatPlaybackSequence('project_1', invalidPlanBeat, makeProjection([invalidPlanBeat]))).toBeNull();
@@ -921,21 +856,14 @@ describe('Beat playback sequence', () => {
 
 describe('BeatPlayer', () => {
   const playableBeat = (): WorkspaceBeatProjection => {
-    const selected = makeTake('take_1', 'video', {
-      selected: true,
-      posterAssetId: 'poster_1',
-      sourceDurationSeconds: 10,
-    });
     return makeBeat(
       'beat_1',
       [
         makeShot('shot_1', 0, {
+          currentPicture: makeCurrentPicture('video_1', 10, 'poster_1'),
           playedDurationSeconds: 8,
-          selectedTakeId: 'take_1',
-          selectedTakeSourceDurationSeconds: 10,
           trimInSeconds: 1,
           trimOutSeconds: 1,
-          videoTakes: [selected],
         }),
         makeShot('shot_2', 1, {
           durationSeconds: 6,
@@ -947,7 +875,7 @@ describe('BeatPlayer', () => {
     );
   };
 
-  it('plays only the exact selected trim, shows its poster during seek, and crosses into the planned slate', () => {
+  it('plays only the exact picture trim, shows its poster during seek, and crosses into the planned slate', () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
     const beat = playableBeat();
@@ -959,7 +887,7 @@ describe('BeatPlayer', () => {
     );
 
     const initial = screen.getByRole('region', { name: 'Beat preview' }).querySelector<HTMLVideoElement>('video')!;
-    expect(initial).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_1');
+    expect(initial).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_1');
     expect(initial).toHaveAttribute('poster', 'weprompt-studio://asset/project_1/poster_1');
     expect(initial).toHaveProperty('muted', true);
     expect(initial).toHaveProperty('controls', false);
@@ -1126,15 +1054,13 @@ describe('BeatPlayer', () => {
     expect(screen.getByTestId('reset-position')).toHaveTextContent('0');
     expect(document.querySelector('[data-beat-preview-media][data-media-kind="slate"]')).toBeInTheDocument();
     fireEvent.error(staleVideo);
-    expect(screen.queryByText('The selected Take could not be previewed.')).toBeNull();
+    expect(screen.queryByText('The current picture could not be previewed.')).toBeNull();
     pause.mockRestore();
   });
 
-  it('fails malformed selected authority closed instead of silently showing a planning slate', () => {
+  it('fails malformed current-picture authority closed instead of silently showing a planning slate', () => {
     const shot = makeShot('shot_1', 0, {
-      selectedTakeId: 'take_1',
-      selectedTakeSourceDurationSeconds: 8,
-      videoTakes: [makeTake('take_1', 'video', { selected: false })],
+      currentPicture: makeCurrentPicture('../unsafe', 8),
     });
     const beat = makeBeat('beat_1', [shot]);
     render(
@@ -1203,7 +1129,7 @@ describe('BeatPlayer', () => {
       rejectPlay?.(new Error('decoder refused playback'));
       await playRequest.catch(() => undefined);
     });
-    expect(screen.getByText('The selected Take could not be previewed.')).toBeVisible();
+    expect(screen.getByText('The current picture could not be previewed.')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Play Beat' })).toBeDisabled();
 
     result.unmount();
@@ -1226,7 +1152,7 @@ describe('BeatPlayer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
     early.setCurrentTime(5);
     fireEvent.ended(earlyVideo);
-    expect(screen.getByText('The selected Take could not be previewed.')).toBeVisible();
+    expect(screen.getByText('The current picture could not be previewed.')).toBeVisible();
     first.unmount();
 
     const exactResult = render(
@@ -1316,11 +1242,8 @@ describe('BeatPlayer', () => {
 
   it('shows the fallback seek cover and contains an active video error', () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
-    const selected = makeTake('take_no_poster', 'video', { selected: true, sourceDurationSeconds: 8 });
     const shot = makeShot('shot_1', 0, {
-      selectedTakeId: selected.assetId,
-      selectedTakeSourceDurationSeconds: 8,
-      videoTakes: [selected],
+      currentPicture: makeCurrentPicture('video_no_poster', 8),
     });
     const beat = makeBeat('beat_1', [shot]);
     const result = render(
@@ -1336,7 +1259,7 @@ describe('BeatPlayer', () => {
     expect(document.querySelector('[data-beat-seek-poster]')).toBeInTheDocument();
     expect(document.querySelector('[data-beat-seek-poster]')).not.toHaveAttribute('src');
     fireEvent.error(previewVideo());
-    expect(screen.getByText('The selected Take could not be previewed.')).toBeVisible();
+    expect(screen.getByText('The current picture could not be previewed.')).toBeVisible();
     result.unmount();
     pause.mockRestore();
   });
@@ -1350,14 +1273,13 @@ describe('BeatPanel', () => {
   });
 
   it('states Shot chain and Line provenance without merging authored controls or continuity warnings', () => {
-    const image = makeTake('asset_private_image', 'image', { effectiveSeed: true });
-    const video = makeTake('asset_private_video', 'video');
+    const image = makeSeedStill('asset_private_image', { effectiveSeed: true });
     const beat = makeBeat('beat_private', [
-      makeShot('shot_private_1', 0, { imageTakes: [image], segmentHead: true }),
+      makeShot('shot_private_1', 0, { seedStills: [image], segmentHead: true }),
       makeShot('shot_private_2', 1, {
+        currentPicture: makeCurrentPicture('asset_private_video'),
         dirtyCauses: ['continuity_stale', 'generation_out_of_date'],
         segmentHead: false,
-        videoTakes: [video],
       }),
       makeShot('shot_private_3', 2, {
         derivation: 'detached',
@@ -1434,8 +1356,8 @@ describe('BeatPanel', () => {
       'rejoin'
     );
     expect(container.querySelector('video')).toHaveProperty('controls', true);
-    expect(container).toHaveTextContent('Shot 1 image 1');
-    expect(container).toHaveTextContent('Shot 2 take 1');
+    expect(within(naturalHead).getByLabelText('Seed still 1 for Shot 1')).toBeInTheDocument();
+    expect(within(continuation).getByLabelText('Player · Current picture for Shot 2')).toBeInTheDocument();
     expect(container.textContent).not.toContain('asset_private');
     expect(container.textContent).not.toContain('shot_private');
   });
@@ -1585,12 +1507,13 @@ describe('BeatPanel', () => {
     expect(shotCard(result.container, 'shot_2')).toHaveAttribute('hidden');
   });
 
-  it('leaves native Take media keyboard controls outside Beat transport shortcuts', () => {
-    const take = makeTake('take_native_controls', 'video');
-    const shot = makeShot('shot_1', 0, { videoTakes: [take] });
+  it('leaves native current-picture controls outside Beat transport shortcuts', () => {
+    const shot = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_native_controls') });
     const beat = makeBeat('beat_1', [shot]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const video = within(takeCard(container, take.assetId)).getByLabelText('Player Shot 1 take 1');
+    const video = within(assetCard(container, 'video_native_controls')).getByLabelText(
+      'Player · Current picture for Shot 1'
+    );
     const seekRail = screen.getByRole('slider', { name: 'Beat seek rail' });
     const space = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Space', key: ' ' });
     const arrow = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' });
@@ -1605,25 +1528,25 @@ describe('BeatPanel', () => {
     expect(seekRail).toHaveAttribute('aria-valuenow', '0');
   });
 
-  it('pauses every native Take video when its mounted Shot inspector becomes hidden', () => {
+  it('pauses the native current-picture video when its mounted Shot inspector becomes hidden', () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     const first = makeShot('shot_1', 0, {
-      videoTakes: [makeTake('take_1', 'video'), makeTake('take_2', 'video')],
+      currentPicture: makeCurrentPicture('video_1'),
     });
     const second = makeShot('shot_2', 1);
     const beat = makeBeat('beat_1', [first, second]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
     const firstCard = shotCard(container, first.id);
-    const takeVideos = Array.from(firstCard.querySelectorAll<HTMLVideoElement>('video[controls]'));
-    takeVideos.forEach((video) => Object.defineProperty(video, 'paused', { configurable: true, value: false }));
+    const pictureVideos = Array.from(firstCard.querySelectorAll<HTMLVideoElement>('video[controls]'));
+    pictureVideos.forEach((video) => Object.defineProperty(video, 'paused', { configurable: true, value: false }));
     pause.mockClear();
 
     inspectShot(container, second.id);
 
     expect(firstCard).toHaveAttribute('hidden');
-    expect(takeVideos).toHaveLength(2);
-    expect(pause).toHaveBeenCalledTimes(2);
-    expect(pause.mock.instances).toEqual(takeVideos);
+    expect(pictureVideos).toHaveLength(1);
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(pause.mock.instances).toEqual(pictureVideos);
     pause.mockRestore();
   });
 
@@ -1682,22 +1605,21 @@ describe('BeatPanel', () => {
     expect(cssRuleBody(css, '.shotActionBand')).toMatch(/align-items:\s*flex-start/);
     expect(cssRuleBody(css, '.shotActionBand')).toMatch(/flex-wrap:\s*nowrap/);
     expect(cssRuleBody(css, '.shotActionBand > .editorActions')).toMatch(/flex-wrap:\s*nowrap/);
-    expect(cssRuleBody(css, '.takeSummary')).toMatch(/flex-wrap:\s*nowrap/);
     expect(cssRuleBody(css, '.beatMetaRow')).toMatch(/grid-column:\s*1\s*\/\s*-1/);
     expect(cssRuleBody(css, '.fieldGuidance')).toMatch(/text-transform:\s*uppercase/);
     expect(cssRuleBody(css, '.chainState')).toMatch(/text-transform:\s*uppercase/);
     expect(cssRuleBody(css, '.lineGuidance')).toMatch(/text-transform:\s*uppercase/);
-    const takeGrid = cssRuleBody(css, '.takeGrid');
-    expect(takeGrid).toMatch(/display:\s*flex/);
-    expect(takeGrid).toMatch(/overflow-x:\s*auto/);
-    const takeCardRule = cssRuleBody(css, '.takeCard');
-    expect(takeCardRule).toMatch(/box-sizing:\s*border-box/);
-    expect(takeCardRule).toMatch(/(?:flex:\s*0\s+0\s+134px|inline-size:\s*134px)/);
-    expect(takeCardRule).toMatch(/padding:\s*10px/);
-    expect(takeCardRule).toMatch(/border:\s*1px\s+solid/);
-    const takePreview = cssRuleBody(css, '.takePreview');
-    expect(takePreview).toMatch(/inline-size:\s*100%/);
-    expect(takePreview).toMatch(/aspect-ratio:\s*16\s*\/\s*9/);
+    const mediaStrip = cssRuleBody(css, '.mediaStrip');
+    expect(mediaStrip).toMatch(/display:\s*flex/);
+    expect(mediaStrip).toMatch(/overflow-x:\s*auto/);
+    const mediaCardRule = cssRuleBody(css, '.mediaCard');
+    expect(mediaCardRule).toMatch(/box-sizing:\s*border-box/);
+    expect(mediaCardRule).toMatch(/(?:flex:\s*0\s+0\s+134px|inline-size:\s*134px)/);
+    expect(mediaCardRule).toMatch(/padding:\s*10px/);
+    expect(mediaCardRule).toMatch(/border:\s*1px\s+solid/);
+    const mediaPreview = cssRuleBody(css, '.mediaPreview');
+    expect(mediaPreview).toMatch(/inline-size:\s*100%/);
+    expect(mediaPreview).toMatch(/aspect-ratio:\s*16\s*\/\s*9/);
     expect(cssRuleBody(css, '.previewSlateTitle')).toMatch(
       /composes:\s*cardName\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
     );
@@ -1843,108 +1765,48 @@ describe('BeatPanel', () => {
     expect(targetShot.getByText('Preserved before re-split')).toBeVisible();
   });
 
-  it('keeps primary Take actions visible and routes keyboard-accessible overflow confirmations exactly', async () => {
-    const image = makeTake('image_1', 'image', { effectiveSeed: true });
-    const selectedImage = makeTake('image_2', 'image', { explicitSeed: true });
-    const video = makeTake('video_1', 'video');
-    const binnedVideo = makeTake('video_2', 'video', { binReason: 'alternate' });
+  it('shows one current picture with Generate again and no Take selection or overflow surface', () => {
     const shot = makeShot('shot_1', 0, {
-      imageTakes: [image, selectedImage],
-      videoTakes: [video, binnedVideo],
-      segmentHead: true,
+      currentPicture: makeCurrentPicture('video_current', 10, 'poster_current'),
+      effectiveSeedAssetId: 'seed_existing',
+      hasEffectiveSeed: true,
     });
     const beat = makeBeat('beat_1', [shot]);
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
 
-    fireEvent.click(within(takeCard(container, 'image_1')).getByRole('button', { name: 'Pin as seed' }));
-    expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', 'image_1');
-    fireEvent.click(within(takeCard(container, 'image_2')).getByRole('button', { name: 'Clear seed pin' }));
-    expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', null);
-    const activeVideoCard = takeCard(container, 'video_1');
-    fireEvent.click(within(activeVideoCard).getByRole('button', { name: 'Select Take' }));
-    expect(actions.selectTake).toHaveBeenCalledWith('shot_1', 'video_1');
+    const shotRegion = within(shotCard(container, shot.id));
+    const picture = shotRegion.getByRole('region', { name: 'Current picture for Shot 1' });
+    expect(within(picture).getByLabelText('Player · Current picture for Shot 1')).toHaveAttribute(
+      'src',
+      'weprompt-studio://asset/project_1/video_current'
+    );
+    expect(container.querySelector('[data-asset-id="video_superseded"]')).toBeNull();
+    expect(within(picture).queryByRole('button', { name: /Select Take|More actions/u })).toBeNull();
+    expect(shotRegion.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
 
-    const takeOverflow = activeVideoCard.querySelector<HTMLButtonElement>('[data-take-overflow-trigger]');
-    if (takeOverflow === null) throw new Error('Missing Take overflow trigger');
-    expect(takeOverflow).toHaveAccessibleName('More actions · Shot 1 take 1');
-    expect(takeOverflow).toHaveAttribute('aria-haspopup', 'menu');
-    expect(activeVideoCard.querySelector('[data-take-move-to-bin]')).toBeNull();
-    act(() => takeOverflow.focus());
-    fireEvent.keyDown(takeOverflow, { key: 'Enter' });
-    const takeMenu = activeVideoCard.querySelector<HTMLElement>('[data-take-overflow-menu]');
-    if (takeMenu === null) throw new Error('Missing Take overflow menu');
-    expect(takeOverflow).toHaveAttribute('aria-expanded', 'true');
-    fireEvent.click(within(takeMenu).getByRole('menuitem', { name: 'Move to Bin' }));
-    let confirmation = latestModalConfirmation();
-    expect(confirmation).toMatchObject({
-      cancelText: 'Cancel',
-      content: 'The Take stays with the project and moves out of active choices.',
-      okButtonProps: { status: 'danger' },
-      okText: 'Move to Bin',
-      title: 'Move this Take to the Bin?',
-    });
-    expect(actions.parkTake).not.toHaveBeenCalled();
-    await act(async () => {
-      await confirmation.onOk();
-    });
-    expect(actions.parkTake).toHaveBeenCalledWith('shot_1', 'video_1');
-
-    fireEvent.keyDown(takeOverflow, { key: 'Enter' });
-    const alternateMenu = activeVideoCard.querySelector<HTMLElement>('[data-take-overflow-menu]');
-    if (alternateMenu === null) throw new Error('Missing reopened Take overflow menu');
-    fireEvent.click(within(alternateMenu).getByRole('menuitem', { name: 'Move to alternates' }));
-    confirmation = latestModalConfirmation();
-    expect(confirmation).toMatchObject({
-      cancelText: 'Cancel',
-      content: 'The Take stays with the project as an alternate.',
-      okText: 'Move to alternates',
-      title: 'Move this Take to alternates?',
-    });
-    expect(actions.addAlternateTake).not.toHaveBeenCalled();
-    await act(async () => {
-      await confirmation.onOk();
-    });
-    expect(actions.addAlternateTake).toHaveBeenCalledWith('shot_1', 'video_1');
-
-    fireEvent.click(within(takeCard(container, 'video_2')).getByRole('button', { name: 'Restore take' }));
-    expect(actions.restoreTake).toHaveBeenCalledWith('shot_1', 'video_2');
-    fireEvent.click(screen.getByRole('button', { name: 'Import seed still' }));
-    await waitFor(() => expect(actions.importSeedStill).toHaveBeenCalledWith('shot_1'));
-    expect(actions.saveBeat).not.toHaveBeenCalled();
-    expect(actions.saveShot).not.toHaveBeenCalled();
+    fireEvent.click(within(picture).getByRole('button', { name: 'Generate again' }));
+    expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [
+      { shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null },
+    ]);
   });
 
-  it('closes and invalidates an open Take confirmation when park authority becomes restore authority', async () => {
-    const activeTake = makeTake('video_1', 'video');
-    const activeBeat = makeBeat('beat_1', [makeShot('shot_1', 0, { videoTakes: [activeTake] })]);
-    const actions = makeActions();
-    const close = vi.fn();
-    modalConfirm.mockReturnValueOnce({ close, update: vi.fn() });
-    const result = render(<BeatPanel {...panelProps(activeBeat, makeDrafts(), actions)} />);
-    const activeCard = takeCard(result.container, activeTake.assetId);
-    const trigger = activeCard.querySelector<HTMLButtonElement>('[data-take-overflow-trigger]');
-    if (trigger === null) throw new Error('Missing Take overflow trigger');
-    fireEvent.keyDown(trigger, { key: 'Enter' });
-    const menu = activeCard.querySelector<HTMLElement>('[data-take-overflow-menu]');
-    if (menu === null) throw new Error('Missing Take overflow menu');
-    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to Bin' }));
-    const staleConfirmation = latestModalConfirmation();
-
-    const binnedTake = { ...activeTake, binReason: 'lifted' as const };
-    const binnedBeat = makeBeat('beat_1', [makeShot('shot_1', 0, { videoTakes: [binnedTake] })]);
-    result.rerender(<BeatPanel {...panelProps(binnedBeat, makeDrafts(), actions)} />);
-
-    expect(close).toHaveBeenCalledTimes(1);
-    expect(takeCard(result.container, activeTake.assetId).querySelector('[data-take-overflow-trigger]')).toBeNull();
-    expect(
-      within(takeCard(result.container, activeTake.assetId)).getByRole('button', { name: 'Restore take' })
-    ).toBeEnabled();
-    await act(async () => {
-      await staleConfirmation.onOk();
+  it('keeps seed still pinning reachable without any video selection or overflow surface', () => {
+    const effective = makeSeedStill('image_1', { effectiveSeed: true });
+    const pinned = makeSeedStill('image_2', { explicitSeed: true });
+    const shot = makeShot('shot_1', 0, {
+      seedStills: [effective, pinned],
+      segmentHead: true,
     });
-    expect(actions.parkTake).not.toHaveBeenCalled();
-    expect(actions.addAlternateTake).not.toHaveBeenCalled();
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+
+    fireEvent.click(within(assetCard(container, effective.assetId)).getByRole('button', { name: 'Pin as seed' }));
+    expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', effective.assetId);
+    fireEvent.click(within(assetCard(container, pinned.assetId)).getByRole('button', { name: 'Clear seed pin' }));
+    expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', null);
+    expect(container.querySelector('[data-take-overflow-trigger]')).toBeNull();
+    expect(container.querySelector('[data-take-overflow-menu]')).toBeNull();
   });
 
   it('closes and invalidates Beat confirmations on identity or project drift and owner unmount', async () => {
@@ -2004,47 +1866,24 @@ describe('BeatPanel', () => {
     expect(actions.parkBeat).not.toHaveBeenCalled();
   });
 
-  it('disables an ordinary Take selection when retained trims leave less than the minimum played duration', () => {
-    const shortVideo = makeTake('short_video', 'video', { sourceDurationSeconds: 9.5 });
-    const shot = makeShot('shot_1', 0, {
-      trimInSeconds: 4.5,
-      trimOutSeconds: 4.5,
-      videoTakes: [shortVideo],
-    });
-    const beat = makeBeat('beat_1', [shot]);
-    const actions = makeActions();
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
-    const card = within(takeCard(container, 'short_video'));
-
-    expect(card.getByRole('button', { name: 'Select Take' })).toBeDisabled();
-    expect(card.getByText('Current trims do not fit this take')).toBeVisible();
-    fireEvent.click(card.getByRole('button', { name: 'Select Take' }));
-    expect(actions.selectTake).not.toHaveBeenCalled();
-  });
-
-  it('keeps retained image Takes reachable on continuity Shots without exposing invalid seed controls', () => {
-    const retainedImage = makeTake('image_continuity', 'image');
+  it('keeps retained seed stills reachable on continuity Shots without exposing seed controls', () => {
+    const retainedSeed = makeSeedStill('image_continuity');
     const beat = makeBeat('beat_1', [
       makeShot('shot_1', 0),
-      makeShot('shot_2', 1, { imageTakes: [retainedImage], segmentHead: false }),
+      makeShot('shot_2', 1, { seedStills: [retainedSeed], segmentHead: false }),
     ]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const inspected = inspectShot(container, 'shot_2');
-    const card = takeCard(container, 'image_continuity');
-    expect(within(inspected).getAllByText('Retained image takes')).toHaveLength(2);
-    expect(card).toHaveTextContent('Shot 2 image 1');
-    expect(card).not.toHaveTextContent('Effective seed');
+    const card = within(inspectShot(container, 'shot_2')).getByLabelText('Seed still 1 for Shot 2');
+
+    expect(card).toBeVisible();
     expect(within(card).queryByRole('button', { name: 'Pin as seed' })).toBeNull();
     expect(within(card).queryByRole('button', { name: 'Clear seed pin' })).toBeNull();
-    expect(card.querySelector('[data-take-overflow-trigger]')).toBeEnabled();
   });
 
-  it('reviews the complete ordered seed-and-video graph with bounded persisted preferences and safe Brief labels', () => {
+  it('reviews the complete ordered seed-and-video graph with reference-only preferences and safe Brief labels', () => {
     const beat = makeBeat();
     const gateChoices = {
-      'shot_1:seed_still': { generationCount: 2, referenceAssetId: 'brief_ref' },
-      'shot_1:video_take': { generationCount: 3, referenceAssetId: null },
-      'shot_2:video_take': { generationCount: 4, referenceAssetId: null },
+      'shot_1:seed_still': { referenceAssetId: 'brief_ref' },
     };
     const drafts = makeDrafts({ 'gate.choices': JSON.stringify(gateChoices) });
     const actions = makeActions();
@@ -2074,16 +1913,7 @@ describe('BeatPanel', () => {
     );
 
     const triggerCard = within(shotCard(result.container, 'shot_1'));
-    expect(triggerCard.getByRole('spinbutton', { name: 'Generation count for Beat 1 Shot 1 seed still' })).toHaveValue(
-      2
-    );
-    expect(triggerCard.getByRole('spinbutton', { name: 'Generation count for Beat 1 Shot 1 video take' })).toHaveValue(
-      3
-    );
-    const downstreamCount = triggerCard.getByRole('spinbutton', {
-      name: 'Generation count for Beat 1 Shot 2 video take',
-    });
-    expect(downstreamCount).toHaveValue(4);
+    expect(triggerCard.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
     const reference = triggerCard.getByRole('combobox', {
       name: 'Brief reference for Beat 1 Shot 1 seed still',
     });
@@ -2092,19 +1922,19 @@ describe('BeatPanel', () => {
     expect(within(reference).queryByRole('option', { name: /Duplicate/ })).toBeNull();
     expect(result.container.textContent).not.toContain('brief_ref');
 
-    fireEvent.change(downstreamCount, { target: { value: '2' } });
+    fireEvent.change(reference, { target: { value: '' } });
     const persisted = JSON.parse(String(drafts.setValue.mock.calls.at(-1)?.[1])) as Record<
       string,
-      { generationCount: number }
+      { referenceAssetId: string | null }
     >;
     expect(drafts.setValue).toHaveBeenLastCalledWith('gate.choices', expect.any(String));
-    expect(persisted['shot_2:video_take']?.generationCount).toBe(2);
+    expect(persisted['shot_1:seed_still']?.referenceAssetId).toBeNull();
 
     fireEvent.click(triggerCard.getByRole('button', { name: 'Generate seed' }));
     expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [
-      { shotId: 'shot_1', purpose: 'seed_still', generationCount: 2, referenceAssetId: 'brief_ref' },
-      { shotId: 'shot_1', purpose: 'video_take', generationCount: 3, referenceAssetId: null },
-      { shotId: 'shot_2', purpose: 'video_take', generationCount: 4, referenceAssetId: null },
+      { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: 'brief_ref' },
+      { shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null },
+      { shotId: 'shot_2', purpose: 'video_take', referenceAssetId: null },
     ]);
   });
 
@@ -2124,42 +1954,13 @@ describe('BeatPanel', () => {
     expect(actions.reviewShot).not.toHaveBeenCalled();
   });
 
-  it('fails closed when exact revision-matched Take eligibility is missing or blocked', () => {
-    const video = makeTake('video_1', 'video');
-    const shot = makeShot('shot_1', 0, { videoTakes: [video] });
-    const beat = makeBeat('beat_1', [shot]);
-    const projection = makeProjection([beat], {
-      parkEligibility: [
-        {
-          subject: 'take',
-          action: 'park',
-          beatId: 'beat_1',
-          shotId: 'shot_1',
-          assetId: 'video_1',
-          allowed: false,
-          blockers: [{ shotId: 'shot_1', code: 'current_selected_take' }],
-        },
-      ],
-    });
-    const actions = makeActions();
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions, projection)} />);
-    const card = takeCard(container, 'video_1');
-    const overflow = card.querySelector<HTMLButtonElement>('[data-take-overflow-trigger]');
-    if (overflow === null) throw new Error('Missing blocked Take overflow trigger');
-    expect(overflow).toBeDisabled();
-    fireEvent.keyDown(overflow, { key: 'Enter' });
-    expect(card.querySelector('[data-take-overflow-menu]')).toBeNull();
-    expect(modalConfirm).not.toHaveBeenCalled();
-    expect(actions.parkTake).not.toHaveBeenCalled();
-  });
-
   it('reorders Shots atomically in Beat scope and announces the resulting position', async () => {
     const beat = makeBeat();
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
     fireEvent.click(within(shotCard(container, 'shot_1')).getByRole('button', { name: 'Move Shot 1 down' }));
     await waitFor(() => expect(actions.reorderShots).toHaveBeenCalledWith('beat_1', ['shot_2', 'shot_1']));
-    expect(screen.getByText('Moved Shot 1 to 2 of 2')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Moved Shot 1 to 2 of 2')).toBeInTheDocument());
   });
 
   it('places Shot and Beat removal in header overflows with exact downstream confirmations', async () => {
@@ -2305,10 +2106,8 @@ describe('BeatPanel', () => {
     expect(onParkShotSuccess).not.toHaveBeenCalled();
   });
 
-  it('offers exact projected video choices, free retry, and cancellation only when projected flags permit them', () => {
-    const upstream = makeShot('shot_1', 0, {
-      videoTakes: [makeTake('video_1', 'video', { selected: true }), makeTake('video_2', 'video')],
-    });
+  it('offers free retry and cancellation only when projected flags permit them without asset-choice controls', () => {
+    const upstream = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_1') });
     const dependent = makeShot('shot_2', 1);
     const beat = makeBeat('beat_1', [upstream, dependent]);
     const row: StudioCascadeProgressV2 = {
@@ -2323,9 +2122,7 @@ describe('BeatPanel', () => {
     const actions = makeActions();
     const result = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions, projection)} />);
 
-    expect(screen.queryByRole('button', { name: 'Use video Beat 1 Shot 1 Take 1' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Use video Beat 1 Shot 1 Take 2' }));
-    expect(actions.chooseCascadeAsset).toHaveBeenCalledWith(row, 'video_2');
+    expect(screen.queryByRole('button', { name: /Use (image|video)/ })).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Retry conditioning free' }));
     expect(actions.retryConditioning).toHaveBeenCalledWith('shot_2');
     fireEvent.click(
@@ -2335,45 +2132,20 @@ describe('BeatPanel', () => {
     );
     expect(actions.cancelWaiting).toHaveBeenCalledWith('shot_2');
 
-    const running = { ...row, waitingReason: 'upstream_running' as const };
+    const running = {
+      ...row,
+      canRetryConditioningFrame: false,
+      canCancelWaiting: false,
+      waitingReason: 'upstream_running' as const,
+    };
     result.rerender(
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat], { cascadeProgress: [running] }))} />
     );
-    expect(screen.queryByRole('button', { name: 'Use video Beat 1 Shot 1 Take 2' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry conditioning free' })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Cancel waiting?' })).toBeNull();
   });
 
-  it('offers only video recovery choices that retain at least the minimum played duration', () => {
-    const upstream = makeShot('shot_1', 0, {
-      trimInSeconds: 4.5,
-      trimOutSeconds: 4.5,
-      videoTakes: [
-        makeTake('selected_video', 'video', { selected: true, sourceDurationSeconds: 12 }),
-        makeTake('short_video', 'video', { sourceDurationSeconds: 9.5 }),
-        makeTake('valid_video', 'video', { sourceDurationSeconds: 10 }),
-      ],
-    });
-    const dependent = makeShot('shot_2', 1);
-    const beat = makeBeat('beat_1', [upstream, dependent]);
-    const row: StudioCascadeProgressV2 = {
-      dependentShotId: 'shot_2',
-      upstreamShotId: 'shot_1',
-      eligiblePrimaryAssetIds: ['selected_video', 'short_video', 'valid_video'],
-      canRetryConditioningFrame: false,
-      canCancelWaiting: false,
-      waitingReason: 'conditioning_failed',
-    };
-    const actions = makeActions();
-    render(
-      <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat], { cascadeProgress: [row] }))} />
-    );
-
-    expect(screen.queryByRole('button', { name: 'Use video Beat 1 Shot 1 Take 1' })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Use video Beat 1 Shot 1 Take 2' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Use video Beat 1 Shot 1 Take 3' }));
-    expect(actions.chooseCascadeAsset).toHaveBeenCalledWith(row, 'valid_video');
-  });
-
-  it('does not expose an eligible ID that has no exact active projected Take and explains terminal states', () => {
+  it('does not expose eligible asset IDs as choices and explains terminal states', () => {
     const beat = makeBeat();
     const row: StudioCascadeProgressV2 = {
       dependentShotId: 'shot_2',

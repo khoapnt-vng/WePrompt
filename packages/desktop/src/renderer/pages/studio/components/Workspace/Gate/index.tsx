@@ -312,7 +312,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                     ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinHeadline'
                     : 'conversation.creativeStudio.workspace.gate.headline',
                 {
-                  count: summary.generationCount,
+                  count: summary.choiceCount,
                   cost: displayedCost,
                 }
               )}
@@ -351,14 +351,9 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                   </span>
                   <span>
                     {t('conversation.creativeStudio.workspace.gate.rowCost', {
-                      count: row.generationCount,
                       cost: formatMoney(row.requestedTotalMinorUnits, summary.currency),
-                      each: formatMoney(row.oneGenerationMinorUnits, summary.currency),
                     })}
                   </span>
-                  {row.waitsForTakeSelection ? (
-                    <span>{t('conversation.creativeStudio.workspace.gate.waitsForTakeSelection')}</span>
-                  ) : null}
                 </li>
               ))}
             </ol>
@@ -434,7 +429,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                     ? 'conversation.creativeStudio.workspace.gate.continuity.confirmRejoin'
                     : 'conversation.creativeStudio.workspace.gate.confirm',
                 {
-                  count: summary.generationCount,
+                  count: summary.choiceCount,
                   cost: confirmCost,
                 }
               )}

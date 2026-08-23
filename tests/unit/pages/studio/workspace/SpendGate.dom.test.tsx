@@ -115,7 +115,6 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
     duplicateChargeAcknowledged: false,
     duplicateChargeAcknowledgedAt: null,
     purpose: 'video_take',
-    generationIndex: 0,
     spendReceipt: null,
     createdAt: '2026-08-19T00:00:00.000Z',
     updatedAt: '2026-08-19T00:00:00.000Z',
@@ -124,7 +123,7 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
 
 const makeProject = (): StudioRendererProjectV2 =>
   ({
-    schemaVersion: 2,
+    schemaVersion: 3,
     revision: 3,
     id: 'project_1',
     name: 'Launch film',
@@ -175,7 +174,7 @@ const makeProject = (): StudioRendererProjectV2 =>
           trimOutSeconds: null,
           chainBreak,
           seedStillId: null,
-          selectedTakeId: null,
+          videoAssetId: null,
           assetIds: [],
           jobIds: [],
         },
@@ -183,7 +182,6 @@ const makeProject = (): StudioRendererProjectV2 =>
     ),
     bin: [],
     bedAssetId: null,
-    matchToShotId: null,
     spendPolicy: null,
     imageRouteId: 'route_image',
     videoRouteId: 'route_video',
@@ -204,11 +202,10 @@ const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => 
       shotId: 'shot_1',
       purpose: 'seed_still',
       route: { choiceId: 'image_choice', providerId: 'safe_provider', model: 'safe_model' },
-      generationCount: 2,
+      generationCount: 1,
       durationSeconds: null,
       oneGenerationMinorUnits: 125,
-      requestedTotalMinorUnits: 250,
-      waitsForTakeSelection: false,
+      requestedTotalMinorUnits: 125,
     },
   ],
   cascadeItems: cascade
@@ -221,12 +218,11 @@ const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => 
           durationSeconds: 4,
           oneGenerationMinorUnits: 400,
           requestedTotalMinorUnits: 400,
-          waitsForTakeSelection: true,
         },
       ]
     : [],
-  lowerMinorUnits: cascade ? 250 : 250,
-  upperMinorUnits: cascade ? 650 : 250,
+  lowerMinorUnits: cascade ? 525 : 125,
+  upperMinorUnits: cascade ? 525 : 125,
   budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 1_000 },
 });
 
@@ -250,7 +246,6 @@ const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
       durationSeconds: null,
       oneGenerationMinorUnits: 125,
       requestedTotalMinorUnits: 125,
-      waitsForTakeSelection: false,
     },
     {
       shotId: 'shot_2',
@@ -260,7 +255,6 @@ const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
       durationSeconds: 4,
       oneGenerationMinorUnits: 400,
       requestedTotalMinorUnits: 400,
-      waitsForTakeSelection: true,
     },
   ],
   cascadeItems: [],
@@ -273,8 +267,8 @@ const draft = {
   projectId: 'project_1',
   expectedRevision: 3,
   originReferenceHandoffId: null,
-  baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still' as const, generationCount: 2, referenceAssetId: null }],
-  cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take' as const, generationCount: 1, referenceAssetId: null }],
+  baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still' as const, referenceAssetId: null }],
+  cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take' as const, referenceAssetId: null }],
 };
 
 const Harness: React.FC<{
@@ -318,7 +312,6 @@ const workspaceCallbacks = (): WorkspaceMutationCallbacks => ({
   undo: vi.fn(async () => true),
   retryConditioning: vi.fn(async () => true),
   cancelWaiting: vi.fn(async () => true),
-  chooseCascadeAsset: vi.fn(async () => true),
 });
 
 const beatPanelActions = (): BeatPanelActions => ({
@@ -330,15 +323,10 @@ const beatPanelActions = (): BeatPanelActions => ({
   redetachLine: vi.fn(async () => true),
   restoreLine: vi.fn(async () => true),
   importSeedStill: vi.fn(async () => 'cancelled'),
-  selectTake: vi.fn(async () => true),
-  parkTake: vi.fn(async () => true),
-  addAlternateTake: vi.fn(async () => true),
-  restoreTake: vi.fn(async () => true),
   parkShot: vi.fn(async () => true),
   parkBeat: vi.fn(async () => true),
   reviewShot: vi.fn(),
   reviewContinuity: vi.fn(),
-  chooseCascadeAsset: vi.fn(async () => true),
   retryGenerationJob: vi.fn(async () => true),
   cancelGenerationJob: vi.fn(async () => true),
   retryConditioning: vi.fn(async () => true),
@@ -352,7 +340,6 @@ const boardActions = (): BoardActions => ({
   parkBeat: vi.fn(async () => true),
   restoreBeat: vi.fn(async () => true),
   restoreShot: vi.fn(async () => true),
-  restoreTake: vi.fn(async () => true),
   reorderBin: vi.fn(async () => true),
 });
 
@@ -361,7 +348,6 @@ const cutActions = (): CutActions => ({
   importBedAudio: vi.fn(async () => 'cancelled'),
   setBed: vi.fn(async () => true),
   detachBedAudio: vi.fn(async () => true),
-  setMatchTo: vi.fn(async () => true),
   createExport: vi.fn(async () => true),
   refreshExports: vi.fn(async () => true),
   copyExport: vi.fn(async () => 'cancelled'),
@@ -406,7 +392,6 @@ const parkableWorkspaceStatus = (projectId = 'project_1', revision = 3): StudioR
       action: 'park',
       beatId: 'beat_1',
       shotId: 'shot_1',
-      assetId: null,
       allowed: true,
       blockers: [],
     },
@@ -562,7 +547,6 @@ const lockedWorkspaceStatus = (): StudioRendererWorkspaceStatusV2 => ({
       action: 'park',
       beatId: 'beat_1',
       shotId: 'shot_1',
-      assetId: null,
       allowed: false,
       blockers: [{ shotId: 'shot_1', code: 'bound_nonterminal_request' }],
     },
@@ -612,7 +596,7 @@ describe('the largest legal render batch', () => {
       durationSeconds: 4,
     } as StudioAssetV2;
     project.shots.shot_1!.assetIds = [assetId];
-    project.shots.shot_1!.selectedTakeId = assetId;
+    project.shots.shot_1!.videoAssetId = assetId;
     const projection = projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
 
     expect(filmRenderBatchShotIds({ project, projection })).toEqual(['shot_2', 'shot_3']);
@@ -638,7 +622,7 @@ describe('the largest legal render batch', () => {
         durationSeconds: 4,
       } as StudioAssetV2;
       project.shots[shotId]!.assetIds = [assetId];
-      project.shots[shotId]!.selectedTakeId = assetId;
+      project.shots[shotId]!.videoAssetId = assetId;
     }
     const projection = projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
 
@@ -678,7 +662,7 @@ describe('the largest legal render batch', () => {
       project,
       projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
     });
-    expect(batch).toEqual([...batch].sort((left, right) => (left < right ? -1 : 1)));
+    expect(batch).toEqual(batch.toSorted((left, right) => (left < right ? -1 : 1)));
   });
 });
 
@@ -715,7 +699,7 @@ describe('spend gate draft graph', () => {
     const projection = readyProjection(project);
 
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_2'] })?.baseChoices).toEqual([
-      { shotId: 'shot_2', purpose: 'video_take', generationCount: 1, referenceAssetId: null },
+      { shotId: 'shot_2', purpose: 'video_take', referenceAssetId: null },
     ]);
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1', 'shot_2'] })).toBeNull();
   });
@@ -749,7 +733,7 @@ describe('spend gate draft graph', () => {
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toBeNull();
   });
 
-  it('accepts bounded per-pair counts/reference and refuses terminal handoff reopening', () => {
+  it('accepts one reference per seed choice, rejects legacy count authority, and refuses terminal handoff reopening', () => {
     const project = makeProject();
     const projection = readyProjection(project);
     const defaults = selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })!;
@@ -757,11 +741,23 @@ describe('spend gate draft graph', () => {
       project,
       projection,
       orderedShotIds: ['shot_1'],
-      baseChoices: [{ ...defaults.baseChoices[0]!, generationCount: 4, referenceAssetId: 'brief_ref' }],
-      cascadeChoices: defaults.cascadeChoices.map((choice) => ({ ...choice, generationCount: 3 })),
+      baseChoices: [{ ...defaults.baseChoices[0]!, referenceAssetId: 'brief_ref' }],
+      cascadeChoices: defaults.cascadeChoices,
     });
-    expect(customized?.baseChoices[0]).toMatchObject({ generationCount: 4, referenceAssetId: 'brief_ref' });
-    expect(customized?.cascadeChoices.every((choice) => choice.generationCount === 3)).toBe(true);
+    expect(customized?.baseChoices[0]).toEqual({
+      shotId: 'shot_1',
+      purpose: 'seed_still',
+      referenceAssetId: 'brief_ref',
+    });
+    expect(
+      selectionGateDraft({
+        project,
+        projection,
+        orderedShotIds: ['shot_1'],
+        baseChoices: [{ ...defaults.baseChoices[0]!, generationCount: 1 } as never],
+        cascadeChoices: defaults.cascadeChoices,
+      })
+    ).toBeNull();
     expect(
       selectionGateDraft({
         project,
@@ -864,16 +860,6 @@ describe('spend gate draft graph', () => {
       requiresSeedGeneration: false,
     });
     expect(spendGateRouteIssue(routeCatalog('unavailable', 'ready'), reusable!)).toBeNull();
-
-    project.bin.push({ kind: 'take', assetId: 'seed_existing', reason: 'lifted' });
-    expect(
-      continuityGateDraft({
-        project,
-        projection: readyProjection(project),
-        shotId: 'shot_2',
-        hardCut: true,
-      })?.continuityChange.requiresSeedGeneration
-    ).toBe(true);
 
     project.shots.shot_2!.chainBreak = 'hard_cut';
     expect(
@@ -1350,7 +1336,6 @@ describe('SpendGateModal', () => {
     fireEvent.click(within(modal).getByText('conversation.creativeStudio.workspace.gate.withCascade'));
     expect(within(modal).getByText(/safe_video/)).toHaveTextContent('video_choice');
     expect(within(modal).getByText('conversation.creativeStudio.workspace.gate.rateCardSource')).toBeVisible();
-    expect(within(modal).getByText('conversation.creativeStudio.workspace.gate.waitsForTakeSelection')).toBeVisible();
     expect(within(modal).getByText(/budgetPolicy/)).toHaveTextContent('$10.00');
 
     fireEvent.click(

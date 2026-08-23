@@ -11,7 +11,7 @@ const FRAME_EXTRACTION_ID_NAMESPACE = 'creative-studio/frame-extraction/v1';
 
 export type StudioFrameExtractionIdentityInput = {
   shotId: string;
-  takeAssetId: string;
+  videoAssetId: string;
   endpointSeconds: number;
 };
 
@@ -19,10 +19,10 @@ const assertSafeId = (value: string, field: string): void => {
   if (!SAFE_STUDIO_ID.test(value)) throw new TypeError(`${field} must be a safe Studio ID`);
 };
 
-/** Returns the deterministic identity of one exact take endpoint extraction. */
+/** Returns the deterministic identity of one exact rendered-video endpoint extraction. */
 export const createStudioFrameExtractionId = (input: StudioFrameExtractionIdentityInput): string => {
   assertSafeId(input.shotId, 'shotId');
-  assertSafeId(input.takeAssetId, 'takeAssetId');
+  assertSafeId(input.videoAssetId, 'videoAssetId');
   if (
     !Number.isFinite(input.endpointSeconds) ||
     input.endpointSeconds <= 0 ||
@@ -34,7 +34,7 @@ export const createStudioFrameExtractionId = (input: StudioFrameExtractionIdenti
   const canonical = [
     FRAME_EXTRACTION_ID_NAMESPACE,
     input.shotId,
-    input.takeAssetId,
+    input.videoAssetId,
     Number.prototype.toString.call(input.endpointSeconds),
   ].join('\0');
   return `frame_${createHash('sha256').update(canonical, 'utf8').digest('hex')}`;

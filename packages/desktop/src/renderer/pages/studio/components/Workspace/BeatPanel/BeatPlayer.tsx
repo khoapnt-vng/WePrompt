@@ -116,7 +116,7 @@ const isEditableDescendant = (target: EventTarget | null, root: HTMLElement): bo
   );
 };
 
-/** Owns truthful selected-Take/slate playback and exposes a controlled Beat seek position. */
+/** Owns truthful current-picture/slate playback and exposes a controlled Beat seek position. */
 export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspector, projectId, projection }) => {
   const { t } = useTranslation();
   const keyboardGuidanceId = useId();

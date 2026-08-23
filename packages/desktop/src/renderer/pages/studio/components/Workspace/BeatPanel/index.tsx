@@ -11,8 +11,6 @@ import { useTranslation } from 'react-i18next';
 
 import {
   STUDIO_LOOK_SOFT_WORD_LIMIT,
-  STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION,
-  type StudioCascadeProgressV2,
   type StudioEditableBeatChanges,
   type StudioEditableShotChanges,
   type StudioRendererParkBlockerCodeV2,
@@ -21,29 +19,21 @@ import {
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
-import type {
-  WorkspaceBeatProjection,
-  WorkspaceProjection,
-  WorkspaceShotProjection,
-  WorkspaceTakeProjection,
-} from '../workspaceProjection';
+import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../workspaceProjection';
 import styles from './BeatPanel.module.css';
 import { BeatPlayer } from './BeatPlayer';
 import { CoverageBar } from './CoverageBar';
-import { COVERAGE_MIN_PLAYED_SECONDS, type CoveragePlanningPairChange } from './coverageGeometry';
+import type { CoveragePlanningPairChange } from './coverageGeometry';
 
 const KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel';
 const JOB_KEY_ROOT = 'conversation.creativeStudio.jobs';
 
 export type BeatPanelImportResult = 'cancelled' | 'imported' | 'failed';
 
-export type BeatPanelGenerationCount = 1 | 2 | 3 | 4;
-
 type ModalConfirmationHandle = ReturnType<typeof Modal.confirm>;
 
 export type BeatPanelReviewPreference = {
   purpose: 'seed_still' | 'video_take';
-  generationCount: BeatPanelGenerationCount;
   referenceAssetId: string | null;
 };
 
@@ -51,8 +41,7 @@ export type BeatPanelReviewChoiceIdentity = Pick<BeatPanelReviewPreference, 'pur
   shotId: string;
 };
 
-export type BeatPanelReviewChoice = BeatPanelReviewChoiceIdentity &
-  Pick<BeatPanelReviewPreference, 'generationCount' | 'referenceAssetId'>;
+export type BeatPanelReviewChoice = BeatPanelReviewChoiceIdentity & Pick<BeatPanelReviewPreference, 'referenceAssetId'>;
 
 export type BeatPanelReviewGraph = {
   triggerShotId: string;
@@ -78,17 +67,12 @@ export type BeatPanelActions = {
   redetachLine: (shotId: string, line: string) => Promise<boolean>;
   restoreLine: (shotId: string, historyEntryId: string) => Promise<boolean>;
   importSeedStill: (shotId: string) => Promise<BeatPanelImportResult>;
-  selectTake: (shotId: string, assetId: string) => Promise<boolean>;
-  parkTake: (shotId: string, assetId: string) => Promise<boolean>;
-  addAlternateTake: (shotId: string, assetId: string) => Promise<boolean>;
-  restoreTake: (shotId: string, assetId: string) => Promise<boolean>;
   parkShot: (shotId: string, onCommitted?: () => void) => Promise<boolean>;
   parkBeat: (beatId: string) => Promise<boolean>;
   reviewShot: (triggerShotId: string, choices: readonly [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]) => void;
   reviewContinuity: (shotId: string, hardCut: boolean) => void;
   retryGenerationJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   cancelGenerationJob: (jobId: string) => Promise<boolean>;
-  chooseCascadeAsset: (row: StudioCascadeProgressV2, assetId: string) => Promise<boolean>;
   retryConditioning: (dependentShotId: string) => Promise<boolean>;
   cancelWaiting: (dependentShotId: string) => Promise<boolean>;
   requestReviewedRederive: (shotId: string) => void;
@@ -142,15 +126,9 @@ const wordCount = (value: string): number => {
   return trimmed.length === 0 ? 0 : trimmed.split(/\s+/u).length;
 };
 
-type GatePreferenceRecord = Record<string, Pick<BeatPanelReviewPreference, 'generationCount' | 'referenceAssetId'>>;
+type GatePreferenceRecord = Record<string, Pick<BeatPanelReviewPreference, 'referenceAssetId'>>;
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
-
-const isGenerationCount = (value: unknown): value is BeatPanelGenerationCount =>
-  typeof value === 'number' &&
-  Number.isSafeInteger(value) &&
-  value >= 1 &&
-  value <= STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION;
 
 const parseGatePreferences = (value: unknown): GatePreferenceRecord => {
   if (typeof value !== 'string') return {};
@@ -163,15 +141,13 @@ const parseGatePreferences = (value: unknown): GatePreferenceRecord => {
       if (keyMatch === null || typeof candidate !== 'object' || candidate === null) continue;
       const row = candidate as Record<string, unknown>;
       if (
-        !isGenerationCount(row.generationCount) ||
+        keyMatch[2] !== 'seed_still' ||
         (row.referenceAssetId !== null &&
-          (typeof row.referenceAssetId !== 'string' || !SAFE_STUDIO_ID.test(row.referenceAssetId))) ||
-        (keyMatch[2] === 'video_take' && row.referenceAssetId !== null)
+          (typeof row.referenceAssetId !== 'string' || !SAFE_STUDIO_ID.test(row.referenceAssetId)))
       ) {
         continue;
       }
       result[key] = {
-        generationCount: row.generationCount,
         referenceAssetId: row.referenceAssetId as string | null,
       };
     }
@@ -198,7 +174,7 @@ const reviewPreferenceKey = (shotId: string, purpose: BeatPanelReviewPreference[
 
 const exactEligibility = (
   projection: WorkspaceProjection,
-  identity: Pick<StudioRendererParkEligibilityV2, 'subject' | 'action' | 'beatId' | 'shotId' | 'assetId'>
+  identity: Pick<StudioRendererParkEligibilityV2, 'subject' | 'action' | 'beatId' | 'shotId'>
 ): StudioRendererParkEligibilityV2 | null => {
   if (!projection.workspaceStatusReady) return null;
   const matches = projection.parkEligibility.filter(
@@ -206,8 +182,7 @@ const exactEligibility = (
       row.subject === identity.subject &&
       row.action === identity.action &&
       row.beatId === identity.beatId &&
-      row.shotId === identity.shotId &&
-      row.assetId === identity.assetId
+      row.shotId === identity.shotId
   );
   return matches.length === 1 ? matches[0]! : null;
 };
@@ -257,81 +232,13 @@ const exactReviewGraph = (
   return choices;
 };
 
-type RecoveryChoice = {
-  mediaKind: WorkspaceTakeProjection['mediaKind'];
-  shotPosition: ShotPosition;
-  takeIndex: number;
-};
-
-const videoTakeFitsShotTrims = (shot: WorkspaceShotProjection, take: WorkspaceTakeProjection): boolean => {
-  if (take.mediaKind !== 'video') return false;
-  const duration = take.sourceDurationSeconds;
-  const trimIn = shot.trimInSeconds ?? 0;
-  const trimOut = shot.trimOutSeconds ?? 0;
-  return (
-    duration !== null &&
-    Number.isFinite(duration) &&
-    duration > 0 &&
-    Number.isFinite(trimIn) &&
-    trimIn >= 0 &&
-    Number.isFinite(trimOut) &&
-    trimOut >= 0 &&
-    trimIn < duration &&
-    trimOut < duration &&
-    duration - trimIn - trimOut >= COVERAGE_MIN_PLAYED_SECONDS
-  );
-};
-
-const exactRecoveryChoice = (
-  projection: WorkspaceProjection,
-  row: StudioCascadeProgressV2,
-  assetId: string
-): RecoveryChoice | null => {
-  if (
-    row.eligiblePrimaryAssetIds.filter((eligibleId) => eligibleId === assetId).length !== 1 ||
-    (row.waitingReason !== 'choose_seed' &&
-      row.waitingReason !== 'choose_take' &&
-      row.waitingReason !== 'conditioning_failed')
-  ) {
-    return null;
-  }
-  const upstreamMatches = projection.activeBeats.flatMap((beat, beatIndex) =>
-    beat.shots.flatMap((shot, shotIndex) =>
-      shot.id === row.upstreamShotId ? [{ shot, shotPosition: { beatIndex, shotIndex } }] : []
-    )
-  );
-  if (upstreamMatches.length !== 1) return null;
-  const [{ shot, shotPosition }] = upstreamMatches;
-  const candidates: Array<{ take: WorkspaceTakeProjection; takeIndex: number }> =
-    row.waitingReason === 'choose_seed'
-      ? shot.imageTakes.map((take, takeIndex) => ({ take, takeIndex }))
-      : shot.videoTakes.map((take, takeIndex) => ({ take, takeIndex }));
-  const matches = candidates.flatMap(({ take, takeIndex }) => {
-    if (
-      take.assetId !== assetId ||
-      take.binReason !== null ||
-      (row.waitingReason === 'conditioning_failed' && take.selected)
-    ) {
-      return [];
-    }
-    if (take.mediaKind === 'video' && !videoTakeFitsShotTrims(shot, take)) return [];
-    return [{ mediaKind: take.mediaKind, shotPosition, takeIndex }];
-  });
-  return matches.length === 1 ? matches[0]! : null;
-};
-
 const BLOCKER_KEYS = {
-  current_match_to: `${KEY_ROOT}.blocker.currentMatchTo`,
   own_nonterminal_job: `${KEY_ROOT}.blocker.ownNonterminalJob`,
   own_pending_frame: `${KEY_ROOT}.blocker.ownPendingFrame`,
   downstream_nonterminal_job: `${KEY_ROOT}.blocker.downstreamNonterminalJob`,
   downstream_pending_frame: `${KEY_ROOT}.blocker.downstreamPendingFrame`,
   waiting_authorization_dependency: `${KEY_ROOT}.blocker.waitingAuthorizationDependency`,
   bound_nonterminal_request: `${KEY_ROOT}.blocker.boundNonterminalRequest`,
-  current_selected_take: `${KEY_ROOT}.blocker.currentSelectedTake`,
-  current_seed_still: `${KEY_ROOT}.blocker.currentSeedStill`,
-  nonterminal_conditioning_use: `${KEY_ROOT}.blocker.nonterminalConditioningUse`,
-  take_bin_capacity_reached: `${KEY_ROOT}.blocker.takeBinCapacityReached`,
   beat_shot_capacity_reached: `${KEY_ROOT}.blocker.beatShotCapacityReached`,
 } as const satisfies Record<StudioRendererParkBlockerCodeV2, string>;
 
@@ -341,361 +248,77 @@ const useLatestDrafts = (drafts: UseWorkspaceDraftsResult): React.MutableRefObje
   return ref;
 };
 
-type TakeCardProps = {
+type SeedStillCardProps = {
   actions: BeatPanelActions;
-  beatId: string;
   canManageSeed: boolean;
   disabled: boolean;
-  hidden: boolean;
   projectId: string;
-  projection: WorkspaceProjection;
   shot: WorkspaceShotProjection;
   shotIndex: number;
-  take: WorkspaceTakeProjection;
-  takeIndex: number;
+  still: WorkspaceShotProjection['seedStills'][number];
+  stillIndex: number;
 };
 
-const TakeCard: React.FC<TakeCardProps> = ({
+const SeedStillCard: React.FC<SeedStillCardProps> = ({
   actions,
-  beatId,
   canManageSeed,
   disabled,
-  hidden,
   projectId,
-  projection,
   shot,
   shotIndex,
-  take,
-  takeIndex,
+  still,
+  stillIndex,
 }) => {
   const { t } = useTranslation();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
-  const restoreMenuFocusAfterCloseRef = useRef(false);
-  const takeMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const assetUrl = createManagedStudioAssetUrl(projectId, take.assetId);
-  const posterUrl = take.posterAssetId === null ? null : createManagedStudioAssetUrl(projectId, take.posterAssetId);
-  const active = take.binReason === null;
-  const parkEligibility = active
-    ? exactEligibility(projection, {
-        subject: 'take',
-        action: 'park',
-        beatId,
-        shotId: shot.id,
-        assetId: take.assetId,
-      })
-    : null;
-  const restoreEligibility = active
-    ? null
-    : exactEligibility(projection, {
-        subject: 'take',
-        action: 'restore',
-        beatId,
-        shotId: shot.id,
-        assetId: take.assetId,
-      });
-  const actionEligibility = active ? parkEligibility : restoreEligibility;
-  const actionAllowed = actionEligibility?.allowed === true;
-  const firstBlocker = actionEligibility?.blockers[0] ?? null;
-  const selectableVideoTake = take.mediaKind === 'video' && videoTakeFitsShotTrims(shot, take);
-  const actionAuthorityRef = useRef({
-    active,
-    actionAllowed,
-    actions,
-    assetId: take.assetId,
-    available: !hidden,
-    disabled,
-    mounted: true,
-    projectId,
-    projectRevision: projection.projectRevision,
-    shotId: shot.id,
+  const assetUrl = createManagedStudioAssetUrl(projectId, still.assetId);
+  const stillLabel = t(`${KEY_ROOT}.seeds.stillLabel`, {
+    shotIndex: shotIndex + 1,
+    stillIndex: stillIndex + 1,
   });
-  actionAuthorityRef.current = {
-    active,
-    actionAllowed,
-    actions,
-    assetId: take.assetId,
-    available: !hidden,
-    disabled,
-    mounted: actionAuthorityRef.current.mounted,
-    projectId,
-    projectRevision: projection.projectRevision,
-    shotId: shot.id,
-  };
-
-  useEffect(() => {
-    if (!active || disabled || hidden || !actionAllowed) {
-      setMenuOpen(false);
-      confirmationHandleRef.current?.close();
-      confirmationHandleRef.current = null;
-    }
-  }, [actionAllowed, active, disabled, hidden]);
-
-  useEffect(() => {
-    setMenuOpen(false);
-    confirmationHandleRef.current?.close();
-    confirmationHandleRef.current = null;
-  }, [projectId, projection.projectRevision]);
-
-  useEffect(
-    () => () => {
-      actionAuthorityRef.current.mounted = false;
-      confirmationHandleRef.current?.close();
-      confirmationHandleRef.current = null;
-    },
-    []
-  );
-
-  if (assetUrl === null || (take.posterAssetId !== null && posterUrl === null)) {
+  if (assetUrl === null) {
     return (
-      <article className={styles.takeCard} data-asset-id={take.assetId} data-media-kind={take.mediaKind}>
+      <article className={styles.mediaCard} data-asset-id={still.assetId}>
         <p className={styles.warning} role='alert'>
-          {t(`${KEY_ROOT}.takes.unavailable`)}
+          {t(`${KEY_ROOT}.picture.unavailable`)}
         </p>
       </article>
     );
   }
-
-  const takeLabel = t(
-    take.mediaKind === 'image' ? `${KEY_ROOT}.takes.imageTakeLabel` : `${KEY_ROOT}.takes.videoTakeLabel`,
-    { shotIndex: shotIndex + 1, takeIndex: takeIndex + 1 }
-  );
-  const confirmPark = (): void => {
-    if (disabled || !actionAllowed) return;
-    setMenuOpen(false);
-    const expectedAssetId = take.assetId;
-    const expectedProjectId = projectId;
-    const expectedProjectRevision = projection.projectRevision;
-    const expectedShotId = shot.id;
-    restoreMenuFocusAfterCloseRef.current = false;
-    confirmationHandleRef.current?.close();
-    confirmationHandleRef.current = Modal.confirm({
-      afterClose: () => {
-        confirmationHandleRef.current = null;
-        const authority = actionAuthorityRef.current;
-        if (
-          restoreMenuFocusAfterCloseRef.current &&
-          authority.mounted &&
-          authority.available &&
-          authority.active &&
-          authority.actionAllowed &&
-          !authority.disabled &&
-          authority.assetId === expectedAssetId &&
-          authority.projectId === expectedProjectId &&
-          authority.projectRevision === expectedProjectRevision &&
-          authority.shotId === expectedShotId
-        ) {
-          takeMenuTriggerRef.current?.focus();
-        }
-        restoreMenuFocusAfterCloseRef.current = false;
-      },
-      cancelText: t(`${KEY_ROOT}.common.cancel`),
-      content: t(`${KEY_ROOT}.takes.parkConfirmBody`),
-      okButtonProps: { status: 'danger' },
-      okText: t(`${KEY_ROOT}.takes.park`),
-      onCancel: () => {
-        restoreMenuFocusAfterCloseRef.current = true;
-      },
-      onOk: () => {
-        const authority = actionAuthorityRef.current;
-        if (
-          !authority.mounted ||
-          !authority.available ||
-          !authority.active ||
-          authority.disabled ||
-          !authority.actionAllowed ||
-          authority.assetId !== expectedAssetId ||
-          authority.projectId !== expectedProjectId ||
-          authority.projectRevision !== expectedProjectRevision ||
-          authority.shotId !== expectedShotId
-        ) {
-          return;
-        }
-        restoreMenuFocusAfterCloseRef.current = true;
-        return authority.actions.parkTake(authority.shotId, authority.assetId);
-      },
-      title: t(`${KEY_ROOT}.takes.parkConfirmTitle`),
-    });
-  };
-  const confirmAlternate = (): void => {
-    if (disabled || !actionAllowed) return;
-    setMenuOpen(false);
-    const expectedAssetId = take.assetId;
-    const expectedProjectId = projectId;
-    const expectedProjectRevision = projection.projectRevision;
-    const expectedShotId = shot.id;
-    restoreMenuFocusAfterCloseRef.current = false;
-    confirmationHandleRef.current?.close();
-    confirmationHandleRef.current = Modal.confirm({
-      afterClose: () => {
-        confirmationHandleRef.current = null;
-        const authority = actionAuthorityRef.current;
-        if (
-          restoreMenuFocusAfterCloseRef.current &&
-          authority.mounted &&
-          authority.available &&
-          authority.active &&
-          authority.actionAllowed &&
-          !authority.disabled &&
-          authority.assetId === expectedAssetId &&
-          authority.projectId === expectedProjectId &&
-          authority.projectRevision === expectedProjectRevision &&
-          authority.shotId === expectedShotId
-        ) {
-          takeMenuTriggerRef.current?.focus();
-        }
-        restoreMenuFocusAfterCloseRef.current = false;
-      },
-      cancelText: t(`${KEY_ROOT}.common.cancel`),
-      content: t(`${KEY_ROOT}.takes.alternateConfirmBody`),
-      okText: t(`${KEY_ROOT}.takes.addAlternate`),
-      onCancel: () => {
-        restoreMenuFocusAfterCloseRef.current = true;
-      },
-      onOk: () => {
-        const authority = actionAuthorityRef.current;
-        if (
-          !authority.mounted ||
-          !authority.available ||
-          !authority.active ||
-          authority.disabled ||
-          !authority.actionAllowed ||
-          authority.assetId !== expectedAssetId ||
-          authority.projectId !== expectedProjectId ||
-          authority.projectRevision !== expectedProjectRevision ||
-          authority.shotId !== expectedShotId
-        ) {
-          return;
-        }
-        restoreMenuFocusAfterCloseRef.current = true;
-        return authority.actions.addAlternateTake(authority.shotId, authority.assetId);
-      },
-      title: t(`${KEY_ROOT}.takes.alternateConfirmTitle`),
-    });
-  };
-  const takeMenu = (
-    <Menu data-asset-id={take.assetId} data-take-overflow-menu>
-      <Menu.Item key='move-to-bin' data-take-move-to-bin disabled={disabled || !actionAllowed} onClick={confirmPark}>
-        {t(`${KEY_ROOT}.takes.park`)}
-      </Menu.Item>
-      <Menu.Item
-        key='alternate'
-        data-take-add-alternate
-        disabled={disabled || !actionAllowed}
-        onClick={confirmAlternate}
-      >
-        {t(`${KEY_ROOT}.takes.addAlternate`)}
-      </Menu.Item>
-    </Menu>
-  );
   return (
     <article
-      aria-label={takeLabel}
-      className={styles.takeCard}
-      data-asset-id={take.assetId}
-      data-bin-reason={take.binReason ?? undefined}
-      data-effective-seed={take.effectiveSeed}
-      data-explicit-seed={take.explicitSeed}
-      data-media-kind={take.mediaKind}
-      data-selected={take.selected}
+      aria-label={stillLabel}
+      className={styles.mediaCard}
+      data-asset-id={still.assetId}
+      data-effective-seed={still.effectiveSeed}
+      data-explicit-seed={still.explicitSeed}
+      data-seed-still
     >
-      {take.mediaKind === 'image' ? (
-        <img
-          alt={t(`${KEY_ROOT}.takes.previewAlt`, { label: takeLabel })}
-          className={styles.takePreview}
-          src={assetUrl}
-        />
-      ) : (
-        <video
-          aria-label={t(`${KEY_ROOT}.takes.videoPreview`, { label: takeLabel })}
-          className={styles.takePreview}
-          controls
-          poster={posterUrl ?? undefined}
-          preload='metadata'
-          src={assetUrl}
-        />
-      )}
-      <div className={styles.takeDetails}>
-        <span className={styles.takeIdentity} dir='auto'>
-          {takeLabel}
+      <img
+        alt={t(`${KEY_ROOT}.seeds.previewAlt`, { label: stillLabel })}
+        className={styles.mediaPreview}
+        src={assetUrl}
+      />
+      <div className={styles.mediaDetails}>
+        <span className={styles.mediaIdentity} dir='auto'>
+          {stillLabel}
         </span>
         <div className={styles.badges}>
-          {take.selected ? <span>{t(`${KEY_ROOT}.takes.selected`)}</span> : null}
-          {take.effectiveSeed ? <span>{t(`${KEY_ROOT}.takes.effectiveSeed`)}</span> : null}
-          {take.explicitSeed ? <span>{t(`${KEY_ROOT}.takes.pinnedSeed`)}</span> : null}
-          {take.binReason !== null ? <span>{t(`${KEY_ROOT}.takes.binReason.${take.binReason}`)}</span> : null}
-          {take.sourceDurationSeconds !== null ? (
-            <span>
-              <bdi>{t(`${KEY_ROOT}.takes.sourceDuration`, { seconds: take.sourceDurationSeconds })}</bdi>
-            </span>
-          ) : null}
+          {still.effectiveSeed ? <span>{t(`${KEY_ROOT}.seeds.effective`)}</span> : null}
+          {still.explicitSeed ? <span>{t(`${KEY_ROOT}.seeds.pinnedBadge`)}</span> : null}
         </div>
       </div>
-      <div className={styles.actions}>
-        {canManageSeed && active && take.mediaKind === 'image' && !take.explicitSeed ? (
-          <Button disabled={disabled} onClick={() => void actions.setSeedStill(shot.id, take.assetId)} size='small'>
-            {t(`${KEY_ROOT}.seeds.pin`)}
-          </Button>
-        ) : null}
-        {canManageSeed && active && take.mediaKind === 'image' && take.explicitSeed ? (
-          <Button disabled={disabled} onClick={() => void actions.setSeedStill(shot.id, null)} size='small'>
-            {t(`${KEY_ROOT}.seeds.clearPin`)}
-          </Button>
-        ) : null}
-        {active && take.mediaKind === 'video' && !take.selected ? (
-          <Button
-            disabled={disabled || !selectableVideoTake}
-            onClick={() => void actions.selectTake(shot.id, take.assetId)}
-            size='small'
-            type='primary'
-          >
-            {t(`${KEY_ROOT}.takes.select`)}
-          </Button>
-        ) : null}
-        {active ? (
-          <Dropdown
-            droplist={takeMenu}
-            getPopupContainer={() => document.body}
-            onVisibleChange={setMenuOpen}
-            popupVisible={menuOpen}
-            position='br'
-            trigger='click'
-          >
-            <Button
-              ref={(node) => {
-                takeMenuTriggerRef.current = node instanceof HTMLButtonElement ? node : null;
-              }}
-              aria-expanded={menuOpen}
-              aria-haspopup='menu'
-              aria-label={`${t('common.more')} · ${takeLabel}`}
-              data-asset-id={take.assetId}
-              data-take-overflow-trigger
-              disabled={disabled || !actionAllowed}
-              icon={<MoreOne aria-hidden='true' />}
-              shape='circle'
-              size='small'
-              type='text'
-            />
-          </Dropdown>
-        ) : (
-          <Button
-            disabled={disabled || !actionAllowed}
-            onClick={() => void actions.restoreTake(shot.id, take.assetId)}
-            size='small'
-          >
-            {t(`${KEY_ROOT}.takes.restore`)}
-          </Button>
-        )}
-      </div>
-      {active && take.mediaKind === 'video' && !take.selected && !selectableVideoTake ? (
-        <p className={styles.warning} role='status'>
-          {t(`${KEY_ROOT}.takes.trimIncompatible`)}
-        </p>
-      ) : null}
-      {!actionAllowed ? (
-        <p className={styles.blocker} role='status'>
-          {firstBlocker === null ? t(`${KEY_ROOT}.blocker.statusUnavailable`) : t(BLOCKER_KEYS[firstBlocker.code])}
-        </p>
+      {canManageSeed ? (
+        <div className={styles.actions}>
+          {still.explicitSeed ? (
+            <Button disabled={disabled} onClick={() => void actions.setSeedStill(shot.id, null)} size='small'>
+              {t(`${KEY_ROOT}.seeds.clearPin`)}
+            </Button>
+          ) : (
+            <Button disabled={disabled} onClick={() => void actions.setSeedStill(shot.id, still.assetId)} size='small'>
+              {t(`${KEY_ROOT}.seeds.pin`)}
+            </Button>
+          )}
+        </div>
       ) : null}
     </article>
   );
@@ -717,7 +340,7 @@ type ShotCardProps = {
   onUpdateReviewPreference: (
     shotId: string,
     purpose: BeatPanelReviewPreference['purpose'],
-    changes: Partial<Pick<BeatPanelReviewPreference, 'generationCount' | 'referenceAssetId'>>
+    changes: Pick<BeatPanelReviewPreference, 'referenceAssetId'>
   ) => void;
   projectId: string;
   projection: WorkspaceProjection;
@@ -787,7 +410,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
     action: 'park',
     beatId: beat.id,
     shotId: shot.id,
-    assetId: null,
   });
   const firstLiftBlocker = liftEligibility?.blockers[0] ?? null;
   const downstream = shot.downstreamShotIds;
@@ -826,7 +448,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
           : null;
       return {
         ...choice,
-        generationCount: stored?.generationCount ?? 1,
         referenceAssetId,
       };
     }) ?? null;
@@ -1031,6 +652,17 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </Menu.Item>
     </Menu>
   );
+  const pictureLabel = t(`${KEY_ROOT}.picture.label`, { index: index + 1 });
+  const currentPictureUrl =
+    shot.currentPicture === null ? null : createManagedStudioAssetUrl(projectId, shot.currentPicture.assetId);
+  const currentPicturePosterUrl =
+    shot.currentPicture?.posterAssetId === null || shot.currentPicture?.posterAssetId === undefined
+      ? null
+      : createManagedStudioAssetUrl(projectId, shot.currentPicture.posterAssetId);
+  const currentPictureAvailable =
+    shot.currentPicture !== null &&
+    currentPictureUrl !== null &&
+    (shot.currentPicture.posterAssetId === null || currentPicturePosterUrl !== null);
   return (
     <article ref={shotCardRef} className={styles.shotCard} data-shot-id={shot.id} hidden={hidden}>
       <header className={styles.shotHeader}>
@@ -1151,22 +783,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </div>
       <div className={styles.shotActionCluster}>
         <div className={styles.shotActionBand} data-shot-action-band>
-          <dl className={styles.takeSummary} data-shot-take-summary>
-            {shot.segmentHead || shot.imageTakes.length > 0 ? (
-              <div>
-                <dt>{t(shot.segmentHead ? `${KEY_ROOT}.seeds.title` : `${KEY_ROOT}.seeds.imageTitle`)}</dt>
-                <dd>
-                  <bdi>{shot.imageTakes.length}</bdi>
-                </dd>
-              </div>
-            ) : null}
-            <div>
-              <dt>{t(`${KEY_ROOT}.takes.videoTitle`)}</dt>
-              <dd>
-                <bdi>{shot.videoTakes.length}</bdi>
-              </dd>
-            </div>
-          </dl>
           <div className={styles.editorActions} data-shot-actions>
             <Button
               disabled={disabled || drafts.staleRevision || saving || !dirty}
@@ -1250,13 +866,8 @@ const ShotCard: React.FC<ShotCardProps> = ({
         ) : null}
       </section>
 
-      {shot.segmentHead || shot.imageTakes.length > 0 ? (
-        <section
-          aria-label={t(shot.segmentHead ? `${KEY_ROOT}.seeds.label` : `${KEY_ROOT}.seeds.imageLabel`, {
-            index: index + 1,
-          })}
-          className={styles.subsection}
-        >
+      {shot.segmentHead || shot.seedStills.length > 0 ? (
+        <section aria-label={t(`${KEY_ROOT}.seeds.label`, { index: index + 1 })} className={styles.subsection}>
           {shot.segmentHead ? (
             <div className={styles.subsectionHeader}>
               <div>
@@ -1276,51 +887,123 @@ const ShotCard: React.FC<ShotCardProps> = ({
               </Button>
             </div>
           ) : (
-            <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.imageTitle`)}</h4>
+            <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
           )}
-          <div className={styles.takeGrid}>
-            {shot.imageTakes.map((take, takeIndex) => (
-              <TakeCard
-                key={take.assetId}
+          <div className={styles.mediaStrip}>
+            {shot.seedStills.map((still, stillIndex) => (
+              <SeedStillCard
+                key={still.assetId}
                 actions={actions}
-                beatId={beat.id}
                 canManageSeed={shot.segmentHead}
                 disabled={disabled}
-                hidden={hidden}
                 projectId={projectId}
-                projection={projection}
                 shot={shot}
                 shotIndex={index}
-                take={take}
-                takeIndex={takeIndex}
+                still={still}
+                stillIndex={stillIndex}
               />
             ))}
           </div>
-          {shot.imageTakes.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.seeds.empty`)}</p> : null}
+          {shot.seedStills.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.seeds.empty`)}</p> : null}
         </section>
       ) : null}
 
-      <section aria-label={t(`${KEY_ROOT}.takes.videoLabel`, { index: index + 1 })} className={styles.subsection}>
-        <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.takes.videoTitle`)}</h4>
-        <div className={styles.takeGrid}>
-          {shot.videoTakes.map((take, takeIndex) => (
-            <TakeCard
-              key={take.assetId}
-              actions={actions}
-              beatId={beat.id}
-              canManageSeed={false}
-              disabled={disabled}
-              hidden={hidden}
-              projectId={projectId}
-              projection={projection}
-              shot={shot}
-              shotIndex={index}
-              take={take}
-              takeIndex={takeIndex}
+      <section aria-label={pictureLabel} className={styles.subsection}>
+        <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.picture.title`)}</h4>
+        {shot.currentPicture === null ? (
+          <p className={styles.muted}>{t(`${KEY_ROOT}.picture.empty`)}</p>
+        ) : !currentPictureAvailable ? (
+          <p className={styles.warning} role='alert'>
+            {t(`${KEY_ROOT}.picture.unavailable`)}
+          </p>
+        ) : (
+          <article className={styles.mediaCard} data-asset-id={shot.currentPicture.assetId} data-current-picture>
+            <video
+              aria-label={t(`${KEY_ROOT}.picture.videoPreview`, { label: pictureLabel })}
+              className={styles.mediaPreview}
+              controls
+              poster={currentPicturePosterUrl ?? undefined}
+              preload='metadata'
+              src={currentPictureUrl!}
             />
-          ))}
+            <div className={styles.mediaDetails}>
+              <span className={styles.mediaIdentity} dir='auto'>
+                {pictureLabel}
+              </span>
+              <span>
+                <bdi>
+                  {t(`${KEY_ROOT}.picture.sourceDuration`, {
+                    seconds: shot.currentPicture.sourceDurationSeconds,
+                  })}
+                </bdi>
+              </span>
+            </div>
+          </article>
+        )}
+        <div className={styles.shotFooter} data-shot-footer>
+          {reviewPreferences?.some((preference) => preference.purpose === 'seed_still') ? (
+            <div className={styles.generationPreferences}>
+              {reviewPreferences
+                .filter((preference) => preference.purpose === 'seed_still')
+                .map((preference) => {
+                  const position = exactShotPosition(projection, preference.shotId)!;
+                  const purpose = t(`${KEY_ROOT}.generation.purpose.seedStill`);
+                  const choiceLabel = t(`${KEY_ROOT}.generation.choiceLabel`, {
+                    beatIndex: position.beatIndex + 1,
+                    shotIndex: position.shotIndex + 1,
+                    purpose,
+                  });
+                  return (
+                    <label key={reviewPreferenceKey(preference.shotId, preference.purpose)}>
+                      <span>{t(`${KEY_ROOT}.generation.referenceForChoice`, { choice: choiceLabel })}</span>
+                      <Select
+                        allowClear
+                        aria-label={t(`${KEY_ROOT}.generation.referenceForChoice`, { choice: choiceLabel })}
+                        disabled={disabled}
+                        onChange={(value) =>
+                          onUpdateReviewPreference(preference.shotId, preference.purpose, {
+                            referenceAssetId:
+                              typeof value === 'string' &&
+                              briefReferenceOptions.some((option) => option.assetId === value)
+                                ? value
+                                : null,
+                          })
+                        }
+                        placeholder={t(`${KEY_ROOT}.generation.noReference`)}
+                        value={preference.referenceAssetId ?? undefined}
+                      >
+                        {briefReferenceOptions.map((option) => (
+                          <Select.Option key={option.assetId} value={option.assetId}>
+                            <span dir='auto'>{option.label}</span>
+                          </Select.Option>
+                        ))}
+                      </Select>
+                    </label>
+                  );
+                })}
+            </div>
+          ) : null}
+          {reviewPreferences === null ? (
+            <p className={styles.blocker} role='status'>
+              {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
+            </p>
+          ) : null}
+          <Button
+            disabled={disabled || reviewBlocked || reviewedGenerationBlocked || reviewPreferences === null}
+            onClick={() => {
+              if (reviewPreferences !== null && reviewPreferences.length > 0) {
+                actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
+              }
+            }}
+            type='primary'
+          >
+            {t(
+              shot.segmentHead && shot.effectiveSeedAssetId === null
+                ? `${KEY_ROOT}.generation.generateSeed`
+                : `${KEY_ROOT}.generation.renderVideo`
+            )}
+          </Button>
         </div>
-        {shot.videoTakes.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.takes.empty`)}</p> : null}
       </section>
 
       {shot.attentionJobs.length > 0 ? (
@@ -1341,7 +1024,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
                     {t(
                       job.purpose === 'seed_still'
                         ? `${KEY_ROOT}.generation.purpose.seedStill`
-                        : `${KEY_ROOT}.generation.purpose.videoTake`
+                        : 'conversation.creativeStudio.scene.video'
                     )}
                   </p>
                 </div>
@@ -1390,97 +1073,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
         </section>
       ) : null}
 
-      <div className={styles.shotFooter} data-shot-footer>
-        <div className={styles.generationPreferences}>
-          {reviewPreferences?.map((preference) => {
-            const position = exactShotPosition(projection, preference.shotId)!;
-            const purpose = t(
-              preference.purpose === 'seed_still'
-                ? `${KEY_ROOT}.generation.purpose.seedStill`
-                : `${KEY_ROOT}.generation.purpose.videoTake`
-            );
-            const choiceLabel = t(`${KEY_ROOT}.generation.choiceLabel`, {
-              beatIndex: position.beatIndex + 1,
-              shotIndex: position.shotIndex + 1,
-              purpose,
-            });
-            return (
-              <div
-                key={reviewPreferenceKey(preference.shotId, preference.purpose)}
-                className={styles.generationPreference}
-                data-generation-purpose={preference.purpose}
-              >
-                <p>{choiceLabel}</p>
-                <label>
-                  <span>{t(`${KEY_ROOT}.generation.countForChoice`, { choice: choiceLabel })}</span>
-                  <InputNumber
-                    aria-label={t(`${KEY_ROOT}.generation.countForChoice`, { choice: choiceLabel })}
-                    disabled={disabled}
-                    max={STUDIO_MAX_GENERATIONS_PER_SHOT_PER_SUBMISSION}
-                    min={1}
-                    onChange={(value) => {
-                      if (isGenerationCount(value)) {
-                        onUpdateReviewPreference(preference.shotId, preference.purpose, {
-                          generationCount: value,
-                        });
-                      }
-                    }}
-                    precision={0}
-                    value={preference.generationCount}
-                  />
-                </label>
-                {preference.purpose === 'seed_still' ? (
-                  <label>
-                    <span>{t(`${KEY_ROOT}.generation.referenceForChoice`, { choice: choiceLabel })}</span>
-                    <Select
-                      allowClear
-                      aria-label={t(`${KEY_ROOT}.generation.referenceForChoice`, { choice: choiceLabel })}
-                      disabled={disabled}
-                      onChange={(value) =>
-                        onUpdateReviewPreference(preference.shotId, preference.purpose, {
-                          referenceAssetId:
-                            typeof value === 'string' &&
-                            briefReferenceOptions.some((option) => option.assetId === value)
-                              ? value
-                              : null,
-                        })
-                      }
-                      placeholder={t(`${KEY_ROOT}.generation.noReference`)}
-                      value={preference.referenceAssetId ?? undefined}
-                    >
-                      {briefReferenceOptions.map((option) => (
-                        <Select.Option key={option.assetId} value={option.assetId}>
-                          <span dir='auto'>{option.label}</span>
-                        </Select.Option>
-                      ))}
-                    </Select>
-                  </label>
-                ) : null}
-              </div>
-            );
-          })}
-          {reviewPreferences === null ? (
-            <p className={styles.blocker} role='status'>
-              {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
-            </p>
-          ) : null}
-        </div>
-        <Button
-          disabled={disabled || reviewBlocked || reviewedGenerationBlocked || reviewPreferences === null}
-          onClick={() => {
-            if (reviewPreferences !== null && reviewPreferences.length > 0) {
-              actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
-            }
-          }}
-          type='primary'
-        >
-          {t(
-            shot.segmentHead && shot.effectiveSeedAssetId === null
-              ? `${KEY_ROOT}.generation.generateSeed`
-              : `${KEY_ROOT}.generation.renderVideo`
-          )}
-        </Button>
-      </div>
       {!liftAllowed ? (
         <p className={styles.blocker} role='status'>
           {dirty
@@ -1494,9 +1086,9 @@ const ShotCard: React.FC<ShotCardProps> = ({
   );
 };
 
-type RecoveryProps = Pick<BeatPanelProps, 'actions' | 'beat' | 'pending' | 'projectId' | 'projection'>;
+type RecoveryProps = Pick<BeatPanelProps, 'actions' | 'beat' | 'pending' | 'projection'>;
 
-const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projectId, projection }) => {
+const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection }) => {
   const { t } = useTranslation();
   const shotIds = new Set(beat.shots.map((shot) => shot.id));
   const rows = projection.cascadeProgress.filter((row) => shotIds.has(row.dependentShotId));
@@ -1520,25 +1112,6 @@ const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projectId, 
             <p className={styles.warning}>{t(`${KEY_ROOT}.recovery.freshQuoteRequired`)}</p>
           ) : null}
           <div className={styles.actions}>
-            {row.eligiblePrimaryAssetIds.map((assetId) => {
-              const choice = exactRecoveryChoice(projection, row, assetId);
-              const url = createManagedStudioAssetUrl(projectId, assetId);
-              if (choice === null || url === null) return null;
-              return (
-                <Button key={assetId} disabled={pending} onClick={() => void actions.chooseCascadeAsset(row, assetId)}>
-                  {t(
-                    choice.mediaKind === 'image'
-                      ? `${KEY_ROOT}.recovery.chooseImage`
-                      : `${KEY_ROOT}.recovery.chooseVideo`,
-                    {
-                      beatIndex: choice.shotPosition.beatIndex + 1,
-                      shotIndex: choice.shotPosition.shotIndex + 1,
-                      takeIndex: choice.takeIndex + 1,
-                    }
-                  )}
-                </Button>
-              );
-            })}
             {row.canRetryConditioningFrame ? (
               <Button disabled={pending} onClick={() => void actions.retryConditioning(row.dependentShotId)}>
                 {t(`${KEY_ROOT}.recovery.retryFree`)}
@@ -1652,7 +1225,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
     action: 'park',
     beatId: beat.id,
     shotId: null,
-    assetId: null,
   });
   const firstBeatBlocker = beatLiftEligibility?.blockers[0] ?? null;
   const containedShotIds = new Set(beat.shots.map((shot) => shot.id));
@@ -1736,17 +1308,15 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const updateReviewPreference = (
     shotId: string,
     purpose: BeatPanelReviewPreference['purpose'],
-    changes: Partial<Pick<BeatPanelReviewPreference, 'generationCount' | 'referenceAssetId'>>
+    changes: Pick<BeatPanelReviewPreference, 'referenceAssetId'>
   ): void => {
-    if (mutationLocked || !SAFE_STUDIO_ID.test(shotId)) return;
+    if (mutationLocked || purpose !== 'seed_still' || !SAFE_STUDIO_ID.test(shotId)) return;
     const key = reviewPreferenceKey(shotId, purpose);
-    const current = gatePreferences[key] ?? { generationCount: 1, referenceAssetId: null };
+    const current = gatePreferences[key] ?? { referenceAssetId: null };
     const next = { ...current, ...changes };
     if (
-      !isGenerationCount(next.generationCount) ||
-      (next.referenceAssetId !== null &&
-        (purpose === 'video_take' ||
-          !safeBriefReferenceOptions.some((option) => option.assetId === next.referenceAssetId)))
+      next.referenceAssetId !== null &&
+      !safeBriefReferenceOptions.some((option) => option.assetId === next.referenceAssetId)
     ) {
       return;
     }
@@ -2069,13 +1639,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           </p>
         ) : null}
 
-        <Recovery
-          actions={actions}
-          beat={beat}
-          pending={mutationLocked}
-          projectId={projectId}
-          projection={projection}
-        />
+        <Recovery actions={actions} beat={beat} pending={mutationLocked} projection={projection} />
 
         <span aria-atomic='true' aria-live='polite' className={styles.srOnly}>
           {shotLiftAnnouncement || reorderAnnouncement}

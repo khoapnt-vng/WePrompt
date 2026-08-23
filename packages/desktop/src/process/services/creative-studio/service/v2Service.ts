@@ -206,7 +206,6 @@ export type StudioShotReadinessIssueV2 =
   | 'missing_line'
   | 'invalid_shot_duration'
   | 'active_job'
-  | 'generated_take_exists'
   | 'latest_job_failed';
 
 export type StudioShotGenerationReadinessV2 = {
@@ -457,10 +456,9 @@ const assertReferenceHandoffPrepareEnvelope: (
   for (const choice of input.baseChoices) {
     if (
       !isRecord(choice) ||
-      !hasExactKeys(choice, ['shotId', 'purpose', 'generationCount', 'referenceAssetId']) ||
+      !hasExactKeys(choice, ['shotId', 'purpose', 'referenceAssetId']) ||
       !isSafeId(choice.shotId) ||
       choice.purpose !== 'seed_still' ||
-      choice.generationCount !== 1 ||
       choice.referenceAssetId !== null
     ) {
       throw invalid('Invalid Studio reference handoff submission');
@@ -713,9 +711,6 @@ const isDenseArray = (value: unknown, maximum: number): value is unknown[] => {
 const ownValue = <Value>(record: Record<string, Value>, id: string): Value | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
 
-const isBinnedTakeV2 = (project: StudioProjectV2, assetId: string): boolean =>
-  project.bin.some((item) => item.kind === 'take' && item.assetId === assetId);
-
 const ownedShotAssetV2 = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
   const asset = ownValue(project.assets, assetId);
   return asset?.id === assetId &&
@@ -760,8 +755,7 @@ const eligibleSeedAssetV2 = (project: StudioProjectV2, shot: StudioShot, assetId
     asset.mediaKind === 'image' &&
     (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
     asset.briefReferenceRole === undefined &&
-    asset.briefReferenceLabel === undefined &&
-    !isBinnedTakeV2(project, asset.id)
+    asset.briefReferenceLabel === undefined
     ? asset
     : null;
 };
@@ -780,8 +774,8 @@ const canonicalCutCoverAssetV2 = (project: StudioProjectV2, shotId: string): Stu
   }
   if (activeShot === null) return null;
 
-  if (activeShot.selectedTakeId !== null && !isBinnedTakeV2(project, activeShot.selectedTakeId)) {
-    const selected = ownedShotAssetV2(project, activeShot, activeShot.selectedTakeId);
+  if (activeShot.videoAssetId !== null) {
+    const selected = ownedShotAssetV2(project, activeShot, activeShot.videoAssetId);
     if (
       selected !== null &&
       selected.mediaKind === 'video' &&
@@ -1086,7 +1080,6 @@ const toRendererSpendReceipt = (job: StudioJobV2): StudioRendererJobV2['spendRec
     rateUnit: receipt.rateUnit,
     rateMinorUnits: receipt.rateMinorUnits,
     durationSeconds: receipt.durationSeconds,
-    generationIndex: receipt.generationIndex,
     generationCount: receipt.generationCount,
     totalMinorUnits: receipt.totalMinorUnits,
   };
@@ -1111,7 +1104,6 @@ const toRendererJob = (job: StudioJobV2, project?: StudioProjectV2): StudioRende
   shotId: job.shotId,
   status: job.status,
   purpose: job.purpose,
-  generationIndex: job.generationIndex,
   provider: toMediaChoice(job.provider, requestedKind(job)),
   outputAssetIds: [...job.outputAssetIds],
   outputAssetIdsByRole: { ...job.outputAssetIdsByRole },
@@ -1207,14 +1199,6 @@ const readinessForShot = (
     return job?.id === jobId && job.projectId === project.id && job.shotId === shot.id ? [job] : [];
   });
   if (jobs.some((job) => ACTIVE_JOB_STATUSES.has(job.status))) issues.push('active_job');
-  if (
-    shot.assetIds.some((assetId) => {
-      const asset = ownValue(project.assets, assetId);
-      return asset !== undefined && isCanonicalStudioGeneratedTakeV2(asset, project.id, shot);
-    })
-  ) {
-    issues.push('generated_take_exists');
-  }
   const latest = jobs.at(-1);
   if (latest?.status === 'failed' || latest?.status === 'needs_attention') issues.push('latest_job_failed');
   return { shotId, beatId, ready: issues.length === 0, issues };
@@ -1395,8 +1379,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       if (beat === undefined) throw invalid('Studio export Beat is missing');
       for (const shotId of beat.shotOrder) {
         const shot = ownValue(project.shots, shotId);
-        if (shot === undefined || shot.selectedTakeId === null) continue;
-        requiredAssetIds.push(shot.selectedTakeId);
+        if (shot === undefined || shot.videoAssetId === null) continue;
+        requiredAssetIds.push(shot.videoAssetId);
       }
     }
     if (project.bedAssetId !== null) requiredAssetIds.push(project.bedAssetId);
@@ -1649,7 +1633,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         }
         return [candidate];
       });
-      for (let generationIndex = 0; generationIndex < item.generationCount; generationIndex += 1) {
+      if (item.generationCount !== 1) throw invalid('Invalid Studio generation count');
+      {
         const jobId = createJobId();
         const idempotencyKey = createIdempotencyKey();
         if (
@@ -1662,11 +1647,11 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         }
         existingJobIds.add(jobId);
         existingKeys.add(idempotencyKey);
-        idempotencyKeys.push({ itemId: item.id, generationIndex, key: idempotencyKey });
+        idempotencyKeys.push({ itemId: item.id, key: idempotencyKey });
         const requestSnapshot =
           item.requestPlan.kind === 'resolved' ? structuredClone(item.requestPlan.snapshot) : null;
         const resolved = requestSnapshot !== null;
-        const retryPredecessor = retryPredecessors[generationIndex];
+        const retryPredecessor = retryPredecessors[0];
         const retryReason =
           retryPredecessor === undefined
             ? null
@@ -1687,7 +1672,6 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           purpose: item.purpose,
           authorizationId: quote.id,
           authorizationItemId: item.id,
-          generationIndex,
           requestPlan: structuredClone(item.requestPlan),
           requestSnapshot,
           spendReceipt: null,
@@ -1731,7 +1715,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
       const extractionId = createStudioFrameExtractionId({
         shotId: dependency.predecessorShotId,
-        takeAssetId: dependency.takeAssetId,
+        videoAssetId: dependency.takeAssetId,
         endpointSeconds: dependency.endpointSeconds,
       });
       const existing = ownValue(project.frameExtractions, extractionId);
@@ -1739,7 +1723,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         existing !== undefined &&
         (existing.id !== extractionId ||
           existing.shotId !== dependency.predecessorShotId ||
-          existing.takeAssetId !== dependency.takeAssetId ||
+          existing.videoAssetId !== dependency.takeAssetId ||
           !Object.is(existing.endpointSeconds, dependency.endpointSeconds))
       ) {
         throw invalid('Invalid Studio rejoin extraction identity');
@@ -1748,7 +1732,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         defineOwn(project.frameExtractions, extractionId, {
           id: extractionId,
           shotId: dependency.predecessorShotId,
-          takeAssetId: dependency.takeAssetId,
+          videoAssetId: dependency.takeAssetId,
           endpointSeconds: dependency.endpointSeconds,
           frameAssetId: null,
           status: 'pending',
@@ -1808,21 +1792,16 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     const predecessorShotId = workspaceRows[0]?.upstreamShotId ?? activePredecessorId(project, dependentShotId);
     const predecessor = predecessorShotId === null ? undefined : ownValue(project.shots, predecessorShotId);
     const take =
-      predecessor?.selectedTakeId === null || predecessor === undefined
+      predecessor?.videoAssetId === null || predecessor === undefined
         ? undefined
-        : ownValue(project.assets, predecessor.selectedTakeId);
-    if (
-      take === undefined ||
-      take.mediaKind !== 'video' ||
-      take.durationSeconds === undefined ||
-      project.bin.some((item) => item.kind === 'take' && item.assetId === take.id)
-    ) {
+        : ownValue(project.assets, predecessor.videoAssetId);
+    if (take === undefined || take.mediaKind !== 'video' || take.durationSeconds === undefined) {
       throw invalid('Studio conditioning source is unavailable');
     }
     const endpointSeconds = take.durationSeconds - (predecessor.trimOutSeconds ?? 0);
     const extractionId = createStudioFrameExtractionId({
       shotId: predecessor.id,
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds,
     });
     const extraction = ownValue(project.frameExtractions, extractionId);
@@ -1831,7 +1810,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       (extraction.status !== 'failed' && extraction.status !== 'ready') ||
       (extraction.status === 'failed' ? extraction.frameAssetId !== null : extraction.frameAssetId === null) ||
       extraction.shotId !== predecessor.id ||
-      extraction.takeAssetId !== take.id ||
+      extraction.videoAssetId !== take.id ||
       !Object.is(extraction.endpointSeconds, endpointSeconds)
     ) {
       throw invalid('Studio conditioning frame is not retryable');
@@ -2069,8 +2048,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
 
     async applyMutations(input, context): Promise<StudioMutationBatchResultV2> {
       const affectsHumanBinding =
-        Array.isArray(input.operations) &&
-        input.operations.some((operation) => operation.kind === 'set_seed_still' || operation.kind === 'select_take');
+        Array.isArray(input.operations) && input.operations.some((operation) => operation.kind === 'set_seed_still');
       if (!affectsHumanBinding) {
         const result = await deps.store.applyMutationBatchV2(input, context);
         return {

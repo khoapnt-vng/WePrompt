@@ -43,10 +43,7 @@ type MockBinProps = {
   focusItemKey: string | null;
   onFocusItemSettled: () => void;
   onRestoreSuccess: (
-    result:
-      | { kind: 'beat'; beatId: string }
-      | { kind: 'shot'; beatId: string; shotId: string }
-      | { kind: 'take'; beatId: string; shotId: string; assetId: string }
+    result: { kind: 'beat'; beatId: string } | { kind: 'shot'; beatId: string; shotId: string }
   ) => void;
 };
 
@@ -133,8 +130,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.board.coverUnavailable': 'Preview unavailable',
         'conversation.creativeStudio.workspace.board.reorderFailed': 'Beat order was not changed.',
         'conversation.creativeStudio.workspace.board.liftBeat': 'Lift Beat',
-        'conversation.creativeStudio.workspace.board.liftConfirmContent':
-          'All authored work and Takes are kept in the Bin.',
+        'conversation.creativeStudio.workspace.board.liftConfirmContent': 'All authored work is kept in the Bin.',
         'conversation.creativeStudio.workspace.board.liftUnavailable':
           'Refresh the current workspace status before lifting this Beat.',
         'conversation.creativeStudio.workspace.board.liftDirtyDraft': 'Save or reset local edits before lifting.',
@@ -149,7 +145,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.state.statusPending': 'Status pending',
         'conversation.creativeStudio.workspace.table.state.ready': 'Ready',
         'conversation.creativeStudio.workspace.table.state.draft': 'Draft',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.currentMatchTo': 'Current match dependency',
         'conversation.creativeStudio.workspace.beatPanel.blocker.ownNonterminalJob': 'Own job is still running',
         'conversation.creativeStudio.workspace.beatPanel.blocker.ownPendingFrame': 'Own frame is pending',
         'conversation.creativeStudio.workspace.beatPanel.blocker.downstreamNonterminalJob':
@@ -158,11 +153,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.blocker.waitingAuthorizationDependency':
           'Authorization dependency is waiting',
         'conversation.creativeStudio.workspace.beatPanel.blocker.boundNonterminalRequest': 'Request is still bound',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.currentSelectedTake': 'Take is selected',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.currentSeedStill': 'Still is the current seed',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.nonterminalConditioningUse':
-          'Conditioning is still using this work',
-        'conversation.creativeStudio.workspace.beatPanel.blocker.takeBinCapacityReached': 'Take Bin is full',
         'conversation.creativeStudio.workspace.beatPanel.blocker.beatShotCapacityReached': 'Beat Shot limit reached',
         'conversation.creativeStudio.workspace.beatPanel.common.cancel': 'Cancel',
       };
@@ -234,12 +224,8 @@ vi.mock('@/renderer/pages/studio/components/Workspace/Views/Board/Bin', async ()
   };
   return {
     Bin,
-    binItemFocusKey: (item: { kind: string; beatId?: string; shotId?: string; assetId?: string }) =>
-      item.kind === 'beat'
-        ? `beat:${item.beatId}`
-        : item.kind === 'shot'
-          ? `shot:${item.shotId}`
-          : `take:${item.assetId}`,
+    binItemFocusKey: (item: { kind: string; beatId?: string; shotId?: string }) =>
+      item.kind === 'beat' ? `beat:${item.beatId}` : `shot:${item.shotId}`,
   };
 });
 
@@ -257,25 +243,25 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
   derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
-  selectedTakeId: null,
-  selectedTakeSourceDurationSeconds: null,
+  currentPicture: null,
   playedDurationSeconds: 4,
   explicitSeedAssetId: null,
   effectiveSeedAssetId: null,
   segmentHead: true,
   planningBoundary: { shotId: id, startSeconds: 0, endSeconds: 4 },
   frameBoundary: null,
-  segmentState: { kind: 'no_take' },
+  segmentState: { kind: 'no_picture' },
   dirtyCauses: [],
   downstreamShotIds: [],
-  imageTakes: [],
-  videoTakes: [],
+  seedStills: [],
   coverAssetId: null,
-  takeCount: 0,
   displayState: 'draft',
   retainedWork: false,
   videoGenerationInFlight: false,
   seedGenerationInFlight: false,
+  videoGenerationBlocked: false,
+  seedGenerationBlocked: false,
+  attentionJobs: [],
   hasEffectiveSeed: false,
   ...overrides,
 });
@@ -304,7 +290,6 @@ const parkRow = (
   action: 'park',
   beatId,
   shotId: null,
-  assetId: null,
   allowed: true,
   blockers: [],
   ...overrides,
@@ -323,7 +308,7 @@ const makeProjection = (
   workspaceStatusReady: true,
   chainStatusReady: true,
   requestShapeLocked: false,
-  bin: { items: [], beats: [], shots: [], takes: [] },
+  bin: { items: [], beats: [], shots: [] },
   undoTop: null,
   dirtyShots: [],
   cascadeProgress: [],
@@ -337,7 +322,6 @@ const makeActions = (): BoardActions => ({
   parkBeat: vi.fn().mockResolvedValue(true),
   restoreBeat: vi.fn().mockResolvedValue(true),
   restoreShot: vi.fn().mockResolvedValue(true),
-  restoreTake: vi.fn().mockResolvedValue(true),
   reorderBin: vi.fn().mockResolvedValue(true),
 });
 
@@ -616,7 +600,7 @@ describe('BoardView', () => {
           allowed: false,
           blockers: [
             { shotId: 'c_shot', code: 'own_pending_frame' },
-            { shotId: 'c_shot', code: 'current_match_to' },
+            { shotId: 'c_shot', code: 'downstream_nonterminal_job' },
           ],
         }),
         parkRow('d'),
@@ -647,13 +631,13 @@ describe('BoardView', () => {
 
     actionRegion = select('c');
     expect(actionRegion).toHaveTextContent('Own frame is pending');
-    expect(actionRegion).toHaveTextContent('Current match dependency');
+    expect(actionRegion).toHaveTextContent('Downstream job is still running');
     expect(cardFor(result.container, 'd')).not.toHaveTextContent('Own frame is pending');
     const blockerList = within(actionRegion).getByRole('list');
     expect(blockerList).toHaveAttribute('aria-live', 'polite');
     expect(within(blockerList).getAllByRole('listitem')).toHaveLength(2);
     expect(actionRegion.textContent!.indexOf('Own frame is pending')).toBeLessThan(
-      actionRegion.textContent!.indexOf('Current match dependency')
+      actionRegion.textContent!.indexOf('Downstream job is still running')
     );
     const blockedLift = within(actionRegion).getByRole('button', { name: 'Lift Beat' });
     expect(blockedLift).toBeEnabled();
@@ -685,7 +669,7 @@ describe('BoardView', () => {
     act(() => lift.focus());
     fireEvent.click(lift);
     const firstConfirm = screen.getByRole('group', { name: 'Lift Beat A?' });
-    expect(firstConfirm).toHaveTextContent('Takes are kept');
+    expect(firstConfirm).toHaveTextContent('All authored work is kept');
     fireEvent.click(within(firstConfirm).getByRole('button', { name: 'Cancel' }));
     expect(actions.parkBeat).not.toHaveBeenCalled();
     expect(lift).toHaveFocus();
@@ -780,7 +764,6 @@ describe('BoardView', () => {
         ],
         beats: [{ ...parked, reason: 'lifted', shotCount: parked.shots.length }],
         shots: [],
-        takes: [],
       },
     });
     render(<BoardView {...boardProps(projection)} />);

@@ -19,9 +19,9 @@ export type CutPlaybackVideoSegment = {
   assetId: string;
   posterAssetId: string | null;
   sourceDurationSeconds: number;
-  /** Inclusive selected-Take media boundary. */
+  /** Inclusive current-picture media boundary. */
   sourceInSeconds: number;
-  /** Exclusive selected-Take media boundary. */
+  /** Exclusive current-picture media boundary. */
   sourceOutSeconds: number;
   durationSeconds: number;
   filmStartSeconds: number;
@@ -80,7 +80,7 @@ const normalizedTrim = (value: number | null): number | null => {
   return finiteSafeNonnegative(value) ? value : null;
 };
 
-const exactSelectedVideo = (
+const exactCurrentPicture = (
   shot: WorkspaceShotProjection
 ): {
   assetId: string;
@@ -90,8 +90,10 @@ const exactSelectedVideo = (
   sourceOutSeconds: number;
   durationSeconds: number;
 } | null => {
-  const assetId = shot.selectedTakeId;
-  const sourceDurationSeconds = shot.selectedTakeSourceDurationSeconds;
+  const picture = shot.currentPicture;
+  if (picture === null) return null;
+  const assetId = picture.assetId;
+  const sourceDurationSeconds = picture.sourceDurationSeconds;
   const playedDurationSeconds = shot.playedDurationSeconds;
   if (!safeId(assetId) || !finiteSafePositive(sourceDurationSeconds) || !finiteSafePositive(playedDurationSeconds)) {
     return null;
@@ -114,25 +116,13 @@ const exactSelectedVideo = (
   const durationSeconds = sourceDurationSeconds - sourceInSeconds - trimOutSeconds;
   if (!finiteSafePositive(durationSeconds) || playedDurationSeconds !== durationSeconds) return null;
 
-  const takeRows = [...shot.videoTakes, ...shot.imageTakes];
-  if (takeRows.some((take) => typeof take.selected !== 'boolean')) return null;
-  const matchingRows = shot.videoTakes.filter((take) => take.assetId === assetId);
-  const selectedRows = takeRows.filter((take) => take.selected === true);
-  if (matchingRows.length !== 1 || selectedRows.length !== 1 || selectedRows[0] !== matchingRows[0]) return null;
-  if (shot.imageTakes.some((take) => take.assetId === assetId)) return null;
-  const selected = matchingRows[0]!;
-  if (
-    selected.mediaKind !== 'video' ||
-    selected.binReason !== null ||
-    selected.sourceDurationSeconds !== sourceDurationSeconds ||
-    (selected.posterAssetId !== null && !safeId(selected.posterAssetId))
-  ) {
+  if (picture.posterAssetId !== null && !safeId(picture.posterAssetId)) {
     return null;
   }
 
   return {
     assetId,
-    posterAssetId: selected.posterAssetId,
+    posterAssetId: picture.posterAssetId,
     sourceDurationSeconds,
     sourceInSeconds,
     sourceOutSeconds,
@@ -143,31 +133,24 @@ const exactSelectedVideo = (
 /**
  * Builds the one sequence that the Cut may truthfully preview.
  *
- * Covered Shots never degrade to slates: every active Shot must carry one exact selected canonical
- * video row. Only a genuinely zero-Shot Beat with a positive target becomes a slate. Any ambiguous
+ * Covered Shots never degrade to slates: every active Shot must carry one exact current canonical
+ * video picture. Only a genuinely zero-Shot Beat with a positive target becomes a slate. Any ambiguous
  * order, identity, duration, or aggregate refuses the complete sequence rather than drawing a
  * shorter film.
  */
-export type CutShotAwaitingTake = { beatPosition: number; shotPosition: number; shotId: string };
+export type CutShotAwaitingPicture = { beatPosition: number; shotPosition: number; shotId: string };
 
 /**
- * The one reason a finished film refuses to play that a director can act on: a covered Shot with
- * Takes but no chosen one. Every other refusal in `buildCutPlaybackSequence` is a projection fault,
- * and reporting those as a missing choice would send someone looking for a button that cannot help.
- *
- * It is the last Shot of a chain this reliably catches. Choosing a Take is what releases the next
- * Shot's conditioning, so every earlier Shot gets chosen on the way through; the last one has
- * nothing downstream to ask for it, and the film then refuses to play with no stated reason.
+ * The one ordinary reason a covered Shot refuses the finished-film preview: it has not rendered a
+ * current picture yet. Every other refusal in `buildCutPlaybackSequence` remains a projection fault.
  */
-export const cutPlaybackShotsAwaitingTake = (projection: WorkspaceProjection): readonly CutShotAwaitingTake[] => {
-  const awaiting: CutShotAwaitingTake[] = [];
+export const cutPlaybackShotsAwaitingPicture = (projection: WorkspaceProjection): readonly CutShotAwaitingPicture[] => {
+  const awaiting: CutShotAwaitingPicture[] = [];
   if (!Array.isArray(projection?.activeBeats)) return awaiting;
   projection.activeBeats.forEach((beat, beatIndex) => {
     if (!Array.isArray(beat?.shots)) return;
     beat.shots.forEach((shot, shotIndex) => {
-      const chosen = shot?.selectedTakeId;
-      if (chosen !== null && chosen !== undefined) return;
-      if (!Array.isArray(shot?.videoTakes) || shot.videoTakes.length === 0 || !safeId(shot.id)) return;
+      if (shot?.currentPicture !== null || !safeId(shot?.id)) return;
       awaiting.push({ beatPosition: beatIndex + 1, shotPosition: shotIndex + 1, shotId: shot.id });
     });
   });
@@ -245,9 +228,9 @@ export const buildCutPlaybackSequence = (projection: WorkspaceProjection): CutPl
       if (!safeId(shot.id) || seenShotIds.has(shot.id) || typeof shot.line !== 'string') return null;
       seenShotIds.add(shot.id);
       flattenedShotIds.push(shot.id);
-      const selected = exactSelectedVideo(shot);
-      if (selected === null) return null;
-      const beatEndSeconds = addPositiveDuration(beatCursor, selected.durationSeconds);
+      const picture = exactCurrentPicture(shot);
+      if (picture === null) return null;
+      const beatEndSeconds = addPositiveDuration(beatCursor, picture.durationSeconds);
       const filmStartSeconds = addDuration(filmCursor, beatCursor);
       const filmEndSeconds = beatEndSeconds === null ? null : addPositiveDuration(filmCursor, beatEndSeconds);
       if (
@@ -266,7 +249,7 @@ export const buildCutPlaybackSequence = (projection: WorkspaceProjection): CutPl
         shotId: shot.id,
         shotPosition: shotIndex + 1,
         shotTitle: shot.line.trim() || shot.id,
-        ...selected,
+        ...picture,
         filmStartSeconds,
         filmEndSeconds,
       });

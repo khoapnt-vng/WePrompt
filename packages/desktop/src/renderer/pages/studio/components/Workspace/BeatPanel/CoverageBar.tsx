@@ -252,8 +252,8 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
       [
         shot.id,
         shot.durationSeconds,
-        shot.selectedTakeId,
-        shot.selectedTakeSourceDurationSeconds,
+        shot.currentPicture?.assetId ?? '',
+        shot.currentPicture?.sourceDurationSeconds ?? '',
         shot.trimInSeconds,
         shot.trimOutSeconds,
       ].join(':')
@@ -295,8 +295,8 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
     switch (state.kind) {
       case 'status_pending':
         return t(`${COVERAGE_KEY_ROOT}.segmentState.statusPending`);
-      case 'no_take':
-        return t(`${COVERAGE_KEY_ROOT}.segmentState.noTake`);
+      case 'no_picture':
+        return t(`${COVERAGE_KEY_ROOT}.segmentState.noPicture`);
       case 'queued':
         return t(`${COVERAGE_KEY_ROOT}.segmentState.queued`);
       case 'waiting_on_shot':
@@ -313,13 +313,6 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
         }
         return t(`${COVERAGE_KEY_ROOT}.segmentState.${state.showingStill ? 'renderingStill' : 'rendering'}`);
       case 'rendered':
-        if (state.takeCount === 1) return t(`${COVERAGE_KEY_ROOT}.segmentState.renderedOneTake`);
-        if (state.takeCount > 1 && state.selectedTakeNumber !== null) {
-          return t(`${COVERAGE_KEY_ROOT}.segmentState.selectedTake`, {
-            count: state.takeCount,
-            take: state.selectedTakeNumber,
-          });
-        }
         return t(`${COVERAGE_KEY_ROOT}.segmentState.rendered`);
       case 'needs_rerender':
         return t(`${COVERAGE_KEY_ROOT}.segmentState.needsRerender`);
@@ -429,7 +422,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
                 <div
                   className={styles.playbackSegment}
                   data-coverage-shot-segment
-                  data-selected-take='false'
+                  data-current-picture='false'
                   data-shot-id={shot.id}
                   style={{ flexBasis: 0, flexGrow: 1 }}
                 >
@@ -455,7 +448,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
   }
 
   const displayPlaybackWidths = geometry.segments.map((segment) =>
-    segment.selectedTake
+    segment.hasCurrentPicture
       ? segment.playbackWidthSeconds
       : (planningPreview?.[segment.shotId] ?? segment.playbackWidthSeconds)
   );
@@ -582,7 +575,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
     shot: WorkspaceShotProjection,
     edge: 'in' | 'out'
   ): void => {
-    if (disabled || shot.selectedTakeSourceDurationSeconds === null) return;
+    if (disabled || shot.currentPicture === null) return;
     const segment = event.currentTarget.parentElement;
     const width = segment?.getBoundingClientRect().width ?? 0;
     if (!Number.isFinite(width) || width <= 0) return;
@@ -602,7 +595,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
       target: event.currentTarget,
       startClientX: event.clientX,
       segmentWidthPixels: width,
-      sourceDurationSeconds: shot.selectedTakeSourceDurationSeconds,
+      sourceDurationSeconds: shot.currentPicture.sourceDurationSeconds,
       rtl: isRtl(segment),
       edge,
       shotId: shot.id,
@@ -665,7 +658,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
     shot: WorkspaceShotProjection,
     edge: 'in' | 'out'
   ): void => {
-    const source = shot.selectedTakeSourceDurationSeconds;
+    const source = shot.currentPicture?.sourceDurationSeconds ?? null;
     if (disabled || source === null) return;
     const currentIn = shot.trimInSeconds ?? 0;
     const currentOut = shot.trimOutSeconds ?? 0;
@@ -807,13 +800,15 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
             const sourceDurationSeconds = segment.playbackWidthSeconds;
             const playedEndSeconds = sourceDurationSeconds - trimOutSeconds;
             const hasContinuitySuccessor = shots[index + 1] !== undefined && shots[index + 1]!.segmentHead === false;
-            const tailWarning = segment.selectedTake && hasContinuitySuccessor && trimOutSeconds > 0;
+            const tailWarning = segment.hasCurrentPicture && hasContinuitySuccessor && trimOutSeconds > 0;
             const tailWarningId = tailWarning ? `${guidanceId}-tail-${index}` : undefined;
             const maximumIn = maximumCoverageTrim(sourceDurationSeconds, trimOutSeconds) ?? 0;
             const maximumOut = maximumCoverageTrim(sourceDurationSeconds, trimInSeconds) ?? 0;
             const shotCopy = t(`${COVERAGE_KEY_ROOT}.shotLabel`, { index: index + 1 });
             const durationCopy = t(
-              segment.selectedTake ? `${COVERAGE_KEY_ROOT}.sourceDuration` : `${COVERAGE_KEY_ROOT}.planningDuration`,
+              segment.hasCurrentPicture
+                ? `${COVERAGE_KEY_ROOT}.sourceDuration`
+                : `${COVERAGE_KEY_ROOT}.planningDuration`,
               { seconds: widthSeconds }
             );
             const stateCopy = segmentStateCopy(shot);
@@ -822,7 +817,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
                 <div
                   className={styles.playbackSegment}
                   data-coverage-shot-segment
-                  data-selected-take={segment.selectedTake}
+                  data-current-picture={segment.hasCurrentPicture}
                   data-shot-id={segment.shotId}
                   style={{ flexBasis: 0, flexGrow: widthSeconds / playbackTotal }}
                 >
@@ -846,7 +841,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
                       {t(`${COVERAGE_KEY_ROOT}.tailTrimWarning`)}
                     </span>
                   ) : null}
-                  {segment.selectedTake ? (
+                  {segment.hasCurrentPicture ? (
                     <div className={styles.trimLane} data-coverage-trim-lane>
                       <span
                         aria-hidden='true'

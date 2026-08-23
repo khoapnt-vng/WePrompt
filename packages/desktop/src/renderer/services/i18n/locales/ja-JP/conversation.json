@@ -901,10 +901,20 @@
       "importError": "参照を追加できませんでした。もう一度お試しください。"
     },
     "workspace": {
+      "library": {
+        "subtitle": "ビートとショットで物語を組み立て、各ショットの現在の画像を確認します。",
+        "pictureCount": "準備完了の画像 {{count}} 件",
+        "pictureCount_one": "準備完了の画像 {{count}} 件",
+        "pictureCount_other": "準備完了の画像 {{count}} 件",
+        "status": {
+          "complete": "すべてのショットに現在の画像があります",
+          "partial": "一部のショットに現在の画像があります"
+        }
+      },
       "board": {
         "liftBeat": "ゴミ箱に移動",
         "liftConfirmTitle": "「{{title}}」をゴミ箱に移動しますか？",
-        "liftConfirmContent": "このビートはフィルムから外れます。作成済みの内容、有料生成した素材、すべてのテイクはゴミ箱に保持されます。"
+        "liftConfirmContent": "このビートはフィルムから外れます。作成済みの内容と有料生成した素材はすべてゴミ箱に保持されます。"
       },
       "cut": {
         "preview": {
@@ -915,8 +925,8 @@
           "videoLabel": "ビート{{beatPosition}} · {{beatTitle}} · ショット{{shotPosition}} · {{shotTitle}}",
           "slateLabel": "ビート{{beatPosition}} · {{beatTitle}} · スレート · カバレッジなし",
           "noMedia": "フィルムプレビューはありません。",
-          "awaitingTakeOne": "フィルムを再生するには、ビート{{beatPosition}} · ショット{{shotPosition}}のテイクを選択してください。",
-          "awaitingTakeMany": "フィルムを再生するには、{{count}}件のショットのテイクを選択してください。",
+          "awaitingPictureOne": "ビート{{beatPosition}}、ショット{{shotPosition}}にはまだ現在の画像がありません。",
+          "awaitingPictureMany": "{{count}}件のショットにはまだ現在の画像がありません。",
           "mediaError": "このプレビューを読み込めませんでした。",
           "play": "フィルムを再生",
           "pause": "フィルムを一時停止",
@@ -928,6 +938,9 @@
           "nextJoin": "次のつなぎ目",
           "loopJoin": "つなぎ目をループ",
           "buffering": "プレビュー画面を読み込み中"
+        },
+        "exports": {
+          "editorFolderDescription": "各ショットの現在の画像、ターゲットスレート、タイムラインデータ、任意の音声ベッドをフィルム順に書き出します。"
         },
         "film": {
           "under": "{{clock}} 短い",
@@ -942,11 +955,28 @@
           "openBeat": "カバレッジのないビートを開く"
         }
       },
+      "proposals": {
+        "fixedReason": {
+          "video_asset": "このショットには現在の画像があります。"
+        }
+      },
       "beatPanel": {
-        "takes": {
-          "park": "ゴミ箱に移動",
-          "parkConfirmTitle": "このテイクをゴミ箱に移動しますか？",
-          "parkConfirmBody": "テイクはプロジェクトに残り、使用中の候補から外れます。"
+        "seeds": {
+          "stillLabel": "ショット{{shotIndex}}のシード静止画{{stillIndex}}",
+          "previewAlt": "プレビュー · {{label}}",
+          "effective": "現在のシード",
+          "pinnedBadge": "固定済み"
+        },
+        "picture": {
+          "title": "現在の画像",
+          "label": "ショット{{index}}の現在の画像",
+          "empty": "まだレンダリングされていません",
+          "sourceDuration": "ソース {{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} 秒",
+          "unavailable": "現在の画像を利用できません",
+          "videoPreview": "プレーヤー · {{label}}"
+        },
+        "generation": {
+          "renderVideo": "もう一度生成"
         },
         "lift": {
           "shot": "ゴミ箱に移動",
@@ -993,7 +1023,7 @@
           "trimGuidance": "エッジ · トリミング · 無料",
           "boundaryGuidance": "境界 · 再レンダリングが必要",
           "segmentState": {
-            "noTake": "テイクなし",
+            "noPicture": "画像なし",
             "queued": "キュー済み",
             "nextUp": "次に実行",
             "waitingOnShot": "ショット{{position}}を待機",
@@ -1002,8 +1032,6 @@
             "renderingProgress": "レンダリング中 · {{progress}}%",
             "renderingStill": "レンダリング中 · 静止画を表示中",
             "rendered": "レンダリング済み",
-            "renderedOneTake": "レンダリング済み · 1テイク",
-            "selectedTake": "{{count}}テイク · T{{take}}をカットで使用",
             "untouched": "未変更",
             "needsRerender": "再レンダリングが必要",
             "staleStillPlays": "古い状態 · 引き続き再生可能",
@@ -1026,7 +1054,7 @@
         "preview": {
           "label": "ビートプレビュー",
           "noMedia": "ビートプレビューは利用できません",
-          "mediaError": "選択したテイクをプレビューできませんでした。",
+          "mediaError": "現在の画像をプレビューできませんでした。",
           "videoLabel": "ショット{{position}}の映像 · {{line}}",
           "slateLabel": "ショット{{position}}の計画スレート · {{line}}",
           "slate": "計画スレート",
@@ -1545,6 +1573,7 @@
         "submissionUnknown": "送信結果は不明です。再試行前に重複料金の警告を確認してください。",
         "downloadFailed": "生成は完了しましたが、出力をダウンロードできませんでした。",
         "unsupported": "このプロバイダーは要求された操作に対応していません。",
+        "seedStillVariationGrid": "生成されたシード静止画には複数パネルのバリエーショングリッドが含まれているため、動画には使用できません。",
         "unknown": "不明な理由で生成ジョブが失敗しました。"
       }
     },

@@ -27,7 +27,7 @@ import {
   type CutPlaybackSegment,
   type CutPlaybackSequence,
   type CutPlaybackVideoSegment,
-  cutPlaybackShotsAwaitingTake,
+  cutPlaybackShotsAwaitingPicture,
 } from './playbackSequence';
 import styles from './Cut.module.css';
 
@@ -165,7 +165,7 @@ const cutJoinLandingIndexes = (
   return { next, previous };
 };
 
-/** A truthful picture-only preview of the exact selected-Take/slate sequence. */
+/** A truthful picture-only preview of the exact current-picture/slate sequence. */
 export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function CutPlayer(
   { onNavigationChange, pending, projectId, projection },
   ref
@@ -891,17 +891,16 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       : null;
   const unavailable = sequence === null || segment === null || (segment.kind === 'video' && mediaSource === null);
   const buttonLabel = state.playing ? t(`${PREVIEW_ROOT}.pause`) : t(`${PREVIEW_ROOT}.play`);
-  // A refusal with no stated reason is the same dead end whether the cause is a fault or a choice
-  // nobody was asked to make. Only the latter is actionable, so only the latter is named.
-  const awaitingTake = unavailable ? cutPlaybackShotsAwaitingTake(projection) : [];
+  // A missing current picture is actionable; every other refusal remains a projection fault.
+  const awaitingPicture = unavailable ? cutPlaybackShotsAwaitingPicture(projection) : [];
   const unavailableReason =
-    awaitingTake.length === 1
-      ? t(`${PREVIEW_ROOT}.awaitingTakeOne`, {
-          beatPosition: awaitingTake[0]!.beatPosition,
-          shotPosition: awaitingTake[0]!.shotPosition,
+    awaitingPicture.length === 1
+      ? t(`${PREVIEW_ROOT}.awaitingPictureOne`, {
+          beatPosition: awaitingPicture[0]!.beatPosition,
+          shotPosition: awaitingPicture[0]!.shotPosition,
         })
-      : awaitingTake.length > 1
-        ? t(`${PREVIEW_ROOT}.awaitingTakeMany`, { count: awaitingTake.length })
+      : awaitingPicture.length > 1
+        ? t(`${PREVIEW_ROOT}.awaitingPictureMany`, { count: awaitingPicture.length })
         : t(`${PREVIEW_ROOT}.noMedia`);
 
   return (

@@ -37,14 +37,14 @@ const summary = (overrides: Partial<StudioProjectSummaryV2> = {}): StudioProject
   resolution: '720p',
   beatCount: 2,
   shotCount: 5,
-  selectedTakeCount: 3,
+  pictureCount: 3,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
   ...overrides,
 });
 
 const project = (): StudioRendererProjectV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   revision: 7,
   id: 'project_1',
   name: 'Launch film',
@@ -59,7 +59,6 @@ const project = (): StudioRendererProjectV2 => ({
   shots: {},
   bin: [],
   bedAssetId: null,
-  matchToShotId: null,
   spendPolicy: null,
   imageRouteId: null,
   videoRouteId: null,
@@ -91,7 +90,7 @@ const renderLibrary = () =>
     </MemoryRouter>
   );
 
-describe('StudioLibrary schema-2 cutover', () => {
+describe('StudioLibrary schema-3 projects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
@@ -108,13 +107,13 @@ describe('StudioLibrary schema-2 cutover', () => {
     expect(createManagedStudioAssetUrl('project_1', 'asset/1')).toBeNull();
   });
 
-  it('renders Beat/Shot summaries from the schema-2 list wrapper', async () => {
+  it('renders Beat/Shot/picture summaries from the project list wrapper', async () => {
     renderLibrary();
 
     expect(await screen.findByRole('button', { name: 'Launch film' })).toBeVisible();
     expect(screen.getByText(/workspace\.library\.beatCount/)).toBeVisible();
     expect(screen.getByText(/workspace\.library\.shotCount/)).toBeVisible();
-    expect(screen.getByText(/workspace\.library\.selectedTakeCount/)).toBeVisible();
+    expect(screen.getByText(/workspace\.library\.pictureCount/)).toBeVisible();
   });
 
   it('surfaces unsupported and quarantined project identities instead of hiding them', async () => {
@@ -301,8 +300,8 @@ describe('StudioLibrary schema-2 cutover', () => {
     mocks.bridge.listProjects.invoke.mockResolvedValue(
       ok({
         projects: [
-          summary({ id: 'project_complete', name: 'Complete film', shotCount: 2, selectedTakeCount: 2 }),
-          summary({ id: 'project_spine', name: 'Spine only', selectedTakeCount: 0 }),
+          summary({ id: 'project_complete', name: 'Complete film', shotCount: 2, pictureCount: 2 }),
+          summary({ id: 'project_spine', name: 'Spine only', pictureCount: 0 }),
         ],
         unsupportedProjectIds: [],
         quarantinedProjectIds: [],

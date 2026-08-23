@@ -903,10 +903,20 @@
       "importError": "مرجع افزوده نشد. دوباره تلاش کنید."
     },
     "workspace": {
+      "library": {
+        "subtitle": "داستان‌ها را در قالب ضرب‌آهنگ و شات برنامه‌ریزی کنید، سپس تصویر فعلی هر شات را بازبینی کنید.",
+        "pictureCount": "{{count}} تصویر آماده",
+        "pictureCount_one": "{{count}} تصویر آماده",
+        "pictureCount_other": "{{count}} تصویر آماده",
+        "status": {
+          "complete": "همهٔ شات‌ها تصویر فعلی دارند",
+          "partial": "برخی شات‌ها تصویر فعلی دارند"
+        }
+      },
       "board": {
         "liftBeat": "انتقال به سطل زباله",
         "liftConfirmTitle": "«{{title}}» به سطل زباله منتقل شود؟",
-        "liftConfirmContent": "این ضرب‌آهنگ از فیلم خارج می‌شود. همهٔ محتوای ساخته‌شده و پولی، همراه با برداشت‌ها، در سطل زباله حفظ می‌شود."
+        "liftConfirmContent": "این ضرب‌آهنگ از فیلم خارج می‌شود. همهٔ محتوای ساخته‌شده و پولی در سطل زباله حفظ می‌شود."
       },
       "cut": {
         "preview": {
@@ -917,8 +927,8 @@
           "videoLabel": "ضرب‌آهنگ {{beatPosition}} · {{beatTitle}} · نمای {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "ضرب‌آهنگ {{beatPosition}} · {{beatTitle}} · اسلیت · بدون پوشش",
           "noMedia": "پیش‌نمایشی از فیلم در دسترس نیست.",
-          "awaitingTakeOne": "پیش از پخش فیلم باید برای ضرب‌آهنگ {{beatPosition}} · نمای {{shotPosition}} یک برداشت انتخاب شود.",
-          "awaitingTakeMany": "پیش از پخش فیلم باید برای {{count}} نما یک برداشت انتخاب شود.",
+          "awaitingPictureOne": "ضرب‌آهنگ {{beatPosition}}، نمای {{shotPosition}} هنوز تصویر فعلی ندارد.",
+          "awaitingPictureMany": "{{count}} نما هنوز تصویر فعلی ندارند.",
           "mediaError": "این پیش‌نمایش بارگیری نشد.",
           "play": "پخش فیلم",
           "pause": "توقف موقت فیلم",
@@ -930,6 +940,9 @@
           "nextJoin": "اتصال بعدی",
           "loopJoin": "تکرار اتصال",
           "buffering": "در حال بارگیری فریم پیش‌نمایش"
+        },
+        "exports": {
+          "editorFolderDescription": "تصاویر فعلی شات‌ها، اسلیت‌های هدف، داده‌های خط زمانی و بستر صوتی اختیاری به ترتیب فیلم."
         },
         "film": {
           "under": "{{clock}} کمتر",
@@ -944,11 +957,28 @@
           "openBeat": "باز کردن ضرب‌آهنگ بدون پوشش"
         }
       },
+      "proposals": {
+        "fixedReason": {
+          "video_asset": "این شات تصویر فعلی دارد."
+        }
+      },
       "beatPanel": {
-        "takes": {
-          "park": "انتقال به سطل زباله",
-          "parkConfirmTitle": "این برداشت به سطل زباله منتقل شود؟",
-          "parkConfirmBody": "برداشت در پروژه می‌ماند و از گزینه‌های فعال خارج می‌شود."
+        "seeds": {
+          "stillLabel": "تصویر آغازین {{stillIndex}} برای شات {{shotIndex}}",
+          "previewAlt": "پیش‌نمایش · {{label}}",
+          "effective": "تصویر آغازین فعلی",
+          "pinnedBadge": "سنجاق‌شده"
+        },
+        "picture": {
+          "title": "تصویر فعلی",
+          "label": "تصویر فعلی برای شات {{index}}",
+          "empty": "هنوز چیزی رندر نشده است",
+          "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} ثانیه منبع",
+          "unavailable": "تصویر فعلی در دسترس نیست",
+          "videoPreview": "پخش‌کننده · {{label}}"
+        },
+        "generation": {
+          "renderVideo": "تولید دوباره"
         },
         "lift": {
           "shot": "انتقال به سطل زباله",
@@ -995,7 +1025,7 @@
           "trimGuidance": "لبه · برش · رایگان",
           "boundaryGuidance": "مرز · نیازمند رندر مجدد",
           "segmentState": {
-            "noTake": "بدون برداشت",
+            "noPicture": "بدون تصویر",
             "queued": "در صف",
             "nextUp": "نوبت بعدی",
             "waitingOnShot": "در انتظار نمای {{position}}",
@@ -1004,8 +1034,6 @@
             "renderingProgress": "در حال رندر · {{progress}}٪",
             "renderingStill": "در حال رندر · نمایش تصویر ثابت",
             "rendered": "رندر شد",
-            "renderedOneTake": "رندر شد · ۱ برداشت",
-            "selectedTake": "{{count}} برداشت · T{{take}} در تدوین",
             "untouched": "بدون تغییر",
             "needsRerender": "نیازمند رندر مجدد",
             "staleStillPlays": "قدیمی · همچنان قابل پخش",
@@ -1028,7 +1056,7 @@
         "preview": {
           "label": "پیش‌نمایش ضرب‌آهنگ",
           "noMedia": "پیش‌نمایش ضرب‌آهنگ در دسترس نیست",
-          "mediaError": "پیش‌نمایش برداشت انتخاب‌شده ممکن نشد.",
+          "mediaError": "پیش‌نمایش تصویر فعلی ممکن نشد.",
           "videoLabel": "ویدیوی نمای {{position}} · {{line}}",
           "slateLabel": "اسلیت برنامه‌ریزی نمای {{position}} · {{line}}",
           "slate": "اسلیت برنامه‌ریزی",
@@ -1563,6 +1591,7 @@
         "submissionUnknown": "نتیجه ارسال نامعلوم است. پیش از تلاش دوباره، هشدار هزینه تکراری را بررسی کنید.",
         "downloadFailed": "تولید کامل شد، اما خروجی بارگیری نشد.",
         "unsupported": "این ارائه‌دهنده از عملیات درخواستی پشتیبانی نمی‌کند.",
+        "seedStillVariationGrid": "تصویر آغازین تولیدشده دارای شبکه‌ای چندبخشی از گونه‌هاست و نمی‌توان از آن برای ویدیو استفاده کرد.",
         "unknown": "کار تولید به دلیل نامعلومی شکست خورد."
       }
     },

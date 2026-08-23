@@ -39,7 +39,8 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
-  selectedTakeId: null,
+  videoAssetId: null,
+  supersededVideoAssetIds: [],
   assetIds: [],
   jobIds: [],
   ...overrides,
@@ -57,7 +58,7 @@ const makeBeat = (id: string, shotOrder: string[] = []): StudioBeat => ({
 });
 
 const makeProject = (shotOrder = ['shot_1', 'shot_2']): StudioProjectV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   revision: 7,
   id: 'project_1',
   name: 'Project One',
@@ -72,7 +73,6 @@ const makeProject = (shotOrder = ['shot_1', 'shot_2']): StudioProjectV2 => ({
   shots: Object.fromEntries(shotOrder.map((shotId) => [shotId, makeShot(shotId)])),
   bin: [],
   bedAssetId: null,
-  matchToShotId: null,
   spendPolicy: null,
   spendAuthorizations: [],
   frameExtractions: {},
@@ -196,13 +196,10 @@ const makeAuthorization = (
     itemId: item.id,
     provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
   })),
-  idempotencyKeys: [...baseItems, ...cascadeItems].flatMap((item) =>
-    Array.from({ length: item.generationCount }, (_, generationIndex) => ({
-      itemId: item.id,
-      generationIndex,
-      key: `idem_${id}_${item.id}_${generationIndex}`,
-    }))
-  ),
+  idempotencyKeys: [...baseItems, ...cascadeItems].map((item) => ({
+    itemId: item.id,
+    key: `idem_${id}_${item.id}`,
+  })),
 });
 
 const makeJob = (
@@ -230,7 +227,6 @@ const makeJob = (
   purpose: 'video_take',
   authorizationId: 'auth_1',
   authorizationItemId: 'item_dependent',
-  generationIndex: 0,
   requestPlan,
   requestSnapshot: requestPlan.kind === 'resolved' ? requestPlan.snapshot : null,
   spendReceipt: null,
@@ -247,8 +243,7 @@ const addSucceededPrimary = (
   project: StudioProjectV2,
   authorizationId: string,
   item: StudioQuotedGeneration,
-  assetId: string,
-  generationIndex = 0
+  assetId: string
 ): StudioJobV2 => {
   const asset = addAsset(project, item.shotId, assetId, item.purpose === 'seed_still' ? 'image' : 'video', 'assets');
   const job = makeJob(`job_${assetId}`, item.shotId, item.requestPlan, {
@@ -256,12 +251,16 @@ const addSucceededPrimary = (
     purpose: item.purpose,
     authorizationId,
     authorizationItemId: item.id,
-    generationIndex,
     providerJobId: `remote_${assetId}`,
     outputAssetIds: [asset.id],
     outputAssetIdsByRole: { primary: asset.id, poster: null },
   });
   addJob(project, job);
+  if (item.purpose === 'video_take') {
+    const shot = project.shots[item.shotId]!;
+    if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+    shot.videoAssetId = asset.id;
+  }
   return job;
 };
 
@@ -297,10 +296,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
     project.shots.shot_3 = makeShot('shot_3');
     project.beats.beat_alt = makeBeat('beat_alt');
     project.shots.shot_parked = makeShot('shot_parked');
-    const activeTake = addAsset(project, 'shot_1', 'take_active', 'image', 'imports');
-    const binnedTake = addAsset(project, 'shot_1', 'take_binned', 'image', 'imports');
     project.bin = [
-      { kind: 'take', assetId: binnedTake.id, reason: 'alternate' },
       { kind: 'shot', beatId: 'beat_2', shotId: 'shot_parked', reason: 'lifted' },
       { kind: 'beat', beatId: 'beat_alt', reason: 'alternate' },
     ];
@@ -323,30 +319,26 @@ describe('projectStudioWorkspaceStatusV2', () => {
       cascadeProgress: [],
     });
     expect(
-      status.parkEligibility.map(({ subject, action, beatId, shotId, assetId }) => ({
+      status.parkEligibility.map(({ subject, action, beatId, shotId }) => ({
         subject,
         action,
         beatId,
         shotId,
-        assetId,
       }))
     ).toEqual([
-      { subject: 'beat', action: 'park', beatId: 'beat_1', shotId: null, assetId: null },
-      { subject: 'shot', action: 'park', beatId: 'beat_1', shotId: 'shot_1', assetId: null },
-      { subject: 'take', action: 'park', beatId: 'beat_1', shotId: 'shot_1', assetId: activeTake.id },
-      { subject: 'shot', action: 'park', beatId: 'beat_1', shotId: 'shot_2', assetId: null },
-      { subject: 'beat', action: 'park', beatId: 'beat_2', shotId: null, assetId: null },
-      { subject: 'shot', action: 'park', beatId: 'beat_2', shotId: 'shot_3', assetId: null },
-      { subject: 'take', action: 'restore', beatId: 'beat_1', shotId: 'shot_1', assetId: binnedTake.id },
-      { subject: 'shot', action: 'restore', beatId: 'beat_2', shotId: 'shot_parked', assetId: null },
-      { subject: 'beat', action: 'restore', beatId: 'beat_alt', shotId: null, assetId: null },
+      { subject: 'beat', action: 'park', beatId: 'beat_1', shotId: null },
+      { subject: 'shot', action: 'park', beatId: 'beat_1', shotId: 'shot_1' },
+      { subject: 'shot', action: 'park', beatId: 'beat_1', shotId: 'shot_2' },
+      { subject: 'beat', action: 'park', beatId: 'beat_2', shotId: null },
+      { subject: 'shot', action: 'park', beatId: 'beat_2', shotId: 'shot_3' },
+      { subject: 'shot', action: 'restore', beatId: 'beat_2', shotId: 'shot_parked' },
+      { subject: 'beat', action: 'restore', beatId: 'beat_alt', shotId: null },
     ]);
     expect(status.parkEligibility.every((row) => row.allowed === (row.blockers.length === 0))).toBe(true);
     expect(exactKeys(status.undoTop!)).toEqual(['entryId', 'label', 'sourceRevision']);
     expect(exactKeys(status.parkEligibility[0]!)).toEqual([
       'action',
       'allowed',
-      'assetId',
       'beatId',
       'blockers',
       'shotId',
@@ -359,7 +351,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
   it('uses the shared dirty-shot projection without exposing generation authority', () => {
     const project = makeProject(['shot_1']);
     const take = addAsset(project, 'shot_1', 'take_1');
-    project.shots.shot_1!.selectedTakeId = take.id;
+    project.shots.shot_1!.videoAssetId = take.id;
     const job = makeJob('job_take', 'shot_1', resolvedPlan(null, 'stale prompt'), {
       status: 'succeeded',
       authorizationItemId: 'item_take',
@@ -376,7 +368,6 @@ describe('projectStudioWorkspaceStatusV2', () => {
         rateUnit: 'second',
         rateMinorUnits: 1,
         durationSeconds: 5,
-        generationIndex: 0,
         generationCount: 1,
         totalMinorUnits: 5,
       },
@@ -400,7 +391,6 @@ describe('projectStudioWorkspaceStatusV2', () => {
 
   it('deduplicates Beat/Shot blockers in contained-shot and frozen code order', () => {
     const project = makeProject(['shot_1', 'shot_2']);
-    project.matchToShotId = 'shot_1';
     addJob(
       project,
       makeJob('job_own', 'shot_1', resolvedPlan(), {
@@ -427,7 +417,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
     project.frameExtractions.frame_pending = {
       id: 'frame_pending',
       shotId: 'shot_1',
-      takeAssetId: 'take_1',
+      videoAssetId: 'take_1',
       endpointSeconds: 10,
       frameAssetId: null,
       status: 'pending',
@@ -440,7 +430,6 @@ describe('projectStudioWorkspaceStatusV2', () => {
       (row) => row.subject === 'shot' && row.action === 'park' && row.shotId === 'shot_1'
     )!;
     const expected = [
-      { shotId: 'shot_1', code: 'current_match_to' },
       { shotId: 'shot_1', code: 'own_nonterminal_job' },
       { shotId: 'shot_1', code: 'own_pending_frame' },
       { shotId: 'shot_1', code: 'downstream_nonterminal_job' },
@@ -458,78 +447,23 @@ describe('projectStudioWorkspaceStatusV2', () => {
     expect(shot.allowed).toBe(false);
   });
 
-  it('reports the reachable Shot-restore and Take-Bin capacity blockers with exact identities', () => {
+  it('reports the reachable Shot-restore capacity blocker with its exact identity', () => {
     const shotIds = Array.from({ length: 8 }, (_, index) => `shot_${index}`);
     const project = makeProject(shotIds);
     project.shots.shot_parked = makeShot('shot_parked');
     project.bin.push({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_parked', reason: 'lifted' });
-    const activeTake = addAsset(project, 'shot_0', 'take_active', 'image', 'imports');
-    for (let index = 0; index < 96; index += 1) {
-      const asset = addAsset(project, 'shot_0', `take_bin_${index}`, 'image', 'imports');
-      project.bin.push({ kind: 'take', assetId: asset.id, reason: 'alternate' });
-    }
 
     const status = projectStudioWorkspaceStatusV2(project);
-    const takeRow = status.parkEligibility.find((row) => row.assetId === activeTake.id)!;
     const shotRestore = status.parkEligibility.find((row) => row.subject === 'shot' && row.action === 'restore')!;
-    expect(takeRow.blockers).toEqual([{ shotId: 'shot_0', code: 'take_bin_capacity_reached' }]);
     expect(shotRestore.blockers).toEqual([{ shotId: null, code: 'beat_shot_capacity_reached' }]);
     expect(status.parkEligibility.flatMap((row) => row.blockers)).not.toContainEqual(
       expect.objectContaining({ code: 'beat_capacity_reached' })
     );
   });
-
-  it('orders every Take-specific blocker without exposing the dependent job or item', () => {
-    const project = makeProject(['shot_1', 'shot_2']);
-    const take = addAsset(project, 'shot_1', 'take_blocked');
-    project.shots.shot_1!.selectedTakeId = take.id;
-    addJob(
-      project,
-      makeJob('job_producer', 'shot_1', resolvedPlan(), {
-        status: 'succeeded',
-        authorizationItemId: 'item_upstream',
-        providerJobId: 'remote_producer',
-        outputAssetIds: [take.id],
-        outputAssetIdsByRole: { primary: take.id, poster: null },
-      })
-    );
-    addJob(project, makeJob('job_waiting', 'shot_2', deferredPredecessorPlan('item_upstream', 'shot_1')));
-    addJob(
-      project,
-      makeJob(
-        'job_bound',
-        'shot_2',
-        resolvedPlan({
-          kind: 'predecessor_frame',
-          predecessorShotId: 'shot_1',
-          takeAssetId: take.id,
-          frameAssetId: 'frame_asset',
-          endpointSeconds: 10,
-        }),
-        { status: 'running', providerJobId: 'remote_bound' }
-      )
-    );
-    for (let index = 0; index < 96; index += 1) {
-      const binned = addAsset(project, 'shot_1', `binned_${index}`, 'image', 'imports');
-      project.bin.push({ kind: 'take', assetId: binned.id, reason: 'alternate' });
-    }
-
-    const row = projectStudioWorkspaceStatusV2(project).parkEligibility.find(
-      (candidate) => candidate.subject === 'take' && candidate.action === 'park' && candidate.assetId === take.id
-    )!;
-    expect(row.blockers).toEqual([
-      { shotId: 'shot_1', code: 'waiting_authorization_dependency' },
-      { shotId: 'shot_1', code: 'current_selected_take' },
-      { shotId: 'shot_1', code: 'nonterminal_conditioning_use' },
-      { shotId: 'shot_1', code: 'take_bin_capacity_reached' },
-    ]);
-    expect(row).not.toHaveProperty('jobId');
-    expect(row).not.toHaveProperty('itemId');
-  });
 });
 
 describe('workspace cascade progress', () => {
-  it('projects upstream-running then choose-take with bounded canonical primary IDs', () => {
+  it('projects upstream-running then auto-bound picture conditioning', () => {
     const running = makeCascadeProject();
     expect(projectStudioWorkspaceStatusV2(running.project).cascadeProgress).toEqual([
       {
@@ -552,19 +486,18 @@ describe('workspace cascade progress', () => {
 
     running.upstreamJob.status = 'succeeded';
     running.upstreamJob.providerJobId = 'remote_upstream';
-    running.upstream.generationCount = 2;
     const take = addAsset(running.project, 'shot_1', 'take_1');
     running.upstreamJob.outputAssetIds = [take.id];
     running.upstreamJob.outputAssetIdsByRole = { primary: take.id, poster: null };
-    addSucceededPrimary(running.project, running.authorization.id, running.upstream, 'take_2', 1);
+    running.project.shots.shot_1!.videoAssetId = take.id;
     expect(projectStudioWorkspaceStatusV2(running.project).cascadeProgress).toEqual([
       {
         dependentShotId: 'shot_2',
         upstreamShotId: 'shot_1',
-        eligiblePrimaryAssetIds: ['take_1', 'take_2'],
+        eligiblePrimaryAssetIds: ['take_1'],
         canRetryConditioningFrame: false,
         canCancelWaiting: true,
-        waitingReason: 'choose_take',
+        waitingReason: 'conditioning_frame',
       },
     ]);
   });
@@ -576,12 +509,12 @@ describe('workspace cascade progress', () => {
     fixture.upstreamJob.outputAssetIds = [take.id];
     fixture.upstreamJob.outputAssetIdsByRole = { primary: take.id, poster: null };
     fixture.project.shots.shot_1!.durationSeconds = 8;
-    fixture.project.shots.shot_1!.selectedTakeId = take.id;
-    const frameId = createStudioFrameExtractionId({ shotId: 'shot_1', takeAssetId: take.id, endpointSeconds: 10 });
+    fixture.project.shots.shot_1!.videoAssetId = take.id;
+    const frameId = createStudioFrameExtractionId({ shotId: 'shot_1', videoAssetId: take.id, endpointSeconds: 10 });
     fixture.project.frameExtractions[frameId] = {
       id: frameId,
       shotId: 'shot_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 10,
       frameAssetId: null,
       status: 'pending',
@@ -604,25 +537,17 @@ describe('workspace cascade progress', () => {
       canRetryConditioningFrame: true,
       canCancelWaiting: true,
     });
-    fixture.project.frameExtractions[frameId]!.takeAssetId = 'replacement_take';
+    fixture.project.frameExtractions[frameId]!.videoAssetId = 'replacement_take';
     expect(projectStudioWorkspaceStatusV2(fixture.project).cascadeProgress[0]).toMatchObject({
       waitingReason: 'conditioning_frame',
       canRetryConditioningFrame: false,
     });
   });
 
-  it('gives dependency-failed precedence over cancelled siblings and emits all-cancelled separately', () => {
+  it('projects dependency failure and terminal cancellation separately', () => {
     const fixture = makeCascadeProject();
-    fixture.dependent.generationCount = 2;
     fixture.dependentJob.status = 'failed';
     fixture.dependentJob.error = { code: 'dependency_failed', messageKey: 'dependency_failed' };
-    const cancelled = makeJob('job_dependent_cancelled', 'shot_2', fixture.dependent.requestPlan, {
-      status: 'cancelled',
-      authorizationId: fixture.authorization.id,
-      authorizationItemId: fixture.dependent.id,
-      generationIndex: 1,
-    });
-    addJob(fixture.project, cancelled);
 
     expect(projectStudioWorkspaceStatusV2(fixture.project).cascadeProgress[0]).toEqual({
       dependentShotId: 'shot_2',
@@ -714,13 +639,13 @@ describe('projectStudioChainStatusV2', () => {
   const makeFailedChain = () => {
     const project = makeProject(['shot_1', 'shot_2']);
     const take = addAsset(project, 'shot_1', 'take_1');
-    project.shots.shot_1!.selectedTakeId = take.id;
+    project.shots.shot_1!.videoAssetId = take.id;
     project.shots.shot_1!.trimOutSeconds = 2;
-    const frameId = createStudioFrameExtractionId({ shotId: 'shot_1', takeAssetId: take.id, endpointSeconds: 8 });
+    const frameId = createStudioFrameExtractionId({ shotId: 'shot_1', videoAssetId: take.id, endpointSeconds: 8 });
     project.frameExtractions[frameId] = {
       id: frameId,
       shotId: 'shot_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
       frameAssetId: null,
       status: 'failed',
@@ -771,17 +696,17 @@ describe('projectStudioChainStatusV2', () => {
   it('projects empty, verified on-disk, and fail-closed ready frame boundaries without leaking extraction authority', () => {
     const project = makeProject(['shot_1', 'shot_2', 'shot_3']);
     const firstTake = addAsset(project, 'shot_1', 'take_1');
-    project.shots.shot_1!.selectedTakeId = firstTake.id;
+    project.shots.shot_1!.videoAssetId = firstTake.id;
     const extractionId = createStudioFrameExtractionId({
       shotId: 'shot_1',
-      takeAssetId: firstTake.id,
+      videoAssetId: firstTake.id,
       endpointSeconds: 10,
     });
     const frame = addAsset(project, 'shot_1', 'frame_1', 'image', 'conditioningFrames');
     project.frameExtractions[extractionId] = {
       id: extractionId,
       shotId: 'shot_1',
-      takeAssetId: firstTake.id,
+      videoAssetId: firstTake.id,
       endpointSeconds: 10,
       frameAssetId: frame.id,
       status: 'ready',
@@ -800,7 +725,7 @@ describe('projectStudioChainStatusV2', () => {
         {
           extractionId,
           shotId: 'shot_1',
-          takeAssetId: firstTake.id,
+          videoAssetId: firstTake.id,
           endpointSeconds: 10,
           frameAssetId: frame.id,
           byteSize: frame.byteSize,
@@ -835,7 +760,7 @@ describe('projectStudioChainStatusV2', () => {
     expect(projectStudioChainBoundaryVerificationIdsV2(project)).toEqual([frameId]);
     expect(projectStudioChainStatusV2(project).boundaries[0]).toMatchObject({ status: 'gone', frameAssetId: null });
 
-    project.frameExtractions[frameId]!.takeAssetId = 'take_other';
+    project.frameExtractions[frameId]!.videoAssetId = 'take_other';
     expect(projectStudioChainBoundaryVerificationIdsV2(project)).toEqual([]);
     expect(projectStudioChainStatusV2(project).boundaries[0]).toMatchObject({ status: 'gone', frameAssetId: null });
 

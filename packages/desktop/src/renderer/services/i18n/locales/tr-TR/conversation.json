@@ -905,10 +905,20 @@
       "importError": "Referans eklenemedi. Yeniden deneyin."
     },
     "workspace": {
+      "library": {
+        "subtitle": "Hikâyeleri Beat ve çekimler olarak planlayın, ardından her çekimin geçerli görüntüsünü inceleyin.",
+        "pictureCount": "{{count}} görüntü hazır",
+        "pictureCount_one": "{{count}} görüntü hazır",
+        "pictureCount_other": "{{count}} görüntü hazır",
+        "status": {
+          "complete": "Tüm çekimlerin geçerli bir görüntüsü var",
+          "partial": "Bazı çekimlerin geçerli bir görüntüsü var"
+        }
+      },
       "board": {
         "liftBeat": "Çöp Kutusu'na taşı",
         "liftConfirmTitle": "\"{{title}}\" Çöp Kutusu'na taşınsın mı?",
-        "liftConfirmContent": "Bu Beat filmden çıkarılır. Oluşturulan ve ücreti ödenmiş tüm içerik ile tüm çekimler Çöp Kutusu'nda korunur."
+        "liftConfirmContent": "Bu Beat filmden çıkarılır. Oluşturulan ve ücreti ödenmiş tüm içerik Çöp Kutusu'nda korunur."
       },
       "cut": {
         "preview": {
@@ -919,8 +929,8 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Çekim {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Slayt · Çekim yok",
           "noMedia": "Kullanılabilir film önizlemesi yok.",
-          "awaitingTakeOne": "Filmi oynatmadan önce Beat {{beatPosition}} · Çekim {{shotPosition}} için bir çekim seçin.",
-          "awaitingTakeMany": "Filmi oynatmadan önce {{count}} çekim için seçim yapın.",
+          "awaitingPictureOne": "Beat {{beatPosition}}, Çekim {{shotPosition}} için henüz geçerli bir görüntü yok.",
+          "awaitingPictureMany": "{{count}} çekim için henüz geçerli bir görüntü yok.",
           "mediaError": "Bu önizleme yüklenemedi.",
           "play": "Filmi oynat",
           "pause": "Filmi duraklat",
@@ -932,6 +942,9 @@
           "nextJoin": "Sonraki birleşim",
           "loopJoin": "Birleşimi döngüye al",
           "buffering": "Önizleme karesi yükleniyor"
+        },
+        "exports": {
+          "editorFolderDescription": "Geçerli çekim görüntüleri, hedef kartlar, zaman çizelgesi verileri ve isteğe bağlı ses yatağı film sırasıyla dışa aktarılır."
         },
         "film": {
           "under": "{{clock}} altında",
@@ -946,11 +959,28 @@
           "openBeat": "Çekimsiz Beat'i aç"
         }
       },
+      "proposals": {
+        "fixedReason": {
+          "video_asset": "Bu çekimin geçerli bir görüntüsü var."
+        }
+      },
       "beatPanel": {
-        "takes": {
-          "park": "Çöp Kutusu'na taşı",
-          "parkConfirmTitle": "Bu çekim Çöp Kutusu'na taşınsın mı?",
-          "parkConfirmBody": "Çekim projede kalır ve etkin seçeneklerden çıkarılır."
+        "seeds": {
+          "stillLabel": "Çekim {{shotIndex}} için başlangıç karesi {{stillIndex}}",
+          "previewAlt": "Önizleme · {{label}}",
+          "effective": "Geçerli başlangıç karesi",
+          "pinnedBadge": "Sabitlendi"
+        },
+        "picture": {
+          "title": "Geçerli görüntü",
+          "label": "{{index}}. Çekimin geçerli görüntüsü",
+          "empty": "Henüz hiçbir şey oluşturulmadı",
+          "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} saniye kaynak",
+          "unavailable": "Geçerli görüntü kullanılamıyor",
+          "videoPreview": "Oynatıcı · {{label}}"
+        },
+        "generation": {
+          "renderVideo": "Yeniden oluştur"
         },
         "lift": {
           "shot": "Çöp Kutusu'na taşı",
@@ -997,7 +1027,7 @@
           "trimGuidance": "Kenar · Kırpma · Ücretsiz",
           "boundaryGuidance": "Sınır · Yeniden oluşturma gerektirir",
           "segmentState": {
-            "noTake": "Çekim yok",
+            "noPicture": "Görüntü yok",
             "queued": "Kuyrukta",
             "nextUp": "Sıradaki",
             "waitingOnShot": "{{position}}. çekim bekleniyor",
@@ -1006,8 +1036,6 @@
             "renderingProgress": "İşleniyor · %{{progress}}",
             "renderingStill": "İşleniyor · Sabit görüntü gösteriliyor",
             "rendered": "İşlendi",
-            "renderedOneTake": "İşlendi · 1 çekim",
-            "selectedTake": "{{count}} çekim · T{{take}} kurguda",
             "untouched": "Değiştirilmedi",
             "needsRerender": "Yeniden işlenmesi gerekiyor",
             "staleStillPlays": "Güncel değil · Yine de oynatılır",
@@ -1030,7 +1058,7 @@
         "preview": {
           "label": "Beat önizlemesi",
           "noMedia": "Beat önizlemesi kullanılamıyor",
-          "mediaError": "Seçili çekimin önizlemesi gösterilemedi.",
+          "mediaError": "Geçerli görüntünün önizlemesi gösterilemedi.",
           "videoLabel": "Çekim {{position}} videosu · {{line}}",
           "slateLabel": "Çekim {{position}} planlama slaytı · {{line}}",
           "slate": "Planlama slaytı",
@@ -1565,6 +1593,7 @@
         "submissionUnknown": "Gönderimin sonucu bilinmiyor. Tekrar denemeden önce mükerrer ücret uyarısını gözden geçirin.",
         "downloadFailed": "Oluşturma tamamlandı ancak çıktı indirilemedi.",
         "unsupported": "Bu sağlayıcı istenen işlemi desteklemiyor.",
+        "seedStillVariationGrid": "Oluşturulan başlangıç karesi çok panelli bir varyasyon ızgarası içeriyor ve video için kullanılamaz.",
         "unknown": "Oluşturma işi bilinmeyen bir nedenle başarısız oldu."
       }
     },

@@ -31,7 +31,6 @@ const templateInput = () => ({
   rules: [rule],
   look: 'Warm studio light.',
   line: 'The camera rotates into view.',
-  matchTo: { look: 'Cool daylight.', line: 'The previous product shot.' },
   aspectRatio: '16:9' as const,
   resolution: '1080p' as const,
   durationSeconds: 8,
@@ -39,29 +38,25 @@ const templateInput = () => ({
 });
 
 describe('composeStudioGenerationPrompt', () => {
-  it('freezes Brief, rules, Look, line, and Match To contribution in one prompt', () => {
+  it('freezes Brief, rules, Look, and line in one prompt', () => {
     expect(composeStudioGenerationPrompt(templateInput())).toBe(
       [
         'BRIEF\nLaunch the new camera.',
         'PROJECT RULES — enforced before any paid render. A visual prompt that breaks an enforced rule is refused before it costs anything.\n1. [project, enforced] Never show a competitor logo (forbidden words: competitor)',
         'LOOK\nWarm studio light.',
         'SHOT\nThe camera rotates into view.',
-        'MATCH TO\nLOOK\nCool daylight.\nSHOT\nThe previous product shot.',
       ].join('\n\n')
     );
   });
 
   it('rejects an empty or oversized provider prompt', () => {
-    expect(() => composeStudioGenerationPrompt({ brief: '', rules: [], look: '', line: '', matchTo: null })).toThrow(
-      RangeError
-    );
+    expect(() => composeStudioGenerationPrompt({ brief: '', rules: [], look: '', line: '' })).toThrow(RangeError);
     expect(() =>
       composeStudioGenerationPrompt({
         brief: 'x'.repeat(STUDIO_MAX_GENERATION_PROMPT_LENGTH + 1),
         rules: [],
         look: '',
         line: '',
-        matchTo: null,
       })
     ).toThrow(RangeError);
   });

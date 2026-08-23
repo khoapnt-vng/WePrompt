@@ -911,10 +911,20 @@
       "importError": "Não foi possível adicionar a referência. Tente novamente."
     },
     "workspace": {
+      "library": {
+        "subtitle": "Planeje histórias como Beats e planos e depois revise a imagem atual de cada plano.",
+        "pictureCount": "{{count}} imagens prontas",
+        "pictureCount_one": "{{count}} imagem pronta",
+        "pictureCount_other": "{{count}} imagens prontas",
+        "status": {
+          "complete": "Todos os planos têm uma imagem atual",
+          "partial": "Alguns planos têm uma imagem atual"
+        }
+      },
       "board": {
         "liftBeat": "Mover para a Lixeira",
         "liftConfirmTitle": "Mover \"{{title}}\" para a Lixeira?",
-        "liftConfirmContent": "Este Beat sai do filme. Todo o conteúdo criado e pago, além das tomadas, permanece na Lixeira."
+        "liftConfirmContent": "Este Beat sai do filme. Todo o conteúdo criado e pago permanece na Lixeira."
       },
       "cut": {
         "preview": {
@@ -925,8 +935,8 @@
           "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Plano {{shotPosition}} · {{shotTitle}}",
           "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Cartela · Sem cobertura",
           "noMedia": "Nenhuma prévia do filme está disponível.",
-          "awaitingTakeOne": "Escolha uma tomada para o Beat {{beatPosition}} · Plano {{shotPosition}} antes de reproduzir o filme.",
-          "awaitingTakeMany": "Escolha uma tomada para {{count}} planos antes de reproduzir o filme.",
+          "awaitingPictureOne": "O Beat {{beatPosition}}, plano {{shotPosition}}, ainda não tem uma imagem atual.",
+          "awaitingPictureMany": "{{count}} planos ainda não têm uma imagem atual.",
           "mediaError": "Não foi possível carregar esta prévia.",
           "play": "Reproduzir filme",
           "pause": "Pausar filme",
@@ -938,6 +948,9 @@
           "nextJoin": "Próxima junção",
           "loopJoin": "Repetir junção",
           "buffering": "Carregando quadro da prévia"
+        },
+        "exports": {
+          "editorFolderDescription": "Imagens atuais dos planos, claquetes de destino, dados da linha do tempo e a faixa opcional na ordem do filme."
         },
         "film": {
           "under": "{{clock}} abaixo",
@@ -952,11 +965,28 @@
           "openBeat": "Abrir beat sem cobertura"
         }
       },
+      "proposals": {
+        "fixedReason": {
+          "video_asset": "Este plano tem uma imagem atual."
+        }
+      },
       "beatPanel": {
-        "takes": {
-          "park": "Mover para a Lixeira",
-          "parkConfirmTitle": "Mover esta tomada para a Lixeira?",
-          "parkConfirmBody": "A tomada permanece no projeto e sai das opções ativas."
+        "seeds": {
+          "stillLabel": "Imagem inicial {{stillIndex}} do plano {{shotIndex}}",
+          "previewAlt": "Prévia · {{label}}",
+          "effective": "Imagem inicial atual",
+          "pinnedBadge": "Fixada"
+        },
+        "picture": {
+          "title": "Imagem atual",
+          "label": "Imagem atual da tomada {{index}}",
+          "empty": "Nada renderizado ainda",
+          "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} segundos de origem",
+          "unavailable": "Imagem atual indisponível",
+          "videoPreview": "Player · {{label}}"
+        },
+        "generation": {
+          "renderVideo": "Gerar novamente"
         },
         "lift": {
           "shot": "Mover para a Lixeira",
@@ -1003,7 +1033,7 @@
           "trimGuidance": "Borda · Corte · Grátis",
           "boundaryGuidance": "Limite · Exige nova renderização",
           "segmentState": {
-            "noTake": "Sem tomada",
+            "noPicture": "Sem imagem",
             "queued": "Na fila",
             "nextUp": "Próximo",
             "waitingOnShot": "Aguardando o plano {{position}}",
@@ -1012,8 +1042,6 @@
             "renderingProgress": "Renderizando · {{progress}}%",
             "renderingStill": "Renderizando · Exibindo o quadro estático",
             "rendered": "Renderizado",
-            "renderedOneTake": "Renderizado · 1 tomada",
-            "selectedTake": "{{count}} tomadas · T{{take}} no corte",
             "untouched": "Intocado",
             "needsRerender": "Precisa renderizar novamente",
             "staleStillPlays": "Desatualizado · Ainda reproduz",
@@ -1036,7 +1064,7 @@
         "preview": {
           "label": "Prévia do beat",
           "noMedia": "Prévia do beat indisponível",
-          "mediaError": "Não foi possível visualizar a tomada selecionada.",
+          "mediaError": "Não foi possível visualizar a imagem atual.",
           "videoLabel": "Vídeo do plano {{position}} · {{line}}",
           "slateLabel": "Cartela de planejamento do plano {{position}} · {{line}}",
           "slate": "Cartela de planejamento",
@@ -1587,6 +1615,7 @@
         "submissionUnknown": "O resultado do envio é desconhecido. Revise o aviso de cobrança duplicada antes de tentar novamente.",
         "downloadFailed": "A geração foi concluída, mas não foi possível baixar a saída.",
         "unsupported": "Este provedor não aceita a operação solicitada.",
+        "seedStillVariationGrid": "A imagem inicial gerada contém uma grade de variações com vários painéis e não pode ser usada para vídeo.",
         "unknown": "O trabalho de geração falhou por um motivo desconhecido."
       }
     },

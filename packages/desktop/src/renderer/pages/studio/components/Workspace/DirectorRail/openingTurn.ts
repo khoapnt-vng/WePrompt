@@ -75,7 +75,7 @@ export const DIRECTOR_PRESET_RULES = [
   '',
   'Once the direction is agreed, say in a sentence or two what you are about to build, then build it.',
   '',
-  'Never start paid generation on your own. The person chooses which takes are worth paying for.',
+  'Never start paid generation on your own. The person chooses when generation is worth paying for.',
   '',
   'Answer in the language the person writes to you in.',
 ].join('\n');

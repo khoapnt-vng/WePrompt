@@ -36,7 +36,8 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
-  selectedTakeId: null,
+  videoAssetId: null,
+  supersededVideoAssetIds: [],
   assetIds: [],
   jobIds: [],
   ...overrides,
@@ -85,7 +86,6 @@ const makeJob = (
   purpose: 'video_take',
   authorizationId: 'authorization_1',
   authorizationItemId: 'item_1',
-  generationIndex: 0,
   requestPlan: {
     kind: 'resolved',
     snapshot: {
@@ -122,7 +122,7 @@ const makeJob = (
 });
 
 const makeProject = (): StudioProjectV2 => ({
-  schemaVersion: 2,
+  schemaVersion: 3,
   revision: 1,
   id: 'project_1',
   name: 'Project One',
@@ -137,7 +137,6 @@ const makeProject = (): StudioProjectV2 => ({
   shots: {},
   bin: [],
   bedAssetId: null,
-  matchToShotId: null,
   spendPolicy: null,
   spendAuthorizations: [],
   frameExtractions: {},
@@ -164,15 +163,15 @@ describe('toStudioProjectSummaryV2', () => {
       { kind: 'shot', beatId: 'beat_2', shotId: 'shot_binned', reason: 'lifted' },
     ];
     project.shots = {
-      shot_parked: makeShot('shot_parked', { selectedTakeId: 'take_parked', assetIds: ['take_parked'] }),
-      shot_binned: makeShot('shot_binned', { selectedTakeId: 'take_binned', assetIds: ['take_binned'] }),
-      shot_later: makeShot('shot_later', { selectedTakeId: 'take_later', assetIds: ['take_later'] }),
+      shot_parked: makeShot('shot_parked', { videoAssetId: 'take_parked', assetIds: ['take_parked'] }),
+      shot_binned: makeShot('shot_binned', { videoAssetId: 'take_binned', assetIds: ['take_binned'] }),
+      shot_later: makeShot('shot_later', { videoAssetId: 'take_later', assetIds: ['take_later'] }),
       shot_without_cover: makeShot('shot_without_cover', {
-        selectedTakeId: 'take_without_cover',
+        videoAssetId: 'take_without_cover',
         assetIds: ['take_without_cover'],
       }),
       shot_cover: makeShot('shot_cover', {
-        selectedTakeId: 'take_cover',
+        videoAssetId: 'take_cover',
         assetIds: ['take_cover', 'poster_cover'],
         jobIds: ['job_cover'],
       }),
@@ -217,7 +216,7 @@ describe('toStudioProjectSummaryV2', () => {
       resolution: '1080p',
       beatCount: 2,
       shotCount: 3,
-      selectedTakeCount: 3,
+      pictureCount: 3,
       poster: {
         beatId: 'beat_2',
         shotId: 'shot_cover',
@@ -235,7 +234,7 @@ describe('toStudioProjectSummaryV2', () => {
     project.beatOrder = ['beat_1'];
     project.beats.beat_1 = makeBeat('beat_1', ['shot_1']);
     project.shots.shot_1 = makeShot('shot_1', {
-      selectedTakeId: 'take_1',
+      videoAssetId: 'take_1',
       assetIds: ['take_1', 'unroled_output', 'poster_1'],
       jobIds: ['job_1'],
     });
@@ -280,7 +279,7 @@ describe('toStudioProjectSummaryV2', () => {
     project.beatOrder = ['beat_1'];
     project.beats.beat_1 = makeBeat('beat_1', ['shot_1']);
     project.shots.shot_1 = makeShot('shot_1', {
-      selectedTakeId: 'take_1',
+      videoAssetId: 'take_1',
       assetIds: ['take_1', ...(posterId === null ? [] : [posterId])],
       jobIds: ['job_1'],
     });
@@ -299,7 +298,7 @@ describe('toStudioProjectSummaryV2', () => {
     });
 
     const summary = toStudioProjectSummaryV2(project);
-    expect(summary.selectedTakeCount).toBe(1);
+    expect(summary.pictureCount).toBe(1);
     expect(Object.hasOwn(summary, 'poster')).toBe(false);
   });
 
@@ -340,7 +339,7 @@ describe('studioPlanningShotBoundariesV2', () => {
     const shot = makeShot('shot_1', {
       durationSeconds: 8,
       trimOutSeconds: 1,
-      selectedTakeId: 'take_1',
+      videoAssetId: 'take_1',
       assetIds: ['take_1'],
     });
     project.shots.shot_1 = shot;
@@ -385,7 +384,7 @@ describe('active film duration projections', () => {
       shot_selected: makeShot('shot_selected', {
         durationSeconds: 8,
         trimOutSeconds: 1,
-        selectedTakeId: 'take_selected',
+        videoAssetId: 'take_selected',
         assetIds: ['take_selected'],
       }),
       shot_planned: makeShot('shot_planned', { durationSeconds: 8 }),
@@ -419,8 +418,8 @@ describe('active film duration projections', () => {
     unsafeProject.beatOrder = ['beat_unsafe'];
     unsafeProject.beats.beat_unsafe = makeBeat('beat_unsafe', ['shot_1', 'shot_2']);
     unsafeProject.shots = {
-      shot_1: makeShot('shot_1', { selectedTakeId: 'take_1', assetIds: ['take_1'] }),
-      shot_2: makeShot('shot_2', { selectedTakeId: 'take_2', assetIds: ['take_2'] }),
+      shot_1: makeShot('shot_1', { videoAssetId: 'take_1', assetIds: ['take_1'] }),
+      shot_2: makeShot('shot_2', { videoAssetId: 'take_2', assetIds: ['take_2'] }),
     };
     unsafeProject.assets = {
       take_1: makeAsset('take_1', 'shot_1', {
@@ -446,7 +445,7 @@ describe('active film duration projections', () => {
     const selected = makeShot('shot_1', {
       trimInSeconds: 5,
       trimOutSeconds: 5,
-      selectedTakeId: 'take_1',
+      videoAssetId: 'take_1',
       assetIds: ['take_1'],
     });
     project.assets.take_1 = makeAsset('take_1', 'shot_1', {

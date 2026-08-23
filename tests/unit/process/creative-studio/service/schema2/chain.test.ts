@@ -58,7 +58,8 @@ const makeShot = (shotId: string): StudioShot => ({
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
-  selectedTakeId: null,
+  videoAssetId: null,
+  supersededVideoAssetIds: [],
   assetIds: [],
   jobIds: [],
 });
@@ -97,7 +98,6 @@ const makeSnapshot = (
       rules: project.rules,
       look: beat.look,
       line: shot.line,
-      matchTo: null,
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
       durationSeconds: shot.durationSeconds,
@@ -134,7 +134,6 @@ const makeJob = (
   purpose: 'video_take',
   authorizationId: `authorization_${jobId}`,
   authorizationItemId: `item_${jobId}`,
-  generationIndex: 0,
   requestPlan: { kind: 'resolved', snapshot },
   requestSnapshot: snapshot,
   spendReceipt: {
@@ -147,7 +146,6 @@ const makeJob = (
     rateUnit: 'second',
     rateMinorUnits: 1,
     durationSeconds: shot.durationSeconds,
-    generationIndex: 0,
     generationCount: 1,
     totalMinorUnits: shot.durationSeconds,
   },
@@ -178,7 +176,7 @@ const addCurrentHeadShot = (project: StudioProjectV2, beatId: string, shotId: st
   project.assets[seedId] = makeAsset(project, shotId, seedId, 'image', 'imports');
   project.assets[takeId] = makeAsset(project, shotId, takeId, 'video', 'assets');
   shot.seedStillId = seedId;
-  shot.selectedTakeId = takeId;
+  shot.videoAssetId = takeId;
   shot.assetIds = [seedId, takeId];
   shot.jobIds = [jobId];
   const snapshot = makeSnapshot(project, beatId, shot, { kind: 'seed_still', assetId: seedId });
@@ -191,17 +189,17 @@ const addReadyFrame = (
   predecessor: StudioShot,
   frameAssetId: string
 ): StudioConditioningInputSnapshot => {
-  const take = project.assets[predecessor.selectedTakeId!]!;
+  const take = project.assets[predecessor.videoAssetId!]!;
   const endpointSeconds = take.durationSeconds! - (predecessor.trimOutSeconds ?? 0);
   const extractionId = createStudioFrameExtractionId({
     shotId: predecessor.id,
-    takeAssetId: take.id,
+    videoAssetId: take.id,
     endpointSeconds,
   });
   project.frameExtractions[extractionId] = {
     id: extractionId,
     shotId: predecessor.id,
-    takeAssetId: take.id,
+    videoAssetId: take.id,
     endpointSeconds,
     frameAssetId,
     status: 'ready',
@@ -228,7 +226,7 @@ const addFollowerShot = (
   project.beats[beatId]!.shotOrder.push(shotId);
   project.shots[shotId] = shot;
   project.assets[takeId] = makeAsset(project, shotId, takeId, 'video', 'assets');
-  shot.selectedTakeId = takeId;
+  shot.videoAssetId = takeId;
   shot.assetIds = [takeId];
   shot.jobIds = [jobId];
   const conditioning = addReadyFrame(project, predecessor, `${predecessor.id}_frame`);
@@ -331,7 +329,7 @@ describe('deriveStudioDirtyShotsV2', () => {
     [
       'mismatched extraction take',
       (project: StudioProjectV2): void => {
-        Object.values(project.frameExtractions)[0]!.takeAssetId = 'wrong_take';
+        Object.values(project.frameExtractions)[0]!.videoAssetId = 'wrong_take';
       },
     ],
     [
@@ -349,7 +347,7 @@ describe('deriveStudioDirtyShotsV2', () => {
     ]);
   });
 
-  it('skips malformed active traversal and non-canonical selected takes without duplicating rows', () => {
+  it('skips malformed active traversal and non-canonical picture pointers without duplicating rows', () => {
     const project = makeProject();
     project.beatOrder.push('missing_beat');
     addBeat(project, 'beat_1');
@@ -361,15 +359,14 @@ describe('deriveStudioDirtyShotsV2', () => {
 
     expect(deriveStudioDirtyShotsV2(project)).toEqual([{ shotId: 'shot_1', causes: ['generation_out_of_date'] }]);
 
-    project.shots.shot_1!.selectedTakeId = null;
+    project.shots.shot_1!.videoAssetId = null;
     expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
 
-    project.shots.shot_1!.selectedTakeId = 'shot_1_seed';
+    project.shots.shot_1!.videoAssetId = 'shot_1_seed';
     expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
 
-    project.shots.shot_1!.selectedTakeId = 'shot_1_take';
-    project.bin.push({ kind: 'take', assetId: 'shot_1_take', reason: 'lifted' });
-    expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
+    project.shots.shot_1!.videoAssetId = 'shot_1_take';
+    expect(deriveStudioDirtyShotsV2(project)).toEqual([{ shotId: 'shot_1', causes: ['generation_out_of_date'] }]);
   });
 
   it('uses an eligible unpinned seed when comparing a current head request', () => {
@@ -404,7 +401,6 @@ describe('deriveStudioDirtyShotsV2', () => {
         rules: project.rules,
         look: project.beats.beat_1!.look,
         line: shot.line,
-        matchTo: null,
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: shot.durationSeconds,
@@ -457,7 +453,7 @@ describe('deriveStudioDirtyShotsV2', () => {
     ]);
   });
 
-  it('detects both a human hard cut and an upstream selected-take replacement', () => {
+  it('detects both a human hard cut and an upstream picture replacement', () => {
     const hardCut = makeTwoShotProject();
     hardCut.shots.shot_2!.chainBreak = 'hard_cut';
     const secondSeedId = 'shot_2_seed';
@@ -475,7 +471,8 @@ describe('deriveStudioDirtyShotsV2', () => {
     const replacementJobId = 'shot_1_job_replacement';
     selectionChanged.assets[replacementId] = makeAsset(selectionChanged, first.id, replacementId, 'video', 'assets');
     first.assetIds.push(replacementId);
-    first.selectedTakeId = replacementId;
+    first.supersededVideoAssetIds.push(first.videoAssetId!);
+    first.videoAssetId = replacementId;
     const replacementSnapshot = makeSnapshot(selectionChanged, 'beat_1', first, {
       kind: 'seed_still',
       assetId: first.seedStillId!,
@@ -500,7 +497,6 @@ describe('deriveStudioDirtyShotsV2', () => {
 describe('deriveStudioInboundShotReferencesV2', () => {
   it('orders every live blocker category and ignores terminal historical consumers', () => {
     const project = makeTwoShotProject();
-    project.matchToShotId = 'shot_1';
     const target = project.shots.shot_1!;
     const dependent = project.shots.shot_2!;
     const downstreamSnapshot = project.jobs.shot_2_job!.requestSnapshot!;
@@ -547,13 +543,13 @@ describe('deriveStudioInboundShotReferencesV2', () => {
     };
     const pendingFrameId = createStudioFrameExtractionId({
       shotId: target.id,
-      takeAssetId: target.selectedTakeId!,
+      videoAssetId: target.videoAssetId!,
       endpointSeconds: 9,
     });
     project.frameExtractions[pendingFrameId] = {
       id: pendingFrameId,
       shotId: target.id,
-      takeAssetId: target.selectedTakeId!,
+      videoAssetId: target.videoAssetId!,
       endpointSeconds: 9,
       frameAssetId: null,
       status: 'pending',
@@ -563,7 +559,6 @@ describe('deriveStudioInboundShotReferencesV2', () => {
     const references = deriveStudioInboundShotReferencesV2(project, [target.id]);
 
     expect(references).toEqual([
-      { shotId: target.id, dependentShotId: null, kind: 'current_match_to' },
       { shotId: target.id, dependentShotId: target.id, kind: 'own_nonterminal_job' },
       { shotId: target.id, dependentShotId: target.id, kind: 'own_pending_frame' },
       { shotId: target.id, dependentShotId: dependent.id, kind: 'downstream_nonterminal_job' },
@@ -575,7 +570,6 @@ describe('deriveStudioInboundShotReferencesV2', () => {
     ]);
     expect(studioShotHasBlockingInboundReferenceV2(project, target.id)).toBe(true);
 
-    project.matchToShotId = null;
     delete project.jobs.own_running;
     delete project.jobs.downstream_running;
     delete project.jobs.downstream_waiting;
@@ -633,13 +627,13 @@ describe('deriveStudioInboundShotReferencesV2', () => {
     const tail = project.shots.shot_2!;
     const pendingFrameId = createStudioFrameExtractionId({
       shotId: tail.id,
-      takeAssetId: tail.selectedTakeId!,
+      videoAssetId: tail.videoAssetId!,
       endpointSeconds: 9,
     });
     project.frameExtractions[pendingFrameId] = {
       id: pendingFrameId,
       shotId: tail.id,
-      takeAssetId: tail.selectedTakeId!,
+      videoAssetId: tail.videoAssetId!,
       endpointSeconds: 9,
       frameAssetId: null,
       status: 'pending',

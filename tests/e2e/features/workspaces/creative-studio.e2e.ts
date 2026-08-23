@@ -220,8 +220,7 @@ type StudioBridgeMethod =
   | 'list-exports'
   | 'list-projects'
   | 'list-routes'
-  | 'prepare-submission'
-  | 'select-take';
+  | 'prepare-submission';
 
 async function invokeStudioBridge<T>(page: Page, method: StudioBridgeMethod, data: unknown): Promise<T> {
   const result: unknown = await page.evaluate(
@@ -318,7 +317,7 @@ const readRawStudioProject = async (userDataDirectory: string, projectId: string
     typeof parsed !== 'object' ||
     parsed === null ||
     Array.isArray(parsed) ||
-    (parsed as Record<string, unknown>).schemaVersion !== 2 ||
+    (parsed as Record<string, unknown>).schemaVersion !== 3 ||
     (parsed as Record<string, unknown>).id !== projectId ||
     typeof (parsed as Record<string, unknown>).frameExtractions !== 'object' ||
     (parsed as Record<string, unknown>).frameExtractions === null
@@ -613,32 +612,22 @@ const captureCutViewportReference = async (
   expect(metrics.documentScrollWidth).toBeLessThanOrEqual(metrics.documentClientWidth + 1);
 
   const audioPanel = cut.getByRole('heading', { name: 'Audio bed', exact: true }).locator('xpath=ancestor::section[1]');
-  const matchPanel = cut.getByRole('heading', { name: 'Match To', exact: true }).locator('xpath=ancestor::section[1]');
-  const [cutBox, audioBox, matchBox, editorBox, stillBox, scriptBox] = await Promise.all([
+  const [cutBox, audioBox, editorBox, stillBox, scriptBox] = await Promise.all([
     cut.boundingBox(),
     audioPanel.boundingBox(),
-    matchPanel.boundingBox(),
     cut.locator('[data-export-shape="editor_folder"]').boundingBox(),
     cut.locator('[data-export-shape="still"]').boundingBox(),
     cut.locator('[data-export-shape="script"]').boundingBox(),
   ]);
-  if (
-    cutBox === null ||
-    audioBox === null ||
-    matchBox === null ||
-    editorBox === null ||
-    stillBox === null ||
-    scriptBox === null
-  ) {
+  if (cutBox === null || audioBox === null || editorBox === null || stillBox === null || scriptBox === null) {
     throw new Error(`Cut ${reference.screenshotName} geometry was unavailable`);
   }
-  for (const box of [cutBox, audioBox, matchBox, editorBox, stillBox, scriptBox]) {
+  for (const box of [cutBox, audioBox, editorBox, stillBox, scriptBox]) {
     expect(box.x).toBeGreaterThanOrEqual(-1);
     expect(box.x + box.width).toBeLessThanOrEqual(reference.width + 1);
   }
 
   if (metrics.clientWidth > 599) {
-    expect(Math.abs(audioBox.y - matchBox.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(editorBox.y - stillBox.y)).toBeLessThanOrEqual(1);
     expect(Math.abs(stillBox.y - scriptBox.y)).toBeLessThanOrEqual(1);
     const inlineDirection = reference.direction === 'ltr' ? 1 : -1;
@@ -766,8 +755,8 @@ const createRenderedCutFixture = async (page: Page, projectBrief: string): Promi
     projectId,
     expectedRevision: authored.projectRevision,
     originReferenceHandoffId: null,
-    baseChoices: [{ shotId, purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-    cascadeChoices: [{ shotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+    baseChoices: [{ shotId, purpose: 'seed_still', referenceAssetId: null }],
+    cascadeChoices: [{ shotId, purpose: 'video_take', referenceAssetId: null }],
   });
   if (prepared.withCascade === null) throw new Error('Creative Studio Cut fixture cascade quote was unavailable');
   await invokeStudioBridge<StudioConfirmSubmissionResultV2>(page, 'confirm-submission', {
@@ -816,12 +805,7 @@ const createRenderedCutFixture = async (page: Page, projectBrief: string): Promi
   if (videoAssetId === null || videoAssetId === undefined) {
     throw new Error('Creative Studio Cut fixture video asset was unavailable');
   }
-  await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'select-take', {
-    projectId,
-    expectedRevision: rendered.revision,
-    shotId,
-    assetId: videoAssetId,
-  });
+  expect(rendered.shots[shotId]?.videoAssetId).toBe(videoAssetId);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table', { timeout: 30_000 });
   await expect(page.getByRole('grid', { name: 'Beat table' }).getByText('Cut export Beat')).toBeVisible();
@@ -836,8 +820,6 @@ const createRenderedCutFixture = async (page: Page, projectBrief: string): Promi
 
 type CutLifecycleState = {
   projectId: string;
-  beatId: string;
-  shotId: string;
   firstBedAssetId: string;
   selectedBedAssetId: string;
   exportArtifacts: StudioRendererExportCatalogV2['artifacts'];
@@ -978,7 +960,6 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
       previewColumn: box(panelElement, '[data-beat-preview-column]'),
       inspector: box(panelElement, '[data-shot-inspector]'),
       shotActionBand: box(visibleShotInspector, '[data-shot-action-band]'),
-      shotTakeSummary: box(visibleShotInspector, '[data-shot-take-summary]'),
       shotActions: box(visibleShotInspector, '[data-shot-actions]'),
       playbackTrack: box(panelElement, '[data-testid="studio-coverage-playback"]'),
       coverage: (() => {
@@ -1027,12 +1008,6 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
     expect(
       Math.abs(geometry.previewColumn.width + geometry.inspector.width + workingGap - geometry.working.width)
     ).toBeLessThanOrEqual(1);
-    expect(Math.abs(geometry.shotTakeSummary.top - geometry.shotActions.top)).toBeLessThanOrEqual(1);
-    if (reference.direction === 'rtl') {
-      expect(geometry.shotActions.right).toBeLessThanOrEqual(geometry.shotTakeSummary.left + 1);
-    } else {
-      expect(geometry.shotTakeSummary.right).toBeLessThanOrEqual(geometry.shotActions.left + 1);
-    }
   } else {
     expect(geometry.previewColumn.bottom).toBeLessThanOrEqual(geometry.inspector.top - 17);
     expect(Math.abs(geometry.previewColumn.width - geometry.working.width)).toBeLessThanOrEqual(1);
@@ -1916,10 +1891,10 @@ test.describe('Creative Studio workspace', () => {
         projectId,
         expectedRevision: authored.projectRevision,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId, purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+        baseChoices: [{ shotId, purpose: 'seed_still', referenceAssetId: null }],
         cascadeChoices: [
-          { shotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null },
-          { shotId: anchorShotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null },
+          { shotId, purpose: 'video_take', referenceAssetId: null },
+          { shotId: anchorShotId, purpose: 'video_take', referenceAssetId: null },
         ],
       });
       expect(prepared.withCascade).not.toBeNull();
@@ -1929,7 +1904,7 @@ test.describe('Creative Studio workspace', () => {
         [shotId, 'video_take'],
         [anchorShotId, 'video_take'],
       ]);
-      const confirmed = await invokeStudioBridge<StudioConfirmSubmissionResultV2>(page, 'confirm-submission', {
+      await invokeStudioBridge<StudioConfirmSubmissionResultV2>(page, 'confirm-submission', {
         projectId,
         quoteId: prepared.withCascade!.id,
         expectedRevision: authored.projectRevision,
@@ -2041,12 +2016,7 @@ test.describe('Creative Studio workspace', () => {
       )?.outputAssetIdsByRole.primary;
       expect(videoAssetId).toBeTruthy();
       expect(renderedProject.shots[shotId]?.seedStillId).toBe(seedAssetId);
-      const selected = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'select-take', {
-        projectId,
-        expectedRevision: renderedProject.revision,
-        shotId,
-        assetId: videoAssetId,
-      });
+      expect(renderedProject.shots[shotId]?.videoAssetId).toBe(videoAssetId);
 
       await expect
         .poll(
@@ -2070,28 +2040,20 @@ test.describe('Creative Studio workspace', () => {
         (job) => job.shotId === anchorShotId && job.purpose === 'video_take'
       )?.outputAssetIdsByRole.primary;
       expect(anchorVideoAssetId).toBeTruthy();
-      const selectedAnchor = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'select-take', {
-        projectId,
-        expectedRevision: chainedProject.revision,
-        shotId: anchorShotId,
-        assetId: anchorVideoAssetId,
-      });
+      expect(chainedProject.shots[anchorShotId]?.videoAssetId).toBe(anchorVideoAssetId);
 
       const terminal = await readStudioProject(page, projectId);
-      expect(selected.projectRevision).toBeGreaterThan(confirmed.projectRevision);
-      expect(terminal.revision).toBe(selectedAnchor.projectRevision);
-      expect(terminal.revision).toBeGreaterThan(confirmed.projectRevision);
-      expect(terminal.shots[shotId]?.selectedTakeId).toBe(videoAssetId);
-      expect(terminal.shots[anchorShotId]?.selectedTakeId).toBe(anchorVideoAssetId);
+      expect(terminal.shots[shotId]?.videoAssetId).toBe(videoAssetId);
+      expect(terminal.shots[anchorShotId]?.videoAssetId).toBe(anchorVideoAssetId);
       expect(terminal.assets[videoAssetId!]?.durationSeconds).toBe(10);
       expect(terminal.assets[anchorVideoAssetId!]?.durationSeconds).toBe(10);
       const initialRaw = await readRawStudioProject(userDataDirectory, projectId);
       const initialExtraction = Object.values(initialRaw.frameExtractions).find(
-        (extraction) => extraction.takeAssetId === videoAssetId
+        (extraction) => extraction.videoAssetId === videoAssetId
       );
       expect(initialExtraction).toMatchObject({
         shotId,
-        takeAssetId: videoAssetId,
+        videoAssetId,
         endpointSeconds: 10,
         status: 'ready',
         frameAssetId: expect.any(String),
@@ -2110,6 +2072,9 @@ test.describe('Creative Studio workspace', () => {
       await renderedRow.getByRole('gridcell').first().click();
       const panel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
       await expect(panel).toBeVisible();
+      const currentPicture = panel.getByRole('region', { name: 'Current picture for Shot 1' });
+      await expect(currentPicture.locator('[data-current-picture]')).toHaveCount(1);
+      await expect(currentPicture.getByRole('button', { name: 'Generate again' })).toBeVisible();
       const beatPreview = panel.locator('[data-beat-preview]');
       const beatMedia = beatPreview.locator('video[data-beat-preview-media][data-media-kind="video"]');
       const beatTransport = panel.locator('[data-beat-transport]');
@@ -2148,8 +2113,8 @@ test.describe('Creative Studio workspace', () => {
       const firstPlaybackSegment = playbackLane.locator(`[data-shot-id="${shotId}"]`);
       const secondPlaybackSegment = playbackLane.locator(`[data-shot-id="${anchorShotId}"]`);
       await expect(firstPlaybackSegment).toContainText('10s source');
-      await expect(firstPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered · 1 Take');
-      await expect(secondPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered · 1 Take');
+      await expect(firstPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered');
+      await expect(secondPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered');
       await expect(panel.getByRole('img', { name: 'Boundary after Shot 01 · Continuity frame ready' })).toHaveAttribute(
         'data-boundary-frame',
         'on_disk'
@@ -2179,7 +2144,7 @@ test.describe('Creative Studio workspace', () => {
       await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:00 / 0:18');
       await expect(beatSeek).toHaveAttribute('aria-valuemax', '18');
       await expect(panel.getByText('Tail trim breaks downstream continuity.')).toBeVisible();
-      await expect(firstPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered · 1 Take');
+      await expect(firstPlaybackSegment.locator('[data-segment-state="rendered"]')).toHaveText('Rendered');
       await expect(secondPlaybackSegment.locator('[data-segment-state="stale"]')).toHaveText('Stale · Still plays');
       await expect(
         panel.getByRole('img', { name: 'Boundary after Shot 01 · Continuity frame is out of date' })
@@ -2220,8 +2185,8 @@ test.describe('Creative Studio workspace', () => {
           projectId,
           expectedRevision: trimmed.revision,
           originReferenceHandoffId: null,
-          baseChoices: [{ shotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
-          cascadeChoices: [{ shotId: anchorShotId, purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+          baseChoices: [{ shotId, purpose: 'video_take', referenceAssetId: null }],
+          cascadeChoices: [{ shotId: anchorShotId, purpose: 'video_take', referenceAssetId: null }],
         }
       );
       expect(rerenderPrepared.withCascade).not.toBeNull();
@@ -2315,28 +2280,20 @@ test.describe('Creative Studio workspace', () => {
       await downstreamRow.getByRole('gridcell').first().click();
       await expect(downstreamPanel).toBeVisible();
 
-      await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'select-take', {
-        projectId,
-        expectedRevision: replacementReady.revision,
-        shotId,
-        assetId: replacementVideoAssetId,
-      });
-
-      const replacementSelected = await readStudioProject(page, projectId);
-      expect(replacementSelected.shots[shotId]?.selectedTakeId).toBe(replacementVideoAssetId);
-      expect(replacementSelected.shots[shotId]?.trimOutSeconds).toBe(2);
+      expect(replacementReady.shots[shotId]?.videoAssetId).toBe(replacementVideoAssetId);
+      expect(replacementReady.shots[shotId]?.trimOutSeconds).toBe(2);
       await expect
         .poll(async () => {
           const raw = await readRawStudioProject(userDataDirectory, projectId);
           return Object.values(raw.frameExtractions)
-            .filter((extraction) => extraction.takeAssetId === replacementVideoAssetId)
-            .map(({ shotId: extractionShotId, takeAssetId, endpointSeconds }) => ({
+            .filter((extraction) => extraction.videoAssetId === replacementVideoAssetId)
+            .map(({ shotId: extractionShotId, videoAssetId: extractionVideoAssetId, endpointSeconds }) => ({
               shotId: extractionShotId,
-              takeAssetId,
+              videoAssetId: extractionVideoAssetId,
               endpointSeconds,
             }));
         })
-        .toEqual([{ shotId, takeAssetId: replacementVideoAssetId, endpointSeconds: 8 }]);
+        .toEqual([{ shotId, videoAssetId: replacementVideoAssetId, endpointSeconds: 8 }]);
 
       await expect
         .poll(
@@ -2361,16 +2318,7 @@ test.describe('Creative Studio workspace', () => {
       );
       const replacementDownstreamAssetId = replacementDownstreamJob?.outputAssetIdsByRole.primary;
       expect(replacementDownstreamAssetId).toBeTruthy();
-      const selectedReplacementDownstream = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(
-        page,
-        'select-take',
-        {
-          projectId,
-          expectedRevision: replacementChain.revision,
-          shotId: anchorShotId,
-          assetId: replacementDownstreamAssetId,
-        }
-      );
+      expect(replacementChain.shots[anchorShotId]?.videoAssetId).toBe(replacementDownstreamAssetId);
 
       const shotCard = panel.locator(`article[data-shot-id="${shotId}"]`);
       const clearSeedPin = shotCard.getByRole('button', { name: 'Clear seed pin' });
@@ -2379,17 +2327,16 @@ test.describe('Creative Studio workspace', () => {
       await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.seedStillId).toBeNull();
 
       const terminalForLift = await readStudioProject(page, projectId);
-      expect(terminalForLift.revision).toBe(selectedReplacementDownstream.projectRevision + 1);
-      expect(terminalForLift.shots[shotId]?.selectedTakeId).toBe(replacementVideoAssetId);
+      expect(terminalForLift.shots[shotId]?.videoAssetId).toBe(replacementVideoAssetId);
       expect(terminalForLift.shots[shotId]?.trimOutSeconds).toBe(2);
-      expect(terminalForLift.shots[anchorShotId]?.selectedTakeId).toBe(replacementDownstreamAssetId);
+      expect(terminalForLift.shots[anchorShotId]?.videoAssetId).toBe(replacementDownstreamAssetId);
       const terminalRaw = await readRawStudioProject(userDataDirectory, projectId);
       const replacementExtraction = Object.values(terminalRaw.frameExtractions).find(
-        (extraction) => extraction.takeAssetId === replacementVideoAssetId
+        (extraction) => extraction.videoAssetId === replacementVideoAssetId
       );
       expect(replacementExtraction).toMatchObject({
         shotId,
-        takeAssetId: replacementVideoAssetId,
+        videoAssetId: replacementVideoAssetId,
         endpointSeconds: 8,
         status: 'ready',
         frameAssetId: expect.any(String),
@@ -2464,7 +2411,7 @@ test.describe('Creative Studio workspace', () => {
   });
 
   test.describe.serial('Cut retained media and exports', () => {
-    test('imports and replaces a bed, sets Match To, and creates only the three non-stitched exports', async ({
+    test('imports and replaces a bed, then creates only the three non-stitched exports', async ({
       electronApp,
       page,
     }) => {
@@ -2573,14 +2520,6 @@ test.describe('Creative Studio workspace', () => {
       });
       await expect(cut.locator('[data-bed-status="ready"]')).toContainText('18s source · fade from 8s to 10s');
 
-      await chooseArcoSelectOption(page, 'Prompt reference Shot', 'The airplane settles into frame.');
-      await expect
-        .poll(async () => (await readStudioProject(page, rendered.projectId)).matchToShotId)
-        .toBe(rendered.shotId);
-      const matched = await readStudioProject(page, rendered.projectId);
-      expect(matched.revision).toBe(replaced.revision + 1);
-      expect(matched.jobs).toEqual(replaced.jobs);
-
       const managedVideo = { projectId: rendered.projectId, assetId: rendered.videoAssetId };
       await captureCutViewportReference(page, studioViewportReferences[0], managedVideo);
       await captureCutViewportReference(page, studioViewportReferences[1], managedVideo);
@@ -2661,8 +2600,6 @@ test.describe('Creative Studio workspace', () => {
       });
       cutLifecycleState = {
         projectId: rendered.projectId,
-        beatId: rendered.beatId,
-        shotId: rendered.shotId,
         firstBedAssetId,
         selectedBedAssetId,
         exportArtifacts: catalog.artifacts,
@@ -2673,10 +2610,7 @@ test.describe('Creative Studio workspace', () => {
       await electronApp.close();
     });
 
-    test('reloads retained Cut state, refuses the Match To lift, then clears, detaches, copies, and reveals', async ({
-      electronApp,
-      page,
-    }) => {
+    test('reloads retained Cut state, then clears, detaches, copies, and reveals', async ({ electronApp, page }) => {
       test.skip(
         process.env.AIONUI_E2E_STUDIO_FAKE !== '1',
         'The Cut no-spend oracle requires the explicit development-only Studio fake adapter.'
@@ -2703,7 +2637,6 @@ test.describe('Creative Studio workspace', () => {
       await expect(cut).toBeVisible();
       const restarted = await readStudioProject(page, state.projectId);
       expect(restarted.bedAssetId).toBe(state.selectedBedAssetId);
-      expect(restarted.matchToShotId).toBe(state.shotId);
       expect(
         Object.values(restarted.assets)
           .filter((asset) => asset.mediaKind === 'audio')
@@ -2727,64 +2660,13 @@ test.describe('Creative Studio workspace', () => {
       await expect(drawer.locator('[data-export-artifact-id]')).toHaveCount(3);
       await page.getByRole('button', { name: 'Close Assets' }).click();
 
-      await applyStudioViewportReference(page, studioViewportReferences[0]);
-      await page.locator(viewNavigationSelector).getByRole('link', { name: 'Table' }).click();
-      const row = page
-        .getByRole('grid', { name: 'Beat table' })
-        .getByRole('row')
-        .filter({ hasText: 'Cut export Beat' });
-      await row.getByRole('gridcell').first().click();
-      const panel = page.getByRole('dialog', { name: 'Beat panel — Cut export Beat' });
-      await expect(panel).toBeVisible();
-      const currentMatchShotCard = panel.locator(`article[data-shot-id="${state.shotId}"]`);
-      const currentMatchShotLift = currentMatchShotCard.getByRole('button', { name: 'Lift Shot', exact: true });
-      await expect(currentMatchShotLift).toBeDisabled();
-      await expect(
-        currentMatchShotCard.getByText('This Shot is the current Match To reference.', { exact: true })
-      ).toBeVisible();
-      const currentMatchBeatLift = panel.getByRole('button', { name: 'Lift Beat', exact: true });
-      await expect(currentMatchBeatLift).toBeDisabled();
-      await expect(panel.getByText('This Shot is the current Match To reference.', { exact: true })).toHaveCount(2);
-      const currentMatchShotSnapshot = await captureStudioNoMutationSnapshot(
-        page,
-        state.userDataDirectory,
-        state.projectId
-      );
-      await currentMatchShotLift.evaluate((button: HTMLButtonElement) => button.click());
-      await currentMatchBeatLift.evaluate((button: HTMLButtonElement) => button.click());
-      await expectStudioNoMutation(page, state.userDataDirectory, state.projectId, currentMatchShotSnapshot);
-      await takeScreenshot(page, 'creative-studio/gate-3/refusal-shot-current-match.png');
-      await panel.getByRole('button', { name: 'Close' }).click();
-
-      await page.locator(viewNavigationSelector).getByRole('link', { name: 'Board' }).click();
-      const currentMatchBeatCard = page.locator(`[data-beat-id="${state.beatId}"]`);
-      const currentMatchBoardLift = currentMatchBeatCard.getByRole('button', { name: 'Lift Beat', exact: true });
-      await expect(currentMatchBoardLift).toBeDisabled();
-      await expect(
-        currentMatchBeatCard.getByText('This Shot is the current Match To reference.', { exact: true })
-      ).toHaveCount(1);
-      const currentMatchBeatSnapshot = await captureStudioNoMutationSnapshot(
-        page,
-        state.userDataDirectory,
-        state.projectId
-      );
-      await currentMatchBoardLift.evaluate((button: HTMLButtonElement) => button.click());
-      await expectStudioNoMutation(page, state.userDataDirectory, state.projectId, currentMatchBeatSnapshot);
-      await takeScreenshot(page, 'creative-studio/gate-3/refusal-beat-current-match.png');
-
-      await page.locator(viewNavigationSelector).getByRole('link', { name: 'Cut' }).click();
-      await clearArcoSelect(page, 'Prompt reference Shot');
-      await expect.poll(async () => (await readStudioProject(page, state.projectId)).matchToShotId).toBeNull();
-      const matchCleared = await readStudioProject(page, state.projectId);
-      expect(matchCleared.revision).toBe(restarted.revision + 1);
-      expect(matchCleared.jobs).toEqual(restarted.jobs);
-
       await clearArcoSelect(page, 'Selected audio bed');
       await expect.poll(async () => (await readStudioProject(page, state.projectId)).bedAssetId).toBeNull();
       const bedCleared = await readStudioProject(page, state.projectId);
-      expect(bedCleared.revision).toBe(matchCleared.revision + 1);
-      expect(bedCleared.assets[state.firstBedAssetId]).toEqual(matchCleared.assets[state.firstBedAssetId]);
-      expect(bedCleared.assets[state.selectedBedAssetId]).toEqual(matchCleared.assets[state.selectedBedAssetId]);
+      expect(bedCleared.revision).toBe(restarted.revision + 1);
+      expect(bedCleared.assets[state.firstBedAssetId]).toEqual(restarted.assets[state.firstBedAssetId]);
+      expect(bedCleared.assets[state.selectedBedAssetId]).toEqual(restarted.assets[state.selectedBedAssetId]);
+      expect(bedCleared.jobs).toEqual(restarted.jobs);
 
       await chooseArcoSelectOption(page, 'Selected audio bed', 'Imported bed 1');
       await expect

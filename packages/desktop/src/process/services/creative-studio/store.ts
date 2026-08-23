@@ -439,7 +439,7 @@ type ProjectDeletionNodeProofV2 =
   | { kind: 'file' | 'symbolic_link' | 'other'; identity: ExactFileIdentityV2 };
 
 type ProjectDeletionMarkerV2 = {
-  schemaVersion: 2;
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
   projectId: string;
   expectedRevision: number;
   directoryDev: number;
@@ -3324,7 +3324,11 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return next;
   };
 
-  const recoverBriefTransactionV2 = async (root: string, directory: DirectoryAuthorityV2): Promise<void> => {
+  const recoverBriefTransactionV2 = async (
+    root: string,
+    directory: DirectoryAuthorityV2,
+    expectedManifest: { bytes: string; identity: FileIdentityV2 }
+  ): Promise<void> => {
     const transactionFile = resolveRootChild(directory.path, STUDIO_BRIEF_TRANSACTION_FILE_NAME);
     let transactionRecord: Awaited<ReturnType<typeof readBoundedRegularFileWithIdentity>>;
     try {
@@ -3384,8 +3388,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       }
       await assertDirectoryAuthorityV2(directory);
     };
-    const removeTransaction = async (): Promise<void> => {
+    const removeTransaction = async (expectedManifestSha256: string): Promise<void> => {
       await assertTransactionCurrent();
+      const currentManifest = await readManifest();
+      if (sha256Utf8(currentManifest.bytes) !== expectedManifestSha256) {
+        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction authority changed');
+      }
       try {
         await fs.rm(transactionFile);
       } catch (error) {
@@ -3395,12 +3403,15 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     };
 
     const manifest = await readManifest();
+    if (manifest.bytes !== expectedManifest.bytes || !sameIdentityV2(manifest.identity, expectedManifest.identity)) {
+      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction authority changed');
+    }
     const brief = await readBrief();
     const manifestSha256 = sha256Utf8(manifest.bytes);
     const briefSha256 = brief === null ? null : sha256Utf8(brief.bytes);
     if (manifestSha256 === transaction.baseManifestSha256) {
       // No candidate manifest was committed. Any external Brief edit remains authoritative.
-      await removeTransaction();
+      await removeTransaction(manifestSha256);
       return;
     }
     if (manifestSha256 !== transaction.candidateManifestSha256) {
@@ -3422,12 +3433,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction diverged');
       }
       // A complete same-project replacement won after the transaction was published. Preserve it.
-      await removeTransaction();
+      await removeTransaction(manifestSha256);
       return;
     }
     const candidateBriefSha256 = sha256Utf8(transaction.candidateBrief);
     if (briefSha256 === candidateBriefSha256) {
-      await removeTransaction();
+      await removeTransaction(manifestSha256);
       return;
     }
     if (briefSha256 === transaction.baseBriefSha256) {
@@ -3442,7 +3453,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
           throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief transaction authority changed');
         }
       });
-      await removeTransaction();
+      await removeTransaction(manifestSha256);
       return;
     }
     if (brief === null) {
@@ -3486,15 +3497,45 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         commitTag: 'brief:file-sync',
       })
     );
-    await removeTransaction();
+    await removeTransaction(sha256Utf8(synchronizedBytes));
   };
 
   const inspectProjectFileV2 = async (root: string, projectId: string): Promise<ProjectFileInspectionV2> => {
     const directoryPath = await projectDirectory(root, projectId, false);
     if (directoryPath === null) return { status: 'not_found', projectId };
     const directory = await captureDirectoryAuthorityV2(directoryPath);
-    await recoverBriefTransactionV2(root, directory);
     const file = resolveRootChild(directory.path, 'project.json');
+    await assertRegularFileOrMissing(file);
+    const initialRecord = await readBoundedStudioV2File(root, file);
+    if (initialRecord === null) return { status: 'not_found', projectId };
+    if (initialRecord.status === 'unsupported_prototype_schema') {
+      return { status: 'unsupported_prototype_schema', projectId };
+    }
+    let initialParsed: unknown;
+    try {
+      initialParsed = JSON.parse(initialRecord.bytes) as unknown;
+    } catch {
+      return {
+        status: 'malformed_v2',
+        projectId,
+        error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
+      };
+    }
+    if (
+      isRecord(initialParsed) &&
+      Number.isSafeInteger(initialParsed.schemaVersion) &&
+      initialParsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION
+    ) {
+      return { status: 'unsupported_prototype_schema', projectId };
+    }
+    if (!isRecord(initialParsed) || initialParsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION) {
+      return {
+        status: 'malformed_v2',
+        projectId,
+        error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
+      };
+    }
+    await recoverBriefTransactionV2(root, directory, initialRecord);
     await assertRegularFileOrMissing(file);
     const record = await readBoundedStudioV2File(root, file);
     if (record === null) return { status: 'not_found', projectId };
@@ -3512,7 +3553,11 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
       };
     }
-    if (isRecord(parsed) && parsed.schemaVersion === 1) {
+    if (
+      isRecord(parsed) &&
+      Number.isSafeInteger(parsed.schemaVersion) &&
+      parsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION
+    ) {
       return { status: 'unsupported_prototype_schema', projectId };
     }
     let briefFile: Extract<ProjectFileInspectionV2, { status: 'supported' }>['briefFile'];
@@ -3532,7 +3577,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       };
     }
     const decoded = decodeStudioProjectManifestV2(parsed, briefFile.status === 'present' ? briefFile.bytes : null);
-    if (!isRecord(parsed) || parsed.schemaVersion !== 2 || decoded === null || decoded.project.id !== projectId) {
+    if (
+      !isRecord(parsed) ||
+      parsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
+      decoded === null ||
+      decoded.project.id !== projectId
+    ) {
       return {
         status: 'malformed_v2',
         projectId,

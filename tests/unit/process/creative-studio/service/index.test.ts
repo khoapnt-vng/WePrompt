@@ -116,7 +116,7 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
   const result = applyStudioMutationBatchV2(
     empty,
     {
-      schemaVersion: 2,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       projectId: empty.id,
       expectedRevision: empty.revision,
       operations: [
@@ -235,7 +235,6 @@ describe('CreativeStudioServiceV2', () => {
     purpose: 'seed_still',
     authorizationId: 'authorization_1',
     authorizationItemId: 'item_1',
-    generationIndex: 0,
     requestPlan: {
       kind: 'resolved',
       snapshot: {
@@ -788,7 +787,7 @@ describe('CreativeStudioServiceV2', () => {
     };
     Object.assign(project.assets, { [take.id]: take, [seed.id]: seed });
     project.shots.clip_1!.assetIds.push(take.id);
-    project.shots.clip_1!.selectedTakeId = take.id;
+    project.shots.clip_1!.videoAssetId = take.id;
     project.shots.clip_1!.trimOutSeconds = 2;
     project.shots.clip_2!.assetIds.push(seed.id);
     project.shots.clip_2!.seedStillId = seed.id;
@@ -1116,7 +1115,7 @@ describe('CreativeStudioServiceV2', () => {
     project.beatOrder = ['section_1'];
     delete project.beats.section_2;
     delete project.shots.clip_2;
-    addGeneratedVideoTakesForMcpV2(project, 1);
+    addGeneratedVideosForMcpV2(project, 1);
     const queueReentrantResolver = vi.fn(async () => {
       throw new Error('export media re-entered the project queue');
     });
@@ -1179,9 +1178,8 @@ describe('CreativeStudioServiceV2', () => {
 
   it('chooses the newest deterministic eligible seed when a still has no explicit cover', async () => {
     const project = makeSchema2ServiceProject();
-    addGeneratedVideoTakesForMcpV2(project, 1);
+    addGeneratedVideosForMcpV2(project, 1);
     const shot = project.shots.clip_1!;
-    shot.selectedTakeId = null;
     shot.seedStillId = null;
     const seeds: StudioAssetV2[] = [
       {
@@ -1713,7 +1711,7 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: 'handoff_service_1',
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
       cascadeChoices: [],
     });
 
@@ -1758,7 +1756,7 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: 'handoff_service_1',
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still' as const, generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still' as const, referenceAssetId: null }],
       cascadeChoices: [],
     };
     const malformed = [
@@ -1767,7 +1765,7 @@ describe('CreativeStudioServiceV2', () => {
         ...exact,
         baseChoices: [
           ...exact.baseChoices,
-          { shotId: 'clip_2', purpose: 'seed_still' as const, generationCount: 1, referenceAssetId: null },
+          { shotId: 'clip_2', purpose: 'seed_still' as const, referenceAssetId: null },
         ],
       },
       { ...exact, baseChoices: [...exact.baseChoices, ...exact.baseChoices] },
@@ -1776,9 +1774,7 @@ describe('CreativeStudioServiceV2', () => {
       { ...exact, baseChoices: [{ ...exact.baseChoices[0]!, referenceAssetId: 'reference_1' }] },
       {
         ...exact,
-        cascadeChoices: [
-          { shotId: 'clip_1', purpose: 'video_take' as const, generationCount: 1, referenceAssetId: null },
-        ],
+        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take' as const, referenceAssetId: null }],
       },
     ];
 
@@ -1802,8 +1798,8 @@ describe('CreativeStudioServiceV2', () => {
       harness.service.prepareSubmission({
         ...exact,
         baseChoices: [
-          { shotId: 'clip_2', purpose: 'seed_still', generationCount: 1, referenceAssetId: null },
-          { shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null },
+          { shotId: 'clip_2', purpose: 'seed_still', referenceAssetId: null },
+          { shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null },
         ],
       })
     ).rejects.toMatchObject({ code: 'invalid_payload' });
@@ -1882,10 +1878,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still' as const, generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [
-        { shotId: 'clip_1', purpose: 'video_take' as const, generationCount: 1, referenceAssetId: null },
-      ],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still' as const, referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take' as const, referenceAssetId: null }],
     };
 
     await expect(
@@ -1916,7 +1910,7 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        baseChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
         cascadeChoices: [],
       })
     ).rejects.toMatchObject({ name: 'StudioPricingErrorV2', code: 'missing_conditioning' });
@@ -1937,14 +1931,14 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 2, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
       cascadeChoices: [],
     });
 
     expect(admit).toHaveBeenCalledWith(
       expect.objectContaining({
         request: expect.objectContaining({
-          cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+          cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
         }),
       })
     );
@@ -1978,8 +1972,8 @@ describe('CreativeStudioServiceV2', () => {
           projectId: project.id,
           expectedRevision: project.revision,
           originReferenceHandoffId: null,
-          baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-          cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+          baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+          cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
         })
       ).rejects.toMatchObject({ code });
 
@@ -2032,8 +2026,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     cacheNow += STUDIO_PREPARED_QUOTE_TTL_SECONDS * 1_000;
 
@@ -2069,8 +2063,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
 
     expect(prepared.baseOnly.id).toMatch(/^quote_[a-f0-9]{32}$/);
@@ -2854,7 +2848,7 @@ describe('CreativeStudioServiceV2', () => {
     });
     await harness.service.applyMutations(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: project.revision,
         operations: [{ kind: 'set_brief', brief: 'Updated' }],
@@ -3029,7 +3023,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.retryJobV2).not.toHaveBeenCalled();
   });
 
-  it('derives visual, duration, active-job, generated-take, and latest-failure blockers', async () => {
+  it('derives visual, duration, active-job, and latest-failure blockers', async () => {
     const project = makeSchema2ServiceProject();
     project.beats.section_1.look = '   ';
     project.shots.clip_1.durationSeconds = 3;
@@ -3071,7 +3065,7 @@ describe('CreativeStudioServiceV2', () => {
         shotId: 'clip_1',
         beatId: 'section_1',
         ready: false,
-        issues: ['missing_look', 'invalid_shot_duration', 'active_job', 'generated_take_exists'],
+        issues: ['missing_look', 'invalid_shot_duration', 'active_job'],
       },
       {
         shotId: 'clip_2',
@@ -3081,6 +3075,33 @@ describe('CreativeStudioServiceV2', () => {
       },
     ]);
     expect(readiness.payableShotIds).toEqual([]);
+  });
+
+  it('keeps a Shot with a current picture payable for Generate again', async () => {
+    const project = makeSchema2ServiceProject();
+    project.assets.picture_1 = {
+      id: 'picture_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'picture_1.mp4' },
+      byteSize: 8,
+      sha256: 'b'.repeat(64),
+      durationSeconds: 10,
+      createdAt: project.createdAt,
+    };
+    project.shots.clip_1.assetIds = ['picture_1'];
+    project.shots.clip_1.videoAssetId = 'picture_1';
+    const harness = makeHarness(project);
+
+    const readiness = await harness.service.getGenerationReadiness({
+      projectId: project.id,
+      beatIds: ['section_1'],
+    });
+
+    expect(readiness.shots).toEqual([{ shotId: 'clip_1', beatId: 'section_1', ready: true, issues: [] }]);
+    expect(readiness.payableShotIds).toEqual(['clip_1']);
   });
 
   it.each([
@@ -3242,8 +3263,8 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision + 1,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
       })
     ).rejects.toMatchObject({ code: 'stale_project' });
     expect(harness.loadRateCard).not.toHaveBeenCalled();
@@ -3266,7 +3287,7 @@ describe('CreativeStudioServiceV2', () => {
 
     expect(prepared.withCascade).toBeNull();
     expect(prepared.baseOnly).toMatchObject({
-      baseItems: [{ shotId: 'clip_2', purpose: 'video_take', generationCount: 1, waitsForTakeSelection: false }],
+      baseItems: [{ shotId: 'clip_2', purpose: 'video_take', generationCount: 1 }],
       cascadeItems: [],
     });
     harness.extractConditioningFrameV2.mockRejectedValueOnce(new Error('fixture decoder failure'));
@@ -3282,7 +3303,7 @@ describe('CreativeStudioServiceV2', () => {
 
     const extractionId = createStudioFrameExtractionId({
       shotId: 'clip_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
     });
     const committed = harness.getProject();
@@ -3290,7 +3311,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(committed.undoHistory).toEqual(project.undoHistory);
     expect(committed.frameExtractions[extractionId]).toMatchObject({
       shotId: 'clip_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
       status: 'pending',
     });
@@ -3377,7 +3398,7 @@ describe('CreativeStudioServiceV2', () => {
 
     const extractionId = createStudioFrameExtractionId({
       shotId: 'clip_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
     });
     const frameAsset: StudioAssetV2 = {
@@ -3406,7 +3427,7 @@ describe('CreativeStudioServiceV2', () => {
     harness.verifyConditioningFrameV2.mockResolvedValueOnce(null).mockResolvedValueOnce({
       extractionId,
       shotId: 'clip_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
       frameAssetId: frameAsset.id,
       byteSize: frameAsset.byteSize,
@@ -3453,7 +3474,7 @@ describe('CreativeStudioServiceV2', () => {
     harness.verifyConditioningFrameV2.mockReset().mockResolvedValueOnce({
       extractionId,
       shotId: 'clip_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 8,
       frameAssetId: frameAsset.id,
       byteSize: frameAsset.byteSize,
@@ -3560,14 +3581,12 @@ describe('CreativeStudioServiceV2', () => {
         cascadeItems: [],
       }),
     ]);
-    expect(
-      Object.values(committed.jobs).map(({ purpose, status, generationIndex }) => [purpose, status, generationIndex])
-    ).toEqual(
+    expect(Object.values(committed.jobs).map(({ purpose, status }) => [purpose, status])).toEqual(
       reuseSeed
-        ? [['video_take', 'queued_local', 0]]
+        ? [['video_take', 'queued_local']]
         : [
-            ['seed_still', 'queued_local', 0],
-            ['video_take', 'waiting_for_conditioning', 0],
+            ['seed_still', 'queued_local'],
+            ['video_take', 'waiting_for_conditioning'],
           ]
     );
     expect(harness.submitShots).toHaveBeenCalledTimes(1);
@@ -3683,8 +3702,8 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
       })
     ).rejects.toMatchObject({ code: 'invalid_route' });
     expect(harness.loadRateCard).not.toHaveBeenCalled();
@@ -3711,8 +3730,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 2, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
 
     expect(prepared.baseOnly).toMatchObject({
@@ -3751,8 +3770,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     expect(prepared.withCascade).toBeNull();
 
@@ -3776,8 +3795,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     expect(prepared.withCascade).not.toBeNull();
     harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
@@ -3804,8 +3823,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     harness.loadRateCard.mockResolvedValueOnce(
       createStudioRateCardV2([
@@ -3846,8 +3865,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     harness.loadRateCard.mockResolvedValueOnce(
       createStudioRateCardV2([
@@ -3886,8 +3905,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     harness.loadRateCard.mockResolvedValueOnce(
       createStudioRateCardV2([
@@ -3929,8 +3948,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 2, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
 
     expect(prepared.baseOnly).toMatchObject({
@@ -3945,9 +3964,9 @@ describe('CreativeStudioServiceV2', () => {
     expect(prepared.withCascade).toMatchObject({
       id: 'quote_service_2',
       lowerMinorUnits: 28,
-      upperMinorUnits: 53,
+      upperMinorUnits: 28,
       baseItems: [{ purpose: 'seed_still', requestedTotalMinorUnits: 3 }],
-      cascadeItems: [{ purpose: 'video_take', generationCount: 2, requestedTotalMinorUnits: 50 }],
+      cascadeItems: [{ purpose: 'video_take', generationCount: 1, requestedTotalMinorUnits: 25 }],
     });
     const rendererItem = prepared.withCascade!.cascadeItems[0]!;
     expect(Object.keys(rendererItem).toSorted()).toEqual([
@@ -3958,7 +3977,6 @@ describe('CreativeStudioServiceV2', () => {
       'requestedTotalMinorUnits',
       'route',
       'shotId',
-      'waitsForTakeSelection',
     ]);
     expect(rendererItem).not.toHaveProperty('requestPlan');
     expect(rendererItem).not.toHaveProperty('authorizationItemId');
@@ -3976,7 +3994,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(committed.spendAuthorizations[0]).toMatchObject({
       id: prepared.withCascade!.id,
       baseItems: [{ purpose: 'seed_still', generationCount: 1 }],
-      cascadeItems: [{ purpose: 'video_take', generationCount: 2 }],
+      cascadeItems: [{ purpose: 'video_take', generationCount: 1 }],
       providerBindings: [
         { provider: { adapterId: 'weprompt-image-v1' } },
         { provider: { adapterId: 'openrouter-video-v1' } },
@@ -3991,7 +4009,6 @@ describe('CreativeStudioServiceV2', () => {
     ).toEqual([
       { status: 'queued_local', purpose: 'seed_still', requestSnapshot: null },
       { status: 'waiting_for_conditioning', purpose: 'video_take', requestSnapshot: null },
-      { status: 'waiting_for_conditioning', purpose: 'video_take', requestSnapshot: null },
     ]);
     expect(harness.submitShots).toHaveBeenCalledWith({ projectId: project.id, jobIds: ['job_service_1'] });
     await expect(
@@ -4003,7 +4020,7 @@ describe('CreativeStudioServiceV2', () => {
     ).rejects.toMatchObject({ code: 'quote_not_found' });
   });
 
-  it('projects exact maximum-count quote rows and preserves their totals and budget in durable authority', async () => {
+  it('projects exact-one quote rows and preserves their totals and budget in durable authority', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
     project.videoRouteId = videoRoute.choiceId;
@@ -4014,28 +4031,26 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 4, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 4, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     const baseRow = {
       shotId: 'clip_1',
       purpose: 'seed_still' as const,
       route: { choiceId: imageRoute.choiceId, providerId: 'provider_1', model: 'image-model' },
-      generationCount: 4,
+      generationCount: 1,
       durationSeconds: null,
       oneGenerationMinorUnits: 3,
-      requestedTotalMinorUnits: 12,
-      waitsForTakeSelection: false,
+      requestedTotalMinorUnits: 3,
     };
     const cascadeRow = {
       shotId: 'clip_1',
       purpose: 'video_take' as const,
       route: { choiceId: videoRoute.choiceId, providerId: 'provider_1', model: 'video-model' },
-      generationCount: 4,
+      generationCount: 1,
       durationSeconds: 5,
       oneGenerationMinorUnits: 25,
-      requestedTotalMinorUnits: 100,
-      waitsForTakeSelection: true,
+      requestedTotalMinorUnits: 25,
     };
     const budget = { kind: 'within_cap' as const, policyCurrency: 'USD', maxPerBatchMinorUnits: 112 };
 
@@ -4049,7 +4064,7 @@ describe('CreativeStudioServiceV2', () => {
         baseItems: [baseRow],
         cascadeItems: [],
         lowerMinorUnits: 3,
-        upperMinorUnits: 12,
+        upperMinorUnits: 3,
         budget,
       },
       withCascade: {
@@ -4061,7 +4076,7 @@ describe('CreativeStudioServiceV2', () => {
         baseItems: [baseRow],
         cascadeItems: [cascadeRow],
         lowerMinorUnits: 28,
-        upperMinorUnits: 112,
+        upperMinorUnits: 28,
         budget,
       },
     });
@@ -4112,8 +4127,8 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision,
         originReferenceHandoffId: 'handoff_not_enabled_yet',
-        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
       })
     ).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
@@ -4122,8 +4137,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     expect(prepared.baseOnly.budget).toEqual({
       kind: 'over_cap',
@@ -4160,8 +4175,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
       routes: [{ ...structuredClone(imageRoute), cancellationPolicy: 'queued_only' }],
@@ -4197,8 +4212,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     await harness.service.confirmSubmission({
       projectId: project.id,
@@ -4215,8 +4230,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: ambiguous.id,
       expectedRevision: ambiguous.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 1, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     await harness.service.confirmSubmission({
       projectId: ambiguous.id,
@@ -4243,7 +4258,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(validateStudioProjectV2(committedRetry)).toBe(true);
   });
 
-  it('binds every waiting sibling only after the exact generated seed is explicitly selected', async () => {
+  it('binds the exact-one waiting video only after the generated seed is explicitly selected', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
     project.videoRouteId = videoRoute.choiceId;
@@ -4252,8 +4267,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 2, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     await harness.service.confirmSubmission({
       projectId: project.id,
@@ -4303,7 +4318,6 @@ describe('CreativeStudioServiceV2', () => {
       rateUnit: 'generation',
       rateMinorUnits: 3,
       durationSeconds: null,
-      generationIndex: 0,
       generationCount: 1,
       totalMinorUnits: 3,
     };
@@ -4314,7 +4328,7 @@ describe('CreativeStudioServiceV2', () => {
     await expect(
       harness.service.applyMutations(
         {
-          schemaVersion: 2,
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
           projectId: paid.id,
           expectedRevision: paid.revision,
           operations: [{ kind: 'set_seed_still', shotId: 'clip_1', assetId: unrelatedSeedAsset.id }],
@@ -4328,7 +4342,7 @@ describe('CreativeStudioServiceV2', () => {
 
     await harness.service.applyMutations(
       {
-        schemaVersion: 2,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: paid.id,
         expectedRevision: paid.revision,
         operations: [{ kind: 'set_seed_still', shotId: 'clip_1', assetId: seedAsset.id }],
@@ -4338,13 +4352,11 @@ describe('CreativeStudioServiceV2', () => {
 
     const bound = harness.getProject();
     const videoJobs = Object.values(bound.jobs).filter((job) => job.purpose === 'video_take');
-    expect(videoJobs).toHaveLength(2);
+    expect(videoJobs).toHaveLength(1);
     expect(videoJobs.every((job) => job.status === 'queued_local')).toBe(true);
     expect(videoJobs.map((job) => job.requestSnapshot?.conditioningInput)).toEqual([
       { kind: 'seed_still', assetId: seedAsset.id },
-      { kind: 'seed_still', assetId: seedAsset.id },
     ]);
-    expect(videoJobs[0]!.requestSnapshot).toEqual(videoJobs[1]!.requestSnapshot);
     expect(harness.submitShots).toHaveBeenCalledWith({
       projectId: paid.id,
       jobIds: videoJobs.map((job) => job.id),
@@ -4360,8 +4372,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', generationCount: 2, referenceAssetId: null }],
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
     });
     await harness.service.confirmSubmission({
       projectId: project.id,
@@ -4458,16 +4470,16 @@ describe('CreativeStudioServiceV2', () => {
     };
     Object.assign(project.assets, { [take.id]: take, [frame.id]: frame });
     project.shots.clip_1!.assetIds.push(take.id, frame.id);
-    project.shots.clip_1!.selectedTakeId = take.id;
+    project.shots.clip_1!.videoAssetId = take.id;
     const extractionId = createStudioFrameExtractionId({
       shotId: 'clip_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 10,
     });
     project.frameExtractions[extractionId] = {
       id: extractionId,
       shotId: 'clip_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 10,
       frameAssetId: frame.id,
       status: 'ready',
@@ -4476,7 +4488,7 @@ describe('CreativeStudioServiceV2', () => {
     const verifyConditioningFrameV2 = vi.fn<StudioMediaStore['verifyConditioningFrameV2']>(async () => ({
       extractionId,
       shotId: 'clip_1',
-      takeAssetId: take.id,
+      videoAssetId: take.id,
       endpointSeconds: 10,
       frameAssetId: frame.id,
       byteSize: frame.byteSize,
@@ -4550,7 +4562,7 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
         chainBreak: 'none',
       },
     ],
-    fixedShots: [{ shotId: 'clip_fixed', reasons: ['owned_asset', 'selected_take', 'on_screen_text'] }],
+    fixedShots: [{ shotId: 'clip_fixed', reasons: ['owned_asset', 'video_asset', 'on_screen_text'] }],
   },
   { kind: 'set_hard_cut', shotId: 'clip_1', hardCut: true },
   { kind: 'set_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
@@ -4558,21 +4570,15 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
   { kind: 'redetach_line', shotId: 'clip_1', line: 'A human-authored line' },
   { kind: 'rederive_line', shotId: 'clip_1', line: 'A reviewed derived line' },
   { kind: 'restore_line', shotId: 'clip_1', historyEntryId: 'history_1' },
-  { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
-  { kind: 'add_alternate_take', shotId: 'clip_1', assetId: 'take_2' },
-  { kind: 'restore_take', shotId: 'clip_1', assetId: 'take_3' },
   {
     kind: 'reorder_bin',
     bin: [
       { kind: 'beat', beatId: 'section_2', reason: 'lifted' },
       { kind: 'shot', beatId: 'section_1', shotId: 'clip_2', reason: 'lifted' },
-      { kind: 'take', assetId: 'take_3', reason: 'alternate' },
     ],
   },
-  { kind: 'select_take', shotId: 'clip_1', assetId: 'take_1' },
   { kind: 'set_routes', imageRouteId: 'image_route', videoRouteId: 'video_route' },
   { kind: 'set_spend_policy', policy: { currency: 'USD', maxPerBatchMinorUnits: 5_000 } },
-  { kind: 'set_match_to', shotId: 'clip_1' },
   { kind: 'set_bed', assetId: 'bed_1' },
   { kind: 'undo_last', entryId: 'undo_1' },
 ];
@@ -4702,7 +4708,7 @@ const stageReadyProposalV2 = async (
   return { canonicalFile, readyFile, temporaryFile };
 };
 
-const addGeneratedVideoTakesForMcpV2 = (project: StudioProjectV2, count: number): void => {
+const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): void => {
   const shot = project.shots.clip_1!;
   const seed: StudioAssetV2 = {
     id: 'seed_clip_1',
@@ -4726,7 +4732,7 @@ const addGeneratedVideoTakesForMcpV2 = (project: StudioProjectV2, count: number)
   } as const;
   let created = 0;
   while (created < count) {
-    const generationCount = Math.min(4, count - created);
+    const ordinal = created + 1;
     const authorizationOrdinal = project.spendAuthorizations.length + 1;
     const projectRevision = project.revision;
     const itemId = createStudioQuotedGenerationId({
@@ -4751,18 +4757,14 @@ const addGeneratedVideoTakesForMcpV2 = (project: StudioProjectV2, count: number)
       shotId: shot.id,
       purpose: 'video_take' as const,
       routeId: 'video_route',
-      generationCount,
+      generationCount: 1,
       requestPlan,
       rateUnit: 'second' as const,
       rateMinorUnits: 2,
     };
     const totals = calculateStudioQuoteTotals([item])!;
     const authorizationId = `auth_mcp_${authorizationOrdinal}`;
-    const idempotencyKeys = Array.from({ length: generationCount }, (_, generationIndex) => ({
-      itemId,
-      generationIndex,
-      key: `idem_mcp_${authorizationOrdinal}_${generationIndex}`,
-    }));
+    const idempotencyKey = `idem_mcp_${authorizationOrdinal}`;
     project.spendAuthorizations.push({
       id: authorizationId,
       projectId: project.id,
@@ -4777,75 +4779,71 @@ const addGeneratedVideoTakesForMcpV2 = (project: StudioProjectV2, count: number)
       expiresAt: '2026-08-17T01:00:00.000Z',
       confirmedAt: '2026-08-17T00:00:01.000Z',
       providerBindings: [{ itemId, provider }],
-      idempotencyKeys,
+      idempotencyKeys: [{ itemId, key: idempotencyKey }],
     });
-    for (let generationIndex = 0; generationIndex < generationCount; generationIndex += 1) {
-      const ordinal = created + generationIndex + 1;
-      const assetId = `take_${String(ordinal).padStart(2, '0')}`;
-      const createdAt = `2026-08-17T00:00:${String(ordinal + 1).padStart(2, '0')}.000Z`;
-      const asset: StudioAssetV2 = {
-        id: assetId,
-        projectId: project.id,
-        shotId: shot.id,
-        mediaKind: 'video',
-        mimeType: 'video/mp4',
-        managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
-        byteSize: 1,
-        sha256: 'a'.repeat(64),
-        durationSeconds: shot.durationSeconds,
-        createdAt,
-      };
-      const jobId = `job_mcp_${ordinal}`;
-      const job: StudioJobV2 = {
-        id: jobId,
-        projectId: project.id,
-        shotId: shot.id,
-        status: 'succeeded',
-        provider,
-        idempotencyKey: idempotencyKeys[generationIndex]!.key,
-        providerJobId: `remote_mcp_${ordinal}`,
-        remoteStartedAt: createdAt,
-        cancellationPolicy: 'queued_and_running',
-        outputAssetIds: [assetId],
-        purpose: 'video_take',
+    const assetId = `take_${String(ordinal).padStart(2, '0')}`;
+    const createdAt = `2026-08-17T00:00:${String(ordinal + 1).padStart(2, '0')}.000Z`;
+    const asset: StudioAssetV2 = {
+      id: assetId,
+      projectId: project.id,
+      shotId: shot.id,
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
+      byteSize: 1,
+      sha256: 'a'.repeat(64),
+      durationSeconds: shot.durationSeconds,
+      createdAt,
+    };
+    const jobId = `job_mcp_${ordinal}`;
+    const job: StudioJobV2 = {
+      id: jobId,
+      projectId: project.id,
+      shotId: shot.id,
+      status: 'succeeded',
+      provider,
+      idempotencyKey,
+      providerJobId: `remote_mcp_${ordinal}`,
+      remoteStartedAt: createdAt,
+      cancellationPolicy: 'queued_and_running',
+      outputAssetIds: [assetId],
+      purpose: 'video_take',
+      authorizationId,
+      authorizationItemId: itemId,
+      requestPlan,
+      requestSnapshot: requestPlan.snapshot,
+      spendReceipt: {
         authorizationId,
-        authorizationItemId: itemId,
-        generationIndex,
-        requestPlan,
-        requestSnapshot: requestPlan.snapshot,
-        spendReceipt: {
-          authorizationId,
-          itemId,
-          jobId,
-          purpose: 'video_take',
-          routeId: 'video_route',
-          currency: 'USD',
-          rateUnit: 'second',
-          rateMinorUnits: 2,
-          durationSeconds: shot.durationSeconds,
-          generationIndex,
-          generationCount,
-          totalMinorUnits: shot.durationSeconds * 2,
-        },
-        outputAssetIdsByRole: { primary: assetId, poster: null },
-        error: null,
-        retryOfJobId: null,
-        retryReason: null,
-        duplicateChargeAcknowledged: false,
-        duplicateChargeAcknowledgedAt: null,
-        createdAt,
-        updatedAt: createdAt,
-      };
-      project.assets[assetId] = asset;
-      project.jobs[jobId] = job;
-      shot.assetIds.push(assetId);
-      shot.jobIds.push(jobId);
-    }
-    created += generationCount;
+        itemId,
+        jobId,
+        purpose: 'video_take',
+        routeId: 'video_route',
+        currency: 'USD',
+        rateUnit: 'second',
+        rateMinorUnits: 2,
+        durationSeconds: shot.durationSeconds,
+        generationCount: 1,
+        totalMinorUnits: shot.durationSeconds * 2,
+      },
+      outputAssetIdsByRole: { primary: assetId, poster: null },
+      error: null,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      createdAt,
+      updatedAt: createdAt,
+    };
+    project.assets[assetId] = asset;
+    project.jobs[jobId] = job;
+    shot.assetIds.push(assetId);
+    shot.jobIds.push(jobId);
+    if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+    shot.videoAssetId = assetId;
+    created += 1;
     project.revision += 1;
   }
   project.updatedAt = '2026-08-17T00:00:59.000Z';
-  shot.selectedTakeId = `take_${String(count).padStart(2, '0')}`;
 };
 
 describe('Studio MCP schema-2 server', () => {
@@ -5049,7 +5047,7 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(32);
+      expect(operationKinds).toHaveLength(27);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds
@@ -5153,8 +5151,8 @@ describe('Studio MCP schema-2 server', () => {
             {
               kind: 'reorder_bin',
               bin: [
-                { kind: 'take', assetId: 'take_1', reason: 'alternate' },
-                { kind: 'take', assetId: 'take_1', reason: 'alternate' },
+                { kind: 'shot', beatId: 'section_1', shotId: 'clip_1', reason: 'lifted' },
+                { kind: 'shot', beatId: 'section_1', shotId: 'clip_1', reason: 'lifted' },
               ],
             },
           ],
@@ -5336,7 +5334,7 @@ describe('Studio MCP schema-2 server', () => {
             kind: 'apply_coverage',
             beatId: 'section_1',
             shots: [],
-            fixedShots: [{ shotId: 'clip_1', reasons: ['selected_take', 'owned_asset'] }],
+            fixedShots: [{ shotId: 'clip_1', reasons: ['video_asset', 'owned_asset'] }],
           },
         ],
       },
@@ -5483,6 +5481,13 @@ describe('Studio MCP schema-2 server', () => {
           name: 'propose_storyboard',
           arguments: {
             base_revision: 7,
+            operations: [{ kind: 'set_match_to', shotId: 'clip_1' }],
+          },
+        },
+        {
+          name: 'propose_storyboard',
+          arguments: {
+            base_revision: 7,
             operations: [
               mutationCatalogV2().find((operation) => operation.kind === 'apply_coverage')!,
               { kind: 'park_shot', shotId: 'clip_1' },
@@ -5502,6 +5507,13 @@ describe('Studio MCP schema-2 server', () => {
             rejectedOperations: [{ index: 0, kind: call.arguments.operations[0]?.kind }],
             directCapableOperationIndexes: [],
           });
+        } else if (
+          call.arguments.operations[0]?.kind === 'select_take' ||
+          call.arguments.operations[0]?.kind === 'set_match_to'
+        ) {
+          const content = result.content[0];
+          expect(content?.type).toBe('text');
+          expect(content?.type === 'text' ? content.text : '').toMatch(/Input validation error|Invalid arguments/u);
         } else {
           expect(result.content).toEqual([{ type: 'text', text: 'operation_not_permitted' }]);
         }
@@ -5623,10 +5635,10 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('projects validated Beat/Shot state with selected-first bounded canonical takes', async () => {
+  it('projects validated Beat/Shot state with only the canonical picture pointer', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
     const project = makeSchema2ServiceProject();
-    addGeneratedVideoTakesForMcpV2(project, 26);
+    addGeneratedVideosForMcpV2(project, 26);
     const briefReferences: StudioAssetV2[] = [
       ['cast_b', 'cast', 'Second cast'],
       ['cast_a', 'cast', 'First cast'],
@@ -5672,7 +5684,7 @@ describe('Studio MCP schema-2 server', () => {
     const view = JSON.parse(result.content[0].text) as {
       beatOrder: string[];
       beats: Record<string, { shotOrder: string[] }>;
-      shots: Record<string, { selectedTakeId: string | null; availableTakeIds: string[] }>;
+      shots: Record<string, { hasVideo: boolean; videoAssetId: string | null }>;
       bin: unknown[];
       briefReferences: unknown[];
       rules: unknown[];
@@ -5681,11 +5693,9 @@ describe('Studio MCP schema-2 server', () => {
     expect(result.isError).toBeUndefined();
     expect(view.beatOrder).toEqual(['section_1', 'section_2']);
     expect(view.beats.section_1.shotOrder).toEqual(['clip_1']);
-    expect(view.shots.clip_1).toMatchObject({ selectedTakeId: 'take_26' });
-    expect(view.shots.clip_1.availableTakeIds).toEqual([
-      'take_26',
-      ...Array.from({ length: 23 }, (_, index) => `take_${String(index + 1).padStart(2, '0')}`),
-    ]);
+    expect(view.shots.clip_1).toMatchObject({ hasVideo: true, videoAssetId: 'take_26' });
+    expect(view.shots.clip_1).not.toHaveProperty('selectedTakeId');
+    expect(view.shots.clip_1).not.toHaveProperty('availableTakeIds');
     expect(view.bin).toEqual([]);
     expect(view.briefReferences).toEqual([
       { id: 'cast_a', label: 'First cast', role: 'cast' },
@@ -5811,34 +5821,37 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('rejects a schema-1 manifest as unsupported before proposal or reference sidecar IO', async () => {
-    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-legacy-'));
-    const unsupportedManifest = { schemaVersion: 1, id: 'project_schema_1', revision: 7 };
-    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(unsupportedManifest));
-    const config = {
-      projectId: unsupportedManifest.id,
-      projectDir,
-      pendingDir: path.join(projectDir, 'proposals', 'pending'),
-      referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
-    };
+  it.each([1, 2] as const)(
+    'rejects a schema-%d manifest as unsupported before proposal or reference sidecar IO',
+    async (schemaVersion) => {
+      const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-legacy-'));
+      const unsupportedManifest = { schemaVersion, id: `project_schema_${schemaVersion}`, revision: 7 };
+      await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(unsupportedManifest));
+      const config = {
+        projectId: unsupportedManifest.id,
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      };
 
-    try {
-      const outcomes = await Promise.all([
-        createReadStoryboardHandlerV2(config)({}),
-        createProposeStoryboardHandlerV2(config)({
-          base_revision: unsupportedManifest.revision,
-          operations: [{ kind: 'set_brief', brief: 'Must remain schema 1' }],
-        }),
-        createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] }),
-      ]);
+      try {
+        const outcomes = await Promise.all([
+          createReadStoryboardHandlerV2(config)({}),
+          createProposeStoryboardHandlerV2(config)({
+            base_revision: unsupportedManifest.revision,
+            operations: [{ kind: 'set_brief', brief: `Must remain schema ${schemaVersion}` }],
+          }),
+          createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] }),
+        ]);
 
-      expect(outcomes.every((result) => result.isError === true)).toBe(true);
-      expect(outcomes.every((result) => result.content[0].text.includes('unsupported_prototype_schema'))).toBe(true);
-      await expect(readdir(projectDir)).resolves.toEqual(['project.json']);
-    } finally {
-      await rm(projectDir, { recursive: true, force: true });
+        expect(outcomes.every((result) => result.isError === true)).toBe(true);
+        expect(outcomes.every((result) => result.content[0].text.includes('unsupported_prototype_schema'))).toBe(true);
+        await expect(readdir(projectDir)).resolves.toEqual(['project.json']);
+      } finally {
+        await rm(projectDir, { recursive: true, force: true });
+      }
     }
-  });
+  );
 
   it.each(['proposal', 'reference'] as const)(
     'rejects a %s queue rooted in another project without changing the foreign project',
@@ -8013,7 +8026,11 @@ describe('Studio MCP schema-2 server', () => {
     ],
     [
       'malformed schema-2 request slot',
-      JSON.stringify({ schemaVersion: 2, requestId: 'unsafe/request', reservedAt: '2026-08-17T00:00:00.000Z' }),
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'unsafe/request',
+        reservedAt: '2026-08-17T00:00:00.000Z',
+      }),
       'storage',
     ],
   ] as const)('rejects a %s without changing the V2 queue', async (_label, slotBytes, expectedCode) => {
@@ -8070,7 +8087,11 @@ describe('Studio MCP schema-2 server', () => {
     ],
     [
       'malformed schema-2',
-      JSON.stringify({ schemaVersion: 2, requestId: 'unsafe/late', reservedAt: '2026-08-17T00:00:00.000Z' }),
+      JSON.stringify({
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        requestId: 'unsafe/late',
+        reservedAt: '2026-08-17T00:00:00.000Z',
+      }),
       'storage',
     ],
   ] as const)(
