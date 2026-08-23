@@ -172,10 +172,6 @@
   min-inline-size: 0;
 }
 
-.backLink {
-  align-self: start;
-}
-
 /* The rail's trailing edge. Wider than the line it draws so it is reachable by pointer, and
    focusable so the pane can be sized without one. */
 .railResizer {

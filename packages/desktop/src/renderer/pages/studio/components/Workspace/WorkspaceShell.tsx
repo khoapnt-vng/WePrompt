@@ -322,9 +322,6 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
         )}
         <div className={styles.workPanel} data-studio-work-panel>
           <div className={styles.workScroll} data-studio-work-scroll>
-            <Link className={styles.backLink} to='/studio'>
-              {t('conversation.creativeStudio.workspace.project.backToLibrary')}
-            </Link>
             {notice === undefined ? null : (
               <div role='alert' className={styles.projectAlert}>
                 {notice}

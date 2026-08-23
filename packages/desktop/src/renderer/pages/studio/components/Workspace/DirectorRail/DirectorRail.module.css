@@ -14,8 +14,13 @@
 }
 
 .collapsed {
-  inline-size: 52px;
-  min-inline-size: 52px;
+  /* A hidden rail occupies nothing. The stub this used to keep was sized for a collapse control
+     that now lives in the app bar, so it held nothing and read as dead space beside the work panel.
+     The content stays mounted — the Director conversation is film-scoped and must not reassemble
+     itself when the rail is toggled. */
+  inline-size: 0;
+  min-inline-size: 0;
+  border-inline-end: none;
 }
 
 .header {
