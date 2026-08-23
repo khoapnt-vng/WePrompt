@@ -2185,7 +2185,13 @@
             "missingConditioning": "A video has no eligible seed or predecessor frame. Add the required image, then prepare again.",
             "unsafeTotal": "The estimate total could not be represented safely. Reduce the selection; nothing was submitted."
           }
-        }
+        },
+        "confirm_one": "Confirm {{count}} generation · up to {{cost}}",
+        "confirm_other": "Confirm {{count}} generations · up to {{cost}}",
+        "headline_one": "{{count}} generation · {{cost}}",
+        "headline_other": "{{count}} generations · {{cost}}",
+        "hideBreakdown": "Hide each generation",
+        "showBreakdown": "Show each generation"
       },
       "review": {
         "title": "Reviewed Director output"
