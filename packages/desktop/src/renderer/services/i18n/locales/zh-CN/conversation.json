@@ -1074,6 +1074,13 @@
         "briefAndRulesTitle": "简报与规则"
       },
       "gate": {
+        "headline_one": "{{count}} 次生成 · {{cost}}",
+        "headline_other": "{{count}} 次生成 · {{cost}}",
+        "confirm_one": "确认 {{count}} 次生成 · {{cost}}",
+        "confirm_other": "确认 {{count}} 次生成 · {{cost}}",
+        "hideBreakdown": "隐藏每次生成",
+        "showBreakdown": "显示每次生成",
+        "routeShared": "全部使用 {{model}}",
         "group": { "required": "必需" },
         "continuity": {
           "severTitle": "审阅硬切",
@@ -1081,10 +1088,18 @@
           "severSummary": "此报价会将该镜头设为链头，复用符合条件的种子图或在需要时创建一个，并替换直到下一个硬切之前所有受影响的视频。",
           "rejoinSummary": "此报价会清除该镜头的种子图选择，并将其重新衔接到经裁剪的前序帧。确认后，免费的帧提取可能会先完成，再提交直到下一个硬切之前的替换视频。",
           "severHeadline": "硬切 · {{count}} 次必需生成 · {{cost}}",
+          "severHeadline_one": "硬切 · {{count}} 次必需生成 · {{cost}}",
+          "severHeadline_other": "硬切 · {{count}} 次必需生成 · {{cost}}",
           "rejoinHeadline": "重新衔接 · {{count}} 次必需生成 · {{cost}}",
+          "rejoinHeadline_one": "重新衔接 · {{count}} 次必需生成 · {{cost}}",
+          "rejoinHeadline_other": "重新衔接 · {{count}} 次必需生成 · {{cost}}",
           "requiredWork": "此链变更必须完成列出的全部替换工作。",
           "confirmSever": "确认硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmSever_one": "确认硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmSever_other": "确认硬切 + {{count}} 次生成 · {{cost}}",
           "confirmRejoin": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin_one": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin_other": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
           "close": "关闭 — 保持链不变",
           "severConfirmed": "已确认硬切。请在镜头中查看种子图和替换工作的进度，以及任何必要的恢复操作。",
           "rejoinConfirmed": "已确认重新衔接。请在镜头中查看帧提取和替换工作的进度，以及任何必要的恢复操作。"

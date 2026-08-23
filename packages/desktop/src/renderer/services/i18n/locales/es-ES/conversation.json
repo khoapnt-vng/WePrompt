@@ -1079,6 +1079,13 @@
         "briefAndRulesTitle": "Brief y reglas"
       },
       "gate": {
+        "headline_one": "{{count}} generación · {{cost}}",
+        "headline_other": "{{count}} generaciones · {{cost}}",
+        "confirm_one": "Confirmar {{count}} generación · {{cost}}",
+        "confirm_other": "Confirmar {{count}} generaciones · {{cost}}",
+        "hideBreakdown": "Ocultar cada generación",
+        "showBreakdown": "Mostrar cada generación",
+        "routeShared": "Todo mediante {{model}}",
         "group": { "required": "Obligatorio" },
         "continuity": {
           "severTitle": "Revisar corte directo",
@@ -1086,10 +1093,18 @@
           "severSummary": "Esta estimación convierte esta toma en inicio de cadena, reutiliza una imagen inicial válida o crea una si hace falta y sustituye todos los vídeos afectados hasta el siguiente corte directo.",
           "rejoinSummary": "Esta estimación borra la selección de imagen inicial de esta toma y la reconecta al fotograma anterior ajustado al recorte. La extracción gratuita del fotograma puede terminar tras confirmar y antes de enviar los vídeos de sustitución hasta el siguiente corte directo.",
           "severHeadline": "Corte directo · {{count}} generaciones obligatorias · {{cost}}",
+          "severHeadline_one": "Corte directo · {{count}} generación obligatoria · {{cost}}",
+          "severHeadline_other": "Corte directo · {{count}} generaciones obligatorias · {{cost}}",
           "rejoinHeadline": "Reconexión · {{count}} generaciones obligatorias · {{cost}}",
+          "rejoinHeadline_one": "Reconexión · {{count}} generación obligatoria · {{cost}}",
+          "rejoinHeadline_other": "Reconexión · {{count}} generaciones obligatorias · {{cost}}",
           "requiredWork": "Todo el trabajo de sustitución indicado es obligatorio para este cambio de cadena.",
           "confirmSever": "Confirmar corte directo + {{count}} generaciones · {{cost}}",
+          "confirmSever_one": "Confirmar corte directo + {{count}} generación · {{cost}}",
+          "confirmSever_other": "Confirmar corte directo + {{count}} generaciones · {{cost}}",
           "confirmRejoin": "Confirmar reconexión + {{count}} generaciones · {{cost}}",
+          "confirmRejoin_one": "Confirmar reconexión + {{count}} generación · {{cost}}",
+          "confirmRejoin_other": "Confirmar reconexión + {{count}} generaciones · {{cost}}",
           "close": "Cerrar — mantener la cadena sin cambios",
           "severConfirmed": "Corte directo confirmado. Revisa el plano para ver el progreso de la imagen inicial y del trabajo de sustitución, o cualquier recuperación necesaria.",
           "rejoinConfirmed": "Reconexión confirmada. Revisa el plano para ver el progreso de la extracción del fotograma y del trabajo de sustitución, o cualquier recuperación necesaria."

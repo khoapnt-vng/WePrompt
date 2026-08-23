@@ -1074,6 +1074,13 @@
         "briefAndRulesTitle": "ブリーフとルール"
       },
       "gate": {
+        "headline_one": "生成 {{count}} 件 · {{cost}}",
+        "headline_other": "生成 {{count}} 件 · {{cost}}",
+        "confirm_one": "{{count}} 件の生成を確定 · {{cost}}",
+        "confirm_other": "{{count}} 件の生成を確定 · {{cost}}",
+        "hideBreakdown": "各生成を非表示",
+        "showBreakdown": "各生成を表示",
+        "routeShared": "すべて {{model}} を使用",
         "group": { "required": "必須" },
         "continuity": {
           "severTitle": "ハードカットを確認",
@@ -1081,10 +1088,18 @@
           "severSummary": "この見積もりでは、このショットをチェーンの先頭にし、有効なシードを再利用するか必要に応じて作成し、次のハードカットまでの影響を受ける全動画を差し替えます。",
           "rejoinSummary": "この見積もりでは、このショットのシード選択を解除してトリム後の前ショットのフレームに再接続します。確定後、無料のフレーム抽出が完了してから、次のハードカットまでの差し替え動画が送信される場合があります。",
           "severHeadline": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",
+          "severHeadline_one": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",
+          "severHeadline_other": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",
           "rejoinHeadline": "再接続 · 必須生成 {{count}} 件 · {{cost}}",
+          "rejoinHeadline_one": "再接続 · 必須生成 {{count}} 件 · {{cost}}",
+          "rejoinHeadline_other": "再接続 · 必須生成 {{count}} 件 · {{cost}}",
           "requiredWork": "このチェーン変更には、表示された差し替え作業がすべて必要です。",
           "confirmSever": "ハードカットと {{count}} 件の生成を確定 · {{cost}}",
+          "confirmSever_one": "ハードカットと {{count}} 件の生成を確定 · {{cost}}",
+          "confirmSever_other": "ハードカットと {{count}} 件の生成を確定 · {{cost}}",
           "confirmRejoin": "再接続と {{count}} 件の生成を確定 · {{cost}}",
+          "confirmRejoin_one": "再接続と {{count}} 件の生成を確定 · {{cost}}",
+          "confirmRejoin_other": "再接続と {{count}} 件の生成を確定 · {{cost}}",
           "close": "閉じる — チェーンを変更しない",
           "severConfirmed": "ハードカットを確定しました。シードと差し替えの進行状況、または必要な復旧対応をショットで確認してください。",
           "rejoinConfirmed": "再接続を確定しました。フレーム抽出と差し替えの進行状況、または必要な復旧対応をショットで確認してください。"

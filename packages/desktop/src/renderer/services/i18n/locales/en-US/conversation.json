@@ -2135,10 +2135,18 @@
           "severSummary": "This estimate makes this Shot a chain head, reuses an eligible seed or creates one if needed, and replaces every affected video through the next hard cut.",
           "rejoinSummary": "This estimate clears this Shot’s seed selection and rejoins it to the trim-aware predecessor frame. Free frame extraction may finish after confirmation, before replacement videos are dispatched through the next hard cut.",
           "severHeadline": "Hard cut · {{count}} required generations · {{cost}}",
+          "severHeadline_one": "Hard cut · {{count}} required generation · {{cost}}",
+          "severHeadline_other": "Hard cut · {{count}} required generations · {{cost}}",
           "rejoinHeadline": "Rejoin · {{count}} required generations · {{cost}}",
+          "rejoinHeadline_one": "Rejoin · {{count}} required generation · {{cost}}",
+          "rejoinHeadline_other": "Rejoin · {{count}} required generations · {{cost}}",
           "requiredWork": "All listed replacement work is required for this chain change.",
           "confirmSever": "Confirm hard cut + {{count}} generations · {{cost}}",
+          "confirmSever_one": "Confirm hard cut + {{count}} generation · {{cost}}",
+          "confirmSever_other": "Confirm hard cut + {{count}} generations · {{cost}}",
           "confirmRejoin": "Confirm rejoin + {{count}} generations · {{cost}}",
+          "confirmRejoin_one": "Confirm rejoin + {{count}} generation · {{cost}}",
+          "confirmRejoin_other": "Confirm rejoin + {{count}} generations · {{cost}}",
           "close": "Close — keep the chain unchanged",
           "severConfirmed": "Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.",
           "rejoinConfirmed": "Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery."
@@ -2170,7 +2178,7 @@
         "confirmed": "Confirmed. The safe project and workspace status are refreshing.",
         "prepare": "Prepare estimate",
         "prepareAgain": "Prepare again",
-        "confirm": "Confirm {{count}} generations · up to {{cost}}",
+        "confirm": "Confirm {{count}} generations · {{cost}}",
         "close": "Close — spend nothing",
         "errors": {
           "generic": "The estimate could not be prepared or confirmed. Nothing was retried automatically.",
@@ -2187,8 +2195,8 @@
             "unsafeTotal": "The estimate total could not be represented safely. Reduce the selection; nothing was submitted."
           }
         },
-        "confirm_one": "Confirm {{count}} generation · up to {{cost}}",
-        "confirm_other": "Confirm {{count}} generations · up to {{cost}}",
+        "confirm_one": "Confirm {{count}} generation · {{cost}}",
+        "confirm_other": "Confirm {{count}} generations · {{cost}}",
         "headline_one": "{{count}} generation · {{cost}}",
         "headline_other": "{{count}} generations · {{cost}}",
         "hideBreakdown": "Hide each generation",

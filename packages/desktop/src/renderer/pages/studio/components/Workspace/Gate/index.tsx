@@ -213,22 +213,38 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   const { t, i18n } = useTranslation();
   // The headline and the Confirm label already carry the count and the total. The per-generation
   // breakdown is a long list on a real film, so it starts closed and stays one click away.
-  const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null);
   const breakdownId = useId();
   const quote = selectedSpendGateQuote(state);
   const summary = useMemo(() => (quote === null ? null : summarizeQuote(quote)), [quote]);
+  const visible = state.phase !== 'closed';
+  const breakdownOpen = visible && quote !== null && expandedQuoteId === quote.id;
+  const closeGate = useCallback(() => {
+    setExpandedQuoteId(null);
+    close();
+  }, [close]);
   const continuityChange = spendGateContinuityChange(state.draft);
   const continuityIntent = continuityChange === null ? null : continuityChange.hardCut ? 'sever' : 'rejoin';
   // A column that reads the same on every row is noise. Show group, purpose and route per row only
   // when they actually differ; otherwise the route is stated once and the row is shot, length, price.
   const rowFacts = useMemo(() => {
     const rows = quote === null ? [] : summarizeQuote(quote).rows;
-    const routes = new Set(rows.map((row) => `${row.route.providerId}\u0000${row.route.model}`));
+    const firstRoute = rows[0]?.route;
+    const sharedRoute =
+      firstRoute !== undefined &&
+      rows.every(
+        (row) =>
+          row.route.providerId === firstRoute.providerId &&
+          row.route.model === firstRoute.model &&
+          row.route.choiceId === firstRoute.choiceId
+      )
+        ? firstRoute
+        : null;
     return {
       // A continuity change forces every row to read "Required", so the label never varies there.
       mixedGroups: continuityIntent === null && new Set(rows.map((row) => row.group)).size > 1,
       mixedPurposes: new Set(rows.map((row) => row.purpose)).size > 1,
-      sharedRoute: routes.size === 1 && rows[0] !== undefined ? rows[0].route : null,
+      sharedRoute,
     };
   }, [continuityIntent, quote]);
   const { mixedGroups, mixedPurposes, sharedRoute } = rowFacts;
@@ -237,7 +253,6 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
       formatMinorUnits(minorUnits, currency, i18n.resolvedLanguage ?? i18n.language),
     [i18n.language, i18n.resolvedLanguage]
   );
-  const visible = state.phase !== 'closed';
   const messageKey = errorMessageKey(state);
   const canClose = state.phase !== 'confirming' && state.phase !== 'quote_in_use';
   const titleKey =
@@ -268,7 +283,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
       closable={canClose}
       unmountOnExit={false}
       title={t(titleKey)}
-      onCancel={canClose ? close : undefined}
+      onCancel={canClose ? closeGate : undefined}
     >
       <div
         className={styles.body}
@@ -315,7 +330,10 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                 aria-label={t('conversation.creativeStudio.workspace.gate.optionsLabel')}
                 value={state.selectedOption}
                 disabled={state.phase !== 'review'}
-                onChange={(value) => selectOption(value as SpendGateSelectedOption)}
+                onChange={(value) => {
+                  setExpandedQuoteId(null);
+                  selectOption(value as SpendGateSelectedOption);
+                }}
               >
                 <Radio value='baseOnly'>{t('conversation.creativeStudio.workspace.gate.baseOnly')}</Radio>
                 <Radio value='withCascade'>{t('conversation.creativeStudio.workspace.gate.withCascade')}</Radio>
@@ -354,7 +372,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               aria-controls={breakdownId}
               aria-expanded={breakdownOpen}
               className={styles.breakdownToggle}
-              onClick={() => setBreakdownOpen((open) => !open)}
+              onClick={() => setExpandedQuoteId((current) => (current === quote.id ? null : quote.id))}
               type='text'
             >
               {t(
@@ -443,7 +461,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               type='primary'
               onClick={() => {
                 const issue = state.routeIssue;
-                close();
+                closeGate();
                 onEditRoutes(issue);
               }}
             >
@@ -451,7 +469,13 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
             </Button>
           ) : null}
           {state.phase === 'choices' || state.phase === 'refresh_required' || state.phase === 'quote_cache_full' ? (
-            <Button type='primary' onClick={() => void prepare()}>
+            <Button
+              type='primary'
+              onClick={() => {
+                setExpandedQuoteId(null);
+                void prepare();
+              }}
+            >
               {t(
                 state.phase === 'choices'
                   ? 'conversation.creativeStudio.workspace.gate.prepare'
@@ -485,7 +509,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               )}
             </Button>
           ) : null}
-          <Button disabled={!canClose} onClick={close}>
+          <Button disabled={!canClose} onClick={closeGate}>
             {t(
               continuityIntent === null
                 ? 'conversation.creativeStudio.workspace.gate.close'

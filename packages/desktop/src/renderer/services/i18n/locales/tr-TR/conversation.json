@@ -1078,6 +1078,13 @@
         "briefAndRulesTitle": "Brief ve kurallar"
       },
       "gate": {
+        "headline_one": "{{count}} üretim · {{cost}}",
+        "headline_other": "{{count}} üretim · {{cost}}",
+        "confirm_one": "{{count}} üretimi onayla · {{cost}}",
+        "confirm_other": "{{count}} üretimi onayla · {{cost}}",
+        "hideBreakdown": "Her üretimi gizle",
+        "showBreakdown": "Her üretimi göster",
+        "routeShared": "Tümü {{model}} üzerinden",
         "group": { "required": "Zorunlu" },
         "continuity": {
           "severTitle": "Sert kesmeyi incele",
@@ -1085,10 +1092,18 @@
           "severSummary": "Bu tahmin, bu Çekimi zincir başı yapar, uygun bir başlangıç görüntüsünü yeniden kullanır veya gerekirse oluşturur ve sonraki sert kesmeye kadar etkilenen tüm videoları değiştirir.",
           "rejoinSummary": "Bu tahmin, bu Çekimin başlangıç görüntüsü seçimini temizler ve kırpmaya göre önceki kareye yeniden bağlar. Onaydan sonra, sonraki sert kesmeye kadar ikame videolar gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
           "severHeadline": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
+          "severHeadline_one": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
+          "severHeadline_other": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
           "rejoinHeadline": "Yeniden bağlanma · {{count}} zorunlu üretim · {{cost}}",
+          "rejoinHeadline_one": "Yeniden bağlanma · {{count}} zorunlu üretim · {{cost}}",
+          "rejoinHeadline_other": "Yeniden bağlanma · {{count}} zorunlu üretim · {{cost}}",
           "requiredWork": "Listelenen tüm ikame çalışmaları bu zincir değişikliği için zorunludur.",
           "confirmSever": "Sert kesme + {{count}} üretimi onayla · {{cost}}",
+          "confirmSever_one": "Sert kesme + {{count}} üretimi onayla · {{cost}}",
+          "confirmSever_other": "Sert kesme + {{count}} üretimi onayla · {{cost}}",
           "confirmRejoin": "Yeniden bağlanma + {{count}} üretimi onayla · {{cost}}",
+          "confirmRejoin_one": "Yeniden bağlanma + {{count}} üretimi onayla · {{cost}}",
+          "confirmRejoin_other": "Yeniden bağlanma + {{count}} üretimi onayla · {{cost}}",
           "close": "Kapat — zinciri değiştirme",
           "severConfirmed": "Sert kesme onaylandı. Shot'ta başlangıç görüntüsü ve ikame ilerlemesini ya da gereken kurtarma işlemlerini inceleyin.",
           "rejoinConfirmed": "Yeniden bağlanma onaylandı. Shot'ta kare çıkarma ve ikame ilerlemesini ya da gereken kurtarma işlemlerini inceleyin."

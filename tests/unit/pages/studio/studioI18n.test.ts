@@ -651,10 +651,18 @@ const expectedLeaves = [
   'gate.continuity.severSummary',
   'gate.continuity.rejoinSummary',
   'gate.continuity.severHeadline',
+  'gate.continuity.severHeadline_one',
+  'gate.continuity.severHeadline_other',
   'gate.continuity.rejoinHeadline',
+  'gate.continuity.rejoinHeadline_one',
+  'gate.continuity.rejoinHeadline_other',
   'gate.continuity.requiredWork',
   'gate.continuity.confirmSever',
+  'gate.continuity.confirmSever_one',
+  'gate.continuity.confirmSever_other',
   'gate.continuity.confirmRejoin',
+  'gate.continuity.confirmRejoin_one',
+  'gate.continuity.confirmRejoin_other',
   'gate.continuity.close',
   'gate.continuity.severConfirmed',
   'gate.continuity.rejoinConfirmed',
@@ -869,6 +877,13 @@ const localizedWorkspaceKeys = [
   ...localizedCutFilmDeltaKeys,
   ...localizedMoveToBinKeys,
   'controls.briefAndRulesTitle',
+  'gate.headline_one',
+  'gate.headline_other',
+  'gate.confirm_one',
+  'gate.confirm_other',
+  'gate.hideBreakdown',
+  'gate.showBreakdown',
+  'gate.routeShared',
   'gate.errors.routesUnavailable',
   'gate.group.required',
   'gate.continuity.severTitle',
@@ -876,10 +891,18 @@ const localizedWorkspaceKeys = [
   'gate.continuity.severSummary',
   'gate.continuity.rejoinSummary',
   'gate.continuity.severHeadline',
+  'gate.continuity.severHeadline_one',
+  'gate.continuity.severHeadline_other',
   'gate.continuity.rejoinHeadline',
+  'gate.continuity.rejoinHeadline_one',
+  'gate.continuity.rejoinHeadline_other',
   'gate.continuity.requiredWork',
   'gate.continuity.confirmSever',
+  'gate.continuity.confirmSever_one',
+  'gate.continuity.confirmSever_other',
   'gate.continuity.confirmRejoin',
+  'gate.continuity.confirmRejoin_one',
+  'gate.continuity.confirmRejoin_other',
   'gate.continuity.close',
   'gate.continuity.severConfirmed',
   'gate.continuity.rejoinConfirmed',
@@ -1092,11 +1115,67 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(19);
+    expect(pluralBases).toHaveLength(23);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
     }
+  });
+
+  it('states an exact one-generation gate amount without an upper-bound qualifier', async () => {
+    const i18n = i18next.createInstance();
+    await i18n.init({
+      lng: referenceLocale,
+      fallbackLng: false,
+      resources: { [referenceLocale]: { translation: { conversation: englishConversation } } },
+      interpolation: { escapeValue: false },
+    });
+
+    expect(i18n.t('conversation.creativeStudio.workspace.gate.headline', { count: 1, cost: '$1.25' })).toBe(
+      '1 generation · $1.25'
+    );
+    expect(i18n.t('conversation.creativeStudio.workspace.gate.confirm', { count: 1, cost: '$1.25' })).toBe(
+      'Confirm 1 generation · $1.25'
+    );
+    expect(i18n.t('conversation.creativeStudio.workspace.gate.confirm', { count: 2, cost: '$2.50' })).toBe(
+      'Confirm 2 generations · $2.50'
+    );
+  });
+
+  it.each([
+    [
+      'severHeadline',
+      'confirmSever',
+      'Hard cut · 1 required generation · $4.00',
+      'Confirm hard cut + 1 generation · $4.00',
+    ],
+    [
+      'rejoinHeadline',
+      'confirmRejoin',
+      'Rejoin · 1 required generation · $4.00',
+      'Confirm rejoin + 1 generation · $4.00',
+    ],
+  ])('uses singular continuity copy for %s', async (headlineKey, confirmKey, headline, action) => {
+    const i18n = i18next.createInstance();
+    await i18n.init({
+      lng: referenceLocale,
+      fallbackLng: false,
+      resources: { [referenceLocale]: { translation: { conversation: englishConversation } } },
+      interpolation: { escapeValue: false },
+    });
+
+    expect(
+      i18n.t(`conversation.creativeStudio.workspace.gate.continuity.${headlineKey}`, {
+        count: 1,
+        cost: '$4.00',
+      })
+    ).toBe(headline);
+    expect(
+      i18n.t(`conversation.creativeStudio.workspace.gate.continuity.${confirmKey}`, {
+        count: 1,
+        cost: '$4.00',
+      })
+    ).toBe(action);
   });
 
   it.each([

@@ -38,10 +38,25 @@ vi.mock('react-i18next', () => ({
         return 'continuity changed';
       }
       if (key === 'conversation.creativeStudio.workspace.gate.continuity.confirmSever') {
-        return `Confirm hard cut + ${String(values?.count)} generations · ${String(values?.cost)}`;
+        return `Confirm hard cut + ${String(values?.count)} ${values?.count === 1 ? 'generation' : 'generations'} · ${String(values?.cost)}`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.continuity.confirmRejoin') {
-        return `Confirm rejoin + ${String(values?.count)} generations · ${String(values?.cost)}`;
+        return `Confirm rejoin + ${String(values?.count)} ${values?.count === 1 ? 'generation' : 'generations'} · ${String(values?.cost)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.continuity.severHeadline') {
+        return `Hard cut · ${String(values?.count)} required ${values?.count === 1 ? 'generation' : 'generations'} · ${String(values?.cost)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.continuity.rejoinHeadline') {
+        return `Rejoin · ${String(values?.count)} required ${values?.count === 1 ? 'generation' : 'generations'} · ${String(values?.cost)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.confirm') {
+        return `${key} · Confirm ${String(values?.count)} ${values?.count === 1 ? 'generation' : 'generations'} · ${String(values?.cost)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.route') {
+        return `${String(values?.provider)} · ${String(values?.model)} · ${String(values?.choice)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.routeShared') {
+        return `All through ${String(values?.model)}`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.continuity.severConfirmed') {
         return 'Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.';
@@ -263,6 +278,14 @@ const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
   budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 1_000 },
 });
 
+const oneItemContinuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
+  ...continuityQuote(),
+  id: 'quote_continuity_one',
+  baseItems: [continuityQuote().baseItems[1]!],
+  lowerMinorUnits: 400,
+  upperMinorUnits: 400,
+});
+
 const draft = {
   projectId: 'project_1',
   expectedRevision: 3,
@@ -291,6 +314,26 @@ const Harness: React.FC<{
       <button onClick={() => void gate.confirm()}>Invoke confirm directly</button>
       <SpendGateModal {...gate} onEditRoutes={onEditRoutes} />
     </>
+  );
+};
+
+const openPreparedGate = async (preparedOptions: StudioRendererPreparedSubmissionOptionsV2): Promise<HTMLElement> => {
+  mocks.prepare.mockResolvedValue({ ok: true, data: preparedOptions });
+  render(<Harness />);
+  fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+  fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+  const modal = await screen.findByTestId('studio-spend-gate');
+  await within(modal).findByRole('button', {
+    name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+  });
+  return modal;
+};
+
+const showGateBreakdown = (modal: HTMLElement): void => {
+  fireEvent.click(
+    within(modal).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+    })
   );
 };
 
@@ -1265,6 +1308,152 @@ describe('SpendGateModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('starts the generation breakdown closed again on every gate opening', async () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    await within(modal).findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+    });
+    showGateBreakdown(modal);
+    expect(within(modal).getByText('conversation.creativeStudio.workspace.gate.rateCardSource')).toBeVisible();
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    const toggle = await within(modal).findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+    });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(modal).queryByText('conversation.creativeStudio.workspace.gate.rateCardSource')).toBeNull();
+  });
+
+  it('starts the generation breakdown closed when the selected quote changes', async () => {
+    const modal = await openPreparedGate(options());
+    showGateBreakdown(modal);
+    fireEvent.click(within(modal).getByText('conversation.creativeStudio.workspace.gate.withCascade'));
+
+    expect(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+      })
+    ).toHaveAttribute('aria-expanded', 'false');
+    expect(within(modal).queryByText('conversation.creativeStudio.workspace.gate.rateCardSource')).toBeNull();
+  });
+
+  it.each([
+    [true, 'Hard cut · 1 required generation · $4.00', 'Confirm hard cut + 1 generation · $4.00'],
+    [false, 'Rejoin · 1 required generation · $4.00', 'Confirm rejoin + 1 generation · $4.00'],
+  ])('uses singular exact copy for a legal one-item continuity quote', async (hardCut, headline, action) => {
+    const continuityDraft = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut, requiresSeedGeneration: false },
+    };
+    mocks.prepare.mockResolvedValue({
+      ok: true,
+      data: { baseOnly: oneItemContinuityQuote(), withCascade: null },
+    });
+    render(<Harness gateDraft={continuityDraft} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+
+    expect(await within(modal).findByRole('heading', { name: headline })).toBeVisible();
+    expect(within(modal).getByRole('button', { name: action })).toBeEnabled();
+  });
+
+  it('names one exact shared route once with its human-readable model', async () => {
+    const sharedQuote = quote('quote_shared');
+    sharedQuote.baseItems.push({ ...sharedQuote.baseItems[0]!, shotId: 'shot_2' });
+    sharedQuote.lowerMinorUnits = 250;
+    sharedQuote.upperMinorUnits = 250;
+    const modal = await openPreparedGate({ baseOnly: sharedQuote, withCascade: null });
+    showGateBreakdown(modal);
+
+    expect(within(modal).getByText('All through safe_model')).toBeVisible();
+    expect(within(modal).getAllByRole('listitem')).toHaveLength(2);
+  });
+
+  it.each([
+    ['providerId', 'safe_provider_2'],
+    ['model', 'safe_model_2'],
+    ['choiceId', 'image_choice_2'],
+  ] as const)('keeps routes separate when their exact %s identities differ', async (field, value) => {
+    const mixedRouteQuote = quote('quote_mixed_route');
+    const secondRoute = { ...mixedRouteQuote.baseItems[0]!.route, [field]: value };
+    mixedRouteQuote.baseItems.push({
+      ...mixedRouteQuote.baseItems[0]!,
+      shotId: 'shot_2',
+      route: secondRoute,
+    });
+    mixedRouteQuote.lowerMinorUnits = 250;
+    mixedRouteQuote.upperMinorUnits = 250;
+    const modal = await openPreparedGate({ baseOnly: mixedRouteQuote, withCascade: null });
+    showGateBreakdown(modal);
+
+    expect(within(modal).queryByText(/^All through /)).toBeNull();
+    expect(within(modal).getByText('safe_provider · safe_model · image_choice')).toBeVisible();
+    expect(
+      within(modal).getByText(`${secondRoute.providerId} · ${secondRoute.model} · ${secondRoute.choiceId}`)
+    ).toBeVisible();
+  });
+
+  it('shows group and purpose only when those facts vary between rows', async () => {
+    const variedQuote = quote('quote_varied', true);
+    const modal = await openPreparedGate({ baseOnly: variedQuote, withCascade: null });
+    showGateBreakdown(modal);
+    const rows = within(modal).getAllByRole('listitem');
+
+    expect(rows[0]).toHaveTextContent('conversation.creativeStudio.workspace.gate.group.base');
+    expect(rows[0]).toHaveTextContent('conversation.creativeStudio.workspace.gate.purpose.seed_still');
+    expect(rows[1]).toHaveTextContent('conversation.creativeStudio.workspace.gate.group.cascade');
+    expect(rows[1]).toHaveTextContent('conversation.creativeStudio.workspace.gate.purpose.video_take');
+  });
+
+  it('omits homogeneous group and purpose labels from each compact row', async () => {
+    const homogeneousQuote = quote('quote_homogeneous');
+    homogeneousQuote.baseItems.push({ ...homogeneousQuote.baseItems[0]!, shotId: 'shot_2' });
+    homogeneousQuote.lowerMinorUnits = 250;
+    homogeneousQuote.upperMinorUnits = 250;
+    const modal = await openPreparedGate({ baseOnly: homogeneousQuote, withCascade: null });
+    showGateBreakdown(modal);
+
+    expect(modal).not.toHaveTextContent('conversation.creativeStudio.workspace.gate.group.base');
+    expect(modal).not.toHaveTextContent('conversation.creativeStudio.workspace.gate.purpose.seed_still');
+  });
+
+  it('shows only the group label when groups vary but purposes do not', async () => {
+    const mixedGroupQuote = quote('quote_mixed_group', true);
+    mixedGroupQuote.baseItems = [
+      { ...mixedGroupQuote.cascadeItems[0]!, shotId: 'shot_1', requestedTotalMinorUnits: 400 },
+    ];
+    mixedGroupQuote.lowerMinorUnits = 800;
+    mixedGroupQuote.upperMinorUnits = 800;
+    const modal = await openPreparedGate({ baseOnly: mixedGroupQuote, withCascade: null });
+    showGateBreakdown(modal);
+
+    expect(modal).toHaveTextContent('conversation.creativeStudio.workspace.gate.group.base');
+    expect(modal).toHaveTextContent('conversation.creativeStudio.workspace.gate.group.cascade');
+    expect(modal).not.toHaveTextContent('conversation.creativeStudio.workspace.gate.purpose.video_take');
+  });
+
+  it('shows only the purpose label when purposes vary but groups do not', async () => {
+    const mixedPurposeQuote = continuityQuote();
+    mixedPurposeQuote.id = 'quote_mixed_purpose';
+    const modal = await openPreparedGate({ baseOnly: mixedPurposeQuote, withCascade: null });
+    showGateBreakdown(modal);
+
+    expect(modal).not.toHaveTextContent('conversation.creativeStudio.workspace.gate.group.base');
+    expect(modal).toHaveTextContent('conversation.creativeStudio.workspace.gate.purpose.seed_still');
+    expect(modal).toHaveTextContent('conversation.creativeStudio.workspace.gate.purpose.video_take');
   });
 
   it('names the unavailable image route before estimating and offers the Brief route picker', async () => {

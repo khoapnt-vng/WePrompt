@@ -1084,6 +1084,13 @@
         "briefAndRulesTitle": "Brief e regras"
       },
       "gate": {
+        "headline_one": "{{count}} geração · {{cost}}",
+        "headline_other": "{{count}} gerações · {{cost}}",
+        "confirm_one": "Confirmar {{count}} geração · {{cost}}",
+        "confirm_other": "Confirmar {{count}} gerações · {{cost}}",
+        "hideBreakdown": "Ocultar cada geração",
+        "showBreakdown": "Mostrar cada geração",
+        "routeShared": "Tudo por {{model}}",
         "group": { "required": "Obrigatório" },
         "continuity": {
           "severTitle": "Revisar corte seco",
@@ -1091,10 +1098,18 @@
           "severSummary": "Esta estimativa torna esta Tomada o início da cadeia, reutiliza uma imagem inicial válida ou cria uma se necessário e substitui todos os vídeos afetados até o próximo corte seco.",
           "rejoinSummary": "Esta estimativa remove a seleção de imagem inicial desta Tomada e a reconecta ao quadro anterior ajustado ao corte. A extração gratuita do quadro pode terminar após a confirmação e antes do envio dos vídeos de substituição até o próximo corte seco.",
           "severHeadline": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",
+          "severHeadline_one": "Corte seco · {{count}} geração obrigatória · {{cost}}",
+          "severHeadline_other": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",
           "rejoinHeadline": "Reconexão · {{count}} gerações obrigatórias · {{cost}}",
+          "rejoinHeadline_one": "Reconexão · {{count}} geração obrigatória · {{cost}}",
+          "rejoinHeadline_other": "Reconexão · {{count}} gerações obrigatórias · {{cost}}",
           "requiredWork": "Todo o trabalho de substituição listado é obrigatório para esta alteração de cadeia.",
           "confirmSever": "Confirmar corte seco + {{count}} gerações · {{cost}}",
+          "confirmSever_one": "Confirmar corte seco + {{count}} geração · {{cost}}",
+          "confirmSever_other": "Confirmar corte seco + {{count}} gerações · {{cost}}",
           "confirmRejoin": "Confirmar reconexão + {{count}} gerações · {{cost}}",
+          "confirmRejoin_one": "Confirmar reconexão + {{count}} geração · {{cost}}",
+          "confirmRejoin_other": "Confirmar reconexão + {{count}} gerações · {{cost}}",
           "close": "Fechar — manter a cadeia inalterada",
           "severConfirmed": "Corte seco confirmado. Verifique no plano o progresso da imagem inicial e da substituição ou qualquer recuperação necessária.",
           "rejoinConfirmed": "Reconexão confirmada. Verifique no plano o progresso da extração do quadro e da substituição ou qualquer recuperação necessária."

@@ -1074,6 +1074,13 @@
         "briefAndRulesTitle": "簡報與規則"
       },
       "gate": {
+        "headline_one": "{{count}} 次生成 · {{cost}}",
+        "headline_other": "{{count}} 次生成 · {{cost}}",
+        "confirm_one": "確認 {{count}} 次生成 · {{cost}}",
+        "confirm_other": "確認 {{count}} 次生成 · {{cost}}",
+        "hideBreakdown": "隱藏每次生成",
+        "showBreakdown": "顯示每次生成",
+        "routeShared": "全部使用 {{model}}",
         "group": { "required": "必要" },
         "continuity": {
           "severTitle": "審閱硬切",
@@ -1081,10 +1088,18 @@
           "severSummary": "此估價會將該鏡頭設為鏈頭，重用符合條件的種子圖或在需要時建立一個，並替換直到下一個硬切之前所有受影響的影片。",
           "rejoinSummary": "此估價會清除該鏡頭的種子圖選擇，並將其重新銜接到經裁剪的前序畫面。確認後，免費的畫面擷取可能會先完成，再送交直到下一個硬切之前的替換影片。",
           "severHeadline": "硬切 · {{count}} 次必要生成 · {{cost}}",
+          "severHeadline_one": "硬切 · {{count}} 次必要生成 · {{cost}}",
+          "severHeadline_other": "硬切 · {{count}} 次必要生成 · {{cost}}",
           "rejoinHeadline": "重新銜接 · {{count}} 次必要生成 · {{cost}}",
+          "rejoinHeadline_one": "重新銜接 · {{count}} 次必要生成 · {{cost}}",
+          "rejoinHeadline_other": "重新銜接 · {{count}} 次必要生成 · {{cost}}",
           "requiredWork": "此鏈變更必須完成列出的全部替換工作。",
           "confirmSever": "確認硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmSever_one": "確認硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmSever_other": "確認硬切 + {{count}} 次生成 · {{cost}}",
           "confirmRejoin": "確認重新銜接 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin_one": "確認重新銜接 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin_other": "確認重新銜接 + {{count}} 次生成 · {{cost}}",
           "close": "關閉 — 保持鏈不變",
           "severConfirmed": "已確認硬切。請在鏡頭中查看種子圖和替換算圖的進度，以及任何必要的復原操作。",
           "rejoinConfirmed": "已確認重新銜接。請在鏡頭中查看畫面擷取和替換算圖的進度，以及任何必要的復原操作。"

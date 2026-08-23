@@ -1074,6 +1074,13 @@
         "briefAndRulesTitle": "브리프 및 규칙"
       },
       "gate": {
+        "headline_one": "생성 {{count}}개 · {{cost}}",
+        "headline_other": "생성 {{count}}개 · {{cost}}",
+        "confirm_one": "생성 {{count}}개 확인 · {{cost}}",
+        "confirm_other": "생성 {{count}}개 확인 · {{cost}}",
+        "hideBreakdown": "각 생성 숨기기",
+        "showBreakdown": "각 생성 표시",
+        "routeShared": "모두 {{model}} 사용",
         "group": { "required": "필수" },
         "continuity": {
           "severTitle": "하드 컷 검토",
@@ -1081,10 +1088,18 @@
           "severSummary": "이 견적은 이 샷을 체인 시작점으로 만들고 적합한 시드를 재사용하거나 필요하면 새로 만들며, 다음 하드 컷까지 영향을 받는 모든 비디오를 교체합니다.",
           "rejoinSummary": "이 견적은 이 샷의 시드 선택을 지우고 트림이 적용된 이전 프레임에 재연결합니다. 확인 후 무료 프레임 추출이 완료된 다음 다음 하드 컷까지의 교체 비디오가 전송될 수 있습니다.",
           "severHeadline": "하드 컷 · 필수 생성 {{count}}개 · {{cost}}",
+          "severHeadline_one": "하드 컷 · 필수 생성 {{count}}개 · {{cost}}",
+          "severHeadline_other": "하드 컷 · 필수 생성 {{count}}개 · {{cost}}",
           "rejoinHeadline": "재연결 · 필수 생성 {{count}}개 · {{cost}}",
+          "rejoinHeadline_one": "재연결 · 필수 생성 {{count}}개 · {{cost}}",
+          "rejoinHeadline_other": "재연결 · 필수 생성 {{count}}개 · {{cost}}",
           "requiredWork": "이 체인 변경에는 표시된 모든 교체 작업이 필요합니다.",
           "confirmSever": "하드 컷 + 생성 {{count}}개 확인 · {{cost}}",
+          "confirmSever_one": "하드 컷 + 생성 {{count}}개 확인 · {{cost}}",
+          "confirmSever_other": "하드 컷 + 생성 {{count}}개 확인 · {{cost}}",
           "confirmRejoin": "재연결 + 생성 {{count}}개 확인 · {{cost}}",
+          "confirmRejoin_one": "재연결 + 생성 {{count}}개 확인 · {{cost}}",
+          "confirmRejoin_other": "재연결 + 생성 {{count}}개 확인 · {{cost}}",
           "close": "닫기 — 체인을 변경하지 않음",
           "severConfirmed": "하드 컷을 확인했습니다. 샷에서 시드와 교체 작업의 진행 상황 또는 필요한 복구 조치를 확인하세요.",
           "rejoinConfirmed": "재연결을 확인했습니다. 샷에서 프레임 추출과 교체 작업의 진행 상황 또는 필요한 복구 조치를 확인하세요."
