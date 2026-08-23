@@ -53,6 +53,10 @@ export type { NormalizedStudioGenerationParameters, StudioRouteIssue, StudioRout
 
 export type SanitizedProviderErrorCode =
   | 'auth'
+  /** A spend limit the user can act on — a balance or a per-key cap, not a broken request. */
+  | 'quota'
+  /** The provider rejected the request definitively. Never an outcome we could not determine. */
+  | 'invalid_request'
   | 'rate_limited'
   | 'provider_unavailable'
   | 'timeout'

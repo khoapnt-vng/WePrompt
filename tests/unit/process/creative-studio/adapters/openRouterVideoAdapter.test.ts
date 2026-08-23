@@ -188,7 +188,7 @@ describe('OpenRouter video generation adapter', () => {
     });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
-      code: 'unknown',
+      code: 'invalid_request',
     });
 
     await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
@@ -196,7 +196,7 @@ describe('OpenRouter video generation adapter', () => {
       operation: 'submit',
       model: 'bytedance/seedance-2.0',
       httpStatus: 400,
-      stableCode: 'unknown',
+      stableCode: 'invalid_request',
       jsonReadable: true,
       errorCode: '400',
       errorType: 'invalid_image',
@@ -206,6 +206,23 @@ describe('OpenRouter video generation adapter', () => {
     expect(JSON.stringify(emitHttpErrorEvidence.mock.calls)).not.toMatch(
       /private scarf|sk-or-secret|private\.example|data:image|base64/i
     );
+  });
+
+  it.each([
+    [402, 'quota', 'the account is out of credits, which the user can act on'],
+    [400, 'invalid_request', 'the provider rejected the request definitively'],
+    [404, 'invalid_request', 'a definitive client-side rejection'],
+  ])('maps HTTP %i to %s, because %s', async (status, expected) => {
+    const fetch = vi.fn(async () => response(status, { error: { message: 'x', code: status } }));
+    const adapter = createOpenRouterVideoAdapter({
+      fetch,
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence: () => undefined,
+    });
+
+    await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: expected,
+    });
   });
 
   it('surfaces an unrecognised provider tag when it is identifier-shaped, and still never the message', async () => {
@@ -226,7 +243,7 @@ describe('OpenRouter video generation adapter', () => {
     });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
-      code: 'unknown',
+      code: 'invalid_request',
     });
 
     await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
@@ -263,7 +280,7 @@ describe('OpenRouter video generation adapter', () => {
     });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
-      code: 'unknown',
+      code: 'invalid_request',
     });
 
     await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
@@ -282,7 +299,7 @@ describe('OpenRouter video generation adapter', () => {
     });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
-      code: 'unknown',
+      code: 'invalid_request',
     });
   });
 
@@ -306,7 +323,7 @@ describe('OpenRouter video generation adapter', () => {
     });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
-      code: 'unknown',
+      code: 'invalid_request',
     });
     failureObserved = true;
     await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
@@ -327,7 +344,7 @@ describe('OpenRouter video generation adapter', () => {
     });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
-      code: 'unknown',
+      code: 'invalid_request',
     });
     await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
 
@@ -354,7 +371,7 @@ describe('OpenRouter video generation adapter', () => {
         ),
         new Promise<'stalled'>((resolve) => setTimeout(() => resolve('stalled'), 20)),
       ]);
-      expect(outcome).toMatchObject({ code: 'unknown' });
+      expect(outcome).toMatchObject({ code: 'invalid_request' });
     } finally {
       resolveBody({ error: { metadata: { error_type: 'invalid_image' } } });
       await submission.catch(() => undefined);

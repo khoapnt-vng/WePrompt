@@ -201,10 +201,22 @@ const requestValidation = (
       };
 };
 
+/**
+ * A 4xx is the provider stating that it rejected the request, so it must not read as an outcome we
+ * could not determine. `unknown` becomes `submission_unknown` downstream, which parks the job in
+ * needs_attention behind a duplicate-charge acknowledgement — a warning about paying twice for work
+ * that provably never started.
+ *
+ * 402 earns its own code because it is the one the user can act on. Measured 2026-08-23: five video
+ * submissions failed in a row, were reported as ambiguous, and the provider had been answering
+ * "Insufficient credits" the whole time.
+ */
 const mapStatusError = (status: number): SanitizedProviderError => {
   if (status === 401 || status === 403) return { code: 'auth' };
+  if (status === 402) return { code: 'quota' };
   if (status === 429) return { code: 'rate_limited' };
   if (status >= 500) return { code: 'provider_unavailable' };
+  if (status >= 400) return { code: 'invalid_request' };
   return { code: 'unknown' };
 };
 
