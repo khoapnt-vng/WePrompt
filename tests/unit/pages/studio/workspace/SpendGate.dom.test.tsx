@@ -1334,6 +1334,11 @@ describe('SpendGateModal', () => {
 
     const modal = await screen.findByTestId('studio-spend-gate');
     fireEvent.click(within(modal).getByText('conversation.creativeStudio.workspace.gate.withCascade'));
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+      })
+    );
     expect(within(modal).getByText(/safe_video/)).toHaveTextContent('video_choice');
     expect(within(modal).getByText('conversation.creativeStudio.workspace.gate.rateCardSource')).toBeVisible();
     expect(within(modal).getByText(/budgetPolicy/)).toHaveTextContent('$10.00');
@@ -1372,11 +1377,25 @@ describe('SpendGateModal', () => {
     expect(within(modal).queryByRole('radio')).toBeNull();
     fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
-    await waitFor(() => expect(within(modal).getByText(/safe_video/)).toBeVisible());
+    await waitFor(() =>
+      expect(
+        within(modal).getByRole('button', {
+          name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+        })
+      ).toBeVisible()
+    );
     expect(within(modal).queryByRole('radio')).toBeNull();
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+      })
+    );
+    expect(within(modal).getByText(/safe_video/)).toBeVisible();
     const requiredRows = within(modal).getAllByRole('listitem');
     expect(requiredRows[0]).toHaveAttribute('data-quote-group', 'required');
-    expect(requiredRows[0]).toHaveTextContent('conversation.creativeStudio.workspace.gate.group.required');
+    // The panel already states that all listed work is required, so the row does not repeat it;
+    // the group survives as the data attribute asserted above.
+    expect(requiredRows[0]).toHaveTextContent('shot_2');
     const confirm = within(modal).getByRole('button', {
       name: 'Confirm hard cut + 2 generations · $5.25',
     });
@@ -1511,6 +1530,11 @@ describe('SpendGateModal', () => {
       within(modal).getByRole('button', { name: /conversation\.creativeStudio\.workspace\.gate\.confirm/ })
     );
 
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+      })
+    );
     expect(await within(modal).findByText('conversation.creativeStudio.errors.quoteInUse')).toBeVisible();
     expect(within(modal).getByText(/safe_video/)).toHaveTextContent('video_choice');
     for (const option of within(modal).getAllByRole('radio')) expect(option).toBeDisabled();

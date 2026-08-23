@@ -5,7 +5,7 @@
  */
 
 import { Alert, Button, Modal, Radio, Spin } from '@arco-design/web-react';
-import React, { useCallback, useMemo, useReducer, useRef } from 'react';
+import React, { useCallback, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ipcBridge } from '@/common';
@@ -211,10 +211,27 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   onEditRoutes,
 }) => {
   const { t, i18n } = useTranslation();
+  // The headline and the Confirm label already carry the count and the total. The per-generation
+  // breakdown is a long list on a real film, so it starts closed and stays one click away.
+  const [breakdownOpen, setBreakdownOpen] = useState(false);
+  const breakdownId = useId();
   const quote = selectedSpendGateQuote(state);
   const summary = useMemo(() => (quote === null ? null : summarizeQuote(quote)), [quote]);
   const continuityChange = spendGateContinuityChange(state.draft);
   const continuityIntent = continuityChange === null ? null : continuityChange.hardCut ? 'sever' : 'rejoin';
+  // A column that reads the same on every row is noise. Show group, purpose and route per row only
+  // when they actually differ; otherwise the route is stated once and the row is shot, length, price.
+  const rowFacts = useMemo(() => {
+    const rows = quote === null ? [] : summarizeQuote(quote).rows;
+    const routes = new Set(rows.map((row) => `${row.route.providerId}\u0000${row.route.model}`));
+    return {
+      // A continuity change forces every row to read "Required", so the label never varies there.
+      mixedGroups: continuityIntent === null && new Set(rows.map((row) => row.group)).size > 1,
+      mixedPurposes: new Set(rows.map((row) => row.purpose)).size > 1,
+      sharedRoute: routes.size === 1 && rows[0] !== undefined ? rows[0].route : null,
+    };
+  }, [continuityIntent, quote]);
+  const { mixedGroups, mixedPurposes, sharedRoute } = rowFacts;
   const formatMoney = useCallback(
     (minorUnits: number, currency: string): string =>
       formatMinorUnits(minorUnits, currency, i18n.resolvedLanguage ?? i18n.language),
@@ -322,54 +339,87 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                 {t('conversation.creativeStudio.workspace.gate.continuity.requiredWork')}
               </p>
             ) : null}
-            <p>{t('conversation.creativeStudio.workspace.gate.rateCardSource')}</p>
-            <ol className={styles.rows}>
-              {summary.rows.map((row, index) => (
-                <li
-                  data-generation-purpose={row.purpose}
-                  data-quote-group={continuityIntent === null ? row.group : 'required'}
-                  data-shot-id={row.shotId}
-                  key={`${row.group}:${row.shotId}:${row.purpose}:${index}`}
-                >
-                  <span>
-                    {t(
-                      `conversation.creativeStudio.workspace.gate.group.${continuityIntent === null ? row.group : 'required'}`
-                    )}{' '}
-                    · {t(`conversation.creativeStudio.workspace.gate.purpose.${row.purpose}`)} · {row.shotId}
-                  </span>
-                  <bdi dir='auto'>
-                    {t('conversation.creativeStudio.workspace.gate.route', {
-                      provider: row.route.providerId,
-                      model: row.route.model,
-                      choice: row.route.choiceId,
-                    })}
-                  </bdi>
-                  <span>
-                    {row.durationSeconds === null
-                      ? t('conversation.creativeStudio.workspace.gate.durationNotApplicable')
-                      : t('conversation.creativeStudio.workspace.gate.duration', { seconds: row.durationSeconds })}
-                  </span>
-                  <span>
-                    {t('conversation.creativeStudio.workspace.gate.rowCost', {
-                      cost: formatMoney(row.requestedTotalMinorUnits, summary.currency),
-                    })}
-                  </span>
-                </li>
-              ))}
-            </ol>
-            <p>
-              {t(`conversation.creativeStudio.workspace.gate.budget.${summary.budget.kind}`)}
-              {'policyCurrency' in summary.budget
-                ? ` · ${t('conversation.creativeStudio.workspace.gate.budgetPolicy', {
-                    currency: summary.budget.policyCurrency,
-                    cap: formatMoney(summary.budget.maxPerBatchMinorUnits, summary.budget.policyCurrency),
-                  })}`
-                : null}
-            </p>
-            <p>
-              {t('conversation.creativeStudio.workspace.gate.revision', { revision: summary.projectRevision })} ·{' '}
-              {t('conversation.creativeStudio.workspace.gate.expires', { expiresAt: summary.expiresAt })}
-            </p>
+            {summary.budget.kind === 'no_policy' ? null : (
+              <p>
+                {t(`conversation.creativeStudio.workspace.gate.budget.${summary.budget.kind}`)}
+                {'policyCurrency' in summary.budget
+                  ? ` · ${t('conversation.creativeStudio.workspace.gate.budgetPolicy', {
+                      currency: summary.budget.policyCurrency,
+                      cap: formatMoney(summary.budget.maxPerBatchMinorUnits, summary.budget.policyCurrency),
+                    })}`
+                  : null}
+              </p>
+            )}
+            <Button
+              aria-controls={breakdownId}
+              aria-expanded={breakdownOpen}
+              className={styles.breakdownToggle}
+              onClick={() => setBreakdownOpen((open) => !open)}
+              type='text'
+            >
+              {t(
+                breakdownOpen
+                  ? 'conversation.creativeStudio.workspace.gate.hideBreakdown'
+                  : 'conversation.creativeStudio.workspace.gate.showBreakdown'
+              )}
+            </Button>
+            {breakdownOpen ? (
+              <div className={styles.breakdown} id={breakdownId}>
+                {summary.budget.kind === 'no_policy' ? (
+                  <p>{t('conversation.creativeStudio.workspace.gate.budget.no_policy')}</p>
+                ) : null}
+                <p>{t('conversation.creativeStudio.workspace.gate.rateCardSource')}</p>
+                {sharedRoute === null ? null : (
+                  <p>
+                    <bdi dir='auto'>
+                      {t('conversation.creativeStudio.workspace.gate.routeShared', {
+                        model: sharedRoute.model,
+                      })}
+                    </bdi>
+                  </p>
+                )}
+                <ol className={styles.rows}>
+                  {summary.rows.map((row, index) => (
+                    <li
+                      data-generation-purpose={row.purpose}
+                      data-quote-group={continuityIntent === null ? row.group : 'required'}
+                      data-shot-id={row.shotId}
+                      key={`${row.group}:${row.shotId}:${row.purpose}:${index}`}
+                    >
+                      <span>
+                        {mixedGroups
+                          ? `${t(
+                              `conversation.creativeStudio.workspace.gate.group.${continuityIntent === null ? row.group : 'required'}`
+                            )} · `
+                          : null}
+                        {mixedPurposes
+                          ? `${t(`conversation.creativeStudio.workspace.gate.purpose.${row.purpose}`)} · `
+                          : null}
+                        {row.shotId} ·{' '}
+                        {row.durationSeconds === null
+                          ? t('conversation.creativeStudio.workspace.gate.durationNotApplicable')
+                          : t('conversation.creativeStudio.workspace.gate.duration', { seconds: row.durationSeconds })}
+                        {' · '}
+                        {formatMoney(row.requestedTotalMinorUnits, summary.currency)}
+                      </span>
+                      {sharedRoute === null ? (
+                        <bdi dir='auto'>
+                          {t('conversation.creativeStudio.workspace.gate.route', {
+                            provider: row.route.providerId,
+                            model: row.route.model,
+                            choice: row.route.choiceId,
+                          })}
+                        </bdi>
+                      ) : null}
+                    </li>
+                  ))}
+                </ol>
+                <p>
+                  {t('conversation.creativeStudio.workspace.gate.revision', { revision: summary.projectRevision })} ·{' '}
+                  {t('conversation.creativeStudio.workspace.gate.expires', { expiresAt: summary.expiresAt })}
+                </p>
+              </div>
+            ) : null}
           </>
         ) : null}
 

@@ -32,3 +32,15 @@
   justify-content: flex-end;
   padding-top: 4px;
 }
+
+.breakdownToggle {
+  align-self: start;
+  padding-inline: 0;
+}
+
+.breakdown {
+  display: flex;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: 8px;
+}

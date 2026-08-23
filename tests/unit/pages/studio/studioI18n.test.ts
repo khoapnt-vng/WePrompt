@@ -644,6 +644,8 @@ const expectedLeaves = [
   'gate.baseOnly',
   'gate.withCascade',
   'gate.headline',
+  'gate.headline_one',
+  'gate.headline_other',
   'gate.continuity.severTitle',
   'gate.continuity.rejoinTitle',
   'gate.continuity.severSummary',
@@ -657,12 +659,15 @@ const expectedLeaves = [
   'gate.continuity.severConfirmed',
   'gate.continuity.rejoinConfirmed',
   'gate.rateCardSource',
+  'gate.showBreakdown',
+  'gate.hideBreakdown',
   'gate.group.base',
   'gate.group.cascade',
   'gate.group.required',
   'gate.purpose.seed_still',
   'gate.purpose.video_take',
   'gate.route',
+  'gate.routeShared',
   'gate.duration',
   'gate.durationNotApplicable',
   'gate.rowCost',
@@ -677,6 +682,8 @@ const expectedLeaves = [
   'gate.prepare',
   'gate.prepareAgain',
   'gate.confirm',
+  'gate.confirm_one',
+  'gate.confirm_other',
   'gate.close',
   'gate.errors.generic',
   'gate.errors.routesUnavailable',
@@ -1085,7 +1092,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(17);
+    expect(pluralBases).toHaveLength(19);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
