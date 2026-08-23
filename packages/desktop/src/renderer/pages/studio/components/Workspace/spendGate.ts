@@ -488,13 +488,29 @@ export const filmRenderBatchShotIds = (input: {
     ) {
       continue;
     }
+    // Start where the work actually is. Re-rendering a Shot that already has a Take pays for it twice
+    // and drags the rest of its chain along behind it, so the first Shot still missing a Take is the
+    // one to begin from — its upstream frame already exists.
+    const needsWork = ({ shotId }: { shotId: string }): boolean => {
+      const shot = projected.get(shotId);
+      return shot === undefined || (shot.selectedTakeId === null && shot.videoTakes.length === 0);
+    };
     let nextChoice: StudioPrepareGenerationChoiceV2 | null = null;
-    const next = ordered.find(({ shotId, shotIndex, segmentHeadIndex }) => {
+    const admissible = ({
+      shotId,
+      shotIndex,
+      segmentHeadIndex,
+    }: {
+      shotId: string;
+      shotIndex: number;
+      segmentHeadIndex: number;
+    }): boolean => {
       const choice = choiceForShot(input.project, input.projection, shotId, shotIndex === segmentHeadIndex);
       if (choice === null || (choice.purpose === 'seed_still' && shotIndex !== segmentHeadIndex)) return false;
       nextChoice = choice;
       return true;
-    });
+    };
+    const next = ordered.find((entry) => needsWork(entry) && admissible(entry)) ?? ordered.find(admissible);
     if (next !== undefined && nextChoice !== null) {
       // The cap counts distinct Shot ids across the whole selection, and choosing a head drags its
       // whole cascade in with it. Counting heads alone lets a large film exceed the cap, and the

@@ -593,6 +593,31 @@ describe('the largest legal render batch', () => {
     expect(batch).toEqual([]);
   });
 
+  it('starts an incomplete segment at the Shot that needs work, not at its head', () => {
+    // beat_1 chains shot_1 -> shot_2. If shot_1 is already rendered and shot_2 is not, re-rendering
+    // shot_1 pays again for a finished Shot and drags shot_2 along behind it. The missing Shot is the
+    // one to start from; its upstream frame already exists.
+    const project = makeProject();
+    const assetId = 'shot_1_take';
+    project.assets[assetId] = {
+      id: assetId,
+      projectId: project.id,
+      shotId: 'shot_1',
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
+      byteSize: 1024,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-08-23T00:00:00.000Z',
+      durationSeconds: 4,
+    } as StudioAssetV2;
+    project.shots.shot_1!.assetIds = [assetId];
+    project.shots.shot_1!.selectedTakeId = assetId;
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
+
+    expect(filmRenderBatchShotIds({ project, projection })).toEqual(['shot_2', 'shot_3']);
+  });
+
   it('skips a segment that is already covered, so the film-wide batch means render what is missing', () => {
     // A partly-rendered film re-offered its finished Beats and never reached the unrendered ones,
     // because segments were packed in film order regardless of coverage. Confirming that would have
