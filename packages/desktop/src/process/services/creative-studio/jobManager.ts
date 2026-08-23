@@ -98,8 +98,9 @@ const REMOTE_POLL_DEADLINE_MS = 30 * 60_000;
  *
  * Video was 1 until 2026-08-23, and that serialised every film: a Beat's chain is a real dependency
  * line, but capping video at one meant Beats being the unit of parallelism bought nothing, and the
- * worst case was every generation added up rather than the longest chain. One measured video took
- * about thirty-two minutes, so a nine-Beat film ran to roughly five hours.
+ * worst case was every generation added up rather than the longest chain. A video takes about two
+ * and a half minutes of provider time (2.2, 2.9 and 2.6 measured), so eleven generations serialise
+ * to roughly half an hour rather than running their Beats side by side.
  *
  * Nothing justified the 1 — no comment, no design note, and the neighbouring per-project cap was a
  * named constant while this was a bare literal. Provider rate limiting is handled independently, by
