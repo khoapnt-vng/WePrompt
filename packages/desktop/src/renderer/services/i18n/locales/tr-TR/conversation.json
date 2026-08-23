@@ -905,6 +905,11 @@
       "importError": "Referans eklenemedi. Yeniden deneyin."
     },
     "workspace": {
+      "board": {
+        "liftBeat": "Çöp Kutusu'na taşı",
+        "liftConfirmTitle": "\"{{title}}\" Çöp Kutusu'na taşınsın mı?",
+        "liftConfirmContent": "Bu Beat filmden çıkarılır. Oluşturulan ve ücreti ödenmiş tüm içerik ile tüm çekimler Çöp Kutusu'nda korunur."
+      },
       "cut": {
         "preview": {
           "label": "Film önizlemesi",
@@ -942,6 +947,23 @@
         }
       },
       "beatPanel": {
+        "takes": {
+          "park": "Çöp Kutusu'na taşı",
+          "parkConfirmTitle": "Bu çekim Çöp Kutusu'na taşınsın mı?",
+          "parkConfirmBody": "Çekim projede kalır ve etkin seçeneklerden çıkarılır."
+        },
+        "lift": {
+          "shot": "Çöp Kutusu'na taşı",
+          "shotTitle": "{{index}}. çekim Çöp Kutusu'na taşınsın mı?",
+          "shotBodyNoStale": "Oluşturulan ve ücreti ödenmiş tüm içerik bu çekimle kalır. Çöp Kutusu'na taşınsın mı?",
+          "shotBodyStale": "Oluşturulan ve ücreti ödenmiş tüm içerik bu çekimle kalır. Çöp Kutusu'na taşındığında şu içerik güncelliğini yitirir: {{shots}}.",
+          "confirmShot": "Çöp Kutusu'na taşı",
+          "beat": "Çöp Kutusu'na taşı",
+          "beatTitle": "Bu Beat Çöp Kutusu'na taşınsın mı?",
+          "beatBodyNoStale": "Tüm çekimler ile oluşturulan ve ücreti ödenmiş tüm içerik bu Beat ile kalır. Çöp Kutusu'na taşınsın mı?",
+          "beatBodyStale": "Tüm çekimler ile oluşturulan ve ücreti ödenmiş tüm içerik bu Beat ile kalır. Çöp Kutusu'na taşındığında şu içerik güncelliğini yitirir: {{shots}}.",
+          "confirmBeat": "Çöp Kutusu'na taşı"
+        },
         "beatFieldsLabel": "Beat aksiyonu, görünümü ve hedef süresi",
         "fieldGuidance": {
           "action": "Aksiyon · Yazdığınız tek şey",

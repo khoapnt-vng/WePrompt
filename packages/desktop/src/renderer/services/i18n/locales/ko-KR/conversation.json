@@ -901,6 +901,11 @@
       "importError": "참조를 추가하지 못했습니다. 다시 시도하세요."
     },
     "workspace": {
+      "board": {
+        "liftBeat": "휴지통으로 이동",
+        "liftConfirmTitle": "\"{{title}}\"을(를) 휴지통으로 이동할까요?",
+        "liftConfirmContent": "이 비트는 필름에서 제외됩니다. 작성한 내용과 유료 생성 결과물, 모든 테이크는 휴지통에 보관됩니다."
+      },
       "cut": {
         "preview": {
           "label": "필름 미리보기",
@@ -938,6 +943,23 @@
         }
       },
       "beatPanel": {
+        "takes": {
+          "park": "휴지통으로 이동",
+          "parkConfirmTitle": "이 테이크를 휴지통으로 이동할까요?",
+          "parkConfirmBody": "테이크는 프로젝트에 남고 활성 선택지에서는 제외됩니다."
+        },
+        "lift": {
+          "shot": "휴지통으로 이동",
+          "shotTitle": "숏 {{index}}을(를) 휴지통으로 이동할까요?",
+          "shotBodyNoStale": "작성한 내용과 유료 생성 결과물은 이 숏에 그대로 남습니다. 휴지통으로 이동할까요?",
+          "shotBodyStale": "작성한 내용과 유료 생성 결과물은 이 숏에 그대로 남습니다. 휴지통으로 이동하면 다음 항목이 최신 상태가 아니게 됩니다: {{shots}}.",
+          "confirmShot": "휴지통으로 이동",
+          "beat": "휴지통으로 이동",
+          "beatTitle": "이 비트를 휴지통으로 이동할까요?",
+          "beatBodyNoStale": "모든 숏과 작성한 내용 및 유료 생성 결과물은 이 비트에 그대로 남습니다. 휴지통으로 이동할까요?",
+          "beatBodyStale": "모든 숏과 작성한 내용 및 유료 생성 결과물은 이 비트에 그대로 남습니다. 휴지통으로 이동하면 다음 항목이 최신 상태가 아니게 됩니다: {{shots}}.",
+          "confirmBeat": "휴지통으로 이동"
+        },
         "beatFieldsLabel": "비트의 액션, 룩 및 목표 시간",
         "fieldGuidance": {
           "action": "액션 · 직접 작성하는 단 하나의 내용",

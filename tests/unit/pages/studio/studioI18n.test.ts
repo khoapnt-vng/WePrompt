@@ -848,6 +848,25 @@ const localizedBeatSegmentKeys = [
 
 const localizedCutFilmDeltaKeys = ['cut.film.under', 'cut.film.over'] as const;
 
+const localizedMoveToBinKeys = [
+  'board.liftBeat',
+  'board.liftConfirmTitle',
+  'board.liftConfirmContent',
+  'beatPanel.takes.park',
+  'beatPanel.takes.parkConfirmTitle',
+  'beatPanel.takes.parkConfirmBody',
+  'beatPanel.lift.shot',
+  'beatPanel.lift.shotTitle',
+  'beatPanel.lift.shotBodyNoStale',
+  'beatPanel.lift.shotBodyStale',
+  'beatPanel.lift.confirmShot',
+  'beatPanel.lift.beat',
+  'beatPanel.lift.beatTitle',
+  'beatPanel.lift.beatBodyNoStale',
+  'beatPanel.lift.beatBodyStale',
+  'beatPanel.lift.confirmBeat',
+] as const;
+
 const localizedWorkspaceKeys = [
   'beatPanel.beatFieldsLabel',
   'beatPanel.chain.continuous',
@@ -877,6 +896,7 @@ const localizedWorkspaceKeys = [
   ...localizedBeatPlaybackKeys,
   ...localizedBeatSegmentKeys,
   ...localizedCutFilmDeltaKeys,
+  ...localizedMoveToBinKeys,
   'controls.briefAndRulesTitle',
   'gate.errors.routesUnavailable',
   'gate.group.required',
@@ -1052,6 +1072,35 @@ describe('Creative Studio workspace translations', () => {
     expect(placeholders(leaves['beatPanel.chain.continuous']!)).toEqual(['position']);
   });
 
+  it('names removal actions as Move to Bin while preserving durable Bin states and alternates', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'board.liftBeat': 'Move to Bin',
+      'board.liftConfirmTitle': 'Move {{title}} to the Bin?',
+      'board.liftConfirmContent': 'This Beat leaves the film. All authored work and Takes are kept in the Bin.',
+      'beatPanel.takes.park': 'Move to Bin',
+      'beatPanel.takes.parkConfirmTitle': 'Move this Take to the Bin?',
+      'beatPanel.takes.parkConfirmBody': 'The Take stays with the project and moves out of active choices.',
+      'beatPanel.lift.shot': 'Move to Bin',
+      'beatPanel.lift.shotTitle': 'Move Shot {{index}} to the Bin?',
+      'beatPanel.lift.shotBodyNoStale': 'Authored and paid work stays with this Shot. Move it to the Bin?',
+      'beatPanel.lift.shotBodyStale':
+        'Authored and paid work stays with this Shot. Moving it to the Bin makes {{shots}} stale.',
+      'beatPanel.lift.confirmShot': 'Move to Bin',
+      'beatPanel.lift.beat': 'Move to Bin',
+      'beatPanel.lift.beatTitle': 'Move this Beat to the Bin?',
+      'beatPanel.lift.beatBodyNoStale':
+        'Every Shot and all authored and paid work stay with this Beat. Move it to the Bin?',
+      'beatPanel.lift.beatBodyStale':
+        'Every Shot and all authored and paid work stay with this Beat. Moving it to the Bin makes {{shots}} stale.',
+      'beatPanel.lift.confirmBeat': 'Move to Bin',
+    });
+    expect(leaves['bin.reason.lifted']).toBe('Lifted');
+    expect(leaves['beatPanel.takes.binReason.lifted']).toBe('Lifted');
+    expect(leaves['beatPanel.takes.addAlternate']).toBe('Move to alternates');
+  });
+
   it('keeps one/other variants paired with identical interpolation parameters', () => {
     const leaves = flattenLeaves(englishWorkspace);
     const pluralBases = Object.keys(leaves)
@@ -1213,7 +1262,12 @@ describe('Creative Studio workspace translations', () => {
           placeholders(englishCopy!)
         );
       }
-      for (const key of [...localizedCutCompositionKeys, ...localizedBeatPlaybackKeys, ...localizedBeatSegmentKeys]) {
+      for (const key of [
+        ...localizedCutCompositionKeys,
+        ...localizedBeatPlaybackKeys,
+        ...localizedBeatSegmentKeys,
+        ...localizedMoveToBinKeys,
+      ]) {
         const englishCopy = englishLeaves[key];
         const localizedCopy = localizedLeaves[key];
         expect(localizedCopy?.trim(), `${locale}:${key}`).not.toBe('');

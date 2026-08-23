@@ -23,11 +23,132 @@ import {
   coverageSeekPositionSeconds,
   maximumCoverageTrim,
   resizeCoveragePlanningPair,
+  type CoverageGeometry,
   type CoveragePlanningPairChange,
 } from './coverageGeometry';
 import { formatBeatPlaybackClock } from './beatPlaybackSequence';
 
 const COVERAGE_KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel.coverage';
+const COVERAGE_BOUNDARY_GUTTER_PIXELS = 24;
+
+const roundedCssNumber = (value: number): number => Number(value.toFixed(6));
+
+const coverageSeekCssPosition = (geometry: CoverageGeometry, requestedSeconds: number): string => {
+  const fallbackRatio = coverageSeekLaneRatio(geometry, requestedSeconds) ?? 0;
+  const totalGutterPixels = Math.max(0, geometry.segments.length - 1) * COVERAGE_BOUNDARY_GUTTER_PIXELS;
+  if (geometry.segments.length < 2 || totalGutterPixels === 0) return `${fallbackRatio * 100}%`;
+
+  const playedTotalSeconds = geometry.segments.reduce((total, segment) => total + segment.playedDurationSeconds, 0);
+  const positionSeconds = Math.min(playedTotalSeconds, Math.max(0, requestedSeconds));
+  let playedCursor = 0;
+  let laneCursor = 0;
+  for (let index = 0; index < geometry.segments.length; index += 1) {
+    const segment = geometry.segments[index]!;
+    const playedEnd = playedCursor + segment.playedDurationSeconds;
+    const atJoin =
+      index < geometry.segments.length - 1 &&
+      Math.abs(positionSeconds - playedEnd) <= Number.EPSILON * 8 * Math.max(1, playedEnd);
+    let lanePosition: number;
+    let gutterOffsetPixels: number;
+    if (atJoin) {
+      lanePosition = laneCursor + segment.playbackWidthSeconds;
+      gutterOffsetPixels = index * COVERAGE_BOUNDARY_GUTTER_PIXELS + COVERAGE_BOUNDARY_GUTTER_PIXELS / 2;
+    } else if (positionSeconds < playedEnd || index === geometry.segments.length - 1) {
+      const localPlayed = Math.min(segment.playedDurationSeconds, Math.max(0, positionSeconds - playedCursor));
+      lanePosition = laneCursor + segment.playedStartSeconds + localPlayed;
+      gutterOffsetPixels = index * COVERAGE_BOUNDARY_GUTTER_PIXELS;
+    } else {
+      laneCursor += segment.playbackWidthSeconds;
+      playedCursor = playedEnd;
+      continue;
+    }
+
+    const laneRatio = lanePosition / geometry.playbackTotalSeconds;
+    const percentage = roundedCssNumber(laneRatio * 100);
+    const pixelCorrection = roundedCssNumber(gutterOffsetPixels - laneRatio * totalGutterPixels);
+    if (Math.abs(pixelCorrection) <= Number.EPSILON * 8) return `${percentage}%`;
+    return `calc(${percentage}% ${pixelCorrection < 0 ? '-' : '+'} ${Math.abs(pixelCorrection)}px)`;
+  }
+  return `${fallbackRatio * 100}%`;
+};
+
+const validCoverageCellRect = (rect: DOMRect): boolean =>
+  Number.isFinite(rect.left) &&
+  Number.isFinite(rect.right) &&
+  Number.isFinite(rect.width) &&
+  rect.width > 0 &&
+  rect.right > rect.left;
+
+const coverageSeekPositionFromCells = (input: {
+  clientX: number;
+  geometry: CoverageGeometry;
+  rtl: boolean;
+  track: HTMLDivElement;
+}): number | null => {
+  if (!Number.isFinite(input.clientX)) return null;
+  const cells = Array.from(input.track.children);
+  if (cells.length !== input.geometry.segments.length * 2 - 1) return null;
+
+  const segmentRects: DOMRect[] = [];
+  const gutterRects: DOMRect[] = [];
+  for (let index = 0; index < input.geometry.segments.length; index += 1) {
+    const segment = input.geometry.segments[index]!;
+    const segmentCell = cells[index * 2];
+    if (
+      segmentCell === undefined ||
+      !segmentCell.hasAttribute('data-coverage-shot-segment') ||
+      segmentCell.getAttribute('data-shot-id') !== segment.shotId
+    ) {
+      return null;
+    }
+    const segmentRect = segmentCell.getBoundingClientRect();
+    if (!validCoverageCellRect(segmentRect)) return null;
+    segmentRects.push(segmentRect);
+
+    if (index < input.geometry.segments.length - 1) {
+      const gutterCell = cells[index * 2 + 1];
+      if (gutterCell === undefined || !gutterCell.hasAttribute('data-coverage-boundary-gutter')) return null;
+      const gutterRect = gutterCell.getBoundingClientRect();
+      if (!validCoverageCellRect(gutterRect)) return null;
+      gutterRects.push(gutterRect);
+    }
+  }
+
+  let playedCursor = 0;
+  for (let index = 0; index < input.geometry.segments.length; index += 1) {
+    const segment = input.geometry.segments[index]!;
+    const segmentRect = segmentRects[index]!;
+    if (input.clientX >= segmentRect.left && input.clientX <= segmentRect.right) {
+      const physicalRatio = input.rtl
+        ? (segmentRect.right - input.clientX) / segmentRect.width
+        : (input.clientX - segmentRect.left) / segmentRect.width;
+      const localSource = Math.min(1, Math.max(0, physicalRatio)) * segment.playbackWidthSeconds;
+      const localPlayed = Math.min(
+        segment.playedDurationSeconds,
+        Math.max(0, localSource - segment.playedStartSeconds)
+      );
+      return playedCursor + localPlayed;
+    }
+
+    const playedEnd = playedCursor + segment.playedDurationSeconds;
+    const gutterRect = gutterRects[index];
+    if (gutterRect !== undefined && input.clientX >= gutterRect.left && input.clientX <= gutterRect.right) {
+      return playedEnd;
+    }
+    playedCursor = playedEnd;
+  }
+
+  const firstRect = segmentRects[0]!;
+  const lastRect = segmentRects.at(-1)!;
+  if (input.rtl) {
+    if (input.clientX >= firstRect.right) return 0;
+    if (input.clientX <= lastRect.left) return playedCursor;
+  } else {
+    if (input.clientX <= firstRect.left) return 0;
+    if (input.clientX >= lastRect.right) return playedCursor;
+  }
+  return null;
+};
 
 export type CoverageBarProps = {
   projectId: string;
@@ -264,6 +385,19 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
     );
   };
 
+  const boundaryGutter = (index: number): React.ReactNode => {
+    if (shots[index] === undefined || shots[index + 1] === undefined) return null;
+    return (
+      <span
+        className={styles.boundaryGutter}
+        data-coverage-boundary-gutter
+        style={{ flex: `0 0 ${COVERAGE_BOUNDARY_GUTTER_PIXELS}px` }}
+      >
+        {boundaryMarker(index)}
+      </span>
+    );
+  };
+
   if (shots.length === 0) {
     return (
       <section aria-label={t(`${COVERAGE_KEY_ROOT}.label`)} className={styles.coverageRoot} data-beat-coverage>
@@ -291,26 +425,28 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
             const shotCopy = t(`${COVERAGE_KEY_ROOT}.shotLabel`, { index: index + 1 });
             const stateCopy = segmentStateCopy(shot);
             return (
-              <div
-                key={shot.id}
-                className={styles.playbackSegment}
-                data-selected-take='false'
-                data-shot-id={shot.id}
-                style={{ flexBasis: 0, flexGrow: 1 }}
-              >
-                <Button
-                  aria-label={`${shotCopy} · ${stateCopy}`}
-                  aria-pressed={inspectedShotId === shot.id}
-                  className={styles.segmentSelector}
-                  data-coverage-shot-selector
-                  onClick={() => onInspectShot(shot.id)}
-                  type='text'
+              <React.Fragment key={shot.id}>
+                <div
+                  className={styles.playbackSegment}
+                  data-coverage-shot-segment
+                  data-selected-take='false'
+                  data-shot-id={shot.id}
+                  style={{ flexBasis: 0, flexGrow: 1 }}
                 >
-                  <span className={styles.segmentLabel}>{shotCopy}</span>
-                  <span className={styles.segmentMeta}>{segmentState(shot, stateCopy)}</span>
-                </Button>
-                {boundaryMarker(index)}
-              </div>
+                  <Button
+                    aria-label={`${shotCopy} · ${stateCopy}`}
+                    aria-pressed={inspectedShotId === shot.id}
+                    className={styles.segmentSelector}
+                    data-coverage-shot-selector
+                    onClick={() => onInspectShot(shot.id)}
+                    type='text'
+                  >
+                    <span className={styles.segmentLabel}>{shotCopy}</span>
+                    <span className={styles.segmentMeta}>{segmentState(shot, stateCopy)}</span>
+                  </Button>
+                </div>
+                {boundaryGutter(index)}
+              </React.Fragment>
             );
           })}
         </div>
@@ -324,7 +460,11 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
       : (planningPreview?.[segment.shotId] ?? segment.playbackWidthSeconds)
   );
   const playbackTotal = displayPlaybackWidths.reduce((sum, seconds) => sum + seconds, 0);
-  const density = coverageDensityForWidth(barWidthPixels, displayPlaybackWidths);
+  const playbackContentWidthPixels = Math.max(
+    0,
+    barWidthPixels - Math.max(0, geometry.segments.length - 1) * COVERAGE_BOUNDARY_GUTTER_PIXELS
+  );
+  const density = coverageDensityForWidth(playbackContentWidthPixels, displayPlaybackWidths);
 
   const announceBoundary = (changes: CoveragePlanningPairChange): void => {
     setAnnouncement(
@@ -570,14 +710,27 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
   const seekFromPointer = (event: React.PointerEvent<HTMLButtonElement>): void => {
     if (!seekAvailable || playback === undefined) return;
     const rect = event.currentTarget.getBoundingClientRect();
-    const position = coverageSeekPositionSeconds({
-      clientX: event.clientX,
-      trackLeftPixels: rect.left,
-      trackWidthPixels: rect.width,
-      geometry,
-      rtl: isRtl(event.currentTarget),
-    });
-    if (position !== null) playback.onSeek(position);
+    const track = playbackTrackRef.current;
+    const position =
+      track === null
+        ? null
+        : coverageSeekPositionFromCells({
+            clientX: event.clientX,
+            geometry,
+            rtl: isRtl(event.currentTarget),
+            track,
+          });
+    const fallbackPosition =
+      position === null && geometry.segments.length === 1
+        ? coverageSeekPositionSeconds({
+            clientX: event.clientX,
+            trackLeftPixels: rect.left,
+            trackWidthPixels: rect.width,
+            geometry,
+            rtl: isRtl(event.currentTarget),
+          })
+        : position;
+    if (fallbackPosition !== null) playback.onSeek(fallbackPosition);
   };
   const beginSeek = (event: React.PointerEvent<HTMLButtonElement>): void => {
     if (!seekAvailable) return;
@@ -621,7 +774,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
   const seekCurrentClock = formatBeatPlaybackClock(seekPositionSeconds, playback?.durationSeconds ?? 0) ?? '0:00';
   const seekTotalClock =
     formatBeatPlaybackClock(playback?.durationSeconds ?? 0, playback?.durationSeconds ?? 0) ?? '0:00';
-  const seekLaneRatio = coverageSeekLaneRatio(geometry, seekPositionSeconds) ?? 0;
+  const seekCssPosition = coverageSeekCssPosition(geometry, seekPositionSeconds);
 
   return (
     <section aria-label={t(`${COVERAGE_KEY_ROOT}.label`)} className={styles.coverageRoot} data-beat-coverage>
@@ -665,94 +818,96 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
             );
             const stateCopy = segmentStateCopy(shot);
             return (
-              <div
-                key={segment.shotId}
-                className={styles.playbackSegment}
-                data-selected-take={segment.selectedTake}
-                data-shot-id={segment.shotId}
-                style={{ flexBasis: 0, flexGrow: widthSeconds / playbackTotal }}
-              >
-                <Button
-                  aria-describedby={tailWarningId}
-                  aria-label={`${shotCopy} · ${durationCopy} · ${stateCopy}`}
-                  aria-pressed={inspectedShotId === shot.id}
-                  className={styles.segmentSelector}
-                  data-coverage-shot-selector
-                  onClick={() => onInspectShot(shot.id)}
-                  type='text'
+              <React.Fragment key={segment.shotId}>
+                <div
+                  className={styles.playbackSegment}
+                  data-coverage-shot-segment
+                  data-selected-take={segment.selectedTake}
+                  data-shot-id={segment.shotId}
+                  style={{ flexBasis: 0, flexGrow: widthSeconds / playbackTotal }}
                 >
-                  <span className={styles.segmentLabel}>{shotCopy}</span>
-                  <span className={styles.segmentDuration}>
-                    <bdi>{durationCopy}</bdi>
-                  </span>
-                  <span className={styles.segmentMeta}>{segmentState(shot, stateCopy)}</span>
-                </Button>
-                {tailWarning ? (
-                  <span className={styles.trimWarning} id={tailWarningId} role='status'>
-                    {t(`${COVERAGE_KEY_ROOT}.tailTrimWarning`)}
-                  </span>
-                ) : null}
-                {segment.selectedTake ? (
-                  <div className={styles.trimLane} data-coverage-trim-lane>
-                    <span
-                      aria-hidden='true'
-                      className={styles.playedRange}
-                      style={{
-                        insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%`,
-                        inlineSize: `${((playedEndSeconds - trimInSeconds) / sourceDurationSeconds) * 100}%`,
-                      }}
-                    />
-                    <Button
-                      aria-describedby={trimGuidanceId}
-                      aria-disabled={disabled}
-                      aria-label={t(`${COVERAGE_KEY_ROOT}.trimInLabel`, { index: index + 1 })}
-                      aria-orientation='horizontal'
-                      aria-valuemax={maximumIn}
-                      aria-valuemin={0}
-                      aria-valuenow={trimInSeconds}
-                      aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
-                        seconds: trimInSeconds,
-                      })}
-                      className={`${styles.trimHandle} ${styles.trimInHandle}`}
-                      disabled={disabled}
-                      onKeyDown={(event) => trimKeyDown(event, shot, 'in')}
-                      onLostPointerCapture={(event) => finishTrimDrag(event, false)}
-                      onPointerCancel={(event) => finishTrimDrag(event, false)}
-                      onPointerDown={(event) => beginTrimDrag(event, shot, 'in')}
-                      onPointerMove={moveTrimDrag}
-                      onPointerUp={(event) => finishTrimDrag(event, true)}
-                      role='slider'
-                      style={{ insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%` }}
-                      tabIndex={disabled ? -1 : 0}
-                    />
-                    <Button
-                      aria-describedby={[trimGuidanceId, tailWarningId].filter(Boolean).join(' ')}
-                      aria-disabled={disabled}
-                      aria-label={t(`${COVERAGE_KEY_ROOT}.trimOutLabel`, { index: index + 1 })}
-                      aria-orientation='horizontal'
-                      aria-valuemax={maximumOut}
-                      aria-valuemin={0}
-                      aria-valuenow={trimOutSeconds}
-                      aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
-                        seconds: trimOutSeconds,
-                      })}
-                      className={`${styles.trimHandle} ${styles.trimOutHandle}`}
-                      data-continuity-warning={tailWarning}
-                      disabled={disabled}
-                      onKeyDown={(event) => trimKeyDown(event, shot, 'out')}
-                      onLostPointerCapture={(event) => finishTrimDrag(event, false)}
-                      onPointerCancel={(event) => finishTrimDrag(event, false)}
-                      onPointerDown={(event) => beginTrimDrag(event, shot, 'out')}
-                      onPointerMove={moveTrimDrag}
-                      onPointerUp={(event) => finishTrimDrag(event, true)}
-                      role='slider'
-                      style={{ insetInlineStart: `${(playedEndSeconds / sourceDurationSeconds) * 100}%` }}
-                      tabIndex={disabled ? -1 : 0}
-                    />
-                  </div>
-                ) : null}
-                {boundaryMarker(index)}
-              </div>
+                  <Button
+                    aria-describedby={tailWarningId}
+                    aria-label={`${shotCopy} · ${durationCopy} · ${stateCopy}`}
+                    aria-pressed={inspectedShotId === shot.id}
+                    className={styles.segmentSelector}
+                    data-coverage-shot-selector
+                    onClick={() => onInspectShot(shot.id)}
+                    type='text'
+                  >
+                    <span className={styles.segmentLabel}>{shotCopy}</span>
+                    <span className={styles.segmentDuration}>
+                      <bdi>{durationCopy}</bdi>
+                    </span>
+                    <span className={styles.segmentMeta}>{segmentState(shot, stateCopy)}</span>
+                  </Button>
+                  {tailWarning ? (
+                    <span className={styles.trimWarning} id={tailWarningId} role='status'>
+                      {t(`${COVERAGE_KEY_ROOT}.tailTrimWarning`)}
+                    </span>
+                  ) : null}
+                  {segment.selectedTake ? (
+                    <div className={styles.trimLane} data-coverage-trim-lane>
+                      <span
+                        aria-hidden='true'
+                        className={styles.playedRange}
+                        style={{
+                          insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%`,
+                          inlineSize: `${((playedEndSeconds - trimInSeconds) / sourceDurationSeconds) * 100}%`,
+                        }}
+                      />
+                      <Button
+                        aria-describedby={trimGuidanceId}
+                        aria-disabled={disabled}
+                        aria-label={t(`${COVERAGE_KEY_ROOT}.trimInLabel`, { index: index + 1 })}
+                        aria-orientation='horizontal'
+                        aria-valuemax={maximumIn}
+                        aria-valuemin={0}
+                        aria-valuenow={trimInSeconds}
+                        aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
+                          seconds: trimInSeconds,
+                        })}
+                        className={`${styles.trimHandle} ${styles.trimInHandle}`}
+                        disabled={disabled}
+                        onKeyDown={(event) => trimKeyDown(event, shot, 'in')}
+                        onLostPointerCapture={(event) => finishTrimDrag(event, false)}
+                        onPointerCancel={(event) => finishTrimDrag(event, false)}
+                        onPointerDown={(event) => beginTrimDrag(event, shot, 'in')}
+                        onPointerMove={moveTrimDrag}
+                        onPointerUp={(event) => finishTrimDrag(event, true)}
+                        role='slider'
+                        style={{ insetInlineStart: `${(trimInSeconds / sourceDurationSeconds) * 100}%` }}
+                        tabIndex={disabled ? -1 : 0}
+                      />
+                      <Button
+                        aria-describedby={[trimGuidanceId, tailWarningId].filter(Boolean).join(' ')}
+                        aria-disabled={disabled}
+                        aria-label={t(`${COVERAGE_KEY_ROOT}.trimOutLabel`, { index: index + 1 })}
+                        aria-orientation='horizontal'
+                        aria-valuemax={maximumOut}
+                        aria-valuemin={0}
+                        aria-valuenow={trimOutSeconds}
+                        aria-valuetext={t(`${COVERAGE_KEY_ROOT}.trimValue`, {
+                          seconds: trimOutSeconds,
+                        })}
+                        className={`${styles.trimHandle} ${styles.trimOutHandle}`}
+                        data-continuity-warning={tailWarning}
+                        disabled={disabled}
+                        onKeyDown={(event) => trimKeyDown(event, shot, 'out')}
+                        onLostPointerCapture={(event) => finishTrimDrag(event, false)}
+                        onPointerCancel={(event) => finishTrimDrag(event, false)}
+                        onPointerDown={(event) => beginTrimDrag(event, shot, 'out')}
+                        onPointerMove={moveTrimDrag}
+                        onPointerUp={(event) => finishTrimDrag(event, true)}
+                        role='slider'
+                        style={{ insetInlineStart: `${(playedEndSeconds / sourceDurationSeconds) * 100}%` }}
+                        tabIndex={disabled ? -1 : 0}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                {boundaryGutter(index)}
+              </React.Fragment>
             );
           })}
         </div>
@@ -778,7 +933,7 @@ export const CoverageBar: React.FC<CoverageBarProps> = ({
           onPointerMove={moveSeek}
           onPointerUp={(event) => finishSeek(event, true)}
           role='slider'
-          style={{ '--seek-position': `${seekLaneRatio * 100}%` } as React.CSSProperties}
+          style={{ '--seek-position': seekCssPosition } as React.CSSProperties}
           tabIndex={seekAvailable ? 0 : -1}
         />
       </div>

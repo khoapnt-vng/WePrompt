@@ -906,6 +906,11 @@
       "importError": "No se pudo añadir la referencia. Inténtalo de nuevo."
     },
     "workspace": {
+      "board": {
+        "liftBeat": "Mover a la papelera",
+        "liftConfirmTitle": "¿Mover «{{title}}» a la papelera?",
+        "liftConfirmContent": "Este Beat sale de la película. Todo el contenido creado y de pago, junto con las tomas, se conserva en la papelera."
+      },
       "cut": {
         "preview": {
           "label": "Vista previa de la película",
@@ -943,6 +948,23 @@
         }
       },
       "beatPanel": {
+        "takes": {
+          "park": "Mover a la papelera",
+          "parkConfirmTitle": "¿Mover esta toma a la papelera?",
+          "parkConfirmBody": "La toma permanece en el proyecto y sale de las opciones activas."
+        },
+        "lift": {
+          "shot": "Mover a la papelera",
+          "shotTitle": "¿Mover el plano {{index}} a la papelera?",
+          "shotBodyNoStale": "Todo el contenido creado y de pago permanece con este plano. ¿Moverlo a la papelera?",
+          "shotBodyStale": "Todo el contenido creado y de pago permanece con este plano. Al moverlo a la papelera, queda contenido desactualizado en {{shots}}.",
+          "confirmShot": "Mover a la papelera",
+          "beat": "Mover a la papelera",
+          "beatTitle": "¿Mover este Beat a la papelera?",
+          "beatBodyNoStale": "Todos los planos y todo el contenido creado y de pago permanecen con este Beat. ¿Moverlo a la papelera?",
+          "beatBodyStale": "Todos los planos y todo el contenido creado y de pago permanecen con este Beat. Al moverlo a la papelera, queda contenido desactualizado en {{shots}}.",
+          "confirmBeat": "Mover a la papelera"
+        },
         "beatFieldsLabel": "Acción, estilo y duración objetivo del beat",
         "fieldGuidance": {
           "action": "Acción · Lo único que escribes",

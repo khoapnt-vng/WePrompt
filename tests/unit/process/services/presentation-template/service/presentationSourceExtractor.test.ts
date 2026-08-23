@@ -313,7 +313,10 @@ describe('extractPresentationSources', () => {
       expect.objectContaining({ format: 'pptx', text: expect.stringContaining('QUARTERLY BUSINESS REVIEW') }),
       expect.objectContaining({ format: 'pdf', text: expect.stringContaining('Visa Letter Policy') }),
     ]);
-  });
+    // This starts three production parser workers and their lazy library imports. It measured
+    // 369ms alone, but reached Vitest's 10,004ms deadline under full-suite contention. Keep the
+    // assertions and global timeout strict while giving this bounded worker test loaded headroom.
+  }, 30_000);
 });
 
 describe('buildPresentationGrounding', () => {

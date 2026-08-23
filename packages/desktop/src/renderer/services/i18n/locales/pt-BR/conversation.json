@@ -911,6 +911,11 @@
       "importError": "Não foi possível adicionar a referência. Tente novamente."
     },
     "workspace": {
+      "board": {
+        "liftBeat": "Mover para a Lixeira",
+        "liftConfirmTitle": "Mover \"{{title}}\" para a Lixeira?",
+        "liftConfirmContent": "Este Beat sai do filme. Todo o conteúdo criado e pago, além das tomadas, permanece na Lixeira."
+      },
       "cut": {
         "preview": {
           "label": "Prévia do filme",
@@ -948,6 +953,23 @@
         }
       },
       "beatPanel": {
+        "takes": {
+          "park": "Mover para a Lixeira",
+          "parkConfirmTitle": "Mover esta tomada para a Lixeira?",
+          "parkConfirmBody": "A tomada permanece no projeto e sai das opções ativas."
+        },
+        "lift": {
+          "shot": "Mover para a Lixeira",
+          "shotTitle": "Mover o plano {{index}} para a Lixeira?",
+          "shotBodyNoStale": "Todo o conteúdo criado e pago permanece com este plano. Movê-lo para a Lixeira?",
+          "shotBodyStale": "Todo o conteúdo criado e pago permanece com este plano. Ao movê-lo para a Lixeira, o seguinte conteúdo fica desatualizado: {{shots}}.",
+          "confirmShot": "Mover para a Lixeira",
+          "beat": "Mover para a Lixeira",
+          "beatTitle": "Mover este Beat para a Lixeira?",
+          "beatBodyNoStale": "Todos os planos e todo o conteúdo criado e pago permanecem com este Beat. Movê-lo para a Lixeira?",
+          "beatBodyStale": "Todos os planos e todo o conteúdo criado e pago permanecem com este Beat. Ao movê-lo para a Lixeira, o seguinte conteúdo fica desatualizado: {{shots}}.",
+          "confirmBeat": "Mover para a Lixeira"
+        },
         "beatFieldsLabel": "Ação, visual e duração-alvo do beat",
         "fieldGuidance": {
           "action": "Ação · A única coisa que você escreve",

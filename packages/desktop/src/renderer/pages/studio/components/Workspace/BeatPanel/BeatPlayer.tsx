@@ -907,7 +907,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
                 data-media-kind='slate'
                 role='img'
               >
-                <strong>{t(`${PREVIEW_ROOT}.slate`)}</strong>
+                <strong className={styles.previewSlateTitle}>{t(`${PREVIEW_ROOT}.slate`)}</strong>
                 <span>
                   {t(`${PREVIEW_ROOT}.slateHold`, {
                     clock: formatBeatPlaybackClock(segment.durationSeconds, segment.durationSeconds) ?? '0:00',

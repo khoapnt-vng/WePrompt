@@ -904,6 +904,11 @@
       "importError": "Die Referenz konnte nicht hinzugefügt werden. Versuche es erneut."
     },
     "workspace": {
+      "board": {
+        "liftBeat": "In den Papierkorb verschieben",
+        "liftConfirmTitle": "{{title}} in den Papierkorb verschieben?",
+        "liftConfirmContent": "Dieser Beat wird aus dem Film entfernt. Alle erstellten und bezahlten Inhalte sowie alle Takes bleiben im Papierkorb erhalten."
+      },
       "cut": {
         "preview": {
           "label": "Filmvorschau",
@@ -941,6 +946,23 @@
         }
       },
       "beatPanel": {
+        "takes": {
+          "park": "In den Papierkorb verschieben",
+          "parkConfirmTitle": "Diesen Take in den Papierkorb verschieben?",
+          "parkConfirmBody": "Der Take bleibt im Projekt erhalten und wird aus den aktiven Auswahlmöglichkeiten entfernt."
+        },
+        "lift": {
+          "shot": "In den Papierkorb verschieben",
+          "shotTitle": "Shot {{index}} in den Papierkorb verschieben?",
+          "shotBodyNoStale": "Alle erstellten und bezahlten Inhalte bleiben bei diesem Shot. Ihn in den Papierkorb verschieben?",
+          "shotBodyStale": "Alle erstellten und bezahlten Inhalte bleiben bei diesem Shot. Wenn er in den Papierkorb verschoben wird, werden {{shots}} als veraltet markiert.",
+          "confirmShot": "In den Papierkorb verschieben",
+          "beat": "In den Papierkorb verschieben",
+          "beatTitle": "Diesen Beat in den Papierkorb verschieben?",
+          "beatBodyNoStale": "Alle Shots sowie alle erstellten und bezahlten Inhalte bleiben bei diesem Beat. Ihn in den Papierkorb verschieben?",
+          "beatBodyStale": "Alle Shots sowie alle erstellten und bezahlten Inhalte bleiben bei diesem Beat. Wenn er in den Papierkorb verschoben wird, werden {{shots}} als veraltet markiert.",
+          "confirmBeat": "In den Papierkorb verschieben"
+        },
         "beatFieldsLabel": "Handlung, Look und Zieldauer des Beats",
         "fieldGuidance": {
           "action": "Handlung · Das Einzige, was du schreibst",

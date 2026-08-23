@@ -12,6 +12,7 @@
 }
 
 .root {
+  composes: surface from '../../../StudioTypography.module.css';
   display: grid;
   min-inline-size: 0;
   max-block-size: min(78vh, 920px);
@@ -20,7 +21,6 @@
   overflow: auto;
   color: var(--text-secondary);
   background: var(--color-bg-1);
-  font-family: var(--font-body);
 }
 
 .panelHeader,
@@ -45,24 +45,27 @@
   justify-content: space-between;
 }
 
-.panelHeader h2,
-.shotHeader h3,
-.subsection h4,
-.recovery h3 {
+.panelTitle,
+.shotTitle,
+.subsectionTitle {
   margin: 0;
   color: var(--text-primary);
-  font-family: var(--font-display);
   overflow-wrap: anywhere;
 }
 
+.panelTitle {
+  composes: pageHeading from '../../../StudioTypography.module.css';
+}
+
+.shotTitle,
+.subsectionTitle {
+  composes: cardName from '../../../StudioTypography.module.css';
+}
+
 .eyebrow {
+  composes: eyebrow from '../../../StudioTypography.module.css';
   margin: 0 0 4px;
   color: var(--color-text-3);
-  font-family: var(--font-mono);
-  font-size: 14px;
-  font-weight: var(--fw-bold);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .beatEditor,
@@ -322,21 +325,35 @@
 }
 
 .takeGrid {
-  display: grid;
+  display: flex;
   min-inline-size: 0;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 10px;
+  padding-block-end: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline proximity;
+  scrollbar-gutter: stable;
 }
 
 .takeCard {
   display: grid;
-  min-inline-size: 0;
+  flex: 0 0 134px;
+  box-sizing: border-box;
+  inline-size: 134px;
+  min-inline-size: 134px;
   align-content: start;
   gap: 8px;
   padding: 10px;
   border: 1px solid var(--color-border-2);
   border-radius: 10px;
   background: var(--color-fill-1);
+  scroll-snap-align: start;
+}
+
+.takeCard > .actions {
+  align-self: end;
+  justify-content: space-between;
 }
 
 .takeCard[data-selected='true'],
@@ -365,9 +382,8 @@
 }
 
 .takeIdentity {
+  composes: meta from '../../../StudioTypography.module.css';
   color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
@@ -488,10 +504,13 @@
 }
 
 .previewColumn {
+  position: sticky;
+  inset-block-start: 0;
   display: grid;
   flex: none;
   inline-size: 404px;
   min-inline-size: 0;
+  align-self: flex-start;
   align-content: start;
   gap: 7px;
 }
@@ -543,10 +562,9 @@ div.previewMedia {
   text-align: center;
 }
 
-div.previewMedia strong {
+.previewSlateTitle {
+  composes: cardName from '../../../StudioTypography.module.css';
   color: var(--text-primary);
-  font-family: var(--font-display);
-  font-size: 24px;
 }
 
 .previewSeekPoster,
@@ -592,21 +610,21 @@ div.previewMedia strong {
   white-space: nowrap;
 }
 
-.pictureOnly,
-.keyboardGuidance {
-  color: var(--color-text-3);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  letter-spacing: 0.04em;
-}
-
 .pictureOnly {
+  composes: meta from '../../../StudioTypography.module.css';
   margin-inline-end: auto;
   text-transform: uppercase;
 }
 
 .keyboardGuidance {
+  composes: meta from '../../../StudioTypography.module.css';
   overflow-wrap: anywhere;
+}
+
+.pictureOnly,
+.keyboardGuidance {
+  color: var(--color-text-3);
+  letter-spacing: 0.04em;
 }
 
 .previewError {
@@ -624,6 +642,7 @@ div.previewMedia strong {
 }
 
 .coverageGuidance {
+  composes: meta from '../../../StudioTypography.module.css';
   display: flex;
   min-inline-size: 620px;
   align-items: center;
@@ -631,8 +650,6 @@ div.previewMedia strong {
   gap: 8px 16px;
   flex-wrap: wrap;
   color: var(--color-text-3);
-  font-family: var(--font-mono);
-  font-size: 12px;
   font-weight: var(--fw-bold);
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -757,25 +774,33 @@ div.previewMedia strong {
   background: var(--color-primary-light-1);
 }
 
+.boundaryGutter {
+  position: relative;
+  flex: 0 0 24px;
+  inline-size: 24px;
+  min-inline-size: 24px;
+  min-block-size: 86px;
+  align-self: stretch;
+  background: var(--color-fill-1);
+}
+
 .boundaryFrame {
   position: absolute;
   z-index: 8;
   inset-block-start: 50%;
-  inset-inline-end: 0;
+  inset-inline: 0;
   display: grid;
-  inline-size: 26px;
+  box-sizing: border-box;
+  inline-size: 24px;
   block-size: 34px;
+  margin-inline: auto;
   place-items: center;
   border: 2px solid var(--color-border-3);
   border-radius: 7px;
   background: var(--color-bg-1);
   box-shadow: var(--shadow-card);
   pointer-events: none;
-  transform: translate(50%, -66%);
-}
-
-[dir='rtl'] .boundaryFrame {
-  transform: translate(-50%, -66%);
+  transform: translateY(-66%);
 }
 
 .boundaryFrame::before,
@@ -905,10 +930,9 @@ div.previewMedia strong {
 }
 
 .segmentState {
+  composes: meta from '../../../StudioTypography.module.css';
   min-inline-size: 0;
   color: var(--color-text-3);
-  font-family: var(--font-mono);
-  font-size: 12px;
   font-weight: var(--fw-bold);
   letter-spacing: 0.04em;
   line-height: 14px;
@@ -1019,12 +1043,12 @@ div.previewMedia strong {
 }
 
 .trimWarning {
+  composes: meta from '../../../StudioTypography.module.css';
   position: absolute;
   z-index: 3;
   inset-block-start: 40px;
   inset-inline: 10px;
   color: var(--color-warning-6);
-  font-family: var(--font-mono);
   font-size: 10px;
   font-weight: var(--fw-bold);
   letter-spacing: 0.03em;
@@ -1045,6 +1069,7 @@ div.previewMedia strong {
 }
 
 .planningSegment {
+  composes: meta from '../../../StudioTypography.module.css';
   position: relative;
   display: flex;
   min-inline-size: 0;
@@ -1054,8 +1079,6 @@ div.previewMedia strong {
   padding-inline: 10px;
   border-inline-end: 1px dashed var(--color-border-3);
   color: var(--color-text-3);
-  font-family: var(--font-mono);
-  font-size: 14px;
   font-variant-numeric: tabular-nums;
   overflow: visible;
 }
@@ -1098,6 +1121,10 @@ div.previewMedia strong {
   .shotInspector {
     flex: none;
     inline-size: 100%;
+  }
+
+  .previewColumn {
+    position: static;
   }
 
   .shotActionBand {

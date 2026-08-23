@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { Modal } from '@arco-design/web-react';
 import React, { useRef } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -843,19 +844,33 @@ describe('WorkspaceControls', () => {
     return screen.getByRole('dialog');
   };
 
-  const confirmFirstShotLift = (): void => {
-    const shot = document.querySelector<HTMLElement>('article[data-shot-id="shot_1"]');
-    if (shot === null) throw new Error('Shot 1 was unavailable');
-    const lift = within(shot).getByRole('button', {
-      name: 'conversation.creativeStudio.workspace.beatPanel.lift.shot',
-    });
-    expect(lift).toBeEnabled();
-    fireEvent.click(lift);
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.workspace.beatPanel.lift.confirmShot',
-      })
-    );
+  const confirmFirstShotMoveToBin = async (): Promise<void> => {
+    const modalConfirm = vi.spyOn(Modal, 'confirm').mockImplementation(() => ({
+      close: vi.fn(),
+      update: vi.fn(),
+    }));
+    try {
+      const shot = document.querySelector<HTMLElement>('article[data-shot-id="shot_1"]');
+      if (shot === null) throw new Error('Shot 1 was unavailable');
+      const overflow = shot.querySelector<HTMLButtonElement>('[data-shot-overflow-trigger]');
+      if (overflow === null) throw new Error('Shot 1 overflow was unavailable');
+      expect(overflow).toBeEnabled();
+      fireEvent.click(overflow);
+      const menu = await screen.findByRole('menu');
+      fireEvent.click(
+        within(menu).getByRole('menuitem', {
+          name: 'conversation.creativeStudio.workspace.beatPanel.lift.shot',
+        })
+      );
+      const confirmation = modalConfirm.mock.calls.at(-1)?.[0];
+      if (confirmation === undefined) throw new Error('Shot confirmation was unavailable');
+      expect(confirmation.okText).toBe('conversation.creativeStudio.workspace.beatPanel.lift.confirmShot');
+      act(() => {
+        void confirmation.onOk?.();
+      });
+    } finally {
+      modalConfirm.mockRestore();
+    }
   };
 
   it('resets only settings while preserving a Brief draft', async () => {
@@ -926,7 +941,7 @@ describe('WorkspaceControls', () => {
     );
     openFirstBeatPanel();
 
-    confirmFirstShotLift();
+    await confirmFirstShotMoveToBin();
 
     await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1', expect.any(Function)));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -966,7 +981,7 @@ describe('WorkspaceControls', () => {
       />
     );
     openFirstBeatPanel();
-    confirmFirstShotLift();
+    await confirmFirstShotMoveToBin();
     await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1', expect.any(Function)));
 
     result.rerender(

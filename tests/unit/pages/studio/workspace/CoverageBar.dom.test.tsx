@@ -109,15 +109,15 @@ class TestResizeObserver implements ResizeObserver {
   unobserve = vi.fn();
 }
 
-const rectangle = (width: number): DOMRect =>
+const rectangle = (width: number, left = 0): DOMRect =>
   ({
     bottom: 0,
     height: 20,
-    left: 0,
-    right: width,
+    left,
+    right: left + width,
     top: 0,
     width,
-    x: 0,
+    x: left,
     y: 0,
     toJSON: () => ({}),
   }) as DOMRect;
@@ -722,6 +722,66 @@ describe('CoverageBar', () => {
     expect(screen.queryByRole('img', { name: /Continuity frame is out of date/ })).toBeNull();
   });
 
+  it('places verified and intentional boundary markers in sibling gutters between Shot segments', () => {
+    const second = makeShot('shot_2', 8, 8, {
+      frameBoundary: {
+        upstreamShotId: 'shot_1',
+        dependentShotId: 'shot_2',
+        status: 'on_disk',
+        frameAssetId: 'frame_1',
+      },
+    });
+    const third = makeShot('shot_3', 8, 16, {
+      chainBreak: 'hard_cut',
+      segmentHead: true,
+    });
+    renderCoverage([makeShot('shot_1', 8, 0), second, third]);
+
+    const playback = screen.getByRole('group', { name: 'Playback lane' });
+    const segments = Array.from(playback.querySelectorAll('[data-coverage-shot-segment]'));
+    const gutters = Array.from(playback.querySelectorAll<HTMLElement>('[data-coverage-boundary-gutter]'));
+    const markers = screen.getAllByRole('img', { name: /Boundary after Shot/ });
+    expect(
+      Array.from(playback.children).map((child) =>
+        child.hasAttribute('data-coverage-shot-segment')
+          ? 'shot'
+          : child.hasAttribute('data-coverage-boundary-gutter')
+            ? 'gutter'
+            : 'unexpected'
+      )
+    ).toEqual(['shot', 'gutter', 'shot', 'gutter', 'shot']);
+    expect(gutters.map((gutter) => gutter.style.flex)).toEqual(['0 0 24px', '0 0 24px']);
+    expect(markers.every((marker) => marker.parentElement?.hasAttribute('data-coverage-boundary-gutter'))).toBe(true);
+    expect(segments.some((segment) => markers.some((marker) => segment.contains(marker)))).toBe(false);
+  });
+
+  it('keeps continuity markers in sibling gutters when malformed geometry fails closed', () => {
+    const second = makeShot('shot_2', 8, 8, {
+      frameBoundary: {
+        upstreamShotId: 'shot_1',
+        dependentShotId: 'shot_2',
+        status: 'on_disk',
+        frameAssetId: 'frame_1',
+      },
+    });
+    renderCoverage([makeShot('shot_1', 8, 0, { planningBoundary: null }), second]);
+
+    const playback = screen.getByRole('group', { name: 'Playback lane' });
+    const marker = screen.getByRole('img', { name: 'Boundary after Shot 01 · Continuity frame ready' });
+    expect(screen.getByRole('alert')).toHaveTextContent('Coverage unavailable');
+    expect(
+      Array.from(playback.children).map((child) =>
+        child.hasAttribute('data-coverage-shot-segment')
+          ? 'shot'
+          : child.hasAttribute('data-coverage-boundary-gutter')
+            ? 'gutter'
+            : 'unexpected'
+      )
+    ).toEqual(['shot', 'gutter', 'shot']);
+    expect(marker.parentElement).toHaveAttribute('data-coverage-boundary-gutter');
+    expect(marker.closest('[data-coverage-shot-segment]')).toBeNull();
+  });
+
   it('keeps source copy outside a dedicated trim lane without weakening the sliders', () => {
     renderCoverage([makeSelectedShot()]);
 
@@ -790,28 +850,45 @@ describe('CoverageBar', () => {
       [
         makeShot('shot_1', 8, 0, {
           selectedTakeId: 'take_1',
-          selectedTakeSourceDurationSeconds: 10,
+          selectedTakeSourceDurationSeconds: 12,
           trimInSeconds: 4,
-          trimOutSeconds: 4,
+          trimOutSeconds: 6,
           playedDurationSeconds: 2,
         }),
-        makeShot('shot_2', 10, 8),
+        makeShot('shot_2', 8, 8),
       ],
-      { playback: { available: true, durationSeconds: 12, positionSeconds: 2, onSeek } }
+      { playback: { available: true, durationSeconds: 10, positionSeconds: 2, onSeek } }
     );
+    const playback = screen.getByRole('group', { name: 'Playback lane' });
+    const [firstSegment, gutter, secondSegment] = Array.from(playback.children) as HTMLElement[];
+    if (firstSegment === undefined || gutter === undefined || secondSegment === undefined) {
+      throw new Error('Coverage did not render the expected segment/gutter cells');
+    }
     const rail = screen.getByRole('slider', { name: 'Beat seek rail' });
-    expect(rail).toHaveStyle({ '--seek-position': '50%' });
-    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(rectangle(100));
+    expect(rail.style.getPropertyValue('--seek-position')).toBe('calc(60% - 2.4px)');
+    vi.spyOn(rail, 'getBoundingClientRect').mockReturnValue(rectangle(124));
+    const firstRect = vi.spyOn(firstSegment, 'getBoundingClientRect').mockReturnValue(rectangle(60));
+    const gutterRect = vi.spyOn(gutter, 'getBoundingClientRect').mockReturnValue(rectangle(24, 60));
+    const secondRect = vi.spyOn(secondSegment, 'getBoundingClientRect').mockReturnValue(rectangle(40, 84));
     installPointerCapture(rail);
 
     fireEvent.pointerDown(rail, { clientX: 25, pointerId: 5 });
     fireEvent.pointerUp(rail, { clientX: 25, pointerId: 5 });
     expect(onSeek).toHaveBeenLastCalledWith(1);
+    fireEvent.pointerDown(rail, { clientX: 70, pointerId: 6 });
+    fireEvent.pointerUp(rail, { clientX: 70, pointerId: 6 });
+    expect(onSeek).toHaveBeenLastCalledWith(2);
 
+    firstRect.mockReturnValue(rectangle(60, 64));
+    gutterRect.mockReturnValue(rectangle(24, 40));
+    secondRect.mockReturnValue(rectangle(40));
     const direction = mockDirection('rtl');
-    fireEvent.pointerDown(rail, { clientX: 25, pointerId: 6 });
-    fireEvent.pointerUp(rail, { clientX: 25, pointerId: 6 });
-    expect(onSeek).toHaveBeenLastCalledWith(7);
+    fireEvent.pointerDown(rail, { clientX: 50, pointerId: 7 });
+    fireEvent.pointerUp(rail, { clientX: 50, pointerId: 7 });
+    expect(onSeek).toHaveBeenLastCalledWith(2);
+    fireEvent.pointerDown(rail, { clientX: 20, pointerId: 8 });
+    fireEvent.pointerUp(rail, { clientX: 20, pointerId: 8 });
+    expect(onSeek).toHaveBeenLastCalledWith(6);
     direction.mockRestore();
   });
 
@@ -868,6 +945,15 @@ describe('CoverageBar', () => {
     expect(playbackTrackRule).toContain('box-sizing: border-box');
     expect(playbackTrackRule).toContain('block-size: 88px');
     expect(playbackTrackRule).toContain('border-radius: 11px');
+    const boundaryGutterRule = cssRuleBody(css, '.boundaryGutter');
+    expect(boundaryGutterRule).toContain('flex: 0 0 24px');
+    expect(boundaryGutterRule).toContain('inline-size: 24px');
+    expect(boundaryGutterRule).toContain('min-inline-size: 24px');
+    const boundaryFrameRule = cssRuleBody(css, '.boundaryFrame');
+    expect(boundaryFrameRule).toContain('box-sizing: border-box');
+    expect(boundaryFrameRule).toContain('inline-size: 24px');
+    expect(boundaryFrameRule).toContain('inset-inline: 0');
+    expect(boundaryFrameRule).toContain('transform: translateY(-66%)');
     expect(css).toMatch(/\.playbackSegment\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\) 28px/s);
     expect(cssRuleBody(css, '.segmentSelector')).toContain('block-size: 100% !important');
     expect(cssRuleBody(css, '.segmentSelector')).toContain('grid-template-rows: auto auto');

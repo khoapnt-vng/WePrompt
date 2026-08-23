@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Input, InputNumber, Modal, Popconfirm, Select } from '@arco-design/web-react';
+import { Alert, Button, Dropdown, Input, InputNumber, Menu, Modal, Popconfirm, Select } from '@arco-design/web-react';
+import { MoreOne } from '@icon-park/react';
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -37,6 +38,8 @@ const JOB_KEY_ROOT = 'conversation.creativeStudio.jobs';
 export type BeatPanelImportResult = 'cancelled' | 'imported' | 'failed';
 
 export type BeatPanelGenerationCount = 1 | 2 | 3 | 4;
+
+type ModalConfirmationHandle = ReturnType<typeof Modal.confirm>;
 
 export type BeatPanelReviewPreference = {
   purpose: 'seed_still' | 'video_take';
@@ -343,6 +346,7 @@ type TakeCardProps = {
   beatId: string;
   canManageSeed: boolean;
   disabled: boolean;
+  hidden: boolean;
   projectId: string;
   projection: WorkspaceProjection;
   shot: WorkspaceShotProjection;
@@ -356,6 +360,7 @@ const TakeCard: React.FC<TakeCardProps> = ({
   beatId,
   canManageSeed,
   disabled,
+  hidden,
   projectId,
   projection,
   shot,
@@ -364,6 +369,10 @@ const TakeCard: React.FC<TakeCardProps> = ({
   takeIndex,
 }) => {
   const { t } = useTranslation();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
+  const restoreMenuFocusAfterCloseRef = useRef(false);
+  const takeMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
   const assetUrl = createManagedStudioAssetUrl(projectId, take.assetId);
   const posterUrl = take.posterAssetId === null ? null : createManagedStudioAssetUrl(projectId, take.posterAssetId);
   const active = take.binReason === null;
@@ -389,6 +398,53 @@ const TakeCard: React.FC<TakeCardProps> = ({
   const actionAllowed = actionEligibility?.allowed === true;
   const firstBlocker = actionEligibility?.blockers[0] ?? null;
   const selectableVideoTake = take.mediaKind === 'video' && videoTakeFitsShotTrims(shot, take);
+  const actionAuthorityRef = useRef({
+    active,
+    actionAllowed,
+    actions,
+    assetId: take.assetId,
+    available: !hidden,
+    disabled,
+    mounted: true,
+    projectId,
+    projectRevision: projection.projectRevision,
+    shotId: shot.id,
+  });
+  actionAuthorityRef.current = {
+    active,
+    actionAllowed,
+    actions,
+    assetId: take.assetId,
+    available: !hidden,
+    disabled,
+    mounted: actionAuthorityRef.current.mounted,
+    projectId,
+    projectRevision: projection.projectRevision,
+    shotId: shot.id,
+  };
+
+  useEffect(() => {
+    if (!active || disabled || hidden || !actionAllowed) {
+      setMenuOpen(false);
+      confirmationHandleRef.current?.close();
+      confirmationHandleRef.current = null;
+    }
+  }, [actionAllowed, active, disabled, hidden]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = null;
+  }, [projectId, projection.projectRevision]);
+
+  useEffect(
+    () => () => {
+      actionAuthorityRef.current.mounted = false;
+      confirmationHandleRef.current?.close();
+      confirmationHandleRef.current = null;
+    },
+    []
+  );
 
   if (assetUrl === null || (take.posterAssetId !== null && posterUrl === null)) {
     return (
@@ -403,6 +459,134 @@ const TakeCard: React.FC<TakeCardProps> = ({
   const takeLabel = t(
     take.mediaKind === 'image' ? `${KEY_ROOT}.takes.imageTakeLabel` : `${KEY_ROOT}.takes.videoTakeLabel`,
     { shotIndex: shotIndex + 1, takeIndex: takeIndex + 1 }
+  );
+  const confirmPark = (): void => {
+    if (disabled || !actionAllowed) return;
+    setMenuOpen(false);
+    const expectedAssetId = take.assetId;
+    const expectedProjectId = projectId;
+    const expectedProjectRevision = projection.projectRevision;
+    const expectedShotId = shot.id;
+    restoreMenuFocusAfterCloseRef.current = false;
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = Modal.confirm({
+      afterClose: () => {
+        confirmationHandleRef.current = null;
+        const authority = actionAuthorityRef.current;
+        if (
+          restoreMenuFocusAfterCloseRef.current &&
+          authority.mounted &&
+          authority.available &&
+          authority.active &&
+          authority.actionAllowed &&
+          !authority.disabled &&
+          authority.assetId === expectedAssetId &&
+          authority.projectId === expectedProjectId &&
+          authority.projectRevision === expectedProjectRevision &&
+          authority.shotId === expectedShotId
+        ) {
+          takeMenuTriggerRef.current?.focus();
+        }
+        restoreMenuFocusAfterCloseRef.current = false;
+      },
+      cancelText: t(`${KEY_ROOT}.common.cancel`),
+      content: t(`${KEY_ROOT}.takes.parkConfirmBody`),
+      okButtonProps: { status: 'danger' },
+      okText: t(`${KEY_ROOT}.takes.park`),
+      onCancel: () => {
+        restoreMenuFocusAfterCloseRef.current = true;
+      },
+      onOk: () => {
+        const authority = actionAuthorityRef.current;
+        if (
+          !authority.mounted ||
+          !authority.available ||
+          !authority.active ||
+          authority.disabled ||
+          !authority.actionAllowed ||
+          authority.assetId !== expectedAssetId ||
+          authority.projectId !== expectedProjectId ||
+          authority.projectRevision !== expectedProjectRevision ||
+          authority.shotId !== expectedShotId
+        ) {
+          return;
+        }
+        restoreMenuFocusAfterCloseRef.current = true;
+        return authority.actions.parkTake(authority.shotId, authority.assetId);
+      },
+      title: t(`${KEY_ROOT}.takes.parkConfirmTitle`),
+    });
+  };
+  const confirmAlternate = (): void => {
+    if (disabled || !actionAllowed) return;
+    setMenuOpen(false);
+    const expectedAssetId = take.assetId;
+    const expectedProjectId = projectId;
+    const expectedProjectRevision = projection.projectRevision;
+    const expectedShotId = shot.id;
+    restoreMenuFocusAfterCloseRef.current = false;
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = Modal.confirm({
+      afterClose: () => {
+        confirmationHandleRef.current = null;
+        const authority = actionAuthorityRef.current;
+        if (
+          restoreMenuFocusAfterCloseRef.current &&
+          authority.mounted &&
+          authority.available &&
+          authority.active &&
+          authority.actionAllowed &&
+          !authority.disabled &&
+          authority.assetId === expectedAssetId &&
+          authority.projectId === expectedProjectId &&
+          authority.projectRevision === expectedProjectRevision &&
+          authority.shotId === expectedShotId
+        ) {
+          takeMenuTriggerRef.current?.focus();
+        }
+        restoreMenuFocusAfterCloseRef.current = false;
+      },
+      cancelText: t(`${KEY_ROOT}.common.cancel`),
+      content: t(`${KEY_ROOT}.takes.alternateConfirmBody`),
+      okText: t(`${KEY_ROOT}.takes.addAlternate`),
+      onCancel: () => {
+        restoreMenuFocusAfterCloseRef.current = true;
+      },
+      onOk: () => {
+        const authority = actionAuthorityRef.current;
+        if (
+          !authority.mounted ||
+          !authority.available ||
+          !authority.active ||
+          authority.disabled ||
+          !authority.actionAllowed ||
+          authority.assetId !== expectedAssetId ||
+          authority.projectId !== expectedProjectId ||
+          authority.projectRevision !== expectedProjectRevision ||
+          authority.shotId !== expectedShotId
+        ) {
+          return;
+        }
+        restoreMenuFocusAfterCloseRef.current = true;
+        return authority.actions.addAlternateTake(authority.shotId, authority.assetId);
+      },
+      title: t(`${KEY_ROOT}.takes.alternateConfirmTitle`),
+    });
+  };
+  const takeMenu = (
+    <Menu data-asset-id={take.assetId} data-take-overflow-menu>
+      <Menu.Item key='move-to-bin' data-take-move-to-bin disabled={disabled || !actionAllowed} onClick={confirmPark}>
+        {t(`${KEY_ROOT}.takes.park`)}
+      </Menu.Item>
+      <Menu.Item
+        key='alternate'
+        data-take-add-alternate
+        disabled={disabled || !actionAllowed}
+        onClick={confirmAlternate}
+      >
+        {t(`${KEY_ROOT}.takes.addAlternate`)}
+      </Menu.Item>
+    </Menu>
   );
   return (
     <article
@@ -469,32 +653,30 @@ const TakeCard: React.FC<TakeCardProps> = ({
           </Button>
         ) : null}
         {active ? (
-          <>
-            <Popconfirm
-              cancelText={t(`${KEY_ROOT}.common.cancel`)}
-              content={t(`${KEY_ROOT}.takes.parkConfirmBody`)}
+          <Dropdown
+            droplist={takeMenu}
+            getPopupContainer={() => document.body}
+            onVisibleChange={setMenuOpen}
+            popupVisible={menuOpen}
+            position='br'
+            trigger='click'
+          >
+            <Button
+              ref={(node) => {
+                takeMenuTriggerRef.current = node instanceof HTMLButtonElement ? node : null;
+              }}
+              aria-expanded={menuOpen}
+              aria-haspopup='menu'
+              aria-label={`${t('common.more')} · ${takeLabel}`}
+              data-asset-id={take.assetId}
+              data-take-overflow-trigger
               disabled={disabled || !actionAllowed}
-              okText={t(`${KEY_ROOT}.takes.park`)}
-              onOk={() => actions.parkTake(shot.id, take.assetId)}
-              title={t(`${KEY_ROOT}.takes.parkConfirmTitle`)}
-            >
-              <Button disabled={disabled || !actionAllowed} size='small'>
-                {t(`${KEY_ROOT}.takes.park`)}
-              </Button>
-            </Popconfirm>
-            <Popconfirm
-              cancelText={t(`${KEY_ROOT}.common.cancel`)}
-              content={t(`${KEY_ROOT}.takes.alternateConfirmBody`)}
-              disabled={disabled || !actionAllowed}
-              okText={t(`${KEY_ROOT}.takes.addAlternate`)}
-              onOk={() => actions.addAlternateTake(shot.id, take.assetId)}
-              title={t(`${KEY_ROOT}.takes.alternateConfirmTitle`)}
-            >
-              <Button disabled={disabled || !actionAllowed} size='small'>
-                {t(`${KEY_ROOT}.takes.addAlternate`)}
-              </Button>
-            </Popconfirm>
-          </>
+              icon={<MoreOne aria-hidden='true' />}
+              shape='circle'
+              size='small'
+              type='text'
+            />
+          </Dropdown>
         ) : (
           <Button
             disabled={disabled || !actionAllowed}
@@ -569,12 +751,26 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [lifting, setLifting] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [recoveringJobId, setRecoveringJobId] = useState<string | null>(null);
-  const [restoreLiftFocus, setRestoreLiftFocus] = useState(false);
   const chainChangeDescriptionId = useId();
   const lineGuidanceId = useId();
   const generationRecoveryId = useId();
   const liftButtonRef = useRef<HTMLButtonElement | null>(null);
+  const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
+  const restoreLiftFocusAfterCloseRef = useRef(false);
+  const liftAuthorityRef = useRef({
+    actions,
+    disabled,
+    hidden,
+    liftAllowed: false,
+    lifting,
+    mounted: true,
+    onParkSettled,
+    projectId,
+    projectRevision: projection.projectRevision,
+    shotId: shot.id,
+  });
   const shotCardRef = useRef<HTMLElement | null>(null);
   const lineKey = shotDraftKey(shot.id, 'line');
   const narrationKey = shotDraftKey(shot.id, 'narration');
@@ -606,6 +802,18 @@ const ShotCard: React.FC<ShotCardProps> = ({
     })
   );
   const liftAllowed = liftEligibility?.allowed === true && !dirty && downstreamPositions.length === downstream.length;
+  liftAuthorityRef.current = {
+    actions,
+    disabled,
+    hidden,
+    liftAllowed,
+    lifting,
+    mounted: liftAuthorityRef.current.mounted,
+    onParkSettled,
+    projectId,
+    projectRevision: projection.projectRevision,
+    shotId: shot.id,
+  };
   const history = beat.lineHistory;
   const reviewPreferences =
     reviewChoices?.map((choice): BeatPanelReviewChoice => {
@@ -683,13 +891,10 @@ const ShotCard: React.FC<ShotCardProps> = ({
   };
 
   useEffect(() => {
-    if (!restoreLiftFocus || disabled || lifting) return;
-    liftButtonRef.current?.focus();
-    setRestoreLiftFocus(false);
-  }, [disabled, lifting, restoreLiftFocus]);
-
-  useEffect(() => {
     if (!hidden) return;
+    setMenuOpen(false);
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = null;
     shotCardRef.current?.querySelectorAll<HTMLVideoElement>('video[controls]').forEach((video) => {
       if (video.paused) return;
       try {
@@ -700,19 +905,53 @@ const ShotCard: React.FC<ShotCardProps> = ({
     });
   }, [hidden]);
 
-  const parkShot = async (): Promise<void> => {
-    if (disabled || lifting || !liftAllowed) return;
+  useEffect(() => {
+    if (disabled || !liftAllowed) {
+      setMenuOpen(false);
+      confirmationHandleRef.current?.close();
+      confirmationHandleRef.current = null;
+    }
+  }, [disabled, liftAllowed]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = null;
+  }, [projectId, projection.projectRevision]);
+
+  useEffect(
+    () => () => {
+      liftAuthorityRef.current.mounted = false;
+      confirmationHandleRef.current?.close();
+      confirmationHandleRef.current = null;
+    },
+    []
+  );
+
+  const parkShot = async (expectedShotId: string): Promise<void> => {
+    const authority = liftAuthorityRef.current;
+    if (
+      !authority.mounted ||
+      authority.hidden ||
+      authority.disabled ||
+      authority.lifting ||
+      !authority.liftAllowed ||
+      authority.shotId !== expectedShotId
+    ) {
+      return;
+    }
+    restoreLiftFocusAfterCloseRef.current = true;
     setLifting(true);
     let parked = false;
     try {
-      parked = await actions.parkShot(shot.id);
+      parked = await authority.actions.parkShot(authority.shotId);
     } catch {
       // The action owner presents commit errors. A rejected provider is never treated as success.
     } finally {
       setLifting(false);
     }
-    onParkSettled(shot.id, parked);
-    if (!parked) setRestoreLiftFocus(true);
+    authority.onParkSettled(authority.shotId, parked);
+    if (!parked) restoreLiftFocusAfterCloseRef.current = true;
   };
 
   const retryGenerationJob = async (jobId: string, acknowledgePossibleDuplicateCharge: boolean): Promise<void> => {
@@ -736,11 +975,67 @@ const ShotCard: React.FC<ShotCardProps> = ({
   };
 
   const liftBodyKey = downstream.length === 0 ? `${KEY_ROOT}.lift.shotBodyNoStale` : `${KEY_ROOT}.lift.shotBodyStale`;
+  const confirmParkShot = (): void => {
+    if (disabled || lifting || !liftAllowed) return;
+    setMenuOpen(false);
+    const expectedProjectId = projectId;
+    const expectedProjectRevision = projection.projectRevision;
+    const expectedShotId = shot.id;
+    restoreLiftFocusAfterCloseRef.current = false;
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = Modal.confirm({
+      afterClose: () => {
+        confirmationHandleRef.current = null;
+        const authority = liftAuthorityRef.current;
+        if (
+          restoreLiftFocusAfterCloseRef.current &&
+          authority.mounted &&
+          !authority.hidden &&
+          !authority.disabled &&
+          authority.projectId === expectedProjectId &&
+          authority.projectRevision === expectedProjectRevision &&
+          authority.shotId === expectedShotId
+        ) {
+          liftButtonRef.current?.focus();
+        }
+        restoreLiftFocusAfterCloseRef.current = false;
+      },
+      cancelText: t(`${KEY_ROOT}.common.cancel`),
+      content: t(liftBodyKey, { shots: downstreamLabels.join(', ') }),
+      okButtonProps: { status: 'danger' },
+      okText: t(`${KEY_ROOT}.lift.confirmShot`),
+      onCancel: () => {
+        restoreLiftFocusAfterCloseRef.current = true;
+      },
+      onOk: () => {
+        if (
+          liftAuthorityRef.current.projectId !== expectedProjectId ||
+          liftAuthorityRef.current.projectRevision !== expectedProjectRevision
+        ) {
+          return;
+        }
+        return parkShot(expectedShotId);
+      },
+      title: t(`${KEY_ROOT}.lift.shotTitle`, { index: index + 1 }),
+    });
+  };
+  const shotMenu = (
+    <Menu data-shot-id={shot.id} data-shot-overflow-menu>
+      <Menu.Item
+        key='move-to-bin'
+        data-shot-move-to-bin
+        disabled={disabled || lifting || !liftAllowed}
+        onClick={confirmParkShot}
+      >
+        {t(`${KEY_ROOT}.lift.shot`)}
+      </Menu.Item>
+    </Menu>
+  );
   return (
     <article ref={shotCardRef} className={styles.shotCard} data-shot-id={shot.id} hidden={hidden}>
       <header className={styles.shotHeader}>
         <div>
-          <h3>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
+          <h3 className={styles.shotTitle}>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
           <span id={lineGuidanceId} className={styles.lineGuidance} data-line-derivation={shot.derivation}>
             {t(
               `${KEY_ROOT}.derivation.${shot.derivation === 'derived' ? 'attachedLineGuidance' : 'detachedLineGuidance'}`
@@ -779,6 +1074,31 @@ const ShotCard: React.FC<ShotCardProps> = ({
           >
             {t(`${KEY_ROOT}.reorder.nextShort`)}
           </Button>
+          <Dropdown
+            droplist={shotMenu}
+            getPopupContainer={() => document.body}
+            onVisibleChange={setMenuOpen}
+            popupVisible={menuOpen}
+            position='br'
+            trigger='click'
+          >
+            <Button
+              ref={(node) => {
+                liftButtonRef.current = node instanceof HTMLButtonElement ? node : null;
+              }}
+              aria-expanded={menuOpen}
+              aria-haspopup='menu'
+              aria-label={`${t('common.more')} · ${t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}`}
+              data-shot-id={shot.id}
+              data-shot-overflow-trigger
+              disabled={disabled || lifting || !liftAllowed}
+              icon={<MoreOne aria-hidden='true' />}
+              loading={lifting}
+              shape='circle'
+              size='small'
+              type='text'
+            />
+          </Dropdown>
         </div>
       </header>
 
@@ -788,7 +1108,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
           <Input.TextArea
             aria-describedby={lineGuidanceId}
             aria-label={t(`${KEY_ROOT}.fields.lineFor`, { index: index + 1 })}
-            autoSize={{ minRows: 2, maxRows: 2 }}
+            autoSize={{ minRows: 3, maxRows: 6 }}
             disabled={disabled}
             onChange={(value) => drafts.setValue(lineKey, value)}
             value={line}
@@ -893,7 +1213,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </div>
 
       <section aria-label={t(`${KEY_ROOT}.derivation.label`, { index: index + 1 })} className={styles.subsection}>
-        <h4>{t(`${KEY_ROOT}.derivation.title`)}</h4>
+        <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.derivation.title`)}</h4>
         <p data-line-derivation-state={shot.derivation}>
           {t(`${KEY_ROOT}.derivation.${shot.derivation}`)}
           {shot.derivationStale ? ` ${t(`${KEY_ROOT}.derivation.stale`)}` : null}
@@ -940,7 +1260,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
           {shot.segmentHead ? (
             <div className={styles.subsectionHeader}>
               <div>
-                <h4>{t(`${KEY_ROOT}.seeds.title`)}</h4>
+                <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
                 <p className={styles.muted}>
                   {t(
                     shot.effectiveSeedAssetId === null
@@ -956,7 +1276,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
               </Button>
             </div>
           ) : (
-            <h4>{t(`${KEY_ROOT}.seeds.imageTitle`)}</h4>
+            <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.imageTitle`)}</h4>
           )}
           <div className={styles.takeGrid}>
             {shot.imageTakes.map((take, takeIndex) => (
@@ -966,6 +1286,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
                 beatId={beat.id}
                 canManageSeed={shot.segmentHead}
                 disabled={disabled}
+                hidden={hidden}
                 projectId={projectId}
                 projection={projection}
                 shot={shot}
@@ -980,7 +1301,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
       ) : null}
 
       <section aria-label={t(`${KEY_ROOT}.takes.videoLabel`, { index: index + 1 })} className={styles.subsection}>
-        <h4>{t(`${KEY_ROOT}.takes.videoTitle`)}</h4>
+        <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.takes.videoTitle`)}</h4>
         <div className={styles.takeGrid}>
           {shot.videoTakes.map((take, takeIndex) => (
             <TakeCard
@@ -989,6 +1310,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
               beatId={beat.id}
               canManageSeed={false}
               disabled={disabled}
+              hidden={hidden}
               projectId={projectId}
               projection={projection}
               shot={shot}
@@ -1068,7 +1390,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
         </section>
       ) : null}
 
-      <div className={styles.shotFooter}>
+      <div className={styles.shotFooter} data-shot-footer>
         <div className={styles.generationPreferences}>
           {reviewPreferences?.map((preference) => {
             const position = exactShotPosition(projection, preference.shotId)!;
@@ -1158,27 +1480,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
               : `${KEY_ROOT}.generation.renderVideo`
           )}
         </Button>
-        <Popconfirm
-          cancelText={t(`${KEY_ROOT}.common.cancel`)}
-          content={t(liftBodyKey, { shots: downstreamLabels.join(', ') })}
-          disabled={disabled || lifting || !liftAllowed}
-          okText={t(`${KEY_ROOT}.lift.confirmShot`)}
-          onCancel={() => liftButtonRef.current?.focus()}
-          onOk={parkShot}
-          title={t(`${KEY_ROOT}.lift.shotTitle`, { index: index + 1 })}
-        >
-          <Button
-            ref={(node) => {
-              if (node === null) liftButtonRef.current = null;
-              else if (node instanceof HTMLButtonElement) liftButtonRef.current = node;
-            }}
-            disabled={disabled || lifting || !liftAllowed}
-            loading={lifting}
-            status='danger'
-          >
-            {t(`${KEY_ROOT}.lift.shot`)}
-          </Button>
-        </Popconfirm>
       </div>
       {!liftAllowed ? (
         <p className={styles.blocker} role='status'>
@@ -1207,7 +1508,7 @@ const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projectId, 
   if (rows.length === 0 && standaloneFailures.length === 0) return null;
   return (
     <section aria-label={t(`${KEY_ROOT}.recovery.label`)} className={styles.recovery}>
-      <h3>{t(`${KEY_ROOT}.recovery.title`)}</h3>
+      <h3 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.recovery.title`)}</h3>
       {rows.map((row) => (
         <article
           key={`cascade:${row.dependentShotId}`}
@@ -1300,8 +1601,21 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const { t } = useTranslation();
   const draftsRef = useLatestDrafts(drafts);
   const [savingBeat, setSavingBeat] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [reorderAnnouncement, setReorderAnnouncement] = useState('');
   const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
+  const beatMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
+  const restoreMenuFocusAfterCloseRef = useRef(false);
+  const beatLiftAuthorityRef = useRef({
+    actions,
+    allowed: false,
+    beatId: beat.id,
+    locked: false,
+    mounted: true,
+    projectId,
+    projectRevision: projection.projectRevision,
+  });
   const [inspectedShotSelection, setInspectedShotSelection] = useState<{
     beatId: string;
     shotId: string | null;
@@ -1359,6 +1673,15 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
     beatLiftEligibility?.allowed === true &&
     !coverageDraftDirty &&
     beatDownstreamPositions.length === beatDownstream.length;
+  beatLiftAuthorityRef.current = {
+    actions,
+    allowed: beatLiftAllowed,
+    beatId: beat.id,
+    locked: mutationLocked,
+    mounted: beatLiftAuthorityRef.current.mounted,
+    projectId,
+    projectRevision: projection.projectRevision,
+  };
   const displayBeatIndex = safeBeatIndex >= 0 ? safeBeatIndex + 1 : Math.max(beatIndex + 1, 1);
   const beatTitle = beat.title.trim() || t(`${KEY_ROOT}.untitledBeat`, { index: displayBeatIndex });
   const requestedInspectedShotId = inspectedShotSelection.beatId === beat.id ? inspectedShotSelection.shotId : null;
@@ -1443,6 +1766,98 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
 
   const beatLiftBodyKey =
     beatDownstream.length === 0 ? `${KEY_ROOT}.lift.beatBodyNoStale` : `${KEY_ROOT}.lift.beatBodyStale`;
+  const confirmParkBeat = (): void => {
+    if (mutationLocked || !beatLiftAllowed) return;
+    setMenuOpen(false);
+    const expectedBeatId = beat.id;
+    const expectedProjectId = projectId;
+    const expectedProjectRevision = projection.projectRevision;
+    restoreMenuFocusAfterCloseRef.current = false;
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = Modal.confirm({
+      afterClose: () => {
+        confirmationHandleRef.current = null;
+        const authority = beatLiftAuthorityRef.current;
+        if (
+          restoreMenuFocusAfterCloseRef.current &&
+          authority.mounted &&
+          !authority.locked &&
+          authority.allowed &&
+          authority.beatId === expectedBeatId &&
+          authority.projectId === expectedProjectId &&
+          authority.projectRevision === expectedProjectRevision
+        ) {
+          beatMenuTriggerRef.current?.focus();
+        }
+        restoreMenuFocusAfterCloseRef.current = false;
+      },
+      cancelText: t(`${KEY_ROOT}.common.cancel`),
+      content: t(beatLiftBodyKey, { shots: beatDownstreamLabels.join(', ') }),
+      okButtonProps: { status: 'danger' },
+      okText: t(`${KEY_ROOT}.lift.confirmBeat`),
+      onCancel: () => {
+        restoreMenuFocusAfterCloseRef.current = true;
+      },
+      onOk: () => {
+        const authority = beatLiftAuthorityRef.current;
+        if (
+          !authority.mounted ||
+          authority.locked ||
+          !authority.allowed ||
+          authority.beatId !== expectedBeatId ||
+          authority.projectId !== expectedProjectId ||
+          authority.projectRevision !== expectedProjectRevision
+        ) {
+          return;
+        }
+        restoreMenuFocusAfterCloseRef.current = true;
+        return authority.actions.parkBeat(authority.beatId);
+      },
+      title: t(`${KEY_ROOT}.lift.beatTitle`),
+    });
+  };
+  const beatMenu = (
+    <Menu data-beat-id={beat.id} data-beat-overflow-menu>
+      <Menu.Item
+        key='move-to-bin'
+        data-beat-move-to-bin
+        disabled={mutationLocked || !beatLiftAllowed}
+        onClick={confirmParkBeat}
+      >
+        {t(`${KEY_ROOT}.lift.beat`)}
+      </Menu.Item>
+    </Menu>
+  );
+
+  useEffect(() => {
+    if (mutationLocked || !beatLiftAllowed) {
+      setMenuOpen(false);
+      confirmationHandleRef.current?.close();
+      confirmationHandleRef.current = null;
+    }
+  }, [beatLiftAllowed, mutationLocked]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = null;
+  }, [beat.id]);
+
+  useEffect(() => {
+    setMenuOpen(false);
+    confirmationHandleRef.current?.close();
+    confirmationHandleRef.current = null;
+  }, [projectId, projection.projectRevision]);
+
+  useEffect(
+    () => () => {
+      beatLiftAuthorityRef.current.mounted = false;
+      confirmationHandleRef.current?.close();
+      confirmationHandleRef.current = null;
+    },
+    []
+  );
+
   return (
     <Modal
       className={styles.modal}
@@ -1455,12 +1870,14 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
       visible
     >
       <section aria-label={t(`${KEY_ROOT}.label`, { title: beatTitle })} className={styles.root}>
-        <header className={styles.panelHeader}>
+        <header className={styles.panelHeader} data-panel-header>
           <div>
             <p className={styles.eyebrow}>
               {t(`${KEY_ROOT}.beatPosition`, { index: safeBeatIndex + 1, total: beatIds.length })}
             </p>
-            <h2 dir='auto'>{beatTitle}</h2>
+            <h2 className={styles.panelTitle} dir='auto'>
+              {beatTitle}
+            </h2>
           </div>
           <div className={styles.actions}>
             <Button
@@ -1477,8 +1894,41 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
             >
               {t(`${KEY_ROOT}.nextBeatShort`)}
             </Button>
+            <Dropdown
+              droplist={beatMenu}
+              getPopupContainer={() => document.body}
+              onVisibleChange={setMenuOpen}
+              popupVisible={menuOpen}
+              position='br'
+              trigger='click'
+            >
+              <Button
+                ref={(node) => {
+                  beatMenuTriggerRef.current = node instanceof HTMLButtonElement ? node : null;
+                }}
+                aria-expanded={menuOpen}
+                aria-haspopup='menu'
+                aria-label={`${t('common.more')} · ${beatTitle}`}
+                data-beat-id={beat.id}
+                data-beat-overflow-trigger
+                disabled={mutationLocked || !beatLiftAllowed}
+                icon={<MoreOne aria-hidden='true' />}
+                shape='circle'
+                type='text'
+              />
+            </Dropdown>
           </div>
         </header>
+
+        {!beatLiftAllowed ? (
+          <p className={styles.blocker} data-beat-removal-blocker role='status'>
+            {coverageDraftDirty
+              ? t(`${KEY_ROOT}.blocker.unsavedDrafts`)
+              : firstBeatBlocker === null
+                ? t(`${KEY_ROOT}.blocker.statusUnavailable`)
+                : t(BLOCKER_KEYS[firstBeatBlocker.code])}
+          </p>
+        ) : null}
 
         {errorMessageKey === null ? null : <Alert content={t(errorMessageKey)} type='error' />}
 
@@ -1627,29 +2077,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           projection={projection}
         />
 
-        <footer className={styles.panelFooter}>
-          <Popconfirm
-            cancelText={t(`${KEY_ROOT}.common.cancel`)}
-            content={t(beatLiftBodyKey, { shots: beatDownstreamLabels.join(', ') })}
-            disabled={mutationLocked || !beatLiftAllowed}
-            okText={t(`${KEY_ROOT}.lift.confirmBeat`)}
-            onOk={() => actions.parkBeat(beat.id)}
-            title={t(`${KEY_ROOT}.lift.beatTitle`)}
-          >
-            <Button disabled={mutationLocked || !beatLiftAllowed} status='danger'>
-              {t(`${KEY_ROOT}.lift.beat`)}
-            </Button>
-          </Popconfirm>
-          {!beatLiftAllowed ? (
-            <p className={styles.blocker} role='status'>
-              {coverageDraftDirty
-                ? t(`${KEY_ROOT}.blocker.unsavedDrafts`)
-                : firstBeatBlocker === null
-                  ? t(`${KEY_ROOT}.blocker.statusUnavailable`)
-                  : t(BLOCKER_KEYS[firstBeatBlocker.code])}
-            </p>
-          ) : null}
-        </footer>
         <span aria-atomic='true' aria-live='polite' className={styles.srOnly}>
           {shotLiftAnnouncement || reorderAnnouncement}
         </span>

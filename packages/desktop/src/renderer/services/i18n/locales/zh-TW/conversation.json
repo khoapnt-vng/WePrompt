@@ -901,6 +901,11 @@
       "importError": "無法新增參考圖，請再試一次。"
     },
     "workspace": {
+      "board": {
+        "liftBeat": "移到垃圾桶",
+        "liftConfirmTitle": "將「{{title}}」移到垃圾桶？",
+        "liftConfirmContent": "此節拍將從影片中移除。所有已創作內容、付費產生的素材和鏡次都會保留在垃圾桶中。"
+      },
       "cut": {
         "preview": {
           "label": "影片預覽",
@@ -938,6 +943,23 @@
         }
       },
       "beatPanel": {
+        "takes": {
+          "park": "移到垃圾桶",
+          "parkConfirmTitle": "將此鏡次移到垃圾桶？",
+          "parkConfirmBody": "此鏡次會保留在專案中，並從目前選項中移出。"
+        },
+        "lift": {
+          "shot": "移到垃圾桶",
+          "shotTitle": "將鏡頭 {{index}} 移到垃圾桶？",
+          "shotBodyNoStale": "此鏡頭中的已創作內容和付費產生素材都會保留。將它移到垃圾桶？",
+          "shotBodyStale": "此鏡頭中的已創作內容和付費產生素材都會保留。移到垃圾桶後，以下內容會變成過時狀態：{{shots}}。",
+          "confirmShot": "移到垃圾桶",
+          "beat": "移到垃圾桶",
+          "beatTitle": "將此節拍移到垃圾桶？",
+          "beatBodyNoStale": "此節拍中的所有鏡頭、已創作內容和付費產生素材都會保留。將它移到垃圾桶？",
+          "beatBodyStale": "此節拍中的所有鏡頭、已創作內容和付費產生素材都會保留。移到垃圾桶後，以下內容會變成過時狀態：{{shots}}。",
+          "confirmBeat": "移到垃圾桶"
+        },
         "beatFieldsLabel": "節拍動作、視覺風格和目標時長",
         "fieldGuidance": {
           "action": "動作 · 你唯一需要寫的內容",

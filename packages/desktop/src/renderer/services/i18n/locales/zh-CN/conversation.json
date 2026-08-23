@@ -901,6 +901,11 @@
       "importError": "无法添加参考图，请重试。"
     },
     "workspace": {
+      "board": {
+        "liftBeat": "移到废纸篓",
+        "liftConfirmTitle": "将“{{title}}”移到废纸篓？",
+        "liftConfirmContent": "此节拍将从影片中移除。所有已创作内容、付费生成的素材和镜次都会保留在废纸篓中。"
+      },
       "cut": {
         "preview": {
           "label": "影片预览",
@@ -938,6 +943,23 @@
         }
       },
       "beatPanel": {
+        "takes": {
+          "park": "移到废纸篓",
+          "parkConfirmTitle": "将此镜次移到废纸篓？",
+          "parkConfirmBody": "该镜次会保留在项目中，并从当前选项中移出。"
+        },
+        "lift": {
+          "shot": "移到废纸篓",
+          "shotTitle": "将镜头 {{index}} 移到废纸篓？",
+          "shotBodyNoStale": "此镜头中的已创作内容和付费生成素材都会保留。将它移到废纸篓？",
+          "shotBodyStale": "此镜头中的已创作内容和付费生成素材都会保留。移到废纸篓后，以下内容会变为过时状态：{{shots}}。",
+          "confirmShot": "移到废纸篓",
+          "beat": "移到废纸篓",
+          "beatTitle": "将此节拍移到废纸篓？",
+          "beatBodyNoStale": "此节拍中的所有镜头、已创作内容和付费生成素材都会保留。将它移到废纸篓？",
+          "beatBodyStale": "此节拍中的所有镜头、已创作内容和付费生成素材都会保留。移到废纸篓后，以下内容会变为过时状态：{{shots}}。",
+          "confirmBeat": "移到废纸篓"
+        },
         "beatFieldsLabel": "节拍动作、视觉风格和目标时长",
         "fieldGuidance": {
           "action": "动作 · 你唯一需要写的内容",

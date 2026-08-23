@@ -25,11 +25,17 @@ import type {
   WorkspaceTakeProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 
+const modalConfirm = vi.hoisted(() => vi.fn());
+
 vi.mock('@arco-design/web-react', async () => {
   const ReactModule = await import('react');
   const Button = ReactModule.forwardRef<HTMLButtonElement, any>(
-    ({ children, loading: _loading, size: _size, status: _status, type: _type, ...props }, ref) => (
+    (
+      { children, icon, loading: _loading, shape: _shape, size: _size, status: _status, type: _type, ...props },
+      ref
+    ) => (
       <button ref={ref} {...props}>
+        {icon}
         {children}
       </button>
     )
@@ -78,17 +84,66 @@ vi.mock('@arco-design/web-react', async () => {
       {children}
     </label>
   );
-  const Modal = ({ children, closable, onCancel, title, visible }: any) =>
-    visible ? (
-      <div aria-label={String(title)} role='dialog'>
-        {closable ? (
-          <button aria-label='Close' onClick={onCancel} type='button'>
-            ×
-          </button>
-        ) : null}
+  type MockTriggerProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
+  type MockDropdownProps = {
+    children: React.ReactElement<MockTriggerProps>;
+    droplist: React.ReactNode;
+    onVisibleChange?: (visible: boolean) => void;
+    popupVisible?: boolean;
+  };
+  const Dropdown = ({ children, droplist, onVisibleChange, popupVisible }: MockDropdownProps) => {
+    const visible = Boolean(popupVisible);
+    const child = children.props;
+    const trigger = ReactModule.cloneElement(children, {
+      onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
+        child.onClick?.(event);
+        if (!child.disabled) onVisibleChange?.(!visible);
+      },
+      onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
+        child.onKeyDown?.(event);
+        if (!child.disabled && (event.key === 'Enter' || event.key === ' ')) {
+          event.preventDefault();
+          onVisibleChange?.(!visible);
+        }
+      },
+    });
+    return (
+      <>
+        {trigger}
+        {visible ? droplist : null}
+      </>
+    );
+  };
+  type MockMenuProps = React.HTMLAttributes<HTMLDivElement>;
+  type MockMenuItemProps = React.ButtonHTMLAttributes<HTMLButtonElement>;
+  const Menu = Object.assign(
+    ({ children, ...props }: MockMenuProps) => (
+      <div role='menu' {...props}>
         {children}
       </div>
-    ) : null;
+    ),
+    {
+      Item: ({ children, disabled, onClick, ...props }: MockMenuItemProps) => (
+        <button disabled={disabled} onClick={onClick} role='menuitem' type='button' {...props}>
+          {children}
+        </button>
+      ),
+    }
+  );
+  const Modal = Object.assign(
+    ({ children, closable, onCancel, title, visible }: any) =>
+      visible ? (
+        <div aria-label={String(title)} role='dialog'>
+          {closable ? (
+            <button aria-label='Close' onClick={onCancel} type='button'>
+              ×
+            </button>
+          ) : null}
+          {children}
+        </div>
+      ) : null,
+    { confirm: modalConfirm }
+  );
   const Popconfirm = ({ cancelText, children, content, disabled, okText, onCancel, onOk, title }: any) => {
     const childLabel = ReactModule.isValidElement(children)
       ? optionText((children.props as { children?: React.ReactNode }).children)
@@ -113,13 +168,30 @@ vi.mock('@arco-design/web-react', async () => {
     );
   };
   const Alert = ({ content, type }: any) => <div role={type === 'error' ? 'alert' : 'status'}>{content}</div>;
-  return { Alert, Button, Checkbox, Input, InputNumber, Modal, Popconfirm, Select, default: ReactModule };
+  return {
+    Alert,
+    Button,
+    Checkbox,
+    Dropdown,
+    Input,
+    InputNumber,
+    Menu,
+    Modal,
+    Popconfirm,
+    Select,
+    default: ReactModule,
+  };
 });
+
+vi.mock('@icon-park/react', () => ({
+  MoreOne: (props: Record<string, unknown>) => <span data-icon='more' {...props} />,
+}));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       const copy: Record<string, string> = {
+        'common.more': 'More actions',
         'conversation.creativeStudio.workspace.beatPanel.beatFieldsLabel': 'Beat fields',
         'conversation.creativeStudio.workspace.beatPanel.blocker.statusUnavailable': 'Status unavailable',
         'conversation.creativeStudio.workspace.beatPanel.blocker.unsavedDrafts': 'Save or reset local edits first',
@@ -169,11 +241,11 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.generation.renderVideo': 'Render Shot',
         'conversation.creativeStudio.workspace.beatPanel.generation.reviewUnavailable':
           'Generation review is unavailable',
-        'conversation.creativeStudio.workspace.beatPanel.lift.beat': 'Lift Beat',
-        'conversation.creativeStudio.workspace.beatPanel.lift.beatTitle': 'Lift this Beat?',
-        'conversation.creativeStudio.workspace.beatPanel.lift.confirmBeat': 'Confirm lift Beat',
-        'conversation.creativeStudio.workspace.beatPanel.lift.confirmShot': 'Confirm lift Shot',
-        'conversation.creativeStudio.workspace.beatPanel.lift.shot': 'Lift Shot',
+        'conversation.creativeStudio.workspace.beatPanel.lift.beat': 'Move to Bin',
+        'conversation.creativeStudio.workspace.beatPanel.lift.beatTitle': 'Move this Beat to the Bin?',
+        'conversation.creativeStudio.workspace.beatPanel.lift.confirmBeat': 'Move to Bin',
+        'conversation.creativeStudio.workspace.beatPanel.lift.confirmShot': 'Move to Bin',
+        'conversation.creativeStudio.workspace.beatPanel.lift.shot': 'Move to Bin',
         'conversation.creativeStudio.workspace.beatPanel.lift.shotFailed': 'Shot was not moved to the Bin.',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelBody': 'Cancel this waiting item only',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelConfirm': 'Confirm cancel waiting',
@@ -187,28 +259,30 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.recovery.title': 'Part done',
         'conversation.creativeStudio.workspace.beatPanel.reorder.nextShort': 'Down',
         'conversation.creativeStudio.workspace.beatPanel.reorder.previousShort': 'Up',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.clearPin': 'Clear pin',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.clearPin': 'Clear seed pin',
         'conversation.creativeStudio.workspace.beatPanel.seeds.empty': 'No image takes',
         'conversation.creativeStudio.workspace.beatPanel.seeds.import': 'Import seed still',
         'conversation.creativeStudio.workspace.beatPanel.seeds.imageTitle': 'Retained image takes',
         'conversation.creativeStudio.workspace.beatPanel.seeds.latestDefault': 'Latest image is the default',
         'conversation.creativeStudio.workspace.beatPanel.seeds.pending': 'Seed pending',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.pin': 'Pin seed',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.pin': 'Pin as seed',
         'conversation.creativeStudio.workspace.beatPanel.seeds.pinned': 'Seed pinned',
         'conversation.creativeStudio.workspace.beatPanel.seeds.title': 'Seed stills',
         'conversation.creativeStudio.workspace.beatPanel.shots.empty': 'No coverage yet',
         'conversation.creativeStudio.workspace.beatPanel.shots.label': 'Shots',
-        'conversation.creativeStudio.workspace.beatPanel.takes.addAlternate': 'Add alternate',
-        'conversation.creativeStudio.workspace.beatPanel.takes.alternateConfirmBody': 'Keep this as an alternate',
-        'conversation.creativeStudio.workspace.beatPanel.takes.alternateConfirmTitle': 'Add alternate take?',
+        'conversation.creativeStudio.workspace.beatPanel.takes.addAlternate': 'Move to alternates',
+        'conversation.creativeStudio.workspace.beatPanel.takes.alternateConfirmBody':
+          'The Take stays with the project as an alternate.',
+        'conversation.creativeStudio.workspace.beatPanel.takes.alternateConfirmTitle': 'Move this Take to alternates?',
         'conversation.creativeStudio.workspace.beatPanel.takes.effectiveSeed': 'Effective seed',
         'conversation.creativeStudio.workspace.beatPanel.takes.empty': 'No video takes',
-        'conversation.creativeStudio.workspace.beatPanel.takes.park': 'Park take',
-        'conversation.creativeStudio.workspace.beatPanel.takes.parkConfirmBody': 'Paid work remains in the Bin',
-        'conversation.creativeStudio.workspace.beatPanel.takes.parkConfirmTitle': 'Park this take?',
+        'conversation.creativeStudio.workspace.beatPanel.takes.park': 'Move to Bin',
+        'conversation.creativeStudio.workspace.beatPanel.takes.parkConfirmBody':
+          'The Take stays with the project and moves out of active choices.',
+        'conversation.creativeStudio.workspace.beatPanel.takes.parkConfirmTitle': 'Move this Take to the Bin?',
         'conversation.creativeStudio.workspace.beatPanel.takes.pinnedSeed': 'Pinned seed',
         'conversation.creativeStudio.workspace.beatPanel.takes.restore': 'Restore take',
-        'conversation.creativeStudio.workspace.beatPanel.takes.select': 'Select take',
+        'conversation.creativeStudio.workspace.beatPanel.takes.select': 'Select Take',
         'conversation.creativeStudio.workspace.beatPanel.takes.selected': 'Selected',
         'conversation.creativeStudio.workspace.beatPanel.takes.trimIncompatible': 'Current trims do not fit this take',
         'conversation.creativeStudio.workspace.beatPanel.takes.unavailable': 'Preview unavailable',
@@ -330,14 +404,18 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.generation.referenceForChoice')) return `Brief reference for ${String(values?.choice)}`;
       if (key.endsWith('.takes.binReason.lifted')) return 'Lifted';
       if (key.endsWith('.takes.binReason.alternate')) return 'Alternate';
-      if (key.endsWith('.lift.shotTitle')) return `Lift Shot ${String(values?.index)}?`;
-      if (key.endsWith('.lift.shotBodyNoStale')) return 'Authored and paid work stays in the Bin';
-      if (key.endsWith('.lift.shotBodyStale')) {
-        return `Authored and paid work stays; downstream ${String(values?.shots)} becomes stale`;
+      if (key.endsWith('.lift.shotTitle')) return `Move Shot ${String(values?.index)} to the Bin?`;
+      if (key.endsWith('.lift.shotBodyNoStale')) {
+        return 'Authored and paid work stays with this Shot. Move it to the Bin?';
       }
-      if (key.endsWith('.lift.beatBodyNoStale')) return 'All authored and paid work stays in the Bin';
+      if (key.endsWith('.lift.shotBodyStale')) {
+        return `Authored and paid work stays with this Shot. Moving it to the Bin makes ${String(values?.shots)} stale.`;
+      }
+      if (key.endsWith('.lift.beatBodyNoStale')) {
+        return 'Every Shot and all authored and paid work stay with this Beat. Move it to the Bin?';
+      }
       if (key.endsWith('.lift.beatBodyStale')) {
-        return `All authored and paid work stays; downstream ${String(values?.shots)} becomes stale`;
+        return `Every Shot and all authored and paid work stay with this Beat. Moving it to the Bin makes ${String(values?.shots)} stale.`;
       }
       if (key.endsWith('.recovery.chooseImage')) {
         return `Use image Beat ${String(values?.beatIndex)} Shot ${String(values?.shotIndex)} Take ${String(values?.takeIndex)}`;
@@ -667,6 +745,23 @@ const takeCard = (container: HTMLElement, assetId: string): HTMLElement => {
   const card = container.querySelector<HTMLElement>(`[data-asset-id="${assetId}"]`);
   if (card === null) throw new Error(`Missing Take card ${assetId}`);
   return card;
+};
+
+type ModalConfirmOptions = {
+  afterClose?: () => void;
+  cancelText: React.ReactNode;
+  content: React.ReactNode;
+  okButtonProps?: { status?: string };
+  okText: React.ReactNode;
+  onCancel?: () => void;
+  onOk: () => unknown;
+  title: React.ReactNode;
+};
+
+const latestModalConfirmation = (): ModalConfirmOptions => {
+  const options = modalConfirm.mock.calls.at(-1)?.[0] as ModalConfirmOptions | undefined;
+  if (options === undefined) throw new Error('Expected an Arco Modal.confirm call');
+  return options;
 };
 
 const cssRuleBody = (source: string, selector: string): string => {
@@ -1249,6 +1344,8 @@ describe('BeatPlayer', () => {
 
 describe('BeatPanel', () => {
   beforeEach(() => {
+    modalConfirm.mockReset();
+    modalConfirm.mockImplementation(() => ({ close: vi.fn(), update: vi.fn() }));
     vi.stubGlobal('ResizeObserver', NoopResizeObserver);
   });
 
@@ -1313,8 +1410,8 @@ describe('BeatPanel', () => {
     const derivedLine = within(naturalHead).getByRole('textbox', { name: 'Line for Shot 1' });
     expect(derivedLine).toHaveAttribute('aria-describedby', derivedGuidance?.id);
     expect(derivedLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
-    expect(derivedLine).toHaveAttribute('data-min-rows', '2');
-    expect(derivedLine).toHaveAttribute('data-max-rows', '2');
+    expect(derivedLine).toHaveAttribute('data-min-rows', '3');
+    expect(derivedLine).toHaveAttribute('data-max-rows', '6');
     expect(derivedGuidance?.closest('header')).toBe(naturalHead.querySelector('header'));
     expect(within(naturalHead).getByText('Derived from the action')).toBeVisible();
 
@@ -1556,13 +1653,26 @@ describe('BeatPanel', () => {
     expect(modalRule).toMatch(/inline-size:\s*min\(1100px,\s*calc\(100vw\s*-\s*32px\)\)/);
     expect(modalRule).toMatch(/max-inline-size:\s*1100px/);
     expect(modalRule).toMatch(/border-radius:\s*16px/);
-    expect(cssRuleBody(css, '.root')).toMatch(/padding:\s*18px\s+22px/);
+    const rootRule = cssRuleBody(css, '.root');
+    expect(rootRule).toMatch(/composes:\s*surface\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/);
+    expect(rootRule).toMatch(/padding:\s*18px\s+22px/);
+    expect(cssRuleBody(css, '.eyebrow')).toMatch(
+      /composes:\s*eyebrow\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
+    );
+    expect(cssRuleBody(css, '.panelTitle')).toMatch(
+      /composes:\s*pageHeading\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
+    );
+    expect(css).toMatch(
+      /\.shotTitle,\s*\.subsectionTitle\s*\{\s*composes:\s*cardName\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
+    );
 
     const workingRow = cssRuleBody(css, '.workingRow');
     expect(workingRow).toMatch(/display:\s*flex/);
     expect(workingRow).toMatch(/align-items:\s*flex-start/);
     expect(workingRow).toMatch(/gap:\s*18px/);
     const previewColumn = cssRuleBody(css, '.previewColumn');
+    expect(previewColumn).toMatch(/position:\s*sticky/);
+    expect(previewColumn).toMatch(/inset-block-start:\s*0/);
     expect(previewColumn).toMatch(/inline-size:\s*404px/);
     expect(previewColumn).toMatch(/flex:\s*none/);
     expect(previewColumn).toMatch(/gap:\s*7px/);
@@ -1577,11 +1687,27 @@ describe('BeatPanel', () => {
     expect(cssRuleBody(css, '.fieldGuidance')).toMatch(/text-transform:\s*uppercase/);
     expect(cssRuleBody(css, '.chainState')).toMatch(/text-transform:\s*uppercase/);
     expect(cssRuleBody(css, '.lineGuidance')).toMatch(/text-transform:\s*uppercase/);
+    const takeGrid = cssRuleBody(css, '.takeGrid');
+    expect(takeGrid).toMatch(/display:\s*flex/);
+    expect(takeGrid).toMatch(/overflow-x:\s*auto/);
+    const takeCardRule = cssRuleBody(css, '.takeCard');
+    expect(takeCardRule).toMatch(/box-sizing:\s*border-box/);
+    expect(takeCardRule).toMatch(/(?:flex:\s*0\s+0\s+134px|inline-size:\s*134px)/);
+    expect(takeCardRule).toMatch(/padding:\s*10px/);
+    expect(takeCardRule).toMatch(/border:\s*1px\s+solid/);
+    const takePreview = cssRuleBody(css, '.takePreview');
+    expect(takePreview).toMatch(/inline-size:\s*100%/);
+    expect(takePreview).toMatch(/aspect-ratio:\s*16\s*\/\s*9/);
+    expect(cssRuleBody(css, '.previewSlateTitle')).toMatch(
+      /composes:\s*cardName\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
+    );
 
     const workingCompactStart = css.search(/@media\s*\(max-width:\s*900px\)/);
     expect(workingCompactStart).toBeGreaterThanOrEqual(0);
     const stackedWorkingRow = workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.workingRow');
     expect(stackedWorkingRow).toMatch(/flex-direction:\s*column/);
+    const stackedPreview = workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.previewColumn');
+    expect(stackedPreview).toMatch(/position:\s*static/);
     const stackedShotActions =
       workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.shotActionBand');
     expect(stackedShotActions).toMatch(/flex-wrap:\s*wrap/);
@@ -1717,7 +1843,7 @@ describe('BeatPanel', () => {
     expect(targetShot.getByText('Preserved before re-split')).toBeVisible();
   });
 
-  it('routes seed and Take gestures through exact semantic callbacks, including Bin restore and import cancel', async () => {
+  it('keeps primary Take actions visible and routes keyboard-accessible overflow confirmations exactly', async () => {
     const image = makeTake('image_1', 'image', { effectiveSeed: true });
     const selectedImage = makeTake('image_2', 'image', { explicitSeed: true });
     const video = makeTake('video_1', 'video');
@@ -1731,25 +1857,151 @@ describe('BeatPanel', () => {
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
 
-    fireEvent.click(within(takeCard(container, 'image_1')).getByRole('button', { name: 'Pin seed' }));
+    fireEvent.click(within(takeCard(container, 'image_1')).getByRole('button', { name: 'Pin as seed' }));
     expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', 'image_1');
-    fireEvent.click(within(takeCard(container, 'image_2')).getByRole('button', { name: 'Clear pin' }));
+    fireEvent.click(within(takeCard(container, 'image_2')).getByRole('button', { name: 'Clear seed pin' }));
     expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', null);
-    fireEvent.click(within(takeCard(container, 'video_1')).getByRole('button', { name: 'Select take' }));
+    const activeVideoCard = takeCard(container, 'video_1');
+    fireEvent.click(within(activeVideoCard).getByRole('button', { name: 'Select Take' }));
     expect(actions.selectTake).toHaveBeenCalledWith('shot_1', 'video_1');
-    fireEvent.click(
-      within(within(takeCard(container, 'video_1')).getByRole('group', { name: 'Park this take?' })).getByRole(
-        'button',
-        { name: 'Park take' }
-      )
-    );
+
+    const takeOverflow = activeVideoCard.querySelector<HTMLButtonElement>('[data-take-overflow-trigger]');
+    if (takeOverflow === null) throw new Error('Missing Take overflow trigger');
+    expect(takeOverflow).toHaveAccessibleName('More actions · Shot 1 take 1');
+    expect(takeOverflow).toHaveAttribute('aria-haspopup', 'menu');
+    expect(activeVideoCard.querySelector('[data-take-move-to-bin]')).toBeNull();
+    act(() => takeOverflow.focus());
+    fireEvent.keyDown(takeOverflow, { key: 'Enter' });
+    const takeMenu = activeVideoCard.querySelector<HTMLElement>('[data-take-overflow-menu]');
+    if (takeMenu === null) throw new Error('Missing Take overflow menu');
+    expect(takeOverflow).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(within(takeMenu).getByRole('menuitem', { name: 'Move to Bin' }));
+    let confirmation = latestModalConfirmation();
+    expect(confirmation).toMatchObject({
+      cancelText: 'Cancel',
+      content: 'The Take stays with the project and moves out of active choices.',
+      okButtonProps: { status: 'danger' },
+      okText: 'Move to Bin',
+      title: 'Move this Take to the Bin?',
+    });
+    expect(actions.parkTake).not.toHaveBeenCalled();
+    await act(async () => {
+      await confirmation.onOk();
+    });
     expect(actions.parkTake).toHaveBeenCalledWith('shot_1', 'video_1');
+
+    fireEvent.keyDown(takeOverflow, { key: 'Enter' });
+    const alternateMenu = activeVideoCard.querySelector<HTMLElement>('[data-take-overflow-menu]');
+    if (alternateMenu === null) throw new Error('Missing reopened Take overflow menu');
+    fireEvent.click(within(alternateMenu).getByRole('menuitem', { name: 'Move to alternates' }));
+    confirmation = latestModalConfirmation();
+    expect(confirmation).toMatchObject({
+      cancelText: 'Cancel',
+      content: 'The Take stays with the project as an alternate.',
+      okText: 'Move to alternates',
+      title: 'Move this Take to alternates?',
+    });
+    expect(actions.addAlternateTake).not.toHaveBeenCalled();
+    await act(async () => {
+      await confirmation.onOk();
+    });
+    expect(actions.addAlternateTake).toHaveBeenCalledWith('shot_1', 'video_1');
+
     fireEvent.click(within(takeCard(container, 'video_2')).getByRole('button', { name: 'Restore take' }));
     expect(actions.restoreTake).toHaveBeenCalledWith('shot_1', 'video_2');
     fireEvent.click(screen.getByRole('button', { name: 'Import seed still' }));
     await waitFor(() => expect(actions.importSeedStill).toHaveBeenCalledWith('shot_1'));
     expect(actions.saveBeat).not.toHaveBeenCalled();
     expect(actions.saveShot).not.toHaveBeenCalled();
+  });
+
+  it('closes and invalidates an open Take confirmation when park authority becomes restore authority', async () => {
+    const activeTake = makeTake('video_1', 'video');
+    const activeBeat = makeBeat('beat_1', [makeShot('shot_1', 0, { videoTakes: [activeTake] })]);
+    const actions = makeActions();
+    const close = vi.fn();
+    modalConfirm.mockReturnValueOnce({ close, update: vi.fn() });
+    const result = render(<BeatPanel {...panelProps(activeBeat, makeDrafts(), actions)} />);
+    const activeCard = takeCard(result.container, activeTake.assetId);
+    const trigger = activeCard.querySelector<HTMLButtonElement>('[data-take-overflow-trigger]');
+    if (trigger === null) throw new Error('Missing Take overflow trigger');
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const menu = activeCard.querySelector<HTMLElement>('[data-take-overflow-menu]');
+    if (menu === null) throw new Error('Missing Take overflow menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to Bin' }));
+    const staleConfirmation = latestModalConfirmation();
+
+    const binnedTake = { ...activeTake, binReason: 'lifted' as const };
+    const binnedBeat = makeBeat('beat_1', [makeShot('shot_1', 0, { videoTakes: [binnedTake] })]);
+    result.rerender(<BeatPanel {...panelProps(binnedBeat, makeDrafts(), actions)} />);
+
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(takeCard(result.container, activeTake.assetId).querySelector('[data-take-overflow-trigger]')).toBeNull();
+    expect(
+      within(takeCard(result.container, activeTake.assetId)).getByRole('button', { name: 'Restore take' })
+    ).toBeEnabled();
+    await act(async () => {
+      await staleConfirmation.onOk();
+    });
+    expect(actions.parkTake).not.toHaveBeenCalled();
+    expect(actions.addAlternateTake).not.toHaveBeenCalled();
+  });
+
+  it('closes and invalidates Beat confirmations on identity or project drift and owner unmount', async () => {
+    const beatA = makeBeat('beat_a', [makeShot('shot_a', 0)]);
+    const beatB = makeBeat('beat_b', [makeShot('shot_b', 0)]);
+    const actions = makeActions();
+    const closeA = vi.fn();
+    modalConfirm.mockReturnValueOnce({ close: closeA, update: vi.fn() });
+    const result = render(<BeatPanel {...panelProps(beatA, makeDrafts(), actions)} />);
+    let trigger = result.container.querySelector<HTMLButtonElement>('[data-beat-overflow-trigger]');
+    if (trigger === null) throw new Error('Missing Beat overflow trigger');
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    let menu = result.container.querySelector<HTMLElement>('[data-beat-overflow-menu]');
+    if (menu === null) throw new Error('Missing Beat overflow menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to Bin' }));
+    const beatAConfirmation = latestModalConfirmation();
+
+    result.rerender(<BeatPanel {...panelProps(beatB, makeDrafts(), actions)} />);
+    expect(closeA).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await beatAConfirmation.onOk();
+    });
+    expect(actions.parkBeat).not.toHaveBeenCalled();
+
+    const closeB = vi.fn();
+    modalConfirm.mockReturnValueOnce({ close: closeB, update: vi.fn() });
+    trigger = result.container.querySelector<HTMLButtonElement>('[data-beat-overflow-trigger]');
+    if (trigger === null) throw new Error('Missing replacement Beat overflow trigger');
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    menu = result.container.querySelector<HTMLElement>('[data-beat-overflow-menu]');
+    if (menu === null) throw new Error('Missing replacement Beat overflow menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to Bin' }));
+    const beatBConfirmation = latestModalConfirmation();
+    result.rerender(
+      <BeatPanel {...panelProps(beatB, makeDrafts(), actions, makeProjection([beatB]), { projectId: 'project_2' })} />
+    );
+    expect(closeB).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await beatBConfirmation.onOk();
+    });
+    expect(actions.parkBeat).not.toHaveBeenCalled();
+
+    const closeProjectTwo = vi.fn();
+    modalConfirm.mockReturnValueOnce({ close: closeProjectTwo, update: vi.fn() });
+    trigger = result.container.querySelector<HTMLButtonElement>('[data-beat-overflow-trigger]');
+    if (trigger === null) throw new Error('Missing project-switched Beat overflow trigger');
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    menu = result.container.querySelector<HTMLElement>('[data-beat-overflow-menu]');
+    if (menu === null) throw new Error('Missing project-switched Beat overflow menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to Bin' }));
+    const projectTwoConfirmation = latestModalConfirmation();
+    result.unmount();
+    expect(closeProjectTwo).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await projectTwoConfirmation.onOk();
+    });
+    expect(actions.parkBeat).not.toHaveBeenCalled();
   });
 
   it('disables an ordinary Take selection when retained trims leave less than the minimum played duration', () => {
@@ -1764,9 +2016,9 @@ describe('BeatPanel', () => {
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
     const card = within(takeCard(container, 'short_video'));
 
-    expect(card.getByRole('button', { name: 'Select take' })).toBeDisabled();
+    expect(card.getByRole('button', { name: 'Select Take' })).toBeDisabled();
     expect(card.getByText('Current trims do not fit this take')).toBeVisible();
-    fireEvent.click(card.getByRole('button', { name: 'Select take' }));
+    fireEvent.click(card.getByRole('button', { name: 'Select Take' }));
     expect(actions.selectTake).not.toHaveBeenCalled();
   });
 
@@ -1782,9 +2034,9 @@ describe('BeatPanel', () => {
     expect(within(inspected).getAllByText('Retained image takes')).toHaveLength(2);
     expect(card).toHaveTextContent('Shot 2 image 1');
     expect(card).not.toHaveTextContent('Effective seed');
-    expect(within(card).queryByRole('button', { name: 'Pin seed' })).toBeNull();
-    expect(within(card).queryByRole('button', { name: 'Clear pin' })).toBeNull();
-    expect(within(card).getAllByRole('button', { name: 'Park take' })[0]).toBeEnabled();
+    expect(within(card).queryByRole('button', { name: 'Pin as seed' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Clear seed pin' })).toBeNull();
+    expect(card.querySelector('[data-take-overflow-trigger]')).toBeEnabled();
   });
 
   it('reviews the complete ordered seed-and-video graph with bounded persisted preferences and safe Brief labels', () => {
@@ -1891,9 +2143,13 @@ describe('BeatPanel', () => {
     });
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions, projection)} />);
-    const park = within(takeCard(container, 'video_1')).getAllByRole('button', { name: 'Park take' });
-    expect(park.every((button) => button.hasAttribute('disabled'))).toBe(true);
-    fireEvent.click(park[0]!);
+    const card = takeCard(container, 'video_1');
+    const overflow = card.querySelector<HTMLButtonElement>('[data-take-overflow-trigger]');
+    if (overflow === null) throw new Error('Missing blocked Take overflow trigger');
+    expect(overflow).toBeDisabled();
+    fireEvent.keyDown(overflow, { key: 'Enter' });
+    expect(card.querySelector('[data-take-overflow-menu]')).toBeNull();
+    expect(modalConfirm).not.toHaveBeenCalled();
     expect(actions.parkTake).not.toHaveBeenCalled();
   });
 
@@ -1906,7 +2162,7 @@ describe('BeatPanel', () => {
     expect(screen.getByText('Moved Shot 1 to 2 of 2')).toBeInTheDocument();
   });
 
-  it('names only remaining downstream positions in lift confirmations and protects unsaved local work', async () => {
+  it('places Shot and Beat removal in header overflows with exact downstream confirmations', async () => {
     const shot1 = makeShot('shot_1', 0, { downstreamShotIds: ['shot_2', 'shot_3'] });
     const shot2 = makeShot('shot_2', 1);
     const beat = makeBeat('beat_1', [shot1, shot2]);
@@ -1918,25 +2174,69 @@ describe('BeatPanel', () => {
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, projection, { onParkShotSuccess })} />
     );
 
-    const shotLift = within(shotCard(result.container, 'shot_1')).getByRole('group', { name: 'Lift Shot 1?' });
-    expect(shotLift).toHaveTextContent('Beat 1, Shot 2');
-    expect(shotLift).toHaveTextContent('Beat 2, Shot 1');
-    fireEvent.click(within(shotLift).getByRole('button', { name: 'Confirm lift Shot' }));
+    const firstShotCard = shotCard(result.container, 'shot_1');
+    const shotHeader = firstShotCard.querySelector('header');
+    const shotFooter = firstShotCard.querySelector<HTMLElement>('[data-shot-footer]');
+    const shotOverflow = firstShotCard.querySelector<HTMLButtonElement>('[data-shot-overflow-trigger]');
+    if (shotHeader === null || shotFooter === null || shotOverflow === null) {
+      throw new Error('Missing Shot header overflow placement hooks');
+    }
+    expect(shotHeader).toContainElement(shotOverflow);
+    expect(shotFooter.querySelector('[data-shot-overflow-trigger]')).toBeNull();
+    expect(shotFooter.querySelector('[data-shot-move-to-bin]')).toBeNull();
+    expect(shotOverflow).toHaveAccessibleName('More actions · Shot 1');
+    expect(shotOverflow).toHaveAttribute('aria-haspopup', 'menu');
+    act(() => shotOverflow.focus());
+    fireEvent.keyDown(shotOverflow, { key: 'Enter' });
+    const shotMenu = firstShotCard.querySelector<HTMLElement>('[data-shot-overflow-menu]');
+    if (shotMenu === null) throw new Error('Missing Shot overflow menu');
+    fireEvent.click(within(shotMenu).getByRole('menuitem', { name: 'Move to Bin' }));
+    let confirmation = latestModalConfirmation();
+    expect(confirmation).toMatchObject({
+      cancelText: 'Cancel',
+      content:
+        'Authored and paid work stays with this Shot. Moving it to the Bin makes Beat 1, Shot 2, Beat 2, Shot 1 stale.',
+      okButtonProps: { status: 'danger' },
+      okText: 'Move to Bin',
+      title: 'Move Shot 1 to the Bin?',
+    });
+    await act(async () => {
+      await confirmation.onOk();
+    });
     await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1'));
     await waitFor(() => expect(onParkShotSuccess).toHaveBeenCalledWith('shot_1'));
 
-    const beatLift = screen.getByRole('group', { name: 'Lift this Beat?' });
-    expect(beatLift).toHaveTextContent('Beat 2, Shot 1');
-    expect(beatLift).not.toHaveTextContent('Beat 1, Shot 2');
-    fireEvent.click(within(beatLift).getByRole('button', { name: 'Cancel' }));
+    const panelHeader = result.container.querySelector<HTMLElement>('[data-panel-header]');
+    const beatOverflow = result.container.querySelector<HTMLButtonElement>('[data-beat-overflow-trigger]');
+    if (panelHeader === null || beatOverflow === null) throw new Error('Missing Beat header overflow placement hooks');
+    expect(panelHeader).toContainElement(beatOverflow);
+    expect(beatOverflow).toHaveAccessibleName('More actions · Opening');
+    expect(result.container.querySelector('[data-panel-footer]')).toBeNull();
+    fireEvent.keyDown(beatOverflow, { key: 'Enter' });
+    const beatMenu = panelHeader.querySelector<HTMLElement>('[data-beat-overflow-menu]');
+    if (beatMenu === null) throw new Error('Missing Beat overflow menu');
+    fireEvent.click(within(beatMenu).getByRole('menuitem', { name: 'Move to Bin' }));
+    confirmation = latestModalConfirmation();
+    expect(confirmation).toMatchObject({
+      cancelText: 'Cancel',
+      content:
+        'Every Shot and all authored and paid work stay with this Beat. Moving it to the Bin makes Beat 2, Shot 1 stale.',
+      okButtonProps: { status: 'danger' },
+      okText: 'Move to Bin',
+      title: 'Move this Beat to the Bin?',
+    });
+    expect(String(confirmation.content)).not.toContain('Beat 1, Shot 2');
+    act(() => screen.getByRole('button', { name: 'Close' }).focus());
+    act(() => confirmation.onCancel?.());
+    expect(beatOverflow).not.toHaveFocus();
+    act(() => confirmation.afterClose?.());
+    expect(beatOverflow).toHaveFocus();
     expect(actions.parkBeat).not.toHaveBeenCalled();
 
     result.rerender(
       <BeatPanel {...panelProps(beat, makeDrafts({ 'shot.shot_1.line': 'Unsaved local work' }), actions, projection)} />
     );
-    expect(
-      within(shotCard(result.container, 'shot_1')).getAllByRole('button', { name: 'Lift Shot' })[0]
-    ).toBeDisabled();
+    expect(shotCard(result.container, 'shot_1').querySelector('[data-shot-overflow-trigger]')).toBeDisabled();
     expect(screen.getAllByText('Save or reset local edits first').length).toBeGreaterThan(0);
   });
 
@@ -1948,14 +2248,23 @@ describe('BeatPanel', () => {
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { onParkShotSuccess })} />
     );
 
-    fireEvent.click(within(shotCard(result.container, 'shot_1')).getByRole('button', { name: 'Confirm lift Shot' }));
+    const card = shotCard(result.container, 'shot_1');
+    const trigger = card.querySelector<HTMLButtonElement>('[data-shot-overflow-trigger]');
+    if (trigger === null) throw new Error('Missing Shot overflow trigger');
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const menu = card.querySelector<HTMLElement>('[data-shot-overflow-menu]');
+    if (menu === null) throw new Error('Missing Shot overflow menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to Bin' }));
+    await act(async () => {
+      await latestModalConfirmation().onOk();
+    });
 
     await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1'));
     await waitFor(() => expect(onParkShotSuccess).toHaveBeenCalledWith('shot_1'));
     expect(onParkShotSuccess).toHaveBeenCalledTimes(1);
   });
 
-  it('restores the exact Lift Shot trigger after cancel or refusal and never starts a Bin handoff', async () => {
+  it('restores the exact Shot overflow trigger after close on cancel or refusal and never starts a Bin handoff', async () => {
     const beat = makeBeat();
     const actions = makeActions({ parkShot: vi.fn().mockResolvedValue(false) });
     const onParkShotSuccess = vi.fn();
@@ -1963,17 +2272,35 @@ describe('BeatPanel', () => {
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { onParkShotSuccess })} />
     );
     const card = shotCard(result.container, 'shot_1');
-    const trigger = within(card).getByRole('button', { name: 'Lift Shot' });
-    const confirmation = within(card).getByRole('group', { name: 'Lift Shot 1?' });
+    const trigger = card.querySelector<HTMLButtonElement>('[data-shot-overflow-trigger]');
+    if (trigger === null) throw new Error('Missing Shot overflow trigger');
 
     act(() => trigger.focus());
-    fireEvent.click(within(confirmation).getByRole('button', { name: 'Cancel' }));
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    let menu = card.querySelector<HTMLElement>('[data-shot-overflow-menu]');
+    if (menu === null) throw new Error('Missing Shot overflow menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to Bin' }));
+    let confirmation = latestModalConfirmation();
+    act(() => screen.getByRole('button', { name: 'Close' }).focus());
+    act(() => confirmation.onCancel?.());
+    expect(trigger).not.toHaveFocus();
+    act(() => confirmation.afterClose?.());
     expect(trigger).toHaveFocus();
     expect(actions.parkShot).not.toHaveBeenCalled();
 
-    fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirm lift Shot' }));
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    menu = card.querySelector<HTMLElement>('[data-shot-overflow-menu]');
+    if (menu === null) throw new Error('Missing reopened Shot overflow menu');
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'Move to Bin' }));
+    confirmation = latestModalConfirmation();
+    act(() => screen.getByRole('button', { name: 'Close' }).focus());
+    await act(async () => {
+      await confirmation.onOk();
+    });
     await waitFor(() => expect(actions.parkShot).toHaveBeenCalledWith('shot_1'));
-    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).not.toHaveFocus();
+    act(() => confirmation.afterClose?.());
+    expect(trigger).toHaveFocus();
     expect(screen.getByText('Shot was not moved to the Bin.')).toBeInTheDocument();
     expect(onParkShotSuccess).not.toHaveBeenCalled();
   });
