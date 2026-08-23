@@ -162,7 +162,7 @@ describe('Creative Studio workspace accessible copy', () => {
     expect(review).toHaveTextContent('It owns media.');
     expect(review).toHaveTextContent('It owns generation work.');
     expect(review).toHaveTextContent('It has a current picture.');
-    expect(review).toHaveTextContent('It has a pinned seed still.');
+    expect(review).toHaveTextContent('It has a pinned first frame.');
     expect(review).toHaveTextContent('It owns a continuity frame.');
     expect(review).toHaveTextContent('A generation request uses it as conditioning input.');
     expect(review).toHaveTextContent('It has authored narration.');

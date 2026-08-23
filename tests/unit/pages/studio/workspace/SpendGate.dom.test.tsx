@@ -59,7 +59,7 @@ vi.mock('react-i18next', () => ({
         return `All through ${String(values?.model)}`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.continuity.severConfirmed') {
-        return 'Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.';
+        return 'Hard cut confirmed. Review the Shot for first-frame progress, replacement progress, or any required recovery.';
       }
       if (key === 'conversation.creativeStudio.workspace.gate.continuity.rejoinConfirmed') {
         return 'Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery.';
@@ -1601,7 +1601,7 @@ describe('SpendGateModal', () => {
     );
     expect(
       await within(modal).findByText(
-        'Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.'
+        'Hard cut confirmed. Review the Shot for first-frame progress, replacement progress, or any required recovery.'
       )
     ).toBeVisible();
   });

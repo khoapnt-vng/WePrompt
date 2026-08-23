@@ -29,7 +29,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.waitingOnFrame': 'Waiting on the frame',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendering': 'Rendering',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderingStill':
-          'Rendering · Showing the still',
+          'Rendering · Showing the first frame',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendered': 'Rendered',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.untouched': 'Untouched',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
@@ -561,7 +561,7 @@ describe('CoverageBar', () => {
     [{ kind: 'waiting_on_shot', upstreamShotNumber: 1 } as const, 'Waiting on 01'],
     [{ kind: 'waiting_on_frame' } as const, 'Waiting on the frame'],
     [{ kind: 'rendering', progressPercent: null, showingStill: false } as const, 'Rendering'],
-    [{ kind: 'rendering', progressPercent: null, showingStill: true } as const, 'Rendering · Showing the still'],
+    [{ kind: 'rendering', progressPercent: null, showingStill: true } as const, 'Rendering · Showing the first frame'],
     [{ kind: 'rendering', progressPercent: 39.6, showingStill: true } as const, 'Rendering · 39.6%'],
     [{ kind: 'rendered' } as const, 'Rendered'],
     [{ kind: 'needs_rerender' } as const, 'Needs a re-render'],

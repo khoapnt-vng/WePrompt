@@ -199,14 +199,14 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.chain.continuous':
           'Continues from Shot {{position}}’s last frame',
         'conversation.creativeStudio.workspace.beatPanel.chain.hardCut': 'Hard cut',
-        'conversation.creativeStudio.workspace.beatPanel.chain.hardCutState': 'Hard cut · Starts from the still',
+        'conversation.creativeStudio.workspace.beatPanel.chain.hardCutState': 'Hard cut · Starts from the first frame',
         'conversation.creativeStudio.workspace.beatPanel.chain.hardCutUnavailable':
           'Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.',
         'conversation.creativeStudio.workspace.beatPanel.chain.reviewSever': 'Review hard cut…',
         'conversation.creativeStudio.workspace.beatPanel.chain.reviewRejoin': 'Review rejoin…',
         'conversation.creativeStudio.workspace.beatPanel.chain.generationOutOfDate': 'Generated work is out of date',
         'conversation.creativeStudio.workspace.beatPanel.chain.segmentHead':
-          'Head of the chain · Starts from the still',
+          'Head of the chain · Starts from the first frame',
         'conversation.creativeStudio.workspace.beatPanel.chain.systemContinuityStale': 'System continuity is stale',
         'conversation.creativeStudio.workspace.beatPanel.common.cancel': 'Cancel',
         'conversation.creativeStudio.workspace.beatPanel.common.keepWaiting': 'Keep waiting',
@@ -234,9 +234,9 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.fields.onScreenText': 'On-screen text',
         'conversation.creativeStudio.workspace.beatPanel.fields.targetSeconds': 'Beat target',
         'conversation.creativeStudio.workspace.beatPanel.generation.gateLocked': 'A confirmation is open',
-        'conversation.creativeStudio.workspace.beatPanel.generation.generateSeed': 'Generate seed',
+        'conversation.creativeStudio.workspace.beatPanel.generation.generateSeed': 'Review first-frame generation',
         'conversation.creativeStudio.workspace.beatPanel.generation.noReference': 'No Brief reference',
-        'conversation.creativeStudio.workspace.beatPanel.generation.purpose.seedStill': 'seed still',
+        'conversation.creativeStudio.workspace.beatPanel.generation.purpose.seedStill': 'first frame',
         'conversation.creativeStudio.scene.video': 'Video',
         'conversation.creativeStudio.workspace.beatPanel.generation.renderVideo': 'Generate again',
         'conversation.creativeStudio.workspace.beatPanel.generation.reviewUnavailable':
@@ -259,15 +259,17 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.recovery.title': 'Part done',
         'conversation.creativeStudio.workspace.beatPanel.reorder.nextShort': 'Down',
         'conversation.creativeStudio.workspace.beatPanel.reorder.previousShort': 'Up',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.clearPin': 'Clear seed pin',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.empty': 'No seed stills',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.import': 'Import seed still',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.latestDefault': 'Latest image is the default',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.pending': 'Seed pending',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.pin': 'Pin as seed',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.pinned': 'Seed pinned',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.title': 'Seed stills',
-        'conversation.creativeStudio.workspace.beatPanel.seeds.effective': 'Current seed',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.clearPin': 'Clear first-frame pin',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.empty': 'No first frames yet.',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.import': 'Import first frame',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.latestDefault':
+          'The latest eligible image is the current first frame.',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.pending':
+          'A first frame is required before video generation.',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.pin': 'Pin as first frame',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.pinned': 'A first frame is pinned.',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.title': 'First frames',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.effective': 'Current first frame',
         'conversation.creativeStudio.workspace.beatPanel.seeds.pinnedBadge': 'Pinned',
         'conversation.creativeStudio.workspace.beatPanel.shots.empty': 'No coverage yet',
         'conversation.creativeStudio.workspace.beatPanel.shots.label': 'Shots',
@@ -289,7 +291,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.waitingOnFrame': 'Waiting on the frame',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendering': 'Rendering',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.renderingStill':
-          'Rendering · Showing the still',
+          'Rendering · Showing the first frame',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.rendered': 'Rendered',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.untouched': 'Untouched',
         'conversation.creativeStudio.workspace.beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
@@ -329,10 +331,10 @@ vi.mock('react-i18next', () => ({
         return `Continues from Shot ${String(values?.position)}’s last frame`;
       }
       if (key.endsWith('.chain.reviewSeverDescription')) {
-        return `A hard cut makes Shot ${String(values?.shot)} start from an eligible still, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.`;
+        return `A hard cut makes Shot ${String(values?.shot)} start from an eligible first frame, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.`;
       }
       if (key.endsWith('.chain.reviewRejoinDescription')) {
-        return `Rejoining Shot ${String(values?.shot)} clears its seed selection and uses Shot ${String(values?.previous)}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.`;
+        return `Rejoining Shot ${String(values?.shot)} clears its first-frame selection and uses Shot ${String(values?.previous)}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.`;
       }
       if (key.endsWith('.fields.lineFor')) return `Line for Shot ${String(values?.index)}`;
       if (key.endsWith('For')) return `${key.split('.').at(-1)?.replace('For', '')} Shot ${String(values?.index)}`;
@@ -343,12 +345,12 @@ vi.mock('react-i18next', () => ({
         return `Moved Shot ${String(values?.from)} to ${String(values?.to)} of ${String(values?.total)}`;
       }
       if (key.endsWith('.derivation.label')) return `Derivation for Shot ${String(values?.index)}`;
-      if (key.endsWith('.seeds.label')) return `Seed stills for Shot ${String(values?.index)}`;
+      if (key.endsWith('.seeds.label')) return `First frames for Shot ${String(values?.index)}`;
       if (key.endsWith('.picture.label')) return `Current picture for Shot ${String(values?.index)}`;
       if (key.endsWith('.picture.sourceDuration')) return `${String(values?.seconds)} seconds source`;
       if (key.endsWith('.picture.videoPreview')) return `Player · ${String(values?.label)}`;
       if (key.endsWith('.seeds.stillLabel')) {
-        return `Seed still ${String(values?.stillIndex)} for Shot ${String(values?.shotIndex)}`;
+        return `First frame ${String(values?.stillIndex)} for Shot ${String(values?.shotIndex)}`;
       }
       if (key.endsWith('.seeds.previewAlt')) return `Preview · ${String(values?.label)}`;
       if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
@@ -1667,7 +1669,7 @@ describe('BeatPanel', () => {
     const laterNaturalHead = shotCard(container, 'shot_private_3');
     const authoredHead = shotCard(container, 'shot_private_4');
     const defensiveContinuation = shotCard(container, 'shot_private_5');
-    const headCopy = 'Head of the chain · Starts from the still';
+    const headCopy = 'Head of the chain · Starts from the first frame';
 
     expect(naturalHead.querySelector('[data-chain-state="segment_head"]')).toHaveTextContent(headCopy);
     expect(continuation.querySelector('[data-chain-state="continuous"]')).toHaveTextContent(
@@ -1675,7 +1677,7 @@ describe('BeatPanel', () => {
     );
     expect(laterNaturalHead.querySelector('[data-chain-state="segment_head"]')).toHaveTextContent(headCopy);
     expect(authoredHead.querySelector('[data-chain-state="hard_cut"]')).toHaveTextContent(
-      'Hard cut · Starts from the still'
+      'Hard cut · Starts from the first frame'
     );
     expect(defensiveContinuation.querySelector('[data-chain-state="continuous"]')).toHaveTextContent(
       'Continues from Shot 04’s last frame'
@@ -1720,7 +1722,7 @@ describe('BeatPanel', () => {
       'rejoin'
     );
     expect(container.querySelector('video')).toHaveProperty('controls', true);
-    expect(within(naturalHead).getByLabelText('Seed still 1 for Shot 1')).toBeInTheDocument();
+    expect(within(naturalHead).getByLabelText('First frame 1 for Shot 1')).toBeInTheDocument();
     expect(within(continuation).getByLabelText('Player · Current picture for Shot 2')).toBeInTheDocument();
     expect(container.textContent).not.toContain('asset_private');
     expect(container.textContent).not.toContain('shot_private');
@@ -1735,9 +1737,9 @@ describe('BeatPanel', () => {
 
     expect(
       shotCard(container, 'shot_legacy_head').querySelector('[data-chain-state="segment_head"]')
-    ).toHaveTextContent('Head of the chain · Starts from the still');
+    ).toHaveTextContent('Head of the chain · Starts from the first frame');
     expect(shotCard(container, 'shot_later_hard_cut').querySelector('[data-chain-state="hard_cut"]')).toHaveTextContent(
-      'Hard cut · Starts from the still'
+      'Hard cut · Starts from the first frame'
     );
   });
 
@@ -1775,7 +1777,7 @@ describe('BeatPanel', () => {
 
     rerender(<BeatPanel {...props} />);
     expect(shotCard(container, 'shot_continuous')).toHaveTextContent('Continues from Shot 01’s last frame');
-    expect(shotCard(container, 'shot_hard_cut')).toHaveTextContent('Hard cut · Starts from the still');
+    expect(shotCard(container, 'shot_hard_cut')).toHaveTextContent('Hard cut · Starts from the first frame');
     expect(actions).not.toHaveProperty('setHardCut');
   });
 
@@ -2172,9 +2174,13 @@ describe('BeatPanel', () => {
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
 
-    fireEvent.click(within(assetCard(container, effective.assetId)).getByRole('button', { name: 'Pin as seed' }));
+    fireEvent.click(
+      within(assetCard(container, effective.assetId)).getByRole('button', { name: 'Pin as first frame' })
+    );
     expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', effective.assetId);
-    fireEvent.click(within(assetCard(container, pinned.assetId)).getByRole('button', { name: 'Clear seed pin' }));
+    fireEvent.click(
+      within(assetCard(container, pinned.assetId)).getByRole('button', { name: 'Clear first-frame pin' })
+    );
     expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', null);
     expect(container.querySelector('[data-take-overflow-trigger]')).toBeNull();
     expect(container.querySelector('[data-take-overflow-menu]')).toBeNull();
@@ -2244,11 +2250,11 @@ describe('BeatPanel', () => {
       makeShot('shot_2', 1, { seedStills: [retainedSeed], segmentHead: false }),
     ]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const card = within(inspectShot(container, 'shot_2')).getByLabelText('Seed still 1 for Shot 2');
+    const card = within(inspectShot(container, 'shot_2')).getByLabelText('First frame 1 for Shot 2');
 
     expect(card).toBeVisible();
-    expect(within(card).queryByRole('button', { name: 'Pin as seed' })).toBeNull();
-    expect(within(card).queryByRole('button', { name: 'Clear seed pin' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Pin as first frame' })).toBeNull();
+    expect(within(card).queryByRole('button', { name: 'Clear first-frame pin' })).toBeNull();
   });
 
   it('reviews the complete ordered seed-and-video graph with reference-only preferences and safe Brief labels', () => {
@@ -2286,7 +2292,7 @@ describe('BeatPanel', () => {
     const triggerCard = within(shotCard(result.container, 'shot_1'));
     expect(triggerCard.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
     const reference = triggerCard.getByRole('combobox', {
-      name: 'Brief reference for Beat 1 Shot 1 seed still',
+      name: 'Brief reference for Beat 1 Shot 1 first frame',
     });
     expect(reference).toHaveValue('brief_ref');
     expect(within(reference).getByRole('option', { name: 'Hero portrait' })).toBeInTheDocument();
@@ -2301,7 +2307,7 @@ describe('BeatPanel', () => {
     expect(drafts.setValue).toHaveBeenLastCalledWith('gate.choices', expect.any(String));
     expect(persisted['shot_1:seed_still']?.referenceAssetId).toBeNull();
 
-    fireEvent.click(triggerCard.getByRole('button', { name: 'Generate seed' }));
+    fireEvent.click(triggerCard.getByRole('button', { name: 'Review first-frame generation' }));
     expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [
       { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: 'brief_ref' },
       { shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null },
@@ -2319,9 +2325,9 @@ describe('BeatPanel', () => {
         })}
       />
     );
-    expect(screen.getByRole('button', { name: 'Generate seed' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Review first-frame generation' })).toBeDisabled();
     expect(screen.getByText('Generation review is unavailable')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Generate seed' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Review first-frame generation' }));
     expect(actions.reviewShot).not.toHaveBeenCalled();
   });
 

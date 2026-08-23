@@ -962,9 +962,9 @@
       },
       "beatPanel": {
         "seeds": {
-          "stillLabel": "镜头 {{shotIndex}} 的种子静帧 {{stillIndex}}",
+          "stillLabel": "镜头 {{shotIndex}} 的首帧 {{stillIndex}}",
           "previewAlt": "预览 · {{label}}",
-          "effective": "当前种子",
+          "effective": "当前首帧",
           "pinnedBadge": "已固定"
         },
         "picture": {
@@ -1004,13 +1004,13 @@
         "lookCounter_one": "{{count}} / {{limit}} 个词",
         "lookCounter_other": "{{count}} / {{limit}} 个词",
         "chain": {
-          "hardCutState": "硬切 · 从静帧开始",
+          "hardCutState": "硬切 · 从首帧开始",
           "hardCutUnavailable": "暂时无法更改硬切。必须先审阅所需替换媒体的报价。",
           "reviewSever": "审阅硬切…",
           "reviewRejoin": "审阅重新衔接…",
-          "reviewSeverDescription": "硬切会让镜头 {{shot}} 从符合条件的静帧开始；如有需要，会创建一个新静帧。确认后，将替换此镜头及其后所有连续镜头，直到下一个硬切。",
-          "reviewRejoinDescription": "重新衔接镜头 {{shot}} 会清除其种子图选择，并使用镜头 {{previous}} 经裁剪后的最后一帧。确认后，免费的帧提取可能会先完成，再将此镜头及其后直到下一个硬切的连续镜头提交给提供商。",
-          "segmentHead": "链首 · 从静帧开始",
+          "reviewSeverDescription": "硬切会让镜头 {{shot}} 从符合条件的首帧开始；如有需要，会创建一个新首帧。确认后，将替换此镜头及其后所有连续镜头，直到下一个硬切。",
+          "reviewRejoinDescription": "重新衔接镜头 {{shot}} 会清除其首帧选择，并使用镜头 {{previous}} 经裁剪后的最后一帧。确认后，免费的帧提取可能会先完成，再将此镜头及其后直到下一个硬切的连续镜头提交给提供商。",
+          "segmentHead": "链首 · 从首帧开始",
           "continuous": "承接镜头 {{position}} 的最后一帧"
         },
         "derivation": {
@@ -1030,7 +1030,7 @@
             "waitingOnFrame": "等待连续性帧",
             "rendering": "正在渲染",
             "renderingProgress": "正在渲染 · {{progress}}%",
-            "renderingStill": "正在渲染 · 正在显示静帧",
+            "renderingStill": "正在渲染 · 正在显示首帧",
             "rendered": "已渲染",
             "untouched": "未更改",
             "needsRerender": "需要重新渲染",
@@ -1085,8 +1085,8 @@
         "continuity": {
           "severTitle": "审阅硬切",
           "rejoinTitle": "审阅重新衔接",
-          "severSummary": "此报价会将该镜头设为链头，复用符合条件的种子图或在需要时创建一个，并替换直到下一个硬切之前所有受影响的视频。",
-          "rejoinSummary": "此报价会清除该镜头的种子图选择，并将其重新衔接到经裁剪的前序帧。确认后，免费的帧提取可能会先完成，再提交直到下一个硬切之前的替换视频。",
+          "severSummary": "此报价会将该镜头设为链头，复用符合条件的首帧或在需要时创建一个，并替换直到下一个硬切之前所有受影响的视频。",
+          "rejoinSummary": "此报价会清除该镜头的首帧选择，并将其重新衔接到经裁剪的前序帧。确认后，免费的帧提取可能会先完成，再提交直到下一个硬切之前的替换视频。",
           "severHeadline": "硬切 · {{count}} 次必需生成 · {{cost}}",
           "severHeadline_one": "硬切 · {{count}} 次必需生成 · {{cost}}",
           "severHeadline_other": "硬切 · {{count}} 次必需生成 · {{cost}}",
@@ -1101,7 +1101,7 @@
           "confirmRejoin_one": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
           "confirmRejoin_other": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
           "close": "关闭 — 保持链不变",
-          "severConfirmed": "已确认硬切。请在镜头中查看种子图和替换工作的进度，以及任何必要的恢复操作。",
+          "severConfirmed": "已确认硬切。请在镜头中查看首帧和替换工作的进度，以及任何必要的恢复操作。",
           "rejoinConfirmed": "已确认重新衔接。请在镜头中查看帧提取和替换工作的进度，以及任何必要的恢复操作。"
         },
         "errors": {
@@ -1114,7 +1114,7 @@
             "invalidDependency": "后续生成的依赖关系已失效。请刷新项目后重新准备报价。",
             "invalidPrepareRequest": "无法安全地准备所选生成任务。请检查选择后重新准备报价。",
             "invalidReference": "一个已选参考图已不再适用于此次生成。请选择其他参考图。",
-            "missingConditioning": "一个视频镜头缺少可用的种子图或前序帧。请添加或选择所需图像。",
+            "missingConditioning": "一个视频镜头缺少可用的首帧或前序帧。请添加或选择所需图像。",
             "unsafeTotal": "无法安全表示报价总额。请减少选择；未提交任何内容。"
           }
         }
@@ -1588,7 +1588,7 @@
         "submissionUnknown": "提交结果未知。重试前请查看重复扣费警告。",
         "downloadFailed": "生成已完成，但无法下载输出。",
         "unsupported": "此服务商不支持请求的操作。",
-        "seedStillVariationGrid": "生成的种子静帧包含多面板变体网格，无法用于视频。",
+        "seedStillVariationGrid": "生成的首帧包含多面板变体网格，无法用于视频。",
         "unknown": "生成任务因未知原因失败。"
       }
     },

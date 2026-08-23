@@ -966,9 +966,9 @@
       },
       "beatPanel": {
         "seeds": {
-          "stillLabel": "Çekim {{shotIndex}} için başlangıç karesi {{stillIndex}}",
+          "stillLabel": "Çekim {{shotIndex}} için ilk kare {{stillIndex}}",
           "previewAlt": "Önizleme · {{label}}",
-          "effective": "Geçerli başlangıç karesi",
+          "effective": "Geçerli ilk kare",
           "pinnedBadge": "Sabitlendi"
         },
         "picture": {
@@ -1008,13 +1008,13 @@
         "lookCounter_one": "{{count}} / {{limit}} kelime",
         "lookCounter_other": "{{count}} / {{limit}} kelime",
         "chain": {
-          "hardCutState": "Sert kesme · Sabit görüntüden başlar",
+          "hardCutState": "Sert kesme · İlk kareden başlar",
           "hardCutUnavailable": "Sert kesmede geçici olarak değişiklik yapılamıyor. Önce gerekli ikame medya için hazırlanan tahminin incelenmesi gerekiyor.",
           "reviewSever": "Sert kesmeyi incele…",
           "reviewRejoin": "Yeniden bağlanmayı incele…",
-          "reviewSeverDescription": "Sert kesme, Çekim {{shot}} için uygun bir sabit görüntüyle başlangıç yapar ve gerekirse yeni bir tane oluşturur. Onaylandığında bu Çekim ve sonraki sert kesmeye kadar devam eden tüm çekimler değiştirilir.",
-          "reviewRejoinDescription": "Çekim {{shot}} yeniden bağlandığında başlangıç görüntüsü seçimi temizlenir ve Çekim {{previous}} için kırpmaya göre son kare kullanılır. Onaydan sonra bu Çekim ve sonraki sert kesmeye kadar devam eden çekimler sağlayıcıya gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
-          "segmentHead": "Zincirin başı · Sabit görüntüden başlar",
+          "reviewSeverDescription": "Sert kesme, Çekim {{shot}} için uygun bir ilk kareyle başlangıç yapar ve gerekirse yeni bir tane oluşturur. Onaylandığında bu Çekim ve sonraki sert kesmeye kadar devam eden tüm çekimler değiştirilir.",
+          "reviewRejoinDescription": "Çekim {{shot}} yeniden bağlandığında ilk kare seçimi temizlenir ve Çekim {{previous}} için kırpmaya göre son kare kullanılır. Onaydan sonra bu Çekim ve sonraki sert kesmeye kadar devam eden çekimler sağlayıcıya gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
+          "segmentHead": "Zincirin başı · İlk kareden başlar",
           "continuous": "{{position}}. çekimin son karesinden devam eder"
         },
         "derivation": {
@@ -1034,7 +1034,7 @@
             "waitingOnFrame": "Süreklilik karesi bekleniyor",
             "rendering": "İşleniyor",
             "renderingProgress": "İşleniyor · %{{progress}}",
-            "renderingStill": "İşleniyor · Sabit görüntü gösteriliyor",
+            "renderingStill": "İşleniyor · İlk kare gösteriliyor",
             "rendered": "İşlendi",
             "untouched": "Değiştirilmedi",
             "needsRerender": "Yeniden işlenmesi gerekiyor",
@@ -1089,8 +1089,8 @@
         "continuity": {
           "severTitle": "Sert kesmeyi incele",
           "rejoinTitle": "Yeniden bağlanmayı incele",
-          "severSummary": "Bu tahmin, bu Çekimi zincir başı yapar, uygun bir başlangıç görüntüsünü yeniden kullanır veya gerekirse oluşturur ve sonraki sert kesmeye kadar etkilenen tüm videoları değiştirir.",
-          "rejoinSummary": "Bu tahmin, bu Çekimin başlangıç görüntüsü seçimini temizler ve kırpmaya göre önceki kareye yeniden bağlar. Onaydan sonra, sonraki sert kesmeye kadar ikame videolar gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
+          "severSummary": "Bu tahmin, bu Çekimi zincir başı yapar, uygun bir ilk kareyi yeniden kullanır veya gerekirse oluşturur ve sonraki sert kesmeye kadar etkilenen tüm videoları değiştirir.",
+          "rejoinSummary": "Bu tahmin, bu Çekimin ilk kare seçimini temizler ve kırpmaya göre önceki kareye yeniden bağlar. Onaydan sonra, sonraki sert kesmeye kadar ikame videolar gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
           "severHeadline": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
           "severHeadline_one": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
           "severHeadline_other": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
@@ -1105,7 +1105,7 @@
           "confirmRejoin_one": "Yeniden bağlanma + {{count}} üretimi onayla · {{cost}}",
           "confirmRejoin_other": "Yeniden bağlanma + {{count}} üretimi onayla · {{cost}}",
           "close": "Kapat — zinciri değiştirme",
-          "severConfirmed": "Sert kesme onaylandı. Shot'ta başlangıç görüntüsü ve ikame ilerlemesini ya da gereken kurtarma işlemlerini inceleyin.",
+          "severConfirmed": "Sert kesme onaylandı. Shot'ta ilk kare ve ikame ilerlemesini ya da gereken kurtarma işlemlerini inceleyin.",
           "rejoinConfirmed": "Yeniden bağlanma onaylandı. Shot'ta kare çıkarma ve ikame ilerlemesini ya da gereken kurtarma işlemlerini inceleyin."
         },
         "errors": {
@@ -1118,7 +1118,7 @@
             "invalidDependency": "Devam bağımlılığı artık geçerli değil. Projeyi yenileyip yeniden hazırlayın.",
             "invalidPrepareRequest": "Üretim seçimi güvenli biçimde hazırlanamadı. Seçimi gözden geçirip yeniden hazırlayın.",
             "invalidReference": "Seçili bir referans artık bu üretim için geçerli değil. Başka bir referans seçin.",
-            "missingConditioning": "Bir video çekimi için uygun başlangıç görseli veya önceki kare yok. Gerekli görseli ekleyin ya da seçin.",
+            "missingConditioning": "Bir video çekimi için uygun ilk kare veya önceki kare yok. Gerekli görseli ekleyin ya da seçin.",
             "unsafeTotal": "Tahmin toplamı güvenli biçimde gösterilemedi. Seçimi azaltın; hiçbir şey gönderilmedi."
           }
         }
@@ -1608,7 +1608,7 @@
         "submissionUnknown": "Gönderimin sonucu bilinmiyor. Tekrar denemeden önce mükerrer ücret uyarısını gözden geçirin.",
         "downloadFailed": "Oluşturma tamamlandı ancak çıktı indirilemedi.",
         "unsupported": "Bu sağlayıcı istenen işlemi desteklemiyor.",
-        "seedStillVariationGrid": "Oluşturulan başlangıç karesi çok panelli bir varyasyon ızgarası içeriyor ve video için kullanılamaz.",
+        "seedStillVariationGrid": "Oluşturulan ilk kare çok panelli bir varyasyon ızgarası içeriyor ve video için kullanılamaz.",
         "unknown": "Oluşturma işi bilinmeyen bir nedenle başarısız oldu."
       }
     },

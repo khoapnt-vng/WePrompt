@@ -1163,7 +1163,7 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   expect(projectBeforeLift.shots[anchorShotId]?.derivation).toBe('derived');
   const headState = shotCard.locator('[data-chain-state="segment_head"]');
   const continuousState = anchorShotCard.locator('[data-chain-state="continuous"]');
-  await expect(headState).toHaveText('Head of the chain · Starts from the still');
+  await expect(headState).toHaveText('Head of the chain · Starts from the first frame');
   await expect(shotCard.locator('[data-chain-change-trigger]')).toHaveCount(0);
   const firstLine = shotCard.getByRole('textbox', { name: 'Line for Shot 1', exact: true });
   await expect(firstLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
@@ -1177,7 +1177,7 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   const chainChange = anchorShotCard.getByRole('button', { name: 'Review hard cut…', exact: true });
   await expect(chainChange).toHaveAttribute('aria-haspopup', 'dialog');
   await expect(chainChange).toHaveAccessibleDescription(
-    'A hard cut makes Shot 2 start from an eligible still, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.'
+    'A hard cut makes Shot 2 start from an eligible first frame, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.'
   );
   await chainChange.click();
   await expect(page.locator('[data-testid="studio-spend-gate"][data-gate-kind="continuity_change"]')).toBeVisible();
@@ -2321,7 +2321,7 @@ test.describe('Creative Studio workspace', () => {
       expect(replacementChain.shots[anchorShotId]?.videoAssetId).toBe(replacementDownstreamAssetId);
 
       const shotCard = panel.locator(`article[data-shot-id="${shotId}"]`);
-      const clearSeedPin = shotCard.getByRole('button', { name: 'Clear seed pin' });
+      const clearSeedPin = shotCard.getByRole('button', { name: 'Clear first-frame pin' });
       await expect(clearSeedPin).toBeEnabled();
       await clearSeedPin.click();
       await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.seedStillId).toBeNull();

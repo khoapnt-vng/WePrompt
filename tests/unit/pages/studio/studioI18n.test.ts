@@ -18,6 +18,35 @@ const localeRoot = join(process.cwd(), 'packages/desktop/src/renderer/services/i
 const referenceLocale = i18nConfig.referenceLanguage;
 const deferredLocales = i18nConfig.supportedLanguages.filter((locale) => locale !== referenceLocale);
 
+const localizedFirstFrameTerms: Record<string, RegExp> = {
+  'de-DE': /erste(?:s|n|m)? Bild/iu,
+  'en-US': /first[ -]frame/iu,
+  'es-ES': /primer fotograma/iu,
+  'fa-IR': /فریم نخست/u,
+  'ja-JP': /最初のフレーム/u,
+  'ko-KR': /첫 프레임/u,
+  'pt-BR': /primeiro quadro/iu,
+  'ru-RU': /перв(?:ый|ого|ом) кадр/iu,
+  'tr-TR': /[İi]lk kare/u,
+  'uk-UA': /перш(?:ий|ого|ому) кадр/iu,
+  'zh-CN': /首帧/u,
+  'zh-TW': /首幀/u,
+};
+
+const localizedFirstFrameWorkspaceKeys = [
+  'beatPanel.chain.hardCutState',
+  'beatPanel.chain.reviewSeverDescription',
+  'beatPanel.chain.reviewRejoinDescription',
+  'beatPanel.chain.segmentHead',
+  'beatPanel.coverage.segmentState.renderingStill',
+  'beatPanel.seeds.stillLabel',
+  'beatPanel.seeds.effective',
+  'gate.continuity.severSummary',
+  'gate.continuity.rejoinSummary',
+  'gate.continuity.severConfirmed',
+  'gate.errors.pricing.missingConditioning',
+] as const;
+
 const loadConversation = (locale: string): JsonObject =>
   JSON.parse(readFileSync(join(localeRoot, locale, 'conversation.json'), 'utf8')) as JsonObject;
 
@@ -1006,7 +1035,7 @@ describe('Creative Studio workspace translations', () => {
       'beatPanel.coverage.segmentState.waitingOnFrame': 'Waiting on the frame',
       'beatPanel.coverage.segmentState.rendering': 'Rendering',
       'beatPanel.coverage.segmentState.renderingProgress': 'Rendering · {{progress}}%',
-      'beatPanel.coverage.segmentState.renderingStill': 'Rendering · Showing the still',
+      'beatPanel.coverage.segmentState.renderingStill': 'Rendering · Showing the first frame',
       'beatPanel.coverage.segmentState.rendered': 'Rendered',
       'beatPanel.coverage.segmentState.untouched': 'Untouched',
       'beatPanel.coverage.segmentState.needsRerender': 'Needs a re-render',
@@ -1034,7 +1063,7 @@ describe('Creative Studio workspace translations', () => {
       'gate.continuity.confirmRejoin': 'Confirm rejoin + {{count}} generations · {{cost}}',
       'gate.continuity.close': 'Close — keep the chain unchanged',
       'gate.continuity.severConfirmed':
-        'Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.',
+        'Hard cut confirmed. Review the Shot for first-frame progress, replacement progress, or any required recovery.',
       'gate.continuity.rejoinConfirmed':
         'Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery.',
     });
@@ -1054,7 +1083,7 @@ describe('Creative Studio workspace translations', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
-      'beatPanel.chain.segmentHead': 'Head of the chain · Starts from the still',
+      'beatPanel.chain.segmentHead': 'Head of the chain · Starts from the first frame',
       'beatPanel.chain.continuous': 'Continues from Shot {{position}}’s last frame',
       'beatPanel.derivation.attachedLineGuidance': 'Written from the action · Edit to detach',
       'beatPanel.derivation.detachedLineGuidance': 'Your words · No longer follows the action',
@@ -1387,8 +1416,82 @@ describe('Creative Studio workspace translations', () => {
     const jobs = asObject(creativeStudio.jobs, 'creativeStudio.jobs');
     const errors = asObject(jobs.errors, 'creativeStudio.jobs.errors');
     expect(errors.seedStillVariationGrid).toBe(
-      'The generated seed still contains a multi-panel variation grid and cannot be used for video.'
+      'The generated first frame contains a multi-panel variation grid and cannot be used for video.'
     );
+  });
+
+  it('uses first-frame copy without renaming durable seed identifiers', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'table.state.seedPending': 'First frame pending',
+      'beatPanel.chain.hardCutState': 'Hard cut · Starts from the first frame',
+      'beatPanel.chain.reviewSeverDescription':
+        'A hard cut makes Shot {{shot}} start from an eligible first frame, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.',
+      'beatPanel.chain.reviewRejoinDescription':
+        'Rejoining Shot {{shot}} clears its first-frame selection and uses Shot {{previous}}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.',
+      'beatPanel.chain.segmentHead': 'Head of the chain · Starts from the first frame',
+      'beatPanel.coverage.segmentState.renderingStill': 'Rendering · Showing the first frame',
+      'beatPanel.seeds.label': 'First frames for Shot {{index}}',
+      'beatPanel.seeds.title': 'First frames',
+      'beatPanel.seeds.pending': 'A first frame is required before video generation.',
+      'beatPanel.seeds.latestDefault': 'The latest eligible image is the current first frame.',
+      'beatPanel.seeds.pinned': 'A first frame is pinned.',
+      'beatPanel.seeds.import': 'Import first frame',
+      'beatPanel.seeds.pin': 'Pin as first frame',
+      'beatPanel.seeds.clearPin': 'Clear first-frame pin',
+      'beatPanel.seeds.empty': 'No first frames yet.',
+      'beatPanel.seeds.stillLabel': 'First frame {{stillIndex}} for Shot {{shotIndex}}',
+      'beatPanel.seeds.effective': 'Current first frame',
+      'beatPanel.generation.generateSeed': 'Review first-frame generation',
+      'beatPanel.generation.purpose.seedStill': 'first frame',
+      'beatPanel.recovery.reason.choose_seed': 'Choose an eligible first frame to continue the existing authorization.',
+      'proposals.fixedReason.seed_still': 'It has a pinned first frame.',
+      'controls.imageRouteBlocked':
+        'Choose a ready image route before reviewing first-frame generation. Video-only work remains available.',
+      'controls.videoRouteBlocked':
+        'Choose a ready video route before reviewing video generation. First-frame-only work remains available.',
+      'controls.shotState.seed_ready': 'First frame ready',
+      'controls.undoLabel.set_seed_still': 'choose first frame',
+      'controls.cascadeReason.choose_seed':
+        'Choose the authorized first frame to continue without another cost confirmation.',
+      'gate.continuity.severSummary':
+        'This estimate makes this Shot a chain head, reuses an eligible first frame or creates one if needed, and replaces every affected video through the next hard cut.',
+      'gate.continuity.rejoinSummary':
+        'This estimate clears this Shot’s first-frame selection and rejoins it to the trim-aware predecessor frame. Free frame extraction may finish after confirmation, before replacement videos are dispatched through the next hard cut.',
+      'gate.continuity.severConfirmed':
+        'Hard cut confirmed. Review the Shot for first-frame progress, replacement progress, or any required recovery.',
+      'gate.purpose.seed_still': 'First frame',
+      'gate.errors.pricing.missingConditioning':
+        'A video has no eligible first frame or predecessor frame. Add the required image, then prepare again.',
+    });
+  });
+
+  it('authors the same first-frame concept in all twelve configured locales', () => {
+    const englishCreativeStudio = asObject(englishConversation.creativeStudio, 'en-US.creativeStudio');
+    const englishJobs = asObject(englishCreativeStudio.jobs, 'en-US.creativeStudio.jobs');
+    const englishErrors = asObject(englishJobs.errors, 'en-US.creativeStudio.jobs.errors');
+    const englishLeaves = flattenLeaves(englishWorkspace);
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const conversation = loadConversation(locale);
+      const creativeStudio = asObject(conversation.creativeStudio, `${locale}.creativeStudio`);
+      const jobs = asObject(creativeStudio.jobs, `${locale}.creativeStudio.jobs`);
+      const errors = asObject(jobs.errors, `${locale}.creativeStudio.jobs.errors`);
+      const leaves = flattenLeaves(workspaceOf(conversation)!);
+      const term = localizedFirstFrameTerms[locale];
+      expect(term, locale).toBeInstanceOf(RegExp);
+
+      expect(errors.seedStillVariationGrid, `${locale}.jobs.errors.seedStillVariationGrid`).toMatch(term!);
+      expect(
+        placeholders(errors.seedStillVariationGrid as string),
+        `${locale}.jobs.errors.seedStillVariationGrid placeholders`
+      ).toEqual(placeholders(englishErrors.seedStillVariationGrid as string));
+      for (const key of localizedFirstFrameWorkspaceKeys) {
+        expect(leaves[key], `${locale}.${key}`).toMatch(term!);
+        expect(placeholders(leaves[key]!), `${locale}.${key} placeholders`).toEqual(placeholders(englishLeaves[key]!));
+      }
+    }
   });
 
   it('falls deferred close-dialog copy back to the Beat/Shot en-US wording', () => {

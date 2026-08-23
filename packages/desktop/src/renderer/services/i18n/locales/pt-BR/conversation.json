@@ -972,9 +972,9 @@
       },
       "beatPanel": {
         "seeds": {
-          "stillLabel": "Imagem inicial {{stillIndex}} do plano {{shotIndex}}",
+          "stillLabel": "Primeiro quadro {{stillIndex}} do plano {{shotIndex}}",
           "previewAlt": "Prévia · {{label}}",
-          "effective": "Imagem inicial atual",
+          "effective": "Primeiro quadro atual",
           "pinnedBadge": "Fixada"
         },
         "picture": {
@@ -1014,13 +1014,13 @@
         "lookCounter_one": "{{count}} / {{limit}} palavras",
         "lookCounter_other": "{{count}} / {{limit}} palavras",
         "chain": {
-          "hardCutState": "Corte seco · Começa com a imagem fixa",
+          "hardCutState": "Corte seco · Começa com o primeiro quadro",
           "hardCutUnavailable": "As alterações no corte seco estão temporariamente indisponíveis. Primeiro, é necessário revisar a estimativa da mídia de substituição necessária.",
           "reviewSever": "Revisar corte seco…",
           "reviewRejoin": "Revisar reconexão…",
-          "reviewSeverDescription": "Um corte seco faz a Tomada {{shot}} começar com uma imagem válida e cria uma se necessário. A confirmação substitui esta Tomada e todas as Tomadas contínuas seguintes até o próximo corte seco.",
-          "reviewRejoinDescription": "Ao reconectar a Tomada {{shot}}, sua seleção de imagem inicial é removida e o último quadro da Tomada {{previous}}, ajustado ao corte, é usado. Após a confirmação, a extração gratuita do quadro pode terminar antes do envio desta Tomada e das Tomadas contínuas seguintes até o próximo corte seco.",
-          "segmentHead": "Início da cadeia · Começa no quadro estático",
+          "reviewSeverDescription": "Um corte seco faz a Tomada {{shot}} começar com um primeiro quadro válido e cria um se necessário. A confirmação substitui esta Tomada e todas as Tomadas contínuas seguintes até o próximo corte seco.",
+          "reviewRejoinDescription": "Ao reconectar a Tomada {{shot}}, sua seleção de primeiro quadro é removida e o último quadro da Tomada {{previous}}, ajustado ao corte, é usado. Após a confirmação, a extração gratuita do quadro pode terminar antes do envio desta Tomada e das Tomadas contínuas seguintes até o próximo corte seco.",
+          "segmentHead": "Início da cadeia · Começa no primeiro quadro",
           "continuous": "Continua do último quadro do Plano {{position}}"
         },
         "derivation": {
@@ -1040,7 +1040,7 @@
             "waitingOnFrame": "Aguardando o quadro de continuidade",
             "rendering": "Renderizando",
             "renderingProgress": "Renderizando · {{progress}}%",
-            "renderingStill": "Renderizando · Exibindo o quadro estático",
+            "renderingStill": "Renderizando · Exibindo o primeiro quadro",
             "rendered": "Renderizado",
             "untouched": "Intocado",
             "needsRerender": "Precisa renderizar novamente",
@@ -1095,8 +1095,8 @@
         "continuity": {
           "severTitle": "Revisar corte seco",
           "rejoinTitle": "Revisar reconexão",
-          "severSummary": "Esta estimativa torna esta Tomada o início da cadeia, reutiliza uma imagem inicial válida ou cria uma se necessário e substitui todos os vídeos afetados até o próximo corte seco.",
-          "rejoinSummary": "Esta estimativa remove a seleção de imagem inicial desta Tomada e a reconecta ao quadro anterior ajustado ao corte. A extração gratuita do quadro pode terminar após a confirmação e antes do envio dos vídeos de substituição até o próximo corte seco.",
+          "severSummary": "Esta estimativa torna esta Tomada o início da cadeia, reutiliza um primeiro quadro válido ou cria um se necessário e substitui todos os vídeos afetados até o próximo corte seco.",
+          "rejoinSummary": "Esta estimativa remove a seleção de primeiro quadro desta Tomada e a reconecta ao quadro anterior ajustado ao corte. A extração gratuita do quadro pode terminar após a confirmação e antes do envio dos vídeos de substituição até o próximo corte seco.",
           "severHeadline": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",
           "severHeadline_one": "Corte seco · {{count}} geração obrigatória · {{cost}}",
           "severHeadline_other": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",
@@ -1111,7 +1111,7 @@
           "confirmRejoin_one": "Confirmar reconexão + {{count}} geração · {{cost}}",
           "confirmRejoin_other": "Confirmar reconexão + {{count}} gerações · {{cost}}",
           "close": "Fechar — manter a cadeia inalterada",
-          "severConfirmed": "Corte seco confirmado. Verifique no plano o progresso da imagem inicial e da substituição ou qualquer recuperação necessária.",
+          "severConfirmed": "Corte seco confirmado. Verifique no plano o progresso do primeiro quadro e da substituição ou qualquer recuperação necessária.",
           "rejoinConfirmed": "Reconexão confirmada. Verifique no plano o progresso da extração do quadro e da substituição ou qualquer recuperação necessária."
         },
         "errors": {
@@ -1124,7 +1124,7 @@
             "invalidDependency": "A dependência da continuação não é mais válida. Atualize o projeto e prepare novamente.",
             "invalidPrepareRequest": "Não foi possível preparar a seleção de geração com segurança. Revise-a e prepare novamente.",
             "invalidReference": "Uma referência selecionada não é mais válida para esta geração. Escolha outra referência.",
-            "missingConditioning": "Uma tomada de vídeo não tem uma imagem inicial nem um quadro predecessor elegível. Adicione ou selecione a imagem necessária.",
+            "missingConditioning": "Uma tomada de vídeo não tem um primeiro quadro nem um quadro predecessor elegível. Adicione ou selecione a imagem necessária.",
             "unsafeTotal": "Não foi possível representar com segurança o total da estimativa. Reduza a seleção; nada foi enviado."
           }
         }
@@ -1630,7 +1630,7 @@
         "submissionUnknown": "O resultado do envio é desconhecido. Revise o aviso de cobrança duplicada antes de tentar novamente.",
         "downloadFailed": "A geração foi concluída, mas não foi possível baixar a saída.",
         "unsupported": "Este provedor não aceita a operação solicitada.",
-        "seedStillVariationGrid": "A imagem inicial gerada contém uma grade de variações com vários painéis e não pode ser usada para vídeo.",
+        "seedStillVariationGrid": "O primeiro quadro gerado contém uma grade de variações com vários painéis e não pode ser usado para vídeo.",
         "unknown": "O trabalho de geração falhou por um motivo desconhecido."
       }
     },

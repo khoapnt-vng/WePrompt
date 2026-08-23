@@ -138,7 +138,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.board.liftFailed': 'Beat was not moved to the Bin.',
         'conversation.creativeStudio.workspace.table.state.durationPending': 'Duration pending',
         'conversation.creativeStudio.workspace.table.state.noCoverage': 'No coverage state',
-        'conversation.creativeStudio.workspace.table.state.seedPending': 'Seed pending',
+        'conversation.creativeStudio.workspace.table.state.seedPending': 'First frame pending',
         'conversation.creativeStudio.workspace.table.state.partDone': 'Part done',
         'conversation.creativeStudio.workspace.table.state.rendering': 'Rendering',
         'conversation.creativeStudio.workspace.table.state.stale': 'Stale',

@@ -36,7 +36,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.empty': 'No beats yet',
         'conversation.creativeStudio.workspace.table.state.durationPending': 'Duration pending',
         'conversation.creativeStudio.workspace.table.state.noCoverage': 'No coverage',
-        'conversation.creativeStudio.workspace.table.state.seedPending': 'Seed pending',
+        'conversation.creativeStudio.workspace.table.state.seedPending': 'First frame pending',
         'conversation.creativeStudio.workspace.table.state.partDone': 'Part done',
         'conversation.creativeStudio.workspace.table.state.rendering': 'Rendering',
         'conversation.creativeStudio.workspace.table.state.stale': 'Stale',
@@ -394,7 +394,7 @@ describe('TableView', () => {
     const states: Array<[WorkspaceBeatProjection['displayState'], string]> = [
       ['duration_pending', 'Duration pending'],
       ['no_coverage', 'No coverage'],
-      ['seed_pending', 'Seed pending'],
+      ['seed_pending', 'First frame pending'],
       ['part_done', 'Part done'],
       ['rendering', 'Rendering'],
       ['stale', 'Stale'],

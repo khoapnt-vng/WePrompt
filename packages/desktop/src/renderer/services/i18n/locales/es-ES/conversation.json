@@ -967,9 +967,9 @@
       },
       "beatPanel": {
         "seeds": {
-          "stillLabel": "Imagen inicial {{stillIndex}} del plano {{shotIndex}}",
+          "stillLabel": "Primer fotograma {{stillIndex}} del plano {{shotIndex}}",
           "previewAlt": "Vista previa · {{label}}",
-          "effective": "Imagen inicial actual",
+          "effective": "Primer fotograma actual",
           "pinnedBadge": "Fijada"
         },
         "picture": {
@@ -1009,13 +1009,13 @@
         "lookCounter_one": "{{count}} / {{limit}} palabras",
         "lookCounter_other": "{{count}} / {{limit}} palabras",
         "chain": {
-          "hardCutState": "Corte directo · Comienza desde la imagen fija",
+          "hardCutState": "Corte directo · Comienza desde el primer fotograma",
           "hardCutUnavailable": "Temporalmente no se pueden hacer cambios en el corte directo. Primero debe revisarse la estimación del material multimedia de sustitución necesario.",
           "reviewSever": "Revisar corte directo…",
           "reviewRejoin": "Revisar reconexión…",
-          "reviewSeverDescription": "Un corte directo hace que la toma {{shot}} comience desde una imagen fija válida y crea una si es necesario. Al confirmar, se sustituyen esta toma y todas las tomas posteriores continuas hasta el siguiente corte directo.",
-          "reviewRejoinDescription": "Al reconectar la toma {{shot}}, se borra su selección de imagen inicial y se usa el último fotograma de la toma {{previous}}, ajustado al recorte. Tras confirmar, la extracción gratuita del fotograma puede terminar antes de enviar esta toma y las tomas posteriores continuas hasta el siguiente corte directo.",
-          "segmentHead": "Inicio de la cadena · Empieza desde la imagen fija",
+          "reviewSeverDescription": "Un corte directo hace que la toma {{shot}} comience desde un primer fotograma válido y crea uno si es necesario. Al confirmar, se sustituyen esta toma y todas las tomas posteriores continuas hasta el siguiente corte directo.",
+          "reviewRejoinDescription": "Al reconectar la toma {{shot}}, se borra su selección de primer fotograma y se usa el último fotograma de la toma {{previous}}, ajustado al recorte. Tras confirmar, la extracción gratuita del fotograma puede terminar antes de enviar esta toma y las tomas posteriores continuas hasta el siguiente corte directo.",
+          "segmentHead": "Inicio de la cadena · Empieza desde el primer fotograma",
           "continuous": "Continúa desde el último fotograma del plano {{position}}"
         },
         "derivation": {
@@ -1035,7 +1035,7 @@
             "waitingOnFrame": "Esperando el fotograma de continuidad",
             "rendering": "Renderizando",
             "renderingProgress": "Renderizando · {{progress}}%",
-            "renderingStill": "Renderizando · Mostrando la imagen fija",
+            "renderingStill": "Renderizando · Mostrando el primer fotograma",
             "rendered": "Renderizado",
             "untouched": "Sin cambios",
             "needsRerender": "Necesita volver a renderizarse",
@@ -1090,8 +1090,8 @@
         "continuity": {
           "severTitle": "Revisar corte directo",
           "rejoinTitle": "Revisar reconexión",
-          "severSummary": "Esta estimación convierte esta toma en inicio de cadena, reutiliza una imagen inicial válida o crea una si hace falta y sustituye todos los vídeos afectados hasta el siguiente corte directo.",
-          "rejoinSummary": "Esta estimación borra la selección de imagen inicial de esta toma y la reconecta al fotograma anterior ajustado al recorte. La extracción gratuita del fotograma puede terminar tras confirmar y antes de enviar los vídeos de sustitución hasta el siguiente corte directo.",
+          "severSummary": "Esta estimación convierte esta toma en inicio de cadena, reutiliza un primer fotograma válido o crea uno si hace falta y sustituye todos los vídeos afectados hasta el siguiente corte directo.",
+          "rejoinSummary": "Esta estimación borra la selección de primer fotograma de esta toma y la reconecta al fotograma anterior ajustado al recorte. La extracción gratuita del fotograma puede terminar tras confirmar y antes de enviar los vídeos de sustitución hasta el siguiente corte directo.",
           "severHeadline": "Corte directo · {{count}} generaciones obligatorias · {{cost}}",
           "severHeadline_one": "Corte directo · {{count}} generación obligatoria · {{cost}}",
           "severHeadline_other": "Corte directo · {{count}} generaciones obligatorias · {{cost}}",
@@ -1106,7 +1106,7 @@
           "confirmRejoin_one": "Confirmar reconexión + {{count}} generación · {{cost}}",
           "confirmRejoin_other": "Confirmar reconexión + {{count}} generaciones · {{cost}}",
           "close": "Cerrar — mantener la cadena sin cambios",
-          "severConfirmed": "Corte directo confirmado. Revisa el plano para ver el progreso de la imagen inicial y del trabajo de sustitución, o cualquier recuperación necesaria.",
+          "severConfirmed": "Corte directo confirmado. Revisa el plano para ver el progreso del primer fotograma y del trabajo de sustitución, o cualquier recuperación necesaria.",
           "rejoinConfirmed": "Reconexión confirmada. Revisa el plano para ver el progreso de la extracción del fotograma y del trabajo de sustitución, o cualquier recuperación necesaria."
         },
         "errors": {
@@ -1119,7 +1119,7 @@
             "invalidDependency": "La dependencia de continuación ya no es válida. Actualiza el proyecto y vuelve a preparar.",
             "invalidPrepareRequest": "No se pudo preparar la selección de generación de forma segura. Revísala y vuelve a preparar.",
             "invalidReference": "Una referencia seleccionada ya no es válida para esta generación. Elige otra referencia.",
-            "missingConditioning": "Una toma de vídeo no tiene una imagen inicial ni un fotograma predecesor válido. Añade o selecciona la imagen necesaria.",
+            "missingConditioning": "Una toma de vídeo no tiene un primer fotograma ni un fotograma predecesor válido. Añade o selecciona la imagen necesaria.",
             "unsafeTotal": "No se pudo representar de forma segura el total de la estimación. Reduce la selección; no se envió nada."
           }
         }
@@ -1625,7 +1625,7 @@
         "submissionUnknown": "Se desconoce el resultado del envío. Revisa la advertencia de cargo duplicado antes de reintentarlo.",
         "downloadFailed": "La generación ha finalizado, pero no se ha podido descargar la salida.",
         "unsupported": "Este proveedor no admite la operación solicitada.",
-        "seedStillVariationGrid": "La imagen inicial generada contiene una cuadrícula de variaciones con varios paneles y no se puede usar para vídeo.",
+        "seedStillVariationGrid": "El primer fotograma generado contiene una cuadrícula de variaciones con varios paneles y no se puede usar para vídeo.",
         "unknown": "La tarea de generación ha fallado por un motivo desconocido."
       }
     },

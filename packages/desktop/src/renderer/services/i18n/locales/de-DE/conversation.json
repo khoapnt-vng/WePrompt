@@ -965,9 +965,9 @@
       },
       "beatPanel": {
         "seeds": {
-          "stillLabel": "Seed-Standbild {{stillIndex}} für Shot {{shotIndex}}",
+          "stillLabel": "Erstes Bild {{stillIndex}} für Shot {{shotIndex}}",
           "previewAlt": "Vorschau · {{label}}",
-          "effective": "Aktueller Seed",
+          "effective": "Aktuelles erstes Bild",
           "pinnedBadge": "Angeheftet"
         },
         "picture": {
@@ -1007,13 +1007,13 @@
         "lookCounter_one": "{{count}} / {{limit}} Wörter",
         "lookCounter_other": "{{count}} / {{limit}} Wörter",
         "chain": {
-          "hardCutState": "Harter Schnitt · Beginnt mit dem Standbild",
+          "hardCutState": "Harter Schnitt · Beginnt mit dem ersten Bild",
           "hardCutUnavailable": "Änderungen am harten Schnitt sind vorübergehend nicht verfügbar. Zuerst muss die Schätzung für die erforderlichen Ersatzmedien geprüft werden.",
           "reviewSever": "Harten Schnitt prüfen…",
           "reviewRejoin": "Wiederverknüpfung prüfen…",
-          "reviewSeverDescription": "Ein harter Schnitt lässt Shot {{shot}} mit einem geeigneten Standbild beginnen und erstellt bei Bedarf eines. Die Bestätigung ersetzt diesen Shot und alle fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt.",
-          "reviewRejoinDescription": "Beim Wiederverknüpfen von Shot {{shot}} wird dessen Startbildauswahl gelöscht und das letzte, schnittgenaue Bild von Shot {{previous}} verwendet. Nach der Bestätigung kann die kostenlose Bildextraktion abgeschlossen werden, bevor dieser Shot und die fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt übermittelt werden.",
-          "segmentHead": "Kettenanfang · Beginnt mit dem Standbild",
+          "reviewSeverDescription": "Ein harter Schnitt lässt Shot {{shot}} mit einem geeigneten ersten Bild beginnen und erstellt bei Bedarf eines. Die Bestätigung ersetzt diesen Shot und alle fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt.",
+          "reviewRejoinDescription": "Beim Wiederverknüpfen von Shot {{shot}} wird die Auswahl des ersten Bildes gelöscht und das letzte, schnittgenaue Bild von Shot {{previous}} verwendet. Nach der Bestätigung kann die kostenlose Bildextraktion abgeschlossen werden, bevor dieser Shot und die fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt übermittelt werden.",
+          "segmentHead": "Kettenanfang · Beginnt mit dem ersten Bild",
           "continuous": "Setzt das letzte Bild von Shot {{position}} fort"
         },
         "derivation": {
@@ -1033,7 +1033,7 @@
             "waitingOnFrame": "Wartet auf den Anschlussframe",
             "rendering": "Wird gerendert",
             "renderingProgress": "Wird gerendert · {{progress}} %",
-            "renderingStill": "Wird gerendert · Standbild wird angezeigt",
+            "renderingStill": "Wird gerendert · Erstes Bild wird angezeigt",
             "rendered": "Gerendert",
             "untouched": "Unverändert",
             "needsRerender": "Muss neu gerendert werden",
@@ -1088,8 +1088,8 @@
         "continuity": {
           "severTitle": "Harten Schnitt prüfen",
           "rejoinTitle": "Wiederverknüpfung prüfen",
-          "severSummary": "Diese Schätzung macht diesen Shot zum Kettenanfang, verwendet ein geeignetes Startbild oder erstellt bei Bedarf eines und ersetzt alle betroffenen Videos bis zum nächsten harten Schnitt.",
-          "rejoinSummary": "Diese Schätzung löscht die Startbildauswahl dieses Shots und verbindet ihn mit dem schnittgenauen Vorgängerbild. Die kostenlose Bildextraktion kann nach der Bestätigung abgeschlossen werden, bevor Ersatzvideos bis zum nächsten harten Schnitt übermittelt werden.",
+          "severSummary": "Diese Schätzung macht diesen Shot zum Kettenanfang, verwendet ein geeignetes erstes Bild oder erstellt bei Bedarf eines und ersetzt alle betroffenen Videos bis zum nächsten harten Schnitt.",
+          "rejoinSummary": "Diese Schätzung löscht die Auswahl des ersten Bildes dieses Shots und verbindet ihn mit dem schnittgenauen Vorgängerbild. Die kostenlose Bildextraktion kann nach der Bestätigung abgeschlossen werden, bevor Ersatzvideos bis zum nächsten harten Schnitt übermittelt werden.",
           "severHeadline": "Harter Schnitt · {{count}} erforderliche Generierungen · {{cost}}",
           "severHeadline_one": "Harter Schnitt · {{count}} erforderliche Generierung · {{cost}}",
           "severHeadline_other": "Harter Schnitt · {{count}} erforderliche Generierungen · {{cost}}",
@@ -1104,7 +1104,7 @@
           "confirmRejoin_one": "Wiederverknüpfung + {{count}} Generierung bestätigen · {{cost}}",
           "confirmRejoin_other": "Wiederverknüpfung + {{count}} Generierungen bestätigen · {{cost}}",
           "close": "Schließen — Kette unverändert lassen",
-          "severConfirmed": "Harter Schnitt bestätigt. Prüfe im Shot den Fortschritt des Startbilds und der Ersatzarbeiten sowie mögliche erforderliche Wiederherstellungsschritte.",
+          "severConfirmed": "Harter Schnitt bestätigt. Prüfe im Shot den Fortschritt des ersten Bildes und der Ersatzarbeiten sowie mögliche erforderliche Wiederherstellungsschritte.",
           "rejoinConfirmed": "Wiederverknüpfung bestätigt. Prüfe im Shot den Fortschritt der Bildextraktion und der Ersatzarbeiten sowie mögliche erforderliche Wiederherstellungsschritte."
         },
         "errors": {
@@ -1117,7 +1117,7 @@
             "invalidDependency": "Die Abhängigkeit der Fortsetzung ist nicht mehr gültig. Aktualisieren Sie das Projekt und bereiten Sie erneut vor.",
             "invalidPrepareRequest": "Die Generierungsauswahl konnte nicht sicher vorbereitet werden. Prüfen Sie sie und versuchen Sie es erneut.",
             "invalidReference": "Eine ausgewählte Referenz ist für diese Generierung nicht mehr gültig. Wählen Sie eine andere Referenz.",
-            "missingConditioning": "Für eine Videoaufnahme fehlt ein geeignetes Startbild oder Vorgängerbild. Fügen Sie das erforderliche Bild hinzu oder wählen Sie es aus.",
+            "missingConditioning": "Für eine Videoaufnahme fehlt ein geeignetes erstes Bild oder Vorgängerbild. Fügen Sie das erforderliche Bild hinzu oder wählen Sie es aus.",
             "unsafeTotal": "Die Gesamtsumme der Schätzung konnte nicht sicher dargestellt werden. Reduzieren Sie die Auswahl; es wurde nichts übermittelt."
           }
         }
@@ -1607,7 +1607,7 @@
         "submissionUnknown": "Das Übermittlungsergebnis ist unbekannt. Prüfe vor einer Wiederholung die Warnung vor einer Doppelbelastung.",
         "downloadFailed": "Die Generierung wurde abgeschlossen, aber die Ausgabe konnte nicht heruntergeladen werden.",
         "unsupported": "Der Anbieter unterstützt den angeforderten Vorgang nicht.",
-        "seedStillVariationGrid": "Das generierte Seed-Standbild enthält ein mehrteiliges Variationsraster und kann nicht für Videos verwendet werden.",
+        "seedStillVariationGrid": "Das generierte erste Bild enthält ein mehrteiliges Variationsraster und kann nicht für Videos verwendet werden.",
         "unknown": "Der Generierungsauftrag ist aus unbekanntem Grund fehlgeschlagen."
       }
     },

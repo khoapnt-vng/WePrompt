@@ -1,6 +1,6 @@
 # The Director draws the board — implementation plan
 
-**Date:** 2026-08-23 · **Status:** plan, not started
+**Date:** 2026-08-23 · **Status:** Slice 1 implemented; Slices 2–6 not started
 **Design:** `Director Storyboard - Hi-fi (standalone).html` + the designer's handoff notes
 **Related:** [bug list](../prds/creative-studio/creative-studio-3-bug-list.md) ·
 [film export](creative-studio-3-film-export.md) ·
@@ -42,16 +42,17 @@ const effectiveSeedStillId = (project, shot) => {
   candidates.sort(…)      // newest first, id as tiebreak
 ```
 
-**Any shot-owned image with no explicit pin becomes that shot's first frame.** Drawing thirty board
-stills would silently repoint thirty chain heads at storyboard art, and the next render would
-condition every video on a drawing.
+**Any eligible shot-owned image with no explicit pin becomes that shot's first frame.** That fallback
+is intentional authority for real first-frame media: the owner decision makes the latest unpinned
+still the default, and a reviewed sever pins the exact effective still that the user confirmed.
+Drawing thirty board stills into an eligible collection would nevertheless repoint thirty chain heads
+at storyboard art, and the next render would condition every video on a drawing.
 
-This is not hypothetical. It is the mechanism behind the thing the designer already saw and wrote
-down — _"a 2×2 grid sitting as a seed still"_. That grid became a first frame by exactly this
-fallback, and it cost four ruined Shots in the paper-boat film.
-
-**So the enforcement point is not a validator on promotion.** Blocking multi-panel images from the
-first-frame slot treats the symptom; the disease is that the slot fills itself.
+The designer's _"2×2 grid sitting as a seed still"_ is related but not the same class of failure. The
+fallback made an unpinned grid effective on that path, but removing the fallback would not reject a
+grid that is explicitly pinned or otherwise selected. The one-picture authority deliberately defers
+that detector until provider validation or a calibrated corpus exists. Board-tier isolation and
+variation-grid rejection therefore remain separate controls.
 
 **The clean fix already has a precedent in the codebase.** `eligibleSeed` (`chain.ts:84`) admits only
 assets in the `'assets'` or `'imports'` collections, which is why video **posters** — shot-owned
@@ -59,15 +60,19 @@ images sitting in `shot.assetIds` since `mediaStore.ts:3529` — are structurall
 first-frame fallback. A board still in a collection the fallback does not admit is ineligible by
 construction, with no change to how real seed stills behave.
 
-The one thing in the way is `validation.ts:1529`, which requires a job's **primary** output to live in
+One visible gate is `validation.ts:1529`, which requires a job's **primary** output to live in
 `'assets'`:
 
 ```ts
 primary.managedAsset.collection !== 'assets' || …  → invalid
 ```
 
-Posters escape it only because they are not primary outputs. Widening that gate for a board-still
-purpose is a small, well-located change — and it is the whole of the fix.
+Posters escape it only because they are not primary outputs. A board collection is a bounded design,
+but `validation.ts:1529` is not the whole implementation: the output loop at `validation.ts:1516`
+also closes the collection set, as do `StudioManagedAssetRefV2`, the managed-collection registry, and
+the provider write-plan union and routing. The new purpose must exist before validation can constrain
+the new collection to board images while keeping `seed_still` and `video_take` primaries in
+`'assets'`.
 
 ### 3. "The Director draws the board"
 
@@ -103,9 +108,10 @@ this one.
 
 **Assets.** The managed-collection union is closed at four members and duplicated in `validation.ts`
 rather than imported. There is **no tier discriminator** on `StudioAssetV2` — a take and a throwaway
-are distinguished only by structural inference. There is **no eviction, TTL or replace-in-place**, so
-"throwaway" and "redrawable" have no storage meaning today. There is **no way to delete a shot-owned
-asset at all** — the only two delete paths are for `shotId === null`.
+are distinguished only by structural inference. There is **no eviction or TTL**, and no way to delete
+a shot-owned asset at all — the only two delete paths are for `shotId === null`. A redraw must not
+overwrite immutable managed bytes: it needs a new asset, an atomic board-pointer swap, and only then
+authority-checked retirement of the old asset.
 
 **The purpose union.** `'seed_still' | 'video_take'` is an inlined literal repeated in nine type
 declarations with no named alias, and roughly ninety production references. Three traps sit on it:
@@ -158,10 +164,11 @@ before any code**, because both are load-bearing identifiers, not labels.
 
 `Seed still → First frame` splits cleanly in two:
 
-- **Copy** — free. The four strings the design names, plus the rest of the `beatPanel.seeds.*` subtree
-  (13 keys, 10 carrying the word), plus ~17 more keys with "seed" in the value. Four of them are
-  authored in all 11 deferred locales and pinned by an exact-equality inventory test, so translations
-  move in the same commit.
+- **Copy** — free. The exact renderer scope is 32 en-US leaves: 27 values containing "seed",
+  `beatPanel.seeds.latestDefault`, and four active chain/rendering labels that call the same first
+  frame "the still". Twelve of those concepts are authored in every configured locale. The locale
+  test pins the exact authored key set plus placeholder parity rather than the translated values, so
+  the semantic translations and their explicit first-frame oracle move in the same commit.
 - **Identifiers** — a data-destroying migration. `validateStudioProjectV2` uses exact key sets, so
   renaming `seedStillId` on disk rejects every existing project; bumping the schema version to dodge
   that marks them all `unsupported_prototype_schema`. `seed_still` is also on the Director MCP wire
@@ -172,21 +179,26 @@ frame"; `seedStillId` stays what it is called in the store. That is a normal and
 
 ## Slices
 
-**Slice 1 — the first-frame slot stops filling itself.** Surface "no first frame" as a real state with
-an action rather than a silent fallback to the newest image, and rename the copy in the same change.
-**This ships alone, fixes the 2×2 grid class of bug, and is a prerequisite for any new per-shot
-image.** Nothing else on this list is safe before it.
+**Slice 1 — first-frame terminology (implemented 2026-08-24).** User-facing `Seed still` copy is now
+`First frame`; `seedStillId`, `seed_still`, `seed_pending`, IPC names, and the latest-unpinned fallback
+remain unchanged. This is terminology cleanup. It neither detects variation grids nor isolates future
+board art, and it does not claim to be a prerequisite for that isolation.
 
-**Slice 2 — a board-still tier.** A fifth managed collection that `eligibleSeed` does not admit,
-following the poster precedent, plus the `validation.ts:1529` widening so a job's primary output may
-live there. Replace-in-place so a redraw does not accumulate. Board stills are then ineligible as a
-first frame **by construction** rather than by a check somebody has to remember.
+**Slice 2 — board-still authority and generation foundation.** A named `StudioJobPurpose` may first
+land while retaining exactly the existing two values. The behavioral change that admits
+`board_still` must then be atomic: add the fifth managed collection that `eligibleSeed` does not
+admit, update the type and registry, both validation gates, every purpose-sensitive router and job
+path (including the branches that currently treat every non-seed purpose as video), request/write
+planning, the id minter, rate card and `spendMath`. Do not let validation accept a durable board job
+before that exhaustive path exists. Only a board-still image may use the board collection, while seed
+and video primaries remain in `'assets'`. Model redraw as a new immutable asset plus an atomic
+board-pointer swap and authority-checked retirement. Board stills are then ineligible as a first frame
+**by construction**.
 
-**Slice 3 — drawing.** A `board_still` purpose: a named `StudioJobPurpose` alias first, then the nine
-declaration sites, the eight fail-open ternaries, the id minter, the rate card, `spendMath`. One gate
-for the whole board, priced honestly. Note `STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST = 24 < 30`, so a
-thirty-shot film is **two** gates unless that cap is raised — the same arithmetic that produced
-BUG-114.
+**Slice 3 — drawing and spend UI.** Once Slice 2 makes the new purpose safe end to end, expose the
+app-owned board generation action and one honestly priced gate for the board. Note
+`STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST = 24 < 30`, so a thirty-shot film is **two** gates unless
+that cap is raised — the same arithmetic that produced BUG-114.
 
 **Slice 4 — the Table column and expansion.** The column is easy; the expansion is not. `aria-rowcount`
 and the roving-focus matrix are both indexed by **beat index**, not DOM row, so injected rows corrupt

@@ -962,9 +962,9 @@
       },
       "beatPanel": {
         "seeds": {
-          "stillLabel": "鏡頭 {{shotIndex}} 的種子靜態畫面 {{stillIndex}}",
+          "stillLabel": "鏡頭 {{shotIndex}} 的首幀 {{stillIndex}}",
           "previewAlt": "預覽 · {{label}}",
-          "effective": "目前種子",
+          "effective": "目前首幀",
           "pinnedBadge": "已釘選"
         },
         "picture": {
@@ -1004,13 +1004,13 @@
         "lookCounter_one": "{{count}} / {{limit}} 個詞",
         "lookCounter_other": "{{count}} / {{limit}} 個詞",
         "chain": {
-          "hardCutState": "硬切 · 從靜幀開始",
+          "hardCutState": "硬切 · 從首幀開始",
           "hardCutUnavailable": "暫時無法變更硬切。必須先審閱所需替換媒體的估價。",
           "reviewSever": "審閱硬切…",
           "reviewRejoin": "審閱重新銜接…",
-          "reviewSeverDescription": "硬切會讓鏡頭 {{shot}} 從符合條件的靜幀開始；如有需要，會建立一個新靜幀。確認後，將替換此鏡頭及其後所有連續鏡頭，直到下一個硬切。",
-          "reviewRejoinDescription": "重新銜接鏡頭 {{shot}} 會清除其種子圖選擇，並使用鏡頭 {{previous}} 經裁剪後的最後一幀。確認後，免費的畫面擷取可能會先完成，再將此鏡頭及其後直到下一個硬切的連續鏡頭送交提供者。",
-          "segmentHead": "鏈首 · 從靜幀開始",
+          "reviewSeverDescription": "硬切會讓鏡頭 {{shot}} 從符合條件的首幀開始；如有需要，會建立一個新首幀。確認後，將替換此鏡頭及其後所有連續鏡頭，直到下一個硬切。",
+          "reviewRejoinDescription": "重新銜接鏡頭 {{shot}} 會清除其首幀選擇，並使用鏡頭 {{previous}} 經裁剪後的最後一幀。確認後，免費的畫面擷取可能會先完成，再將此鏡頭及其後直到下一個硬切的連續鏡頭送交提供者。",
+          "segmentHead": "鏈首 · 從首幀開始",
           "continuous": "承接鏡頭 {{position}} 的最後一幀"
         },
         "derivation": {
@@ -1030,7 +1030,7 @@
             "waitingOnFrame": "等待連續性幀",
             "rendering": "正在算繪",
             "renderingProgress": "正在算繪 · {{progress}}%",
-            "renderingStill": "正在算繪 · 正在顯示靜幀",
+            "renderingStill": "正在算繪 · 正在顯示首幀",
             "rendered": "已算繪",
             "untouched": "未變更",
             "needsRerender": "需要重新算繪",
@@ -1085,8 +1085,8 @@
         "continuity": {
           "severTitle": "審閱硬切",
           "rejoinTitle": "審閱重新銜接",
-          "severSummary": "此估價會將該鏡頭設為鏈頭，重用符合條件的種子圖或在需要時建立一個，並替換直到下一個硬切之前所有受影響的影片。",
-          "rejoinSummary": "此估價會清除該鏡頭的種子圖選擇，並將其重新銜接到經裁剪的前序畫面。確認後，免費的畫面擷取可能會先完成，再送交直到下一個硬切之前的替換影片。",
+          "severSummary": "此估價會將該鏡頭設為鏈頭，重用符合條件的首幀或在需要時建立一個，並替換直到下一個硬切之前所有受影響的影片。",
+          "rejoinSummary": "此估價會清除該鏡頭的首幀選擇，並將其重新銜接到經裁剪的前序畫面。確認後，免費的畫面擷取可能會先完成，再送交直到下一個硬切之前的替換影片。",
           "severHeadline": "硬切 · {{count}} 次必要生成 · {{cost}}",
           "severHeadline_one": "硬切 · {{count}} 次必要生成 · {{cost}}",
           "severHeadline_other": "硬切 · {{count}} 次必要生成 · {{cost}}",
@@ -1101,7 +1101,7 @@
           "confirmRejoin_one": "確認重新銜接 + {{count}} 次生成 · {{cost}}",
           "confirmRejoin_other": "確認重新銜接 + {{count}} 次生成 · {{cost}}",
           "close": "關閉 — 保持鏈不變",
-          "severConfirmed": "已確認硬切。請在鏡頭中查看種子圖和替換算圖的進度，以及任何必要的復原操作。",
+          "severConfirmed": "已確認硬切。請在鏡頭中查看首幀和替換算圖的進度，以及任何必要的復原操作。",
           "rejoinConfirmed": "已確認重新銜接。請在鏡頭中查看畫面擷取和替換算圖的進度，以及任何必要的復原操作。"
         },
         "errors": {
@@ -1114,7 +1114,7 @@
             "invalidDependency": "後續產生的相依關係已失效。請重新整理專案後再次準備估價。",
             "invalidPrepareRequest": "無法安全地準備所選產生工作。請檢查選擇後再次準備估價。",
             "invalidReference": "一個已選參考圖已不再適用於此次產生。請選擇其他參考圖。",
-            "missingConditioning": "一個影片鏡頭缺少可用的種子圖或前序影格。請新增或選擇所需影像。",
+            "missingConditioning": "一個影片鏡頭缺少可用的首幀或前序影格。請新增或選擇所需影像。",
             "unsafeTotal": "無法安全表示估價總額。請減少選擇；未提交任何內容。"
           }
         }
@@ -1588,7 +1588,7 @@
         "submissionUnknown": "提交結果不明。重試前請檢視重複收費警告。",
         "downloadFailed": "產生已完成，但無法下載輸出。",
         "unsupported": "此服務供應商不支援要求的操作。",
-        "seedStillVariationGrid": "產生的種子靜態畫面包含多面板變體網格，無法用於影片。",
+        "seedStillVariationGrid": "產生的首幀包含多面板變體網格，無法用於影片。",
         "unknown": "產生工作因不明原因失敗。"
       }
     },

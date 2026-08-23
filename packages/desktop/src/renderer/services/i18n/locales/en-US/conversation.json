@@ -1226,7 +1226,7 @@
         "downloadFailed": "Generation completed, but the output could not be downloaded.",
         "unsupported": "This provider does not support the requested operation.",
         "unknown": "The generation job failed for an unknown reason.",
-        "seedStillVariationGrid": "The generated seed still contains a multi-panel variation grid and cannot be used for video."
+        "seedStillVariationGrid": "The generated first frame contains a multi-panel variation grid and cannot be used for video."
       }
     },
     "preview": {
@@ -1477,7 +1477,7 @@
         "state": {
           "durationPending": "Duration pending",
           "noCoverage": "No coverage",
-          "seedPending": "Seed pending",
+          "seedPending": "First frame pending",
           "partDone": "Part done",
           "rendering": "Rendering",
           "stale": "Stale",
@@ -1737,13 +1737,13 @@
         "chain": {
           "authorHardCut": "Start with a hard cut",
           "hardCut": "Hard cut",
-          "hardCutState": "Hard cut · Starts from the still",
+          "hardCutState": "Hard cut · Starts from the first frame",
           "hardCutUnavailable": "Hard-cut changes are temporarily unavailable. A reviewed estimate for the required replacement media must come first.",
           "reviewSever": "Review hard cut…",
           "reviewRejoin": "Review rejoin…",
-          "reviewSeverDescription": "A hard cut makes Shot {{shot}} start from an eligible still, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.",
-          "reviewRejoinDescription": "Rejoining Shot {{shot}} clears its seed selection and uses Shot {{previous}}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.",
-          "segmentHead": "Head of the chain · Starts from the still",
+          "reviewSeverDescription": "A hard cut makes Shot {{shot}} start from an eligible first frame, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.",
+          "reviewRejoinDescription": "Rejoining Shot {{shot}} clears its first-frame selection and uses Shot {{previous}}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.",
+          "segmentHead": "Head of the chain · Starts from the first frame",
           "continuous": "Continues from Shot {{position}}’s last frame",
           "systemContinuityStale": "Continuity is out of date",
           "generationOutOfDate": "Generated work is out of date"
@@ -1763,7 +1763,7 @@
             "waitingOnFrame": "Waiting on the frame",
             "rendering": "Rendering",
             "renderingProgress": "Rendering · {{progress}}%",
-            "renderingStill": "Rendering · Showing the still",
+            "renderingStill": "Rendering · Showing the first frame",
             "rendered": "Rendered",
             "untouched": "Untouched",
             "needsRerender": "Needs a re-render",
@@ -1823,29 +1823,29 @@
           "restoreHistory": "Restore this line"
         },
         "seeds": {
-          "label": "Seed stills for Shot {{index}}",
-          "title": "Seed stills",
-          "pending": "A seed still is required before video generation.",
-          "latestDefault": "The latest eligible image is the current default.",
-          "pinned": "A seed still is pinned.",
-          "import": "Import seed still",
-          "pin": "Pin as seed",
-          "clearPin": "Clear seed pin",
-          "empty": "No seed stills yet.",
-          "stillLabel": "Seed still {{stillIndex}} for Shot {{shotIndex}}",
+          "label": "First frames for Shot {{index}}",
+          "title": "First frames",
+          "pending": "A first frame is required before video generation.",
+          "latestDefault": "The latest eligible image is the current first frame.",
+          "pinned": "A first frame is pinned.",
+          "import": "Import first frame",
+          "pin": "Pin as first frame",
+          "clearPin": "Clear first-frame pin",
+          "empty": "No first frames yet.",
+          "stillLabel": "First frame {{stillIndex}} for Shot {{shotIndex}}",
           "previewAlt": "Preview · {{label}}",
-          "effective": "Current seed",
+          "effective": "Current first frame",
           "pinnedBadge": "Pinned"
         },
         "generation": {
           "gateLocked": "Finish or close the current generation review before opening another.",
-          "generateSeed": "Review seed generation",
+          "generateSeed": "Review first-frame generation",
           "renderVideo": "Generate again",
           "choiceLabel": "Beat {{beatIndex}}, Shot {{shotIndex}} · {{purpose}}",
           "referenceForChoice": "Brief reference for {{choice}}",
           "noReference": "No Brief reference",
           "purpose": {
-            "seedStill": "seed still"
+            "seedStill": "first frame"
           },
           "reviewUnavailable": "Save or reset every generation-affecting edit and refresh the current workspace before reviewing generation."
         },
@@ -1879,7 +1879,7 @@
           "title": "Finish existing generation",
           "reason": {
             "upstream_running": "Waiting for upstream generation to finish.",
-            "choose_seed": "Choose an eligible seed still to continue the existing authorization.",
+            "choose_seed": "Choose an eligible first frame to continue the existing authorization.",
             "conditioning_frame": "Preparing the continuity frame.",
             "conditioning_failed": "Continuity-frame preparation failed.",
             "dependency_failed": "An upstream dependency failed.",
@@ -1993,7 +1993,7 @@
         "fixedReason": {
           "owned_asset": "It owns media.",
           "owned_job": "It owns generation work.",
-          "seed_still": "It has a pinned seed still.",
+          "seed_still": "It has a pinned first frame.",
           "conditioning_frame": "It owns a continuity frame.",
           "conditioning_input": "A generation request uses it as conditioning input.",
           "narration": "It has authored narration.",
@@ -2054,8 +2054,8 @@
         "statusRequired": "Refresh the revision-matched workspace and chain status before reviewing a cost.",
         "routeCatalogRequired": "Refresh routes for the current project settings before reviewing a cost.",
         "selectionNotPayable": "This exact selection cannot form a bounded generation graph. Keep the uncovered alternative or change the selection.",
-        "imageRouteBlocked": "Choose a ready image route before reviewing seed generation. Video-only work remains available.",
-        "videoRouteBlocked": "Choose a ready video route before reviewing video generation. Seed-only work remains available.",
+        "imageRouteBlocked": "Choose a ready image route before reviewing first-frame generation. Video-only work remains available.",
+        "videoRouteBlocked": "Choose a ready video route before reviewing video generation. First-frame-only work remains available.",
         "routeStatus": {
           "ready": "Ready",
           "selection_required": "Selection required",
@@ -2064,7 +2064,7 @@
         },
         "shotState": {
           "draft": "Draft",
-          "seed_ready": "Seed ready"
+          "seed_ready": "First frame ready"
         },
         "undo": "Undo: {{label}}",
         "undoLabel": {
@@ -2085,7 +2085,7 @@
           "reorder_shots": "reorder shots",
           "apply_coverage": "apply coverage",
           "set_hard_cut": "change continuity",
-          "set_seed_still": "choose seed",
+          "set_seed_still": "choose first frame",
           "trim_shot": "trim shot",
           "redetach_line": "detach line",
           "rederive_line": "rederive line",
@@ -2105,7 +2105,7 @@
         "cascadeTitle": "Authorized continuation",
         "cascadeReason": {
           "upstream_running": "Waiting for the upstream generation.",
-          "choose_seed": "Choose the authorized seed to continue without another cost confirmation.",
+          "choose_seed": "Choose the authorized first frame to continue without another cost confirmation.",
           "conditioning_frame": "Preparing the predecessor frame.",
           "conditioning_failed": "The predecessor frame failed. Retry for free, choose another eligible primary, or cancel.",
           "dependency_failed": "The authorized dependency failed.",
@@ -2132,8 +2132,8 @@
         "continuity": {
           "severTitle": "Review hard cut",
           "rejoinTitle": "Review rejoin",
-          "severSummary": "This estimate makes this Shot a chain head, reuses an eligible seed or creates one if needed, and replaces every affected video through the next hard cut.",
-          "rejoinSummary": "This estimate clears this Shot’s seed selection and rejoins it to the trim-aware predecessor frame. Free frame extraction may finish after confirmation, before replacement videos are dispatched through the next hard cut.",
+          "severSummary": "This estimate makes this Shot a chain head, reuses an eligible first frame or creates one if needed, and replaces every affected video through the next hard cut.",
+          "rejoinSummary": "This estimate clears this Shot’s first-frame selection and rejoins it to the trim-aware predecessor frame. Free frame extraction may finish after confirmation, before replacement videos are dispatched through the next hard cut.",
           "severHeadline": "Hard cut · {{count}} required generations · {{cost}}",
           "severHeadline_one": "Hard cut · {{count}} required generation · {{cost}}",
           "severHeadline_other": "Hard cut · {{count}} required generations · {{cost}}",
@@ -2148,7 +2148,7 @@
           "confirmRejoin_one": "Confirm rejoin + {{count}} generation · {{cost}}",
           "confirmRejoin_other": "Confirm rejoin + {{count}} generations · {{cost}}",
           "close": "Close — keep the chain unchanged",
-          "severConfirmed": "Hard cut confirmed. Review the Shot for seed and replacement progress or any required recovery.",
+          "severConfirmed": "Hard cut confirmed. Review the Shot for first-frame progress, replacement progress, or any required recovery.",
           "rejoinConfirmed": "Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery."
         },
         "rateCardSource": "This estimate comes from the app's configured rate card, not a provider response.",
@@ -2158,7 +2158,7 @@
           "required": "Required"
         },
         "purpose": {
-          "seed_still": "Seed still",
+          "seed_still": "First frame",
           "video_take": "Video"
         },
         "route": "{{provider}} · {{model}} · {{choice}}",
@@ -2191,7 +2191,7 @@
             "invalidDependency": "The continuation dependency is no longer valid. Refresh the project and prepare again.",
             "invalidPrepareRequest": "The generation selection could not be prepared safely. Review it and prepare again.",
             "invalidReference": "A selected reference is no longer valid for this generation. Choose another reference and prepare again.",
-            "missingConditioning": "A video has no eligible seed or predecessor frame. Add the required image, then prepare again.",
+            "missingConditioning": "A video has no eligible first frame or predecessor frame. Add the required image, then prepare again.",
             "unsafeTotal": "The estimate total could not be represented safely. Reduce the selection; nothing was submitted."
           }
         },
