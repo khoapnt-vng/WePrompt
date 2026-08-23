@@ -431,6 +431,13 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - `canRetryJobV2` requires `providerJobId !== null` or `submission_unknown`. A 5xx at submit satisfies neither, so the retry seam that exists for ambiguous submissions does not cover the case most likely to succeed on a second attempt.
   - The result is a film stuck two Shots from complete, with two rendered Takes on disk, and the only visible routes being Lift Shot or Lift Beat — both destructive.
   - Contrast with the ambiguous case, which is well handled: `submission_unknown` offers Retry, then an acknowledgement of duplicate-charge risk. A plain 5xx deserves a _simpler_ path than that, not none.
+- [x] **[BUG-114][P1][Creative Studio] The film-wide Render refused any film longer than about 96 seconds** — found and fixed 2026-08-23 on the first two-minute film
+  - An eight-Beat, thirty-Shot film could not be rendered at all. Pressing **Render…** produced only _"This exact selection cannot form a bounded generation graph. Keep the uncovered alternative or change the selection."_ — true, and unactionable.
+  - **Cause.** `STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST` (24) caps **distinct Shot ids across the whole selection**, but `filmRenderBatchShotIds` counted only the _segment heads_ it named. Choosing a head commits its entire cascade to the end of its Beat, so eight heads silently dragged in all thirty Shots, blew the cap, and `selectionGateDraft` then refused the batch as unpayable.
+  - The batch builder and the draft builder disagreed about what a selection costs. The builder said eight; the gate saw thirty.
+  - **Why it survived until now.** Every earlier test film was a single Beat of three Shots, where heads and cascade coverage are close enough that the difference never shows. The bound only bites past 24 Shots — roughly **96 seconds** at four seconds a Shot — so the feature was broken for exactly the films worth making.
+  - **Fix.** The batch now accumulates each segment's cascade coverage and stops before the cap, so it renders as much of the film as fits rather than refusing the whole thing. Verified live: the same film that produced no gate at all now opens at **23 shots selected**, quoting **29 generations · $4.78**, with the remaining two Beats left for a second pass.
+  - A pre-existing test had encoded the old assumption — that a cap of one admits `shot_1`. It does not: choosing `shot_1` commits `shot_2` with it, so a cap of one admits no segment. That expectation is corrected rather than worked around, and a new property test pins the invariant that was actually violated: **whatever the batch returns must be a batch the spend gate accepts.**
 
 ## Correctness and honesty of failures
 

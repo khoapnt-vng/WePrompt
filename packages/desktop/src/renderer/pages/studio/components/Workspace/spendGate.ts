@@ -414,6 +414,33 @@ const validGenerationChoice = (
  * A segment with work already in flight is skipped whole. Submitting its next shot would queue a
  * generation against a first frame that is still being produced.
  */
+/**
+ * Every Shot a base choice pulls into the request: itself, plus the cascade running from it to the
+ * end of its Beat, stopping where the chain is severed or where work is already in flight. This
+ * mirrors the cascade the draft builder derives, so a batch is bounded by what will actually be
+ * quoted rather than by how many segment heads it happens to name.
+ */
+const cascadeCoverage = (
+  project: StudioRendererProjectV2,
+  projected: Map<string, { videoGenerationInFlight: boolean }>,
+  location: { shotId: string; shotIndex: number; beatId: string },
+  choice: StudioPrepareGenerationChoiceV2
+): string[] => {
+  const covered = [location.shotId];
+  const beat = Object.hasOwn(project.beats, location.beatId) ? project.beats[location.beatId] : undefined;
+  if (beat?.id !== location.beatId) return covered;
+  const first = choice.purpose === 'seed_still' ? location.shotIndex : location.shotIndex + 1;
+  for (let index = first; index < beat.shotOrder.length; index += 1) {
+    const downstreamId = beat.shotOrder[index]!;
+    const downstream = Object.hasOwn(project.shots, downstreamId) ? project.shots[downstreamId] : undefined;
+    if (downstream?.id !== downstreamId) break;
+    if (index > location.shotIndex && downstream.chainBreak === 'hard_cut') break;
+    if (projected.get(downstreamId)?.videoGenerationInFlight === true) break;
+    if (!covered.includes(downstreamId)) covered.push(downstreamId);
+  }
+  return covered;
+};
+
 export const filmRenderBatchShotIds = (input: {
   project: StudioRendererProjectV2;
   projection: WorkspaceProjection;
@@ -430,7 +457,7 @@ export const filmRenderBatchShotIds = (input: {
 
   const segments = new Map<
     string,
-    { shotId: string; shotIndex: number; segmentHeadIndex: number; filmIndex: number }[]
+    { shotId: string; shotIndex: number; segmentHeadIndex: number; filmIndex: number; beatId: string }[]
   >();
   for (const [shotId, location] of locations) {
     const key = `${location.beatId}\0${location.segmentHeadIndex}`;
@@ -439,7 +466,7 @@ export const filmRenderBatchShotIds = (input: {
     segments.set(key, bucket);
   }
 
-  const batch: { shotId: string; filmIndex: number }[] = [];
+  const batch: { shotId: string; filmIndex: number; coveredShotIds: string[] }[] = [];
   for (const bucket of segments.values()) {
     const ordered = bucket.toSorted((left, right) => left.shotIndex - right.shotIndex);
     if (
@@ -450,17 +477,35 @@ export const filmRenderBatchShotIds = (input: {
     ) {
       continue;
     }
+    let nextChoice: StudioPrepareGenerationChoiceV2 | null = null;
     const next = ordered.find(({ shotId, shotIndex, segmentHeadIndex }) => {
       const choice = choiceForShot(input.project, input.projection, shotId, shotIndex === segmentHeadIndex);
-      return choice !== null && !(choice.purpose === 'seed_still' && shotIndex !== segmentHeadIndex);
+      if (choice === null || (choice.purpose === 'seed_still' && shotIndex !== segmentHeadIndex)) return false;
+      nextChoice = choice;
+      return true;
     });
-    if (next !== undefined) batch.push({ shotId: next.shotId, filmIndex: next.filmIndex });
+    if (next !== undefined && nextChoice !== null) {
+      // The cap counts distinct Shot ids across the whole selection, and choosing a head drags its
+      // whole cascade in with it. Counting heads alone lets a large film exceed the cap, and the
+      // draft is then refused as unpayable — which is what a 30-Shot film hit in practice.
+      batch.push({
+        shotId: next.shotId,
+        filmIndex: next.filmIndex,
+        coveredShotIds: cascadeCoverage(input.project, projected, next, nextChoice),
+      });
+    }
   }
 
-  return batch
-    .toSorted((left, right) => left.filmIndex - right.filmIndex)
-    .slice(0, cap)
-    .map(({ shotId }) => shotId);
+  const selected: string[] = [];
+  let covered = new Set<string>();
+  for (const entry of batch.toSorted((left, right) => left.filmIndex - right.filmIndex)) {
+    const widened = new Set(covered);
+    for (const shotId of entry.coveredShotIds) widened.add(shotId);
+    if (widened.size > cap) break;
+    selected.push(entry.shotId);
+    covered = widened;
+  }
+  return selected;
 };
 
 export const selectionGateDraft = (input: {

@@ -580,14 +580,37 @@ describe('the largest legal render batch', () => {
     expect(batch).toEqual(['shot_1', 'shot_3']);
   });
 
-  it('honours the per-request shot cap', () => {
+  it('honours the per-request shot cap, counting the cascade against it', () => {
+    // shot_1 cannot be rendered alone: choosing it commits shot_2 with it, so a cap of one admits no
+    // segment at all. Returning shot_1 here would hand back a batch the spend gate then refuses.
     const project = makeProject();
     const batch = filmRenderBatchShotIds({
       project,
       projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
       maxShots: 1,
     });
-    expect(batch).toEqual(['shot_1']);
+    expect(batch).toEqual([]);
+  });
+
+  it('counts the cascade each segment drags in, not only the segment heads', () => {
+    // beat_1's head cascades to shot_2 as well, so a batch of two heads touches three Shots. The cap
+    // is on distinct Shot ids across the whole selection, so counting heads lets the batch exceed it
+    // and the draft is then refused as unpayable — which is what a 30-Shot film hit in practice.
+    const project = makeProject();
+    const projection = projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3));
+
+    expect(filmRenderBatchShotIds({ project, projection, maxShots: 2 })).toEqual(['shot_1']);
+  });
+
+  it('only ever returns a batch the spend gate will accept', () => {
+    const project = makeProject();
+    const projection = projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3));
+
+    for (const maxShots of [1, 2, 3, 24]) {
+      const batch = filmRenderBatchShotIds({ project, projection, maxShots });
+      if (batch.length === 0) continue;
+      expect(selectionGateDraft({ project, projection, orderedShotIds: batch }), `maxShots=${maxShots}`).not.toBeNull();
+    }
   });
 
   it('renders nothing until both revision-matched status snapshots are ready', () => {
