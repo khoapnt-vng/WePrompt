@@ -52,6 +52,7 @@ const ACTIVE_DIRECTORY_NAME = 'exports';
 const QUARANTINE_DIRECTORY_NAME = 'exports-quarantine';
 const ARTIFACT_RECORD_NAME = 'artifact.json';
 const MANIFEST_FILE_NAME = 'manifest.json';
+const FINDER_METADATA_FILE_NAME = '.DS_Store';
 const CATALOG_MAX_BYTES = 256 * 1024;
 const ARTIFACT_RECORD_MAX_BYTES = 16 * 1024;
 const MANIFEST_MAX_BYTES = 256 * 1024;
@@ -615,6 +616,7 @@ type PhysicalArtifact = {
 
 type PhysicalCatalog = CatalogReadState & {
   activeProof: PhysicalDirectoryProof | null;
+  activeFinderMetadataFiles: Map<string, PhysicalFileProof>;
   artifacts: Map<string, PhysicalArtifact>;
 };
 
@@ -815,7 +817,7 @@ const capturePhysicalDirectoryTransition = async (
 const capturePhysicalFileProof = async (filePath: string): Promise<PhysicalFileProof> => {
   let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
   try {
-    handle = await fs.open(filePath, fsConstants.O_RDONLY | NO_FOLLOW);
+    handle = await fs.open(filePath, fsConstants.O_RDONLY | NO_FOLLOW | NON_BLOCK);
     const openedStats = await handle.stat();
     const opened = exactIdentity(openedStats);
     const pathBeforeStats = await fs.lstat(filePath);
@@ -952,7 +954,26 @@ const reprovePhysicalCatalogLedger = async (
   } else {
     await reprovePhysicalDirectory(physical.activeProof);
   }
+  for (const proof of physical.activeFinderMetadataFiles.values()) await reprovePhysicalFile(proof);
   await reprovePhysicalArtifactLedgers(physical);
+};
+
+const samePhysicalFileProofs = (
+  left: ReadonlyMap<string, PhysicalFileProof>,
+  right: ReadonlyMap<string, PhysicalFileProof>
+): boolean => {
+  if (left.size !== right.size) return false;
+  for (const [name, leftProof] of left) {
+    const rightProof = right.get(name);
+    if (
+      rightProof === undefined ||
+      leftProof.path !== rightProof.path ||
+      !sameIdentity(leftProof.identity, rightProof.identity)
+    ) {
+      return false;
+    }
+  }
+  return true;
 };
 
 const retainedArtifactProofsMatch = (
@@ -992,6 +1013,7 @@ const samePhysicalCatalogLedger = (left: PhysicalCatalog, right: PhysicalCatalog
   ) {
     return false;
   }
+  if (!samePhysicalFileProofs(left.activeFinderMetadataFiles, right.activeFinderMetadataFiles)) return false;
   for (const [artifactId, leftArtifact] of left.artifacts) {
     const rightArtifact = right.artifacts.get(artifactId);
     if (rightArtifact === undefined || !samePhysicalTreeProof(leftArtifact.treeProof, rightArtifact.treeProof)) {
@@ -1275,8 +1297,10 @@ const walkPayloadTree = async (
   currentPath: string,
   relativeDirectory: string,
   currentProof: PhysicalDirectoryProof,
+  manifestPaths: ReadonlySet<string>,
   files: Map<string, string>,
-  directories: Map<string, PhysicalDirectoryProof>
+  directories: Map<string, PhysicalDirectoryProof>,
+  finderMetadataFiles: Map<string, PhysicalFileProof>
 ): Promise<void> => {
   for (const entryName of currentProof.childNames) {
     if (relativeDirectory.length === 0 && (entryName === ARTIFACT_RECORD_NAME || entryName === MANIFEST_FILE_NAME)) {
@@ -1292,11 +1316,25 @@ const walkPayloadTree = async (
       if ((await fs.realpath(entryPath)) !== entryPath) return fail('storage_error');
       const directoryProof = await capturePhysicalDirectoryProof(entryPath, exactIdentity(stats));
       directories.set(relativePath, directoryProof);
-      await walkPayloadTree(entryPath, relativePath, directoryProof, files, directories);
+      await walkPayloadTree(
+        entryPath,
+        relativePath,
+        directoryProof,
+        manifestPaths,
+        files,
+        directories,
+        finderMetadataFiles
+      );
       continue;
     }
     if (!stats.isFile() || files.has(relativePath) || (await fs.realpath(entryPath)) !== entryPath) {
       return fail('storage_error');
+    }
+    if (entryName === FINDER_METADATA_FILE_NAME && !manifestPaths.has(relativePath)) {
+      const proof = await capturePhysicalFileProof(entryPath);
+      if (proof.identity.nlink !== 1 || finderMetadataFiles.has(relativePath)) return fail('storage_error');
+      finderMetadataFiles.set(relativePath, proof);
+      continue;
     }
     files.set(relativePath, entryPath);
   }
@@ -1312,12 +1350,19 @@ const validatePhysicalCatalog = async (
   const activeIdentity = await readOptionalVerifiedDirectory(activePath);
   if (state.catalog.artifacts.length > 0 && activeIdentity === null) return fail('storage_error');
   const directoryProofs: PhysicalDirectoryProof[] = [];
+  const fileProofs: PhysicalFileProof[] = [];
+  const activeFinderMetadataFiles = new Map<string, PhysicalFileProof>();
   let activeProof: PhysicalDirectoryProof | null = null;
   if (activeIdentity !== null) {
     activeProof = await capturePhysicalDirectoryProof(activePath, activeIdentity);
     directoryProofs.push(activeProof);
+    if (activeProof.childNames.includes(FINDER_METADATA_FILE_NAME)) {
+      const finderMetadata = await capturePhysicalFileProof(path.join(activePath, FINDER_METADATA_FILE_NAME));
+      if (finderMetadata.identity.nlink !== 1) return fail('storage_error');
+      fileProofs.push(finderMetadata);
+      activeFinderMetadataFiles.set(FINDER_METADATA_FILE_NAME, finderMetadata);
+    }
   }
-  const fileProofs: PhysicalFileProof[] = [];
   const artifacts = new Map<string, PhysicalArtifact>();
   const proofs: StudioExportArtifactIdentityProofV2[] = [];
 
@@ -1346,9 +1391,11 @@ const validatePhysicalCatalog = async (
 
     const payloadPaths = new Map<string, string>();
     const directories = new Map<string, PhysicalDirectoryProof>();
-    await walkPayloadTree(rootPath, '', rootProof, payloadPaths, directories);
-    directoryProofs.push(...directories.values());
     const manifestPaths = new Set(manifest.entries.map(({ relativePath }) => relativePath));
+    const finderMetadataFiles = new Map<string, PhysicalFileProof>();
+    await walkPayloadTree(rootPath, '', rootProof, manifestPaths, payloadPaths, directories, finderMetadataFiles);
+    directoryProofs.push(...directories.values());
+    fileProofs.push(...finderMetadataFiles.values());
     if (
       payloadPaths.size !== manifestPaths.size ||
       [...payloadPaths.keys()].some((relativePath) => !manifestPaths.has(relativePath)) ||
@@ -1366,6 +1413,9 @@ const validatePhysicalCatalog = async (
       [MANIFEST_FILE_NAME, { kind: 'file', identity: manifestFile.identity }],
       ...[...directories].map(
         ([relativePath, proof]) => [relativePath, { kind: 'directory', identity: proof.identity }] as const
+      ),
+      ...[...finderMetadataFiles].map(
+        ([relativePath, proof]) => [relativePath, { kind: 'file', identity: proof.identity }] as const
       ),
     ]);
     for (const entry of manifest.entries) {
@@ -1394,7 +1444,7 @@ const validatePhysicalCatalog = async (
   if (activeIdentity === null && (await readOptionalVerifiedDirectory(activePath)) !== null) {
     return fail('storage_error');
   }
-  return { ...state, activeProof, artifacts };
+  return { ...state, activeProof, activeFinderMetadataFiles, artifacts };
 };
 
 const suggestedDirectoryName = (authority: StudioExportProjectAuthorityV2): string => {
@@ -2341,6 +2391,7 @@ export const createStudioExportCatalogStoreV2 = (
           await authority.assertCurrent?.();
           await assertCatalogPathIdentity(authority, current.identity);
           await reprovePhysicalArtifactLedgers(current);
+          for (const proof of current.activeFinderMetadataFiles.values()) await reprovePhysicalFile(proof);
           stagedTreeProof = await capturePhysicalTreeProof(stagingPath, stagedTreeProof.nodes);
           await reprovePhysicalDirectory(quarantineProof);
           await reprovePhysicalDirectory(activeBeforePublication);
@@ -2380,6 +2431,7 @@ export const createStudioExportCatalogStoreV2 = (
             prospective.activeProof === null ||
             !sameIdentity(prospective.activeProof.identity, activeParentProof.identity) ||
             !sameNames(prospective.activeProof.childNames, activeParentProof.childNames) ||
+            !samePhysicalFileProofs(current.activeFinderMetadataFiles, prospective.activeFinderMetadataFiles) ||
             !retainedArtifactProofsMatch(current, prospective, artifact.id)
           ) {
             return fail('storage_error');
@@ -2395,6 +2447,7 @@ export const createStudioExportCatalogStoreV2 = (
             prospective,
             async () => {
               await reprovePhysicalArtifactLedgers(current);
+              for (const proof of current.activeFinderMetadataFiles.values()) await reprovePhysicalFile(proof);
               const currentPublished = await capturePhysicalTreeProof(activePath, publishedTreeProof.nodes);
               if (!samePhysicalTreeProof(currentPublished, publishedTreeProof)) return fail('storage_error');
               await reprovePhysicalDirectory(activeParentProof);
@@ -2453,6 +2506,7 @@ export const createStudioExportCatalogStoreV2 = (
           if (
             finalPhysical.identity === null ||
             !sameIdentity(finalPhysical.identity, committedCatalogIdentity) ||
+            !samePhysicalFileProofs(committed.activeFinderMetadataFiles, finalPhysical.activeFinderMetadataFiles) ||
             !retainedArtifactProofsMatch(prospective, finalPhysical, '') ||
             finalPhysical.activeProof === null ||
             !sameIdentity(finalPhysical.activeProof.identity, activeParentProof.identity) ||
@@ -3283,8 +3337,10 @@ export const createStudioExportCatalogStoreV2 = (
         await assertCatalogPathIdentity(authority, physical.identity, 'storage_error');
 
         const retainedNames = new Set(physical.catalog.artifacts.map(({ managedExport }) => managedExport.fileName));
+        const retainedActiveNames = new Set(retainedNames);
+        for (const name of physical.activeFinderMetadataFiles.keys()) retainedActiveNames.add(name);
         const orphanNames =
-          activeProof === null ? [] : activeProof.childNames.filter((entry) => !retainedNames.has(entry));
+          activeProof === null ? [] : activeProof.childNames.filter((entry) => !retainedActiveNames.has(entry));
         for (const entry of orphanNames) {
           if (activeProof === null) return fail('storage_error');
           await reprovePhysicalDirectory(activeProof);
@@ -3337,6 +3393,7 @@ export const createStudioExportCatalogStoreV2 = (
           (finalPhysical.identity !== null &&
             physical.identity !== null &&
             !sameIdentity(finalPhysical.identity, physical.identity)) ||
+          !samePhysicalFileProofs(physical.activeFinderMetadataFiles, finalPhysical.activeFinderMetadataFiles) ||
           !retainedArtifactProofsMatch(physical, finalPhysical, '')
         ) {
           return fail('storage_error');
@@ -3345,7 +3402,7 @@ export const createStudioExportCatalogStoreV2 = (
           if (physical.activeProof !== finalPhysical.activeProof) return fail('storage_error');
         } else if (
           !sameNodeIdentity(finalPhysical.activeProof.identity, physical.activeProof.identity) ||
-          !sameNames(finalPhysical.activeProof.childNames, [...retainedNames].toSorted())
+          !sameNames(finalPhysical.activeProof.childNames, [...retainedActiveNames].toSorted())
         ) {
           return fail('storage_error');
         }

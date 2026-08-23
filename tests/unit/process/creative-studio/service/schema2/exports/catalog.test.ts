@@ -9,6 +9,7 @@
 /* eslint-disable no-await-in-loop -- Retention publications intentionally depend on prior catalog revisions. */
 
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, promises as fs, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -764,6 +765,248 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
     await expect(store.list(authority)).resolves.toEqual(catalog);
   });
 
+  it('refreshes without consuming Finder metadata at the exports and artifact roots', async () => {
+    const authority = await makeAuthority();
+    const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+    const catalog = await store.create(authority, {
+      expectedProjectRevision: authority.project.revision,
+      expectedCatalogRevision: 1,
+      artifactId: 'artifact_finder_metadata',
+      managedFileName: 'managed_finder_metadata',
+      shape: 'editor_folder',
+      createdAt: CREATED_AT,
+      files: [
+        { kind: 'generated', relativePath: 'timeline.json', bytes: Buffer.from('{"timeline":true}') },
+        { kind: 'generated', relativePath: 'media/shot-001.mp4', bytes: Buffer.from('shot bytes') },
+      ],
+    });
+    const activeRoot = path.join(authority.projectDir, 'exports');
+    const artifactRoot = path.join(activeRoot, 'managed_finder_metadata');
+    await fs.writeFile(path.join(activeRoot, '.DS_Store'), 'finder catalog metadata');
+    await fs.writeFile(path.join(artifactRoot, '.DS_Store'), 'finder root metadata');
+    await fs.writeFile(path.join(artifactRoot, 'media', '.DS_Store'), 'finder nested metadata');
+
+    await expect(store.repair(authority)).resolves.toEqual(catalog);
+    await expect(fs.readFile(path.join(activeRoot, '.DS_Store'), 'utf8')).resolves.toBe('finder catalog metadata');
+    await expect(fs.readFile(path.join(artifactRoot, '.DS_Store'), 'utf8')).resolves.toBe('finder root metadata');
+    await expect(fs.readFile(path.join(artifactRoot, 'media', '.DS_Store'), 'utf8')).resolves.toBe(
+      'finder nested metadata'
+    );
+  });
+
+  it('reveals an editor folder with Finder metadata at the exports and artifact roots', async () => {
+    const authority = await makeAuthority();
+    const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+    const catalog = await store.create(
+      authority,
+      makeCreatePlan('finder_reveal', 1, 'editor_folder', Buffer.from('{"timeline":true}'))
+    );
+    const activeRoot = path.join(authority.projectDir, 'exports');
+    const artifactRoot = path.join(activeRoot, 'managed_finder_reveal');
+    await fs.writeFile(path.join(activeRoot, '.DS_Store'), 'finder catalog metadata');
+    await fs.writeFile(path.join(artifactRoot, '.DS_Store'), 'finder artifact metadata');
+
+    await expect(
+      store.resolveRevealPath(authority, {
+        projectId: authority.project.id,
+        expectedCatalogRevision: catalog.revision,
+        artifactId: 'artifact_finder_reveal',
+      })
+    ).resolves.toBe(artifactRoot);
+    await expect(fs.readFile(path.join(activeRoot, '.DS_Store'), 'utf8')).resolves.toBe('finder catalog metadata');
+    await expect(fs.readFile(path.join(artifactRoot, '.DS_Store'), 'utf8')).resolves.toBe('finder artifact metadata');
+  });
+
+  it('copies only manifested payloads from an editor folder that contains Finder metadata', async () => {
+    const authority = await makeAuthority();
+    const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+    const catalog = await store.create(authority, {
+      expectedProjectRevision: authority.project.revision,
+      expectedCatalogRevision: 1,
+      artifactId: 'artifact_finder_copy',
+      managedFileName: 'managed_finder_copy',
+      shape: 'editor_folder',
+      createdAt: CREATED_AT,
+      files: [
+        { kind: 'generated', relativePath: 'timeline.json', bytes: Buffer.from('{"timeline":true}') },
+        { kind: 'generated', relativePath: 'media/shot-001.mp4', bytes: Buffer.from('shot bytes') },
+      ],
+    });
+    const artifactRoot = path.join(authority.projectDir, 'exports', 'managed_finder_copy');
+    await fs.writeFile(path.join(artifactRoot, '.DS_Store'), 'finder root metadata');
+    await fs.writeFile(path.join(artifactRoot, 'media', '.DS_Store'), 'finder nested metadata');
+    const destinationPath = path.join(path.dirname(authority.projectDir), 'finder-copy');
+
+    await expect(
+      store.copy(
+        authority,
+        {
+          projectId: authority.project.id,
+          expectedCatalogRevision: catalog.revision,
+          artifactId: 'artifact_finder_copy',
+        },
+        destinationPath
+      )
+    ).resolves.toEqual({ status: 'copied' });
+    await expect(fs.readFile(path.join(destinationPath, 'media', 'shot-001.mp4'), 'utf8')).resolves.toBe('shot bytes');
+    await expect(fs.access(path.join(destinationPath, '.DS_Store'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.access(path.join(destinationPath, 'media', '.DS_Store'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('publishes another export without adopting or deleting Finder metadata in the active catalog', async () => {
+    const authority = await makeAuthority();
+    const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+    const first = await store.create(authority, makeCreatePlan('finder_retained', 1));
+    const activeRoot = path.join(authority.projectDir, 'exports');
+    const artifactRoot = path.join(activeRoot, 'managed_finder_retained');
+    await fs.writeFile(path.join(activeRoot, '.DS_Store'), 'finder catalog metadata');
+    await fs.writeFile(path.join(artifactRoot, '.DS_Store'), 'finder artifact metadata');
+
+    const second = await store.create(
+      authority,
+      makeCreatePlan(
+        'after_finder_metadata',
+        first.revision,
+        'script',
+        Buffer.from('# second\n'),
+        '2026-08-20T00:00:01.000Z'
+      )
+    );
+
+    expect(second.revision).toBe(first.revision + 1);
+    expect(second.artifacts.map(({ id }) => id)).toEqual([
+      'artifact_finder_retained',
+      'artifact_after_finder_metadata',
+    ]);
+    await expect(fs.readFile(path.join(activeRoot, '.DS_Store'), 'utf8')).resolves.toBe('finder catalog metadata');
+    await expect(fs.readFile(path.join(artifactRoot, '.DS_Store'), 'utf8')).resolves.toBe('finder artifact metadata');
+    await expect(store.list(authority)).resolves.toEqual(second);
+  });
+
+  it.each([
+    { target: 'active root', kind: 'symbolic link' },
+    { target: 'active root', kind: 'directory' },
+    { target: 'artifact root', kind: 'hard link' },
+  ] as const)('rejects Finder metadata represented by a $kind at the $target', async ({ target, kind }) => {
+    const authority = await makeAuthority();
+    const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+    await store.create(authority, makeCreatePlan(`unsafe_finder_${kind.replace(' ', '_')}`, 1));
+    const activeRoot = path.join(authority.projectDir, 'exports');
+    const artifactRoot = path.join(activeRoot, `managed_unsafe_finder_${kind.replace(' ', '_')}`);
+    const sidecarPath = path.join(target === 'active root' ? activeRoot : artifactRoot, '.DS_Store');
+    const payloadPath = path.join(artifactRoot, 'script.md');
+    let sentinelPath: string | null = null;
+    if (kind === 'symbolic link') await fs.symlink(payloadPath, sidecarPath);
+    else if (kind === 'directory') await fs.mkdir(sidecarPath);
+    else {
+      sentinelPath = path.join(path.dirname(authority.projectDir), 'finder-hard-link-sentinel');
+      await fs.writeFile(sentinelPath, 'external sentinel');
+      await fs.link(sentinelPath, sidecarPath);
+    }
+
+    await expectAsyncCode(store.list(authority), 'storage_error');
+    if (sentinelPath !== null) await expect(fs.readFile(sentinelPath, 'utf8')).resolves.toBe('external sentinel');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'rejects an active-root Finder metadata FIFO without waiting for a writer',
+    async () => {
+      const authority = await makeAuthority();
+      const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+      await store.create(authority, makeCreatePlan('finder_fifo', 1));
+      const sidecarPath = path.join(authority.projectDir, 'exports', '.DS_Store');
+      execFileSync('mkfifo', [sidecarPath]);
+      let unblockTriggered = false;
+      let unblockPromise: Promise<void> | null = null;
+      const unblockTimer = setTimeout(() => {
+        unblockTriggered = true;
+        unblockPromise = fs.open(sidecarPath, 'w').then(async (handle) => handle.close());
+      }, 2_000);
+
+      try {
+        await expectAsyncCode(store.list(authority), 'storage_error');
+      } finally {
+        clearTimeout(unblockTimer);
+        if (unblockPromise !== null) await unblockPromise;
+      }
+      expect(unblockTriggered).toBe(false);
+    }
+  );
+
+  it('keeps a manifest-recorded .DS_Store under ordinary payload integrity', async () => {
+    const authority = await makeAuthority();
+    const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+    const original = Buffer.from('manifest-owned Finder-named payload');
+    const catalog = await store.create(authority, {
+      ...makeCreatePlan('manifested_finder_name', 1, 'script', original),
+      files: [{ kind: 'generated', relativePath: '.DS_Store', bytes: original }],
+    });
+    const payloadPath = path.join(authority.projectDir, 'exports', 'managed_manifested_finder_name', '.DS_Store');
+
+    await expect(store.list(authority)).resolves.toEqual(catalog);
+    await fs.writeFile(payloadPath, Buffer.alloc(original.length, 120));
+    await expectAsyncCode(store.list(authority), 'storage_error');
+  });
+
+  it('rejects Finder metadata changed after descendant validation, then accepts its next stable proof', async () => {
+    const authority = await makeAuthority();
+    const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+    const catalog = await store.create(authority, makeCreatePlan('finder_race', 1));
+    const sidecarPath = path.join(authority.projectDir, 'exports', 'managed_finder_race', '.DS_Store');
+    await fs.writeFile(sidecarPath, 'before');
+    let changed = false;
+    const racingStore = createStudioExportCatalogStoreV2({
+      createNonce: nonceSequence(),
+      onStep: async (step) => {
+        if (step !== 'physical_catalog_descendants_validated' || changed) return;
+        changed = true;
+        await fs.writeFile(sidecarPath, 'after descendant validation');
+      },
+    });
+
+    await expectAsyncCode(racingStore.list(authority), 'storage_error');
+    expect(changed).toBe(true);
+    await expect(store.list(authority)).resolves.toEqual(catalog);
+  });
+
+  it.each(['artifact_staged', 'artifact_published'] as const)(
+    'rejects active-root Finder metadata changed at the $step create boundary',
+    async (step) => {
+      const authority = await makeAuthority();
+      const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+      const catalog = await store.create(authority, makeCreatePlan(`finder_${step}_base`, 1));
+      const sidecarPath = path.join(authority.projectDir, 'exports', '.DS_Store');
+      await fs.writeFile(sidecarPath, 'before');
+      let changed = false;
+      const racingStore = createStudioExportCatalogStoreV2({
+        createNonce: nonceSequence(),
+        onStep: async (currentStep) => {
+          if (currentStep !== step || changed) return;
+          changed = true;
+          await fs.writeFile(sidecarPath, `changed at ${step}`);
+        },
+      });
+
+      await expectAsyncCode(
+        racingStore.create(
+          authority,
+          makeCreatePlan(
+            `finder_${step}_next`,
+            catalog.revision,
+            'script',
+            Buffer.from('# next\n'),
+            '2026-08-20T00:00:01.000Z'
+          )
+        ),
+        'storage_error'
+      );
+      expect(changed).toBe(true);
+      await expect(store.list(authority)).resolves.toEqual(catalog);
+    }
+  );
+
   it('holds validated retained-export byte facts across one managed-media authority callback', async () => {
     const authority = await makeAuthority();
     const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
@@ -775,6 +1018,8 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
       artifact.byteSize +
       (await fs.stat(path.join(artifactRoot, 'manifest.json'))).size +
       (await fs.stat(path.join(artifactRoot, 'artifact.json'))).size;
+    await fs.writeFile(path.join(authority.projectDir, 'exports', '.DS_Store'), Buffer.alloc(8 * 1024, 1));
+    await fs.writeFile(path.join(artifactRoot, '.DS_Store'), Buffer.alloc(16 * 1024, 2));
 
     await expect(
       store.withManagedMediaAuthority(authority, async (facts) => {
@@ -916,6 +1161,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
     await expectAsyncCode(store.list(authority), 'storage_error');
 
     await fs.unlink(secondPayload);
+    await expectAsyncCode(store.list(authority), 'storage_error');
     await fs.symlink(firstPayload, secondPayload);
     await expectAsyncCode(store.list(authority), 'storage_error');
   });
@@ -1277,6 +1523,14 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
     await fs.writeFile(
       path.join(extraPayloadAuthority.projectDir, 'exports', 'managed_extra_payload', 'unmanifested.bin'),
       'foreign'
+    );
+    await expectAsyncCode(extraPayloadStore.list(extraPayloadAuthority), 'storage_error');
+    await fs.unlink(
+      path.join(extraPayloadAuthority.projectDir, 'exports', 'managed_extra_payload', 'unmanifested.bin')
+    );
+    await fs.writeFile(
+      path.join(extraPayloadAuthority.projectDir, 'exports', 'managed_extra_payload', '.DS_Store.bak'),
+      'not allowlisted Finder metadata'
     );
     await expectAsyncCode(extraPayloadStore.list(extraPayloadAuthority), 'storage_error');
 
