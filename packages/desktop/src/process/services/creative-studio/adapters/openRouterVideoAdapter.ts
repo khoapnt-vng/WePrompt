@@ -82,6 +82,8 @@ export type OpenRouterHttpErrorEvidence = {
   errorCode: string | null;
   errorType: string | null;
   providerCode: string | null;
+  /** e.g. `openrouter_credits` on a 402 — the one identifier that says which spend gate fired. */
+  limitSource: string | null;
   messagePresent: boolean;
 };
 
@@ -207,9 +209,9 @@ const requestValidation = (
  * needs_attention behind a duplicate-charge acknowledgement — a warning about paying twice for work
  * that provably never started.
  *
- * 402 earns its own code because it is the one the user can act on. Measured 2026-08-23: five video
- * submissions failed in a row, were reported as ambiguous, and the provider had been answering
- * "Insufficient credits" the whole time.
+ * 402 earns its own code because it is the one the user can act on. Measured 2026-08-23: four video
+ * submissions failed in a row and were reported as ambiguous; replaying the same submission returned
+ * a plain 402 "Insufficient credits" that the redacted bodies had given no way to see.
  */
 const mapStatusError = (status: number): SanitizedProviderError => {
   if (status === 401 || status === 403) return { code: 'auth' };
@@ -441,6 +443,7 @@ const httpErrorEvidence = async (
       errorCode: null,
       errorType: null,
       providerCode: null,
+      limitSource: null,
       messagePresent: false,
     };
   }
@@ -455,6 +458,7 @@ const httpErrorEvidence = async (
     errorCode: safeEvidenceTag(error?.code),
     errorType: safeEvidenceTag(metadata?.error_type),
     providerCode: safeEvidenceTag(metadata?.provider_code),
+    limitSource: safeEvidenceTag(metadata?.limit_source),
     messagePresent: typeof error?.message === 'string' && error.message.length > 0,
   };
 };

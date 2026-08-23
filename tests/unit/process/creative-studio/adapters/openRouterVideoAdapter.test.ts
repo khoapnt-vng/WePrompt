@@ -201,11 +201,39 @@ describe('OpenRouter video generation adapter', () => {
       errorCode: '400',
       errorType: 'invalid_image',
       providerCode: 'image_download_failed',
+      limitSource: null,
       messagePresent: true,
     });
     expect(JSON.stringify(emitHttpErrorEvidence.mock.calls)).not.toMatch(
       /private scarf|sk-or-secret|private\.example|data:image|base64/i
     );
+  });
+
+  it('surfaces the spend-limit source a 402 names, because it is the one field that explains it', async () => {
+    const emitHttpErrorEvidence = vi.fn();
+    const fetch = vi.fn(async () =>
+      response(402, {
+        error: {
+          code: 402,
+          message: 'Insufficient credits. Add more using https://openrouter.ai/settings/credits',
+          metadata: { limit_source: 'openrouter_credits', remedy_hint: 'Add credits at https://openrouter.ai' },
+        },
+      })
+    );
+    const adapter = createOpenRouterVideoAdapter({
+      fetch,
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
+
+    await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'quota',
+    });
+
+    await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
+    expect(emitHttpErrorEvidence).toHaveBeenCalledWith(expect.objectContaining({ limitSource: 'openrouter_credits' }));
+    // remedy_hint is free text with a URL; the identifier gate must keep dropping content like it.
+    expect(JSON.stringify(emitHttpErrorEvidence.mock.calls)).not.toMatch(/settings\/credits|Add credits/i);
   });
 
   it.each([
