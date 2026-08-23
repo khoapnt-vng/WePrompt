@@ -2520,6 +2520,41 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(loaded.status === 'supported' ? Object.keys(loaded.project.jobs) : null).toEqual(['job_v2_1']);
   });
 
+  it('terminalizes a refused submission without demanding a duplicate-charge acknowledgement', async () => {
+    // The provider answered before taking the work, so nothing was created and nothing can be charged
+    // twice. Offering retry and then rejecting the request left a Shot stranded with a button that
+    // did nothing — worse than no button at all.
+    const submit = vi.fn(async () => {
+      throw new Error('must not submit again');
+    });
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
+    const attention = await harness.store.updateProjectV2(harness.project.id, (project) => {
+      const job = project.jobs.job_v2_1!;
+      job.status = 'needs_attention';
+      job.providerJobId = null;
+      job.error = {
+        code: 'provider_unavailable',
+        messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+      };
+      return project;
+    });
+
+    await expect(
+      harness.manager.retryJobV2({
+        projectId: attention.id,
+        jobId: 'job_v2_1',
+        expectedRevision: attention.revision,
+      })
+    ).resolves.toMatchObject({ status: 'failed' });
+
+    const loaded = await harness.store.getProjectV2(attention.id);
+    expect(loaded.status === 'supported' ? loaded.project.jobs.job_v2_1 : null).toMatchObject({
+      status: 'failed',
+      spendReceipt: null,
+    });
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it('requires explicit duplicate-charge acknowledgement before terminalizing an unknown submission', async () => {
     const submit = vi.fn(async () => {
       throw new Error('must not submit again');

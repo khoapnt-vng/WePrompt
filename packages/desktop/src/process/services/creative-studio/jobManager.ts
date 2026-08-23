@@ -1509,23 +1509,35 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (!canRetryJobV2(previous)) {
       throw new StudioJobManagerError('invalid_request');
     }
-    if (
+    // Two shapes terminalize here so the gate can re-plan: a submission whose outcome is unknown, and
+    // one the provider refused before taking it. Only the first can have created paid work, so only
+    // the first demands an acknowledgement of duplicate-charge risk. Refusing the second outright, as
+    // this did until 2026-08-23, stranded the Shot behind a retry button that could not run.
+    const unknownSubmission =
       previous.status === 'needs_attention' &&
       previous.error?.code === 'submission_unknown' &&
-      previous.providerJobId === null
-    ) {
-      if (input.acknowledgePossibleDuplicateCharge !== true) {
+      previous.providerJobId === null;
+    const refusedSubmission =
+      previous.status === 'needs_attention' &&
+      previous.providerJobId === null &&
+      previous.error !== null &&
+      previous.error !== undefined &&
+      SUBMISSION_REFUSED_CODES.has(previous.error.code);
+    if (unknownSubmission || refusedSubmission) {
+      if (unknownSubmission && input.acknowledgePossibleDuplicateCharge !== true) {
         throw new StudioJobManagerError('duplicate_charge_acknowledgement_required');
       }
       const acknowledged = await mutateJobV2(
         project.id,
         previous.id,
         (_currentProject, currentJob) => {
+          const code = currentJob.error?.code;
           if (
             currentJob.status !== 'needs_attention' ||
-            currentJob.error?.code !== 'submission_unknown' ||
             currentJob.providerJobId !== null ||
-            currentJob.spendReceipt !== null
+            currentJob.spendReceipt !== null ||
+            code === undefined ||
+            (code !== 'submission_unknown' && !SUBMISSION_REFUSED_CODES.has(code))
           ) {
             return false;
           }
