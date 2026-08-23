@@ -469,6 +469,17 @@ export const filmRenderBatchShotIds = (input: {
   const batch: { shotId: string; filmIndex: number; coveredShotIds: string[] }[] = [];
   for (const bucket of segments.values()) {
     const ordered = bucket.toSorted((left, right) => left.shotIndex - right.shotIndex);
+    // "Render the film" means render what is missing. A segment whose every Shot already has a Take
+    // needs nothing, and packing it anyway both re-charges finished work and consumes cap that the
+    // unrendered Beats behind it then never get — a partly-rendered film could not be finished at all.
+    if (
+      ordered.every(({ shotId }) => {
+        const shot = projected.get(shotId);
+        return shot !== undefined && (shot.selectedTakeId !== null || shot.videoTakes.length > 0);
+      })
+    ) {
+      continue;
+    }
     if (
       ordered.some(({ shotId }) => {
         const shot = projected.get(shotId);

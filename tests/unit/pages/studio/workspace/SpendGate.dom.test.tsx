@@ -593,6 +593,33 @@ describe('the largest legal render batch', () => {
     expect(batch).toEqual([]);
   });
 
+  it('skips a segment that is already covered, so the film-wide batch means render what is missing', () => {
+    // A partly-rendered film re-offered its finished Beats and never reached the unrendered ones,
+    // because segments were packed in film order regardless of coverage. Confirming that would have
+    // charged again for work already paid for and still left the film unfinished.
+    const project = makeProject();
+    for (const shotId of ['shot_1', 'shot_2'] as const) {
+      const assetId = `${shotId}_take`;
+      project.assets[assetId] = {
+        id: assetId,
+        projectId: project.id,
+        shotId,
+        mediaKind: 'video',
+        mimeType: 'video/mp4',
+        managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
+        byteSize: 1024,
+        sha256: 'a'.repeat(64),
+        createdAt: '2026-08-23T00:00:00.000Z',
+        durationSeconds: 4,
+      } as StudioAssetV2;
+      project.shots[shotId]!.assetIds = [assetId];
+      project.shots[shotId]!.selectedTakeId = assetId;
+    }
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
+
+    expect(filmRenderBatchShotIds({ project, projection })).toEqual(['shot_3']);
+  });
+
   it('counts the cascade each segment drags in, not only the segment heads', () => {
     // beat_1's head cascades to shot_2 as well, so a batch of two heads touches three Shots. The cap
     // is on distinct Shot ids across the whole selection, so counting heads lets the batch exceed it

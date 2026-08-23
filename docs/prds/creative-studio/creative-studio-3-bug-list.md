@@ -450,6 +450,12 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **The gate is not wrong.** _"Waits for your take choice"_ is the promise that stops authorized money being spent ahead of a human, and it held all day — including through four provider failures. The problem is that the promise was sized for a film with three choices in it.
   - A pilot user asked to make two minutes today would not finish. Nothing is broken; the interaction budget simply runs out before the film does.
   - Worth deciding as design rather than patching: whether a Beat can be pre-authorised to advance its own chain unattended once its first take is chosen, which would take a 30-interaction film to about 8 without weakening the gate at a Beat boundary.
+- [x] **[BUG-116][P1][Creative Studio] A partly-rendered film re-offered its finished Beats and could never reach the unfinished ones** — found and fixed 2026-08-23
+  - With six of eight Beats rendered, pressing **Render…** selected **all 23 already-completed Shots** — `shot_gutter_01` through `shot_downriver_04`, every one succeeded — quoted **$4.60**, and **excluded Harbour Passage and Open Sea entirely**, the only two Beats that still needed rendering. Confirming would have paid twice for finished work and still left the film unfinished.
+  - **Cause, and it was in the BUG-114 fix.** That change made the batch pack segments in film order until the cascade-expanded Shot cap. It never asked whether a segment needed anything, so the six finished Beats filled all 24 places and the two empty Beats behind them never got in.
+  - So the two defects compound: before BUG-114 a long film could not be rendered at all; after it, a _partly-rendered_ long film re-charged its finished half forever.
+  - **Fix.** A segment whose every Shot already has a Take is skipped, so "render the film" means render what is missing. The cap then falls to the Beats that need it.
+  - **Caught only by driving a real film to a partly-rendered state.** Every prior test rendered from empty, where finished-versus-unfinished cannot differ, and the spend gate's own arithmetic was correct throughout — $4.60 was the true price of what it had selected. Nothing was wrong except _what_ it selected, which no amount of checking the total would reveal.
 
 ## Correctness and honesty of failures
 
