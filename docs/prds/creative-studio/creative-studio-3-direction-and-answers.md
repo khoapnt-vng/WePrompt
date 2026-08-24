@@ -17,6 +17,11 @@ cascade, generation-count, undo, and Director decisions left implicit by §13.1.
 only, §13.6 supersedes any earlier reading that makes the cascade optional, treats `set_hard_cut` as
 ordinary free authoring, or permits ordinary undo or a Director proposal.
 
+**Approved product amendment — 2026-08-24 (BUG-121):** §14 is the owner-approved simple reference
+workflow. It replaces independent per-Shot “reference image” generation with a project-level
+character-first, background-second stage and adds **REFERENCES** immediately before **TABLE** in the
+Studio workspace navigation.
+
 ---
 
 ## 1. What CS3 is
@@ -761,3 +766,71 @@ bind symbolic downstream dependencies; the hard-cut gate does not silently choos
 Reversing it is the opposite paid topology transition through a new prepare/confirm gate; it is not
 `undo_last`. The current Director cannot apply or propose either transition, and accepting a legacy
 pending proposal cannot open, manufacture, or confirm this spend authority.
+
+---
+
+## 14. Sixth round — references before Shots
+
+The first reference workflow generated three independent seed stills for three Shots. All three paid
+jobs succeeded, but each image reinvented the characters and environment, and the completed assets
+were hidden inside the affected Beat panels. That is the wrong production order and an incomplete
+result handoff.
+
+### 14.1 The simple flow
+
+The approved order is:
+
+`Brief → References → Table → Board → Cut/Render`
+
+References is a persistent workspace tab, placed first in the existing workspace navigation:
+
+`REFERENCES | TABLE | BOARD | CUT`
+
+The separate **Render** action stays where it is. First-time reference work opens **REFERENCES**
+automatically, but later updates never pull the user away from another active workspace. Once every
+required reference is approved, the view exposes **Continue to Table**.
+
+### 14.2 One page, two sections
+
+**Characters first.** The Director derives the named characters from the approved Brief. The page
+shows one card per character, and each card holds one generated character sheet with **Approve** and
+**Regenerate**. A sheet may contain several views in one image, but it is one asset and one approval
+decision. There are no costume variants, expression libraries, or multiple identity branches in this
+version.
+
+**Backgrounds second.** When every required character sheet is approved, the page offers a small set
+of recurring location references. Each location card has the same **Approve** and **Regenerate**
+decision. A story with no named characters starts here. Lighting variants, prop libraries, masks and
+layers remain out.
+
+### 14.3 Composition, not literal compositing
+
+Shot generation automatically conditions on the approved character sheets for characters present in
+the Shot and the approved background matching its location. The Shot prompt remains the composition
+instruction. The output is a Shot candidate that follows the existing first-frame review path; it is
+not a new character or background reference.
+
+This version does not literally cut out a foreground and merge it over a background. If the location
+match is missing or ambiguous, generation stops and asks the user to choose instead of silently
+dropping the reference.
+
+Every generated Shot records the exact reference asset ids used. Approved references stay stable
+until the user explicitly generates and approves a replacement. A pending candidate never replaces
+approved conditioning authority.
+
+### 14.4 The result returns to where it belongs
+
+The Director handoff remains actionable after spend confirmation and across reload:
+
+- before confirmation, it names the scope and price;
+- while running, it shows queued, running, succeeded and failed counts;
+- after completion, it shows thumbnails and **Review references**;
+- on partial failure, it preserves successful results and retries only failed items.
+
+**Review references** switches to **REFERENCES**, scrolls to the exact generated cards and briefly
+highlights them. Reference assets never occupy the Table's Board-panel thumbnail slot. In this first
+version, the Table gains no per-row reference controls; **REFERENCES** is the one durable place to
+review or replace project references.
+
+The existing prepare/confirm spend boundary remains mandatory for every generation and separate from
+free authoring approval.
