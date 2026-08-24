@@ -7,7 +7,11 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { createStudioE2EFakeBundle } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
+import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
+import {
+  createStudioE2EFakeBundle,
+  createStudioE2EFakeRemoteState,
+} from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 import { createStudioJobManager } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
@@ -125,6 +129,8 @@ describe('Creative Studio generation lifecycle integration', () => {
             trimOutSeconds: null,
             chainBreak: 'none',
             seedStillId: null,
+            boardAssetId: null,
+            supersededBoardAssetIds: [],
             videoAssetId: null,
             supersededVideoAssetIds: [],
             assetIds: [],
@@ -244,6 +250,192 @@ describe('Creative Studio generation lifecycle integration', () => {
         collection: 'assets',
       });
       expect(primaryAssetId ? await mediaStore.resolveAssetV2(completed.id, primaryAssetId) : null).not.toBeNull();
+      service.dispose();
+    } finally {
+      clock.releaseAll();
+      await manager?.dispose().catch((): undefined => undefined);
+      await fake.dispose().catch((): undefined => undefined);
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs a publicly selected Board style through confirmation before one image dispatch and atomic ownership', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-board-generation-integration-'));
+    const remoteState = createStudioE2EFakeRemoteState();
+    const fake = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const clock = new ControlledPollClock();
+    let manager: ReturnType<typeof createStudioJobManager> | null = null;
+    try {
+      const store = createCreativeStudioStore({ rootDir });
+      await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
+      const listProviders = async () => [fake.provider];
+      const providerResolver = createStudioProviderResolver({
+        listProviders,
+        listConnections: () => store.listConnections(),
+      });
+      const catalog = await providerResolver.listGenerationRoutes();
+      const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
+      if (!imageRoute) throw new Error('Board lifecycle did not resolve the fake image route');
+      const created = await store.createProjectV2({
+        name: 'Board lifecycle film',
+        brief: 'Draw one confirmed production storyboard panel',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '720p',
+      });
+      const configured = await store.updateProjectV2(created.id, (project) => ({
+        ...project,
+        beatOrder: ['section_board'],
+        beats: {
+          section_board: {
+            id: 'section_board',
+            title: 'Opening',
+            action: 'Reveal the product in one deliberate move',
+            look: 'Restrained morning light with deep silhouettes',
+            actionRevision: 1,
+            targetSeconds: null,
+            shotOrder: ['clip_board'],
+            lineHistory: [],
+          },
+        },
+        shots: {
+          clip_board: {
+            id: 'clip_board',
+            line: 'A wide frame reveals the product on a quiet stage',
+            derivation: 'derived',
+            derivedFromActionRevision: 1,
+            narration: '',
+            onScreenText: '',
+            durationSeconds: 5,
+            trimInSeconds: null,
+            trimOutSeconds: null,
+            chainBreak: 'none',
+            seedStillId: null,
+            boardAssetId: null,
+            supersededBoardAssetIds: [],
+            videoAssetId: null,
+            supersededVideoAssetIds: [],
+            assetIds: [],
+            jobIds: [],
+          },
+        },
+        imageRouteId: imageRoute.choiceId,
+      }));
+      const mediaStore = createStudioMediaStore({ store });
+      manager = createStudioJobManager({
+        store,
+        mediaStore,
+        providerResolver,
+        adapters: fake.adapters,
+        listProviders,
+        sleep: clock.sleep,
+        jitterMs: (baseMs) => baseMs,
+      });
+      const rateCard = createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+      ]);
+      const service = createCreativeStudioServiceV2({
+        store,
+        mediaStore,
+        providerResolver,
+        jobManager: manager,
+        rateCard: async () => rateCard,
+        createQuoteId: () => 'quote_v2_board_lifecycle',
+        createJobId: () => 'job_v2_board_lifecycle',
+        createIdempotencyKey: () => 'idempotency_v2_board_lifecycle',
+        onProjectUpdated: () => {},
+      });
+
+      const styled = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          operations: [{ kind: 'edit_project', changes: { boardStyle: 'line_art' } }],
+        },
+        { mutationId: 'select_board_style', capturedAt: new Date().toISOString() }
+      );
+      expect(styled.project.boardStyle).toBe('line_art');
+
+      const prepared = await service.prepareSubmission({
+        projectId: configured.id,
+        expectedRevision: styled.project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [
+          {
+            shotId: 'clip_board',
+            purpose: 'board_still',
+            referenceAssetId: null,
+          },
+        ],
+        cascadeChoices: [],
+      });
+      expect(prepared).toMatchObject({
+        baseOnly: {
+          projectRevision: styled.project.revision,
+          baseItems: [
+            {
+              shotId: 'clip_board',
+              purpose: 'board_still',
+              route: { choiceId: imageRoute.choiceId },
+              generationCount: 1,
+              durationSeconds: null,
+            },
+          ],
+          cascadeItems: [],
+        },
+        withCascade: null,
+      });
+      expect(remoteState.taskCounter).toBe(0);
+
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: prepared.baseOnly.id,
+          expectedRevision: styled.project.revision,
+        })
+      ).resolves.toEqual({ projectId: configured.id, projectRevision: styled.project.revision + 1 });
+      clock.releaseAll();
+
+      const completed = await waitFor(async () => {
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          return loaded.status === 'supported' && loaded.project.jobs.job_v2_board_lifecycle.status === 'succeeded'
+            ? loaded.project
+            : null;
+        } catch {
+          return null;
+        }
+      });
+      const job = completed.jobs.job_v2_board_lifecycle;
+      const shot = completed.shots.clip_board;
+      const boardAssetId = job.outputAssetIdsByRole.primary;
+      const asset = boardAssetId ? completed.assets[boardAssetId] : null;
+      expect(remoteState.taskCounter).toBe(1);
+      expect({
+        purpose: job.purpose,
+        boardAssetId: shot.boardAssetId,
+        supersededBoardAssetIds: shot.supersededBoardAssetIds,
+        assetId: boardAssetId,
+        assetShotId: asset?.shotId,
+        mediaKind: asset?.mediaKind,
+        collection: asset?.managedAsset.collection,
+      }).toEqual({
+        purpose: 'board_still',
+        boardAssetId,
+        supersededBoardAssetIds: [],
+        assetId: boardAssetId,
+        assetShotId: 'clip_board',
+        mediaKind: 'image',
+        collection: 'boardStills',
+      });
+      expect(boardAssetId ? await mediaStore.resolveAssetV2(completed.id, boardAssetId) : null).not.toBeNull();
       service.dispose();
     } finally {
       clock.releaseAll();

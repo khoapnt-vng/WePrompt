@@ -911,6 +911,48 @@
       "importError": "Não foi possível adicionar a referência. Tente novamente."
     },
     "workspace": {
+      "table": {
+        "columns": { "panel": "Painel" },
+        "board": {
+          "label": "Controles do Board do Diretor",
+          "progress": "{{drawn}} de {{total}} painéis desenhados",
+          "progressLabel": "Conclusão do Board",
+          "staleCount": "{{count}} desatualizados",
+          "busyCount": "{{count}} em andamento",
+          "style": {
+            "label": "Estilo do Board",
+            "greyTone": "Tons de cinza",
+            "lineArt": "Arte linear",
+            "colourKey": "Chave de cor"
+          },
+          "stop": "Parar desenho",
+          "stopNote": "Parar solicita o cancelamento quando possível. Os painéis concluídos e as cobranças já incorridas permanecem.",
+          "drawNext": "Desenhar próximo lote ({{count}})",
+          "styleRequired": "Escolha um estilo de Board antes de desenhar."
+        },
+        "panel": {
+          "openDetails": "Abrir painéis do Board de {{title}}",
+          "closeDetails": "Fechar painéis do Board de {{title}}",
+          "detailLabel": "Painéis do Board de {{title}}",
+          "drawMissing": "Desenhar ausentes ({{count}})",
+          "redrawBeat": "Redesenhar Beat · pago",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "head": "Início",
+          "redrawShot": "Redesenhar Shot {{position}} · pago",
+          "useAsFirstFrame": "Usar o painel do Shot {{position}} como primeiro quadro",
+          "status": {
+            "missing": "Não desenhado",
+            "current": "Atual",
+            "stale": "Desatualizado",
+            "statusPending": "Status pendente",
+            "queued": "Na fila",
+            "drawing": "Desenhando",
+            "needsAttention": "Requer atenção",
+            "failed": "Falhou",
+            "cancelled": "Cancelado"
+          }
+        }
+      },
       "library": {
         "subtitle": "Planeje histórias como Beats e planos e depois revise a imagem atual de cada plano.",
         "pictureCount": "{{count}} imagens prontas",
@@ -1081,9 +1123,33 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "Brief e regras"
+        "briefAndRulesTitle": "Brief e regras",
+        "undoLabel": { "promote_board_panel": "Usar painel como primeiro quadro" }
       },
       "gate": {
+        "purpose": { "board_still": "Painel do Board" },
+        "promotion": {
+          "title": "Usar painel como primeiro quadro",
+          "summary": "Promova o painel atual do Board do Shot {{shotId}} a primeiro quadro. Isso não altera o limite de continuidade do Shot.",
+          "impactNone": "Nenhum take atual depende deste quadro.",
+          "impactIntro": "Takes atuais que continuarão reproduzíveis, mas ficarão desatualizados: {{count}}",
+          "impactItem": "Take atual do Shot {{shotId}}",
+          "optionsLabel": "Escolha como tratar os takes atuais",
+          "promoteOnly": "Apenas promover — manter takes reproduzíveis e desatualizados",
+          "freePrice": "$0",
+          "promoteAndRerender": "Promover e revisar o trabalho exato de nova renderização",
+          "priceAfterReview": "Preço exibido a seguir",
+          "promoteOnlyAction": "Promover por $0",
+          "reviewPaidAction": "Revisar preço da nova renderização",
+          "paidUnavailable": "Este segmento tem takes atuais demais para uma única confirmação paga. A opção de apenas promover continua disponível.",
+          "headline": "Promover + renderizar takes novamente ({{count}}) · {{cost}}",
+          "requiredWork": "As novas renderizações listadas são exatamente os takes atuais que esta promoção torna desatualizados. A cobertura ausente não está incluída.",
+          "confirm": "Confirmar promoção + renderizar takes novamente ({{count}}) · {{cost}}",
+          "promoted": "Painel promovido. Os takes existentes continuam reproduzíveis e são marcados como desatualizados.",
+          "promoting": "Promovendo painel…",
+          "confirmed": "Painel promovido e nova renderização iniciada para os takes confirmados.",
+          "close": "Fechar"
+        },
         "headline_one": "{{count}} geração · {{cost}}",
         "headline_other": "{{count}} gerações · {{cost}}",
         "confirm_one": "Confirmar {{count}} geração · {{cost}}",

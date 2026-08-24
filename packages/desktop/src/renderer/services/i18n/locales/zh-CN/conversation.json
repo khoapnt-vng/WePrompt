@@ -901,6 +901,48 @@
       "importError": "无法添加参考图，请重试。"
     },
     "workspace": {
+      "table": {
+        "columns": { "panel": "分镜" },
+        "board": {
+          "label": "导演分镜控制",
+          "progress": "已绘制 {{drawn}} / {{total}} 个分镜",
+          "progressLabel": "分镜板完成度",
+          "staleCount": "{{count}} 个已过期",
+          "busyCount": "{{count}} 个进行中",
+          "style": {
+            "label": "分镜板风格",
+            "greyTone": "灰度",
+            "lineArt": "线稿",
+            "colourKey": "色彩稿"
+          },
+          "stop": "停止绘制",
+          "stopNote": "停止操作会在可能的情况下请求取消。已完成的分镜和已经产生的费用会保留。",
+          "drawNext": "绘制下一批（{{count}}）",
+          "styleRequired": "请先选择分镜板风格再绘制。"
+        },
+        "panel": {
+          "openDetails": "打开 {{title}} 的分镜",
+          "closeDetails": "关闭 {{title}} 的分镜",
+          "detailLabel": "{{title}} 的分镜",
+          "drawMissing": "绘制缺失项（{{count}}）",
+          "redrawBeat": "重新绘制 Beat · 付费",
+          "cardLabel": "Shot {{position}}：{{status}}",
+          "head": "起始",
+          "redrawShot": "重新绘制 Shot {{position}} · 付费",
+          "useAsFirstFrame": "将 Shot {{position}} 分镜用作首帧",
+          "status": {
+            "missing": "未绘制",
+            "current": "当前",
+            "stale": "已过期",
+            "statusPending": "状态待定",
+            "queued": "已排队",
+            "drawing": "绘制中",
+            "needsAttention": "需要处理",
+            "failed": "失败",
+            "cancelled": "已取消"
+          }
+        }
+      },
       "library": {
         "subtitle": "以节拍和镜头规划故事，然后检查每个镜头的当前画面。",
         "pictureCount": "{{count}} 个画面已就绪",
@@ -1071,9 +1113,33 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "简报与规则"
+        "briefAndRulesTitle": "简报与规则",
+        "undoLabel": { "promote_board_panel": "将分镜用作首帧" }
       },
       "gate": {
+        "purpose": { "board_still": "分镜" },
+        "promotion": {
+          "title": "将分镜用作首帧",
+          "summary": "将 Shot {{shotId}} 的当前导演分镜提升为首帧。此操作不会更改该 Shot 的连续性边界。",
+          "impactNone": "没有当前成片依赖此帧。",
+          "impactIntro": "以下 {{count}} 个当前成片仍可播放，但会变为已过期：",
+          "impactItem": "Shot {{shotId}} 的当前成片",
+          "optionsLabel": "选择如何处理当前成片",
+          "promoteOnly": "仅提升 — 保留可播放但已过期的成片",
+          "freePrice": "$0",
+          "promoteAndRerender": "提升并查看确切的重新渲染任务",
+          "priceAfterReview": "下一步显示价格",
+          "promoteOnlyAction": "免费提升",
+          "reviewPaidAction": "查看重新渲染价格",
+          "paidUnavailable": "此片段的当前成片过多，无法一次付费确认。仍可选择仅提升。",
+          "headline": "提升 + 重新渲染 {{count}} 个 · {{cost}}",
+          "requiredWork": "所列重新渲染项正是此次提升会使其过期的当前成片。不包括缺失的覆盖内容。",
+          "confirm": "确认提升 + 重新渲染 {{count}} 个 · {{cost}}",
+          "promoted": "分镜已提升。现有成片仍可播放，并已标记为过期。",
+          "promoting": "正在提升分镜…",
+          "confirmed": "分镜已提升，并已开始重新渲染确认的成片。",
+          "close": "关闭"
+        },
         "headline_one": "{{count}} 次生成 · {{cost}}",
         "headline_other": "{{count}} 次生成 · {{cost}}",
         "confirm_one": "确认 {{count}} 次生成 · {{cost}}",

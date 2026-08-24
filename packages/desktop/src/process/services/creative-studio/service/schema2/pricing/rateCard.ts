@@ -5,6 +5,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { StudioJobPurpose } from '@/common/types/project/creativeStudioTypes';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const CURRENCY = /^[A-Z]{3}$/;
@@ -46,6 +47,21 @@ export class StudioRateCardErrorV2 extends Error {
 
 const invalidRateCard = (): never => {
   throw new StudioRateCardErrorV2('invalid_rate_card');
+};
+
+const rateKindForPurpose = (purpose: StudioJobPurpose): StudioRateCardEntryV2['kind'] => {
+  switch (purpose) {
+    case 'seed_still':
+    case 'board_still':
+      return 'image';
+    case 'video_take':
+      return 'video';
+    default: {
+      const exhaustivePurpose: never = purpose;
+      void exhaustivePurpose;
+      return invalidRateCard();
+    }
+  }
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -109,12 +125,12 @@ export const createStudioRateCardV2 = (input: unknown): StudioRateCardV2 => {
 export const getStudioRateCardEntryV2 = (
   card: StudioRateCardV2,
   routeId: string,
-  purpose: 'seed_still' | 'video_take'
+  purpose: StudioJobPurpose
 ): StudioRateCardEntryV2 => {
   if (!SAFE_ID.test(routeId)) invalidRateCard();
+  const expectedKind = rateKindForPurpose(purpose);
   const entry = card.entries.find((candidate) => candidate.routeId === routeId);
   if (entry === undefined) throw new StudioRateCardErrorV2('rate_not_found');
-  const expectedKind = purpose === 'seed_still' ? 'image' : 'video';
   if (entry.kind !== expectedKind) throw new StudioRateCardErrorV2('route_kind_mismatch');
   return entry;
 };

@@ -27,6 +27,17 @@ describe('createStudioQuotedGenerationId', () => {
     expect(createStudioQuotedGenerationId(input)).toBe(createStudioQuotedGenerationId({ ...input }));
   });
 
+  it('gives a Board item its own frozen purpose identity', () => {
+    expect(
+      createStudioQuotedGenerationId({
+        projectId: 'project_1',
+        projectRevision: 7,
+        shotId: 'shot_1',
+        purpose: 'board_still',
+      })
+    ).toBe('item_6a5ac2df92374f7cb475923fe1bc3097bc83d38d174965a5acad302fd5484d3f');
+  });
+
   it.each([
     [{ projectId: '../project', projectRevision: 7, shotId: 'shot_1', purpose: 'video_take' }, TypeError],
     [{ projectId: 'project_1', projectRevision: 0, shotId: 'shot_1', purpose: 'video_take' }, RangeError],

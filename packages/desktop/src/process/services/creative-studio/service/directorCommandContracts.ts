@@ -296,6 +296,7 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   apply_coverage: 'proposal',
   set_hard_cut: 'operation_not_permitted',
   set_seed_still: 'operation_not_permitted',
+  promote_board_panel: 'operation_not_permitted',
   trim_shot: 'operation_not_permitted',
   redetach_line: 'proposal',
   rederive_line: 'proposal',

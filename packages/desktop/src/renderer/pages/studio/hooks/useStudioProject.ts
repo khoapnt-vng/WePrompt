@@ -173,7 +173,7 @@ const sanitizeExportCatalog = (
   return { revision: catalog.revision as number, artifacts };
 };
 
-/** Owns the schema-3 composite renderer snapshot and subscribes before every initial read. */
+/** Owns the schema-4 composite renderer snapshot and subscribes before every initial read. */
 export const useStudioProject = (projectId: string | undefined): UseStudioProjectResult => {
   const binding = useMemo<StudioProjectBinding>(
     () => Object.freeze({ projectId, epoch: Symbol('studio-project-binding') }),

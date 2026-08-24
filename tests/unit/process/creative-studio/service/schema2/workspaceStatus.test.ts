@@ -17,7 +17,10 @@ import type {
   StudioShot,
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
-import { createStudioFrameExtractionId } from '@/process/services/creative-studio/service/schema2/generation';
+import {
+  createStudioBoardGenerationRequestPlan,
+  createStudioFrameExtractionId,
+} from '@/process/services/creative-studio/service/schema2/generation';
 import {
   projectStudioChainBoundaryVerificationIdsV2,
   projectStudioChainStatusV2,
@@ -39,6 +42,8 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
   supersededVideoAssetIds: [],
   assetIds: [],
@@ -58,7 +63,7 @@ const makeBeat = (id: string, shotOrder: string[] = []): StudioBeat => ({
 });
 
 const makeProject = (shotOrder = ['shot_1', 'shot_2']): StudioProjectV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 7,
   id: 'project_1',
   name: 'Project One',
@@ -68,6 +73,7 @@ const makeProject = (shotOrder = ['shot_1', 'shot_2']): StudioProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '1080p',
+  boardStyle: null,
   beatOrder: ['beat_1'],
   beats: { beat_1: makeBeat('beat_1', shotOrder) },
   shots: Object.fromEntries(shotOrder.map((shotId) => [shotId, makeShot(shotId)])),
@@ -239,6 +245,54 @@ const addJob = (project: StudioProjectV2, job: StudioJobV2): void => {
   project.shots[job.shotId]?.jobIds.push(job.id);
 };
 
+const boardPlan = (project: StudioProjectV2, shotId: string): StudioGenerationRequestPlan => {
+  const beat = Object.values(project.beats).find((candidate) => candidate.shotOrder.includes(shotId));
+  const shot = project.shots[shotId];
+  if (beat === undefined || shot === undefined || project.boardStyle === null)
+    throw new Error('Board setup is incomplete');
+  return createStudioBoardGenerationRequestPlan({
+    brief: project.brief,
+    rules: project.rules,
+    action: beat.action,
+    look: beat.look,
+    line: shot.line,
+    style: project.boardStyle,
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+  });
+};
+
+const addSucceededBoardPanel = (project: StudioProjectV2, shotId: string, assetId: string): StudioJobV2 => {
+  const asset = addAsset(project, shotId, assetId, 'image', 'boardStills');
+  const plan = boardPlan(project, shotId);
+  const job = makeJob(`job_${assetId}`, shotId, plan, {
+    status: 'succeeded',
+    purpose: 'board_still',
+    authorizationItemId: `item_${assetId}`,
+    providerJobId: `remote_${assetId}`,
+    outputAssetIds: [asset.id],
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+    spendReceipt: {
+      authorizationId: 'auth_1',
+      itemId: `item_${assetId}`,
+      jobId: `job_${assetId}`,
+      purpose: 'board_still',
+      routeId: project.imageRouteId!,
+      currency: 'USD',
+      rateUnit: 'generation',
+      rateMinorUnits: 1,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: 1,
+    },
+  });
+  addJob(project, job);
+  const shot = project.shots[shotId]!;
+  if (shot.boardAssetId !== null) shot.supersededBoardAssetIds.push(shot.boardAssetId);
+  shot.boardAssetId = asset.id;
+  return job;
+};
+
 const addSucceededPrimary = (
   project: StudioProjectV2,
   authorizationId: string,
@@ -316,6 +370,11 @@ describe('projectStudioWorkspaceStatusV2', () => {
       projectRevision: 7,
       undoTop: { entryId: 'mutation_7', sourceRevision: 7, label: 'edit_shot' },
       dirtyShots: [],
+      boardPanels: [
+        { shotId: 'shot_1', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+        { shotId: 'shot_2', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+        { shotId: 'shot_3', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+      ],
       cascadeProgress: [],
     });
     expect(
@@ -336,6 +395,13 @@ describe('projectStudioWorkspaceStatusV2', () => {
     ]);
     expect(status.parkEligibility.every((row) => row.allowed === (row.blockers.length === 0))).toBe(true);
     expect(exactKeys(status.undoTop!)).toEqual(['entryId', 'label', 'sourceRevision']);
+    expect(exactKeys(status.boardPanels[0]!)).toEqual([
+      'assetId',
+      'latestJobId',
+      'producerJobId',
+      'shotId',
+      'staleCauses',
+    ]);
     expect(exactKeys(status.parkEligibility[0]!)).toEqual([
       'action',
       'allowed',
@@ -378,6 +444,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
 
     expect(status.dirtyShots).toEqual([{ shotId: 'shot_1', causes: ['generation_out_of_date'] }]);
     expect(exactKeys(status)).toEqual([
+      'boardPanels',
       'cascadeProgress',
       'currentVideoJobs',
       'dirtyShots',
@@ -387,6 +454,71 @@ describe('projectStudioWorkspaceStatusV2', () => {
       'undoTop',
     ]);
     expect(exactKeys(status.dirtyShots[0]!)).toEqual(['causes', 'shotId']);
+  });
+
+  it('derives Board request and route freshness from the successful producer while tracking a newer redraw', () => {
+    const project = makeProject(['shot_1']);
+    project.brief = 'A paper boat crosses a flooded street.';
+    project.boardStyle = 'grey_tone';
+    project.imageRouteId = 'route_board';
+    project.beats.beat_1!.action = 'The paper boat drifts past a curb.';
+    project.beats.beat_1!.look = 'Rainy sodium-vapour dusk.';
+    project.shots.shot_1!.line = 'Wide, low angle on the boat.';
+    const producer = addSucceededBoardPanel(project, 'shot_1', 'board_1');
+
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels).toEqual([
+      {
+        shotId: 'shot_1',
+        assetId: 'board_1',
+        producerJobId: producer.id,
+        latestJobId: producer.id,
+        staleCauses: [],
+      },
+    ]);
+
+    const redraw = makeJob('job_redraw', 'shot_1', boardPlan(project, 'shot_1'), {
+      status: 'running',
+      purpose: 'board_still',
+      authorizationItemId: 'item_redraw',
+      providerJobId: 'remote_redraw',
+    });
+    addJob(project, redraw);
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]).toMatchObject({
+      assetId: 'board_1',
+      producerJobId: producer.id,
+      latestJobId: redraw.id,
+      staleCauses: [],
+    });
+
+    project.beats.beat_1!.action = 'The boat is now lifted from the water.';
+    project.imageRouteId = 'route_board_new';
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]!.staleCauses).toEqual([
+      'request_out_of_date',
+      'route_out_of_date',
+    ]);
+  });
+
+  it('keeps a missing Board panel free of producer and stale causes after a failed draw', () => {
+    const project = makeProject(['shot_1']);
+    project.boardStyle = 'line_art';
+    project.imageRouteId = 'route_board';
+    const failed = makeJob('job_board_failed', 'shot_1', boardPlan(project, 'shot_1'), {
+      status: 'failed',
+      purpose: 'board_still',
+      authorizationItemId: 'item_board_failed',
+      error: { code: 'provider_unavailable', messageKey: 'board_failed' },
+    });
+    addJob(project, failed);
+
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels).toEqual([
+      {
+        shotId: 'shot_1',
+        assetId: null,
+        producerJobId: null,
+        latestJobId: failed.id,
+        staleCauses: [],
+      },
+    ]);
   });
 
   it('deduplicates Beat/Shot blockers in contained-shot and frozen code order', () => {

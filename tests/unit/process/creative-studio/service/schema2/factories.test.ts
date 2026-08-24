@@ -13,7 +13,7 @@ import {
 } from '@/process/services/creative-studio/service/schema2';
 
 describe('createEmptyStudioProjectV2', () => {
-  it('creates the exact empty schema-2 project state', () => {
+  it('creates the exact empty schema-4 project state with no Board style selected', () => {
     const project = createEmptyStudioProjectV2(
       {
         name: '  Project One  ',
@@ -28,7 +28,7 @@ describe('createEmptyStudioProjectV2', () => {
     );
 
     expect(project).toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       revision: 1,
       id: 'project_1',
       name: 'Project One',
@@ -39,6 +39,7 @@ describe('createEmptyStudioProjectV2', () => {
       aspectRatio: '16:9',
       targetDurationSeconds: 30,
       resolution: '1080p',
+      boardStyle: null,
       beatOrder: [],
       beats: {},
       shots: {},

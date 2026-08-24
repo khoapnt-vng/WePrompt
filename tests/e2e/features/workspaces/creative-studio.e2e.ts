@@ -317,7 +317,7 @@ const readRawStudioProject = async (userDataDirectory: string, projectId: string
     typeof parsed !== 'object' ||
     parsed === null ||
     Array.isArray(parsed) ||
-    (parsed as Record<string, unknown>).schemaVersion !== 3 ||
+    (parsed as Record<string, unknown>).schemaVersion !== 4 ||
     (parsed as Record<string, unknown>).id !== projectId ||
     typeof (parsed as Record<string, unknown>).frameExtractions !== 'object' ||
     (parsed as Record<string, unknown>).frameExtractions === null

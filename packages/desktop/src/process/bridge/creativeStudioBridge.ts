@@ -731,6 +731,9 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   );
   ipcBridge.creativeStudio.cancelJob.provider((input) => runCommand(() => dependencies.getService().cancelJob(input)));
   ipcBridge.creativeStudio.retryJob.provider((input) => runCommand(() => dependencies.getService().retryJob(input)));
+  ipcBridge.creativeStudio.retryDownload.provider((input) =>
+    runCommand(() => dependencies.getService().retryDownload(input))
+  );
   ipcBridge.creativeStudio.dismissReferenceGenerationHandoff.provider((input) =>
     runCommand(() => dependencies.getService().dismissReferenceGenerationHandoff(input))
   );

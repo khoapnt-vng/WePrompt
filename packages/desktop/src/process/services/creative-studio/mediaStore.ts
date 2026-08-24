@@ -16,6 +16,7 @@ import type {
   StudioDetachBedAudioRequestV2,
   StudioDetachBriefReferenceRequest,
   StudioFrameExtraction,
+  StudioJobPurpose,
   StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
@@ -50,6 +51,8 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const BED_MEDIA_INTENT_MAX_BYTES = 16 * 1024;
+const STUDIO_ASSET_SOURCE_LOOK_MAX_LENGTH = 8 * 1024;
+const STUDIO_CLEANUP_QUARANTINE_DIRECTORY = /^\.studio-cleanup-[A-Za-z0-9]{6}$/;
 const hasExactOwnKeys = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   try {
@@ -303,6 +306,28 @@ export class CreativeStudioMediaError extends Error {
     this.code = code;
   }
 }
+
+const providerPrimaryMediaKindV2 = (purpose: StudioJobPurpose): 'image' | 'video' => {
+  switch (purpose) {
+    case 'seed_still':
+    case 'board_still':
+      return 'image';
+    case 'video_take':
+      return 'video';
+  }
+};
+
+const providerPrimaryCollectionV2 = (
+  purpose: StudioJobPurpose
+): Extract<StudioAssetV2['managedAsset']['collection'], 'assets' | 'boardStills'> => {
+  switch (purpose) {
+    case 'seed_still':
+    case 'video_take':
+      return 'assets';
+    case 'board_still':
+      return 'boardStills';
+  }
+};
 
 const nonterminalJobNeedsBriefReferenceV2 = (project: StudioProjectV2, assetId: string): boolean =>
   Object.values(project.jobs).some((job) => {
@@ -1571,7 +1596,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     authority: StudioProjectPathAuthorityV2,
     filePath: string,
     identity: FileIdentity,
-    directory: VerifiedDirectory
+    directory: VerifiedDirectory,
+    verifyOwnership?: (ownedPath: string) => Promise<void>
   ): Promise<ManagedPathCleanupOutcomeV2> => {
     try {
       await assertV2ManagedMutation(authority, [directory]);
@@ -1589,6 +1615,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           // exact manifest and child-directory identities here so a concurrent CAS is retried from
           // a fresh schema-2 classification instead of being mistaken for successful cleanup.
           await assertV2ManagedMutation(authority, [directory]);
+          await verifyOwnership?.(ownedPath);
         } catch (error) {
           authorityChanged = true;
           throw error;
@@ -2716,6 +2743,254 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     }
   };
 
+  const captureOrphanBoardFileV2 = async (
+    authority: StudioProjectPathAuthorityV2,
+    directory: VerifiedDirectory,
+    filePath: string
+  ): Promise<FileIdentity> => {
+    if (path.dirname(filePath) !== directory.directory) throw new CreativeStudioMediaError('storage_error');
+    await assertV2ManagedMutation(authority, [directory]);
+    const pathStats = await fs.lstat(filePath);
+    const pathIdentity = fileIdentity(pathStats);
+    if (
+      !pathStats.isFile() ||
+      pathStats.isSymbolicLink() ||
+      pathStats.nlink !== 1 ||
+      (await fs.realpath(filePath)) !== filePath
+    ) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    const noFollow = process.platform === 'win32' ? 0 : fsConstants.O_NOFOLLOW;
+    let handle: Awaited<ReturnType<typeof fs.open>>;
+    try {
+      handle = await fs.open(filePath, fsConstants.O_RDONLY | noFollow);
+    } catch {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    try {
+      const opened = await handle.stat();
+      const openedIdentity = fileIdentity(opened);
+      if (
+        !opened.isFile() ||
+        opened.nlink !== 1 ||
+        openedIdentity.dev !== pathIdentity.dev ||
+        openedIdentity.ino !== pathIdentity.ino ||
+        opened.size !== pathStats.size ||
+        opened.mtimeMs !== pathStats.mtimeMs ||
+        opened.ctimeMs !== pathStats.ctimeMs
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      await assertV2ManagedMutation(authority, [directory]);
+      const finalPathStats = await fs.lstat(filePath);
+      const finalPathIdentity = fileIdentity(finalPathStats);
+      if (
+        !finalPathStats.isFile() ||
+        finalPathStats.isSymbolicLink() ||
+        finalPathStats.nlink !== 1 ||
+        finalPathIdentity.dev !== openedIdentity.dev ||
+        finalPathIdentity.ino !== openedIdentity.ino ||
+        finalPathStats.size !== opened.size ||
+        finalPathStats.mtimeMs !== opened.mtimeMs ||
+        finalPathStats.ctimeMs !== opened.ctimeMs ||
+        (await fs.realpath(filePath)) !== filePath
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      return openedIdentity;
+    } finally {
+      await handle.close().catch((): undefined => undefined);
+    }
+  };
+
+  const cleanupOrphanBoardStillsV2 = async (
+    context: Awaited<ReturnType<typeof loadProjectContextV2>>
+  ): Promise<void> => {
+    const boardDirectoryPath = path.join(context.projectDir, 'boardStills');
+    let boardDirectoryStats: Awaited<ReturnType<typeof fs.lstat>>;
+    try {
+      boardDirectoryStats = await fs.lstat(boardDirectoryPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    if (
+      !boardDirectoryStats.isDirectory() ||
+      boardDirectoryStats.isSymbolicLink() ||
+      (await fs.realpath(boardDirectoryPath)) !== boardDirectoryPath
+    ) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+    const boardDirectory: VerifiedDirectory = {
+      directory: boardDirectoryPath,
+      identity: fileIdentity(boardDirectoryStats),
+    };
+    await assertV2ManagedMutation(context.authority, [boardDirectory]);
+    const referencedFileNames = new Set(
+      Object.values(context.project.assets)
+        .filter((asset) => asset.managedAsset.collection === 'boardStills')
+        .map((asset) => asset.managedAsset.fileName)
+    );
+    const entries = await fs.readdir(boardDirectoryPath, { withFileTypes: true });
+    type RestoredBoardQuarantineLink = {
+      directory: VerifiedDirectory;
+      filePath: string;
+      identity: FileIdentity;
+    };
+    const quarantinedNameCounts = new Map<string, number>();
+    const restoredQuarantineLinks = new Map<string, RestoredBoardQuarantineLink>();
+    for (const entry of entries) {
+      if (!STUDIO_CLEANUP_QUARANTINE_DIRECTORY.test(entry.name)) continue;
+      const quarantinePath = path.join(boardDirectoryPath, entry.name);
+      // `unlinkIfIdentityMatches` deliberately quarantines an entry before deciding whether it owns
+      // the inode. A crash may therefore leave either an empty private directory or one containing
+      // bytes whose ownership was never proved. Empty shells are safe to retire; populated shells
+      // must remain quarantined rather than broadening startup cleanup to unknown bytes.
+      // eslint-disable-next-line no-await-in-loop -- Every quarantine decision gets a fresh authority fence.
+      await assertV2ManagedMutation(context.authority, [boardDirectory]);
+      // eslint-disable-next-line no-await-in-loop -- The exact private directory identity is captured before inspection.
+      const quarantineStats = await fs.lstat(quarantinePath);
+      const quarantineDirectory: VerifiedDirectory = {
+        directory: quarantinePath,
+        identity: fileIdentity(quarantineStats),
+      };
+      if (
+        !quarantineStats.isDirectory() ||
+        quarantineStats.isSymbolicLink() ||
+        path.dirname(quarantinePath) !== boardDirectoryPath ||
+        // eslint-disable-next-line no-await-in-loop -- Never follow a winning replacement outside Board storage.
+        (await fs.realpath(quarantinePath)) !== quarantinePath
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      // eslint-disable-next-line no-await-in-loop -- Populated quarantines preserve ambiguous bytes for recovery.
+      const quarantineEntries = await fs.readdir(quarantinePath, { withFileTypes: true });
+      if (quarantineEntries.length === 0) {
+        // eslint-disable-next-line no-await-in-loop -- Re-prove both parent authority and the empty child identity.
+        await assertV2ManagedMutation(context.authority, [boardDirectory]);
+        // eslint-disable-next-line no-await-in-loop -- A replaced or populated child is preserved and rejected by rmdir.
+        await assertVerifiedDirectory(quarantineDirectory);
+        try {
+          // eslint-disable-next-line no-await-in-loop -- rmdir cannot remove a nonempty race winner.
+          await fs.rmdir(quarantinePath);
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === 'ENOENT' || code === 'ENOTEMPTY' || code === 'EEXIST') continue;
+          throw new CreativeStudioMediaError('storage_error');
+        }
+        // eslint-disable-next-line no-await-in-loop -- Make retirement of the empty shell crash durable.
+        await syncVerifiedDirectoryV2(boardDirectory);
+        continue;
+      }
+      for (const quarantineEntry of quarantineEntries) {
+        quarantinedNameCounts.set(quarantineEntry.name, (quarantinedNameCounts.get(quarantineEntry.name) ?? 0) + 1);
+      }
+      if (quarantineEntries.length !== 1) continue;
+      const quarantineEntry = quarantineEntries[0]!;
+      const quarantinedFilePath = path.join(quarantinePath, quarantineEntry.name);
+      if (path.dirname(quarantinedFilePath) !== quarantinePath) throw new CreativeStudioMediaError('storage_error');
+      // eslint-disable-next-line no-await-in-loop -- Capture only the exact two-link state created by safe restoration.
+      const quarantinedStats = await fs.lstat(quarantinedFilePath);
+      const quarantinedIdentity = fileIdentity(quarantinedStats);
+      if (
+        !quarantinedStats.isFile() ||
+        quarantinedStats.isSymbolicLink() ||
+        quarantinedStats.nlink !== 2 ||
+        // eslint-disable-next-line no-await-in-loop -- A private candidate may not resolve outside its quarantine.
+        (await fs.realpath(quarantinedFilePath)) !== quarantinedFilePath
+      ) {
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop -- Bind the candidate to the still-current quarantine directory.
+      await assertVerifiedDirectory(quarantineDirectory);
+      if (!restoredQuarantineLinks.has(quarantineEntry.name)) {
+        restoredQuarantineLinks.set(quarantineEntry.name, {
+          directory: quarantineDirectory,
+          filePath: quarantinedFilePath,
+          identity: quarantinedIdentity,
+        });
+      }
+    }
+    for (const entry of entries) {
+      if (STUDIO_CLEANUP_QUARANTINE_DIRECTORY.test(entry.name)) continue;
+      const filePath = path.join(boardDirectoryPath, entry.name);
+      const quarantineNameCount = quarantinedNameCounts.get(entry.name) ?? 0;
+      if (quarantineNameCount > 0) {
+        const candidate = quarantineNameCount === 1 ? restoredQuarantineLinks.get(entry.name) : undefined;
+        if (referencedFileNames.has(entry.name) || candidate === undefined) {
+          throw new CreativeStudioMediaError('storage_error');
+        }
+        // `unlinkIfIdentityMatches` may have restored an unverified replacement without overwrite and
+        // deliberately retained the other link in quarantine. This exact pair remains ambiguous, so
+        // recovery only recognizes and preserves it; it never acquires deletion authority over either link.
+        // eslint-disable-next-line no-await-in-loop -- Re-prove the project, parent, and private child authority.
+        await assertV2ManagedMutation(context.authority, [boardDirectory]);
+        // eslint-disable-next-line no-await-in-loop -- The quarantine directory must still be the captured inode.
+        await assertVerifiedDirectory(candidate.directory);
+        // eslint-disable-next-line no-await-in-loop -- Both paths are inspected together before the preserve decision.
+        const [topLevelStats, quarantinedStats, currentQuarantineEntries] = await Promise.all([
+          fs.lstat(filePath),
+          fs.lstat(candidate.filePath),
+          fs.readdir(candidate.directory.directory, { withFileTypes: true }),
+        ]);
+        const topLevelIdentity = fileIdentity(topLevelStats);
+        const quarantinedIdentity = fileIdentity(quarantinedStats);
+        if (
+          !topLevelStats.isFile() ||
+          topLevelStats.isSymbolicLink() ||
+          topLevelStats.nlink !== 2 ||
+          !quarantinedStats.isFile() ||
+          quarantinedStats.isSymbolicLink() ||
+          quarantinedStats.nlink !== 2 ||
+          currentQuarantineEntries.length !== 1 ||
+          currentQuarantineEntries[0]?.name !== entry.name ||
+          topLevelIdentity.dev !== candidate.identity.dev ||
+          topLevelIdentity.ino !== candidate.identity.ino ||
+          quarantinedIdentity.dev !== candidate.identity.dev ||
+          quarantinedIdentity.ino !== candidate.identity.ino ||
+          // eslint-disable-next-line no-await-in-loop -- Neither preserved hardlink may resolve through a symlinked parent.
+          (await fs.realpath(filePath)) !== filePath ||
+          // eslint-disable-next-line no-await-in-loop -- The private peer must remain inside the verified quarantine.
+          (await fs.realpath(candidate.filePath)) !== candidate.filePath
+        ) {
+          throw new CreativeStudioMediaError('storage_error');
+        }
+        // eslint-disable-next-line no-await-in-loop -- Bind the final preserve decision to the captured private directory.
+        await assertVerifiedDirectory(candidate.directory);
+        continue;
+      }
+      // eslint-disable-next-line no-await-in-loop -- Every deletion gets a fresh manifest/directory fence.
+      const identity = await captureOrphanBoardFileV2(context.authority, boardDirectory, filePath);
+      if (referencedFileNames.has(entry.name)) continue;
+      // eslint-disable-next-line no-await-in-loop -- Cleanup ownership must remain deterministic and fail closed.
+      const outcome = await cleanupManagedPathV2(
+        context.authority,
+        filePath,
+        identity,
+        boardDirectory,
+        async (ownedPath) => {
+          const ownedIdentity = await captureOrphanBoardFileV2(context.authority, boardDirectory, ownedPath);
+          if (ownedIdentity.dev !== identity.dev || ownedIdentity.ino !== identity.ino) {
+            throw new CreativeStudioMediaError('storage_error');
+          }
+        }
+      );
+      if (outcome !== 'completed') throw new CreativeStudioMediaError('storage_error');
+      try {
+        // eslint-disable-next-line no-await-in-loop -- A winning pathname replacement must be retained and rejected.
+        await fs.lstat(filePath);
+        throw new CreativeStudioMediaError('storage_error');
+      } catch (error) {
+        if (error instanceof CreativeStudioMediaError) throw error;
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CreativeStudioMediaError('storage_error');
+      }
+      // eslint-disable-next-line no-await-in-loop -- Persist each recovered capacity release before the next candidate.
+      await assertV2ManagedMutation(context.authority, [boardDirectory]);
+      // eslint-disable-next-line no-await-in-loop -- Directory fsync makes the orphan removal crash durable.
+      await syncVerifiedDirectoryV2(boardDirectory);
+    }
+  };
+
   const cleanupOrphanPartsV2 = async (): Promise<void> => {
     const inventory = await deps.store.inspectProjectsV2();
     for (const projectId of inventory.supportedProjectIds) {
@@ -2806,6 +3081,13 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         );
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw new CreativeStudioMediaError('storage_error');
+      }
+      try {
+        // eslint-disable-next-line no-await-in-loop -- Startup recovery remains serialized by project inventory order.
+        await cleanupOrphanBoardStillsV2(context);
+      } catch (error) {
+        if (error instanceof CreativeStudioMediaError) throw error;
+        throw new CreativeStudioMediaError('storage_error');
       }
     }
   };
@@ -3431,7 +3713,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     project: StudioProjectV2;
     authority: StudioProjectPathAuthorityV2;
     capacity: WriteCapacity;
-    collection: 'assets' | 'thumbnails';
+    collection: 'assets' | 'thumbnails' | 'boardStills';
   };
 
   const validateProviderOutputMetadataV2 = (input: ProviderJobOutputMetadataV2 | ProviderJobPosterMetadataV2): void => {
@@ -3464,7 +3746,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     const shot = ownRecordValue(project.shots, input.shotId);
     const job = ownRecordValue(project.jobs, input.jobId);
     const beat = owningBeatForShotV2(project, input.shotId);
-    const expectedMediaKind = job?.purpose === 'seed_still' ? 'image' : job?.purpose === 'video_take' ? 'video' : null;
+    const expectedMediaKind = job === undefined ? null : providerPrimaryMediaKindV2(job.purpose);
     const mediaKindMatchesRole = expectedMediaKind === input.mediaKind;
     if (shot && !mediaKindMatchesRole) throw new CreativeStudioMediaError('invalid_media');
     const active =
@@ -3489,7 +3771,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       project,
       authority,
       capacity: await planWriteCapacity(project, projectDir, perAssetMaxBytes, input.declaredByteSize),
-      collection: 'assets',
+      collection: providerPrimaryCollectionV2(job.purpose),
     };
   };
 
@@ -3786,7 +4068,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         ) {
           throw new CreativeStudioMediaError('job_inactive');
         }
-        const expectedMediaKind = job.purpose === 'seed_still' ? 'image' : 'video';
+        const expectedMediaKind = providerPrimaryMediaKindV2(job.purpose);
+        const expectedCollection = providerPrimaryCollectionV2(job.purpose);
         if (expectedMediaKind !== input.mediaKind) {
           throw new CreativeStudioMediaError('job_inactive');
         }
@@ -3794,16 +4077,20 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           asset.projectId !== current.id ||
           asset.shotId !== shot.id ||
           asset.mediaKind !== input.mediaKind ||
-          asset.managedAsset.collection !== 'assets'
+          asset.managedAsset.collection !== expectedCollection
         ) {
           throw new CreativeStudioMediaError('invalid_media');
         }
-        asset.sourceLook = job.requestSnapshot?.prompt ?? `${beat.look.trim()}\n\n${shot.line.trim()}`;
+        const sourceLook = job.requestSnapshot?.prompt ?? `${beat.look.trim()}\n\n${shot.line.trim()}`;
+        if (sourceLook.length <= STUDIO_ASSET_SOURCE_LOOK_MAX_LENGTH) asset.sourceLook = sourceLook;
         defineRecordValue(current.assets, asset.id, asset);
         shot.assetIds.push(asset.id);
         if (job.purpose === 'video_take') {
           if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
           shot.videoAssetId = asset.id;
+        } else if (job.purpose === 'board_still') {
+          if (shot.boardAssetId !== null) shot.supersededBoardAssetIds.push(shot.boardAssetId);
+          shot.boardAssetId = asset.id;
         }
         job.status = 'succeeded';
         job.outputAssetIds = [asset.id];

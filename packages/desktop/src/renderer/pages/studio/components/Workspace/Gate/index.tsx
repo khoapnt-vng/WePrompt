@@ -5,7 +5,7 @@
  */
 
 import { Alert, Button, Modal, Radio, Spin } from '@arco-design/web-react';
-import React, { useCallback, useId, useMemo, useReducer, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ipcBridge } from '@/common';
@@ -13,15 +13,19 @@ import type {
   StudioConfirmSubmissionResultV2,
   StudioPricingRefusalReasonV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST } from '@/common/types/project/creativeStudioTypes';
 import {
   initialSpendGateState,
   formatMinorUnits,
   selectedSpendGateQuote,
+  spendGateBoardPromotion,
   spendGateContinuityChange,
   spendGateReducer,
   spendGateRouteIssue,
   summarizeQuote,
   type SpendGateDraft,
+  type SpendGateBoardPromotion,
+  type SpendGateBoardPromotionImpact,
   type SpendGateSelectedOption,
   type SpendGateState,
   type SpendGateRouteIssue,
@@ -30,39 +34,53 @@ import styles from './SpendGateModal.module.css';
 
 export type UseSpendGateInput = {
   onConfirmed: (result: StudioConfirmSubmissionResultV2) => void | Promise<void>;
+  onPromoteOnly?: (input: {
+    projectId: string;
+    expectedRevision: number;
+    promotion: SpendGateBoardPromotion;
+  }) => boolean | Promise<boolean>;
 };
 
 export type UseSpendGateResult = {
   state: SpendGateState;
-  open: (draft: SpendGateDraft) => void;
+  open: (draft: SpendGateDraft, boardPromotionImpact?: SpendGateBoardPromotionImpact) => void;
   close: () => void;
+  promoteOnly: () => Promise<void>;
   prepare: () => Promise<void>;
   selectOption: (option: SpendGateSelectedOption) => void;
   confirm: () => Promise<void>;
 };
 
 /** Owns one reviewed submission attempt. Opening and closing never call native paid seams. */
-export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateResult => {
+export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput): UseSpendGateResult => {
   const [state, dispatch] = useReducer(spendGateReducer, undefined, initialSpendGateState);
   const stateRef = useRef(state);
   const gateGenerationRef = useRef(0);
   const prepareOperationRef = useRef(0);
   const confirmOperationRef = useRef(0);
   const preparingRef = useRef(false);
+  const promotingRef = useRef(false);
   const confirmingRef = useRef(false);
   const terminalSuccessRef = useRef(false);
   stateRef.current = state;
 
-  const open = useCallback((draft: SpendGateDraft) => {
-    if (confirmingRef.current || terminalSuccessRef.current || stateRef.current.phase === 'quote_in_use') return;
+  const open = useCallback((draft: SpendGateDraft, boardPromotionImpact?: SpendGateBoardPromotionImpact) => {
+    if (
+      promotingRef.current ||
+      confirmingRef.current ||
+      terminalSuccessRef.current ||
+      stateRef.current.phase === 'quote_in_use'
+    ) {
+      return;
+    }
     gateGenerationRef.current += 1;
     preparingRef.current = false;
     confirmingRef.current = false;
     terminalSuccessRef.current = false;
-    dispatch({ type: 'open', draft });
+    dispatch({ type: 'open', draft, ...(boardPromotionImpact === undefined ? {} : { boardPromotionImpact }) });
   }, []);
   const close = useCallback(() => {
-    if (confirmingRef.current || stateRef.current.phase === 'quote_in_use') return;
+    if (promotingRef.current || confirmingRef.current || stateRef.current.phase === 'quote_in_use') return;
     gateGenerationRef.current += 1;
     preparingRef.current = false;
     terminalSuccessRef.current = false;
@@ -72,9 +90,64 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
     if (stateRef.current.phase === 'review') dispatch({ type: 'select_option', option });
   }, []);
 
+  const promoteOnly = useCallback(async (): Promise<void> => {
+    const current = stateRef.current;
+    const promotion = spendGateBoardPromotion(current.draft);
+    if (
+      promotion === null ||
+      current.boardPromotionImpact === null ||
+      onPromoteOnly === undefined ||
+      promotingRef.current ||
+      preparingRef.current ||
+      confirmingRef.current ||
+      current.phase === 'quote_in_use' ||
+      current.phase === 'promoted' ||
+      current.phase === 'confirmed'
+    ) {
+      return;
+    }
+    promotingRef.current = true;
+    const generation = gateGenerationRef.current;
+    dispatch({ type: 'promote_started' });
+    try {
+      const promoted = await onPromoteOnly({
+        projectId: current.draft!.projectId,
+        expectedRevision: current.draft!.expectedRevision,
+        promotion,
+      });
+      if (gateGenerationRef.current !== generation) return;
+      if (!promoted) {
+        dispatch({ type: 'promote_failed', error: { code: 'storage_error' } });
+        return;
+      }
+      terminalSuccessRef.current = true;
+      dispatch({ type: 'promote_succeeded' });
+    } catch {
+      if (gateGenerationRef.current === generation) {
+        dispatch({ type: 'promote_failed', error: { code: 'storage_error' } });
+      }
+    } finally {
+      promotingRef.current = false;
+    }
+  }, [onPromoteOnly]);
+
   const prepare = useCallback(async (): Promise<void> => {
     const current = stateRef.current;
-    if (current.draft === null || preparingRef.current || confirmingRef.current) return;
+    const promotion = spendGateBoardPromotion(current.draft);
+    if (
+      current.draft === null ||
+      promotingRef.current ||
+      preparingRef.current ||
+      confirmingRef.current ||
+      terminalSuccessRef.current ||
+      (promotion !== null &&
+        (current.boardPromotionImpact === null ||
+          current.boardPromotionImpact.paidRouteReady === false ||
+          current.boardPromotionImpact.currentTakeShotIds.length === 0 ||
+          current.boardPromotionImpact.currentTakeShotIds.length > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST))
+    ) {
+      return;
+    }
     preparingRef.current = true;
     const generation = gateGenerationRef.current;
     const operation = ++prepareOperationRef.current;
@@ -118,6 +191,7 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
     if (
       quote === null ||
       current.phase !== 'review' ||
+      promotingRef.current ||
       confirmingRef.current ||
       preparingRef.current ||
       terminalSuccessRef.current
@@ -159,12 +233,12 @@ export const useSpendGate = ({ onConfirmed }: UseSpendGateInput): UseSpendGateRe
     }
   }, [onConfirmed]);
 
-  return { state, open, close, prepare, selectOption, confirm };
+  return { state, open, close, promoteOnly, prepare, selectOption, confirm };
 };
 
 export type SpendGateModalProps = Pick<
   UseSpendGateResult,
-  'state' | 'close' | 'prepare' | 'selectOption' | 'confirm'
+  'state' | 'close' | 'promoteOnly' | 'prepare' | 'selectOption' | 'confirm'
 > & {
   onEditRoutes: (issue: SpendGateRouteIssue) => void;
 };
@@ -202,9 +276,12 @@ const errorMessageKey = (state: SpendGateState): string | null => {
   return null;
 };
 
+type BoardPromotionChoice = 'promote_only' | 'promote_and_rerender';
+
 export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   state,
   close,
+  promoteOnly,
   prepare,
   selectOption,
   confirm,
@@ -214,6 +291,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   // The headline and the Confirm label already carry the count and the total. The per-generation
   // breakdown is a long list on a real film, so it starts closed and stays one click away.
   const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null);
+  const [boardPromotionChoice, setBoardPromotionChoice] = useState<BoardPromotionChoice>('promote_only');
   const breakdownId = useId();
   const quote = selectedSpendGateQuote(state);
   const summary = useMemo(() => (quote === null ? null : summarizeQuote(quote)), [quote]);
@@ -225,6 +303,19 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   }, [close]);
   const continuityChange = spendGateContinuityChange(state.draft);
   const continuityIntent = continuityChange === null ? null : continuityChange.hardCut ? 'sever' : 'rejoin';
+  const boardPromotion = spendGateBoardPromotion(state.draft);
+  const boardPromotionImpact = boardPromotion === null ? null : state.boardPromotionImpact;
+  const boardPromotionPaidCount = boardPromotionImpact?.currentTakeShotIds.length ?? 0;
+  const boardPromotionPaidAvailable =
+    boardPromotionPaidCount > 0 &&
+    boardPromotionPaidCount <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST &&
+    boardPromotionImpact?.paidRouteReady !== false;
+  const boardPromotionIdentity =
+    boardPromotion === null
+      ? null
+      : `${state.draft?.projectId ?? ''}\0${String(state.draft?.expectedRevision ?? '')}\0${boardPromotion.shotId}\0${boardPromotion.boardAssetId}`;
+  useEffect(() => setBoardPromotionChoice('promote_only'), [boardPromotionIdentity]);
+  const requiredChange = continuityIntent !== null || boardPromotion !== null;
   // A column that reads the same on every row is noise. Show group, purpose and route per row only
   // when they actually differ; otherwise the route is stated once and the row is shot, length, price.
   const rowFacts = useMemo(() => {
@@ -241,12 +332,12 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
         ? firstRoute
         : null;
     return {
-      // A continuity change forces every row to read "Required", so the label never varies there.
-      mixedGroups: continuityIntent === null && new Set(rows.map((row) => row.group)).size > 1,
+      // A state change forces every row to read "Required", so the label never varies there.
+      mixedGroups: !requiredChange && new Set(rows.map((row) => row.group)).size > 1,
       mixedPurposes: new Set(rows.map((row) => row.purpose)).size > 1,
       sharedRoute,
     };
-  }, [continuityIntent, quote]);
+  }, [quote, requiredChange]);
   const { mixedGroups, mixedPurposes, sharedRoute } = rowFacts;
   const formatMoney = useCallback(
     (minorUnits: number, currency: string): string =>
@@ -254,13 +345,15 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
     [i18n.language, i18n.resolvedLanguage]
   );
   const messageKey = errorMessageKey(state);
-  const canClose = state.phase !== 'confirming' && state.phase !== 'quote_in_use';
+  const canClose = state.phase !== 'promoting' && state.phase !== 'confirming' && state.phase !== 'quote_in_use';
   const titleKey =
-    continuityIntent === 'sever'
-      ? 'conversation.creativeStudio.workspace.gate.continuity.severTitle'
-      : continuityIntent === 'rejoin'
-        ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinTitle'
-        : 'conversation.creativeStudio.workspace.gate.title';
+    boardPromotion !== null
+      ? 'conversation.creativeStudio.workspace.gate.promotion.title'
+      : continuityIntent === 'sever'
+        ? 'conversation.creativeStudio.workspace.gate.continuity.severTitle'
+        : continuityIntent === 'rejoin'
+          ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinTitle'
+          : 'conversation.creativeStudio.workspace.gate.title';
   const displayedCost =
     summary === null
       ? ''
@@ -274,6 +367,23 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
     summary === null
       ? ''
       : formatMoney(summary.exactPrice ? summary.lowerMinorUnits : summary.upperMinorUnits, summary.currency);
+  const freePromotionAvailable =
+    boardPromotion !== null &&
+    (state.phase === 'choices' ||
+      state.phase === 'review' ||
+      state.phase === 'error' ||
+      state.phase === 'refresh_required' ||
+      state.phase === 'quote_cache_full' ||
+      state.phase === 'quote_too_large');
+  const paidPromotionPrepareAvailable =
+    boardPromotion !== null &&
+    boardPromotionPaidAvailable &&
+    state.routeIssue === null &&
+    ((state.phase === 'choices' && boardPromotionChoice === 'promote_and_rerender') ||
+      state.phase === 'error' ||
+      state.phase === 'refresh_required' ||
+      state.phase === 'quote_cache_full' ||
+      state.phase === 'quote_too_large');
 
   return (
     <Modal
@@ -288,13 +398,67 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
       <div
         className={styles.body}
         data-chain-change-intent={continuityIntent ?? undefined}
-        data-gate-kind={continuityIntent === null ? 'generation' : 'continuity_change'}
+        data-gate-kind={
+          boardPromotion !== null ? 'board_promotion' : continuityIntent === null ? 'generation' : 'continuity_change'
+        }
         data-testid='studio-spend-gate'
       >
         {state.phase === 'choices' ? (
           <>
-            <p>{t('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')}</p>
-            {continuityIntent === null ? (
+            {boardPromotion !== null && boardPromotionImpact !== null ? (
+              <>
+                <p data-board-promotion-summary>
+                  {t('conversation.creativeStudio.workspace.gate.promotion.summary', {
+                    shotId: boardPromotion.shotId,
+                  })}
+                </p>
+                {boardPromotionPaidCount === 0 ? (
+                  <p>{t('conversation.creativeStudio.workspace.gate.promotion.impactNone')}</p>
+                ) : (
+                  <div className={styles.promotionImpact}>
+                    <p>
+                      {t('conversation.creativeStudio.workspace.gate.promotion.impactIntro', {
+                        count: boardPromotionPaidCount,
+                      })}
+                    </p>
+                    <ol>
+                      {boardPromotionImpact.currentTakeShotIds.map((shotId) => (
+                        <li key={shotId} data-promotion-stale-shot-id={shotId}>
+                          {t('conversation.creativeStudio.workspace.gate.promotion.impactItem', { shotId })}
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+                <Radio.Group
+                  aria-label={t('conversation.creativeStudio.workspace.gate.promotion.optionsLabel')}
+                  className={styles.promotionChoices}
+                  onChange={(value) => {
+                    if (value === 'promote_only' || (value === 'promote_and_rerender' && boardPromotionPaidAvailable)) {
+                      setBoardPromotionChoice(value);
+                    }
+                  }}
+                  value={boardPromotionChoice}
+                >
+                  <Radio value='promote_only'>
+                    <span>{t('conversation.creativeStudio.workspace.gate.promotion.promoteOnly')}</span>
+                    <bdi>{t('conversation.creativeStudio.workspace.gate.promotion.freePrice')}</bdi>
+                  </Radio>
+                  {boardPromotionPaidAvailable ? (
+                    <Radio value='promote_and_rerender'>
+                      <span>{t('conversation.creativeStudio.workspace.gate.promotion.promoteAndRerender')}</span>
+                      <bdi>{t('conversation.creativeStudio.workspace.gate.promotion.priceAfterReview')}</bdi>
+                    </Radio>
+                  ) : null}
+                </Radio.Group>
+                {boardPromotionPaidCount > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST ? (
+                  <p>{t('conversation.creativeStudio.workspace.gate.promotion.paidUnavailable')}</p>
+                ) : null}
+              </>
+            ) : (
+              <p>{t('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')}</p>
+            )}
+            {boardPromotion === null && continuityIntent === null ? (
               <p>
                 {t('conversation.creativeStudio.workspace.gate.requestedShots', {
                   count: new Set(
@@ -304,7 +468,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                   ).size,
                 })}
               </p>
-            ) : (
+            ) : boardPromotion === null ? (
               <p data-chain-change-summary data-testid='studio-chain-change-summary'>
                 {t(
                   continuityIntent === 'sever'
@@ -312,8 +476,15 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                     : 'conversation.creativeStudio.workspace.gate.continuity.rejoinSummary'
                 )}
               </p>
-            )}
+            ) : null}
           </>
+        ) : null}
+
+        {state.phase === 'promoting' ? (
+          <div className={styles.loading}>
+            <Spin />
+            <span>{t('conversation.creativeStudio.workspace.gate.promotion.promoting')}</span>
+          </div>
         ) : null}
 
         {state.phase === 'preparing' ? (
@@ -325,7 +496,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
 
         {state.options !== null && quote !== null && summary !== null ? (
           <>
-            {continuityIntent === null && state.options.withCascade !== null ? (
+            {!requiredChange && state.options.withCascade !== null ? (
               <Radio.Group
                 aria-label={t('conversation.creativeStudio.workspace.gate.optionsLabel')}
                 value={state.selectedOption}
@@ -341,20 +512,29 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
             ) : null}
             <h3>
               {t(
-                continuityIntent === 'sever'
-                  ? 'conversation.creativeStudio.workspace.gate.continuity.severHeadline'
-                  : continuityIntent === 'rejoin'
-                    ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinHeadline'
-                    : 'conversation.creativeStudio.workspace.gate.headline',
+                boardPromotion !== null
+                  ? 'conversation.creativeStudio.workspace.gate.promotion.headline'
+                  : continuityIntent === 'sever'
+                    ? 'conversation.creativeStudio.workspace.gate.continuity.severHeadline'
+                    : continuityIntent === 'rejoin'
+                      ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinHeadline'
+                      : 'conversation.creativeStudio.workspace.gate.headline',
                 {
                   count: summary.choiceCount,
                   cost: displayedCost,
                 }
               )}
             </h3>
-            {continuityIntent !== null ? (
-              <p data-chain-change-required>
-                {t('conversation.creativeStudio.workspace.gate.continuity.requiredWork')}
+            {requiredChange ? (
+              <p
+                data-chain-change-required={continuityIntent === null ? undefined : true}
+                data-promotion-required={boardPromotion === null ? undefined : true}
+              >
+                {t(
+                  boardPromotion === null
+                    ? 'conversation.creativeStudio.workspace.gate.continuity.requiredWork'
+                    : 'conversation.creativeStudio.workspace.gate.promotion.requiredWork'
+                )}
               </p>
             ) : null}
             {summary.budget.kind === 'no_policy' ? null : (
@@ -400,14 +580,14 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                   {summary.rows.map((row, index) => (
                     <li
                       data-generation-purpose={row.purpose}
-                      data-quote-group={continuityIntent === null ? row.group : 'required'}
+                      data-quote-group={requiredChange ? 'required' : row.group}
                       data-shot-id={row.shotId}
                       key={`${row.group}:${row.shotId}:${row.purpose}:${index}`}
                     >
                       <span>
                         {mixedGroups
                           ? `${t(
-                              `conversation.creativeStudio.workspace.gate.group.${continuityIntent === null ? row.group : 'required'}`
+                              `conversation.creativeStudio.workspace.gate.group.${requiredChange ? 'required' : row.group}`
                             )} · `
                           : null}
                         {mixedPurposes
@@ -442,15 +622,20 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
         ) : null}
 
         {messageKey !== null ? <Alert type='warning' content={t(messageKey)} /> : null}
+        {state.phase === 'promoted' ? (
+          <Alert type='success' content={t('conversation.creativeStudio.workspace.gate.promotion.promoted')} />
+        ) : null}
         {state.phase === 'confirmed' ? (
           <Alert
             type='success'
             content={t(
-              continuityIntent === 'sever'
-                ? 'conversation.creativeStudio.workspace.gate.continuity.severConfirmed'
-                : continuityIntent === 'rejoin'
-                  ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinConfirmed'
-                  : 'conversation.creativeStudio.workspace.gate.confirmed'
+              boardPromotion !== null
+                ? 'conversation.creativeStudio.workspace.gate.promotion.confirmed'
+                : continuityIntent === 'sever'
+                  ? 'conversation.creativeStudio.workspace.gate.continuity.severConfirmed'
+                  : continuityIntent === 'rejoin'
+                    ? 'conversation.creativeStudio.workspace.gate.continuity.rejoinConfirmed'
+                    : 'conversation.creativeStudio.workspace.gate.confirmed'
             )}
           />
         ) : null}
@@ -468,7 +653,24 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               {t('conversation.creativeStudio.workspace.controls.briefAndRulesTitle')}
             </Button>
           ) : null}
-          {state.phase === 'choices' || state.phase === 'refresh_required' || state.phase === 'quote_cache_full' ? (
+          {freePromotionAvailable && (state.phase !== 'choices' || boardPromotionChoice === 'promote_only') ? (
+            <Button type={state.phase === 'choices' ? 'primary' : 'default'} onClick={() => void promoteOnly()}>
+              {t('conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction')}
+            </Button>
+          ) : null}
+          {paidPromotionPrepareAvailable ? (
+            <Button
+              type='primary'
+              onClick={() => {
+                setExpandedQuoteId(null);
+                void prepare();
+              }}
+            >
+              {t('conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction')}
+            </Button>
+          ) : null}
+          {boardPromotion === null &&
+          (state.phase === 'choices' || state.phase === 'refresh_required' || state.phase === 'quote_cache_full') ? (
             <Button
               type='primary'
               onClick={() => {
@@ -487,6 +689,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
           summary !== null ? (
             <Button
               data-chain-change-confirm={continuityIntent === null ? undefined : true}
+              data-board-promotion-confirm={boardPromotion === null ? undefined : true}
               type='primary'
               loading={state.phase === 'confirming' || state.phase === 'quote_in_use'}
               disabled={
@@ -497,11 +700,13 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               onClick={() => void confirm()}
             >
               {t(
-                continuityIntent === 'sever'
-                  ? 'conversation.creativeStudio.workspace.gate.continuity.confirmSever'
-                  : continuityIntent === 'rejoin'
-                    ? 'conversation.creativeStudio.workspace.gate.continuity.confirmRejoin'
-                    : 'conversation.creativeStudio.workspace.gate.confirm',
+                boardPromotion !== null
+                  ? 'conversation.creativeStudio.workspace.gate.promotion.confirm'
+                  : continuityIntent === 'sever'
+                    ? 'conversation.creativeStudio.workspace.gate.continuity.confirmSever'
+                    : continuityIntent === 'rejoin'
+                      ? 'conversation.creativeStudio.workspace.gate.continuity.confirmRejoin'
+                      : 'conversation.creativeStudio.workspace.gate.confirm',
                 {
                   count: summary.choiceCount,
                   cost: confirmCost,
@@ -512,7 +717,9 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
           <Button disabled={!canClose} onClick={closeGate}>
             {t(
               continuityIntent === null
-                ? 'conversation.creativeStudio.workspace.gate.close'
+                ? boardPromotion === null
+                  ? 'conversation.creativeStudio.workspace.gate.close'
+                  : 'conversation.creativeStudio.workspace.gate.promotion.close'
                 : 'conversation.creativeStudio.workspace.gate.continuity.close'
             )}
           </Button>

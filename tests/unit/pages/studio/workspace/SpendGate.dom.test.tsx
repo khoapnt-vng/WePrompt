@@ -64,6 +64,41 @@ vi.mock('react-i18next', () => ({
       if (key === 'conversation.creativeStudio.workspace.gate.continuity.rejoinConfirmed') {
         return 'Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery.';
       }
+      if (key === 'conversation.creativeStudio.workspace.gate.promotion.summary') {
+        return `Promote the current Board panel for Shot ${String(values?.shotId)}. This does not change the Shot's continuity boundary.`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.promotion.impactIntro') {
+        return `${String(values?.count)} current takes will remain playable but become stale:`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.promotion.impactItem') {
+        return `Shot ${String(values?.shotId)} current take`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.promotion.headline') {
+        return `Promote + ${String(values?.count)} rerenders · ${String(values?.cost)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.promotion.confirm') {
+        return `Confirm promotion + ${String(values?.count)} rerenders · ${String(values?.cost)}`;
+      }
+      const promotionCopy: Record<string, string> = {
+        'conversation.creativeStudio.workspace.gate.promotion.title': 'Use panel as first frame',
+        'conversation.creativeStudio.workspace.gate.promotion.impactNone': 'No current takes depend on this frame.',
+        'conversation.creativeStudio.workspace.gate.promotion.optionsLabel': 'Choose how to handle current takes',
+        'conversation.creativeStudio.workspace.gate.promotion.promoteOnly': 'Promote only — keep playable, stale takes',
+        'conversation.creativeStudio.workspace.gate.promotion.freePrice': '$0',
+        'conversation.creativeStudio.workspace.gate.promotion.promoteAndRerender':
+          'Promote and review exact rerender work',
+        'conversation.creativeStudio.workspace.gate.promotion.priceAfterReview': 'Price shown next',
+        'conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction': 'Promote for $0',
+        'conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction': 'Review rerender price',
+        'conversation.creativeStudio.workspace.gate.promotion.requiredWork':
+          'The listed rerenders are exactly the current takes this promotion makes stale. Missing coverage is not included.',
+        'conversation.creativeStudio.workspace.gate.promotion.promoted':
+          'Panel promoted. Existing takes remain playable and are marked stale.',
+        'conversation.creativeStudio.workspace.gate.promotion.confirmed':
+          'Panel promoted and rerendering started for the confirmed takes.',
+        'conversation.creativeStudio.workspace.gate.promotion.close': 'Close',
+      };
+      if (promotionCopy[key] !== undefined) return promotionCopy[key]!;
       return values === undefined ? key : `${key}:${JSON.stringify(values)}`;
     },
     i18n: { language: 'en-US', resolvedLanguage: 'en-US' },
@@ -74,6 +109,7 @@ import {
   SpendGateModal,
   WorkspaceControls,
   WorkspaceProjectMenu,
+  boardPromotionGatePlan,
   continuityGateDraft,
   formatMinorUnits,
   handoffGateDraft,
@@ -90,9 +126,12 @@ import {
   type BeatPanelActions,
   type BoardActions,
   type CutActions,
+  type SpendGateBoardPromotionImpact,
+  type SpendGateDraft,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
 } from '@/renderer/pages/studio/components/Workspace';
+import { boardGateDraft, boardSelectionGateDraft } from '@/renderer/pages/studio/components/Workspace/spendGate';
 
 const makeAsset = (
   id: string,
@@ -138,7 +177,7 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
 
 const makeProject = (): StudioRendererProjectV2 =>
   ({
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 3,
     id: 'project_1',
     name: 'Launch film',
@@ -147,6 +186,7 @@ const makeProject = (): StudioRendererProjectV2 =>
     aspectRatio: '16:9',
     targetDurationSeconds: 12,
     resolution: '720p',
+    boardStyle: null,
     beatOrder: ['beat_1', 'beat_2'],
     beats: {
       beat_1: {
@@ -189,6 +229,8 @@ const makeProject = (): StudioRendererProjectV2 =>
           trimOutSeconds: null,
           chainBreak,
           seedStillId: null,
+          boardAssetId: null,
+          supersededBoardAssetIds: [],
           videoAssetId: null,
           assetIds: [],
           jobIds: [],
@@ -205,6 +247,85 @@ const makeProject = (): StudioRendererProjectV2 =>
     createdAt: '2026-08-19T00:00:00.000Z',
     updatedAt: '2026-08-19T00:00:00.000Z',
   }) as StudioRendererProjectV2;
+
+const makeBoardProject = (shotCount: number): StudioRendererProjectV2 => {
+  const project = makeProject();
+  const templateShot = project.shots.shot_1!;
+  project.boardStyle = 'grey_tone';
+  project.targetDurationSeconds = shotCount * 4;
+  project.beatOrder = [];
+  project.beats = {};
+  project.shots = {};
+  for (let offset = 0; offset < shotCount; offset += 8) {
+    const beatNumber = offset / 8 + 1;
+    const beatId = `board_beat_${beatNumber}`;
+    const shotIds = Array.from({ length: Math.min(8, shotCount - offset) }, (_, index) => {
+      const shotNumber = offset + index + 1;
+      const shotId = `board_shot_${String(shotNumber).padStart(2, '0')}`;
+      project.shots[shotId] = {
+        ...templateShot,
+        id: shotId,
+        line: `Panel ${shotNumber}`,
+        chainBreak: 'hard_cut',
+        seedStillId: null,
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
+        videoAssetId: null,
+        assetIds: [],
+        jobIds: [],
+      };
+      return shotId;
+    });
+    project.beatOrder.push(beatId);
+    project.beats[beatId] = {
+      id: beatId,
+      title: `Board Beat ${beatNumber}`,
+      action: `Action ${beatNumber}`,
+      look: `Look ${beatNumber}`,
+      actionRevision: 1,
+      targetSeconds: shotIds.length * 4,
+      shotOrder: shotIds,
+      lineHistory: [],
+    };
+  }
+  return project;
+};
+
+const addCurrentBoardPanel = (project: StudioRendererProjectV2, shotId: string): { assetId: string; jobId: string } => {
+  const assetId = `board_${shotId}`;
+  const jobId = `board_job_${shotId}`;
+  const shot = project.shots[shotId]!;
+  project.assets[assetId] = makeAsset(assetId, shotId, 'image', 'boardStills');
+  shot.boardAssetId = assetId;
+  shot.assetIds.push(assetId);
+  shot.jobIds.push(jobId);
+  project.jobs[jobId] = makeJob(jobId, shotId, {
+    purpose: 'board_still',
+    provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+    outputAssetIds: [assetId],
+    outputAssetIdsByRole: { primary: assetId, poster: null },
+    spendReceipt: {
+      purpose: 'board_still',
+      routeId: 'route_image',
+      currency: 'USD',
+      rateUnit: 'generation',
+      rateMinorUnits: 3,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: 3,
+    },
+  });
+  return { assetId, jobId };
+};
+
+const addCurrentVideoTake = (project: StudioRendererProjectV2, shotId: string): string => {
+  const assetId = `video_${shotId}`;
+  const shot = project.shots[shotId]!;
+  project.assets[assetId] = makeAsset(assetId, shotId, 'video', 'assets');
+  shot.videoAssetId = assetId;
+  shot.assetIds.push(assetId);
+  return assetId;
+};
 
 const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => ({
   id,
@@ -278,6 +399,27 @@ const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
   budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 1_000 },
 });
 
+const promotionQuote = (): StudioRendererSubmissionQuoteV2 => ({
+  id: 'quote_promotion',
+  projectId: 'project_1',
+  projectRevision: 3,
+  expiresAt: '2026-08-19T01:00:00.000Z',
+  currency: 'USD',
+  baseItems: ['shot_1', 'shot_2'].map((shotId) => ({
+    shotId,
+    purpose: 'video_take' as const,
+    route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
+    generationCount: 1,
+    durationSeconds: 4,
+    oneGenerationMinorUnits: 400,
+    requestedTotalMinorUnits: 400,
+  })),
+  cascadeItems: [],
+  lowerMinorUnits: 800,
+  upperMinorUnits: 800,
+  budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 1_000 },
+});
+
 const oneItemContinuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
   ...continuityQuote(),
   id: 'quote_continuity_one',
@@ -294,23 +436,42 @@ const draft = {
   cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take' as const, referenceAssetId: null }],
 };
 
+const promotionDraft: SpendGateDraft = {
+  projectId: 'project_1',
+  expectedRevision: 3,
+  originReferenceHandoffId: null,
+  baseChoices: [],
+  cascadeChoices: [],
+  boardPromotion: { shotId: 'shot_1', boardAssetId: 'board_shot_1' },
+};
+
 const Harness: React.FC<{
-  gateDraft?: typeof draft;
+  gateDraft?: SpendGateDraft;
+  boardPromotionImpact?: SpendGateBoardPromotionImpact;
   onEditRoutes?: ReturnType<typeof vi.fn>;
+  onPromoteOnly?: ReturnType<typeof vi.fn>;
   reenterOnConfirmed?: boolean;
   rejectOnConfirmed?: boolean;
-}> = ({ gateDraft = draft, onEditRoutes = vi.fn(), reenterOnConfirmed = false, rejectOnConfirmed = false }) => {
+}> = ({
+  gateDraft = draft,
+  boardPromotionImpact,
+  onEditRoutes = vi.fn(),
+  onPromoteOnly = vi.fn(async () => true),
+  reenterOnConfirmed = false,
+  rejectOnConfirmed = false,
+}) => {
   const gateRef = useRef<ReturnType<typeof useSpendGate> | null>(null);
   const gate = useSpendGate({
     onConfirmed: async () => {
       if (reenterOnConfirmed) await gateRef.current?.confirm();
       if (rejectOnConfirmed) throw new Error('refresh failed');
     },
+    onPromoteOnly,
   });
   gateRef.current = gate;
   return (
     <>
-      <button onClick={() => gate.open(gateDraft)}>Open review</button>
+      <button onClick={() => gate.open(gateDraft, boardPromotionImpact)}>Open review</button>
       <button onClick={() => void gate.confirm()}>Invoke confirm directly</button>
       <SpendGateModal {...gate} onEditRoutes={onEditRoutes} />
     </>
@@ -399,13 +560,13 @@ const cutActions = (): CutActions => ({
 
 const readyWorkspaceStatus = (source: number | StudioRendererProjectV2 = 3): StudioRendererWorkspaceStatusV2 => {
   const revision = typeof source === 'number' ? source : source.revision;
+  const activeShotIds =
+    typeof source === 'number'
+      ? ['shot_1', 'shot_2', 'shot_3']
+      : source.beatOrder.flatMap((beatId) => source.beats[beatId]?.shotOrder ?? []);
   const currentVideoJobs =
     typeof source === 'number'
-      ? [
-          { shotId: 'shot_1', jobIds: [] },
-          { shotId: 'shot_2', jobIds: [] },
-          { shotId: 'shot_3', jobIds: [] },
-        ]
+      ? activeShotIds.map((shotId) => ({ shotId, jobIds: [] }))
       : source.beatOrder.flatMap((beatId) =>
           (source.beats[beatId]?.shotOrder ?? []).map((shotId) => ({
             shotId,
@@ -420,6 +581,13 @@ const readyWorkspaceStatus = (source: number | StudioRendererProjectV2 = 3): Stu
     projectRevision: revision,
     undoTop: null,
     dirtyShots: [],
+    boardPanels: activeShotIds.map((shotId) => ({
+      shotId,
+      assetId: null,
+      producerJobId: null,
+      latestJobId: null,
+      staleCauses: [],
+    })),
     cascadeProgress: [],
     currentVideoJobs,
     parkEligibility: [],
@@ -916,6 +1084,235 @@ describe('spend gate draft graph', () => {
   });
 });
 
+describe('Board spend gate draft', () => {
+  it('selects the next 24 missing panels in film order, then the remaining six after completion', () => {
+    const project = makeBoardProject(30);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
+
+    const firstBatch = boardGateDraft({ project, projection });
+    expect(firstBatch).toEqual({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: Array.from({ length: 24 }, (_, index) => ({
+        shotId: `board_shot_${String(index + 1).padStart(2, '0')}`,
+        purpose: 'board_still',
+        referenceAssetId: null,
+      })),
+      cascadeChoices: [],
+    });
+    expect(spendGateRouteIssue(routeCatalog('unavailable', 'ready'), firstBatch!)).toBe('image');
+    expect(spendGateRouteIssue(routeCatalog('ready', 'unavailable'), firstBatch!)).toBeNull();
+
+    const afterCompletion = {
+      ...projection,
+      boardPanels: projection.boardPanels.map((panel, index) =>
+        index < 24
+          ? {
+              ...panel,
+              assetId: `board_asset_${index + 1}`,
+              producerJobId: `board_job_${index + 1}`,
+              latestJobId: `board_job_${index + 1}`,
+              freshness: 'current' as const,
+            }
+          : panel
+      ),
+    };
+    expect(boardGateDraft({ project, projection: afterCompletion })?.baseChoices).toEqual(
+      Array.from({ length: 6 }, (_, index) => ({
+        shotId: `board_shot_${String(index + 25).padStart(2, '0')}`,
+        purpose: 'board_still',
+        referenceAssetId: null,
+      }))
+    );
+  });
+
+  it('selects only missing idle or terminal panels and excludes current, stale, nonterminal, and attention work', () => {
+    const project = makeBoardProject(8);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
+    const states = [
+      { freshness: 'current', activity: 'idle' },
+      { freshness: 'stale', activity: 'idle' },
+      { freshness: 'missing', activity: 'queued' },
+      { freshness: 'missing', activity: 'drawing' },
+      { freshness: 'missing', activity: 'needs_attention' },
+      { freshness: 'missing', activity: 'idle' },
+      { freshness: 'missing', activity: 'failed' },
+      { freshness: 'missing', activity: 'cancelled' },
+    ] as const;
+    const exactProjection = {
+      ...projection,
+      boardPanels: projection.boardPanels.map((panel, index) => ({
+        ...panel,
+        ...states[index]!,
+      })),
+    };
+
+    expect(boardGateDraft({ project, projection: exactProjection })?.baseChoices).toEqual(
+      [6, 7, 8].map((shotNumber) => ({
+        shotId: `board_shot_${String(shotNumber).padStart(2, '0')}`,
+        purpose: 'board_still',
+        referenceAssetId: null,
+      }))
+    );
+  });
+
+  it('excludes a failed panel with no-charge download recovery from fresh paid draw and redraw drafts', () => {
+    const project = makeBoardProject(2);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
+    const failedDownloadPanel = {
+      ...projection.boardPanels[0]!,
+      activity: 'failed' as const,
+      recovery: {
+        jobId: 'board_download_job',
+        canRetry: false,
+        canCancel: false,
+        canRetryDownload: true,
+        submissionUnknown: false,
+      },
+    };
+    const failedDownloadProjection = {
+      ...projection,
+      boardPanels: [failedDownloadPanel, ...projection.boardPanels.slice(1)],
+    };
+
+    expect(boardGateDraft({ project, projection: failedDownloadProjection })?.baseChoices).toEqual([
+      { shotId: 'board_shot_02', purpose: 'board_still', referenceAssetId: null },
+    ]);
+    expect(
+      boardSelectionGateDraft({
+        project,
+        projection: failedDownloadProjection,
+        orderedShotIds: ['board_shot_01'],
+      })
+    ).toBeNull();
+    expect(
+      boardSelectionGateDraft({
+        project,
+        projection: failedDownloadProjection,
+        orderedShotIds: ['board_shot_02'],
+      })
+    ).not.toBeNull();
+  });
+
+  it('fails closed without a style or an exact project, revision, active order, and Board status', () => {
+    const project = makeBoardProject(3);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
+    expect(boardGateDraft({ project, projection })).not.toBeNull();
+
+    project.boardStyle = null;
+    expect(boardGateDraft({ project, projection })).toBeNull();
+    project.boardStyle = 'grey_tone';
+
+    expect(boardGateDraft({ project, projection: { ...projection, projectId: 'project_other' } })).toBeNull();
+    expect(
+      boardGateDraft({ project, projection: { ...projection, projectRevision: project.revision - 1 } })
+    ).toBeNull();
+    expect(
+      boardGateDraft({
+        project,
+        projection: { ...projection, activeShotIds: projection.activeShotIds.toReversed() },
+      })
+    ).toBeNull();
+    expect(
+      boardGateDraft({
+        project,
+        projection: { ...projection, boardPanels: projection.boardPanels.toReversed() },
+      })
+    ).toBeNull();
+    expect(
+      boardGateDraft({
+        project,
+        projection: {
+          ...projection,
+          boardPanels: projection.boardPanels.map((panel, index) =>
+            index === 1
+              ? { ...panel, freshness: 'status_pending' as const, activity: 'status_pending' as const }
+              : panel
+          ),
+        },
+      })
+    ).toBeNull();
+
+    const mismatchedStatus = readyWorkspaceStatus(project);
+    mismatchedStatus.projectRevision -= 1;
+    expect(boardGateDraft({ project, projection: projectWorkspace(project, mismatchedStatus, null) })).toBeNull();
+  });
+
+  it('builds an exact paid redraw for caller-selected missing, current, and stale panels', () => {
+    const project = makeBoardProject(4);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
+    const redrawProjection = {
+      ...projection,
+      boardPanels: projection.boardPanels.map((panel, index) => {
+        if (index === 0) return { ...panel, freshness: 'current' as const, activity: 'idle' as const };
+        if (index === 1) return { ...panel, freshness: 'stale' as const, activity: 'failed' as const };
+        if (index === 2) return { ...panel, freshness: 'missing' as const, activity: 'cancelled' as const };
+        return { ...panel, activity: 'queued' as const };
+      }),
+    };
+
+    expect(
+      boardSelectionGateDraft({
+        project,
+        projection: redrawProjection,
+        orderedShotIds: ['board_shot_01', 'board_shot_02', 'board_shot_03'],
+      })
+    ).toEqual({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [1, 2, 3].map((shotNumber) => ({
+        shotId: `board_shot_0${shotNumber}`,
+        purpose: 'board_still',
+        referenceAssetId: null,
+      })),
+      cascadeChoices: [],
+    });
+  });
+
+  it('rejects busy selections, duplicates, non-film order, non-active Shots, and more than 24 panels', () => {
+    const project = makeBoardProject(25);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
+    const busyProjection = {
+      ...projection,
+      boardPanels: projection.boardPanels.map((panel, index) =>
+        index < 3 ? { ...panel, activity: (['queued', 'drawing', 'needs_attention'] as const)[index]! } : panel
+      ),
+    };
+    for (const shotId of ['board_shot_01', 'board_shot_02', 'board_shot_03']) {
+      expect(boardSelectionGateDraft({ project, projection: busyProjection, orderedShotIds: [shotId] })).toBeNull();
+    }
+    expect(boardSelectionGateDraft({ project, projection, orderedShotIds: [] })).toBeNull();
+    expect(
+      boardSelectionGateDraft({ project, projection, orderedShotIds: ['board_shot_01', 'board_shot_01'] })
+    ).toBeNull();
+    expect(
+      boardSelectionGateDraft({ project, projection, orderedShotIds: ['board_shot_02', 'board_shot_01'] })
+    ).toBeNull();
+    expect(boardSelectionGateDraft({ project, projection, orderedShotIds: ['shot_in_bin'] })).toBeNull();
+    expect(
+      boardSelectionGateDraft({
+        project,
+        projection: {
+          ...projection,
+          boardPanels: projection.boardPanels.map((panel, index) =>
+            index === 0
+              ? { ...panel, freshness: 'status_pending' as const, activity: 'status_pending' as const }
+              : panel
+          ),
+        },
+        orderedShotIds: ['board_shot_01'],
+      })
+    ).toBeNull();
+    expect(boardSelectionGateDraft({ project, projection, orderedShotIds: projection.activeShotIds })).toBeNull();
+    expect(
+      boardSelectionGateDraft({ project, projection, orderedShotIds: projection.activeShotIds.slice(0, 24) })
+        ?.baseChoices
+    ).toHaveLength(24);
+  });
+});
+
 describe('WorkspaceControls', () => {
   beforeEach(() => window.sessionStorage.clear());
 
@@ -1291,6 +1688,163 @@ describe('WorkspaceControls', () => {
   });
 });
 
+describe('Board first-frame promotion gate plan', () => {
+  const promotionProjection = (project: StudioRendererProjectV2, assetId: string, jobId: string) => {
+    const status = readyWorkspaceStatus(project);
+    status.boardPanels[0] = {
+      shotId: 'shot_1',
+      assetId,
+      producerJobId: jobId,
+      latestJobId: jobId,
+      staleCauses: [],
+    };
+    return projectWorkspace(project, status, readyChainStatus(project));
+  };
+
+  it('derives only exact current takes in the selected segment and keeps the continuity boundary unchanged', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
+    addCurrentVideoTake(project, 'shot_1');
+    addCurrentVideoTake(project, 'shot_2');
+    addCurrentVideoTake(project, 'shot_3');
+    const projection = promotionProjection(project, assetId, jobId);
+    const originalChainBreak = project.shots.shot_1!.chainBreak;
+
+    const plan = boardPromotionGatePlan({ project, projection, shotId: 'shot_1', boardAssetId: assetId });
+
+    expect(plan).toEqual({
+      draft: {
+        projectId: project.id,
+        expectedRevision: project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        boardPromotion: { shotId: 'shot_1', boardAssetId: assetId },
+      },
+      impact: { currentTakeShotIds: ['shot_1', 'shot_2'] },
+    });
+    expect(project.shots.shot_1!.chainBreak).toBe(originalChainBreak);
+    expect(spendGateRouteIssue(routeCatalog('unavailable', 'ready'), plan!.draft)).toBeNull();
+    expect(spendGateRouteIssue(routeCatalog('ready', 'unavailable'), plan!.draft)).toBe('video');
+  });
+
+  it('keeps free promotion available with no current takes while omitting paid rerender impact', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
+    const projection = promotionProjection(project, assetId, jobId);
+
+    expect(boardPromotionGatePlan({ project, projection, shotId: 'shot_1', boardAssetId: assetId })?.impact).toEqual({
+      currentTakeShotIds: [],
+    });
+  });
+
+  it('fails closed on forged downstream order, current-take identity, or generation activity', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
+    addCurrentVideoTake(project, 'shot_1');
+    addCurrentVideoTake(project, 'shot_2');
+    const projection = promotionProjection(project, assetId, jobId);
+    const build = (exactProjection: typeof projection) =>
+      boardPromotionGatePlan({ project, projection: exactProjection, shotId: 'shot_1', boardAssetId: assetId });
+
+    const forgedDownstream = structuredClone(projection);
+    forgedDownstream.activeBeats[0]!.shots[0]!.downstreamShotIds = [];
+    expect(build(forgedDownstream)).toBeNull();
+
+    const forgedTake = structuredClone(projection);
+    forgedTake.activeBeats[0]!.shots[1]!.currentPicture = {
+      ...forgedTake.activeBeats[0]!.shots[1]!.currentPicture!,
+      assetId: 'video_forged',
+    };
+    expect(build(forgedTake)).toBeNull();
+
+    const blocked = structuredClone(projection);
+    blocked.activeBeats[0]!.shots[1]!.videoGenerationBlocked = true;
+    expect(build(blocked)).toBeNull();
+  });
+
+  it.each(['idle', 'failed', 'cancelled'] as const)(
+    'accepts a current segment-head panel with stable %s activity',
+    (activity) => {
+      const project = makeProject();
+      project.boardStyle = 'grey_tone';
+      const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
+      const projection = promotionProjection(project, assetId, jobId);
+
+      expect(
+        boardPromotionGatePlan({
+          project,
+          projection: {
+            ...projection,
+            boardPanels: projection.boardPanels.map((panel, index) => (index === 0 ? { ...panel, activity } : panel)),
+          },
+          shotId: 'shot_1',
+          boardAssetId: assetId,
+        })
+      ).not.toBeNull();
+    }
+  );
+
+  it('rejects a stable current panel on a non-head Shot', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_2');
+    const status = readyWorkspaceStatus(project);
+    status.boardPanels[1] = {
+      shotId: 'shot_2',
+      assetId,
+      producerJobId: jobId,
+      latestJobId: jobId,
+      staleCauses: [],
+    };
+    const projection = projectWorkspace(project, status, readyChainStatus(project));
+
+    expect(boardPromotionGatePlan({ project, projection, shotId: 'shot_2', boardAssetId: assetId })).toBeNull();
+  });
+
+  it('rejects stale, busy, attention, already-promoted, pending, and mismatched panel authority', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
+    const projection = promotionProjection(project, assetId, jobId);
+    const build = (exactProjection = projection, shotId = 'shot_1', exactAssetId = assetId) =>
+      boardPromotionGatePlan({ project, projection: exactProjection, shotId, boardAssetId: exactAssetId });
+
+    expect(
+      build({
+        ...projection,
+        boardPanels: projection.boardPanels.map((panel, index) =>
+          index === 0 ? { ...panel, freshness: 'stale' as const, staleCauses: ['request_out_of_date'] } : panel
+        ),
+      })
+    ).toBeNull();
+    expect(
+      build({
+        ...projection,
+        boardPanels: projection.boardPanels.map((panel, index) =>
+          index === 0 ? { ...panel, activity: 'needs_attention' as const } : panel
+        ),
+      })
+    ).toBeNull();
+    expect(
+      build({
+        ...projection,
+        boardPanels: projection.boardPanels.map((panel, index) =>
+          index === 0 ? { ...panel, activity: 'drawing' as const } : panel
+        ),
+      })
+    ).toBeNull();
+    project.shots.shot_1!.seedStillId = assetId;
+    expect(build(promotionProjection(project, assetId, jobId))).toBeNull();
+    project.shots.shot_1!.seedStillId = null;
+    expect(build({ ...projection, chainStatusReady: false })).toBeNull();
+    expect(build(projection, 'shot_1', 'board_forged')).toBeNull();
+  });
+});
+
 describe('SpendGateModal', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -1308,6 +1862,153 @@ describe('SpendGateModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('defaults Board promotion to the exact $0 mutation and leaves every provider seam untouched', async () => {
+    const onPromoteOnly = vi.fn(async () => true);
+    render(
+      <Harness
+        gateDraft={promotionDraft}
+        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }}
+        onPromoteOnly={onPromoteOnly}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+
+    expect(modal).toHaveAttribute('data-gate-kind', 'board_promotion');
+    expect(screen.getByRole('dialog', { name: 'Use panel as first frame' })).toBeVisible();
+    expect(within(modal).getByRole('radio', { name: /Promote only/ })).toBeChecked();
+    expect(
+      within(modal)
+        .getAllByRole('listitem')
+        .map((row) => row.getAttribute('data-promotion-stale-shot-id'))
+    ).toEqual(['shot_1', 'shot_2']);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Promote for $0' }));
+    await waitFor(() =>
+      expect(onPromoteOnly).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        promotion: { shotId: 'shot_1', boardAssetId: 'board_shot_1' },
+      })
+    );
+    expect(
+      await within(modal).findByText('Panel promoted. Existing takes remain playable and are marked stale.')
+    ).toBeVisible();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('prepares the atomic paid promotion only after that option is chosen and confirms only on the explicit action', async () => {
+    mocks.prepare.mockResolvedValue({ ok: true, data: { baseOnly: promotionQuote(), withCascade: null } });
+    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('radio', { name: /Promote and review exact rerender work/ }));
+    expect(mocks.prepare).not.toHaveBeenCalled();
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(promotionDraft));
+    expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(await within(modal).findByRole('heading', { name: 'Promote + 2 rerenders · $8.00' })).toBeVisible();
+    expect(
+      within(modal).getByText(
+        'The listed rerenders are exactly the current takes this promotion makes stale. Missing coverage is not included.'
+      )
+    ).toBeVisible();
+    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' }));
+    await waitFor(() =>
+      expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        quoteId: 'quote_promotion',
+        expectedRevision: 3,
+      })
+    );
+  });
+
+  it('offers free-only promotion when there is no current take to rerender', async () => {
+    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: [] }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+
+    expect(within(modal).getByText('No current takes depend on this frame.')).toBeVisible();
+    expect(within(modal).getAllByRole('radio')).toHaveLength(1);
+    expect(within(modal).queryByRole('button', { name: 'Review rerender price' })).toBeNull();
+    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+  });
+
+  it('hides paid promotion when the video route is not ready without blocking the free choice', async () => {
+    render(
+      <Harness
+        gateDraft={promotionDraft}
+        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'], paidRouteReady: false }}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+
+    expect(within(modal).getAllByRole('radio')).toHaveLength(1);
+    expect(within(modal).queryByRole('button', { name: 'Review rerender price' })).toBeNull();
+    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+  });
+
+  it('retains the free promotion after paid route refusal', async () => {
+    mocks.listRoutes.mockResolvedValue({ ok: true, data: routeCatalog('ready', 'unavailable') });
+    mocks.prepare.mockResolvedValueOnce({ ok: false, error: { code: 'invalid_route' } });
+    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = screen.getByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('radio', { name: /Promote and review exact rerender work/ }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
+
+    expect(
+      await within(modal).findByText('conversation.creativeStudio.workspace.controls.videoRouteBlocked')
+    ).toBeVisible();
+    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(within(modal).queryByRole('button', { name: 'Review rerender price' })).toBeNull();
+  });
+
+  it('retains the free promotion when the paid quote is over cap', async () => {
+    mocks.prepare.mockResolvedValue({
+      ok: true,
+      data: {
+        baseOnly: {
+          ...promotionQuote(),
+          budget: { kind: 'over_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 1 },
+        },
+        withCascade: null,
+      },
+    });
+    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = screen.getByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('radio', { name: /Promote and review exact rerender work/ }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
+
+    const confirm = await within(modal).findByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' });
+    expect(confirm).toBeDisabled();
+    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+  });
+
+  it('retains the free promotion when a paid quote expires at confirmation', async () => {
+    mocks.prepare.mockResolvedValue({ ok: true, data: { baseOnly: promotionQuote(), withCascade: null } });
+    mocks.confirm.mockResolvedValue({ ok: false, error: { code: 'quote_not_found' } });
+    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = screen.getByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('radio', { name: /Promote and review exact rerender work/ }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
+    fireEvent.click(await within(modal).findByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' }));
+
+    expect(await within(modal).findByText('conversation.creativeStudio.errors.quoteNotFound')).toBeVisible();
+    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
   });
 
   it('starts the generation breakdown closed again on every gate opening', async () => {

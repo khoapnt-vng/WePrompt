@@ -77,6 +77,8 @@ const makeShot = (id: string, line: string, chainBreak: 'none' | 'hard_cut' = 'h
   trimOutSeconds: null,
   chainBreak,
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [] as string[],
   videoAssetId: null,
   supersededVideoAssetIds: [] as string[],
   assetIds: [] as string[],
@@ -85,7 +87,7 @@ const makeShot = (id: string, line: string, chainBreak: 'none' | 'hard_cut' = 'h
 
 const makeProject = (): StudioRendererProjectV2 =>
   ({
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 3,
     id: 'project_1',
     name: 'Launch film',
@@ -94,6 +96,7 @@ const makeProject = (): StudioRendererProjectV2 =>
     aspectRatio: '16:9',
     targetDurationSeconds: 12,
     resolution: '720p',
+    boardStyle: null,
     beatOrder: ['beat_1', 'beat_2'],
     beats: {
       beat_1: {
@@ -149,6 +152,11 @@ const workspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
   projectRevision: revision,
   undoTop: { entryId: 'undo_1', label: 'Edit shot', sourceRevision: 2 },
   dirtyShots: [{ shotId: 'shot_2', causes: ['continuity_stale'] }],
+  boardPanels: [
+    { shotId: 'shot_1', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+    { shotId: 'shot_2', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+    { shotId: 'shot_3', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+  ],
   cascadeProgress: [],
   currentVideoJobs: [
     { shotId: 'shot_1', jobIds: [] },
@@ -201,6 +209,39 @@ const addCurrentVideo = (
   project.shots[shotId]!.videoAssetId = assetId;
 };
 
+const addCurrentBoardPanel = (
+  project: StudioRendererProjectV2,
+  shotId: string,
+  assetId = `board_${shotId}`,
+  jobId = `job_${assetId}`
+): StudioRendererJobV2 => {
+  const asset = makeAsset(assetId, shotId, 'image', 'boardStills');
+  project.assets[asset.id] = asset;
+  const shot = project.shots[shotId]!;
+  shot.assetIds.push(asset.id);
+  shot.boardAssetId = asset.id;
+  const job = makeJob(jobId, shotId, {
+    status: 'succeeded',
+    purpose: 'board_still',
+    provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+    outputAssetIds: [asset.id],
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+    spendReceipt: {
+      purpose: 'board_still',
+      routeId: 'route_image',
+      currency: 'USD',
+      rateUnit: 'generation',
+      rateMinorUnits: 1,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: 1,
+    },
+  });
+  project.jobs[job.id] = job;
+  shot.jobIds.push(job.id);
+  return job;
+};
+
 const cascadeRow = (
   waitingReason: StudioCascadeProgressV2['waitingReason'],
   dependentShotId = 'shot_2'
@@ -248,6 +289,196 @@ describe('buildStudioBarStats', () => {
 });
 
 describe('projectWorkspace', () => {
+  it('projects Board freshness independently and retains the current panel while a paid redraw is drawing', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const producer = addCurrentBoardPanel(project, 'shot_1');
+    const redraw = makeJob('job_board_redraw', 'shot_1', {
+      status: 'running',
+      purpose: 'board_still',
+      provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+    });
+    project.jobs[redraw.id] = redraw;
+    project.shots.shot_1!.jobIds.push(redraw.id);
+    const status = cleanWorkspaceStatus();
+    status.boardPanels[0] = {
+      shotId: 'shot_1',
+      assetId: 'board_shot_1',
+      producerJobId: producer.id,
+      latestJobId: redraw.id,
+      staleCauses: ['request_out_of_date'],
+    };
+
+    expect(projectWorkspace(project, status, null).boardPanels[0]).toEqual({
+      shotId: 'shot_1',
+      assetId: 'board_shot_1',
+      producerJobId: producer.id,
+      latestJobId: redraw.id,
+      staleCauses: ['request_out_of_date'],
+      freshness: 'stale',
+      activity: 'drawing',
+      recovery: null,
+    });
+  });
+
+  it('projects only sanitized recovery authority for the exact latest Board job needing attention', () => {
+    const project = makeProject();
+    project.boardStyle = 'line_art';
+    const attention = makeJob('job_board_attention', 'shot_1', {
+      status: 'needs_attention',
+      purpose: 'board_still',
+      provider: { choiceId: 'route_secret', providerId: 'provider_secret', model: 'model_secret' },
+      error: {
+        code: 'submission_unknown',
+        messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
+      },
+      canCancel: false,
+      canRetry: true,
+    });
+    project.jobs[attention.id] = attention;
+    project.shots.shot_1!.jobIds.push(attention.id);
+    const status = cleanWorkspaceStatus();
+    status.boardPanels[0] = {
+      shotId: 'shot_1',
+      assetId: null,
+      producerJobId: null,
+      latestJobId: attention.id,
+      staleCauses: [],
+    };
+
+    const panel = projectWorkspace(project, status, cleanChainStatus()).boardPanels[0]!;
+    expect(panel).toMatchObject({
+      activity: 'needs_attention',
+      recovery: {
+        jobId: attention.id,
+        canRetry: true,
+        canCancel: false,
+        canRetryDownload: false,
+        submissionUnknown: true,
+      },
+    });
+    expect(Object.keys(panel.recovery ?? {}).toSorted()).toEqual([
+      'canCancel',
+      'canRetry',
+      'canRetryDownload',
+      'jobId',
+      'submissionUnknown',
+    ]);
+    expect(JSON.stringify(panel)).not.toContain('provider_secret');
+    expect(JSON.stringify(panel)).not.toContain('messageKey');
+    expect(projectWorkspace(project, null, null).boardPanels[0]!.recovery).toBeNull();
+  });
+
+  it('projects only the no-charge download retry for an exact latest Board download failure', () => {
+    const project = makeProject();
+    project.boardStyle = 'colour_key';
+    const failed = makeJob('job_board_download', 'shot_1', {
+      status: 'failed',
+      purpose: 'board_still',
+      provider: { choiceId: 'route_secret', providerId: 'provider_secret', model: 'model_secret' },
+      error: {
+        code: 'download_failed',
+        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+      },
+      canRetryDownload: true,
+    });
+    project.jobs[failed.id] = failed;
+    project.shots.shot_1!.jobIds.push(failed.id);
+    const status = cleanWorkspaceStatus();
+    status.boardPanels[0] = {
+      shotId: 'shot_1',
+      assetId: null,
+      producerJobId: null,
+      latestJobId: failed.id,
+      staleCauses: [],
+    };
+
+    const panel = projectWorkspace(project, status, cleanChainStatus()).boardPanels[0]!;
+    expect(panel).toMatchObject({
+      freshness: 'missing',
+      activity: 'failed',
+      recovery: {
+        jobId: failed.id,
+        canRetry: false,
+        canCancel: false,
+        canRetryDownload: true,
+        submissionUnknown: false,
+      },
+    });
+    expect(JSON.stringify(panel)).not.toContain('provider_secret');
+    expect(JSON.stringify(panel)).not.toContain('messageKey');
+
+    failed.error = {
+      code: 'provider_unavailable',
+      messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+    };
+    expect(projectWorkspace(project, status, cleanChainStatus()).boardPanels[0]!.recovery).toBeNull();
+  });
+
+  it.each([
+    ['queued_local', 'queued'],
+    ['submitting', 'queued'],
+    ['queued_remote', 'queued'],
+    ['running', 'drawing'],
+    ['needs_attention', 'needs_attention'],
+    ['failed', 'failed'],
+    ['cancelled', 'cancelled'],
+  ] as const)('projects latest missing-panel job activity %s as %s', (jobStatus, activity) => {
+    const project = makeProject();
+    project.boardStyle = 'line_art';
+    const job = makeJob(`job_board_${jobStatus}`, 'shot_1', { status: jobStatus, purpose: 'board_still' });
+    project.jobs[job.id] = job;
+    project.shots.shot_1!.jobIds.push(job.id);
+    const status = cleanWorkspaceStatus();
+    status.boardPanels[0] = {
+      shotId: 'shot_1',
+      assetId: null,
+      producerJobId: null,
+      latestJobId: job.id,
+      staleCauses: [],
+    };
+
+    expect(projectWorkspace(project, status, null).boardPanels[0]).toMatchObject({
+      assetId: null,
+      freshness: 'missing',
+      activity,
+    });
+  });
+
+  it('fails Board status closed on a revision race or non-film-order rows without affecting video readiness', () => {
+    const project = makeProject();
+    const staleRevision = cleanWorkspaceStatus(2);
+    const reordered = cleanWorkspaceStatus();
+    reordered.boardPanels = [reordered.boardPanels[1]!, reordered.boardPanels[0]!, reordered.boardPanels[2]!];
+
+    const revisionPending = projectWorkspace(project, staleRevision, cleanChainStatus());
+    const orderPending = projectWorkspace(project, reordered, cleanChainStatus());
+
+    expect(revisionPending.boardPanels.every((panel) => panel.freshness === 'status_pending')).toBe(true);
+    expect(orderPending.boardPanels.every((panel) => panel.activity === 'status_pending')).toBe(true);
+    expect(orderPending.activeBeats[0]!.shots[0]!.segmentState).not.toEqual({ kind: 'status_pending' });
+  });
+
+  it('fails a forged Board producer route status closed while preserving its locally valid image', () => {
+    const project = makeProject();
+    project.boardStyle = 'colour_key';
+    const producer = addCurrentBoardPanel(project, 'shot_1');
+    const status = cleanWorkspaceStatus();
+    status.boardPanels[0] = {
+      shotId: 'shot_1',
+      assetId: 'board_shot_1',
+      producerJobId: producer.id,
+      latestJobId: producer.id,
+      staleCauses: ['route_out_of_date'],
+    };
+
+    expect(projectWorkspace(project, status, cleanChainStatus()).boardPanels[0]).toMatchObject({
+      assetId: 'board_shot_1',
+      freshness: 'status_pending',
+      activity: 'status_pending',
+    });
+  });
+
   it('projects one current picture and no video Take gallery or rendered-count facts', () => {
     const project = makeProject();
     const superseded = makeAsset('video_superseded', 'shot_1', 'video', 'assets', '2026-08-19T01:00:00.000Z', 9);
@@ -352,6 +583,37 @@ describe('projectWorkspace', () => {
     ]);
     expect(shot.currentPicture).toMatchObject({ assetId: 'video_current', sourceDurationSeconds: 10 });
     expect(shot).not.toHaveProperty('videoTakes');
+  });
+
+  it('admits only an explicitly pinned Board panel into the first-frame choices and never into fallback', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    addCurrentBoardPanel(project, 'shot_1');
+    addCurrentBoardPanel(project, 'shot_2');
+
+    const beforePromotion = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+    expect(beforePromotion.shots[0]).toMatchObject({
+      explicitSeedAssetId: null,
+      effectiveSeedAssetId: null,
+      seedStills: [],
+    });
+    expect(beforePromotion.shots[1]!.seedStills).toEqual([]);
+
+    project.shots.shot_1!.seedStillId = 'board_shot_1';
+    const afterPromotion = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+    expect(afterPromotion.shots[0]).toMatchObject({
+      explicitSeedAssetId: 'board_shot_1',
+      effectiveSeedAssetId: 'board_shot_1',
+      hasEffectiveSeed: true,
+      seedStills: [
+        {
+          assetId: 'board_shot_1',
+          explicitSeed: true,
+          effectiveSeed: true,
+        },
+      ],
+    });
+    expect(afterPromotion.shots[1]!.seedStills).toEqual([]);
   });
 
   it('uses one exact succeeded current-picture poster and rejects a cross-owned video', () => {
@@ -625,6 +887,24 @@ describe('projectWorkspace', () => {
       },
     ]);
     expect(JSON.stringify(shot.attentionJobs)).not.toContain('providerJobId');
+  });
+
+  it('keeps Board failures out of the legacy first-frame and video recovery surface', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.jobIds.push('job_board_attention');
+    project.jobs.job_board_attention = makeJob('job_board_attention', 'shot_1', {
+      status: 'needs_attention',
+      purpose: 'board_still',
+      error: {
+        code: 'provider_unavailable',
+        messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+      },
+      canRetry: true,
+    });
+
+    const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.attentionJobs).toEqual([]);
   });
 
   it('projects owned generation activity as rendering ahead of stale and seed-pending states', () => {

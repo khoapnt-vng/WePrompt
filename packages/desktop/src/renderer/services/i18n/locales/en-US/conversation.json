@@ -1461,9 +1461,49 @@
           "action": "Action",
           "look": "Look",
           "shots": "Shots",
+          "panel": "Panel",
           "length": "Length",
           "state": "State",
           "actionLook": "Action · Look"
+        },
+        "board": {
+          "label": "Director Board controls",
+          "progress": "{{drawn}} of {{total}} panels drawn",
+          "progressLabel": "Board completeness",
+          "staleCount": "{{count}} stale",
+          "busyCount": "{{count}} in progress",
+          "style": {
+            "label": "Board style",
+            "greyTone": "Grey tone",
+            "lineArt": "Line art",
+            "colourKey": "Colour key"
+          },
+          "stop": "Stop drawing",
+          "stopNote": "Stop requests cancellation where possible. Completed panels and charges already incurred remain.",
+          "drawNext": "Draw next batch ({{count}})",
+          "styleRequired": "Choose a Board style before drawing."
+        },
+        "panel": {
+          "openDetails": "Open Board panels for {{title}}",
+          "closeDetails": "Close Board panels for {{title}}",
+          "detailLabel": "Board panels for {{title}}",
+          "drawMissing": "Draw missing ({{count}})",
+          "redrawBeat": "Redraw Beat · paid",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "head": "Head",
+          "redrawShot": "Redraw Shot {{position}} · paid",
+          "useAsFirstFrame": "Use Shot {{position}} panel as first frame",
+          "status": {
+            "missing": "Not drawn",
+            "current": "Current",
+            "stale": "Stale",
+            "statusPending": "Status pending",
+            "queued": "Queued",
+            "drawing": "Drawing",
+            "needsAttention": "Needs attention",
+            "failed": "Failed",
+            "cancelled": "Cancelled"
+          }
         },
         "lookMissing": "No look written yet",
         "shotCount": "{{count}} shots",
@@ -2086,6 +2126,7 @@
           "apply_coverage": "apply coverage",
           "set_hard_cut": "change continuity",
           "set_seed_still": "choose first frame",
+          "promote_board_panel": "Use panel as first frame",
           "trim_shot": "trim shot",
           "redetach_line": "detach line",
           "rederive_line": "rederive line",
@@ -2151,6 +2192,28 @@
           "severConfirmed": "Hard cut confirmed. Review the Shot for first-frame progress, replacement progress, or any required recovery.",
           "rejoinConfirmed": "Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery."
         },
+        "promotion": {
+          "title": "Use panel as first frame",
+          "summary": "Promote the current Board panel for Shot {{shotId}}. This does not change the Shot’s continuity boundary.",
+          "impactNone": "No current takes depend on this frame.",
+          "impactIntro": "{{count}} current take(s) will remain playable but become stale:",
+          "impactItem": "Shot {{shotId}} current take",
+          "optionsLabel": "Choose how to handle current takes",
+          "promoteOnly": "Promote only — keep playable, stale takes",
+          "freePrice": "$0",
+          "promoteAndRerender": "Promote and review exact rerender work",
+          "priceAfterReview": "Price shown next",
+          "promoteOnlyAction": "Promote for $0",
+          "reviewPaidAction": "Review rerender price",
+          "paidUnavailable": "This segment has too many current takes for one paid confirmation. Promote-only remains available.",
+          "headline": "Promote + {{count}} rerender(s) · {{cost}}",
+          "requiredWork": "The listed rerenders are exactly the current takes this promotion makes stale. Missing coverage is not included.",
+          "confirm": "Confirm promotion + {{count}} rerender(s) · {{cost}}",
+          "promoted": "Panel promoted. Existing takes remain playable and are marked stale.",
+          "promoting": "Promoting panel…",
+          "confirmed": "Panel promoted and rerendering started for the confirmed takes.",
+          "close": "Close"
+        },
         "rateCardSource": "This estimate comes from the app's configured rate card, not a provider response.",
         "group": {
           "base": "Base",
@@ -2158,6 +2221,7 @@
           "required": "Required"
         },
         "purpose": {
+          "board_still": "Board panel",
           "seed_still": "First frame",
           "video_take": "Video"
         },

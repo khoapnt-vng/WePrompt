@@ -28,7 +28,7 @@ export const createStudioQuotedGenerationId = (input: StudioQuotedGenerationIden
   if (!Number.isSafeInteger(input.projectRevision) || input.projectRevision < 1) {
     throw new RangeError('projectRevision must be a positive safe integer');
   }
-  if (input.purpose !== 'seed_still' && input.purpose !== 'video_take') {
+  if (input.purpose !== 'seed_still' && input.purpose !== 'board_still' && input.purpose !== 'video_take') {
     throw new TypeError('purpose must be a Studio generation purpose');
   }
   const canonical = [

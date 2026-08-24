@@ -48,6 +48,7 @@ import {
 import {
   applyStudioMutationBatchV2,
   calculateStudioQuoteTotals,
+  createStudioBoardGenerationRequestPlanForShot,
   createEmptyStudioProjectV2,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
@@ -798,6 +799,75 @@ describe('CreativeStudioServiceV2', () => {
     project.shots.clip_2!.assetIds.push(seed.id);
     project.shots.clip_2!.seedStillId = seed.id;
     return { project, take, seed };
+  };
+
+  const makeBoardPromotionProject = (): { project: StudioProjectV2; board: StudioAssetV2 } => {
+    const project = makeContinuityProject('none');
+    project.boardStyle = 'grey_tone';
+    const shot = project.shots.clip_1!;
+    const beat = project.beats.section_1!;
+    const requestPlan = createStudioBoardGenerationRequestPlanForShot({ project, beat, shot });
+    if (requestPlan === null) throw new Error('Board promotion fixture request must resolve');
+    const board: StudioAssetV2 = {
+      id: 'board_promote_1',
+      projectId: project.id,
+      shotId: shot.id,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'boardStills', fileName: 'board_promote_1.png' },
+      byteSize: 20,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-08-17T00:00:01.000Z',
+    };
+    project.assets[board.id] = board;
+    shot.assetIds.push(board.id);
+    shot.boardAssetId = board.id;
+    project.jobs.job_board_promote_1 = makeSchema2Job(project, {
+      id: 'job_board_promote_1',
+      shotId: shot.id,
+      status: 'succeeded',
+      purpose: 'board_still',
+      providerJobId: 'remote_board_promote_1',
+      remoteStartedAt: '2026-08-17T00:00:01.000Z',
+      outputAssetIds: [board.id],
+      error: null,
+      requestPlan,
+      requestSnapshot: requestPlan.snapshot,
+      spendReceipt: {
+        authorizationId: 'authorization_1',
+        itemId: 'item_1',
+        jobId: 'job_board_promote_1',
+        purpose: 'board_still',
+        routeId: imageRoute.choiceId,
+        currency: 'USD',
+        rateUnit: 'generation',
+        rateMinorUnits: 3,
+        durationSeconds: null,
+        generationCount: 1,
+        totalMinorUnits: 3,
+      },
+      outputAssetIdsByRole: { primary: board.id, poster: null },
+    });
+    shot.jobIds.push('job_board_promote_1');
+    for (const shotId of ['clip_1', 'clip_2']) {
+      const selectedShot = project.shots[shotId]!;
+      const take: StudioAssetV2 = {
+        id: `take_${shotId}`,
+        projectId: project.id,
+        shotId,
+        mediaKind: 'video',
+        mimeType: 'video/mp4',
+        managedAsset: { collection: 'assets', fileName: `take_${shotId}.mp4` },
+        byteSize: 100,
+        sha256: 'c'.repeat(64),
+        durationSeconds: selectedShot.durationSeconds,
+        createdAt: '2026-08-17T00:00:01.000Z',
+      };
+      project.assets[take.id] = take;
+      selectedShot.assetIds.push(take.id);
+      selectedShot.videoAssetId = take.id;
+    }
+    return { project, board };
   };
 
   it('rejects malformed V2 service envelopes before store, media, or paid work', async () => {
@@ -1925,6 +1995,54 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
+  it('confirms a Board-only batch and exposes its latest jobs through the workspace status seam', async () => {
+    const project = makeSchema2ServiceProject();
+    project.boardStyle = 'grey_tone';
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [
+        { shotId: 'clip_1', purpose: 'board_still', referenceAssetId: null },
+        { shotId: 'clip_2', purpose: 'board_still', referenceAssetId: null },
+      ],
+      cascadeChoices: [],
+    });
+    expect(prepared.withCascade).toBeNull();
+
+    await harness.service.confirmSubmission({
+      projectId: project.id,
+      quoteId: prepared.baseOnly.id,
+      expectedRevision: project.revision,
+    });
+    const committed = harness.getProject();
+    const boardJobs = Object.values(committed.jobs).filter((job) => job.purpose === 'board_still');
+    const workspace = await harness.service.getProjectWorkspace({ projectId: project.id });
+
+    expect(boardJobs).toHaveLength(2);
+    expect(workspace).toMatchObject({
+      status: 'supported',
+      snapshot: {
+        workspaceStatus: {
+          boardPanels: boardJobs.map((job) => ({
+            shotId: job.shotId,
+            assetId: null,
+            producerJobId: null,
+            latestJobId: job.id,
+            staleCauses: [],
+          })),
+        },
+      },
+    });
+    expect(harness.submitShots).toHaveBeenCalledWith({
+      projectId: project.id,
+      jobIds: boardJobs.map((job) => job.id),
+    });
+  });
+
   it('caches and confirms the server-derived default cascade instead of the caller empty list', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
@@ -2106,6 +2224,45 @@ describe('CreativeStudioServiceV2', () => {
       beatIds: ['section_1'],
     });
     expect(subset.payableShotIds).toEqual(['clip_1']);
+  });
+
+  it('keeps video generation ready while a Board redraw is nonterminal', async () => {
+    const project = makeSchema2ServiceProject();
+    project.boardStyle = 'grey_tone';
+    const boardSnapshot = {
+      prompt: 'A grey-tone storyboard panel for the city launch',
+      aspectRatio: '16:9' as const,
+      resolution: '1080p' as const,
+      durationSeconds: 4,
+      referenceInput: null,
+      conditioningInput: null,
+    };
+    project.jobs.board_job = makeSchema2Job(project, {
+      id: 'board_job',
+      purpose: 'board_still',
+      status: 'running',
+      providerJobId: 'remote_board_job',
+      error: null,
+      requestPlan: { kind: 'resolved', snapshot: boardSnapshot },
+      requestSnapshot: boardSnapshot,
+    });
+    project.shots.clip_1.jobIds = ['board_job'];
+    const harness = makeHarness(project);
+
+    const readiness = await harness.service.getGenerationReadiness({
+      projectId: project.id,
+      beatIds: ['section_1'],
+    });
+
+    expect(readiness.shots).toEqual([
+      {
+        shotId: 'clip_1',
+        beatId: 'section_1',
+        ready: true,
+        issues: [],
+      },
+    ]);
+    expect(readiness.payableShotIds).toEqual(['clip_1']);
   });
 
   it('reports exact authored and durable blockers without treating optional copy as required', async () => {
@@ -3278,6 +3435,107 @@ describe('CreativeStudioServiceV2', () => {
     expect(admit).not.toHaveBeenCalled();
   });
 
+  it('atomically pins an exact Board panel and authorizes only selected takes in its segment', async () => {
+    const { project, board } = makeBoardPromotionProject();
+    const harness = makeHarness(project);
+    const boardBefore = structuredClone({
+      asset: project.assets[board.id],
+      pointer: project.shots.clip_1!.boardAssetId,
+      history: project.shots.clip_1!.supersededBoardAssetIds,
+      producer: project.jobs.job_board_promote_1,
+    });
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      boardPromotion: { shotId: 'clip_1', boardAssetId: board.id },
+    });
+    expect(harness.getProject()).toEqual(project);
+    expect(prepared.withCascade).toBeNull();
+    expect(prepared.baseOnly.baseItems.map(({ shotId, purpose }) => [shotId, purpose])).toEqual([
+      ['clip_1', 'video_take'],
+      ['clip_2', 'video_take'],
+    ]);
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+
+    const committed = harness.getProject();
+    expect(committed.shots.clip_1).toMatchObject({
+      seedStillId: board.id,
+      boardAssetId: boardBefore.pointer,
+      supersededBoardAssetIds: boardBefore.history,
+      chainBreak: 'none',
+      videoAssetId: 'take_clip_1',
+    });
+    expect(committed.assets[board.id]).toEqual(boardBefore.asset);
+    expect(committed.jobs.job_board_promote_1).toEqual(boardBefore.producer);
+    expect(committed.undoHistory).toEqual(project.undoHistory);
+    expect(committed.spendAuthorizations).toEqual([
+      expect.objectContaining({ id: prepared.baseOnly.id, cascadeItems: [] }),
+    ]);
+    const replacementJobs = Object.values(committed.jobs).filter((job) => job.id !== 'job_board_promote_1');
+    expect(replacementJobs).toEqual([
+      expect.objectContaining({
+        shotId: 'clip_1',
+        purpose: 'video_take',
+        status: 'queued_local',
+        requestSnapshot: expect.objectContaining({
+          conditioningInput: { kind: 'seed_still', assetId: board.id },
+        }),
+      }),
+      expect.objectContaining({
+        shotId: 'clip_2',
+        purpose: 'video_take',
+        status: 'waiting_for_conditioning',
+        requestPlan: expect.objectContaining({
+          kind: 'after_take_selection',
+          dependency: expect.objectContaining({ kind: 'authorized_predecessor', predecessorShotId: 'clip_1' }),
+        }),
+      }),
+    ]);
+    expect(harness.submitShots).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      jobIds: [replacementJobs[0]!.id],
+    });
+  });
+
+  it('revalidates the exact current Board pointer before paid confirmation and leaves failure byte-identical', async () => {
+    const { project, board } = makeBoardPromotionProject();
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      boardPromotion: { shotId: 'clip_1', boardAssetId: board.id },
+    });
+    const mismatched = harness.getProject();
+    mismatched.shots.clip_1!.boardAssetId = null;
+    harness.setProject(mismatched);
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toThrow();
+    expect(harness.getProject()).toEqual(mismatched);
+    expect(harness.getProject().spendAuthorizations).toEqual([]);
+    expect(Object.keys(harness.getProject().jobs)).toEqual(['job_board_promote_1']);
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
   it('confirms one rejoin atomically with exact existing-predecessor extraction authority', async () => {
     const { project, take } = makeRejoinProject();
     const harness = makeHarness(project);
@@ -4429,6 +4687,7 @@ describe('CreativeStudioServiceV2', () => {
       cascadeProgress: [],
     });
     expect(Object.keys(workspace).toSorted()).toEqual([
+      'boardPanels',
       'cascadeProgress',
       'currentVideoJobs',
       'dirtyShots',
@@ -4446,6 +4705,10 @@ describe('CreativeStudioServiceV2', () => {
     expect(workspace.currentVideoJobs).toEqual([
       { shotId: 'clip_1', jobIds: [] },
       { shotId: 'clip_2', jobIds: [] },
+    ]);
+    expect(workspace.boardPanels).toEqual([
+      { shotId: 'clip_1', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+      { shotId: 'clip_2', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
     ]);
     expect(harness.verifyConditioningFrameV2).not.toHaveBeenCalled();
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
@@ -4641,6 +4904,7 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
   },
   { kind: 'set_hard_cut', shotId: 'clip_1', hardCut: true },
   { kind: 'set_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
+  { kind: 'promote_board_panel', shotId: 'clip_1', boardAssetId: 'asset_board' },
   { kind: 'trim_shot', shotId: 'clip_1', trimInSeconds: 0, trimOutSeconds: 4.5 },
   { kind: 'redetach_line', shotId: 'clip_1', line: 'A human-authored line' },
   { kind: 'rederive_line', shotId: 'clip_1', line: 'A reviewed derived line' },
@@ -5122,7 +5386,7 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(27);
+      expect(operationKinds).toHaveLength(28);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds
@@ -5790,6 +6054,37 @@ describe('Studio MCP schema-2 server', () => {
     expect(view).not.toHaveProperty('scenes');
     await rm(projectDir, { recursive: true, force: true });
   });
+
+  it.each([null, 'grey_tone', 'line_art', 'colour_key'] as const)(
+    'projects the exact nullable Board style %s without exposing Board asset authority',
+    async (boardStyle) => {
+      const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-board-style-'));
+      const project = makeSchema2ServiceProject();
+      project.boardStyle = boardStyle;
+      await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+
+      try {
+        const result = await createReadStoryboardHandlerV2({
+          projectId: project.id,
+          projectDir,
+          pendingDir: '',
+          referencePendingDir: '',
+        })({});
+        const view = JSON.parse(result.content[0].text) as {
+          boardStyle: typeof boardStyle;
+          shots: Record<string, Record<string, unknown>>;
+        };
+
+        expect(result.isError).toBeUndefined();
+        expect(Object.hasOwn(view, 'boardStyle')).toBe(true);
+        expect(view.boardStyle).toBe(boardStyle);
+        expect(view.shots.clip_1).not.toHaveProperty('boardAssetId');
+        expect(view.shots.clip_1).not.toHaveProperty('supersededBoardAssetIds');
+      } finally {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('hydrates the storyboard Brief only from the digest-backed Brief file', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-brief-file-'));

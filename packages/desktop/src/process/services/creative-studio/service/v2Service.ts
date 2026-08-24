@@ -36,6 +36,7 @@ import {
   type StudioDismissReferenceGenerationHandoffResultV2,
   type StudioDirectorSessionAuthorityV2,
   type StudioJobRequest,
+  type StudioJobPurpose,
   type StudioJobV2,
   type StudioExportArtifactRequestV2,
   type StudioListExportsRequestV2,
@@ -136,9 +137,12 @@ import {
   applyStudioMutationBatchV2,
   advanceStudioWaitingBindingsV2,
   createStudioFrameExtractionId,
+  deriveStudioInboundShotReferencesV2,
   projectStudioChainBoundaryVerificationIdsV2,
   projectStudioChainStatusV2,
   projectStudioWorkspaceStatusV2,
+  resolveStudioCanonicalBoardAssetV2,
+  resolveStudioCurrentBoardPanelAuthorityV2,
   terminalizeStudioUnboundDependenciesV2,
   type StudioMutationApplyResultV2,
   type StudioVerifiedConditioningFrameV2,
@@ -774,6 +778,15 @@ const eligibleSeedAssetV2 = (project: StudioProjectV2, shot: StudioShot, assetId
     : null;
 };
 
+const eligibleExplicitSeedAssetV2 = (
+  project: StudioProjectV2,
+  shot: StudioShot,
+  assetId: string
+): StudioAssetV2 | null =>
+  eligibleSeedAssetV2(project, shot, assetId) ??
+  resolveStudioCanonicalBoardAssetV2(project, shot, assetId)?.asset ??
+  null;
+
 const canonicalCutCoverAssetV2 = (project: StudioProjectV2, shotId: string): StudioAssetV2 | null => {
   let activeShot: StudioShot | null = null;
   let segmentHead = false;
@@ -801,7 +814,7 @@ const canonicalCutCoverAssetV2 = (project: StudioProjectV2, shotId: string): Stu
   }
   if (!segmentHead) return null;
   if (activeShot.seedStillId !== null) {
-    const explicit = eligibleSeedAssetV2(project, activeShot, activeShot.seedStillId);
+    const explicit = eligibleExplicitSeedAssetV2(project, activeShot, activeShot.seedStillId);
     if (explicit !== null) return explicit;
   }
   const candidates = activeShot.assetIds.flatMap((assetId) => {
@@ -1012,12 +1025,22 @@ const quotedDuration = (item: StudioQuotedGeneration): number =>
     ? item.requestPlan.snapshot.durationSeconds
     : item.requestPlan.template.durationSeconds;
 
+const generationMediaKindForPurpose = (purpose: StudioJobPurpose): StudioMediaKind => {
+  switch (purpose) {
+    case 'seed_still':
+    case 'board_still':
+      return 'image';
+    case 'video_take':
+      return 'video';
+  }
+};
+
 const resolveQuotedRoute = (
   generation: StudioGenerationRouteCatalog,
   project: StudioProjectV2,
   item: StudioQuotedGeneration
 ): StudioGenerationRoute => {
-  const kind: StudioMediaKind = item.purpose === 'seed_still' ? 'image' : 'video';
+  const kind = generationMediaKindForPurpose(item.purpose);
   const matches = generation.routes.filter((route) => route.choiceId === item.routeId && route.kind === kind);
   const route = matches.length === 1 ? matches[0]! : null;
   const durationSeconds = quotedDuration(item);
@@ -1073,7 +1096,7 @@ const rendererRouteLookup =
     project: StudioProjectV2
   ): ((routeId: string, purpose: StudioQuotedGeneration['purpose']) => StudioMediaChoiceRef) =>
   (routeId, purpose) => {
-    const kind: StudioMediaKind = purpose === 'seed_still' ? 'image' : 'video';
+    const kind = generationMediaKindForPurpose(purpose);
     const matches = generation.routes.filter((route) => route.choiceId === routeId && route.kind === kind);
     const route = matches.length === 1 ? matches[0]! : null;
     if (route === null || !routeSupportsProject(route, project)) {
@@ -1082,7 +1105,7 @@ const rendererRouteLookup =
     return toMediaChoice(route, kind);
   };
 
-const requestedKind = (job: StudioJobV2): StudioMediaKind => (job.purpose === 'seed_still' ? 'image' : 'video');
+const requestedKind = (job: StudioJobV2): StudioMediaKind => generationMediaKindForPurpose(job.purpose);
 
 const toRendererSpendReceipt = (job: StudioJobV2): StudioRendererJobV2['spendReceipt'] => {
   const receipt = job.spendReceipt;
@@ -1210,7 +1233,9 @@ const readinessForShot = (
   if (!shotDurationIsValid(shot)) issues.push('invalid_shot_duration');
   const jobs = shot.jobIds.flatMap((jobId) => {
     const job = ownValue(project.jobs, jobId);
-    return job?.id === jobId && job.projectId === project.id && job.shotId === shot.id ? [job] : [];
+    return job?.id === jobId && job.projectId === project.id && job.shotId === shot.id && job.purpose !== 'board_still'
+      ? [job]
+      : [];
   });
   if (jobs.some((job) => ACTIVE_JOB_STATUSES.has(job.status))) issues.push('active_job');
   const latest = jobs.at(-1);
@@ -1542,11 +1567,43 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     providerBindings: StudioSpendAuthorization['providerBindings'];
     cancellationPolicies: Array<{ itemId: string; policy: StudioCancellationPolicy }>;
     continuityChange: StudioPrepareSubmissionRequestV2['continuityChange'] | null;
+    boardPromotion: StudioPrepareSubmissionRequestV2['boardPromotion'] | null;
   };
 
   type ConfirmationDispatch = StudioDispatchAuthorizedJobsRequestV2 & {
     extractionIds: string[];
     bindingItemIds: string[];
+  };
+
+  const currentBoardPromotionSelectedTakeShotIds = (
+    project: StudioProjectV2,
+    promotion: NonNullable<StudioPrepareSubmissionRequestV2['boardPromotion']>
+  ): string[] | null => {
+    const authority = resolveStudioCurrentBoardPanelAuthorityV2(project, promotion.shotId, promotion.boardAssetId);
+    if (
+      authority === null ||
+      (authority.shotIndex !== 0 && authority.shot.chainBreak !== 'hard_cut') ||
+      authority.shot.seedStillId === promotion.boardAssetId
+    ) {
+      return null;
+    }
+    const segmentShotIds: string[] = [];
+    for (let shotIndex = authority.shotIndex; shotIndex < authority.beat.shotOrder.length; shotIndex += 1) {
+      const shotId = authority.beat.shotOrder[shotIndex]!;
+      const shot = ownValue(project.shots, shotId);
+      if (shot === undefined) return null;
+      if (shotIndex > authority.shotIndex && shot.chainBreak === 'hard_cut') break;
+      segmentShotIds.push(shotId);
+    }
+    if (segmentShotIds.length === 0 || deriveStudioInboundShotReferencesV2(project, segmentShotIds).length > 0) {
+      return null;
+    }
+    return segmentShotIds.filter((shotId) => {
+      const shot = ownValue(project.shots, shotId);
+      if (shot?.videoAssetId === null || shot === undefined) return false;
+      const asset = ownValue(project.assets, shot.videoAssetId);
+      return asset !== undefined && isCanonicalStudioGeneratedTakeV2(asset, project.id, shot);
+    });
   };
 
   const buildConfirmedProject = (
@@ -1579,6 +1636,10 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     );
 
     const continuityChange = revalidation.continuityChange;
+    const boardPromotion = revalidation.boardPromotion;
+    if (continuityChange !== null && boardPromotion !== null) {
+      throw invalid('Conflicting Studio confirmation intents');
+    }
     if (continuityChange !== null) {
       const shot = ownValue(project.shots, continuityChange.shotId);
       if (
@@ -1621,6 +1682,34 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         shot.chainBreak = 'none';
         shot.seedStillId = null;
       }
+    }
+    if (boardPromotion !== null) {
+      const promotedShot = ownValue(project.shots, boardPromotion.shotId);
+      const selectedTakeShotIds = currentBoardPromotionSelectedTakeShotIds(project, boardPromotion);
+      if (
+        quote.originReferenceHandoffId !== null ||
+        quote.cascadeItems.length !== 0 ||
+        promotedShot === undefined ||
+        selectedTakeShotIds === null ||
+        selectedTakeShotIds.length === 0 ||
+        quote.baseItems.length !== selectedTakeShotIds.length ||
+        quote.baseItems.some(
+          (item, index) => item.purpose !== 'video_take' || item.shotId !== selectedTakeShotIds[index]
+        )
+      ) {
+        throw invalid('Invalid Studio Board promotion confirmation');
+      }
+      const promotedHeadVideo = quote.baseItems.find((item) => item.shotId === promotedShot.id);
+      if (promotedHeadVideo !== undefined) {
+        const conditioning =
+          promotedHeadVideo.requestPlan.kind === 'resolved'
+            ? promotedHeadVideo.requestPlan.snapshot.conditioningInput
+            : null;
+        if (conditioning?.kind !== 'seed_still' || conditioning.assetId !== boardPromotion.boardAssetId) {
+          throw invalid('Invalid Studio Board promotion conditioning');
+        }
+      }
+      promotedShot.seedStillId = boardPromotion.boardAssetId;
     }
 
     for (const item of items) {
@@ -2732,6 +2821,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
               providerBindings,
               cancellationPolicies,
               continuityChange: structuredClone(claim.session.request.continuityChange ?? null),
+              boardPromotion: structuredClone(claim.session.request.boardPromotion ?? null),
             };
           },
           assertActive: () => assertServiceActive(claim),

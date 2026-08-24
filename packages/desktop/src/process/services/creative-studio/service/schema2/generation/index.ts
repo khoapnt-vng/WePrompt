@@ -5,6 +5,8 @@
  */
 
 export * from './frameExtraction';
+export * from './boardRequest';
+export * from './boardPanel';
 export * from './generationRequest';
 export * from './spendMath';
 export * from './submissionIdentity';

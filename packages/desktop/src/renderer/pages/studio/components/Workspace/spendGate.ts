@@ -5,6 +5,7 @@
  */
 
 import type {
+  StudioBoardPromotionV2,
   StudioPrepareGenerationChoiceV2,
   StudioPrepareSubmissionRequestV2,
   StudioContinuityChangeV2,
@@ -26,6 +27,19 @@ import type { WorkspaceProjection } from './workspaceProjection';
 
 export type SpendGateContinuityChange = StudioContinuityChangeV2;
 
+export type SpendGateBoardPromotion = StudioBoardPromotionV2;
+
+export type SpendGateBoardPromotionImpact = {
+  currentTakeShotIds: string[];
+  /** Renderer-only availability fact; false hides paid review without blocking the free mutation. */
+  paidRouteReady?: boolean;
+};
+
+export type BoardPromotionGatePlan = {
+  draft: SpendGateDraft;
+  impact: SpendGateBoardPromotionImpact;
+};
+
 export type SpendGateDraft = StudioPrepareSubmissionRequestV2;
 
 export type SpendGateSelectedOption = 'baseOnly' | 'withCascade';
@@ -36,7 +50,8 @@ const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 
 export const spendGateContinuityChange = (draft: SpendGateDraft | null): SpendGateContinuityChange | null => {
   const change = draft?.continuityChange;
-  return change !== undefined &&
+  return draft?.boardPromotion === undefined &&
+    change !== undefined &&
     SAFE_STUDIO_ID.test(change.shotId) &&
     typeof change.hardCut === 'boolean' &&
     typeof change.requiresSeedGeneration === 'boolean'
@@ -48,9 +63,45 @@ export const spendGateContinuityChange = (draft: SpendGateDraft | null): SpendGa
     : null;
 };
 
+export const spendGateBoardPromotion = (draft: SpendGateDraft | null): SpendGateBoardPromotion | null => {
+  const promotion = draft?.boardPromotion;
+  return promotion !== undefined &&
+    draft.continuityChange === undefined &&
+    draft.originReferenceHandoffId === null &&
+    draft.baseChoices.length === 0 &&
+    draft.cascadeChoices.length === 0 &&
+    SAFE_STUDIO_ID.test(promotion.shotId) &&
+    SAFE_STUDIO_ID.test(promotion.boardAssetId)
+    ? { shotId: promotion.shotId, boardAssetId: promotion.boardAssetId }
+    : null;
+};
+
+const exactBoardPromotionImpact = (
+  draft: SpendGateDraft,
+  impact: SpendGateBoardPromotionImpact | undefined
+): SpendGateBoardPromotionImpact | null => {
+  if (spendGateBoardPromotion(draft) === null || impact === undefined || !Array.isArray(impact.currentTakeShotIds)) {
+    return null;
+  }
+  const seen = new Set<string>();
+  const currentTakeShotIds: string[] = [];
+  for (const shotId of impact.currentTakeShotIds) {
+    if (!SAFE_STUDIO_ID.test(shotId) || seen.has(shotId)) return null;
+    seen.add(shotId);
+    currentTakeShotIds.push(shotId);
+  }
+  if (impact.paidRouteReady !== undefined && typeof impact.paidRouteReady !== 'boolean') return null;
+  return {
+    currentTakeShotIds,
+    ...(impact.paidRouteReady === undefined ? {} : { paidRouteReady: impact.paidRouteReady }),
+  };
+};
+
 export type SpendGatePhase =
   | 'closed'
   | 'choices'
+  | 'promoting'
+  | 'promoted'
   | 'preparing'
   | 'review'
   | 'confirming'
@@ -64,6 +115,7 @@ export type SpendGatePhase =
 export type SpendGateState = {
   phase: SpendGatePhase;
   draft: SpendGateDraft | null;
+  boardPromotionImpact: SpendGateBoardPromotionImpact | null;
   options: StudioRendererPreparedSubmissionOptionsV2 | null;
   selectedOption: SpendGateSelectedOption;
   errorCode: string | null;
@@ -74,8 +126,11 @@ export type SpendGateState = {
 type SpendGateFailure = { code: string; reason?: unknown; routeIssue?: SpendGateRouteIssue };
 
 export type SpendGateAction =
-  | { type: 'open'; draft: SpendGateDraft }
+  | { type: 'open'; draft: SpendGateDraft; boardPromotionImpact?: SpendGateBoardPromotionImpact }
   | { type: 'close' }
+  | { type: 'promote_started' }
+  | { type: 'promote_succeeded' }
+  | { type: 'promote_failed'; error: SpendGateFailure }
   | { type: 'prepare_started' }
   | { type: 'prepare_succeeded'; options: StudioRendererPreparedSubmissionOptionsV2 }
   | { type: 'prepare_failed'; error: SpendGateFailure }
@@ -87,6 +142,7 @@ export type SpendGateAction =
 export const initialSpendGateState = (): SpendGateState => ({
   phase: 'closed',
   draft: null,
+  boardPromotionImpact: null,
   options: null,
   selectedOption: 'baseOnly',
   errorCode: null,
@@ -106,9 +162,14 @@ const cacheFailurePhase = (code: string): SpendGatePhase => {
 /** Pure gate state. No transition initiates a bridge call or retries another transition. */
 export const spendGateReducer = (state: SpendGateState, action: SpendGateAction): SpendGateState => {
   if (action.type === 'open') {
+    const promotion = spendGateBoardPromotion(action.draft);
+    const boardPromotionImpact =
+      promotion === null ? null : exactBoardPromotionImpact(action.draft, action.boardPromotionImpact);
+    if (promotion !== null && boardPromotionImpact === null) return state;
     return {
       phase: 'choices',
       draft: action.draft,
+      boardPromotionImpact,
       options: null,
       selectedOption: 'baseOnly',
       errorCode: null,
@@ -117,6 +178,41 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
     };
   }
   if (action.type === 'close') return initialSpendGateState();
+  if (action.type === 'promote_started') {
+    return spendGateBoardPromotion(state.draft) === null || state.boardPromotionImpact === null
+      ? state
+      : {
+          ...state,
+          phase: 'promoting',
+          options: null,
+          errorCode: null,
+          pricingRefusalReason: null,
+          routeIssue: null,
+        };
+  }
+  if (action.type === 'promote_succeeded') {
+    return state.phase !== 'promoting'
+      ? state
+      : {
+          ...state,
+          phase: 'promoted',
+          errorCode: null,
+          pricingRefusalReason: null,
+          routeIssue: null,
+        };
+  }
+  if (action.type === 'promote_failed') {
+    return state.phase !== 'promoting'
+      ? state
+      : {
+          ...state,
+          phase: 'error',
+          options: null,
+          errorCode: action.error.code,
+          pricingRefusalReason: null,
+          routeIssue: null,
+        };
+  }
   if (action.type === 'prepare_started') {
     return state.draft === null
       ? state
@@ -131,7 +227,10 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
         };
   }
   if (action.type === 'prepare_succeeded') {
-    if (spendGateContinuityChange(state.draft) !== null && action.options.withCascade !== null) {
+    if (
+      (spendGateContinuityChange(state.draft) !== null || spendGateBoardPromotion(state.draft) !== null) &&
+      action.options.withCascade !== null
+    ) {
       return {
         ...state,
         phase: 'error',
@@ -196,9 +295,12 @@ export const spendGateRouteIssue = (
 ): SpendGateRouteIssue | null => {
   const choices = [...draft.baseChoices, ...draft.cascadeChoices];
   const continuityChange = spendGateContinuityChange(draft);
+  const boardPromotion = spendGateBoardPromotion(draft);
   const needsImage =
-    continuityChange?.requiresSeedGeneration === true || choices.some((choice) => choice.purpose === 'seed_still');
-  const needsVideo = continuityChange !== null || choices.some((choice) => choice.purpose === 'video_take');
+    continuityChange?.requiresSeedGeneration === true ||
+    choices.some((choice) => choice.purpose === 'seed_still' || choice.purpose === 'board_still');
+  const needsVideo =
+    continuityChange !== null || boardPromotion !== null || choices.some((choice) => choice.purpose === 'video_take');
   const imageUnavailable = needsImage && catalog.image.status !== 'ready';
   const videoUnavailable = needsVideo && catalog.video.status !== 'ready';
   if (imageUnavailable && videoUnavailable) return 'image_and_video';
@@ -327,6 +429,214 @@ const activeShotLocations = (project: StudioRendererProjectV2): Map<string, Acti
     }
   }
   return locations;
+};
+
+const BOARD_DRAWABLE_ACTIVITIES = new Set(['idle', 'failed', 'cancelled']);
+const BOARD_EXACT_FRESHNESS = new Set(['missing', 'current', 'stale']);
+const BOARD_EXACT_ACTIVITIES = new Set(['idle', 'queued', 'drawing', 'needs_attention', 'failed', 'cancelled']);
+
+const isBoardPanelDrawable = (panel: WorkspaceProjection['boardPanels'][number]): boolean =>
+  BOARD_DRAWABLE_ACTIVITIES.has(panel.activity) && panel.recovery?.canRetryDownload !== true;
+
+const exactBoardGateProjection = (input: {
+  project: StudioRendererProjectV2;
+  projection: WorkspaceProjection;
+}): { orderedShotIds: string[]; boardPanels: WorkspaceProjection['boardPanels'] } | null => {
+  if (
+    input.project.boardStyle === null ||
+    input.projection.projectId !== input.project.id ||
+    input.projection.projectRevision !== input.project.revision ||
+    input.projection.activeBeatIds.length !== input.project.beatOrder.length ||
+    input.projection.activeBeatIds.some((beatId, index) => beatId !== input.project.beatOrder[index])
+  ) {
+    return null;
+  }
+
+  const locations = activeShotLocations(input.project);
+  const orderedShotIds = [...locations]
+    .toSorted((left, right) => left[1].filmIndex - right[1].filmIndex)
+    .map(([shotId]) => shotId);
+  const authoredShotCount = input.project.beatOrder.reduce((count, beatId) => {
+    const beat = Object.hasOwn(input.project.beats, beatId) ? input.project.beats[beatId] : undefined;
+    return count + (beat?.id === beatId ? beat.shotOrder.length : 0);
+  }, 0);
+  if (
+    authoredShotCount !== orderedShotIds.length ||
+    input.projection.activeShotIds.length !== orderedShotIds.length ||
+    input.projection.activeShotIds.some((shotId, index) => shotId !== orderedShotIds[index]) ||
+    input.projection.boardPanels.length !== orderedShotIds.length
+  ) {
+    return null;
+  }
+
+  for (let index = 0; index < orderedShotIds.length; index += 1) {
+    const shotId = orderedShotIds[index]!;
+    const panel = input.projection.boardPanels[index];
+    if (
+      panel?.shotId !== shotId ||
+      !BOARD_EXACT_FRESHNESS.has(panel.freshness) ||
+      !BOARD_EXACT_ACTIVITIES.has(panel.activity)
+    ) {
+      return null;
+    }
+  }
+  return { orderedShotIds, boardPanels: input.projection.boardPanels };
+};
+
+/** Builds one paid, Board-only request for the next exact film-order batch of missing panels. */
+export const boardGateDraft = (input: {
+  project: StudioRendererProjectV2;
+  projection: WorkspaceProjection;
+}): SpendGateDraft | null => {
+  const exact = exactBoardGateProjection(input);
+  if (exact === null) return null;
+  const choices = exact.boardPanels.flatMap<StudioPrepareGenerationChoiceV2>((panel) =>
+    panel.freshness === 'missing' && isBoardPanelDrawable(panel)
+      ? [{ shotId: panel.shotId, purpose: 'board_still' as const, referenceAssetId: null }]
+      : []
+  );
+  if (choices.length === 0) return null;
+  return {
+    projectId: input.project.id,
+    expectedRevision: input.project.revision,
+    originReferenceHandoffId: null,
+    baseChoices: choices.slice(0, STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST),
+    cascadeChoices: [],
+  };
+};
+
+/** Builds an exact paid redraw request for a caller-selected film-order set of Board panels. */
+export const boardSelectionGateDraft = (input: {
+  project: StudioRendererProjectV2;
+  projection: WorkspaceProjection;
+  orderedShotIds: readonly string[];
+}): SpendGateDraft | null => {
+  const exact = exactBoardGateProjection(input);
+  if (
+    exact === null ||
+    !Array.isArray(input.orderedShotIds) ||
+    input.orderedShotIds.length === 0 ||
+    input.orderedShotIds.length > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST
+  ) {
+    return null;
+  }
+  const filmIndexByShotId = new Map(exact.orderedShotIds.map((shotId, filmIndex) => [shotId, filmIndex]));
+  const choices: StudioPrepareGenerationChoiceV2[] = [];
+  let previousFilmIndex = -1;
+  for (const shotId of input.orderedShotIds) {
+    const filmIndex = filmIndexByShotId.get(shotId);
+    const panel = filmIndex === undefined ? undefined : exact.boardPanels[filmIndex];
+    if (
+      filmIndex === undefined ||
+      filmIndex <= previousFilmIndex ||
+      panel?.shotId !== shotId ||
+      !isBoardPanelDrawable(panel)
+    ) {
+      return null;
+    }
+    previousFilmIndex = filmIndex;
+    choices.push({ shotId, purpose: 'board_still', referenceAssetId: null });
+  }
+  return {
+    projectId: input.project.id,
+    expectedRevision: input.project.revision,
+    originReferenceHandoffId: null,
+    baseChoices: choices,
+    cascadeChoices: [],
+  };
+};
+
+/**
+ * Builds one exact Board-promotion review without changing continuity or silently filling coverage.
+ * The paid alternative is limited to canonical current takes that the promotion will make stale.
+ */
+export const boardPromotionGatePlan = (input: {
+  project: StudioRendererProjectV2;
+  projection: WorkspaceProjection;
+  shotId: string;
+  boardAssetId: string;
+}): BoardPromotionGatePlan | null => {
+  if (!SAFE_STUDIO_ID.test(input.shotId) || !SAFE_STUDIO_ID.test(input.boardAssetId)) return null;
+  const exact = exactBoardGateProjection(input);
+  if (exact === null || !input.projection.workspaceStatusReady || !input.projection.chainStatusReady) return null;
+
+  const location = activeShotLocations(input.project).get(input.shotId);
+  const beat = location === undefined ? undefined : input.project.beats[location.beatId];
+  const shot = Object.hasOwn(input.project.shots, input.shotId) ? input.project.shots[input.shotId] : undefined;
+  const projectedBeat = input.projection.activeBeats.find((candidate) => candidate.id === location?.beatId);
+  const projectedShot = projectedBeat?.shots.find((candidate) => candidate.id === input.shotId);
+  const panel = location === undefined ? undefined : exact.boardPanels[location.filmIndex];
+  if (
+    location === undefined ||
+    beat?.id !== location.beatId ||
+    shot?.id !== input.shotId ||
+    projectedBeat?.id !== beat.id ||
+    projectedShot?.id !== shot.id ||
+    (location.shotIndex !== 0 && shot.chainBreak !== 'hard_cut') ||
+    !projectedShot.segmentHead ||
+    projectedShot.chainBreak !== shot.chainBreak ||
+    projectedShot.seedGenerationBlocked ||
+    panel?.shotId !== shot.id ||
+    panel.assetId !== input.boardAssetId ||
+    shot.boardAssetId !== input.boardAssetId ||
+    panel.freshness !== 'current' ||
+    !isBoardPanelDrawable(panel) ||
+    shot.seedStillId === input.boardAssetId ||
+    projectedShot.explicitSeedAssetId === input.boardAssetId
+  ) {
+    return null;
+  }
+
+  const segmentShotIds: string[] = [];
+  for (let shotIndex = location.shotIndex; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+    const segmentShotId = beat.shotOrder[shotIndex]!;
+    const segmentShot = Object.hasOwn(input.project.shots, segmentShotId)
+      ? input.project.shots[segmentShotId]
+      : undefined;
+    if (segmentShot?.id !== segmentShotId) return null;
+    if (shotIndex > location.shotIndex && segmentShot.chainBreak === 'hard_cut') break;
+    segmentShotIds.push(segmentShotId);
+  }
+  if (
+    segmentShotIds.length === 0 ||
+    projectedShot.downstreamShotIds.length !== segmentShotIds.length - 1 ||
+    projectedShot.downstreamShotIds.some((shotId, index) => shotId !== segmentShotIds[index + 1])
+  ) {
+    return null;
+  }
+
+  const projectedByShotId = new Map(projectedBeat.shots.map((candidate) => [candidate.id, candidate]));
+  const currentTakeShotIds: string[] = [];
+  for (const segmentShotId of segmentShotIds) {
+    const segmentShot = Object.hasOwn(input.project.shots, segmentShotId)
+      ? input.project.shots[segmentShotId]
+      : undefined;
+    const projected = projectedByShotId.get(segmentShotId);
+    if (
+      segmentShot?.id !== segmentShotId ||
+      projected?.id !== segmentShotId ||
+      projected.chainBreak !== segmentShot.chainBreak ||
+      projected.segmentState.kind === 'status_pending' ||
+      projected.videoGenerationBlocked ||
+      (segmentShot.videoAssetId === null) !== (projected.currentPicture === null) ||
+      (segmentShot.videoAssetId !== null && projected.currentPicture?.assetId !== segmentShot.videoAssetId)
+    ) {
+      return null;
+    }
+    if (projected.currentPicture !== null) currentTakeShotIds.push(segmentShotId);
+  }
+
+  return {
+    draft: {
+      projectId: input.project.id,
+      expectedRevision: input.project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      boardPromotion: { shotId: input.shotId, boardAssetId: input.boardAssetId },
+    },
+    impact: { currentTakeShotIds },
+  };
 };
 
 /** Builds the free review request for one exact prospective continuity change. */

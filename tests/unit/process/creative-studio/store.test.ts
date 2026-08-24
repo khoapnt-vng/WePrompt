@@ -564,6 +564,8 @@ describe('schema-2 creative studio project store', () => {
       trimOutSeconds: null,
       chainBreak: 'none',
       seedStillId: 'asset_seed',
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
       videoAssetId: 'asset_video',
       supersededVideoAssetIds: [],
       assetIds: ['asset_seed', 'asset_video', 'asset_thumbnail'],
@@ -773,7 +775,7 @@ describe('schema-2 creative studio project store', () => {
     expect(typeof store.removeConnection).toBe('function');
   });
 
-  it('returns exact load discriminants without parsing schema-1 or schema-2 payloads as schema 3', async () => {
+  it('returns exact load discriminants without parsing earlier payloads as schema 4', async () => {
     const prototypeId = 'prototype_minimal';
     mkdirSync(path.join(rootDir, prototypeId));
     writeFileSync(
@@ -786,6 +788,12 @@ describe('schema-2 creative studio project store', () => {
       path.join(rootDir, previousSchemaId, 'project.json'),
       JSON.stringify({ schemaVersion: 2, id: previousSchemaId, deliberatelyNotMigrated: true })
     );
+    const schema3Id = 'schema_3_project';
+    mkdirSync(path.join(rootDir, schema3Id));
+    const schema3 = createEmptyStudioProjectV2(inputV2, schema3Id, timestamp) as unknown as Record<string, unknown>;
+    schema3.schemaVersion = 3;
+    delete schema3.boardStyle;
+    writeFileSync(path.join(rootDir, schema3Id, 'project.json'), JSON.stringify(schema3));
     const malformedId = 'malformed_v2';
     mkdirSync(path.join(rootDir, malformedId));
     writeFileSync(
@@ -808,24 +816,31 @@ describe('schema-2 creative studio project store', () => {
       status: 'unsupported_prototype_schema',
       projectId: previousSchemaId,
     });
+    await expect(store.getProjectV2(schema3Id)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId: schema3Id,
+    });
     await expect(store.getProjectV2('missing_v2')).resolves.toEqual(missing);
     await expect(store.getProjectV2(malformedId)).rejects.toMatchObject({ code: 'storage_error' });
     expect(prototypeIndexAccesses).toEqual([]);
   });
 
-  it('refuses a schema-2 project without recovering or deleting its interrupted Brief sidecars', async () => {
-    const projectId = 'schema_2_brief_transaction';
+  it('leaves a valid schema-3 project and interrupted Brief sidecars byte-for-byte untouched', async () => {
+    const projectId = 'schema_3_brief_transaction';
     const directory = path.join(rootDir, projectId);
     mkdirSync(directory);
-    const projectBytes = JSON.stringify({ schemaVersion: 2, id: projectId, deliberatelyNotMigrated: true });
-    const briefBytes = 'Schema-2 Brief bytes stay untouched';
+    const schema3 = createEmptyStudioProjectV2(inputV2, projectId, timestamp) as unknown as Record<string, unknown>;
+    schema3.schemaVersion = 3;
+    delete schema3.boardStyle;
+    const projectBytes = JSON.stringify(schema3);
+    const briefBytes = 'Schema-3 Brief bytes stay untouched';
     const transactionBytes = JSON.stringify({
       schemaVersion: 1,
       projectId,
       baseManifestSha256: createHash('sha256').update(projectBytes).digest('hex'),
       baseBriefSha256: createHash('sha256').update(briefBytes).digest('hex'),
       candidateManifestSha256: 'c'.repeat(64),
-      candidateBrief: 'A schema-2 candidate must never be recovered',
+      candidateBrief: 'A schema-3 candidate must never be recovered',
     });
     writeFileSync(path.join(directory, 'project.json'), projectBytes);
     writeFileSync(path.join(directory, 'brief.md'), briefBytes);
@@ -1162,9 +1177,9 @@ describe('schema-2 creative studio project store', () => {
 
   it.each([
     ['leading garbage', 'garbage{"schemaVersion":1}'],
-    ['future-version value bait', '{"schemaVersion":3,"bait":"schemaVersion":1}'],
+    ['future-version value bait', '{"schemaVersion":5,"bait":"schemaVersion":1}'],
     ['missing root comma', '{"schemaVersion":1 "future":3}'],
-    ['valid future version with quoted bait', '{"schemaVersion":3,"bait":"schemaVersion:1"}'],
+    ['valid future version with quoted bait', '{"schemaVersion":5,"bait":"schemaVersion:1"}'],
     ['crossed nested delimiters', '{"payload":[{]},"schemaVersion":1}'],
     ['invalid nested literal', '{"payload":{"x":garbage},"schemaVersion":1}'],
     ['missing nested comma', '{"payload":[1 2],"schemaVersion":1}'],

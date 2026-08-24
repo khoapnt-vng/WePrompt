@@ -58,6 +58,8 @@ const makeShot = (shotId: string): StudioShot => ({
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
   supersededVideoAssetIds: [],
   assetIds: [],
@@ -69,7 +71,7 @@ const makeAsset = (
   shotId: string,
   assetId: string,
   mediaKind: 'image' | 'video',
-  collection: 'assets' | 'imports',
+  collection: StudioAssetV2['managedAsset']['collection'],
   createdAt = NOW
 ): StudioAssetV2 => ({
   id: assetId,
@@ -372,6 +374,18 @@ describe('deriveStudioDirtyShotsV2', () => {
   it('uses an eligible unpinned seed when comparing a current head request', () => {
     const project = makeTwoShotProject();
     project.shots.shot_1!.seedStillId = null;
+
+    expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
+  });
+
+  it('never treats a newer Board panel as an implicit first frame', () => {
+    const project = makeTwoShotProject();
+    const shot = project.shots.shot_1!;
+    shot.seedStillId = null;
+    const board = makeAsset(project, shot.id, 'shot_1_board', 'image', 'boardStills', '2026-08-18T00:00:01.000Z');
+    project.assets[board.id] = board;
+    shot.boardAssetId = board.id;
+    shot.assetIds.push(board.id);
 
     expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
   });

@@ -6,6 +6,7 @@
 
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
+  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   type StudioJobV2,
   type StudioProviderRef,
   type StudioQuotedGeneration,
@@ -17,6 +18,7 @@ import {
   calculateStudioQuoteTotals,
   calculateStudioQuotedGenerationAmounts,
   createStudioQuotedGenerationId,
+  STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from '../generation';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
@@ -97,6 +99,52 @@ const combinedItems = (quote: StudioSubmissionQuote): StudioQuotedGeneration[] =
   ...quote.cascadeItems,
 ];
 
+type StudioBoardAuthorizationScopeV2 = Pick<
+  StudioSubmissionQuote,
+  'originReferenceHandoffId' | 'baseItems' | 'cascadeItems'
+>;
+
+/** Keeps Board spend authority independent from continuity and first-frame generation. */
+export const studioBoardAuthorizationScopeIsValidV2 = (quote: StudioBoardAuthorizationScopeV2): boolean => {
+  const items = [...quote.baseItems, ...quote.cascadeItems];
+  const boardItemCount = items.filter((item) => item.purpose === 'board_still').length;
+  return (
+    boardItemCount === 0 ||
+    (boardItemCount === items.length &&
+      boardItemCount <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST &&
+      quote.originReferenceHandoffId === null &&
+      quote.cascadeItems.length === 0 &&
+      items.every(
+        (item) =>
+          item.requestPlan.kind === 'resolved' &&
+          item.requestPlan.snapshot.durationSeconds === STUDIO_BOARD_REQUEST_DURATION_SECONDS &&
+          item.requestPlan.snapshot.referenceInput === null &&
+          item.requestPlan.snapshot.conditioningInput === null
+      ))
+  );
+};
+
+const quotedItemRequestAuthorityIsValid = (item: StudioQuotedGeneration): boolean => {
+  const purpose = item.purpose;
+  switch (purpose) {
+    case 'seed_still':
+    case 'video_take':
+      return true;
+    case 'board_still':
+      return (
+        item.requestPlan.kind === 'resolved' &&
+        item.requestPlan.snapshot.durationSeconds === STUDIO_BOARD_REQUEST_DURATION_SECONDS &&
+        item.requestPlan.snapshot.referenceInput === null &&
+        item.requestPlan.snapshot.conditioningInput === null
+      );
+    default: {
+      const exhaustivePurpose: never = purpose;
+      void exhaustivePurpose;
+      return false;
+    }
+  }
+};
+
 const validateQuote = (quote: StudioSubmissionQuote): StudioQuotedGeneration[] => {
   if (
     !SAFE_ID.test(quote.id) ||
@@ -114,7 +162,9 @@ const validateQuote = (quote: StudioSubmissionQuote): StudioQuotedGeneration[] =
     return fail('invalid_authorization');
   }
   const items = combinedItems(quote);
-  if (items.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) fail('invalid_authorization');
+  if (items.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST || !studioBoardAuthorizationScopeIsValidV2(quote)) {
+    fail('invalid_authorization');
+  }
   const itemIds = new Set<string>();
   const pairs = new Set<string>();
   for (const item of items) {
@@ -129,6 +179,7 @@ const validateQuote = (quote: StudioSubmissionQuote): StudioQuotedGeneration[] =
         }) ||
       itemIds.has(item.id) ||
       pairs.has(`${item.shotId}\0${item.purpose}`) ||
+      !quotedItemRequestAuthorityIsValid(item) ||
       calculateStudioQuotedGenerationAmounts(item) === null
     ) {
       return fail('invalid_authorization');
@@ -213,6 +264,24 @@ const findAuthorizationItem = (authorization: StudioSpendAuthorization, itemId: 
   return item;
 };
 
+const receiptDurationSeconds = (item: StudioQuotedGeneration): number | null => {
+  const purpose = item.purpose;
+  switch (purpose) {
+    case 'seed_still':
+    case 'board_still':
+      return null;
+    case 'video_take':
+      return item.requestPlan.kind === 'resolved'
+        ? item.requestPlan.snapshot.durationSeconds
+        : item.requestPlan.template.durationSeconds;
+    default: {
+      const exhaustivePurpose: never = purpose;
+      void exhaustivePurpose;
+      return fail('invalid_receipt');
+    }
+  }
+};
+
 /** Derives the immutable per-job receipt from frozen authorization values, never a current rate card. */
 export const createStudioSpendReceiptV2 = (input: {
   authorization: StudioSpendAuthorization;
@@ -223,12 +292,7 @@ export const createStudioSpendReceiptV2 = (input: {
   const item = findAuthorizationItem(input.authorization, input.itemId);
   const amounts = calculateStudioQuotedGenerationAmounts(item);
   if (amounts === null) return fail('invalid_receipt');
-  const durationSeconds =
-    item.purpose === 'seed_still'
-      ? null
-      : item.requestPlan.kind === 'resolved'
-        ? item.requestPlan.snapshot.durationSeconds
-        : item.requestPlan.template.durationSeconds;
+  const durationSeconds = receiptDurationSeconds(item);
   return {
     authorizationId: input.authorization.id,
     itemId: item.id,

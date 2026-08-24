@@ -905,6 +905,48 @@
       "importError": "Referans eklenemedi. Yeniden deneyin."
     },
     "workspace": {
+      "table": {
+        "columns": { "panel": "Panel" },
+        "board": {
+          "label": "Yönetmen panosu denetimleri",
+          "progress": "{{total}} panelden {{drawn}} tanesi çizildi",
+          "progressLabel": "Pano tamamlanma durumu",
+          "staleCount": "{{count}} eski",
+          "busyCount": "{{count}} işlemde",
+          "style": {
+            "label": "Pano stili",
+            "greyTone": "Gri ton",
+            "lineArt": "Çizgi sanatı",
+            "colourKey": "Renk anahtarı"
+          },
+          "stop": "Çizimi durdur",
+          "stopNote": "Durdurma, mümkün olduğunda iptal talebinde bulunur. Tamamlanan paneller ve oluşmuş ücretler korunur.",
+          "drawNext": "Sonraki grubu çiz ({{count}})",
+          "styleRequired": "Çizmeden önce bir pano stili seçin."
+        },
+        "panel": {
+          "openDetails": "{{title}} için pano panellerini aç",
+          "closeDetails": "{{title}} için pano panellerini kapat",
+          "detailLabel": "{{title}} için pano panelleri",
+          "drawMissing": "Eksikleri çiz ({{count}})",
+          "redrawBeat": "Beat'i yeniden çiz · ücretli",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "head": "Başlangıç",
+          "redrawShot": "Shot {{position}} öğesini yeniden çiz · ücretli",
+          "useAsFirstFrame": "Shot {{position}} panelini ilk kare olarak kullan",
+          "status": {
+            "missing": "Çizilmedi",
+            "current": "Güncel",
+            "stale": "Eski",
+            "statusPending": "Durum bekleniyor",
+            "queued": "Kuyrukta",
+            "drawing": "Çiziliyor",
+            "needsAttention": "İlgilenilmesi gerekiyor",
+            "failed": "Başarısız",
+            "cancelled": "İptal edildi"
+          }
+        }
+      },
       "library": {
         "subtitle": "Hikâyeleri Beat ve çekimler olarak planlayın, ardından her çekimin geçerli görüntüsünü inceleyin.",
         "pictureCount": "{{count}} görüntü hazır",
@@ -1075,9 +1117,33 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "Brief ve kurallar"
+        "briefAndRulesTitle": "Brief ve kurallar",
+        "undoLabel": { "promote_board_panel": "Paneli ilk kare olarak kullan" }
       },
       "gate": {
+        "purpose": { "board_still": "Pano paneli" },
+        "promotion": {
+          "title": "Paneli ilk kare olarak kullan",
+          "summary": "Shot {{shotId}} için geçerli pano panelini ilk kareye yükseltin. Bu işlem Shot'ın devamlılık sınırını değiştirmez.",
+          "impactNone": "Hiçbir geçerli çekim bu kareye bağlı değil.",
+          "impactIntro": "{{count}} geçerli çekim oynatılabilir kalacak ancak eski duruma gelecek:",
+          "impactItem": "Shot {{shotId}} geçerli çekimi",
+          "optionsLabel": "Geçerli çekimlerin nasıl ele alınacağını seçin",
+          "promoteOnly": "Yalnızca yükselt — oynatılabilir eski çekimleri koru",
+          "freePrice": "$0",
+          "promoteAndRerender": "Yükselt ve tam yeniden oluşturma işini incele",
+          "priceAfterReview": "Fiyat sonraki adımda gösterilir",
+          "promoteOnlyAction": "$0 karşılığında yükselt",
+          "reviewPaidAction": "Yeniden oluşturma fiyatını incele",
+          "paidUnavailable": "Bu segmentte tek bir ücretli onay için çok fazla geçerli çekim var. Yalnızca yükseltme seçeneği kullanılabilir.",
+          "headline": "Yükselt + {{count}} yeniden oluşturma · {{cost}}",
+          "requiredWork": "Listelenen yeniden oluşturmalar, bu yükseltmenin eskiteceği geçerli çekimlerin tam karşılığıdır. Eksik kapsam dahil değildir.",
+          "confirm": "Yükseltme + {{count}} yeniden oluşturmayı onayla · {{cost}}",
+          "promoted": "Panel yükseltildi. Mevcut çekimler oynatılabilir kalır ve eski olarak işaretlenir.",
+          "promoting": "Panel yükseltiliyor…",
+          "confirmed": "Panel yükseltildi ve onaylanan çekimler için yeniden oluşturma başlatıldı.",
+          "close": "Kapat"
+        },
         "headline_one": "{{count}} üretim · {{cost}}",
         "headline_other": "{{count}} üretim · {{cost}}",
         "confirm_one": "{{count}} üretimi onayla · {{cost}}",

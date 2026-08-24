@@ -906,6 +906,48 @@
       "importError": "No se pudo añadir la referencia. Inténtalo de nuevo."
     },
     "workspace": {
+      "table": {
+        "columns": { "panel": "Panel" },
+        "board": {
+          "label": "Controles del Board del Director",
+          "progress": "{{drawn}} de {{total}} paneles dibujados",
+          "progressLabel": "Progreso del Board",
+          "staleCount": "{{count}} obsoletos",
+          "busyCount": "{{count}} en curso",
+          "style": {
+            "label": "Estilo del Board",
+            "greyTone": "Tonos grises",
+            "lineArt": "Dibujo lineal",
+            "colourKey": "Clave de color"
+          },
+          "stop": "Detener el dibujo",
+          "stopNote": "Detener solicita la cancelación cuando es posible. Los paneles completados y los cargos ya incurridos se conservan.",
+          "drawNext": "Dibujar siguiente lote ({{count}})",
+          "styleRequired": "Elige un estilo del Board antes de dibujar."
+        },
+        "panel": {
+          "openDetails": "Abrir paneles del Board de {{title}}",
+          "closeDetails": "Cerrar paneles del Board de {{title}}",
+          "detailLabel": "Paneles del Board de {{title}}",
+          "drawMissing": "Dibujar faltantes ({{count}})",
+          "redrawBeat": "Redibujar Beat · de pago",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "head": "Inicio",
+          "redrawShot": "Redibujar Shot {{position}} · de pago",
+          "useAsFirstFrame": "Usar el panel de Shot {{position}} como primer fotograma",
+          "status": {
+            "missing": "Sin dibujar",
+            "current": "Actual",
+            "stale": "Obsoleto",
+            "statusPending": "Estado pendiente",
+            "queued": "En cola",
+            "drawing": "Dibujando",
+            "needsAttention": "Requiere atención",
+            "failed": "Fallido",
+            "cancelled": "Cancelado"
+          }
+        }
+      },
       "library": {
         "subtitle": "Planifica historias como Beats y planos, y revisa después la imagen actual de cada plano.",
         "pictureCount": "{{count}} imágenes listas",
@@ -1076,9 +1118,33 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "Brief y reglas"
+        "briefAndRulesTitle": "Brief y reglas",
+        "undoLabel": { "promote_board_panel": "Usar panel como primer fotograma" }
       },
       "gate": {
+        "purpose": { "board_still": "Panel del Board" },
+        "promotion": {
+          "title": "Usar panel como primer fotograma",
+          "summary": "Promueve el panel actual del Board de Shot {{shotId}} a primer fotograma. Esto no cambia el límite de continuidad del Shot.",
+          "impactNone": "Ninguna toma actual depende de este fotograma.",
+          "impactIntro": "Tomas actuales que seguirán reproduciéndose pero quedarán obsoletas: {{count}}",
+          "impactItem": "Toma actual de Shot {{shotId}}",
+          "optionsLabel": "Elige cómo tratar las tomas actuales",
+          "promoteOnly": "Solo promover — conservar las tomas obsoletas reproducibles",
+          "freePrice": "$0",
+          "promoteAndRerender": "Promover y revisar el trabajo exacto de regeneración",
+          "priceAfterReview": "El precio se muestra a continuación",
+          "promoteOnlyAction": "Promover por $0",
+          "reviewPaidAction": "Revisar el precio de regeneración",
+          "paidUnavailable": "Este segmento tiene demasiadas tomas actuales para una sola confirmación de pago. La opción de solo promover sigue disponible.",
+          "headline": "Promover + regenerar tomas ({{count}}) · {{cost}}",
+          "requiredWork": "Las regeneraciones indicadas son exactamente las tomas actuales que esta promoción deja obsoletas. No se incluye la cobertura que falta.",
+          "confirm": "Confirmar promoción + regenerar tomas ({{count}}) · {{cost}}",
+          "promoted": "Panel promovido. Las tomas existentes siguen reproduciéndose y se marcan como obsoletas.",
+          "promoting": "Promoviendo panel…",
+          "confirmed": "Panel promovido y regeneración iniciada para las tomas confirmadas.",
+          "close": "Cerrar"
+        },
         "headline_one": "{{count}} generación · {{cost}}",
         "headline_other": "{{count}} generaciones · {{cost}}",
         "confirm_one": "Confirmar {{count}} generación · {{cost}}",

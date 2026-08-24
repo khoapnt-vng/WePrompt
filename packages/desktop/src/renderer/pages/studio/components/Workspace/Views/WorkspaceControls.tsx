@@ -26,6 +26,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   errorMessageKey,
   exportErrorMessageKey,
   mutations,
+  tableBoardActions,
   boardActions,
   cutActions,
   beatPanelActions,
@@ -116,9 +117,16 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
     <div className={styles.root} data-studio-workspace-controls data-active-view={activeView}>
       {activeView === 'table' ? (
         <TableView
+          actions={tableBoardActions}
           beats={projection.activeBeats}
+          boardStyle={project.boardStyle}
+          boardPanels={projection.boardPanels}
+          gateLocked={gateLocked}
+          onOpenBeat={selectAndOpenBeat}
+          onSelectBeat={drafts.selectBeat}
+          pending={pending}
+          projectId={project.id}
           selectedBeatId={drafts.selection.selectedBeatId}
-          onSelectBeat={selectAndOpenBeat}
         />
       ) : null}
       {activeView === 'board' ? (

@@ -40,6 +40,7 @@ const providerNames = [
   'confirmSubmission',
   'cancelJob',
   'retryJob',
+  'retryDownload',
   'dismissReferenceGenerationHandoff',
   'applyAuthoringBatch',
   'undoLast',
@@ -94,6 +95,7 @@ const mocks = vi.hoisted(() => ({
       'confirmSubmission',
       'cancelJob',
       'retryJob',
+      'retryDownload',
       'dismissReferenceGenerationHandoff',
       'applyAuthoringBatch',
       'undoLast',
@@ -159,6 +161,7 @@ const workspaceStatus: StudioRendererWorkspaceStatusV2 = {
   projectRevision: 8,
   undoTop: null,
   dirtyShots: [],
+  boardPanels: [],
   cascadeProgress: [],
   currentVideoJobs: [],
   parkEligibility: [],
@@ -254,6 +257,7 @@ const createService = () =>
     confirmSubmission: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8 })),
     cancelJob: vi.fn(),
     retryJob: vi.fn(),
+    retryDownload: vi.fn(),
     dismissReferenceGenerationHandoff: vi.fn(async () => ({
       status: 'dismissed' as const,
       completedAt: '2026-08-19T02:03:04.000Z',
@@ -654,6 +658,18 @@ describe('initCreativeStudioBridge', () => {
     vi.mocked(service.retryJob).mockRejectedValueOnce(
       new StudioJobManagerError('duplicate_charge_acknowledgement_required')
     );
+    const downloadJob = {
+      ...job,
+      status: 'failed' as const,
+      purpose: 'board_still' as const,
+      error: {
+        code: 'download_failed' as const,
+        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+      },
+      canCancel: false,
+      canRetryDownload: true,
+    };
+    vi.mocked(service.retryDownload).mockResolvedValueOnce(downloadJob);
     initCreativeStudioBridge(dependencies);
 
     const request = { projectId: 'project_1', jobId: 'job_1', expectedRevision: 7 };
@@ -667,11 +683,16 @@ describe('initCreativeStudioBridge', () => {
         messageKey: 'conversation.creativeStudio.errors.duplicateChargeAcknowledgementRequired',
       },
     });
+    await expect(registeredHandler('retryDownload')(request as never)).resolves.toEqual({
+      ok: true,
+      data: downloadJob,
+    });
     expect(service.cancelJob).toHaveBeenCalledExactlyOnceWith(request);
     expect(service.retryJob).toHaveBeenCalledExactlyOnceWith({
       ...request,
       acknowledgePossibleDuplicateCharge: false,
     });
+    expect(service.retryDownload).toHaveBeenCalledExactlyOnceWith(request);
 
     vi.mocked(service.retryJob).mockRejectedValueOnce(new StudioJobManagerError('invalid_request'));
     await expect(

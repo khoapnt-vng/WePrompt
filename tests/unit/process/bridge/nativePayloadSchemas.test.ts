@@ -276,6 +276,11 @@ const VALID_PAYLOADS = {
     expectedRevision: 1,
     acknowledgePossibleDuplicateCharge: false,
   },
+  'creative-studio.retry-job-download': {
+    projectId: 'project_1',
+    jobId: 'job_1',
+    expectedRevision: 1,
+  },
   'creative-studio.dismiss-reference-generation-handoff': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -1347,6 +1352,7 @@ describe('native bridge payload schemas', () => {
     { kind: 'reorder_shots', beatId: 'beat_1', shotOrder: ['shot_1'] },
     { kind: 'set_hard_cut', shotId: 'shot_1', hardCut: true },
     { kind: 'set_seed_still', shotId: 'shot_1', assetId: null },
+    { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_1' },
     { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: null, trimOutSeconds: null },
     { kind: 'redetach_line', shotId: 'shot_1', line: 'Detached' },
     { kind: 'restore_line', shotId: 'shot_1', historyEntryId: 'history_1' },
@@ -1548,6 +1554,31 @@ describe('native bridge payload schemas', () => {
     }
   });
 
+  it('accepts only the exact Board-promotion review envelope with empty caller-authored choices', () => {
+    const promotion = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      boardPromotion: { shotId: 'shot_1', boardAssetId: 'board_1' },
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.prepare-submission', promotion)).toEqual(promotion);
+    for (const hostile of [
+      { ...promotion, baseChoices: [VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0]!] },
+      { ...promotion, cascadeChoices: [VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0]!] },
+      { ...promotion, originReferenceHandoffId: 'handoff_1' },
+      { ...promotion, boardPromotion: { ...promotion.boardPromotion, boardAssetId: '../board_1' } },
+      { ...promotion, boardPromotion: { ...promotion.boardPromotion, provider: 'private' } },
+      { ...promotion, continuityChange: { shotId: 'shot_1', hardCut: true, requiresSeedGeneration: false } },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.prepare-submission', hostile)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
   it('accepts only bounded dense prepare choices with exact renderer-owned keys', () => {
     const makeChoice = (index: number, purpose: 'seed_still' | 'video_take') => ({
       shotId: `shot_${index}`,
@@ -1587,6 +1618,55 @@ describe('native bridge payload schemas', () => {
     ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
+  it('admits only an isolated bounded Board batch with no renderer reference authority', () => {
+    const boardChoice = (index: number) => ({
+      shotId: `shot_${index}`,
+      purpose: 'board_still',
+      referenceAssetId: null,
+    });
+    const boardBatch = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST }, (_, index) => boardChoice(index)),
+      cascadeChoices: [],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.prepare-submission', boardBatch)).toEqual(boardBatch);
+    for (const hostile of [
+      { ...boardBatch, baseChoices: [...boardBatch.baseChoices, boardChoice(boardBatch.baseChoices.length)] },
+      {
+        ...boardBatch,
+        baseChoices: [boardChoice(0), { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
+      },
+      { ...boardBatch, baseChoices: [boardChoice(0)], cascadeChoices: [boardChoice(1)] },
+      { ...boardBatch, originReferenceHandoffId: 'handoff_1' },
+      { ...boardBatch, baseChoices: [{ ...boardChoice(0), referenceAssetId: 'reference_1' }] },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.prepare-submission', hostile)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
+  it('accepts only the persisted Board style catalog through project edits', () => {
+    for (const boardStyle of ['grey_tone', 'line_art', 'colour_key', null] as const) {
+      const payload = {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        changes: { boardStyle },
+      };
+      expect(parseNativeBridgePayload('creative-studio.edit-project', payload)).toEqual(payload);
+    }
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.edit-project', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        changes: { boardStyle: 'photoreal' },
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
   it('rejects legacy prepare counts, duplicates, and nested authority', () => {
     const valid = VALID_PAYLOADS['creative-studio.prepare-submission'];
     const choice = valid.baseChoices[0];
@@ -1618,6 +1698,7 @@ describe('native bridge payload schemas', () => {
 
   it.each([
     ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
+    ['creative-studio.retry-job-download', VALID_PAYLOADS['creative-studio.retry-job-download']],
     [
       'creative-studio.dismiss-reference-generation-handoff',
       VALID_PAYLOADS['creative-studio.dismiss-reference-generation-handoff'],
@@ -1634,6 +1715,7 @@ describe('native bridge payload schemas', () => {
   it.each([
     ['creative-studio.prepare-submission', VALID_PAYLOADS['creative-studio.prepare-submission']],
     ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
+    ['creative-studio.retry-job-download', VALID_PAYLOADS['creative-studio.retry-job-download']],
     [
       'creative-studio.dismiss-reference-generation-handoff',
       VALID_PAYLOADS['creative-studio.dismiss-reference-generation-handoff'],
@@ -1718,6 +1800,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.confirm-submission',
       'creative-studio.cancel-job',
       'creative-studio.retry-job',
+      'creative-studio.retry-job-download',
       'creative-studio.dismiss-reference-generation-handoff',
     ] as const;
     const absent = [
@@ -1754,6 +1837,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.confirm-submission',
       'creative-studio.cancel-job',
       'creative-studio.retry-job',
+      'creative-studio.retry-job-download',
       'creative-studio.dismiss-reference-generation-handoff',
       'creative-studio.import-bed-audio',
       'creative-studio.detach-bed-audio',
@@ -1774,9 +1858,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);

@@ -60,7 +60,7 @@ const makeArtifact = (
   createdAt = CREATED_AT,
   manifest = manifestFor({ relativePath: 'timeline.json', byteSize: 4, sha256: 'a'.repeat(64) })
 ): StudioExportArtifactV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   id,
   projectId: CONTEXT.projectId,
   sourceRevision: CONTEXT.currentProjectRevision,
@@ -133,7 +133,7 @@ const makeCreatePlan = (
 describe('schema-2 export catalog', () => {
   it('treats absence as logical revision one and projects only renderer-safe fields', () => {
     const logical = parseStudioExportCatalogV2(null, CONTEXT);
-    expect(logical).toEqual({ schemaVersion: 3, projectId: 'project_1', revision: 1, artifacts: [] });
+    expect(logical).toEqual({ schemaVersion: 4, projectId: 'project_1', revision: 1, artifacts: [] });
     expect(createLogicalStudioExportCatalogV2('project_1')).toEqual(logical);
 
     const artifact = makeArtifact('artifact_1');
@@ -158,7 +158,7 @@ describe('schema-2 export catalog', () => {
 
   it('round-trips only canonical exact-key catalog bytes and refuses raw authority mismatches', () => {
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts: [makeArtifact('artifact_1')],
@@ -198,7 +198,7 @@ describe('schema-2 export catalog', () => {
   it('rejects every non-data catalog shape and every malformed artifact authority field', () => {
     const artifact = makeArtifact('artifact_1');
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts: [artifact],
@@ -354,7 +354,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact(`artifact_${index}`, 'script', `2026-08-20T00:00:0${index}.000Z`)
     );
     const overRetained: StudioExportCatalogV2 = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: CONTEXT.projectId,
       revision: 7,
       artifacts: sixScripts,
@@ -368,7 +368,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact('artifact_b', 'still', '2026-08-20T00:00:01.000Z', manifestB),
     ];
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts,
@@ -463,7 +463,7 @@ describe('schema-2 export catalog', () => {
   it('increments once, enforces exact catalog CAS, and evicts the oldest fifth artifact by time and ID', () => {
     const artifacts = ['a', 'b', 'c', 'd', 'e'].map((id) => makeArtifact(`artifact_${id}`));
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: CONTEXT.projectId,
       revision: 6,
       artifacts,
@@ -513,7 +513,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact('artifact_b', 'still', '2026-08-20T00:00:01.000Z', manifestB),
     ];
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts,
@@ -705,7 +705,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
     const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
 
     await expect(store.list(authority)).resolves.toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: 'project_1',
       revision: 1,
       artifacts: [],
@@ -2764,7 +2764,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
 
     const restarted = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
     await expect(restarted.repair(authority)).resolves.toEqual({
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: 'project_1',
       revision: 1,
       artifacts: [],

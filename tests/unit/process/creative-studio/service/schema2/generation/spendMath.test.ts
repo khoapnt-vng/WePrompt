@@ -50,6 +50,29 @@ describe('calculateStudioQuotedGenerationAmounts', () => {
     ).toEqual({ oneGenerationMinorUnits: 125, requestedTotalMinorUnits: 125 });
   });
 
+  it('prices one Board panel as an image generation rather than video time', () => {
+    expect(
+      calculateStudioQuotedGenerationAmounts(
+        makeItem({
+          purpose: 'board_still',
+          requestPlan: {
+            kind: 'resolved',
+            snapshot: {
+              prompt: 'A Board panel',
+              aspectRatio: '16:9',
+              resolution: '1080p',
+              durationSeconds: 4,
+              referenceInput: null,
+              conditioningInput: null,
+            },
+          },
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        })
+      )
+    ).toEqual({ oneGenerationMinorUnits: 3, requestedTotalMinorUnits: 3 });
+  });
+
   it('prices one video generation from the frozen request duration', () => {
     expect(calculateStudioQuotedGenerationAmounts(makeItem())).toEqual({
       oneGenerationMinorUnits: 200,
@@ -59,6 +82,7 @@ describe('calculateStudioQuotedGenerationAmounts', () => {
 
   it.each([
     makeItem({ purpose: 'seed_still', rateUnit: 'second' }),
+    makeItem({ purpose: 'board_still', rateUnit: 'second' }),
     makeItem({ purpose: 'video_take', rateUnit: 'generation' }),
     makeItem({ generationCount: 0 }),
     makeItem({ generationCount: 2 }),

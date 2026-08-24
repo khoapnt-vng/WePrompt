@@ -179,7 +179,7 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
   });
   const dependentJob = job('job_dependent', dependent.shotId, dependent.id, dependentPlan);
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 7,
     id: 'project_1',
     name: 'Project',
@@ -189,6 +189,7 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
     aspectRatio: '16:9',
     targetDurationSeconds: 10,
     resolution: '1080p',
+    boardStyle: null,
     beatOrder: ['beat_1'],
     beats: {
       beat_1: {
@@ -215,6 +216,8 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
         trimOutSeconds: dependency === 'predecessor' ? 2 : null,
         chainBreak: 'none',
         seedStillId: null,
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
         videoAssetId: null,
         supersededVideoAssetIds: [],
         assetIds: [],
@@ -232,6 +235,8 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
         trimOutSeconds: null,
         chainBreak: 'none',
         seedStillId: null,
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
         videoAssetId: null,
         supersededVideoAssetIds: [],
         assetIds: [],

@@ -17,6 +17,7 @@ export const STUDIO_MANAGED_ASSET_COLLECTIONS_V2: ReadonlySet<StudioManagedAsset
   'imports',
   'thumbnails',
   'conditioningFrames',
+  'boardStills',
 ]);
 
 export const STUDIO_MAX_ACTIVE_BRIEF_REFERENCES = 6;

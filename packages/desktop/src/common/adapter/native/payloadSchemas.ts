@@ -17,6 +17,7 @@ import {
 import { PRESENTATION_RUN_LIMITS } from '../../types/office/presentationRunPolicy';
 import { hasRuleToken, STUDIO_RULE_LIMITS } from '../../types/project/creativeStudioRules';
 import {
+  STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
@@ -330,6 +331,7 @@ const studioV2EditableProjectChangesSchema = z
     aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']).optional(),
     resolution: z.enum(['720p', '1080p']).optional(),
     targetDurationSeconds: z.number().finite().int().min(5).max(1440).optional(),
+    boardStyle: z.enum(STUDIO_BOARD_STYLES_V2).nullable().optional(),
   })
   .strict()
   .refine((changes) => Object.keys(changes).length > 0);
@@ -444,6 +446,7 @@ const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
     .strict(),
   z.object({ kind: z.literal('set_hard_cut'), shotId: safeIdSchema, hardCut: z.boolean() }).strict(),
   z.object({ kind: z.literal('set_seed_still'), shotId: safeIdSchema, assetId: safeIdSchema.nullable() }).strict(),
+  z.object({ kind: z.literal('promote_board_panel'), shotId: safeIdSchema, boardAssetId: safeIdSchema }).strict(),
   z
     .object({
       kind: z.literal('trim_shot'),
@@ -505,6 +508,13 @@ const studioV2PrepareGenerationChoiceSchema = z.discriminatedUnion('purpose', [
   z
     .object({
       ...studioV2PrepareGenerationChoiceShape,
+      purpose: z.literal('board_still'),
+      referenceAssetId: z.null(),
+    })
+    .strict(),
+  z
+    .object({
+      ...studioV2PrepareGenerationChoiceShape,
       purpose: z.literal('video_take'),
       referenceAssetId: z.null(),
     })
@@ -533,8 +543,26 @@ const studioV2ContinuityPrepareSubmissionSchema = z
       .strict(),
   })
   .strict();
+const studioV2BoardPromotionPrepareSubmissionSchema = z
+  .object({
+    ...studioV2MutationRequestShape,
+    originReferenceHandoffId: z.null(),
+    baseChoices: z.array(studioV2PrepareGenerationChoiceSchema).length(0),
+    cascadeChoices: z.array(studioV2PrepareGenerationChoiceSchema).length(0),
+    boardPromotion: z
+      .object({
+        shotId: safeIdSchema,
+        boardAssetId: safeIdSchema,
+      })
+      .strict(),
+  })
+  .strict();
 const studioV2PrepareSubmissionSchema = z
-  .union([studioV2OrdinaryPrepareSubmissionSchema, studioV2ContinuityPrepareSubmissionSchema])
+  .union([
+    studioV2OrdinaryPrepareSubmissionSchema,
+    studioV2ContinuityPrepareSubmissionSchema,
+    studioV2BoardPromotionPrepareSubmissionSchema,
+  ])
   .superRefine((request, context) => {
     const choices = [...request.baseChoices, ...request.cascadeChoices];
     if (choices.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) {
@@ -545,6 +573,15 @@ const studioV2PrepareSubmissionSchema = z
     }
     if (new Set(choices.map((choice) => `${choice.shotId}:${choice.purpose}`)).size !== choices.length) {
       context.addIssue({ code: 'custom', message: 'duplicate generation choice' });
+    }
+    const boardChoiceCount = choices.filter((choice) => choice.purpose === 'board_still').length;
+    if (
+      boardChoiceCount > 0 &&
+      (boardChoiceCount !== choices.length ||
+        request.originReferenceHandoffId !== null ||
+        request.cascadeChoices.length > 0)
+    ) {
+      context.addIssue({ code: 'custom', message: 'Board generation must be an isolated base batch' });
     }
   });
 
@@ -839,6 +876,7 @@ export const nativeBridgePayloadSchemas = {
       acknowledgePossibleDuplicateCharge: z.boolean().optional(),
     })
     .strict(),
+  'creative-studio.retry-job-download': z.object({ ...studioV2MutationRequestShape, jobId: safeIdSchema }).strict(),
   'creative-studio.dismiss-reference-generation-handoff': z
     .object({ ...studioV2MutationRequestShape, handoffId: safeIdSchema })
     .strict(),

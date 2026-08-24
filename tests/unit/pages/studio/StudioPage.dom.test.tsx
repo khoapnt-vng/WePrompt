@@ -10,8 +10,10 @@ import type {
   StudioReferenceRequestV2,
   StudioRendererExportCatalogV2,
   StudioRendererChainStatusV2,
+  StudioRendererJobV2,
   StudioRendererProjectV2,
   StudioRendererReferenceGenerationHandoffV2,
+  StudioRendererSubmissionQuoteV2,
   StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import type {
@@ -20,6 +22,7 @@ import type {
   BeatPanelImportResult,
   BoardActions,
   CutActions,
+  TableBoardActions,
   WorkspaceMutationCallbacks,
 } from '@/renderer/pages/studio/components/Workspace';
 
@@ -48,6 +51,7 @@ const mocks = vi.hoisted(() => {
     closeHandlers,
     beatPanelActions: null as BeatPanelActions | null,
     boardActions: null as BoardActions | null,
+    tableBoardActions: null as TableBoardActions | null,
     cutActions: null as CutActions | null,
     workspaceMutations: null as WorkspaceMutationCallbacks | null,
     beatPanelBriefReferenceOptions: null as readonly BeatPanelBriefReferenceOption[] | null,
@@ -78,6 +82,7 @@ const mocks = vi.hoisted(() => {
       confirmSubmission: { invoke: vi.fn() },
       cancelJob: { invoke: vi.fn() },
       retryJob: { invoke: vi.fn() },
+      retryDownload: { invoke: vi.fn() },
       dismissReferenceGenerationHandoff: { invoke: vi.fn() },
       applyAuthoringBatch: { invoke: vi.fn() },
       undoLast: { invoke: vi.fn() },
@@ -119,6 +124,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
     WorkspaceControls: (props: React.ComponentProps<typeof actual.WorkspaceControls>) => {
       mocks.beatPanelActions = props.beatPanelActions;
       mocks.boardActions = props.boardActions;
+      mocks.tableBoardActions = props.tableBoardActions;
       mocks.cutActions = props.cutActions;
       mocks.workspaceMutations = props.mutations;
       mocks.beatPanelBriefReferenceOptions = props.beatPanelBriefReferenceOptions;
@@ -181,7 +187,7 @@ const deferred = <T,>() => {
 };
 
 const project = (): StudioRendererProjectV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 3,
   id: 'project_1',
   name: 'Launch film',
@@ -191,6 +197,7 @@ const project = (): StudioRendererProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '720p',
+  boardStyle: null,
   beatOrder: [],
   beats: {},
   shots: {},
@@ -230,6 +237,8 @@ const projectWithHandoffShot = (): StudioRendererProjectV2 => {
     trimOutSeconds: null,
     chainBreak: 'hard_cut',
     seedStillId: null,
+    boardAssetId: null,
+    supersededBoardAssetIds: [],
     videoAssetId: null,
     supersededVideoAssetIds: [],
     assetIds: [],
@@ -266,12 +275,229 @@ const projectWithDraftBatch = (beatCount: number): StudioRendererProjectV2 => {
       trimOutSeconds: null,
       chainBreak: index === 0 ? 'hard_cut' : 'none',
       seedStillId: null,
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
       videoAssetId: null,
       supersededVideoAssetIds: [],
       assetIds: [],
       jobIds: [],
     };
   }
+  return value;
+};
+
+const projectWithBoardJobs = (shotCount: number, includeJobs = true): StudioRendererProjectV2 => {
+  const value = project();
+  value.boardStyle = 'grey_tone';
+  value.imageRouteId = 'route_image';
+  value.targetDurationSeconds = shotCount * 4;
+  for (let offset = 0; offset < shotCount; offset += 8) {
+    const beatId = `board_beat_${offset / 8 + 1}`;
+    const shotIds = Array.from({ length: Math.min(8, shotCount - offset) }, (_, index) => {
+      const shotNumber = offset + index + 1;
+      const shotId = `board_shot_${String(shotNumber).padStart(2, '0')}`;
+      const jobId = `board_job_${String(shotNumber).padStart(2, '0')}`;
+      value.shots[shotId] = {
+        id: shotId,
+        line: `Board Shot ${shotNumber}`,
+        derivation: 'derived',
+        derivedFromActionRevision: 1,
+        narration: '',
+        onScreenText: '',
+        durationSeconds: 4,
+        trimInSeconds: null,
+        trimOutSeconds: null,
+        chainBreak: 'hard_cut',
+        seedStillId: null,
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
+        assetIds: [],
+        jobIds: includeJobs ? [jobId] : [],
+      };
+      if (includeJobs) {
+        value.jobs[jobId] = {
+          id: jobId,
+          projectId: value.id,
+          shotId,
+          status: 'queued_local',
+          provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+          outputAssetIds: [],
+          outputAssetIdsByRole: { primary: null, poster: null },
+          error: null,
+          canCancel: true,
+          canRetry: false,
+          canRetryDownload: false,
+          retryOfJobId: null,
+          retryReason: null,
+          duplicateChargeAcknowledged: false,
+          duplicateChargeAcknowledgedAt: null,
+          purpose: 'board_still',
+          spendReceipt: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+      }
+      return shotId;
+    });
+    value.beatOrder.push(beatId);
+    value.beats[beatId] = {
+      id: beatId,
+      title: `Board Beat ${offset / 8 + 1}`,
+      action: `Board action ${offset / 8 + 1}`,
+      look: 'Storyboard look',
+      actionRevision: 1,
+      targetSeconds: shotIds.length * 4,
+      shotOrder: shotIds,
+      lineHistory: [],
+    };
+  }
+  return value;
+};
+
+const withCancelledBoardJobs = (source: StudioRendererProjectV2, cancelledCount: number): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  value.revision = source.revision + cancelledCount;
+  for (let shotNumber = 1; shotNumber <= cancelledCount; shotNumber += 1) {
+    const jobId = `board_job_${String(shotNumber).padStart(2, '0')}`;
+    const job = value.jobs[jobId];
+    if (job === undefined) continue;
+    job.status = 'cancelled';
+    job.canCancel = false;
+    job.updatedAt = `2026-01-01T00:00:${String(shotNumber).padStart(2, '0')}.000Z`;
+  }
+  return value;
+};
+
+const withCurrentBoardPanels = (
+  source: StudioRendererProjectV2,
+  shotNumbers: readonly number[]
+): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  for (const shotNumber of shotNumbers) {
+    const suffix = String(shotNumber).padStart(2, '0');
+    const shotId = `board_shot_${suffix}`;
+    const assetId = `board_asset_${suffix}`;
+    const jobId = `board_current_job_${suffix}`;
+    const shot = value.shots[shotId];
+    if (shot === undefined) continue;
+    value.assets[assetId] = {
+      id: assetId,
+      projectId: value.id,
+      shotId,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'boardStills', fileName: `${assetId}.png` },
+      byteSize: 16,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    shot.boardAssetId = assetId;
+    shot.assetIds.push(assetId);
+    shot.jobIds.push(jobId);
+    value.jobs[jobId] = {
+      id: jobId,
+      projectId: value.id,
+      shotId,
+      status: 'succeeded',
+      provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+      outputAssetIds: [assetId],
+      outputAssetIdsByRole: { primary: assetId, poster: null },
+      error: null,
+      canCancel: false,
+      canRetry: false,
+      canRetryDownload: false,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      purpose: 'board_still',
+      spendReceipt: {
+        purpose: 'board_still',
+        routeId: 'route_image',
+        currency: 'USD',
+        rateUnit: 'generation',
+        rateMinorUnits: 3,
+        durationSeconds: null,
+        generationCount: 1,
+        totalMinorUnits: 3,
+      },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+  }
+  return value;
+};
+
+const withCurrentVideoTakes = (
+  source: StudioRendererProjectV2,
+  shotNumbers: readonly number[]
+): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  for (const shotNumber of shotNumbers) {
+    const suffix = String(shotNumber).padStart(2, '0');
+    const shotId = `board_shot_${suffix}`;
+    const assetId = `video_asset_${suffix}`;
+    const shot = value.shots[shotId];
+    if (shot === undefined) continue;
+    value.assets[assetId] = {
+      id: assetId,
+      projectId: value.id,
+      shotId,
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
+      byteSize: 16,
+      sha256: 'c'.repeat(64),
+      durationSeconds: 4,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    };
+    shot.videoAssetId = assetId;
+    shot.assetIds.push(assetId);
+  }
+  return value;
+};
+
+const boardPromotionQuote = (
+  authority: StudioRendererProjectV2,
+  shotIds: readonly string[]
+): StudioRendererSubmissionQuoteV2 => ({
+  id: 'quote_board_promotion',
+  projectId: authority.id,
+  projectRevision: authority.revision,
+  expiresAt: '2026-01-01T01:00:00.000Z',
+  currency: 'USD',
+  baseItems: shotIds.map((shotId) => ({
+    shotId,
+    purpose: 'video_take',
+    route: { choiceId: 'route_video', providerId: 'provider_safe', model: 'model_safe' },
+    generationCount: 1,
+    durationSeconds: 4,
+    oneGenerationMinorUnits: 400,
+    requestedTotalMinorUnits: 400,
+  })),
+  cascadeItems: [],
+  lowerMinorUnits: shotIds.length * 400,
+  upperMinorUnits: shotIds.length * 400,
+  budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 10_000 },
+});
+
+const withBoardAttention = (
+  source: StudioRendererProjectV2,
+  input: { submissionUnknown: boolean; canCancel: boolean }
+): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  const job = value.jobs.board_job_01!;
+  job.status = 'needs_attention';
+  job.error = {
+    code: input.submissionUnknown ? 'submission_unknown' : 'provider_unavailable',
+    messageKey: input.submissionUnknown
+      ? 'conversation.creativeStudio.jobs.errors.submissionUnknown'
+      : 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+  };
+  job.canRetry = true;
+  job.canCancel = input.canCancel;
   return value;
 };
 
@@ -316,6 +542,8 @@ const projectWithRecovery = (revision = 3): StudioRendererProjectV2 => {
       trimOutSeconds: null,
       chainBreak: index === 0 || index === 2 ? 'hard_cut' : 'none',
       seedStillId: null,
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
       videoAssetId: null,
       supersededVideoAssetIds: [],
       assetIds: [],
@@ -391,6 +619,45 @@ const currentVideoJobs = (authority: StudioRendererProjectV2): StudioRendererWor
     });
   });
 
+const boardPanels = (authority: StudioRendererProjectV2): StudioRendererWorkspaceStatusV2['boardPanels'] =>
+  authority.beatOrder.flatMap((beatId) => {
+    const beat = authority.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.flatMap((shotId) => {
+      const shot = authority.shots[shotId];
+      if (shot?.id !== shotId) return [];
+      const latestBoardJob = shot.jobIds.reduce<StudioRendererJobV2 | null>((latest, jobId) => {
+        const job = authority.jobs[jobId];
+        return job?.id === jobId &&
+          job.projectId === authority.id &&
+          job.shotId === shot.id &&
+          job.purpose === 'board_still'
+          ? job
+          : latest;
+      }, null);
+      const producer = shot.jobIds
+        .map((jobId) => authority.jobs[jobId])
+        .find(
+          (job) =>
+            job?.id !== undefined &&
+            job.projectId === authority.id &&
+            job.shotId === shot.id &&
+            job.purpose === 'board_still' &&
+            job.status === 'succeeded' &&
+            job.outputAssetIdsByRole.primary === shot.boardAssetId
+        );
+      return [
+        {
+          shotId,
+          assetId: shot.boardAssetId,
+          producerJobId: producer?.id ?? null,
+          latestJobId: latestBoardJob?.id ?? null,
+          staleCauses: [],
+        },
+      ];
+    });
+  });
+
 const chainBoundaries = (authority: StudioRendererProjectV2): StudioRendererChainStatusV2['boundaries'] =>
   authority.beatOrder.flatMap((beatId) => {
     const beat = authority.beats[beatId];
@@ -435,6 +702,7 @@ const workspaceStatus = (source: number | StudioRendererProjectV2, locked = fals
     projectRevision: authority.revision,
     undoTop: null,
     dirtyShots: [],
+    boardPanels: boardPanels(authority),
     cascadeProgress: [],
     currentVideoJobs: currentVideoJobs(authority),
     parkEligibility: locked
@@ -502,7 +770,7 @@ const commit = (revision: number) =>
   ok({ projectId: 'project_1', projectRevision: revision, createdBeatIds: [], createdShotIds: [] });
 
 const proposal = (): StudioProposalV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   id: 'proposal_1',
   projectId: 'project_1',
   status: 'pending',
@@ -519,7 +787,7 @@ const pinRuleProposal = (): StudioProposalV2 => ({
 });
 
 const referenceRequest = (): StudioReferenceRequestV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   id: 'reference_1',
   projectId: 'project_1',
   shotIds: ['shot_1', 'shot_2'],
@@ -672,6 +940,11 @@ const capturedBoardActions = (): BoardActions => {
   return mocks.boardActions!;
 };
 
+const capturedTableBoardActions = (): TableBoardActions => {
+  expect(mocks.tableBoardActions).not.toBeNull();
+  return mocks.tableBoardActions!;
+};
+
 const capturedCutActions = (): CutActions => {
   expect(mocks.cutActions).not.toBeNull();
   return mocks.cutActions!;
@@ -733,6 +1006,7 @@ describe('StudioPage schema-2 cutover', () => {
     mocks.closeHandlers.hasUnsavedWork = null;
     mocks.closeHandlers.flushUnsavedWork = null;
     mocks.boardActions = null;
+    mocks.tableBoardActions = null;
     mocks.cutActions = null;
     mocks.workspaceMutations = null;
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
@@ -787,7 +1061,7 @@ describe('StudioPage schema-2 cutover', () => {
     );
     mocks.bridge.decideReferenceRequest.invoke.mockResolvedValue(
       ok({
-        schemaVersion: 3,
+        schemaVersion: 4,
         requestId: 'reference_1',
         projectId: 'project_1',
         decidedAt: '2026-01-01T00:00:05.000Z',
@@ -1053,6 +1327,544 @@ describe('StudioPage schema-2 cutover', () => {
     expect(screen.getByText('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')).toBeVisible();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('opens an exact paid Board gate for the next 24 missing panels without spending automatically', async () => {
+    const authority = projectWithBoardJobs(30, false);
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().drawNext());
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: Array.from({ length: 24 }, (_, index) => ({
+          shotId: `board_shot_${String(index + 1).padStart(2, '0')}`,
+          purpose: 'board_still',
+          referenceAssetId: null,
+        })),
+        cascadeChoices: [],
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('routes a Board style choice through the revisioned project-settings owner', async () => {
+    const authority = projectWithBoardJobs(2, false);
+    mockSupportedProject(authority);
+    mocks.bridge.editProject.invoke.mockResolvedValue(commit(authority.revision));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().setStyle('line_art'));
+
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        changes: { boardStyle: 'line_art' },
+      })
+    );
+  });
+
+  it('promotes one exact current Board panel for $0 without preparing or confirming provider work', async () => {
+    const initial = withCurrentVideoTakes(withCurrentBoardPanels(projectWithBoardJobs(3, false), [1]), [1, 2, 3]);
+    initial.videoRouteId = 'route_video';
+    initial.shots.board_shot_02!.chainBreak = 'none';
+    const promoted = structuredClone(initial);
+    promoted.revision += 1;
+    promoted.shots.board_shot_01!.seedStillId = 'board_asset_01';
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(promoted));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(promoted.revision));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'board_promotion');
+    expect(
+      within(modal)
+        .getAllByRole('listitem')
+        .map((row) => row.getAttribute('data-promotion-stale-shot-id'))
+    ).toEqual(['board_shot_01', 'board_shot_02']);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction',
+      })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: initial.id,
+        expectedRevision: initial.revision,
+        operations: [
+          {
+            kind: 'promote_board_panel',
+            shotId: 'board_shot_01',
+            boardAssetId: 'board_asset_01',
+          },
+        ],
+      })
+    );
+    expect(
+      await within(modal).findByText('conversation.creativeStudio.workspace.gate.promotion.promoted')
+    ).toBeVisible();
+    expect(promoted.shots.board_shot_01!.chainBreak).toBe(initial.shots.board_shot_01!.chainBreak);
+    expect(promoted.shots.board_shot_01!.videoAssetId).toBe(initial.shots.board_shot_01!.videoAssetId);
+    expect(promoted.shots.board_shot_02!.videoAssetId).toBe(initial.shots.board_shot_02!.videoAssetId);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('prepares and confirms atomic paid Board promotion only from its two explicit actions', async () => {
+    const authority = withCurrentVideoTakes(withCurrentBoardPanels(projectWithBoardJobs(3, false), [1]), [1, 2, 3]);
+    authority.videoRouteId = 'route_video';
+    authority.shots.board_shot_02!.chainBreak = 'none';
+    mockSupportedProject(authority);
+    const quote = boardPromotionQuote(authority, ['board_shot_01', 'board_shot_02']);
+    mocks.bridge.prepareSubmission.invoke.mockResolvedValue(ok({ baseOnly: quote, withCascade: null }));
+    mocks.bridge.confirmSubmission.invoke.mockResolvedValue(
+      ok({ projectId: authority.id, projectRevision: authority.revision + 1 })
+    );
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      within(modal).getByRole('radio', {
+        name: /conversation\.creativeStudio\.workspace\.gate\.promotion\.promoteAndRerender/,
+      })
+    );
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction',
+      })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        boardPromotion: { shotId: 'board_shot_01', boardAssetId: 'board_asset_01' },
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      await within(modal).findByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.gate\.promotion\.confirm/,
+      })
+    );
+    await waitFor(() =>
+      expect(mocks.bridge.confirmSubmission.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: authority.id,
+        quoteId: quote.id,
+        expectedRevision: authority.revision,
+      })
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rejects Board draw, style, and Stop callbacks while paid confirmation is locked', async () => {
+    const authority = projectWithBoardJobs(2);
+    authority.jobs.board_job_01!.status = 'needs_attention';
+    authority.jobs.board_job_01!.error = {
+      code: 'provider_unavailable',
+      messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+    };
+    authority.jobs.board_job_01!.canRetry = true;
+    authority.jobs.board_job_01!.canCancel = true;
+    const secondJobId = authority.shots.board_shot_02!.jobIds[0]!;
+    authority.shots.board_shot_02!.jobIds = [];
+    delete authority.jobs[secondJobId];
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockResolvedValue(
+      ok({
+        baseOnly: {
+          id: 'quote_board',
+          projectId: authority.id,
+          projectRevision: authority.revision,
+          expiresAt: '2026-01-01T01:00:00.000Z',
+          currency: 'USD',
+          baseItems: [
+            {
+              shotId: 'board_shot_02',
+              purpose: 'board_still',
+              route: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+              generationCount: 1,
+              durationSeconds: null,
+              oneGenerationMinorUnits: 3,
+              requestedTotalMinorUnits: 3,
+            },
+          ],
+          cascadeItems: [],
+          lowerMinorUnits: 3,
+          upperMinorUnits: 3,
+          budget: { kind: 'no_policy' },
+        },
+        withCascade: null,
+      })
+    );
+    const confirmation = deferred<{
+      ok: true;
+      data: { projectId: string; projectRevision: number };
+    }>();
+    mocks.bridge.confirmSubmission.invoke.mockReturnValue(confirmation.promise);
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().drawNext());
+    const modal = await screen.findByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+    const confirm = await within(modal).findByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.gate\.confirm/,
+    });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(mocks.bridge.confirmSubmission.invoke).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      capturedTableBoardActions().setStyle('line_art');
+      capturedTableBoardActions().drawNext();
+      capturedTableBoardActions().retryJob('board_job_01', false);
+      capturedTableBoardActions().retryDownload('board_job_01');
+      capturedTableBoardActions().cancelJob('board_job_01');
+      capturedTableBoardActions().stop();
+    });
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.cancelJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.retryDownload.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      confirmation.resolve(ok({ projectId: authority.id, projectRevision: authority.revision + 1 }));
+      await confirmation.promise;
+    });
+  });
+
+  it('opens only the requested Beat for a paid Board draw or redraw', async () => {
+    const authority = projectWithBoardJobs(10, false);
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().drawBeat('board_beat_2'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [9, 10].map((shotNumber) => ({
+          shotId: `board_shot_${String(shotNumber).padStart(2, '0')}`,
+          purpose: 'board_still',
+          referenceAssetId: null,
+        })),
+        cascadeChoices: [],
+      })
+    );
+  });
+
+  it('opens only the exact requested Shot for a paid Board redraw', async () => {
+    const authority = withCurrentBoardPanels(projectWithBoardJobs(3, false), [2]);
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().redrawShot('board_shot_02'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [{ shotId: 'board_shot_02', purpose: 'board_still', referenceAssetId: null }],
+        cascadeChoices: [],
+      })
+    );
+  });
+
+  it('rejects Redraw for a missing Shot or a partially boarded Beat', async () => {
+    const authority = withCurrentBoardPanels(projectWithBoardJobs(2, false), [1]);
+    mockSupportedProject(authority);
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().redrawShot('board_shot_02'));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+
+    act(() => capturedTableBoardActions().redrawBeat('board_beat_1'));
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks Board spend review while generation-affecting drafts are dirty', async () => {
+    const authority = withCurrentBoardPanels(projectWithBoardJobs(2, false), [1]);
+    mockSupportedProject(authority);
+    seedWorkspaceDrafts({
+      'brief.text': { baseValue: authority.brief, value: 'Unsaved replacement brief' },
+    });
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().setStyle('line_art'));
+    act(() => capturedTableBoardActions().drawNext());
+    act(() => capturedTableBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks Board spend review when the Board status is not exact', async () => {
+    const authority = withCurrentBoardPanels(projectWithBoardJobs(2, false), [1]);
+    mockSupportedProject(authority);
+    const pendingStatus = workspaceStatus(authority);
+    pendingStatus.boardPanels[0]!.latestJobId = 'forged_job';
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(pendingStatus));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().drawNext());
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks Board spend review when the selected image route is missing', async () => {
+    const authority = projectWithBoardJobs(2, false);
+    authority.imageRouteId = null;
+    mockSupportedProject(authority);
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().drawNext());
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.imageRouteBlocked')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks Board spend review until the project has a Board style', async () => {
+    const authority = projectWithBoardJobs(2, false);
+    authority.boardStyle = null;
+    mockSupportedProject(authority);
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().drawNext());
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('stops all 30 exact cancellable Board jobs against sequentially refreshed revisions', async () => {
+    const initial = projectWithBoardJobs(30);
+    const authorities = Array.from({ length: 31 }, (_, cancelledCount) =>
+      withCancelledBoardJobs(initial, cancelledCount)
+    );
+    let workspaceRead = 0;
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(async () => {
+      const authority = authorities[Math.min(workspaceRead, 30)]!;
+      workspaceRead += 1;
+      return projectWorkspaceLoad(authority);
+    });
+    mocks.bridge.cancelJob.invoke.mockImplementation(async ({ jobId }: { jobId: string }) => {
+      const shotNumber = Number(jobId.slice(-2));
+      return ok(authorities[shotNumber]!.jobs[jobId]!);
+    });
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().stop());
+
+    await waitFor(() => expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledTimes(30), { timeout: 15_000 });
+    expect(mocks.bridge.cancelJob.invoke.mock.calls.map(([request]) => request)).toEqual(
+      Array.from({ length: 30 }, (_, index) => ({
+        projectId: initial.id,
+        jobId: `board_job_${String(index + 1).padStart(2, '0')}`,
+        expectedRevision: initial.revision + index,
+      }))
+    );
+    expect(workspaceRead).toBe(31);
+  });
+
+  it('stops a busy Board job without cancelling a separate job that needs attention', async () => {
+    const initial = projectWithBoardJobs(2);
+    initial.jobs.board_job_02!.status = 'needs_attention';
+    initial.jobs.board_job_02!.error = {
+      code: 'provider_unavailable',
+      messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+    };
+    initial.jobs.board_job_02!.canRetry = true;
+    initial.jobs.board_job_02!.canCancel = true;
+    const afterBusyCancellation = withCancelledBoardJobs(initial, 1);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(afterBusyCancellation));
+    mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(afterBusyCancellation.jobs.board_job_01));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().stop());
+
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: initial.id,
+      jobId: 'board_job_01',
+      expectedRevision: initial.revision,
+    });
+    expect(afterBusyCancellation.jobs.board_job_02).toMatchObject({
+      status: 'needs_attention',
+      canCancel: true,
+    });
+  });
+
+  it('retries only an exact Board attention job with the required duplicate-charge acknowledgement', async () => {
+    const current = withBoardAttention(projectWithBoardJobs(1), { submissionUnknown: true, canCancel: false });
+    const retried = structuredClone(current);
+    retried.revision += 1;
+    retried.jobs.board_job_01!.status = 'queued_local';
+    retried.jobs.board_job_01!.error = null;
+    retried.jobs.board_job_01!.canRetry = false;
+    retried.jobs.board_job_01!.canCancel = true;
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: retried }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(retried)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(retried)));
+    mocks.bridge.retryJob.invoke.mockResolvedValue(ok(retried.jobs.board_job_01));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    await expect(capturedBeatPanelActions().retryGenerationJob('board_job_01', true)).resolves.toBe(false);
+    act(() => capturedTableBoardActions().retryJob('board_job_01', false));
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+
+    act(() => capturedTableBoardActions().retryJob('board_job_01', true));
+    await waitFor(() =>
+      expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: current.id,
+        jobId: 'board_job_01',
+        expectedRevision: current.revision,
+        acknowledgePossibleDuplicateCharge: true,
+      })
+    );
+  });
+
+  it('retries an exact Board download failure without opening a fresh paid generation gate', async () => {
+    const current = projectWithBoardJobs(1);
+    const failed = current.jobs.board_job_01!;
+    failed.status = 'failed';
+    failed.error = {
+      code: 'download_failed',
+      messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+    };
+    failed.canCancel = false;
+    failed.canRetry = false;
+    failed.canRetryDownload = true;
+    const retried = structuredClone(current);
+    retried.revision += 1;
+    retried.jobs.board_job_01!.updatedAt = '2026-01-01T00:00:01.000Z';
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: retried }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(retried)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(retried)));
+    mocks.bridge.retryDownload.invoke.mockResolvedValue(ok(retried.jobs.board_job_01));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    act(() => capturedTableBoardActions().drawNext());
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+
+    act(() => capturedTableBoardActions().retryDownload('board_job_01'));
+    await waitFor(() =>
+      expect(mocks.bridge.retryDownload.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: current.id,
+        jobId: 'board_job_01',
+        expectedRevision: current.revision,
+      })
+    );
+    await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2));
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('cancels only an exact provider-cancellable Board attention job through the Table owner', async () => {
+    const current = withBoardAttention(projectWithBoardJobs(1), { submissionUnknown: false, canCancel: true });
+    const cancelled = structuredClone(current);
+    cancelled.revision += 1;
+    cancelled.jobs.board_job_01!.status = 'cancelled';
+    cancelled.jobs.board_job_01!.error = null;
+    cancelled.jobs.board_job_01!.canRetry = false;
+    cancelled.jobs.board_job_01!.canCancel = false;
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: cancelled }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(cancelled)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(cancelled)));
+    mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(cancelled.jobs.board_job_01));
+    renderStudio();
+    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+
+    await expect(capturedBeatPanelActions().cancelGenerationJob('board_job_01')).resolves.toBe(false);
+    act(() => capturedTableBoardActions().cancelJob('board_job_01'));
+
+    await waitFor(() =>
+      expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: current.id,
+        jobId: 'board_job_01',
+        expectedRevision: current.revision,
+      })
+    );
   });
 
   it('opens an exact paid continuity draft without using the free authoring bridge', async () => {

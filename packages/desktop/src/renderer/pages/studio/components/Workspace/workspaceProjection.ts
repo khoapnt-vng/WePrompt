@@ -11,6 +11,7 @@ import type {
   StudioBinItem,
   StudioLineHistoryEntry,
   StudioPlanningShotBoundaryV2,
+  StudioRendererBoardPanelStatusV2,
   StudioRendererChainBoundaryV2,
   StudioRendererChainConditioningFailureV2,
   StudioRendererChainStatusV2,
@@ -57,10 +58,34 @@ export type WorkspaceCurrentPictureProjection = {
   posterAssetId: string | null;
 };
 
-export type WorkspaceAttentionJobProjection = Pick<
-  StudioRendererJobV2,
-  'id' | 'purpose' | 'error' | 'canCancel' | 'canRetry'
->;
+export type WorkspaceBoardPanelFreshness = 'missing' | 'current' | 'stale' | 'status_pending';
+
+export type WorkspaceBoardPanelActivity =
+  | 'idle'
+  | 'queued'
+  | 'drawing'
+  | 'needs_attention'
+  | 'failed'
+  | 'cancelled'
+  | 'status_pending';
+
+export type WorkspaceBoardPanelRecoveryProjection = {
+  jobId: string;
+  canRetry: boolean;
+  canCancel: boolean;
+  canRetryDownload: boolean;
+  submissionUnknown: boolean;
+};
+
+export type WorkspaceBoardPanelProjection = StudioRendererBoardPanelStatusV2 & {
+  freshness: WorkspaceBoardPanelFreshness;
+  activity: WorkspaceBoardPanelActivity;
+  recovery: WorkspaceBoardPanelRecoveryProjection | null;
+};
+
+export type WorkspaceAttentionJobProjection = Pick<StudioRendererJobV2, 'id' | 'error' | 'canCancel' | 'canRetry'> & {
+  purpose: 'seed_still' | 'video_take';
+};
 
 export type WorkspaceShotProjection = {
   id: string;
@@ -215,6 +240,7 @@ export type WorkspaceProjection = {
     shots: WorkspaceBinnedShotProjection[];
   };
   undoTop: StudioRendererUndoTopV2 | null;
+  boardPanels: WorkspaceBoardPanelProjection[];
   dirtyShots: StudioRendererDirtyShotV2[];
   cascadeProgress: StudioCascadeProgressV2[];
   parkEligibility: StudioRendererParkEligibilityV2[];
@@ -307,7 +333,9 @@ const validExplicitSeedStillId = (project: StudioRendererProjectV2, shot: Studio
   const seed = isOwnedAsset(project, shot, shot.seedStillId);
   return seed !== null &&
     seed.mediaKind === 'image' &&
-    (seed.managedAsset.collection === 'assets' || seed.managedAsset.collection === 'imports') &&
+    (seed.managedAsset.collection === 'assets' ||
+      seed.managedAsset.collection === 'imports' ||
+      seed.managedAsset.collection === 'boardStills') &&
     seed.briefReferenceRole === undefined &&
     seed.briefReferenceLabel === undefined &&
     shot.assetIds.includes(seed.id)
@@ -355,7 +383,14 @@ const projectSeedStills = (input: {
   for (const assetId of new Set(input.shot.assetIds)) {
     const asset = isOwnedAsset(input.project, input.shot, assetId);
     if (asset === null) continue;
-    if (isEligibleImageTake(input.project, input.shot, asset)) {
+    if (
+      isEligibleImageTake(input.project, input.shot, asset) ||
+      (asset.id === input.explicitSeedAssetId &&
+        asset.mediaKind === 'image' &&
+        asset.managedAsset.collection === 'boardStills' &&
+        asset.briefReferenceRole === undefined &&
+        asset.briefReferenceLabel === undefined)
+    ) {
       seedStills.push({
         assetId: asset.id,
         createdAt: asset.createdAt,
@@ -424,6 +459,7 @@ const ownedAttentionJobs = (project: StudioRendererProjectV2, shot: StudioShot):
       job.shotId === shot.id &&
       job.status === 'needs_attention' &&
       job.error !== null &&
+      (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
       (job.canRetry || job.canCancel)
       ? [
           {
@@ -817,6 +853,9 @@ const hasSafeShotDisplayFacts = (shot: StudioShot): boolean =>
   (shot.trimInSeconds === null || (Number.isFinite(shot.trimInSeconds) && shot.trimInSeconds >= 0)) &&
   (shot.trimOutSeconds === null || (Number.isFinite(shot.trimOutSeconds) && shot.trimOutSeconds >= 0)) &&
   (shot.seedStillId === null || isSafeStudioId(shot.seedStillId)) &&
+  (shot.boardAssetId === null || isSafeStudioId(shot.boardAssetId)) &&
+  Array.isArray(shot.supersededBoardAssetIds) &&
+  shot.supersededBoardAssetIds.every(isSafeStudioId) &&
   (shot.videoAssetId === null || isSafeStudioId(shot.videoAssetId)) &&
   Array.isArray(shot.supersededVideoAssetIds) &&
   shot.supersededVideoAssetIds.every(isSafeStudioId) &&
@@ -1018,6 +1057,191 @@ const revisionMatches = (
 ): boolean => snapshot?.projectId === project.id && snapshot.projectRevision === project.revision;
 
 type ExactStatusFact<Value> = { valid: true; value: Value } | { valid: false; value: null };
+
+const BOARD_PANEL_STALE_CAUSE_ORDER: readonly StudioRendererBoardPanelStatusV2['staleCauses'][number][] = [
+  'request_out_of_date',
+  'route_out_of_date',
+];
+
+const validBoardAssetId = (project: StudioRendererProjectV2, shot: StudioShot): string | null => {
+  if (shot.boardAssetId === null) return null;
+  const asset = isOwnedAsset(project, shot, shot.boardAssetId);
+  return asset !== null &&
+    asset.mediaKind === 'image' &&
+    asset.managedAsset.collection === 'boardStills' &&
+    asset.briefReferenceRole === undefined &&
+    asset.briefReferenceLabel === undefined &&
+    shot.assetIds.filter((assetId) => assetId === asset.id).length === 1
+    ? asset.id
+    : null;
+};
+
+const boardJobs = (project: StudioRendererProjectV2, shot: StudioShot): StudioRendererJobV2[] =>
+  shot.jobIds.flatMap((jobId) => {
+    const job = ownValue(project.jobs, jobId);
+    return job?.id === jobId &&
+      job.projectId === project.id &&
+      job.shotId === shot.id &&
+      job.purpose === 'board_still' &&
+      shot.jobIds.filter((ownedId) => ownedId === jobId).length === 1
+      ? [job]
+      : [];
+  });
+
+const pendingBoardPanel = (project: StudioRendererProjectV2, shot: StudioShot): WorkspaceBoardPanelProjection => ({
+  shotId: shot.id,
+  assetId: validBoardAssetId(project, shot),
+  producerJobId: null,
+  latestJobId: null,
+  staleCauses: [],
+  freshness: 'status_pending',
+  activity: 'status_pending',
+  recovery: null,
+});
+
+const boardActivity = (job: StudioRendererJobV2 | null): WorkspaceBoardPanelActivity => {
+  if (job === null || job.status === 'succeeded') return 'idle';
+  switch (job.status) {
+    case 'queued_local':
+    case 'submitting':
+    case 'queued_remote':
+      return 'queued';
+    case 'running':
+      return 'drawing';
+    case 'needs_attention':
+      return 'needs_attention';
+    case 'failed':
+      return 'failed';
+    case 'cancelled':
+      return 'cancelled';
+    case 'waiting_for_conditioning':
+      return 'status_pending';
+  }
+};
+
+const boardRecovery = (job: StudioRendererJobV2 | null): WorkspaceBoardPanelRecoveryProjection | null => {
+  if (job?.purpose !== 'board_still' || job.error === null) return null;
+  if (job.status === 'failed' && job.error.code === 'download_failed' && job.canRetryDownload) {
+    return {
+      jobId: job.id,
+      canRetry: false,
+      canCancel: false,
+      canRetryDownload: true,
+      submissionUnknown: false,
+    };
+  }
+  return job.status === 'needs_attention' && (job.canRetry || job.canCancel)
+    ? {
+        jobId: job.id,
+        canRetry: job.canRetry,
+        canCancel: job.canCancel,
+        canRetryDownload: false,
+        submissionUnknown: job.error.code === 'submission_unknown',
+      }
+    : null;
+};
+
+const hasExactBoardStaleCauses = (causes: unknown): causes is StudioRendererBoardPanelStatusV2['staleCauses'] =>
+  Array.isArray(causes) &&
+  causes.length <= BOARD_PANEL_STALE_CAUSE_ORDER.length &&
+  causes.every((cause, index) => {
+    if (typeof cause !== 'string') return false;
+    const position = BOARD_PANEL_STALE_CAUSE_ORDER.indexOf(
+      cause as StudioRendererBoardPanelStatusV2['staleCauses'][number]
+    );
+    if (position < 0) return false;
+    if (index === 0) return true;
+    const previousPosition = BOARD_PANEL_STALE_CAUSE_ORDER.indexOf(
+      causes[index - 1] as StudioRendererBoardPanelStatusV2['staleCauses'][number]
+    );
+    return previousPosition < position;
+  });
+
+const exactBoardPanel = (
+  project: StudioRendererProjectV2,
+  shot: StudioShot,
+  row: StudioRendererBoardPanelStatusV2
+): WorkspaceBoardPanelProjection | null => {
+  if (
+    row.shotId !== shot.id ||
+    (row.assetId !== null && !isSafeStudioId(row.assetId)) ||
+    (row.producerJobId !== null && !isSafeStudioId(row.producerJobId)) ||
+    (row.latestJobId !== null && !isSafeStudioId(row.latestJobId)) ||
+    !hasExactBoardStaleCauses(row.staleCauses)
+  ) {
+    return null;
+  }
+
+  const jobs = boardJobs(project, shot);
+  const latest = jobs.at(-1) ?? null;
+  if (row.latestJobId !== latest?.id && !(row.latestJobId === null && latest === null)) return null;
+
+  if (row.assetId === null) {
+    if (shot.boardAssetId !== null || row.producerJobId !== null || row.staleCauses.length !== 0) return null;
+    return {
+      shotId: row.shotId,
+      assetId: null,
+      producerJobId: null,
+      latestJobId: row.latestJobId,
+      staleCauses: [],
+      freshness: 'missing',
+      activity: boardActivity(latest),
+      recovery: boardRecovery(latest),
+    };
+  }
+
+  if (row.assetId !== shot.boardAssetId || validBoardAssetId(project, shot) !== row.assetId) return null;
+  const successfulProducers = jobs.filter(
+    (job) =>
+      job.status === 'succeeded' &&
+      job.outputAssetIdsByRole.primary === row.assetId &&
+      job.outputAssetIds.filter((assetId) => assetId === row.assetId).length === 1
+  );
+  const producer = successfulProducers.length === 1 ? successfulProducers[0]! : null;
+  const latestSucceeded = jobs.toReversed().find((job) => job.status === 'succeeded') ?? null;
+  if (
+    producer === null ||
+    latestSucceeded?.id !== producer.id ||
+    row.producerJobId !== producer.id ||
+    producer.spendReceipt?.purpose !== 'board_still' ||
+    !isSafeStudioId(producer.spendReceipt.routeId)
+  ) {
+    return null;
+  }
+  const routeOutOfDate = project.imageRouteId === null || producer.spendReceipt.routeId !== project.imageRouteId;
+  if (row.staleCauses.includes('route_out_of_date') !== routeOutOfDate) return null;
+  return {
+    shotId: row.shotId,
+    assetId: row.assetId,
+    producerJobId: row.producerJobId,
+    latestJobId: row.latestJobId,
+    staleCauses: [...row.staleCauses],
+    freshness: row.staleCauses.length === 0 ? 'current' : 'stale',
+    activity: boardActivity(latest),
+    recovery: boardRecovery(latest),
+  };
+};
+
+const projectBoardPanels = (
+  project: StudioRendererProjectV2,
+  status: StudioRendererWorkspaceStatusV2 | null,
+  activeShotIds: readonly string[]
+): WorkspaceBoardPanelProjection[] => {
+  const activeShots = activeShotIds.map((shotId) => ownValue(project.shots, shotId));
+  if (
+    activeShots.some((shot) => shot === undefined) ||
+    status === null ||
+    !Array.isArray(status.boardPanels) ||
+    status.boardPanels.length !== activeShotIds.length ||
+    status.boardPanels.some((row, index) => row?.shotId !== activeShotIds[index])
+  ) {
+    return activeShots.flatMap((shot) => (shot === undefined ? [] : [pendingBoardPanel(project, shot)]));
+  }
+  return activeShots.map((shot, index) => {
+    const exact = exactBoardPanel(project, shot!, status.boardPanels[index]!);
+    return exact ?? pendingBoardPanel(project, shot!);
+  });
+};
 
 const exactCurrentVideoJobs = (
   project: StudioRendererProjectV2,
@@ -1231,6 +1455,7 @@ export const projectWorkspace = (
   const identityCounts = binIdentityCounts(project.bin);
   const memberships = projectBeatMemberships(project, identityCounts);
   const owners = projectShotOwners(project, memberships, identityCounts);
+  const boardPanels = projectBoardPanels(project, matchedWorkspaceStatus, activeShotIds);
   const statusFacts: WorkspaceProjectionStatusFacts = {
     workspaceStatusReady: matchedWorkspaceStatus !== null,
     chainStatusReady: matchedChainStatus !== null,
@@ -1337,6 +1562,7 @@ export const projectWorkspace = (
       matchedWorkspaceStatus?.undoTop === null || matchedWorkspaceStatus === null
         ? null
         : { ...matchedWorkspaceStatus.undoTop },
+    boardPanels,
     dirtyShots: matchedWorkspaceStatus?.dirtyShots.map((row) => ({ ...row, causes: [...row.causes] })) ?? [],
     cascadeProgress:
       matchedWorkspaceStatus?.cascadeProgress.map((row) => ({

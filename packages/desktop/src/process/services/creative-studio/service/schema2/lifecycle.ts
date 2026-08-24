@@ -45,6 +45,20 @@ const TERMINAL_JOB_STATUSES: ReadonlySet<StudioProjectV2['jobs'][string]['status
   'cancelled',
 ]);
 
+const isCanonicalDependencyPrimary = (
+  purpose: StudioQuotedGeneration['purpose'],
+  asset: StudioProjectV2['assets'][string]
+): boolean => {
+  switch (purpose) {
+    case 'seed_still':
+      return asset.mediaKind === 'image' && asset.managedAsset.collection === 'assets';
+    case 'video_take':
+      return asset.mediaKind === 'video' && asset.managedAsset.collection === 'assets';
+    case 'board_still':
+      return false;
+  }
+};
+
 const hasCanonicalPrimary = (
   project: StudioProjectV2,
   authorizationId: string,
@@ -67,9 +81,7 @@ const hasCanonicalPrimary = (
       primary.projectId === project.id &&
       primary.shotId === item.shotId &&
       ownValue(project.shots, item.shotId)?.assetIds.includes(primary.id) === true &&
-      (item.purpose === 'seed_still'
-        ? primary.mediaKind === 'image'
-        : primary.mediaKind === 'video' && primary.managedAsset.collection === 'assets')
+      isCanonicalDependencyPrimary(item.purpose, primary)
     );
   });
 

@@ -23,6 +23,8 @@ const makeShot = (overrides: Partial<StudioShot> = {}): StudioShot => ({
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
   supersededVideoAssetIds: [],
   assetIds: ['asset_1'],
@@ -101,7 +103,13 @@ describe('isCanonicalStudioGeneratedTakeV2', () => {
 
 describe('managed asset collection contracts', () => {
   it('freezes the Beat/Shot managed collection set', () => {
-    expect([...STUDIO_MANAGED_ASSET_COLLECTIONS_V2]).toEqual(['assets', 'imports', 'thumbnails', 'conditioningFrames']);
+    expect([...STUDIO_MANAGED_ASSET_COLLECTIONS_V2]).toEqual([
+      'assets',
+      'imports',
+      'thumbnails',
+      'conditioningFrames',
+      'boardStills',
+    ]);
     expect(STUDIO_MANAGED_ASSET_COLLECTIONS_V2.has('references' as never)).toBe(false);
   });
 });

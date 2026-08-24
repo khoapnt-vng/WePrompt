@@ -365,7 +365,15 @@ const hasExactKeysV2 = (
   }
 };
 
-const jobMediaKindV2 = (job: StudioJobV2): StudioMediaKind => (job.purpose === 'seed_still' ? 'image' : 'video');
+const jobMediaKindV2 = (job: StudioJobV2): StudioMediaKind => {
+  switch (job.purpose) {
+    case 'seed_still':
+    case 'board_still':
+      return 'image';
+    case 'video_take':
+      return 'video';
+  }
+};
 
 const activeBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioProjectV2['beats'][string] | null => {
   for (const beatId of project.beatOrder) {
@@ -1761,6 +1769,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
             }
             if (job.status === 'submitting' && job.providerJobId === null) {
               await transitionFailureV2(project.id, job.id, 'needs_attention', 'submission_unknown');
+              continue;
+            }
+            if (job.status === 'running' && job.providerJobId === null && job.spendReceipt !== null) {
+              await transitionFailureV2(project.id, job.id, 'failed', 'no_output');
               continue;
             }
             if (!job.providerJobId) {

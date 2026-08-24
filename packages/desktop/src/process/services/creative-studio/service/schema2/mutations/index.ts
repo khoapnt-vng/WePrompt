@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { hasRuleToken, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import { studioPlanningShotBoundariesV2 } from '@/common/types/project/creativeStudioProjectSummary';
 import {
+  STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
   STUDIO_MAX_BEATS,
@@ -42,6 +43,7 @@ import {
   type StudioUndoPatch,
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioInboundShotReferencesV2 } from '../chain';
+import { resolveStudioCurrentBoardPanelAuthorityV2 } from '../generation/boardPanel';
 import { createStudioLineHistoryId } from './identity';
 import { validateStudioFixedShotReviewsV2, validateStudioProjectV2, validateStudioProposedShotV2 } from '../validation';
 
@@ -86,7 +88,8 @@ const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
 ]);
 const BATCH_KEYS = new Set(['schemaVersion', 'projectId', 'expectedRevision', 'operations']);
 const CONTEXT_KEYS = new Set(['mutationId', 'capturedAt']);
-const PROJECT_CHANGE_KEYS = new Set(['name', 'aspectRatio', 'resolution', 'targetDurationSeconds']);
+const PROJECT_CHANGE_KEYS = new Set(['name', 'aspectRatio', 'resolution', 'targetDurationSeconds', 'boardStyle']);
+const BOARD_STYLES: ReadonlySet<string> = new Set(STUDIO_BOARD_STYLES_V2);
 const BEAT_INPUT_KEYS = new Set(['title', 'action', 'look', 'targetSeconds']);
 const BEAT_CHANGE_KEYS = new Set(BEAT_INPUT_KEYS);
 const SHOT_INPUT_KEYS = new Set(['line', 'narration', 'onScreenText', 'durationSeconds']);
@@ -115,6 +118,7 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   apply_coverage: new Set(['kind', 'beatId', 'shots', 'fixedShots']),
   set_hard_cut: new Set(['kind', 'shotId', 'hardCut']),
   set_seed_still: new Set(['kind', 'shotId', 'assetId']),
+  promote_board_panel: new Set(['kind', 'shotId', 'boardAssetId']),
   trim_shot: new Set(['kind', 'shotId', 'trimInSeconds', 'trimOutSeconds']),
   redetach_line: new Set(['kind', 'shotId', 'line']),
   rederive_line: new Set(['kind', 'shotId', 'line']),
@@ -250,6 +254,9 @@ const isEditableProjectChanges = (value: unknown): value is StudioEditableProjec
       value.aspectRatio === '4:3' ||
       value.aspectRatio === '3:4') &&
     (!Object.hasOwn(value, 'resolution') || value.resolution === '720p' || value.resolution === '1080p') &&
+    (!Object.hasOwn(value, 'boardStyle') ||
+      value.boardStyle === null ||
+      (typeof value.boardStyle === 'string' && BOARD_STYLES.has(value.boardStyle))) &&
     (!Object.hasOwn(value, 'targetDurationSeconds') ||
       (isInteger(value.targetDurationSeconds) &&
         value.targetDurationSeconds >= 5 &&
@@ -455,6 +462,9 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
     case 'set_seed_still':
       if (!isSafeId(operation.shotId) || !isSafeAnchor(operation.assetId)) fail('invalid_operation');
       return;
+    case 'promote_board_panel':
+      if (!isSafeId(operation.shotId) || !isSafeId(operation.boardAssetId)) fail('invalid_operation');
+      return;
     case 'trim_shot':
       if (
         !isSafeId(operation.shotId) ||
@@ -572,6 +582,23 @@ const findActiveShotOwner = (project: StudioProjectV2, shotId: string): StudioBe
   return undefined;
 };
 
+const segmentShotIdsFromHead = (project: StudioProjectV2, headShotId: string): string[] | null => {
+  const beat = findActiveShotOwner(project, headShotId);
+  if (beat === undefined) return null;
+  const headIndex = beat.shotOrder.indexOf(headShotId);
+  const head = ownValue(project.shots, headShotId);
+  if (head === undefined || headIndex < 0 || (headIndex !== 0 && head.chainBreak !== 'hard_cut')) return null;
+  const segmentShotIds: string[] = [];
+  for (let shotIndex = headIndex; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+    const shotId = beat.shotOrder[shotIndex]!;
+    const shot = ownValue(project.shots, shotId);
+    if (shot === undefined) return null;
+    if (shotIndex > headIndex && shot.chainBreak === 'hard_cut') break;
+    segmentShotIds.push(shotId);
+  }
+  return segmentShotIds;
+};
+
 const shotOwnerLocation = (
   project: StudioProjectV2,
   shotId: string
@@ -647,6 +674,10 @@ const hasBoundNonterminalJob = (
       predicate(job)
   );
 
+const hasBoardHistory = (project: StudioProjectV2): boolean =>
+  Object.values(project.jobs).some((job) => job.purpose === 'board_still') ||
+  Object.values(project.shots).some((shot) => shot.boardAssetId !== null || shot.supersededBoardAssetIds.length > 0);
+
 const seedMatchesWaitingAuthorizedDependencies = (
   project: StudioProjectV2,
   shotId: string,
@@ -704,6 +735,7 @@ const projectFields = (project: StudioProjectV2): Extract<StudioUndoPatch, { kin
   aspectRatio: project.aspectRatio,
   resolution: project.resolution,
   targetDurationSeconds: project.targetDurationSeconds,
+  boardStyle: project.boardStyle,
   brief: project.brief,
   rules: structuredClone(project.rules),
   beatOrder: [...project.beatOrder],
@@ -928,12 +960,25 @@ const undoPatchChangesChainBreak = (project: StudioProjectV2, patch: StudioUndoP
   );
 };
 
+const undoPatchClearsBoardStyleWithHistory = (project: StudioProjectV2, patch: StudioUndoPatch): boolean =>
+  patch.kind === 'project_fields' && patch.before.boardStyle === null && hasBoardHistory(project);
+
 const applyUndoEntry = (project: StudioProjectV2, entryId: string): StudioProjectV2 => {
+  if (hasBoundNonterminalJob(project, (job) => job.purpose === 'board_still')) fail('undo_conflict');
   const entry = project.undoHistory.at(-1);
   if (entry === undefined || entry.id !== entryId || entry.patches.some((patch) => !verifyUndoDigest(project, patch))) {
     return fail('undo_conflict');
   }
   if (entry.patches.some((patch) => undoPatchChangesChainBreak(project, patch))) fail('undo_conflict');
+  if (entry.patches.some((patch) => undoPatchClearsBoardStyleWithHistory(project, patch))) fail('undo_conflict');
+  if (entry.label === 'promote_board_panel') {
+    const promotionPatch = entry.patches.length === 1 ? entry.patches[0] : undefined;
+    const segmentShotIds =
+      promotionPatch?.kind === 'shot_fields' ? segmentShotIdsFromHead(project, promotionPatch.shotId) : null;
+    if (segmentShotIds === null || deriveStudioInboundShotReferencesV2(project, segmentShotIds).length > 0) {
+      fail('undo_conflict');
+    }
+  }
 
   const draft = structuredClone(project);
   for (const patch of entry.patches.toReversed()) {
@@ -1021,6 +1066,12 @@ export const applyStudioMutationBatchV2 = (
     const undone = applyUndoEntry(draft, operation.entryId);
     return { project: undone, createdBeatIds: [], createdShotIds: [], coverageResults: [] };
   }
+  if (
+    operations.some((operation) => (operation as StudioMutationOperationV2).kind === 'promote_board_panel') &&
+    operations.length !== 1
+  ) {
+    fail('invalid_operation');
+  }
   if (draft.undoHistory.some((entry) => entry.id === reducerContext.mutationId)) fail('identity_collision');
   const knownBeatIds = new Set(Object.keys(draft.beats));
   const knownShotIds = new Set(Object.keys(draft.shots));
@@ -1047,7 +1098,14 @@ export const applyStudioMutationBatchV2 = (
         }
         const aspectRatioChanged = Object.hasOwn(changes, 'aspectRatio') && changes.aspectRatio !== draft.aspectRatio;
         const resolutionChanged = Object.hasOwn(changes, 'resolution') && changes.resolution !== draft.resolution;
+        const boardStyleChanged = Object.hasOwn(changes, 'boardStyle') && changes.boardStyle !== draft.boardStyle;
         if ((aspectRatioChanged || resolutionChanged) && hasBoundNonterminalJob(draft)) {
+          fail('dependency_blocked');
+        }
+        if (boardStyleChanged && hasBoundNonterminalJob(draft, (job) => job.purpose === 'board_still')) {
+          fail('dependency_blocked');
+        }
+        if (boardStyleChanged && changes.boardStyle === null && hasBoardHistory(draft)) {
           fail('dependency_blocked');
         }
         touchProject(tracker, draft);
@@ -1135,7 +1193,14 @@ export const applyStudioMutationBatchV2 = (
         }
         const actionChanged = Object.hasOwn(operation.changes, 'action') && operation.changes.action !== beat.action;
         const lookChanged = Object.hasOwn(operation.changes, 'look') && operation.changes.look !== beat.look;
-        if (lookChanged && hasBoundNonterminalJob(draft, (job) => beat.shotOrder.includes(job.shotId))) {
+        if (
+          (lookChanged && hasBoundNonterminalJob(draft, (job) => beat.shotOrder.includes(job.shotId))) ||
+          (actionChanged &&
+            hasBoundNonterminalJob(
+              draft,
+              (job) => job.purpose === 'board_still' && beat.shotOrder.includes(job.shotId)
+            ))
+        ) {
           fail('dependency_blocked');
         }
         if (actionChanged && beat.actionRevision >= Number.MAX_SAFE_INTEGER) {
@@ -1211,6 +1276,8 @@ export const applyStudioMutationBatchV2 = (
           trimOutSeconds: null,
           chainBreak: 'none',
           seedStillId: null,
+          boardAssetId: null,
+          supersededBoardAssetIds: [],
           videoAssetId: null,
           supersededVideoAssetIds: [],
           assetIds: [],
@@ -1433,6 +1500,8 @@ export const applyStudioMutationBatchV2 = (
               trimOutSeconds: null,
               chainBreak: proposed.chainBreak,
               seedStillId: null,
+              boardAssetId: null,
+              supersededBoardAssetIds: [],
               videoAssetId: null,
               supersededVideoAssetIds: [],
               assetIds: [],
@@ -1495,6 +1564,28 @@ export const applyStudioMutationBatchV2 = (
         if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id)) fail('dependency_blocked');
         touchShot(tracker, draft, shot.id);
         defineOwn(draft.shots, shot.id, { ...shot, seedStillId: operation.assetId });
+        break;
+      }
+
+      case 'promote_board_panel': {
+        const authority = resolveStudioCurrentBoardPanelAuthorityV2(draft, operation.shotId, operation.boardAssetId);
+        if (
+          authority === null ||
+          (authority.shotIndex !== 0 && authority.shot.chainBreak !== 'hard_cut') ||
+          authority.shot.seedStillId === operation.boardAssetId
+        ) {
+          fail('invalid_operation');
+        }
+        const segmentShotIds = segmentShotIdsFromHead(draft, authority.shot.id);
+        if (segmentShotIds === null) fail('invalid_operation');
+        if (deriveStudioInboundShotReferencesV2(draft, segmentShotIds).length > 0) {
+          fail('dependency_blocked');
+        }
+        touchShot(tracker, draft, authority.shot.id);
+        defineOwn(draft.shots, authority.shot.id, {
+          ...authority.shot,
+          seedStillId: operation.boardAssetId,
+        });
         break;
       }
 
@@ -1620,7 +1711,7 @@ export const applyStudioMutationBatchV2 = (
         }
         if (
           draft.imageRouteId !== operation.imageRouteId &&
-          hasBoundNonterminalJob(draft, (job) => job.purpose === 'seed_still')
+          hasBoundNonterminalJob(draft, (job) => job.purpose === 'seed_still' || job.purpose === 'board_still')
         ) {
           fail('dependency_blocked');
         }

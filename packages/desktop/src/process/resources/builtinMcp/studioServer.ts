@@ -21,6 +21,7 @@ import {
 } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import {
+  STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
@@ -110,12 +111,14 @@ const studioEditableProjectChangesFieldsV2 = {
   aspectRatio: z4.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
   resolution: z4.enum(['720p', '1080p']),
   targetDurationSeconds: z4.number().int().min(5).max(1440),
+  boardStyle: z4.enum(STUDIO_BOARD_STYLES_V2).nullable(),
 };
 const studioEditableProjectChangesSchemaV2 = z4.union([
   z4.object(studioEditableProjectChangesFieldsV2).partial().required({ name: true }).strict(),
   z4.object(studioEditableProjectChangesFieldsV2).partial().required({ aspectRatio: true }).strict(),
   z4.object(studioEditableProjectChangesFieldsV2).partial().required({ resolution: true }).strict(),
   z4.object(studioEditableProjectChangesFieldsV2).partial().required({ targetDurationSeconds: true }).strict(),
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ boardStyle: true }).strict(),
 ]);
 const studioBeatInputSchemaV2 = z4
   .object({
@@ -358,6 +361,13 @@ const studioMutationOperationSchemasV2 = {
       assetId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
+  promoteBoardPanel: z4
+    .object({
+      kind: z4.literal('promote_board_panel'),
+      shotId: studioDirectorIdSchemaV2,
+      boardAssetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
   trimShot: z4
     .object({
       kind: z4.literal('trim_shot'),
@@ -440,6 +450,7 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.applyCoverage,
   studioMutationOperationSchemasV2.setHardCut,
   studioMutationOperationSchemasV2.setSeedStill,
+  studioMutationOperationSchemasV2.promoteBoardPanel,
   studioMutationOperationSchemasV2.trimShot,
   studioMutationOperationSchemasV2.redetachLine,
   studioMutationOperationSchemasV2.rederiveLine,
@@ -869,6 +880,7 @@ export function createReadStoryboardHandlerV2(
         rules,
         aspectRatio: project.aspectRatio,
         targetDurationSeconds: project.targetDurationSeconds,
+        boardStyle: project.boardStyle,
         beatCapacity: {
           current: beatCount,
           maximum: STUDIO_MAX_BEATS,
@@ -1120,7 +1132,7 @@ export function registerStudioToolsV2(
     'read_storyboard',
     {
       description:
-        'Read the authoritative schema-3 Beat/Shot storyboard, bin, rules, references, and current video picture before proposing changes.',
+        'Read the authoritative schema-4 Beat/Shot storyboard, bin, rules, references, and current video picture before proposing changes.',
       inputSchema: z.object({}).strict(),
     },
     createReadStoryboardHandlerV2(config)
@@ -1138,7 +1150,7 @@ export function registerStudioToolsV2(
     'propose_storyboard',
     {
       description:
-        'Record one ordered schema-3 direct- or proposal-capable mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Unavailable operations return operation_not_permitted before any ID or I/O; the final serialized proposal record must fit within 256 KiB.',
+        'Record one ordered schema-4 direct- or proposal-capable mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Unavailable operations return operation_not_permitted before any ID or I/O; the final serialized proposal record must fit within 256 KiB.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
     },
     async (input) =>
@@ -1166,7 +1178,7 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of direct-capable Beat/Shot edits to that exact revision. Canonical schema-3 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. Exact add_beat and add_shot variants require caller-provided beatId and shotId and never accept legacy firstShot fields. This never starts paid generation. A batch containing proposal-only or unavailable operations is rejected atomically at capability preflight before any ID or I/O: no operation reaches command evaluation or is applied, and the operation_not_permitted error names every rejected zero-based index, kind, disposition, and reason plus every direct-capable index. Omit unavailable operations or ask the user to perform them manually when supported. If the remaining ordered direct-and-proposal-capable subset still expresses the intended atomic change, send that whole subset to propose_storyboard for user review; resubmit a direct-only subset through studio_apply_edits only when it is independently valid and only after calling read_storyboard. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable Beat/Shot edits to that exact revision. Canonical schema-4 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. Exact add_beat and add_shot variants require caller-provided beatId and shotId and never accept legacy firstShot fields. This never starts paid generation. A batch containing proposal-only or unavailable operations is rejected atomically at capability preflight before any ID or I/O: no operation reaches command evaluation or is applied, and the operation_not_permitted error names every rejected zero-based index, kind, disposition, and reason plus every direct-capable index. Omit unavailable operations or ask the user to perform them manually when supported. If the remaining ordered direct-and-proposal-capable subset still expresses the intended atomic change, send that whole subset to propose_storyboard for user review; resubmit a direct-only subset through studio_apply_edits only when it is independently valid and only after calling read_storyboard. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
     createStudioApplyEditsHandlerV2(config, writerDeps)
@@ -1175,7 +1187,7 @@ export function registerStudioToolsV2(
     'studio_get_command_status',
     {
       description:
-        'Read the exact durable or pending schema-3 status for one commandId. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
+        'Read the exact durable or pending schema-4 status for one commandId. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
       inputSchema: studioGetCommandStatusInputSchemaV2,
     },
     createStudioGetCommandStatusHandlerV2(config, writerDeps)

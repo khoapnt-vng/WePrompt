@@ -139,6 +139,7 @@ import type {
   StudioRendererPreparedSubmissionOptionsV2,
   StudioRendererExportCatalogV2,
   StudioRendererReferenceGenerationHandoffV2,
+  StudioRetryDownloadRequest,
   StudioRetryJobRequest,
   StudioRouteCatalogV2,
   StudioRevealExportResultV2,
@@ -1282,6 +1283,9 @@ export const creativeStudio = {
   ),
   retryJob: bridge.buildProvider<StudioCommandResult<StudioRendererJobV2>, StudioRetryJobRequest>(
     'creative-studio.retry-job'
+  ),
+  retryDownload: bridge.buildProvider<StudioCommandResult<StudioRendererJobV2>, StudioRetryDownloadRequest>(
+    'creative-studio.retry-job-download'
   ),
   dismissReferenceGenerationHandoff: bridge.buildProvider<
     StudioCommandResult<StudioDismissReferenceGenerationHandoffResultV2>,

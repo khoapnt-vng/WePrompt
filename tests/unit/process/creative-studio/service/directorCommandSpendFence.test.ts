@@ -219,6 +219,8 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       trimOutSeconds: null,
       chainBreak: 'none',
       seedStillId: 'seed_1',
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
       videoAssetId: 'take_1',
       supersededVideoAssetIds: [],
       assetIds: ['seed_1', 'take_1'],

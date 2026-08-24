@@ -19,6 +19,7 @@ import type { WorkspaceProjection } from '../workspaceProjection';
 import type { BeatPanelActions, BeatPanelBriefReferenceOption, BeatPanelReviewGraph } from '../BeatPanel';
 import type { BoardActions } from './Board';
 import type { CutActions } from './Cut';
+import type { TableBoardActions } from './Table';
 
 export type WorkspaceAuthoringOperationV2 = Exclude<StudioRendererAuthoringOperationV2, { kind: 'set_hard_cut' }>;
 
@@ -47,6 +48,7 @@ export type WorkspaceControlsProps = {
   errorMessageKey: string | null;
   exportErrorMessageKey: string | null;
   mutations: WorkspaceMutationCallbacks;
+  tableBoardActions: TableBoardActions;
   boardActions: BoardActions;
   cutActions: CutActions;
   beatPanelActions: BeatPanelActions;

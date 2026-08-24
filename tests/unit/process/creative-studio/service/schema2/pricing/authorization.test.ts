@@ -7,14 +7,23 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { StudioProjectV2, StudioSpendAuthorization } from '@/common/types/project/creativeStudioTypes';
-import { createStudioResolvedGenerationRequestPlan } from '@/process/services/creative-studio/service/schema2/generation';
+import type {
+  StudioProjectV2,
+  StudioQuotedGeneration,
+  StudioSpendAuthorization,
+} from '@/common/types/project/creativeStudioTypes';
+import {
+  calculateStudioQuotedGenerationAmounts,
+  createStudioQuotedGenerationId,
+  createStudioResolvedGenerationRequestPlan,
+} from '@/process/services/creative-studio/service/schema2/generation';
 import {
   createStudioRateCardV2,
   createStudioSpendAuthorizationV2,
   createStudioSpendReceiptV2,
   createStudioSubmissionQuoteCoreV2,
   studioSpendReceiptMatchesJobV2,
+  type StudioSpendAuthorizationInputV2,
 } from '@/process/services/creative-studio/service/schema2/pricing';
 
 const imageRate = {
@@ -53,6 +62,8 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
   supersededVideoAssetIds: [],
   assetIds: [],
@@ -135,6 +146,152 @@ const makeAuthorizationInput = () => {
   };
 };
 
+const makeBoardAuthorizationInput = () => {
+  const project = {
+    id: 'project_1',
+    revision: 7,
+    beatOrder: ['beat_1'],
+    beats: {
+      beat_1: {
+        id: 'beat_1',
+        title: 'Opening',
+        action: 'Cross the room',
+        look: 'Grey morning',
+        actionRevision: 1,
+        targetSeconds: null,
+        shotOrder: ['shot_1'],
+        lineHistory: [],
+      },
+    },
+    shots: { shot_1: makeShot('shot_1') },
+    jobs: {},
+  };
+  const quote = {
+    ...createStudioSubmissionQuoteCoreV2({
+      project,
+      originReferenceHandoffId: null,
+      rateCard: createStudioRateCardV2([{ ...imageRate, rateMinorUnits: 3 }]),
+      baseItems: [
+        {
+          shotId: 'shot_1',
+          purpose: 'board_still' as const,
+          routeId: imageRate.routeId,
+          generationCount: 1,
+          requestPlan: {
+            kind: 'resolved' as const,
+            snapshot: {
+              ...template,
+              durationSeconds: 4,
+              conditioningInput: null,
+            },
+          },
+        },
+      ],
+      cascadeItems: [],
+    }),
+    id: 'authorization_board',
+    expiresAt: '2026-08-18T00:05:00.000Z',
+  };
+  const item = quote.baseItems[0]!;
+  return {
+    quote,
+    confirmedAt: '2026-08-18T00:04:00.000Z',
+    providerBindings: [
+      {
+        itemId: item.id,
+        provider: { providerId: 'provider_image', adapterId: 'weprompt-image-v1' as const, model: 'image-model' },
+      },
+    ],
+    idempotencyKeys: [{ itemId: item.id, key: 'key_board' }],
+  };
+};
+
+const appendAuthorizationItem = (
+  input: StudioSpendAuthorizationInputV2,
+  item: StudioQuotedGeneration,
+  destination: 'base' | 'cascade'
+): void => {
+  const amounts = calculateStudioQuotedGenerationAmounts(item);
+  if (amounts === null) throw new Error('invalid authorization test item');
+  (destination === 'base' ? input.quote.baseItems : input.quote.cascadeItems).push(item);
+  input.quote.lowerMinorUnits += amounts.oneGenerationMinorUnits;
+  input.quote.upperMinorUnits += amounts.requestedTotalMinorUnits;
+  input.providerBindings.push({
+    itemId: item.id,
+    provider: { providerId: 'provider_image', adapterId: 'weprompt-image-v1', model: 'image-model' },
+  });
+  input.idempotencyKeys.push({ itemId: item.id, key: `key_${item.shotId}_${item.purpose}` });
+};
+
+const makeMixedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
+  const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
+  const seed = structuredClone(makeAuthorizationInput().quote.baseItems[0]!);
+  appendAuthorizationItem(input, seed, 'base');
+  return input;
+};
+
+const makeBoardCascadeAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
+  const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
+  const item = structuredClone(input.quote.baseItems[0]!);
+  item.shotId = 'shot_2';
+  item.id = createStudioQuotedGenerationId({
+    projectId: input.quote.projectId,
+    projectRevision: input.quote.projectRevision,
+    shotId: item.shotId,
+    purpose: item.purpose,
+  });
+  appendAuthorizationItem(input, item, 'cascade');
+  return input;
+};
+
+const makeBoardHandoffAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
+  const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
+  input.quote.originReferenceHandoffId = 'handoff_1';
+  return input;
+};
+
+const makeOversizedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
+  const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
+  for (let shotNumber = 2; shotNumber <= 25; shotNumber += 1) {
+    const item = structuredClone(input.quote.baseItems[0]!);
+    item.shotId = `shot_${shotNumber}`;
+    item.id = createStudioQuotedGenerationId({
+      projectId: input.quote.projectId,
+      projectRevision: input.quote.projectRevision,
+      shotId: item.shotId,
+      purpose: item.purpose,
+    });
+    appendAuthorizationItem(input, item, 'base');
+  }
+  return input;
+};
+
+const makeReferencedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
+  const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
+  const plan = input.quote.baseItems[0]!.requestPlan;
+  if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
+  plan.snapshot.referenceInput = { assetId: 'reference_1', sha256: 'a'.repeat(64) };
+  return input;
+};
+
+const makeConditionedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
+  const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
+  const plan = input.quote.baseItems[0]!.requestPlan;
+  if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
+  plan.snapshot.conditioningInput = { kind: 'seed_still', assetId: 'seed_1' };
+  return input;
+};
+
+const makeDeferredBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
+  const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
+  input.quote.baseItems[0]!.requestPlan = {
+    kind: 'after_take_selection',
+    template: { ...template, durationSeconds: 4 },
+    dependency: { kind: 'authorized_seed', upstreamItemId: 'seed_item_1', shotId: 'shot_1' },
+  };
+  return input;
+};
+
 describe('schema-2 Studio spend authorization', () => {
   it('freezes a complete provider binding and idempotency bijection', () => {
     const input = makeAuthorizationInput();
@@ -215,6 +372,43 @@ describe('schema-2 Studio spend authorization', () => {
       generationCount: 1,
       totalMinorUnits: 56,
     });
+  });
+
+  it('records a Board panel as one image generation with no billable duration', () => {
+    const authorization = createStudioSpendAuthorizationV2(makeBoardAuthorizationInput());
+    const item = authorization.baseItems[0]!;
+
+    expect(createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId: 'job_board' })).toMatchObject({
+      purpose: 'board_still',
+      durationSeconds: null,
+      rateUnit: 'generation',
+      totalMinorUnits: 3,
+    });
+  });
+
+  it('refuses a Board authority whose image plumbing duration is not canonical', () => {
+    const input = makeBoardAuthorizationInput();
+    const plan = input.quote.baseItems[0]!.requestPlan;
+    if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
+    plan.snapshot.durationSeconds = 5;
+
+    expect(() => createStudioSpendAuthorizationV2(input)).toThrow(
+      expect.objectContaining({ code: 'invalid_authorization' })
+    );
+  });
+
+  it.each([
+    ['mixed Board and seed rows', makeMixedBoardAuthorizationInput],
+    ['a Board cascade row', makeBoardCascadeAuthorizationInput],
+    ['a Board reference handoff origin', makeBoardHandoffAuthorizationInput],
+    ['more than 24 Board rows', makeOversizedBoardAuthorizationInput],
+    ['a referenced Board request', makeReferencedBoardAuthorizationInput],
+    ['a conditioned Board request', makeConditionedBoardAuthorizationInput],
+    ['a deferred Board request', makeDeferredBoardAuthorizationInput],
+  ] as const)('refuses %s before minting spend authority', (_label, makeInput) => {
+    expect(() => createStudioSpendAuthorizationV2(makeInput())).toThrow(
+      expect.objectContaining({ code: 'invalid_authorization' })
+    );
   });
 
   it('correlates the paired job and rejects a wrong logical idempotency entry', () => {

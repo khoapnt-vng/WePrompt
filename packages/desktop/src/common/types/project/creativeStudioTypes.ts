@@ -35,6 +35,12 @@ export type StudioAspectRatio = '16:9' | '9:16' | '1:1' | '4:3' | '3:4';
 
 export type StudioResolution = '720p' | '1080p';
 
+export const STUDIO_BOARD_STYLES_V2 = ['grey_tone', 'line_art', 'colour_key'] as const;
+
+export type StudioBoardStyleV2 = (typeof STUDIO_BOARD_STYLES_V2)[number];
+
+export type StudioJobPurpose = 'seed_still' | 'board_still' | 'video_take';
+
 export type StudioJobStatus =
   | 'queued_local'
   | 'submitting'
@@ -104,7 +110,7 @@ export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown';
 
 export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_running';
 
-export const STUDIO_PROJECT_SCHEMA_VERSION = 3 as const;
+export const STUDIO_PROJECT_SCHEMA_VERSION = 4 as const;
 export const STUDIO_MAX_BEATS = 24;
 export const STUDIO_MAX_SHOTS_PER_BEAT = 8;
 export const STUDIO_MAX_SHOTS_PER_PROJECT = 96;
@@ -306,6 +312,8 @@ export type StudioShot = {
   trimOutSeconds: number | null;
   chainBreak: 'none' | 'hard_cut';
   seedStillId: string | null;
+  boardAssetId: string | null;
+  supersededBoardAssetIds: string[];
   videoAssetId: string | null;
   supersededVideoAssetIds: string[];
   assetIds: string[];
@@ -420,7 +428,7 @@ export type StudioSpendPolicy = {
 export type StudioQuotedGeneration = {
   id: string;
   shotId: string;
-  purpose: 'seed_still' | 'video_take';
+  purpose: StudioJobPurpose;
   routeId: string;
   generationCount: number;
   requestPlan: StudioGenerationRequestPlan;
@@ -447,7 +455,7 @@ export type StudioSubmissionQuote = StudioSubmissionQuoteCore & {
 
 export type StudioPrepareGenerationChoiceV2 = {
   shotId: string;
-  purpose: 'seed_still' | 'video_take';
+  purpose: StudioJobPurpose;
   referenceAssetId: string | null;
 };
 
@@ -456,6 +464,12 @@ export type StudioContinuityChangeV2 = {
   hardCut: boolean;
   /** Renderer route-diagnosis hint. Main recomputes and rejects any mismatch. */
   requiresSeedGeneration: boolean;
+};
+
+/** Exact current Board panel that main may promote into the segment's pinned first frame. */
+export type StudioBoardPromotionV2 = {
+  shotId: string;
+  boardAssetId: string;
 };
 
 /** Safe pricing classifications that may cross from main to the renderer without diagnostics. */
@@ -487,6 +501,8 @@ export type StudioPrepareSubmissionRequestV2 = {
   cascadeChoices: StudioPrepareGenerationChoiceV2[];
   /** Exact paid continuity review; mutually exclusive with generation choices and reference handoffs. */
   continuityChange?: StudioContinuityChangeV2;
+  /** Exact paid Board-promotion review; mutually exclusive with every other submission intent. */
+  boardPromotion?: StudioBoardPromotionV2;
 };
 
 export type StudioConfirmSubmissionRequestV2 = {
@@ -513,7 +529,7 @@ export type StudioPreparedSubmissionOptionsV2 = {
 
 export type StudioRendererQuotedGenerationV2 = {
   shotId: string;
-  purpose: 'seed_still' | 'video_take';
+  purpose: StudioJobPurpose;
   route: StudioRendererMediaModelRef;
   generationCount: number;
   durationSeconds: number | null;
@@ -707,6 +723,7 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'reorder_shots'
       | 'set_hard_cut'
       | 'set_seed_still'
+      | 'promote_board_panel'
       | 'trim_shot'
       | 'redetach_line'
       | 'restore_line'
@@ -766,6 +783,16 @@ export type StudioRendererDirtyShotV2 = {
   causes: ('continuity_stale' | 'generation_out_of_date')[];
 };
 
+export type StudioRendererBoardPanelStaleCauseV2 = 'request_out_of_date' | 'route_out_of_date';
+
+export type StudioRendererBoardPanelStatusV2 = {
+  shotId: string;
+  assetId: string | null;
+  producerJobId: string | null;
+  latestJobId: string | null;
+  staleCauses: StudioRendererBoardPanelStaleCauseV2[];
+};
+
 export type StudioRendererParkBlockerCodeV2 =
   | 'own_nonterminal_job'
   | 'own_pending_frame'
@@ -794,6 +821,8 @@ export type StudioRendererWorkspaceStatusV2 = {
   projectRevision: number;
   undoTop: StudioRendererUndoTopV2 | null;
   dirtyShots: StudioRendererDirtyShotV2[];
+  /** One Board-panel status row per active Shot, in exact film order. */
+  boardPanels: StudioRendererBoardPanelStatusV2[];
   cascadeProgress: StudioCascadeProgressV2[];
   /** Exact renderer job identities for each active Shot's latest authorized video generation item. */
   currentVideoJobs: { shotId: string; jobIds: string[] }[];
@@ -821,7 +850,7 @@ export type StudioSpendReceipt = {
   authorizationId: string;
   itemId: string;
   jobId: string;
-  purpose: 'seed_still' | 'video_take';
+  purpose: StudioJobPurpose;
   routeId: string;
   currency: string;
   rateUnit: 'generation' | 'second';
@@ -834,7 +863,7 @@ export type StudioSpendReceipt = {
 export type StudioMediaKindV2 = 'image' | 'video' | 'audio';
 
 export type StudioManagedAssetRefV2 = {
-  collection: 'assets' | 'imports' | 'thumbnails' | 'conditioningFrames';
+  collection: 'assets' | 'imports' | 'thumbnails' | 'conditioningFrames' | 'boardStills';
   fileName: string;
 };
 
@@ -995,7 +1024,7 @@ export type StudioJobV2 = {
   duplicateChargeAcknowledgedAt: string | null;
   createdAt: string;
   updatedAt: string;
-  purpose: 'seed_still' | 'video_take';
+  purpose: StudioJobPurpose;
   authorizationId: string;
   authorizationItemId: string;
   requestPlan: StudioGenerationRequestPlan;
@@ -1051,6 +1080,7 @@ export type StudioUndoPatch =
         aspectRatio: StudioAspectRatio;
         resolution: StudioResolution;
         targetDurationSeconds: number;
+        boardStyle: StudioBoardStyleV2 | null;
         brief: string;
         rules: StudioBriefRule[];
         beatOrder: string[];
@@ -1097,7 +1127,7 @@ export type StudioEditableShotChanges = StudioNonEmptyPartial<StudioEditableShot
 
 export type StudioEditableProjectSettings = Pick<
   StudioProjectV2,
-  'name' | 'aspectRatio' | 'resolution' | 'targetDurationSeconds'
+  'name' | 'aspectRatio' | 'resolution' | 'targetDurationSeconds' | 'boardStyle'
 >;
 export type StudioEditableProjectSettingsChanges = StudioNonEmptyPartial<StudioEditableProjectSettings>;
 
@@ -1113,6 +1143,7 @@ export type StudioProjectV2 = {
   aspectRatio: StudioAspectRatio;
   targetDurationSeconds: number;
   resolution: StudioResolution;
+  boardStyle: StudioBoardStyleV2 | null;
   beatOrder: string[];
   beats: Record<string, StudioBeat>;
   shots: Record<string, StudioShot>;
@@ -1214,6 +1245,7 @@ export type StudioMutationOperationV2 =
   | { kind: 'apply_coverage'; beatId: string; shots: StudioProposedShot[]; fixedShots: StudioFixedShotReviewV2[] }
   | { kind: 'set_hard_cut'; shotId: string; hardCut: boolean }
   | { kind: 'set_seed_still'; shotId: string; assetId: string | null }
+  | { kind: 'promote_board_panel'; shotId: string; boardAssetId: string }
   | { kind: 'trim_shot'; shotId: string; trimInSeconds: number | null; trimOutSeconds: number | null }
   | { kind: 'redetach_line'; shotId: string; line: string }
   | { kind: 'rederive_line'; shotId: string; line: string }

@@ -189,8 +189,11 @@ export const createStudioResolvedGenerationRequestPlan = (
   input: StudioResolvedGenerationRequestPlanInput
 ): Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> => {
   const template = assertTemplate(input.template);
-  if (input.purpose === 'seed_still') {
-    if (input.conditioningInput !== null) throw new TypeError('seed requests cannot carry conditioning input');
+  if (input.purpose === 'seed_still' || input.purpose === 'board_still') {
+    if (input.conditioningInput !== null) throw new TypeError('still requests cannot carry conditioning input');
+    if (input.purpose === 'board_still' && template.referenceInput !== null) {
+      throw new TypeError('board requests cannot carry a Brief reference input');
+    }
   } else if (input.purpose === 'video_take') {
     if (input.conditioningInput === null) throw new TypeError('direct video requests require conditioning input');
     if (template.referenceInput !== null) throw new TypeError('video requests cannot carry a Brief reference input');

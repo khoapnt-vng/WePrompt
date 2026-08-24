@@ -51,7 +51,7 @@ const studioSpecSelectors = (): string[] => {
 };
 
 const project: StudioRendererProjectV2 = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 1,
   id: 'project-1',
   name: 'Launch film',
@@ -61,6 +61,7 @@ const project: StudioRendererProjectV2 = {
   aspectRatio: '16:9',
   targetDurationSeconds: 18,
   resolution: '720p',
+  boardStyle: null,
   beatOrder: [],
   beats: {},
   shots: {},
@@ -104,6 +105,7 @@ describe('Creative Studio E2E selectors', () => {
             projectRevision: project.revision,
             undoTop: null,
             dirtyShots: [],
+            boardPanels: [],
             cascadeProgress: [],
             currentVideoJobs: [],
             parkEligibility: [],

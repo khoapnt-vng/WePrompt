@@ -84,7 +84,7 @@ const makeProject = (
   overrides: Partial<StudioRendererProjectV2> = {}
 ): StudioRendererProjectV2 =>
   ({
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 7,
     id: 'project_1',
     name: 'Launch film',
@@ -93,6 +93,7 @@ const makeProject = (
     aspectRatio: '16:9',
     targetDurationSeconds: 12,
     resolution: '720p',
+    boardStyle: null,
     beatOrder: [],
     beats: {},
     shots: {},
@@ -113,6 +114,7 @@ const workspaceStatus = (project: StudioRendererProjectV2): StudioRendererWorksp
   projectRevision: project.revision,
   undoTop: null,
   dirtyShots: [],
+  boardPanels: [],
   cascadeProgress: [],
   currentVideoJobs: [],
   parkEligibility: [],

@@ -26,6 +26,7 @@ import {
 } from '@process/services/creative-studio/store';
 import {
   calculateStudioQuoteTotals,
+  composeStudioBoardGenerationPrompt,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
 } from '@process/services/creative-studio/service/schema2/generation';
@@ -132,6 +133,7 @@ const makeStoreV2 = async (
     includeAuthorizedJob?: boolean;
     briefReference?: boolean;
     adapterId?: StudioJobV2['provider']['adapterId'];
+    prompt?: string;
   } = {}
 ) => {
   const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-media-v2-'));
@@ -150,6 +152,7 @@ const makeStoreV2 = async (
   });
   const authored = await store.updateProjectV2(createdProject.id, (current) => ({
     ...current,
+    boardStyle: options.purpose === 'board_still' ? 'grey_tone' : null,
     beatOrder: options.addSecondShot ? ['beat_1', 'beat_2'] : ['beat_1'],
     beats: {
       beat_1: {
@@ -190,6 +193,8 @@ const makeStoreV2 = async (
         trimOutSeconds: null,
         chainBreak: 'none',
         seedStillId: null,
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
         videoAssetId: null,
         supersededVideoAssetIds: [],
         assetIds: [],
@@ -209,6 +214,8 @@ const makeStoreV2 = async (
               trimOutSeconds: null,
               chainBreak: 'none' as const,
               seedStillId: null,
+              boardAssetId: null,
+              supersededBoardAssetIds: [],
               videoAssetId: null,
               supersededVideoAssetIds: [],
               assetIds: [],
@@ -265,10 +272,16 @@ const makeStoreV2 = async (
   const requestPlan: Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> = {
     kind: 'resolved',
     snapshot: {
-      prompt: purpose === 'seed_still' ? 'A frozen seed prompt' : 'A frozen video prompt',
+      prompt:
+        options.prompt ??
+        (purpose === 'seed_still'
+          ? 'A frozen seed prompt'
+          : purpose === 'board_still'
+            ? 'A frozen board prompt'
+            : 'A frozen video prompt'),
       aspectRatio: quoteBase.aspectRatio,
       resolution: quoteBase.resolution,
-      durationSeconds: 5,
+      durationSeconds: purpose === 'board_still' ? 4 : 5,
       referenceInput: options.briefReference
         ? { assetId: 'brief_v2', sha256: createHash('sha256').update(png).digest('hex') }
         : null,
@@ -284,10 +297,10 @@ const makeStoreV2 = async (
     }),
     shotId: 'shot_1',
     purpose,
-    routeId: purpose === 'seed_still' ? 'route_image' : 'route_video',
+    routeId: purpose === 'video_take' ? 'route_video' : 'route_image',
     generationCount: 1,
     requestPlan,
-    rateUnit: purpose === 'seed_still' ? 'generation' : 'second',
+    rateUnit: purpose === 'video_take' ? 'second' : 'generation',
     rateMinorUnits: 3,
   };
   const totals = calculateStudioQuoteTotals([item]);
@@ -296,8 +309,8 @@ const makeStoreV2 = async (
     providerId: 'provider_1',
     adapterId:
       options.adapterId ??
-      (purpose === 'seed_still' ? ('weprompt-image-v1' as const) : ('weprompt-media-gateway-v1' as const)),
-    model: purpose === 'seed_still' ? 'image-model' : 'video-model',
+      (purpose === 'video_take' ? ('weprompt-media-gateway-v1' as const) : ('weprompt-image-v1' as const)),
+    model: purpose === 'video_take' ? 'video-model' : 'image-model',
   };
   const authorization: StudioSpendAuthorization = {
     id: 'authorization_v2',
@@ -352,6 +365,78 @@ const makeStoreV2 = async (
     return current;
   });
   return { rootDir, store, project, authorization, item };
+};
+
+const addBoardRedrawJob = async (store: CreativeStudioStore, projectId: string): Promise<StudioProjectV2> => {
+  const loaded = await store.getProjectV2(projectId);
+  if (loaded.status !== 'supported') throw new Error('Board redraw fixture missing');
+  const requestPlan = loaded.project.jobs.job_1?.requestPlan;
+  const provider = loaded.project.jobs.job_1?.provider;
+  if (requestPlan?.kind !== 'resolved' || provider === undefined) throw new Error('Board redraw authority missing');
+  const item: StudioQuotedGeneration = {
+    id: createStudioQuotedGenerationId({
+      projectId,
+      projectRevision: loaded.project.revision,
+      shotId: 'shot_1',
+      purpose: 'board_still',
+    }),
+    shotId: 'shot_1',
+    purpose: 'board_still',
+    routeId: 'route_image',
+    generationCount: 1,
+    requestPlan: structuredClone(requestPlan),
+    rateUnit: 'generation',
+    rateMinorUnits: 3,
+  };
+  const totals = calculateStudioQuoteTotals([item]);
+  if (totals === null) throw new Error('Invalid Board redraw total');
+  const authorization: StudioSpendAuthorization = {
+    id: 'authorization_redraw',
+    projectId,
+    projectRevision: loaded.project.revision,
+    originReferenceHandoffId: null,
+    rateCardDigest: 'c'.repeat(64),
+    currency: 'USD',
+    baseItems: [item],
+    cascadeItems: [],
+    lowerMinorUnits: totals.lowerMinorUnits,
+    upperMinorUnits: totals.upperMinorUnits,
+    expiresAt: '2026-08-17T12:10:00.000Z',
+    confirmedAt: '2026-08-17T12:05:01.000Z',
+    providerBindings: [{ itemId: item.id, provider }],
+    idempotencyKeys: [{ itemId: item.id, key: 'key_redraw' }],
+  };
+  const receipt = createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId: 'job_redraw' });
+  return store.updateProjectV2(projectId, (current) => {
+    current.spendAuthorizations.push(authorization);
+    current.jobs.job_redraw = {
+      id: 'job_redraw',
+      projectId,
+      shotId: 'shot_1',
+      status: 'running',
+      provider,
+      idempotencyKey: 'key_redraw',
+      providerJobId: null,
+      cancellationPolicy: 'none',
+      outputAssetIds: [],
+      error: null,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      createdAt: '2026-08-17T12:05:01.000Z',
+      updatedAt: '2026-08-17T12:05:01.000Z',
+      purpose: 'board_still',
+      authorizationId: authorization.id,
+      authorizationItemId: item.id,
+      requestPlan: structuredClone(requestPlan),
+      requestSnapshot: structuredClone(requestPlan.snapshot),
+      spendReceipt: receipt,
+      outputAssetIdsByRole: { primary: null, poster: null },
+    };
+    current.shots.shot_1!.jobIds.push('job_redraw');
+    return current;
+  });
 };
 
 const idSequence = (...ids: string[]): (() => string) => {
@@ -895,6 +980,181 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
   });
 
+  it('publishes a Board primary to its isolated collection and selects it atomically', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const media = createStudioMediaStore({ store, createId: () => 'board_output_1' });
+
+    const asset = await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      declaredByteSize: png.length,
+      body: Readable.from([png]),
+    });
+
+    expect(asset).toMatchObject({
+      id: 'board_output_1',
+      mediaKind: 'image',
+      managedAsset: { collection: 'boardStills', fileName: 'board_output_1.png' },
+      sourceLook: 'A frozen board prompt',
+    });
+    await expect(fs.readFile(path.join(rootDir, project.id, 'boardStills', 'board_output_1.png'))).resolves.toEqual(
+      png
+    );
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        shots: {
+          shot_1: {
+            seedStillId: null,
+            boardAssetId: 'board_output_1',
+            supersededBoardAssetIds: [],
+            videoAssetId: null,
+            assetIds: ['board_output_1'],
+          },
+        },
+        jobs: {
+          job_1: {
+            status: 'succeeded',
+            outputAssetIds: ['board_output_1'],
+            outputAssetIdsByRole: { primary: 'board_output_1', poster: null },
+          },
+        },
+      },
+    });
+  });
+
+  it.each([8 * 1024 + 1, 32 * 1024])(
+    'persists a valid %i-character Board prompt through the completed-job lifecycle',
+    async (promptLength) => {
+      const prompt = 'p'.repeat(promptLength);
+      const { store, project } = await makeStoreV2({ purpose: 'board_still', prompt });
+      const media = createStudioMediaStore({ store, createId: () => 'board_output_long_prompt' });
+
+      const asset = await media.persistProviderOutputForJobV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        declaredByteSize: png.length,
+        body: Readable.from([png]),
+      });
+      const loaded = await store.getProjectV2(project.id);
+
+      expect(asset).not.toHaveProperty('sourceLook');
+      expect(loaded).toMatchObject({
+        status: 'supported',
+        project: {
+          assets: { board_output_long_prompt: { id: 'board_output_long_prompt' } },
+          jobs: {
+            job_1: {
+              status: 'succeeded',
+              requestSnapshot: { prompt },
+              outputAssetIdsByRole: { primary: 'board_output_long_prompt', poster: null },
+            },
+          },
+        },
+      });
+    }
+  );
+
+  it('keeps the current Board panel when redraw capacity cannot hold both immutable outputs', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const firstMedia = createStudioMediaStore({ store, createId: () => 'board_output_1' });
+    await firstMedia.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+    await addBoardRedrawJob(store, project.id);
+    let consumed = false;
+    const boundedMedia = createStudioMediaStore({
+      store,
+      createId: () => 'board_output_refused',
+      limits: { projectMaxBytes: png.length * 2 - 1 },
+    });
+
+    await expect(
+      boundedMedia.persistProviderOutputForJobV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_redraw',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        declaredByteSize: png.length,
+        body: (async function* () {
+          consumed = true;
+          yield png;
+        })(),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+
+    expect(consumed).toBe(false);
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        shots: { shot_1: { boardAssetId: 'board_output_1', supersededBoardAssetIds: [] } },
+        jobs: { job_redraw: { status: 'running', outputAssetIds: [] } },
+      },
+    });
+  });
+
+  it('swaps a successful redraw while retaining the prior panel, bytes, and paid lineage', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('board_output_1', 'board_output_2'),
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+    await addBoardRedrawJob(store, project.id);
+
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_redraw',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      body: Readable.from([png]),
+    });
+
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        shots: {
+          shot_1: {
+            boardAssetId: 'board_output_2',
+            supersededBoardAssetIds: ['board_output_1'],
+            assetIds: ['board_output_1', 'board_output_2'],
+          },
+        },
+        assets: {
+          board_output_1: { managedAsset: { collection: 'boardStills' } },
+          board_output_2: { managedAsset: { collection: 'boardStills' } },
+        },
+        jobs: {
+          job_1: { status: 'succeeded', outputAssetIds: ['board_output_1'] },
+          job_redraw: { status: 'succeeded', outputAssetIds: ['board_output_2'] },
+        },
+      },
+    });
+    await expect(fs.readFile(path.join(rootDir, project.id, 'boardStills', 'board_output_1.png'))).resolves.toEqual(
+      png
+    );
+  });
+
   it('persists the decoded video duration and keeps it immutable after planning-duration edits', async () => {
     const { store, project } = await makeStoreV2({ purpose: 'video_take' });
     const probeVideoDurationSecondsV2 = vi.fn(async () => 10);
@@ -1400,7 +1660,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
 
     const undone = await store.applyMutationBatchV2(
       {
-        schemaVersion: 3,
+        schemaVersion: 4,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'undo_last', entryId: 'bed_import_mutation_1' }],
@@ -1782,7 +2042,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 3,
+        schemaVersion: 4,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -1898,7 +2158,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 3,
+        schemaVersion: 4,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -1947,7 +2207,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 3,
+        schemaVersion: 4,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2044,7 +2304,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       });
       const cleared = await store.applyMutationBatchV2(
         {
-          schemaVersion: 3,
+          schemaVersion: 4,
           projectId: project.id,
           expectedRevision: imported.project.revision,
           operations: [{ kind: 'set_bed', assetId: null }],
@@ -2113,7 +2373,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 3,
+        schemaVersion: 4,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2173,7 +2433,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       fs.writeFile(
         intentPath,
         `${JSON.stringify({
-          schemaVersion: 3,
+          schemaVersion: 4,
           kind: 'detach_bed_audio',
           projectId: project.id,
           expectedRevision: imported.project.revision,
@@ -2219,7 +2479,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await fs.writeFile(
       intentPath,
       `${JSON.stringify({
-        schemaVersion: 3,
+        schemaVersion: 4,
         kind: 'import_bed_audio',
         projectId: project.id,
         expectedRevision: project.revision,
@@ -2254,7 +2514,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 3,
+        schemaVersion: 4,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2269,7 +2529,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await fs.writeFile(
       intentPath,
       `${JSON.stringify({
-        schemaVersion: 3,
+        schemaVersion: 4,
         kind: 'detach_bed_audio',
         projectId: project.id,
         expectedRevision: cleared.project.revision,
@@ -2937,6 +3197,318 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await expect(fs.readFile(path.join(prototypeParts, 'prototype.part'), 'utf8')).resolves.toBe('prototype');
     await expect(fs.access(path.join(v2Parts, 'orphan.part'))).rejects.toMatchObject({ code: 'ENOENT' });
     await expect(fs.readFile(path.join(v2Parts, 'keep.txt'), 'utf8')).resolves.toBe('keep');
+  });
+
+  it('cleans a crash-orphaned Board publication while preserving every manifest-owned Board still', async () => {
+    const prompt = composeStudioBoardGenerationPrompt({
+      brief: '',
+      rules: [],
+      action: '',
+      look: 'A visual language inherited by the shot',
+      line: 'A precise opening frame',
+      style: 'grey_tone',
+    });
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still', prompt });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('board_output_owned', 'board_output_redraw'),
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      declaredByteSize: png.length,
+      body: Readable.from([png]),
+    });
+    const routed = await store.updateProjectV2(project.id, (current) => ({
+      ...current,
+      imageRouteId: 'route_image',
+    }));
+    const promoted = await store.applyMutationBatchV2(
+      {
+        schemaVersion: 4,
+        projectId: project.id,
+        expectedRevision: routed.revision,
+        operations: [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_output_owned' }],
+      },
+      { mutationId: 'promote_board_before_restart', capturedAt: '2026-08-17T12:04:00.000Z' }
+    );
+    expect(promoted.project.shots.shot_1).toMatchObject({
+      seedStillId: 'board_output_owned',
+      boardAssetId: 'board_output_owned',
+      chainBreak: 'none',
+    });
+    await addBoardRedrawJob(store, project.id);
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_redraw',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      declaredByteSize: png.length,
+      body: Readable.from([png]),
+    });
+    const projectDirectory = path.join(rootDir, project.id);
+    const partsDirectory = path.join(projectDirectory, 'parts');
+    const boardDirectory = path.join(projectDirectory, 'boardStills');
+    const crashPartPath = path.join(partsDirectory, 'board_output_crashed.part');
+    const crashBoardPath = path.join(boardDirectory, 'board_output_crashed.png');
+    await fs.writeFile(crashPartPath, png);
+    await fs.link(crashPartPath, crashBoardPath);
+    const restartedStore = createCreativeStudioStore({
+      rootDir,
+      createId: () => 'must_not_allocate',
+      now: () => '2026-08-17T12:10:00.000Z',
+    });
+
+    await createStudioMediaStore({ store: restartedStore }).cleanupOrphanPartsV2();
+
+    await expect(fs.access(crashPartPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.access(crashBoardPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      Promise.all(
+        ['board_output_owned.png', 'board_output_redraw.png'].map((fileName) =>
+          fs.readFile(path.join(boardDirectory, fileName))
+        )
+      )
+    ).resolves.toEqual([png, png]);
+    const restarted = await restartedStore.getProjectV2(project.id);
+    expect(restarted).toMatchObject({
+      status: 'supported',
+      project: {
+        shots: {
+          shot_1: {
+            seedStillId: 'board_output_owned',
+            boardAssetId: 'board_output_redraw',
+            supersededBoardAssetIds: ['board_output_owned'],
+            chainBreak: 'none',
+          },
+        },
+        assets: {
+          board_output_owned: { managedAsset: { collection: 'boardStills' } },
+          board_output_redraw: { managedAsset: { collection: 'boardStills' } },
+        },
+      },
+    });
+    if (restarted.status !== 'supported') throw new Error('Promoted Board project did not survive restart');
+    expect(Object.keys(restarted.project.assets).toSorted()).toEqual(['board_output_owned', 'board_output_redraw']);
+  });
+
+  it('retires an empty interrupted-cleanup shell and continues cleaning Board orphans', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+    const quarantineDirectory = path.join(boardDirectory, '.studio-cleanup-AbC123');
+    const orphanPath = path.join(boardDirectory, 'board_output_orphan.png');
+    await fs.mkdir(quarantineDirectory, { recursive: true });
+    await fs.writeFile(orphanPath, png);
+
+    await createStudioMediaStore({ store }).cleanupOrphanPartsV2();
+
+    await expect(fs.access(quarantineDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fs.access(orphanPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves populated interrupted-cleanup quarantine without blocking Board recovery', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+    const quarantineDirectory = path.join(boardDirectory, '.studio-cleanup-AbC123');
+    const quarantinedPath = path.join(quarantineDirectory, 'unverified.png');
+    const orphanPath = path.join(boardDirectory, 'board_output_orphan.png');
+    await fs.mkdir(quarantineDirectory, { recursive: true });
+    await fs.writeFile(quarantinedPath, png);
+    await fs.writeFile(orphanPath, png);
+
+    await createStudioMediaStore({ store }).cleanupOrphanPartsV2();
+
+    await expect(fs.readFile(quarantinedPath)).resolves.toEqual(png);
+    await expect(fs.access(orphanPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves an exact restored cleanup hardlink pair across repeated Board restart recovery', async () => {
+    const { rootDir, project } = await makeStoreV2({ purpose: 'board_still' });
+    const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+    const quarantineDirectory = path.join(boardDirectory, '.studio-cleanup-AbC123');
+    const fileName = 'board_output_restored.png';
+    const quarantinedPath = path.join(quarantineDirectory, fileName);
+    const restoredPath = path.join(boardDirectory, fileName);
+    await fs.mkdir(quarantineDirectory, { recursive: true });
+    await fs.writeFile(quarantinedPath, png);
+    await fs.link(quarantinedPath, restoredPath);
+    const restartedStore = createCreativeStudioStore({
+      rootDir,
+      createId: () => 'must_not_allocate',
+      now: () => '2026-08-17T12:10:00.000Z',
+    });
+    const restartedMedia = createStudioMediaStore({ store: restartedStore });
+
+    await restartedMedia.cleanupOrphanPartsV2();
+    await restartedMedia.cleanupOrphanPartsV2();
+
+    await expect(Promise.all([fs.readFile(quarantinedPath), fs.readFile(restoredPath)])).resolves.toEqual([png, png]);
+    const [quarantined, restored] = await Promise.all([fs.lstat(quarantinedPath), fs.lstat(restoredPath)]);
+    expect(quarantined.ino).toBe(restored.ino);
+    expect([quarantined.nlink, restored.nlink]).toEqual([2, 2]);
+  });
+
+  it.each(['third_link', 'multiple_entries', 'inode_mismatch'] as const)(
+    'rejects an adversarial %s cleanup quarantine without deleting either pathname',
+    async (kind) => {
+      const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+      const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+      const quarantineDirectory = path.join(boardDirectory, '.studio-cleanup-AbC123');
+      const fileName = 'board_output_ambiguous.png';
+      const quarantinedPath = path.join(quarantineDirectory, fileName);
+      const topLevelPath = path.join(boardDirectory, fileName);
+      const auxiliaryPath = path.join(rootDir, `board_output_${kind}.png`);
+      const secondaryQuarantinePath = path.join(quarantineDirectory, 'second-entry.png');
+      const replacement = Buffer.concat([png, Buffer.from([0x01])]);
+      await fs.mkdir(quarantineDirectory, { recursive: true });
+      await fs.writeFile(quarantinedPath, png);
+      if (kind === 'inode_mismatch') {
+        await fs.link(quarantinedPath, auxiliaryPath);
+        await fs.writeFile(topLevelPath, replacement);
+      } else {
+        await fs.link(quarantinedPath, topLevelPath);
+        if (kind === 'third_link') await fs.link(quarantinedPath, auxiliaryPath);
+        else await fs.writeFile(secondaryQuarantinePath, replacement);
+      }
+
+      await expect(createStudioMediaStore({ store }).cleanupOrphanPartsV2()).rejects.toMatchObject({
+        code: 'storage_error',
+      });
+
+      await expect(fs.readFile(quarantinedPath)).resolves.toEqual(png);
+      await expect(fs.readFile(topLevelPath)).resolves.toEqual(kind === 'inode_mismatch' ? replacement : png);
+      await expect(fs.readFile(kind === 'multiple_entries' ? secondaryQuarantinePath : auxiliaryPath)).resolves.toEqual(
+        kind === 'multiple_entries' ? replacement : png
+      );
+    }
+  );
+
+  it('rejects an exact cleanup hardlink pair when the top-level Board pathname is manifest-owned', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('board_output_owned'),
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      declaredByteSize: png.length,
+      body: Readable.from([png]),
+    });
+    const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+    const quarantineDirectory = path.join(boardDirectory, '.studio-cleanup-AbC123');
+    const fileName = 'board_output_owned.png';
+    const ownedPath = path.join(boardDirectory, fileName);
+    const quarantinedPath = path.join(quarantineDirectory, fileName);
+    await fs.mkdir(quarantineDirectory);
+    await fs.link(ownedPath, quarantinedPath);
+
+    await expect(media.cleanupOrphanPartsV2()).rejects.toMatchObject({ code: 'storage_error' });
+
+    await expect(Promise.all([fs.readFile(ownedPath), fs.readFile(quarantinedPath)])).resolves.toEqual([png, png]);
+  });
+
+  it.each(['symlink', 'directory', 'hardlink'] as const)(
+    'rejects an unreferenced Board %s without touching its external authority',
+    async (kind) => {
+      const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+      const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+      const unsafePath = path.join(boardDirectory, 'unsafe.png');
+      const outsidePath = path.join(rootDir, `outside-${kind}.png`);
+      await fs.mkdir(boardDirectory);
+      await fs.writeFile(outsidePath, png);
+      if (kind === 'symlink') await fs.symlink(outsidePath, unsafePath);
+      else if (kind === 'directory') await fs.mkdir(unsafePath);
+      else await fs.link(outsidePath, unsafePath);
+
+      await expect(createStudioMediaStore({ store }).cleanupOrphanPartsV2()).rejects.toMatchObject({
+        code: 'storage_error',
+      });
+
+      const unsafeStats = await fs.lstat(unsafePath);
+      expect(
+        kind === 'symlink' ? unsafeStats.isSymbolicLink() : kind === 'directory' ? unsafeStats.isDirectory() : true
+      ).toBe(true);
+      await expect(fs.readFile(outsidePath)).resolves.toEqual(png);
+    }
+  );
+
+  it('rejects a Board orphan identity swap and preserves the winning replacement', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+    const orphanPath = path.join(boardDirectory, 'board_output_orphan.png');
+    const replacementPath = path.join(rootDir, 'board_output_replacement.png');
+    const replacement = Buffer.concat([png, Buffer.from([0x01])]);
+    await fs.mkdir(boardDirectory);
+    await fs.writeFile(orphanPath, png);
+    await fs.writeFile(replacementPath, replacement);
+    let swapped = false;
+    const media = createStudioMediaStore({
+      store,
+      beforeCleanupOwnership: async (filePath) => {
+        if (path.basename(filePath) !== path.basename(orphanPath) || swapped) return;
+        swapped = true;
+        await fs.rm(filePath);
+        await fs.rename(replacementPath, filePath);
+      },
+    });
+
+    await expect(media.cleanupOrphanPartsV2()).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(swapped).toBe(true);
+    await expect(fs.readFile(orphanPath)).resolves.toEqual(replacement);
+  });
+
+  it('rejects a project-authority race before removing an unreferenced Board still', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+    const orphanPath = path.join(boardDirectory, 'board_output_orphan.png');
+    await fs.mkdir(boardDirectory);
+    await fs.writeFile(orphanPath, png);
+    let revised = false;
+    const media = createStudioMediaStore({
+      store,
+      beforeCleanupOwnership: async (filePath) => {
+        if (path.basename(filePath) !== path.basename(orphanPath) || revised) return;
+        revised = true;
+        await store.updateProjectV2(project.id, (current) => ({ ...current, name: 'Revised during cleanup' }));
+      },
+    });
+
+    await expect(media.cleanupOrphanPartsV2()).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(revised).toBe(true);
+    await expect(fs.readFile(orphanPath)).resolves.toEqual(png);
+  });
+
+  it('rejects a hardlink introduced at the Board cleanup ownership fence', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still' });
+    const boardDirectory = path.join(rootDir, project.id, 'boardStills');
+    const orphanPath = path.join(boardDirectory, 'board_output_orphan.png');
+    const outsideLink = path.join(rootDir, 'board_output_winning_link.png');
+    await fs.mkdir(boardDirectory);
+    await fs.writeFile(orphanPath, png);
+    let linked = false;
+    const media = createStudioMediaStore({
+      store,
+      beforeCleanupOwnership: async (filePath) => {
+        if (path.basename(filePath) !== path.basename(orphanPath) || linked) return;
+        linked = true;
+        await fs.link(filePath, outsideLink);
+      },
+    });
+
+    await expect(media.cleanupOrphanPartsV2()).rejects.toMatchObject({ code: 'storage_error' });
+
+    expect(linked).toBe(true);
+    await expect(Promise.all([fs.readFile(orphanPath), fs.readFile(outsideLink)])).resolves.toEqual([png, png]);
   });
 
   it('extracts one trim-aware local conditioning frame and coalesces duplicate scheduling', async () => {

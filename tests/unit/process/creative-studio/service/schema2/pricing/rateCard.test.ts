@@ -39,6 +39,7 @@ describe('schema-2 Studio rate card', () => {
     const card = createStudioRateCardV2([imageRate, videoRate]);
 
     expect(getStudioRateCardEntryV2(card, imageRate.routeId, 'seed_still')).toEqual(imageRate);
+    expect(getStudioRateCardEntryV2(card, imageRate.routeId, 'board_still')).toEqual(imageRate);
     expect(getStudioRateCardEntryV2(card, videoRate.routeId, 'video_take')).toEqual(videoRate);
   });
 
@@ -68,6 +69,12 @@ describe('schema-2 Studio rate card', () => {
     );
     expect(() => getStudioRateCardEntryV2(card, imageRate.routeId, 'video_take')).toThrow(
       expect.objectContaining({ code: 'route_kind_mismatch' })
+    );
+    expect(() => getStudioRateCardEntryV2(card, videoRate.routeId, 'board_still')).toThrow(
+      expect.objectContaining({ code: 'route_kind_mismatch' })
+    );
+    expect(() => getStudioRateCardEntryV2(card, imageRate.routeId, 'future_purpose' as never)).toThrow(
+      expect.objectContaining({ code: 'invalid_rate_card' })
     );
   });
 

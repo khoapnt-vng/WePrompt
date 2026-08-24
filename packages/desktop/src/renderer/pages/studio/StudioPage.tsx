@@ -14,6 +14,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ipcBridge } from '@/common';
 import {
   STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_MUTATION_OPERATIONS,
   type StudioBinItem,
   type StudioBriefRuleDraft,
@@ -29,6 +30,9 @@ import { StudioLibrary } from './components/Library';
 import { DirectorProposals } from './components/Shell/DirectorProposals';
 import {
   SpendGateModal,
+  boardGateDraft,
+  boardPromotionGatePlan,
+  boardSelectionGateDraft,
   continuityGateDraft,
   hasGenerationAffectingWorkspaceDrafts,
   handoffGateDraft,
@@ -54,9 +58,13 @@ import {
   type CutActions,
   type CutCopyResult,
   type CutImportResult,
+  type SpendGateDraft,
+  type SpendGateBoardPromotion,
   type SpendGateRouteIssue,
+  type TableBoardActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
+  type WorkspaceProjection,
   type WorkspaceShellHandle,
 } from './components/Workspace';
 import { useStudioProject } from './hooks/useStudioProject';
@@ -126,6 +134,38 @@ const containsUnavailableHardCutOperation = (operations: readonly StudioRenderer
 const cloneBinItem = (item: StudioBinItem): StudioBinItem => {
   if (item.kind === 'beat') return { kind: 'beat', beatId: item.beatId, reason: item.reason };
   return { kind: 'shot', beatId: item.beatId, shotId: item.shotId, reason: 'lifted' };
+};
+
+const BOARD_STOP_JOB_STATUSES: ReadonlySet<StudioRendererJobV2['status']> = new Set([
+  'queued_local',
+  'submitting',
+  'queued_remote',
+  'running',
+]);
+const BOARD_DRAW_PANEL_ACTIVITIES = new Set(['idle', 'failed', 'cancelled']);
+
+type BoardStopCandidate = { shotId: string; jobId: string };
+
+const exactLatestCancellableBoardJob = (
+  project: StudioRendererProjectV2,
+  candidate: BoardStopCandidate
+): StudioRendererJobV2 | null => {
+  const shot = Object.hasOwn(project.shots, candidate.shotId) ? project.shots[candidate.shotId] : undefined;
+  if (shot?.id !== candidate.shotId) return null;
+  let activeOwnerships = 0;
+  for (const beatId of project.beatOrder) {
+    const beat = Object.hasOwn(project.beats, beatId) ? project.beats[beatId] : undefined;
+    if (beat?.id === beatId) activeOwnerships += beat.shotOrder.filter((shotId) => shotId === shot.id).length;
+  }
+  if (activeOwnerships !== 1 || shot.jobIds.filter((jobId) => jobId === candidate.jobId).length !== 1) return null;
+  const boardJobs = shot.jobIds.flatMap((jobId) => {
+    const job = Object.hasOwn(project.jobs, jobId) ? project.jobs[jobId] : undefined;
+    return job?.id === jobId && job.projectId === project.id && job.shotId === shot.id && job.purpose === 'board_still'
+      ? [job]
+      : [];
+  });
+  const job = boardJobs.at(-1);
+  return job?.id === candidate.jobId && job.canCancel && BOARD_STOP_JOB_STATUSES.has(job.status) ? job : null;
 };
 
 const projectDraftValues = (project: StudioRendererProjectV2): Record<string, WorkspaceDraftValue> => {
@@ -239,6 +279,8 @@ const StudioProjectPage: React.FC<{
     activeShotIds: projection?.activeShotIds ?? [],
     enabled: project !== null,
   });
+  const generationDraftsBlockReview =
+    drafts.staleRevision || activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
 
   useEffect(() => {
     if (routeView !== null) {
@@ -252,8 +294,121 @@ const StudioProjectPage: React.FC<{
     const [refreshed] = await Promise.all([refetchProjectWorkspace(), refetchReferences()]);
     if (refreshed !== null) projectRef.current = refreshed;
   }, [refetchProjectWorkspace, refetchReferences]);
-  const spendGate = useSpendGate({ onConfirmed: afterPaidConfirm });
-  const spendGateLocked = spendGate.state.phase === 'confirming' || spendGate.state.phase === 'quote_in_use';
+  const promoteBoardPanelOnly = useCallback(
+    async (input: {
+      projectId: string;
+      expectedRevision: number;
+      promotion: SpendGateBoardPromotion;
+    }): Promise<boolean> => {
+      const current = projectRef.current;
+      if (
+        current === null ||
+        projection === null ||
+        workspacePendingRef.current ||
+        generationDraftsBlockReview ||
+        current.id !== input.projectId ||
+        current.revision !== input.expectedRevision ||
+        projection.projectId !== current.id ||
+        projection.projectRevision !== current.revision
+      ) {
+        return false;
+      }
+      const plan = boardPromotionGatePlan({
+        project: current,
+        projection,
+        shotId: input.promotion.shotId,
+        boardAssetId: input.promotion.boardAssetId,
+      });
+      const originalShot = Object.hasOwn(current.shots, input.promotion.shotId)
+        ? current.shots[input.promotion.shotId]
+        : undefined;
+      if (
+        plan === null ||
+        originalShot?.id !== input.promotion.shotId ||
+        plan.draft.projectId !== input.projectId ||
+        plan.draft.expectedRevision !== input.expectedRevision ||
+        plan.draft.boardPromotion?.shotId !== input.promotion.shotId ||
+        plan.draft.boardPromotion.boardAssetId !== input.promotion.boardAssetId
+      ) {
+        return false;
+      }
+      const originalChainBreaks = new Map(
+        Object.entries(current.shots).flatMap(([shotId, candidate]) =>
+          candidate?.id === shotId ? [[shotId, candidate.chainBreak] as const] : []
+        )
+      );
+      const originalCurrentTakes = new Map(
+        plan.impact.currentTakeShotIds.flatMap((shotId) => {
+          const candidate = Object.hasOwn(current.shots, shotId) ? current.shots[shotId] : undefined;
+          return candidate?.id === shotId && candidate.videoAssetId !== null
+            ? [[shotId, candidate.videoAssetId] as const]
+            : [];
+        })
+      );
+      if (originalCurrentTakes.size !== plan.impact.currentTakeShotIds.length) return false;
+
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
+      try {
+        const result = await ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+          projectId: current.id,
+          expectedRevision: current.revision,
+          operations: [
+            {
+              kind: 'promote_board_panel',
+              shotId: input.promotion.shotId,
+              boardAssetId: input.promotion.boardAssetId,
+            },
+          ],
+        });
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          return false;
+        }
+        const refreshed = await refetchProjectWorkspace();
+        const promotedShot =
+          refreshed !== null && Object.hasOwn(refreshed.shots, input.promotion.shotId)
+            ? refreshed.shots[input.promotion.shotId]
+            : undefined;
+        if (
+          refreshed === null ||
+          refreshed.id !== current.id ||
+          refreshed.revision <= current.revision ||
+          refreshed.revision !== result.data.projectRevision ||
+          promotedShot?.id !== originalShot.id ||
+          promotedShot.boardAssetId !== input.promotion.boardAssetId ||
+          promotedShot.seedStillId !== input.promotion.boardAssetId ||
+          promotedShot.chainBreak !== originalShot.chainBreak ||
+          [...originalChainBreaks].some(([shotId, chainBreak]) => {
+            const candidate = Object.hasOwn(refreshed.shots, shotId) ? refreshed.shots[shotId] : undefined;
+            return candidate?.id !== shotId || candidate.chainBreak !== chainBreak;
+          }) ||
+          [...originalCurrentTakes].some(([shotId, assetId]) => {
+            const candidate = Object.hasOwn(refreshed.shots, shotId) ? refreshed.shots[shotId] : undefined;
+            return candidate?.id !== shotId || candidate.videoAssetId !== assetId;
+          })
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        projectRef.current = refreshed;
+        return true;
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        return false;
+      } finally {
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
+      }
+    },
+    [generationDraftsBlockReview, projection, refetchProjectWorkspace, setActionErrorMessageKey]
+  );
+  const spendGate = useSpendGate({ onConfirmed: afterPaidConfirm, onPromoteOnly: promoteBoardPanelOnly });
+  const spendGateLocked =
+    spendGate.state.phase === 'promoting' ||
+    spendGate.state.phase === 'confirming' ||
+    spendGate.state.phase === 'quote_in_use';
   const editSpendGateRoutes = useCallback(
     (_issue: SpendGateRouteIssue): void => {
       setBriefDialogRequest((request) => request + 1);
@@ -282,8 +437,6 @@ const StudioProjectPage: React.FC<{
     }
     spendGate.open(draft);
   }, [projection, setActionErrorMessageKey, spendGate.open, spendGateLocked]);
-  const generationDraftsBlockReview =
-    drafts.staleRevision || activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
   const beatPanelReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
@@ -325,15 +478,70 @@ const StudioProjectPage: React.FC<{
     return projection.activeShotIds.flatMap((triggerShotId) => {
       const draft = selectionGateDraft({ project, projection, orderedShotIds: [triggerShotId] });
       if (draft === null) return [];
-      const choices = [...draft.baseChoices, ...draft.cascadeChoices].map(({ shotId, purpose }) => ({
-        shotId,
-        purpose,
-      }));
+      const choices = [...draft.baseChoices, ...draft.cascadeChoices].flatMap(({ shotId, purpose }) =>
+        purpose === 'seed_still' || purpose === 'video_take' ? [{ shotId, purpose }] : []
+      );
       const [firstChoice, ...remainingChoices] = choices;
       if (firstChoice === undefined) return [];
       return [{ triggerShotId, choices: [firstChoice, ...remainingChoices] }];
     });
   }, [project, projection]);
+
+  const openBoardSpendGate = useCallback(
+    (
+      buildDraft: (current: StudioRendererProjectV2, exactProjection: WorkspaceProjection) => SpendGateDraft | null
+    ): void => {
+      const current = projectRef.current;
+      if (
+        current === null ||
+        projection === null ||
+        spendGateLocked ||
+        workspacePendingRef.current ||
+        current.id !== projection.projectId ||
+        current.revision !== projection.projectRevision
+      ) {
+        return;
+      }
+      if (generationDraftsBlockReview) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+        return;
+      }
+      if (
+        projection.boardPanels.length !== projection.activeShotIds.length ||
+        projection.boardPanels.some(
+          (panel) => panel.freshness === 'status_pending' || panel.activity === 'status_pending'
+        )
+      ) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.statusRequired');
+        return;
+      }
+      if (routeCatalog === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+        return;
+      }
+      if (current.imageRouteId === null || routeCatalog.image.status !== 'ready') {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
+        return;
+      }
+      const draft = buildDraft(current, projection);
+      if (draft === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+        return;
+      }
+      const routeIssue = spendGateRouteIssue(routeCatalog, draft);
+      if (routeIssue !== null) {
+        setActionErrorMessageKey(
+          routeIssue === 'image'
+            ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+            : 'conversation.creativeStudio.workspace.gate.errors.routesUnavailable'
+        );
+        return;
+      }
+      setActionErrorMessageKey(null);
+      spendGate.open(draft);
+    },
+    [generationDraftsBlockReview, projection, routeCatalog, setActionErrorMessageKey, spendGate.open, spendGateLocked]
+  );
 
   const runWorkspaceCommitAtRevision = useCallback(
     async (
@@ -407,7 +615,6 @@ const StudioProjectPage: React.FC<{
         job.projectId !== current.id ||
         job.shotId !== shot.id ||
         !shot.jobIds.includes(job.id) ||
-        job.status !== 'needs_attention' ||
         !isAuthorized(job)
       ) {
         return false;
@@ -922,7 +1129,11 @@ const StudioProjectPage: React.FC<{
       retryGenerationJob: async (jobId, acknowledgePossibleDuplicateCharge) =>
         runJobRecovery(
           jobId,
-          (job) => job.canRetry && acknowledgePossibleDuplicateCharge === (job.error?.code === 'submission_unknown'),
+          (job) =>
+            (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
+            job.status === 'needs_attention' &&
+            job.canRetry &&
+            acknowledgePossibleDuplicateCharge === (job.error?.code === 'submission_unknown'),
           (current) =>
             ipcBridge.creativeStudio.retryJob.invoke({
               projectId: current.id,
@@ -934,7 +1145,10 @@ const StudioProjectPage: React.FC<{
       cancelGenerationJob: async (jobId) =>
         runJobRecovery(
           jobId,
-          (job) => job.canCancel,
+          (job) =>
+            (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
+            job.status === 'needs_attention' &&
+            job.canCancel,
           (current) =>
             ipcBridge.creativeStudio.cancelJob.invoke({
               projectId: current.id,
@@ -960,6 +1174,252 @@ const StudioProjectPage: React.FC<{
       setActionErrorMessageKey,
       spendGate.open,
       spendGateLocked,
+    ]
+  );
+
+  const stopBoardJobs = useCallback((): void => {
+    const current = projectRef.current;
+    if (
+      current === null ||
+      projection === null ||
+      spendGateLocked ||
+      workspacePendingRef.current ||
+      projection.projectId !== current.id ||
+      projection.projectRevision !== current.revision
+    ) {
+      return;
+    }
+    const seenJobs = new Set<string>();
+    const candidates = projection.boardPanels
+      .flatMap((panel): BoardStopCandidate[] => {
+        if (
+          panel.latestJobId === null ||
+          (panel.activity !== 'queued' && panel.activity !== 'drawing') ||
+          seenJobs.has(panel.latestJobId)
+        ) {
+          return [];
+        }
+        seenJobs.add(panel.latestJobId);
+        return [{ shotId: panel.shotId, jobId: panel.latestJobId }];
+      })
+      .slice(0, STUDIO_MAX_SHOTS_PER_PROJECT);
+    if (candidates.length === 0) return;
+
+    void runWorkspaceExclusive(async () => {
+      let failureMessageKey: string | null = null;
+      for (const candidate of candidates) {
+        const authority = projectRef.current;
+        if (authority === null) break;
+        const job = exactLatestCancellableBoardJob(authority, candidate);
+        if (job === null) continue;
+
+        let result: Awaited<ReturnType<typeof ipcBridge.creativeStudio.cancelJob.invoke>> | null = null;
+        try {
+          result = await ipcBridge.creativeStudio.cancelJob.invoke({
+            projectId: authority.id,
+            jobId: job.id,
+            expectedRevision: authority.revision,
+          });
+        } catch {
+          failureMessageKey ??= 'conversation.creativeStudio.workspace.errors.storage';
+        }
+
+        const refreshed = await refetchProjectWorkspace();
+        if (refreshed === null || refreshed.id !== authority.id || refreshed.revision < authority.revision) {
+          failureMessageKey ??= 'conversation.creativeStudio.workspace.errors.storage';
+          break;
+        }
+        projectRef.current = refreshed;
+        if (result === null) continue;
+        if (result.ok === false) {
+          failureMessageKey ??= result.error.messageKey;
+          continue;
+        }
+        const returnedJob = result.data;
+        const refreshedJob = Object.hasOwn(refreshed.jobs, job.id) ? refreshed.jobs[job.id] : undefined;
+        const validSubmittingOutcome =
+          job.status === 'submitting' &&
+          returnedJob.status === 'needs_attention' &&
+          returnedJob.error?.code === 'submission_unknown';
+        if (
+          refreshed.revision <= authority.revision ||
+          returnedJob.id !== job.id ||
+          returnedJob.projectId !== authority.id ||
+          returnedJob.shotId !== job.shotId ||
+          returnedJob.purpose !== 'board_still' ||
+          (returnedJob.status !== 'cancelled' && !validSubmittingOutcome) ||
+          refreshedJob?.id !== returnedJob.id ||
+          refreshedJob.projectId !== returnedJob.projectId ||
+          refreshedJob.shotId !== returnedJob.shotId ||
+          refreshedJob.purpose !== 'board_still' ||
+          refreshedJob.status !== returnedJob.status
+        ) {
+          failureMessageKey ??= 'conversation.creativeStudio.workspace.errors.storage';
+        }
+      }
+      if (failureMessageKey !== null) setActionErrorMessageKey(failureMessageKey);
+    });
+  }, [projection, refetchProjectWorkspace, runWorkspaceExclusive, setActionErrorMessageKey, spendGateLocked]);
+
+  const tableBoardActions = useMemo<TableBoardActions>(
+    () => ({
+      setStyle: (style) => {
+        const current = projectRef.current;
+        if (current === null || current.boardStyle === style || workspacePendingRef.current || spendGateLocked) {
+          return;
+        }
+        if (generationDraftsBlockReview) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+          return;
+        }
+        void mutations.editProject({ boardStyle: style });
+      },
+      drawNext: () =>
+        openBoardSpendGate((current, exactProjection) =>
+          boardGateDraft({
+            project: current,
+            projection: exactProjection,
+          })
+        ),
+      drawBeat: (beatId) =>
+        openBoardSpendGate((current, exactProjection) => {
+          const beat = Object.hasOwn(current.beats, beatId) ? current.beats[beatId] : undefined;
+          if (beat?.id !== beatId || current.beatOrder.filter((activeBeatId) => activeBeatId === beatId).length !== 1) {
+            return null;
+          }
+          const panelsByShotId = new Map(exactProjection.boardPanels.map((panel) => [panel.shotId, panel]));
+          const missingShotIds = beat.shotOrder.filter((shotId) => {
+            const panel = panelsByShotId.get(shotId);
+            return (
+              panel?.freshness === 'missing' &&
+              BOARD_DRAW_PANEL_ACTIVITIES.has(panel.activity) &&
+              panel.recovery?.canRetryDownload !== true
+            );
+          });
+          return boardSelectionGateDraft({
+            project: current,
+            projection: exactProjection,
+            orderedShotIds: missingShotIds,
+          });
+        }),
+      redrawShot: (shotId) =>
+        openBoardSpendGate((current, exactProjection) => {
+          const panel = exactProjection.boardPanels.find((candidate) => candidate.shotId === shotId);
+          return panel === undefined || panel.assetId === null
+            ? null
+            : boardSelectionGateDraft({
+                project: current,
+                projection: exactProjection,
+                orderedShotIds: [shotId],
+              });
+        }),
+      redrawBeat: (beatId) =>
+        openBoardSpendGate((current, exactProjection) => {
+          const beat = Object.hasOwn(current.beats, beatId) ? current.beats[beatId] : undefined;
+          if (beat?.id !== beatId || current.beatOrder.filter((activeBeatId) => activeBeatId === beatId).length !== 1) {
+            return null;
+          }
+          const panelsByShotId = new Map(exactProjection.boardPanels.map((panel) => [panel.shotId, panel]));
+          if (beat.shotOrder.some((shotId) => panelsByShotId.get(shotId)?.assetId == null)) return null;
+          return boardSelectionGateDraft({
+            project: current,
+            projection: exactProjection,
+            orderedShotIds: beat.shotOrder,
+          });
+        }),
+      promotePanel: (shotId, boardAssetId) => {
+        const current = projectRef.current;
+        if (
+          current === null ||
+          projection === null ||
+          spendGateLocked ||
+          workspacePendingRef.current ||
+          current.id !== projection.projectId ||
+          current.revision !== projection.projectRevision
+        ) {
+          return;
+        }
+        if (generationDraftsBlockReview) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+          return;
+        }
+        if (!projection.workspaceStatusReady || !projection.chainStatusReady) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.statusRequired');
+          return;
+        }
+        const plan = boardPromotionGatePlan({ project: current, projection, shotId, boardAssetId });
+        if (plan === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+          return;
+        }
+        setActionErrorMessageKey(null);
+        spendGate.open(plan.draft, {
+          ...plan.impact,
+          paidRouteReady:
+            current.videoRouteId !== null && routeCatalog !== null && routeCatalog.video.status === 'ready',
+        });
+      },
+      retryJob: (jobId, acknowledgePossibleDuplicateCharge) => {
+        if (spendGateLocked) return;
+        void runJobRecovery(
+          jobId,
+          (job) =>
+            job.purpose === 'board_still' &&
+            job.status === 'needs_attention' &&
+            job.canRetry &&
+            acknowledgePossibleDuplicateCharge === (job.error?.code === 'submission_unknown'),
+          (current) =>
+            ipcBridge.creativeStudio.retryJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+              acknowledgePossibleDuplicateCharge,
+            })
+        );
+      },
+      retryDownload: (jobId) => {
+        if (spendGateLocked) return;
+        void runJobRecovery(
+          jobId,
+          (job) =>
+            job.purpose === 'board_still' &&
+            job.status === 'failed' &&
+            job.error?.code === 'download_failed' &&
+            job.canRetryDownload,
+          (current) =>
+            ipcBridge.creativeStudio.retryDownload.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+            })
+        );
+      },
+      cancelJob: (jobId) => {
+        if (spendGateLocked) return;
+        void runJobRecovery(
+          jobId,
+          (job) => job.purpose === 'board_still' && job.status === 'needs_attention' && job.canCancel,
+          (current) =>
+            ipcBridge.creativeStudio.cancelJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+            })
+        );
+      },
+      stop: stopBoardJobs,
+    }),
+    [
+      generationDraftsBlockReview,
+      mutations,
+      openBoardSpendGate,
+      projection,
+      routeCatalog,
+      runJobRecovery,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+      stopBoardJobs,
     ]
   );
 
@@ -1607,6 +2067,7 @@ const StudioProjectPage: React.FC<{
           <WorkspaceControls
             activeView={activeView}
             boardActions={boardActions}
+            tableBoardActions={tableBoardActions}
             cutActions={cutActions}
             project={project}
             projection={projection}
@@ -1627,6 +2088,7 @@ const StudioProjectPage: React.FC<{
       <SpendGateModal
         state={spendGate.state}
         close={spendGate.close}
+        promoteOnly={spendGate.promoteOnly}
         prepare={spendGate.prepare}
         selectOption={spendGate.selectOption}
         confirm={spendGate.confirm}

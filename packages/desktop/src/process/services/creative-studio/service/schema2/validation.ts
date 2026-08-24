@@ -7,6 +7,7 @@
 import { types as nodeTypes } from 'node:util';
 import {
   isValidProviderJobId,
+  STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
@@ -27,11 +28,14 @@ import {
   type StudioBinItem,
   type StudioGenerationRequestPlan,
   type StudioJobV2,
+  type StudioJobPurpose,
   type StudioProjectV2,
   type StudioProviderAdapterId,
   type StudioShot,
+  type StudioSubmissionQuote,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  STUDIO_MANAGED_ASSET_COLLECTIONS_V2,
   STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
   isCanonicalStudioBedAudioAssetV2,
   isStudioBriefReferenceLabel,
@@ -43,13 +47,15 @@ import {
   calculateStudioQuotedGenerationAmounts,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
+  STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from './generation';
+import { studioBoardAuthorizationScopeIsValidV2 } from './pricing/authorization';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
 const RESOLUTIONS = new Set(['720p', '1080p']);
+const BOARD_STYLES: ReadonlySet<string> = new Set(STUDIO_BOARD_STYLES_V2);
 const MEDIA_KINDS = new Set(['image', 'video', 'audio']);
-const MANAGED_ASSET_COLLECTIONS = new Set(['assets', 'imports', 'thumbnails', 'conditioningFrames']);
 const ADAPTER_IDS: ReadonlySet<StudioProviderAdapterId> = new Set([
   'weprompt-image-v1',
   'byteplus-seedance-v1',
@@ -84,7 +90,7 @@ const JOB_ERROR_CODES = new Set([
   'dependency_failed',
 ]);
 const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
-const PURPOSES = new Set(['seed_still', 'video_take']);
+const PURPOSES: ReadonlySet<string> = new Set<StudioJobPurpose>(['seed_still', 'board_still', 'video_take']);
 const RATE_UNITS = new Set(['generation', 'second']);
 const FRAME_STATUSES = new Set(['pending', 'extracting', 'ready', 'failed']);
 const FRAME_ERROR_CODES = new Set(['decode_failed', 'source_missing', 'storage_error']);
@@ -109,6 +115,7 @@ const PROJECT_REQUIRED_KEYS = new Set([
   'aspectRatio',
   'targetDurationSeconds',
   'resolution',
+  'boardStyle',
   'beatOrder',
   'beats',
   'shots',
@@ -149,6 +156,8 @@ const SHOT_KEYS = new Set([
   'trimOutSeconds',
   'chainBreak',
   'seedStillId',
+  'boardAssetId',
+  'supersededBoardAssetIds',
   'videoAssetId',
   'supersededVideoAssetIds',
   'assetIds',
@@ -288,6 +297,7 @@ const PROJECT_PATCH_BEFORE_KEYS = new Set([
   'aspectRatio',
   'resolution',
   'targetDurationSeconds',
+  'boardStyle',
   'brief',
   'rules',
   'beatOrder',
@@ -608,6 +618,8 @@ const validateShotRecord = (
   isNullableTrim(value.trimOutSeconds) &&
   (value.chainBreak === 'none' || value.chainBreak === 'hard_cut') &&
   isNullableSafeId(value.seedStillId) &&
+  isNullableSafeId(value.boardAssetId) &&
+  isUniqueSafeIdArray(value.supersededBoardAssetIds) &&
   isNullableSafeId(value.videoAssetId) &&
   isUniqueSafeIdArray(value.supersededVideoAssetIds) &&
   (!requireMembership || (isUniqueSafeIdArray(value.assetIds) && isUniqueSafeIdArray(value.jobIds)));
@@ -684,7 +696,9 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
     !MEDIA_KINDS.has(value.mediaKind) ||
     !isNonEmptyStringWithin(value.mimeType, 256) ||
     typeof value.managedAsset.collection !== 'string' ||
-    !MANAGED_ASSET_COLLECTIONS.has(value.managedAsset.collection) ||
+    !STUDIO_MANAGED_ASSET_COLLECTIONS_V2.has(
+      value.managedAsset.collection as StudioAssetV2['managedAsset']['collection']
+    ) ||
     !isSafeFileName(value.managedAsset.fileName) ||
     !isIntegerInRange(value.byteSize, 0, Number.MAX_SAFE_INTEGER) ||
     !isLowercaseDigest(value.sha256) ||
@@ -1052,6 +1066,17 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
     ) {
       return false;
     }
+  } else if (value.purpose === 'board_still') {
+    if (
+      value.rateUnit !== 'generation' ||
+      plan.kind !== 'resolved' ||
+      !isRecord(plan.snapshot) ||
+      plan.snapshot.durationSeconds !== STUDIO_BOARD_REQUEST_DURATION_SECONDS ||
+      plan.snapshot.referenceInput !== null ||
+      plan.snapshot.conditioningInput !== null
+    ) {
+      return false;
+    }
   } else if (
     value.rateUnit !== 'second' ||
     (plan.kind === 'resolved' &&
@@ -1068,7 +1093,7 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
         projectId,
         projectRevision,
         shotId: value.shotId as string,
-        purpose: value.purpose as 'seed_still' | 'video_take',
+        purpose: value.purpose as StudioJobPurpose,
       }) &&
     calculateStudioQuotedGenerationAmounts(value as Parameters<typeof calculateStudioQuotedGenerationAmounts>[0]) !==
       null
@@ -1114,6 +1139,7 @@ const validateAuthorizationShape = (value: unknown, projectId: string, currentRe
     shotIds.add(quoted.shotId as string);
     if (shotIds.size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) return false;
   }
+  if (!studioBoardAuthorizationScopeIsValidV2(value as unknown as StudioSubmissionQuote)) return false;
   const totals = calculateStudioQuoteTotals(items as Parameters<typeof calculateStudioQuoteTotals>[0]);
   if (
     totals === null ||
@@ -1198,6 +1224,7 @@ const validateProjectPatchBefore = (value: unknown): boolean =>
   typeof value.resolution === 'string' &&
   RESOLUTIONS.has(value.resolution) &&
   isIntegerInRange(value.targetDurationSeconds, 5, 1440) &&
+  (value.boardStyle === null || (typeof value.boardStyle === 'string' && BOARD_STYLES.has(value.boardStyle))) &&
   isStringWithin(value.brief, 16 * 1024) &&
   validateRules(value.rules) &&
   isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS) &&
@@ -1299,6 +1326,14 @@ const isCanonicalImageTake = (asset: StudioAssetV2 | undefined, shotId: string):
   asset.briefReferenceRole === undefined &&
   asset.briefReferenceLabel === undefined;
 
+const isCanonicalBoardStill = (asset: StudioAssetV2 | undefined, shotId: string): asset is StudioAssetV2 =>
+  asset !== undefined &&
+  asset.shotId === shotId &&
+  asset.mediaKind === 'image' &&
+  asset.managedAsset.collection === 'boardStills' &&
+  asset.briefReferenceRole === undefined &&
+  asset.briefReferenceLabel === undefined;
+
 const isCanonicalVideoTake = (asset: StudioAssetV2 | undefined, shotId: string): asset is StudioAssetV2 =>
   asset !== undefined &&
   asset.shotId === shotId &&
@@ -1323,7 +1358,7 @@ const validateReceiptAgainstJob = (
   const receipt = job.spendReceipt;
   const amounts = calculateStudioQuotedGenerationAmounts(item);
   if (amounts === null) return false;
-  const expectedDuration = item.purpose === 'seed_still' ? null : requestDurationSeconds(item.requestPlan);
+  const expectedDuration = item.purpose === 'video_take' ? requestDurationSeconds(item.requestPlan) : null;
   return (
     receipt.authorizationId === authorization.id &&
     receipt.itemId === item.id &&
@@ -1363,6 +1398,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     !isIntegerInRange(value.targetDurationSeconds, 5, 1440) ||
     typeof value.resolution !== 'string' ||
     !RESOLUTIONS.has(value.resolution) ||
+    (value.boardStyle !== null && (typeof value.boardStyle !== 'string' || !BOARD_STYLES.has(value.boardStyle))) ||
     !isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS) ||
     !isRecord(value.beats) ||
     !isRecord(value.shots) ||
@@ -1494,6 +1530,16 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     if (!arrayEvery(shot.jobIds, (jobId) => ownValue(project.jobs, jobId)?.shotId === shot.id)) return false;
   }
 
+  if (
+    project.boardStyle === null &&
+    (Object.values(project.jobs).some((job) => job.purpose === 'board_still') ||
+      Object.values(project.shots).some(
+        (shot) => shot.boardAssetId !== null || shot.supersededBoardAssetIds.length > 0
+      ))
+  ) {
+    return false;
+  }
+
   for (const job of Object.values(project.jobs)) {
     if ((job.status === 'failed') !== (job.error !== null) && job.status !== 'needs_attention') return false;
     if (job.status !== 'failed' && job.status !== 'needs_attention' && job.error !== null) return false;
@@ -1507,13 +1553,24 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     } else if (job.outputAssetIdsByRole.primary !== null || job.outputAssetIdsByRole.poster !== null) {
       return false;
     }
-    if (job.purpose === 'seed_still' && job.outputAssetIdsByRole.poster !== null) return false;
+    if (job.purpose !== 'video_take' && job.outputAssetIdsByRole.poster !== null) return false;
+    if (
+      job.purpose === 'board_still' &&
+      job.status === 'succeeded' &&
+      (job.outputAssetIds.length !== 1 || job.outputAssetIds[0] !== job.outputAssetIdsByRole.primary)
+    ) {
+      return false;
+    }
     for (const outputAssetId of job.outputAssetIds) {
       const output = ownValue(project.assets, outputAssetId);
+      const outputCollectionIsValid =
+        job.purpose === 'board_still'
+          ? output?.managedAsset.collection === 'boardStills'
+          : output?.managedAsset.collection === 'assets' || output?.managedAsset.collection === 'thumbnails';
       if (
         output === undefined ||
         output.shotId !== job.shotId ||
-        (output.managedAsset.collection !== 'assets' && output.managedAsset.collection !== 'thumbnails') ||
+        !outputCollectionIsValid ||
         outputProducerByAssetId.has(outputAssetId)
       ) {
         return false;
@@ -1526,10 +1583,13 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       const primary = ownValue(project.assets, primaryId);
       if (
         primary === undefined ||
-        primary.managedAsset.collection !== 'assets' ||
-        (job.purpose === 'seed_still'
-          ? primary.mediaKind !== 'image'
-          : primary.mediaKind !== 'video' || primary.durationSeconds === undefined)
+        (job.purpose === 'seed_still' &&
+          (primary.managedAsset.collection !== 'assets' || primary.mediaKind !== 'image')) ||
+        (job.purpose === 'board_still' && !isCanonicalBoardStill(primary, job.shotId)) ||
+        (job.purpose === 'video_take' &&
+          (primary.managedAsset.collection !== 'assets' ||
+            primary.mediaKind !== 'video' ||
+            primary.durationSeconds === undefined))
       ) {
         return false;
       }
@@ -1584,7 +1644,16 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
 
   for (const asset of Object.values(project.assets)) {
     if (asset.shotId === null) continue;
-    if (asset.managedAsset.collection === 'imports') {
+    if (asset.managedAsset.collection === 'boardStills') {
+      const producer = outputProducerByAssetId.get(asset.id);
+      if (
+        producer?.status !== 'succeeded' ||
+        producer.purpose !== 'board_still' ||
+        producer.outputAssetIdsByRole.primary !== asset.id
+      ) {
+        return false;
+      }
+    } else if (asset.managedAsset.collection === 'imports') {
       if (asset.mediaKind !== 'image' || outputProducerByAssetId.has(asset.id) || frameByAssetId.has(asset.id)) {
         return false;
       }
@@ -1599,6 +1668,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     if (purpose === 'seed_still') {
       if (!isCanonicalImageTake(asset, shotId)) return false;
       if (asset.managedAsset.collection === 'imports') return !outputProducerByAssetId.has(asset.id);
+    } else if (purpose === 'board_still') {
+      if (!isCanonicalBoardStill(asset, shotId)) return false;
     } else if (!isCanonicalVideoTake(asset, shotId)) {
       return false;
     }
@@ -1609,6 +1680,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       producer.outputAssetIdsByRole.primary === asset.id
     );
   };
+  const isCanonicalSeedSelection = (asset: StudioAssetV2 | undefined, shotId: string): boolean =>
+    isCanonicalPrimary(asset, shotId, 'seed_still') || isCanonicalPrimary(asset, shotId, 'board_still');
   const isCurrentExistingPredecessor = (
     dependency: Extract<StudioGenerationRequestPlan, { kind: 'after_take_selection' }>['dependency'],
     dependentShotId: string
@@ -1658,9 +1731,27 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   };
 
   for (const shot of Object.values(project.shots)) {
+    if (shot.seedStillId !== null && !isCanonicalSeedSelection(ownValue(project.assets, shot.seedStillId), shot.id)) {
+      return false;
+    }
+    const successfulBoardAssetIds = shot.jobIds.flatMap((jobId) => {
+      const job = ownValue(project.jobs, jobId);
+      return job?.status === 'succeeded' && job.purpose === 'board_still' && job.outputAssetIdsByRole.primary !== null
+        ? [job.outputAssetIdsByRole.primary]
+        : [];
+    });
+    const expectedBoardAssetId = successfulBoardAssetIds.at(-1) ?? null;
+    const expectedSupersededBoardAssetIds = successfulBoardAssetIds.slice(0, -1);
     if (
-      shot.seedStillId !== null &&
-      !isCanonicalPrimary(ownValue(project.assets, shot.seedStillId), shot.id, 'seed_still')
+      shot.boardAssetId !== expectedBoardAssetId ||
+      shot.supersededBoardAssetIds.length !== expectedSupersededBoardAssetIds.length ||
+      shot.supersededBoardAssetIds.some((assetId, index) => assetId !== expectedSupersededBoardAssetIds[index])
+    ) {
+      return false;
+    }
+    if (
+      shot.boardAssetId !== null &&
+      !isCanonicalPrimary(ownValue(project.assets, shot.boardAssetId), shot.id, 'board_still')
     ) {
       return false;
     }
@@ -1891,7 +1982,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         }
       }
       if (conditioning?.kind === 'seed_still') {
-        if (!isCanonicalPrimary(ownValue(project.assets, conditioning.assetId), job.shotId, 'seed_still')) {
+        if (!isCanonicalSeedSelection(ownValue(project.assets, conditioning.assetId), job.shotId)) {
           return false;
         }
       } else if (conditioning?.kind === 'predecessor_frame') {

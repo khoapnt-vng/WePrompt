@@ -48,6 +48,8 @@ const makeShot = (id: string, chainBreak: StudioShot['chainBreak']): StudioShot 
   trimOutSeconds: null,
   chainBreak,
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
   supersededVideoAssetIds: [],
   assetIds: [],
@@ -56,7 +58,7 @@ const makeShot = (id: string, chainBreak: StudioShot['chainBreak']): StudioShot 
 
 const makeProject = (): StudioProjectV2 => {
   const project: StudioProjectV2 = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     revision: 1,
     id: 'project_1',
     name: 'Editor package',
@@ -66,6 +68,7 @@ const makeProject = (): StudioProjectV2 => {
     aspectRatio: '16:9',
     targetDurationSeconds: 30,
     resolution: '1080p',
+    boardStyle: null,
     beatOrder: ['beat_1', 'beat_2'],
     beats: {
       beat_1: {

@@ -44,7 +44,7 @@ const summary = (overrides: Partial<StudioProjectSummaryV2> = {}): StudioProject
 });
 
 const project = (): StudioRendererProjectV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 7,
   id: 'project_1',
   name: 'Launch film',
@@ -54,6 +54,7 @@ const project = (): StudioRendererProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 18,
   resolution: '720p',
+  boardStyle: null,
   beatOrder: [],
   beats: {},
   shots: {},
@@ -90,7 +91,7 @@ const renderLibrary = () =>
     </MemoryRouter>
   );
 
-describe('StudioLibrary schema-3 projects', () => {
+describe('StudioLibrary schema-4 projects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();

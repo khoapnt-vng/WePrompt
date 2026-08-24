@@ -226,7 +226,7 @@ const createHarness = (
     copy: vi.fn(),
     resolveRevealPath: vi.fn(),
     repair: vi.fn(async () => ({
-      schemaVersion: 3 as const,
+      schemaVersion: 4 as const,
       projectId: 'runtime_recovery',
       revision: 1,
       artifacts: [],
@@ -669,6 +669,8 @@ describe('Creative Studio schema-2 runtime activation', () => {
       trimOutSeconds: null,
       chainBreak: 'none',
       seedStillId: null,
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
       videoAssetId: null,
       supersededVideoAssetIds: [],
       assetIds: [],

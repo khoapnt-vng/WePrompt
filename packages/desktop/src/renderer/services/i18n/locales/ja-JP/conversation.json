@@ -901,6 +901,48 @@
       "importError": "参照を追加できませんでした。もう一度お試しください。"
     },
     "workspace": {
+      "table": {
+        "columns": { "panel": "パネル" },
+        "board": {
+          "label": "ディレクター・ボードの操作",
+          "progress": "{{total}}枚中{{drawn}}枚を作成済み",
+          "progressLabel": "ボードの完成度",
+          "staleCount": "古いパネル {{count}}件",
+          "busyCount": "進行中 {{count}}件",
+          "style": {
+            "label": "ボードのスタイル",
+            "greyTone": "グレートーン",
+            "lineArt": "線画",
+            "colourKey": "カラーキー"
+          },
+          "stop": "描画を停止",
+          "stopNote": "可能な場合は停止時にキャンセルを要求します。完成済みのパネルと発生済みの料金はそのまま残ります。",
+          "drawNext": "次のバッチを描画 ({{count}})",
+          "styleRequired": "描画する前にボードのスタイルを選択してください。"
+        },
+        "panel": {
+          "openDetails": "{{title}}のボードパネルを開く",
+          "closeDetails": "{{title}}のボードパネルを閉じる",
+          "detailLabel": "{{title}}のボードパネル",
+          "drawMissing": "未作成を描画 ({{count}})",
+          "redrawBeat": "Beatを再描画 · 有料",
+          "cardLabel": "Shot {{position}}：{{status}}",
+          "head": "先頭",
+          "redrawShot": "Shot {{position}}を再描画 · 有料",
+          "useAsFirstFrame": "Shot {{position}}のパネルを最初のフレームに使用",
+          "status": {
+            "missing": "未作成",
+            "current": "最新",
+            "stale": "古い",
+            "statusPending": "ステータス待ち",
+            "queued": "待機中",
+            "drawing": "描画中",
+            "needsAttention": "要確認",
+            "failed": "失敗",
+            "cancelled": "キャンセル済み"
+          }
+        }
+      },
       "library": {
         "subtitle": "ビートとショットで物語を組み立て、各ショットの現在の画像を確認します。",
         "pictureCount": "準備完了の画像 {{count}} 件",
@@ -1071,9 +1113,33 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "ブリーフとルール"
+        "briefAndRulesTitle": "ブリーフとルール",
+        "undoLabel": { "promote_board_panel": "パネルを最初のフレームに使用" }
       },
       "gate": {
+        "purpose": { "board_still": "ボードパネル" },
+        "promotion": {
+          "title": "パネルを最初のフレームに使用",
+          "summary": "Shot {{shotId}}の現在のボードパネルを最初のフレームに昇格します。Shotの連続性境界は変更されません。",
+          "impactNone": "このフレームに依存する現在のテイクはありません。",
+          "impactIntro": "現在のテイク {{count}}件は再生可能なままですが、古い状態になります：",
+          "impactItem": "Shot {{shotId}}の現在のテイク",
+          "optionsLabel": "現在のテイクの処理方法を選択",
+          "promoteOnly": "昇格のみ — 再生可能な古いテイクを保持",
+          "freePrice": "$0",
+          "promoteAndRerender": "昇格して正確な再生成作業を確認",
+          "priceAfterReview": "次に価格を表示",
+          "promoteOnlyAction": "$0で昇格",
+          "reviewPaidAction": "再生成の価格を確認",
+          "paidUnavailable": "このセグメントには現在のテイクが多すぎるため、1回の有料確認では処理できません。昇格のみは引き続き利用できます。",
+          "headline": "昇格 + {{count}}件の再生成 · {{cost}}",
+          "requiredWork": "表示された再生成は、この昇格によって古くなる現在のテイクと完全に一致します。不足しているカバレッジは含まれません。",
+          "confirm": "昇格 + {{count}}件の再生成を確認 · {{cost}}",
+          "promoted": "パネルを昇格しました。既存のテイクは再生可能なまま、古い状態としてマークされます。",
+          "promoting": "パネルを昇格中…",
+          "confirmed": "パネルを昇格し、確認したテイクの再生成を開始しました。",
+          "close": "閉じる"
+        },
         "headline_one": "生成 {{count}} 件 · {{cost}}",
         "headline_other": "生成 {{count}} 件 · {{cost}}",
         "confirm_one": "{{count}} 件の生成を確定 · {{cost}}",

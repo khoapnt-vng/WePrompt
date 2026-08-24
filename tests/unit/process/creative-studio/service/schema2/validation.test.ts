@@ -58,6 +58,8 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
   supersededVideoAssetIds: [],
   assetIds: [],
@@ -78,7 +80,7 @@ const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<Studi
 });
 
 const makeProject = (projectId = 'project_1'): StudioProjectV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 1,
   id: projectId,
   name: `Project ${projectId}`,
@@ -88,6 +90,7 @@ const makeProject = (projectId = 'project_1'): StudioProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '1080p',
+  boardStyle: null,
   beatOrder: ['beat_1'],
   beats: { beat_1: makeBeat('beat_1', ['shot_1']) },
   shots: { shot_1: makeShot('shot_1') },
@@ -161,6 +164,44 @@ const seedPlan = (referenceInput: { assetId: string; sha256: string } | null = n
   },
 });
 
+const boardPlan = (): StudioGenerationRequestPlan => ({
+  kind: 'resolved',
+  snapshot: {
+    prompt: 'board prompt',
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    durationSeconds: 4,
+    referenceInput: null,
+    conditioningInput: null,
+  },
+});
+
+const referencedBoardPlan = (): StudioGenerationRequestPlan => {
+  const plan = boardPlan();
+  if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
+  plan.snapshot.referenceInput = { assetId: 'reference_1', sha256: digest };
+  return plan;
+};
+
+const conditionedBoardPlan = (): StudioGenerationRequestPlan => {
+  const plan = boardPlan();
+  if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
+  plan.snapshot.conditioningInput = { kind: 'seed_still', assetId: 'seed_1' };
+  return plan;
+};
+
+const deferredBoardPlan = (): StudioGenerationRequestPlan => ({
+  kind: 'after_take_selection',
+  template: {
+    prompt: 'deferred board prompt',
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    durationSeconds: 8,
+    referenceInput: null,
+  },
+  dependency: { kind: 'authorized_seed', upstreamItemId: 'seed_item_1', shotId: 'shot_1' },
+});
+
 const videoPlan = (conditioningInput: StudioConditioningInputSnapshot): StudioGenerationRequestPlan => ({
   kind: 'resolved',
   snapshot: {
@@ -200,10 +241,10 @@ const makeItem = (
   id: createStudioQuotedGenerationId({ projectId, projectRevision, shotId, purpose }),
   shotId,
   purpose,
-  routeId: purpose === 'seed_still' ? 'image_route' : 'video_route',
+  routeId: purpose === 'video_take' ? 'video_route' : 'image_route',
   generationCount,
   requestPlan,
-  rateUnit: purpose === 'seed_still' ? 'generation' : 'second',
+  rateUnit: purpose === 'video_take' ? 'second' : 'generation',
   rateMinorUnits: 2,
 });
 
@@ -343,6 +384,77 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId = 'shot_1', asse
   return asset;
 };
 
+const addSucceededBoardStill = (project: StudioProjectV2, shotId = 'shot_1', assetId = 'board_1'): StudioAssetV2 => {
+  const shot = project.shots[shotId]!;
+  project.boardStyle ??= 'grey_tone';
+  const projectRevision = project.revision;
+  const item = makeItem(projectRevision, shotId, 'board_still', boardPlan(), 1, project.id);
+  const authorization = makeAuthorization(`auth_board_${projectRevision}`, projectRevision, [item], [], project.id);
+  const asset = makeImageAsset(assetId, shotId, 'boardStills', { projectId: project.id });
+  project.assets[asset.id] = asset;
+  shot.assetIds.push(asset.id);
+  const jobId = `job_board_${projectRevision}`;
+  const job = makeJob(jobId, authorization, item, {
+    status: 'succeeded',
+    providerJobId: `remote_board_${projectRevision}`,
+    remoteStartedAt: timestamp,
+    outputAssetIds: [asset.id],
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+    spendReceipt: {
+      authorizationId: authorization.id,
+      itemId: item.id,
+      jobId,
+      purpose: item.purpose,
+      routeId: item.routeId,
+      currency: authorization.currency,
+      rateUnit: item.rateUnit,
+      rateMinorUnits: item.rateMinorUnits,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: item.rateMinorUnits,
+    },
+  });
+  addAuthorizationWithJobs(project, authorization, [job]);
+  if (shot.boardAssetId !== null) shot.supersededBoardAssetIds.push(shot.boardAssetId);
+  shot.boardAssetId = asset.id;
+  return asset;
+};
+
+const addFailedBoardRedraw = (project: StudioProjectV2, shotId = 'shot_1'): StudioJobV2 => {
+  const projectRevision = project.revision;
+  const item = makeItem(projectRevision, shotId, 'board_still', boardPlan(), 1, project.id);
+  const authorization = makeAuthorization(`auth_board_${projectRevision}`, projectRevision, [item], [], project.id);
+  const job = makeJob(`job_board_${projectRevision}`, authorization, item, {
+    status: 'failed',
+    error: { code: 'timeout', messageKey: 'timeout' },
+  });
+  addAuthorizationWithJobs(project, authorization, [job]);
+  return job;
+};
+
+const addFailedAuthorizationGraph = (
+  project: StudioProjectV2,
+  baseItems: StudioQuotedGeneration[],
+  cascadeItems: StudioQuotedGeneration[] = [],
+  originReferenceHandoffId: string | null = null
+): void => {
+  const authorization = makeAuthorization(
+    `auth_hostile_${project.revision}`,
+    project.revision,
+    baseItems,
+    cascadeItems,
+    project.id
+  );
+  authorization.originReferenceHandoffId = originReferenceHandoffId;
+  const jobs = [...baseItems, ...cascadeItems].map((item, index) =>
+    makeJob(`job_hostile_${index + 1}`, authorization, item, {
+      status: 'failed',
+      error: { code: 'timeout', messageKey: 'timeout' },
+    })
+  );
+  addAuthorizationWithJobs(project, authorization, jobs);
+};
+
 const addReadyFrame = (project: StudioProjectV2, takeId = 'take_1', endpointSeconds = 10): string => {
   const frameId = createStudioFrameExtractionId({ shotId: 'shot_1', videoAssetId: takeId, endpointSeconds });
   const frameAssetId = `frame_asset_${endpointSeconds}`;
@@ -406,17 +518,26 @@ const addShots = (project: StudioProjectV2, beatId: string, count: number, offse
 };
 
 describe('validateStudioProjectV2 exact project and authorship contract', () => {
-  it('accepts only the schema-3 one-picture Shot shape and refuses the legacy schema-2 shape', () => {
+  it('accepts only the exact schema-4 Board shape and leaves schema 3 unsupported', () => {
     const legacy = structuredClone(makeProject()) as unknown as Record<string, unknown>;
-    legacy.schemaVersion = 2;
+    legacy.schemaVersion = 3;
+    delete legacy.boardStyle;
     const legacyShots = legacy.shots as Record<string, Record<string, unknown>>;
-    delete legacyShots.shot_1!.videoAssetId;
-    delete legacyShots.shot_1!.supersededVideoAssetIds;
-    legacyShots.shot_1!.selectedTakeId = null;
+    delete legacyShots.shot_1!.boardAssetId;
+    delete legacyShots.shot_1!.supersededBoardAssetIds;
     expect(validateStudioProjectV2(legacy)).toBe(false);
+    expect(validateStudioProjectV2(makeProject())).toBe(true);
+  });
 
-    const onePicture = makeProject();
-    expect(validateStudioProjectV2(onePicture)).toBe(true);
+  it('accepts only the three exact Board styles', () => {
+    for (const style of ['grey_tone', 'line_art', 'colour_key'] as const) {
+      const project = makeProject();
+      project.boardStyle = style;
+      expect(validateStudioProjectV2(project)).toBe(true);
+    }
+    const project = makeProject();
+    (project as unknown as { boardStyle: string | null }).boardStyle = 'watercolour';
+    expect(validateStudioProjectV2(project)).toBe(false);
   });
 
   it('accepts the minimal project and an empty-coverage Beat with null or authored target', () => {
@@ -671,6 +792,114 @@ describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
     const project = makeProject();
     addSucceededVideoTake(project);
     expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('accepts only canonical Board art as an explicit first-frame pin and still requires its selected style', () => {
+    const project = makeProject();
+    const board = addSucceededBoardStill(project);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    project.boardStyle = null;
+    expect(validateStudioProjectV2(project)).toBe(false);
+    project.boardStyle = 'grey_tone';
+    project.shots.shot_1!.seedStillId = board.id;
+    expect(validateStudioProjectV2(project)).toBe(true);
+    board.managedAsset.collection = 'assets';
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects a persisted authorization that mixes Board and seed work', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    addFailedAuthorizationGraph(project, [
+      makeItem(project.revision, 'shot_1', 'board_still', boardPlan()),
+      makeItem(project.revision, 'shot_1', 'seed_still', seedPlan()),
+    ]);
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects a persisted Board cascade authorization', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    project.beats.beat_1!.shotOrder.push('shot_2');
+    project.shots.shot_2 = makeShot('shot_2');
+    addFailedAuthorizationGraph(
+      project,
+      [makeItem(project.revision, 'shot_1', 'board_still', boardPlan())],
+      [makeItem(project.revision, 'shot_2', 'board_still', boardPlan())]
+    );
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects a persisted Board authorization with a reference-handoff origin', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    addFailedAuthorizationGraph(
+      project,
+      [makeItem(project.revision, 'shot_1', 'board_still', boardPlan())],
+      [],
+      'handoff_1'
+    );
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it.each([
+    ['deferred', deferredBoardPlan],
+    ['referenced', referencedBoardPlan],
+    ['conditioned', conditionedBoardPlan],
+  ] as const)('rejects a persisted %s Board request', (_label, makePlan) => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    addFailedAuthorizationGraph(project, [makeItem(project.revision, 'shot_1', 'board_still', makePlan())]);
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects a persisted Board authority with a noncanonical plumbing duration', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const plan = boardPlan();
+    if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
+    plan.snapshot.durationSeconds = 5;
+    addFailedAuthorizationGraph(project, [makeItem(project.revision, 'shot_1', 'board_still', plan)]);
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('derives current and superseded Board pointers from successful jobs in immutable order', () => {
+    const project = makeProject();
+    addSucceededBoardStill(project, 'shot_1', 'board_1');
+    addSucceededBoardStill(project, 'shot_1', 'board_2');
+    expect(project.shots.shot_1).toMatchObject({
+      boardAssetId: 'board_2',
+      supersededBoardAssetIds: ['board_1'],
+    });
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    project.shots.shot_1!.supersededBoardAssetIds = [];
+    expect(validateStudioProjectV2(project)).toBe(false);
+    project.shots.shot_1!.supersededBoardAssetIds = ['board_1'];
+    project.shots.shot_1!.boardAssetId = 'board_1';
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('keeps the published Board pointer unchanged when a paid redraw fails', () => {
+    const project = makeProject();
+    addSucceededBoardStill(project);
+    addFailedBoardRedraw(project);
+    expect(project.shots.shot_1).toMatchObject({ boardAssetId: 'board_1', supersededBoardAssetIds: [] });
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('binds a successful Board output and receipt to the immutable paid image item', () => {
+    const project = makeProject();
+    addSucceededBoardStill(project);
+    expect(validateStudioProjectV2(project)).toBe(true);
+    project.jobs.job_board_1!.spendReceipt!.durationSeconds = 8;
+    expect(validateStudioProjectV2(project)).toBe(false);
   });
 
   it('requires the current picture and superseded history to follow successful video jobs in order', () => {

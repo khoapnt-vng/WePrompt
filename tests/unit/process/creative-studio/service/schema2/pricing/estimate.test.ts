@@ -7,16 +7,18 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type {
-  StudioAssetV2,
-  StudioGenerationRequestPlan,
-  StudioPrepareSubmissionRequestV2,
-  StudioProjectV2,
-  StudioQuotedGeneration,
+import {
+  STUDIO_MAX_SHOTS_PER_BEAT,
+  type StudioAssetV2,
+  type StudioGenerationRequestPlan,
+  type StudioPrepareSubmissionRequestV2,
+  type StudioProjectV2,
+  type StudioQuotedGeneration,
 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/factories';
 import {
   createStudioDeferredGenerationRequestPlan,
+  createStudioBoardGenerationRequestPlanForShot,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
   createStudioResolvedGenerationRequestPlan,
@@ -69,7 +71,10 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
+  supersededVideoAssetIds: [],
   assetIds: [],
   jobIds: [],
 });
@@ -104,6 +109,9 @@ const resolvedVideo = (): StudioGenerationRequestPlan =>
     conditioningInput: { kind: 'seed_still', assetId: 'take_seed' },
   });
 
+const resolvedBoard = (): StudioGenerationRequestPlan =>
+  createStudioResolvedGenerationRequestPlan({ purpose: 'board_still', template, conditioningInput: null });
+
 const draft = (
   shotId: string,
   purpose: StudioQuotedGeneration['purpose'],
@@ -112,7 +120,7 @@ const draft = (
 ): StudioUnpricedQuotedGenerationV2 => ({
   shotId,
   purpose,
-  routeId: purpose === 'seed_still' ? imageRate.routeId : videoRate.routeId,
+  routeId: purpose === 'video_take' ? videoRate.routeId : imageRate.routeId,
   generationCount,
   requestPlan,
 });
@@ -223,6 +231,104 @@ const makeDerivationProject = (): StudioProjectV2 => {
   return project;
 };
 
+const makeBoardDerivationProject = (shotCount = 3): StudioProjectV2 => {
+  const project = makeDerivationProject();
+  const shotIds = Array.from({ length: shotCount }, (_, index) => `shot_${index + 1}`);
+  project.boardStyle = 'grey_tone';
+  const beatIds = Array.from(
+    { length: Math.ceil(shotCount / STUDIO_MAX_SHOTS_PER_BEAT) },
+    (_, index) => `beat_${index + 1}`
+  );
+  project.beatOrder = beatIds;
+  project.beats = Object.fromEntries(
+    beatIds.map((beatId, beatIndex) => [
+      beatId,
+      {
+        id: beatId,
+        title: beatIndex === 0 ? 'Opening' : `Beat ${beatIndex + 1}`,
+        action: beatIndex === 0 ? 'Move through the space' : `Action ${beatIndex + 1}`,
+        look: beatIndex === 0 ? 'Clean daylight' : `Look ${beatIndex + 1}`,
+        actionRevision: 1,
+        targetSeconds: null,
+        shotOrder: shotIds.slice(beatIndex * STUDIO_MAX_SHOTS_PER_BEAT, (beatIndex + 1) * STUDIO_MAX_SHOTS_PER_BEAT),
+        lineHistory: [],
+      },
+    ])
+  );
+  project.shots = Object.fromEntries(shotIds.map((shotId) => [shotId, makeShot(shotId)]));
+  project.assets = {};
+  return project;
+};
+
+const addCurrentBoardPanel = (project: StudioProjectV2, shotId: string, assetId = `board_${shotId}`): StudioAssetV2 => {
+  project.boardStyle = 'grey_tone';
+  const beat = Object.values(project.beats).find((candidate) => candidate.shotOrder.includes(shotId));
+  const shot = project.shots[shotId];
+  if (beat === undefined || shot === undefined) throw new Error('Board fixture requires one active Shot');
+  const requestPlan = createStudioBoardGenerationRequestPlanForShot({ project, beat, shot });
+  if (requestPlan === null || requestPlan.kind !== 'resolved') throw new Error('Board fixture request must resolve');
+  const asset = addDerivationAsset(project, {
+    id: assetId,
+    shotId,
+    mediaKind: 'image',
+    managedAsset: { collection: 'boardStills', fileName: `${assetId}.png` },
+  });
+  const jobId = `job_${assetId}`;
+  project.jobs[jobId] = {
+    id: jobId,
+    projectId: project.id,
+    shotId,
+    status: 'succeeded',
+    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
+    idempotencyKey: `idem_${assetId}`,
+    providerJobId: `remote_${assetId}`,
+    remoteStartedAt: '2026-08-18T00:00:00.000Z',
+    cancellationPolicy: 'queued_and_running',
+    outputAssetIds: [asset.id],
+    error: null,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: '2026-08-18T00:00:00.000Z',
+    updatedAt: '2026-08-18T00:00:00.000Z',
+    purpose: 'board_still',
+    authorizationId: `auth_${assetId}`,
+    authorizationItemId: `item_${assetId}`,
+    requestPlan,
+    requestSnapshot: requestPlan.snapshot,
+    spendReceipt: {
+      authorizationId: `auth_${assetId}`,
+      itemId: `item_${assetId}`,
+      jobId,
+      purpose: 'board_still',
+      routeId: project.imageRouteId!,
+      currency: 'USD',
+      rateUnit: 'generation',
+      rateMinorUnits: imageRate.rateMinorUnits,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: imageRate.rateMinorUnits,
+    },
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+  };
+  shot.jobIds.push(jobId);
+  shot.boardAssetId = asset.id;
+  return asset;
+};
+
+const addSelectedVideo = (project: StudioProjectV2, shotId: string, assetId = `video_${shotId}`): StudioAssetV2 => {
+  const asset = addDerivationAsset(project, {
+    id: assetId,
+    shotId,
+    mediaKind: 'video',
+    managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
+    durationSeconds: project.shots[shotId]!.durationSeconds,
+  });
+  project.shots[shotId]!.videoAssetId = asset.id;
+  return asset;
+};
+
 const prepareRequest = (
   baseChoices: StudioPrepareSubmissionRequestV2['baseChoices'],
   cascadeChoices: StudioPrepareSubmissionRequestV2['cascadeChoices']
@@ -258,7 +364,277 @@ const continuityRequest = (
     continuityChange: { shotId, hardCut, requiresSeedGeneration },
   }) as unknown as StudioPrepareSubmissionRequestV2;
 
+const boardPromotionRequest = (shotId: string, boardAssetId: string): StudioPrepareSubmissionRequestV2 => ({
+  projectId: 'project_1',
+  expectedRevision: 7,
+  originReferenceHandoffId: null,
+  baseChoices: [],
+  cascadeChoices: [],
+  boardPromotion: { shotId, boardAssetId },
+});
+
 describe('schema-2 Studio estimates', () => {
+  it('derives one image-priced resolved Board item per selected Shot in film order', () => {
+    const project = makeBoardDerivationProject();
+    const request = prepareRequest(
+      [choice('shot_1', 'board_still'), choice('shot_2', 'board_still'), choice('shot_3', 'board_still')],
+      []
+    );
+
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request,
+      rateCard: createStudioRateCardV2([imageRate]),
+    });
+
+    expect(options.withCascade).toBeNull();
+    expect(options.baseOnly).toMatchObject({
+      lowerMinorUnits: 75,
+      upperMinorUnits: 75,
+      cascadeItems: [],
+      baseItems: [
+        { shotId: 'shot_1', purpose: 'board_still', routeId: 'image_route', rateUnit: 'generation' },
+        { shotId: 'shot_2', purpose: 'board_still', routeId: 'image_route', rateUnit: 'generation' },
+        { shotId: 'shot_3', purpose: 'board_still', routeId: 'image_route', rateUnit: 'generation' },
+      ],
+    });
+    const firstPlan = options.baseOnly.baseItems[0]!.requestPlan;
+    expect(firstPlan).toEqual(
+      expect.objectContaining({
+        kind: 'resolved',
+        snapshot: expect.objectContaining({
+          durationSeconds: 4,
+          referenceInput: null,
+          conditioningInput: null,
+        }),
+      })
+    );
+    expect(firstPlan.kind === 'resolved' ? firstPlan.snapshot.prompt : '').toContain('ACTION\nMove through the space');
+    expect(firstPlan.kind === 'resolved' ? firstPlan.snapshot.prompt : '').toContain(
+      'BOARD DRAWING\nRestrained grey-tone storyboard drawing'
+    );
+  });
+
+  it('accepts exactly 24 Board Shots and refuses a twenty-fifth', () => {
+    const project = makeBoardDerivationProject(25);
+    const rateCard = createStudioRateCardV2([imageRate]);
+    const choices = project.beatOrder.flatMap((beatId) =>
+      project.beats[beatId]!.shotOrder.map((shotId) => choice(shotId, 'board_still'))
+    );
+
+    expect(
+      deriveStudioSubmissionQuoteCoresV2({
+        project,
+        request: prepareRequest(choices.slice(0, 24), []),
+        rateCard,
+      }).baseOnly.baseItems
+    ).toHaveLength(24);
+    expect(() =>
+      deriveStudioSubmissionQuoteCoresV2({ project, request: prepareRequest(choices, []), rateCard })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+  });
+
+  it.each([
+    [
+      'mixed purpose',
+      prepareRequest([choice('shot_1', 'board_still'), choice('shot_2', 'seed_still')], []),
+      'invalid_prepare_request',
+    ],
+    [
+      'cascade row',
+      prepareRequest([choice('shot_1', 'board_still')], [choice('shot_2', 'board_still')]),
+      'invalid_prepare_request',
+    ],
+    ['renderer reference', prepareRequest([choice('shot_1', 'board_still', 'reference_1')], []), 'invalid_reference'],
+    [
+      'out-of-order rows',
+      prepareRequest([choice('shot_2', 'board_still'), choice('shot_1', 'board_still')], []),
+      'invalid_prepare_request',
+    ],
+  ] as const)('refuses a Board batch with %s', (_label, request, code) => {
+    expect(() =>
+      deriveStudioSubmissionQuoteCoresV2({
+        project: makeBoardDerivationProject(),
+        request,
+        rateCard: createStudioRateCardV2([imageRate]),
+      })
+    ).toThrow(expect.objectContaining({ code }));
+  });
+
+  it('refuses Board handoffs, continuity envelopes, unset style, and in-flight Board work', () => {
+    const project = makeBoardDerivationProject();
+    const rateCard = createStudioRateCardV2([imageRate]);
+    const board = prepareRequest([choice('shot_1', 'board_still')], []);
+
+    expect(() =>
+      deriveStudioSubmissionQuoteCoresV2({
+        project,
+        request: { ...board, originReferenceHandoffId: 'handoff_1' },
+        rateCard,
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+    expect(() =>
+      deriveStudioSubmissionQuoteCoresV2({
+        project,
+        request: { ...board, continuityChange: { shotId: 'shot_1', hardCut: true, requiresSeedGeneration: false } },
+        rateCard,
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+
+    project.boardStyle = null;
+    expect(() => deriveStudioSubmissionQuoteCoresV2({ project, request: board, rateCard })).toThrow(
+      expect.objectContaining({ code: 'invalid_prepare_request' })
+    );
+    project.boardStyle = 'grey_tone';
+    project.jobs.job_board = {
+      shotId: 'shot_1',
+      purpose: 'board_still',
+      status: 'running',
+    } as StudioProjectV2['jobs'][string];
+    expect(() => deriveStudioSubmissionQuoteCoresV2({ project, request: board, rateCard })).toThrow(
+      expect.objectContaining({ code: 'in_flight' })
+    );
+  });
+
+  it('prices only selected takes in the promoted Board panel segment and derives against the candidate pin', () => {
+    const project = makeBoardDerivationProject(4);
+    const panel = addCurrentBoardPanel(project, 'shot_1');
+    addSelectedVideo(project, 'shot_1');
+    addSelectedVideo(project, 'shot_2');
+    project.shots.shot_4!.chainBreak = 'hard_cut';
+    addSelectedVideo(project, 'shot_4');
+
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: boardPromotionRequest('shot_1', panel.id),
+      rateCard: createStudioRateCardV2([videoRate]),
+    });
+
+    expect(options.withCascade).toBeNull();
+    expect(options.baseOnly.cascadeItems).toEqual([]);
+    expect(options.baseOnly.baseItems.map(({ shotId, purpose }) => [shotId, purpose])).toEqual([
+      ['shot_1', 'video_take'],
+      ['shot_2', 'video_take'],
+    ]);
+    expect(options.baseOnly.baseItems[0]?.requestPlan).toEqual(
+      expect.objectContaining({
+        kind: 'resolved',
+        snapshot: expect.objectContaining({ conditioningInput: { kind: 'seed_still', assetId: panel.id } }),
+      })
+    );
+    expect(options.baseOnly.baseItems[1]?.requestPlan).toEqual(
+      expect.objectContaining({
+        kind: 'after_take_selection',
+        dependency: expect.objectContaining({
+          kind: 'authorized_predecessor',
+          predecessorShotId: 'shot_1',
+        }),
+      })
+    );
+    expect(project.shots.shot_1!.seedStillId).toBeNull();
+    expect(JSON.stringify(options)).not.toContain('shot_4');
+  });
+
+  it('refuses paid Board promotion when no selected take would be made stale', () => {
+    const project = makeBoardDerivationProject();
+    const panel = addCurrentBoardPanel(project, 'shot_1');
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({ project, request: boardPromotionRequest('shot_1', panel.id) })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+  });
+
+  it('refuses non-head, mismatched, stale, in-flight, and mixed Board promotion intents', () => {
+    const nonHead = makeBoardDerivationProject();
+    const nonHeadPanel = addCurrentBoardPanel(nonHead, 'shot_2');
+    addSelectedVideo(nonHead, 'shot_2');
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project: nonHead,
+        request: boardPromotionRequest('shot_2', nonHeadPanel.id),
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+
+    const project = makeBoardDerivationProject();
+    const panel = addCurrentBoardPanel(project, 'shot_1');
+    addSelectedVideo(project, 'shot_1');
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project,
+        request: boardPromotionRequest('shot_1', 'other_board'),
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+
+    const stale = structuredClone(project);
+    stale.shots.shot_1!.line = 'Changed after Board generation';
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({ project: stale, request: boardPromotionRequest('shot_1', panel.id) })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+
+    const alreadyPinned = structuredClone(project);
+    alreadyPinned.shots.shot_1!.seedStillId = panel.id;
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project: alreadyPinned,
+        request: boardPromotionRequest('shot_1', panel.id),
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
+
+    const inFlight = structuredClone(project);
+    const producer = inFlight.jobs[`job_${panel.id}`]!;
+    inFlight.jobs.job_board_redraw = {
+      ...producer,
+      id: 'job_board_redraw',
+      status: 'running',
+      providerJobId: 'remote_board_redraw',
+      idempotencyKey: 'idem_board_redraw',
+      outputAssetIds: [],
+      outputAssetIdsByRole: { primary: null, poster: null },
+      spendReceipt: null,
+    };
+    inFlight.shots.shot_1!.jobIds.push('job_board_redraw');
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({ project: inFlight, request: boardPromotionRequest('shot_1', panel.id) })
+    ).toThrow(expect.objectContaining({ code: 'in_flight' }));
+
+    const pendingFrame = structuredClone(project);
+    const selected = pendingFrame.assets.video_shot_1!;
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      videoAssetId: selected.id,
+      endpointSeconds: selected.durationSeconds!,
+    });
+    pendingFrame.frameExtractions[extractionId] = {
+      id: extractionId,
+      shotId: 'shot_1',
+      videoAssetId: selected.id,
+      endpointSeconds: selected.durationSeconds!,
+      frameAssetId: null,
+      status: 'pending',
+      errorCode: null,
+    };
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project: pendingFrame,
+        request: boardPromotionRequest('shot_1', panel.id),
+      })
+    ).toThrow(expect.objectContaining({ code: 'in_flight' }));
+
+    const mixedChoice = {
+      ...boardPromotionRequest('shot_1', panel.id),
+      baseChoices: [choice('shot_1', 'video_take')],
+    };
+    const mixedContinuity = {
+      ...boardPromotionRequest('shot_1', panel.id),
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    };
+    const handoff = { ...boardPromotionRequest('shot_1', panel.id), originReferenceHandoffId: 'handoff_1' };
+    for (const request of [mixedChoice, mixedContinuity, handoff]) {
+      expect(() => deriveStudioSubmissionQuoteGraphV2({ project, request })).toThrow(
+        expect.objectContaining({ code: 'invalid_prepare_request' })
+      );
+    }
+  });
+
   it('prices one mandatory sever graph from an exact reusable seed through the next hard cut', () => {
     const project = makeDerivationProject();
     project.beats.beat_1!.shotOrder.push('shot_4');
@@ -975,6 +1351,33 @@ describe('schema-2 Studio estimates', () => {
     expectQuoteCode(symbolicSeed, 'invalid_dependency');
   });
 
+  it('rejects noncanonical Board scope at the low-level quote boundary', () => {
+    const boardInput = (): StudioSubmissionQuoteEstimateInputV2 => ({
+      project: makeProject(),
+      originReferenceHandoffId: null,
+      rateCard: createStudioRateCardV2([imageRate]),
+      baseItems: [draft('shot_1', 'board_still', 1, resolvedBoard())],
+      cascadeItems: [],
+    });
+    const expectInvalidQuote = (input: StudioSubmissionQuoteEstimateInputV2): void => {
+      expect(() => createStudioSubmissionQuoteCoreV2(input)).toThrow(
+        expect.objectContaining({ code: 'invalid_quote' })
+      );
+    };
+
+    const mixed = boardInput();
+    mixed.baseItems.push(draft('shot_2', 'seed_still', 1, resolvedSeed()));
+    expectInvalidQuote(mixed);
+
+    const cascaded = boardInput();
+    cascaded.cascadeItems.push(draft('shot_2', 'board_still', 1, resolvedBoard()));
+    expectInvalidQuote(cascaded);
+
+    const handedOff = boardInput();
+    handedOff.originReferenceHandoffId = 'handoff_1';
+    expectInvalidQuote(handedOff);
+  });
+
   it('prices base and symbolic cascade lines from one exact ordered graph', () => {
     const quote = createStudioSubmissionQuoteCoreV2(makeInput());
 
@@ -1136,6 +1539,22 @@ describe('schema-2 Studio estimates', () => {
     expect(serialized).not.toContain('rateCardDigest');
     expect(serialized).not.toContain('item_');
     expect(serialized).not.toContain('rateMinorUnits');
+  });
+
+  it('projects Board image pricing with no billable duration', () => {
+    const project = makeBoardDerivationProject(1);
+    const core = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: prepareRequest([choice('shot_1', 'board_still')], []),
+      rateCard: createStudioRateCardV2([imageRate]),
+    }).baseOnly;
+    const projected = toStudioRendererSubmissionQuoteV2(
+      { ...core, id: 'quote_board', expiresAt: '2026-08-18T00:05:00.000Z' },
+      null,
+      (routeId) => ({ choiceId: routeId, providerId: 'image-provider', model: 'image-model' })
+    );
+
+    expect(projected.baseItems[0]).toMatchObject({ purpose: 'board_still', durationSeconds: null });
   });
 
   it('projects the frozen duration for a resolved video base row', () => {

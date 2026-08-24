@@ -50,7 +50,7 @@ export const calculateStudioQuotedGenerationAmounts = (
   }
 
   let oneGenerationMinorUnits: number | null;
-  if (item.purpose === 'seed_still' && item.rateUnit === 'generation') {
+  if ((item.purpose === 'seed_still' || item.purpose === 'board_still') && item.rateUnit === 'generation') {
     oneGenerationMinorUnits = item.rateMinorUnits;
   } else if (item.purpose === 'video_take' && item.rateUnit === 'second') {
     const durationSeconds = requestDuration(item.requestPlan);

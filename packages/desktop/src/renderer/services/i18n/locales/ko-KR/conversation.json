@@ -901,6 +901,48 @@
       "importError": "참조를 추가하지 못했습니다. 다시 시도하세요."
     },
     "workspace": {
+      "table": {
+        "columns": { "panel": "패널" },
+        "board": {
+          "label": "디렉터 보드 제어",
+          "progress": "{{total}}개 중 {{drawn}}개 패널 완성",
+          "progressLabel": "보드 완성도",
+          "staleCount": "오래됨 {{count}}개",
+          "busyCount": "진행 중 {{count}}개",
+          "style": {
+            "label": "보드 스타일",
+            "greyTone": "그레이 톤",
+            "lineArt": "라인 아트",
+            "colourKey": "컬러 키"
+          },
+          "stop": "그리기 중지",
+          "stopNote": "가능한 경우 중지를 누르면 취소를 요청합니다. 완료된 패널과 이미 발생한 비용은 그대로 유지됩니다.",
+          "drawNext": "다음 묶음 그리기 ({{count}})",
+          "styleRequired": "그리기 전에 보드 스타일을 선택하세요."
+        },
+        "panel": {
+          "openDetails": "{{title}}의 보드 패널 열기",
+          "closeDetails": "{{title}}의 보드 패널 닫기",
+          "detailLabel": "{{title}}의 보드 패널",
+          "drawMissing": "누락 패널 그리기 ({{count}})",
+          "redrawBeat": "Beat 다시 그리기 · 유료",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "head": "시작",
+          "redrawShot": "Shot {{position}} 다시 그리기 · 유료",
+          "useAsFirstFrame": "Shot {{position}} 패널을 첫 프레임으로 사용",
+          "status": {
+            "missing": "그리지 않음",
+            "current": "현재",
+            "stale": "오래됨",
+            "statusPending": "상태 대기 중",
+            "queued": "대기열",
+            "drawing": "그리는 중",
+            "needsAttention": "확인 필요",
+            "failed": "실패",
+            "cancelled": "취소됨"
+          }
+        }
+      },
       "library": {
         "subtitle": "비트와 샷으로 이야기를 계획한 다음 각 샷의 현재 사진을 검토하세요.",
         "pictureCount": "사진 {{count}}개 준비됨",
@@ -1071,9 +1113,33 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "브리프 및 규칙"
+        "briefAndRulesTitle": "브리프 및 규칙",
+        "undoLabel": { "promote_board_panel": "패널을 첫 프레임으로 사용" }
       },
       "gate": {
+        "purpose": { "board_still": "보드 패널" },
+        "promotion": {
+          "title": "패널을 첫 프레임으로 사용",
+          "summary": "Shot {{shotId}}의 현재 보드 패널을 첫 프레임으로 승격합니다. Shot의 연속성 경계는 변경되지 않습니다.",
+          "impactNone": "이 프레임에 의존하는 현재 테이크가 없습니다.",
+          "impactIntro": "현재 테이크 {{count}}개는 계속 재생할 수 있지만 오래된 상태가 됩니다:",
+          "impactItem": "Shot {{shotId}}의 현재 테이크",
+          "optionsLabel": "현재 테이크 처리 방법 선택",
+          "promoteOnly": "승격만 — 재생 가능한 오래된 테이크 유지",
+          "freePrice": "$0",
+          "promoteAndRerender": "승격하고 정확한 재렌더링 작업 검토",
+          "priceAfterReview": "다음 단계에서 가격 표시",
+          "promoteOnlyAction": "$0에 승격",
+          "reviewPaidAction": "재렌더링 가격 검토",
+          "paidUnavailable": "이 구간에는 현재 테이크가 너무 많아 한 번의 유료 확인으로 처리할 수 없습니다. 승격만 하는 옵션은 계속 사용할 수 있습니다.",
+          "headline": "승격 + 재렌더링 {{count}}개 · {{cost}}",
+          "requiredWork": "표시된 재렌더링은 이 승격으로 오래된 상태가 되는 현재 테이크와 정확히 일치합니다. 누락된 커버리지는 포함되지 않습니다.",
+          "confirm": "승격 + 재렌더링 {{count}}개 확인 · {{cost}}",
+          "promoted": "패널을 승격했습니다. 기존 테이크는 계속 재생할 수 있으며 오래된 상태로 표시됩니다.",
+          "promoting": "패널 승격 중…",
+          "confirmed": "패널을 승격하고 확인한 테이크의 재렌더링을 시작했습니다.",
+          "close": "닫기"
+        },
         "headline_one": "생성 {{count}}개 · {{cost}}",
         "headline_other": "생성 {{count}}개 · {{cost}}",
         "confirm_one": "생성 {{count}}개 확인 · {{cost}}",

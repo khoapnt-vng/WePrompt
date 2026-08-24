@@ -89,6 +89,7 @@ export const NATIVE_BRIDGE_PROVIDER_KEYS = [
   'creative-studio.confirm-submission',
   'creative-studio.cancel-job',
   'creative-studio.retry-job',
+  'creative-studio.retry-job-download',
   'creative-studio.dismiss-reference-generation-handoff',
   'creative-studio.apply-authoring-batch',
   'creative-studio.undo-last',

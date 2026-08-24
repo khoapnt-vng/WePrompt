@@ -148,10 +148,15 @@ const makeResolvedPlanV2 = (
 ): Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> => ({
   kind: 'resolved',
   snapshot: {
-    prompt: purpose === 'seed_still' ? 'A frozen seed prompt' : 'A frozen video prompt',
+    prompt:
+      purpose === 'seed_still'
+        ? 'A frozen seed prompt'
+        : purpose === 'board_still'
+          ? 'A frozen board prompt'
+          : 'A frozen video prompt',
     aspectRatio: '16:9',
     resolution: '720p',
-    durationSeconds: 5,
+    durationSeconds: purpose === 'board_still' ? 4 : 5,
     referenceInput: null,
     conditioningInput: null,
   },
@@ -168,15 +173,15 @@ const createV2Harness = async (
   const providerBinding: StudioProviderRef = {
     providerId: provider.id,
     adapterId: adapter.id,
-    model: purpose === 'seed_still' ? 'image-model' : 'video-model',
+    model: purpose === 'video_take' ? 'video-model' : 'image-model',
   };
-  const routeId = purpose === 'seed_still' ? 'route_image' : 'route_video';
+  const routeId = purpose === 'video_take' ? 'route_video' : 'route_image';
   const route: StudioGenerationRoute = {
     choiceId: routeId,
     ...providerBinding,
     providerName: 'Provider',
     health: 'available',
-    kind: purpose === 'seed_still' ? 'image' : 'video',
+    kind: purpose === 'video_take' ? 'video' : 'image',
     cancellationPolicy: options.cancellationPolicy ?? 'queued_and_running',
     constraints: {
       aspectRatios: ['16:9'],
@@ -197,6 +202,7 @@ const createV2Harness = async (
   });
   const authored = await store.updateProjectV2(created.id, (current) => ({
     ...current,
+    boardStyle: purpose === 'board_still' ? 'grey_tone' : null,
     beatOrder: ['beat_1'],
     beats: {
       beat_1: {
@@ -223,13 +229,15 @@ const createV2Harness = async (
         trimOutSeconds: null,
         chainBreak: 'none',
         seedStillId: null,
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
         videoAssetId: null,
         supersededVideoAssetIds: [],
         assetIds: [],
         jobIds: [],
       },
     },
-    imageRouteId: purpose === 'seed_still' ? routeId : null,
+    imageRouteId: purpose === 'video_take' ? null : routeId,
     videoRouteId: purpose === 'video_take' ? routeId : null,
   }));
   let quotedProject = authored;
@@ -277,7 +285,7 @@ const createV2Harness = async (
     routeId,
     generationCount: 1,
     requestPlan,
-    rateUnit: purpose === 'seed_still' ? 'generation' : 'second',
+    rateUnit: purpose === 'video_take' ? 'second' : 'generation',
     rateMinorUnits: 3,
   };
   const totals = calculateStudioQuoteTotals([item]);
@@ -1584,6 +1592,42 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(canCancelJobV2(job)).toBe(false);
   });
 
+  it('dispatches a Board job through the image adapter and publishes its current panel', async () => {
+    let outputPath = '';
+    const submit = vi.fn(async () => ({
+      kind: 'complete' as const,
+      outputs: [
+        {
+          mediaKind: 'image' as const,
+          role: 'primary' as const,
+          source: { kind: 'file' as const, path: outputPath },
+          mimeType: 'image/png' as const,
+        },
+      ],
+    }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      purpose: 'board_still',
+    });
+    outputPath = path.join(harness.rootDir, 'provider-board.png');
+    await writeFile(outputPath, png);
+
+    await dispatchV2(harness);
+    await expectV2Job(harness, { status: 'succeeded', purpose: 'board_still' });
+
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaKind: 'image', durationSeconds: 4 }),
+      expect.anything(),
+      expect.anything()
+    );
+    const loaded = await harness.store.getProjectV2(harness.project.id);
+    if (loaded.status !== 'supported') throw new Error('Board project disappeared');
+    const boardAssetId = loaded.project.shots.shot_1!.boardAssetId;
+    expect(loaded.project.assets[boardAssetId!]).toMatchObject({
+      mediaKind: 'image',
+      managedAsset: { collection: 'boardStills' },
+    });
+  });
+
   it('persists a local V2 video primary and optional poster with bounded provider metadata', async () => {
     let primaryPath = '';
     let posterPath = '';
@@ -1680,6 +1724,8 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         trimOutSeconds: null,
         chainBreak: 'none',
         seedStillId: null,
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
         videoAssetId: null,
         supersededVideoAssetIds: [],
         assetIds: [],
@@ -2208,6 +2254,77 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       })
     ).rejects.toMatchObject({ code: 'cancellation_refused' });
     expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('resumes a persisted remote Board job through the image adapter after restart', async () => {
+    let outputPath = '';
+    const submit = vi.fn(async () => {
+      throw new Error('must not submit again');
+    });
+    const poll = vi.fn(async () => ({
+      status: 'succeeded' as const,
+      outputs: [
+        {
+          mediaKind: 'image' as const,
+          role: 'primary' as const,
+          source: { kind: 'file' as const, path: outputPath },
+          mimeType: 'image/png' as const,
+        },
+      ],
+    }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit, poll }), {
+      purpose: 'board_still',
+      sleep: async () => undefined,
+      nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+    });
+    outputPath = path.join(harness.rootDir, 'recovered-board.png');
+    await writeFile(outputPath, png);
+    await harness.store.updateProjectV2(harness.project.id, (project) => {
+      const job = project.jobs.job_v2_1!;
+      job.status = 'queued_remote';
+      job.providerJobId = 'remote_board_1';
+      job.remoteStartedAt = '2026-08-17T12:00:02.000Z';
+      return project;
+    });
+
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+    await expectV2Job(harness, { status: 'succeeded', purpose: 'board_still' });
+
+    const loaded = await harness.store.getProjectV2(harness.project.id);
+    if (loaded.status !== 'supported') throw new Error('Recovered Board project disappeared');
+    expect(loaded.project.shots.shot_1!.boardAssetId).toEqual(expect.any(String));
+    expect(poll).toHaveBeenCalledWith('remote_board_1', expect.anything(), expect.anything());
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('terminalizes a receipt-bearing local Board completion after restart without resubmitting', async () => {
+    const submit = vi.fn(async () => {
+      throw new Error('must not submit paid work again');
+    });
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      purpose: 'board_still',
+    });
+    const receipt = createStudioSpendReceiptV2({
+      authorization: harness.authorization,
+      itemId: harness.item.id,
+      jobId: 'job_v2_1',
+    });
+    await harness.store.updateProjectV2(harness.project.id, (project) => {
+      const job = project.jobs.job_v2_1!;
+      job.status = 'running';
+      job.spendReceipt = receipt;
+      return project;
+    });
+
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+
+    await expectV2Job(harness, {
+      status: 'failed',
+      providerJobId: null,
+      error: { code: 'no_output' },
+      spendReceipt: receipt,
+    });
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it('recovers a remote job from persisted provider binding without consulting the edited route catalog', async () => {

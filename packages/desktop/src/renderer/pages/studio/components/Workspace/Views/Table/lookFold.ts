@@ -9,7 +9,7 @@
  * Action cell. Ruled by the designer on 2026-08-21 and measured, as the coverage bar's density tiers
  * are, against the rendered column width rather than the window's.
  */
-export const TABLE_LOOK_FOLD_MAX_WIDTH_PX = 860;
+export const TABLE_LOOK_FOLD_MAX_WIDTH_PX = 956;
 
 /**
  * Whether a Table of this rendered width folds its Look column into the Action cell.

@@ -181,7 +181,7 @@ describe('Studio Director V2 command contracts', () => {
     expect(source).not.toMatch(/export function parseStudioDirectorCommandReceipt\s*\(/u);
   });
 
-  it('freezes an exhaustive 27-kind capability table and rejects unknown provenance', () => {
+  it('freezes an exhaustive 28-kind capability table and rejects unknown provenance', () => {
     const expected = {
       edit_project: 'operation_not_permitted',
       set_brief: 'direct',
@@ -201,6 +201,7 @@ describe('Studio Director V2 command contracts', () => {
       apply_coverage: 'proposal',
       set_hard_cut: 'operation_not_permitted',
       set_seed_still: 'operation_not_permitted',
+      promote_board_panel: 'operation_not_permitted',
       trim_shot: 'operation_not_permitted',
       redetach_line: 'proposal',
       rederive_line: 'proposal',
@@ -215,7 +216,7 @@ describe('Studio Director V2 command contracts', () => {
     >;
 
     expect(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2).toEqual(expected);
-    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(27);
+    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(28);
     expect(Object.isFrozen(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toBe(true);
     for (const [kind, disposition] of Object.entries(expected)) {
       expect(classifyStudioDirectorOperationV2(kind), kind).toBe(disposition);
@@ -371,7 +372,7 @@ describe('Studio Director V2 command contracts', () => {
   });
 
   it('distinguishes unknown versions from malformed schema-2 records', () => {
-    expect(parsePendingV2({ ...validCommandV2(), schemaVersion: 4 })).toEqual({
+    expect(parsePendingV2({ ...validCommandV2(), schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1 })).toEqual({
       status: 'invalid',
       commandId: 'command_1',
       expectedRevision: 4,
@@ -475,7 +476,12 @@ describe('Studio Director V2 slot and lease contracts', () => {
     ['slot unknown key', () => parseStudioDirectorCommandSlotV2({ ...validSlotV2(), extra: true }, NOW, WAIT_MS)],
     [
       'slot unknown version',
-      () => parseStudioDirectorCommandSlotV2({ ...validSlotV2(), schemaVersion: 4 }, NOW, WAIT_MS),
+      () =>
+        parseStudioDirectorCommandSlotV2(
+          { ...validSlotV2(), schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1 },
+          NOW,
+          WAIT_MS
+        ),
     ],
     [
       'lease partial identity',

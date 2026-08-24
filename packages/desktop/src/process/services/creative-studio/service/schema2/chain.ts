@@ -20,6 +20,7 @@ import {
   isStudioGenerationRequestCurrent,
   studioConditioningInputsEqual,
 } from './generation';
+import { resolveStudioCanonicalBoardAssetV2 } from './generation/boardPanel';
 
 const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
   'queued_local',
@@ -89,8 +90,11 @@ const eligibleSeed = (project: StudioProjectV2, shot: StudioShot, assetId: strin
     : null;
 };
 
+const eligibleExplicitSeed = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null =>
+  eligibleSeed(project, shot, assetId) ?? resolveStudioCanonicalBoardAssetV2(project, shot, assetId)?.asset ?? null;
+
 const effectiveSeed = (project: StudioProjectV2, shot: StudioShot): StudioAssetV2 | null => {
-  if (shot.seedStillId !== null) return eligibleSeed(project, shot, shot.seedStillId);
+  if (shot.seedStillId !== null) return eligibleExplicitSeed(project, shot, shot.seedStillId);
   const candidates = shot.assetIds.flatMap((assetId) => {
     const asset = eligibleSeed(project, shot, assetId);
     return asset === null ? [] : [asset];
@@ -216,8 +220,15 @@ const currentConditioningInput = (
   };
 };
 
-const currentRouteId = (project: StudioProjectV2, job: StudioJobV2): string | null =>
-  job.purpose === 'seed_still' ? project.imageRouteId : project.videoRouteId;
+const currentRouteId = (project: StudioProjectV2, job: StudioJobV2): string | null => {
+  switch (job.purpose) {
+    case 'seed_still':
+    case 'board_still':
+      return project.imageRouteId;
+    case 'video_take':
+      return project.videoRouteId;
+  }
+};
 
 const jobIsCurrent = (
   project: StudioProjectV2,
@@ -236,7 +247,9 @@ const jobIsCurrent = (
 
 const effectiveSeedGenerationIsCurrent = (project: StudioProjectV2, shot: StudioShot): boolean => {
   const seed = effectiveSeed(project, shot);
-  if (seed === null || seed.managedAsset.collection === 'imports') return true;
+  if (seed === null || seed.managedAsset.collection === 'imports' || seed.managedAsset.collection === 'boardStills') {
+    return true;
+  }
   const seedJob = producingJob(project, shot, seed.id);
   return seedJob !== null && jobIsCurrent(project, shot, seedJob, null);
 };

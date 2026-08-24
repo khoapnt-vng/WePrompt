@@ -13,6 +13,7 @@ import {
   type StudioQuotedGeneration,
   type StudioRendererChainBoundaryV2,
   type StudioRendererChainStatusV2,
+  type StudioRendererBoardPanelStatusV2,
   type StudioRendererParkBlockerCodeV2,
   type StudioRendererParkBlockerV2,
   type StudioRendererParkEligibilityV2,
@@ -21,7 +22,11 @@ import {
   type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioDirtyShotsV2, deriveStudioInboundShotReferencesV2 } from './chain';
-import { createStudioFrameExtractionId } from './generation';
+import {
+  createStudioBoardGenerationRequestPlanForShot,
+  createStudioFrameExtractionId,
+  isStudioGenerationRequestCurrent,
+} from './generation';
 import type { StudioVerifiedConditioningFrameV2 } from './lifecycle';
 
 const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
@@ -82,6 +87,20 @@ const isCanonicalTake = (
     (asset.mediaKind === 'image' && asset.managedAsset.collection === 'imports')) &&
   shot.assetIds.includes(asset.id);
 
+const isCanonicalDependencyAssetForPurpose = (
+  purpose: StudioQuotedGeneration['purpose'],
+  asset: StudioAssetV2
+): boolean => {
+  switch (purpose) {
+    case 'seed_still':
+      return asset.mediaKind === 'image';
+    case 'video_take':
+      return asset.mediaKind === 'video';
+    case 'board_still':
+      return false;
+  }
+};
+
 const jobsForItem = (project: StudioProjectV2, authorizationId: string, itemId: string): StudioJobV2[] =>
   Object.values(project.jobs)
     .filter((job) => job.authorizationId === authorizationId && job.authorizationItemId === itemId)
@@ -109,7 +128,7 @@ const primaryAssetIdsForItem = (
     if (
       !isCanonicalTake(project, shot, asset) ||
       !job.outputAssetIds.includes(assetId) ||
-      (item.purpose === 'seed_still' ? asset.mediaKind !== 'image' : asset.mediaKind !== 'video')
+      !isCanonicalDependencyAssetForPurpose(item.purpose, asset)
     ) {
       continue;
     }
@@ -156,6 +175,102 @@ const projectCurrentVideoJobs = (
     };
   });
 };
+
+const latestBoardJob = (project: StudioProjectV2, shot: StudioShot): StudioJobV2 | null => {
+  for (let index = shot.jobIds.length - 1; index >= 0; index -= 1) {
+    const jobId = shot.jobIds[index]!;
+    const job = ownValue(project.jobs, jobId);
+    if (job?.id === jobId && job.projectId === project.id && job.shotId === shot.id && job.purpose === 'board_still') {
+      return job;
+    }
+  }
+  return null;
+};
+
+const boardProducer = (project: StudioProjectV2, shot: StudioShot): StudioJobV2 | null => {
+  if (shot.boardAssetId === null) return null;
+  const producers = shot.jobIds.flatMap((jobId) => {
+    const job = ownValue(project.jobs, jobId);
+    return job?.id === jobId &&
+      job.projectId === project.id &&
+      job.shotId === shot.id &&
+      job.purpose === 'board_still' &&
+      job.status === 'succeeded' &&
+      job.outputAssetIdsByRole.primary === shot.boardAssetId &&
+      job.outputAssetIds.filter((assetId) => assetId === shot.boardAssetId).length === 1
+      ? [job]
+      : [];
+  });
+  return producers.length === 1 ? producers[0]! : null;
+};
+
+const currentBoardRequest = (
+  project: StudioProjectV2,
+  location: ActiveShotLocation
+): StudioJobV2['requestSnapshot'] => {
+  const beat = ownValue(project.beats, location.beatId);
+  const shot = ownValue(project.shots, location.shotId);
+  if (beat === undefined || shot === undefined || project.boardStyle === null) return null;
+  try {
+    return createStudioBoardGenerationRequestPlanForShot({ project, beat, shot })?.snapshot ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const projectBoardPanels = (
+  project: StudioProjectV2,
+  locations: readonly ActiveShotLocation[]
+): StudioRendererBoardPanelStatusV2[] =>
+  locations.map((location) => {
+    const shot = ownValue(project.shots, location.shotId);
+    if (shot === undefined) {
+      return {
+        shotId: location.shotId,
+        assetId: null,
+        producerJobId: null,
+        latestJobId: null,
+        staleCauses: [],
+      };
+    }
+    const latestJobId = latestBoardJob(project, shot)?.id ?? null;
+    if (shot.boardAssetId === null) {
+      return {
+        shotId: shot.id,
+        assetId: null,
+        producerJobId: null,
+        latestJobId,
+        staleCauses: [],
+      };
+    }
+    const producer = boardProducer(project, shot);
+    const currentRequest = currentBoardRequest(project, location);
+    const staleCauses: StudioRendererBoardPanelStatusV2['staleCauses'] = [];
+    if (
+      producer?.requestSnapshot === null ||
+      producer === null ||
+      currentRequest === null ||
+      !isStudioGenerationRequestCurrent(producer.requestSnapshot, currentRequest)
+    ) {
+      staleCauses.push('request_out_of_date');
+    }
+    if (
+      producer?.spendReceipt === null ||
+      producer === null ||
+      project.imageRouteId === null ||
+      producer.spendReceipt.purpose !== 'board_still' ||
+      producer.spendReceipt.routeId !== project.imageRouteId
+    ) {
+      staleCauses.push('route_out_of_date');
+    }
+    return {
+      shotId: shot.id,
+      assetId: shot.boardAssetId,
+      producerJobId: producer?.id ?? null,
+      latestJobId,
+      staleCauses,
+    };
+  });
 
 const canCancelWaitingJobs = (jobs: readonly StudioJobV2[]): boolean => {
   const remaining = jobs.filter((job) => job.status !== 'cancelled');
@@ -692,6 +807,7 @@ export const projectStudioWorkspaceStatusV2 = (project: StudioProjectV2): Studio
         ? null
         : { entryId: undoTop.id, label: undoTop.label, sourceRevision: undoTop.sourceRevision },
     dirtyShots: deriveStudioDirtyShotsV2(project),
+    boardPanels: projectBoardPanels(project, locations),
     cascadeProgress: projectCascadeProgress(project, locations),
     currentVideoJobs: projectCurrentVideoJobs(project, locations),
     parkEligibility: projectParkEligibility(project),

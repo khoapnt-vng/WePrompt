@@ -28,6 +28,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   calculateStudioQuoteTotals,
+  createStudioBoardGenerationRequestPlanForShot,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
 } from '@/process/services/creative-studio/service/schema2/generation';
@@ -79,6 +80,8 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
   supersededVideoAssetIds: [],
   assetIds: [],
@@ -99,7 +102,7 @@ const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<Studi
 });
 
 const makeProject = (): StudioProjectV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 7,
   id: 'project_1',
   name: 'Project One',
@@ -109,6 +112,7 @@ const makeProject = (): StudioProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '1080p',
+  boardStyle: null,
   beatOrder: ['beat_1', 'beat_2'],
   beats: {
     beat_1: makeBeat('beat_1', ['shot_1', 'shot_2']),
@@ -270,6 +274,35 @@ const makeSeedItem = (projectRevision: number, shotId: string): StudioQuotedGene
   rateMinorUnits: 3,
 });
 
+const makeBoardItem = (projectRevision: number, shotId: string): StudioQuotedGeneration => {
+  const requestPlan: StudioGenerationRequestPlan = {
+    kind: 'resolved',
+    snapshot: {
+      prompt: 'Board prompt',
+      aspectRatio: '16:9',
+      resolution: '1080p',
+      durationSeconds: 4,
+      referenceInput: null,
+      conditioningInput: null,
+    },
+  };
+  return {
+    id: createStudioQuotedGenerationId({
+      projectId: 'project_1',
+      projectRevision,
+      shotId,
+      purpose: 'board_still',
+    }),
+    shotId,
+    purpose: 'board_still',
+    routeId: 'image_route',
+    generationCount: 1,
+    requestPlan,
+    rateUnit: 'generation',
+    rateMinorUnits: 3,
+  };
+};
+
 const authorizedSeedPlan = (upstreamItemId: string, shotId: string): StudioGenerationRequestPlan => ({
   kind: 'after_take_selection',
   template: {
@@ -371,6 +404,53 @@ const addSucceededSeedJob = (
   });
   project.jobs[job.id] = job;
   project.shots[item.shotId]!.jobIds.push(job.id);
+  return asset;
+};
+
+const addSucceededBoardPanel = (
+  project: StudioProjectV2,
+  shotId: string,
+  assetId = `board_${shotId}`,
+  jobId = `job_${assetId}`
+): StudioAssetV2 => {
+  project.boardStyle = 'grey_tone';
+  project.imageRouteId = 'image_route';
+  const beat = Object.values(project.beats).find((candidate) => candidate.shotOrder.includes(shotId));
+  const shot = project.shots[shotId];
+  if (beat === undefined || shot === undefined) throw new Error('Board fixture requires one active Shot');
+  const requestPlan = createStudioBoardGenerationRequestPlanForShot({ project, beat, shot });
+  if (requestPlan === null) throw new Error('Board fixture request must resolve');
+  const item: StudioQuotedGeneration = {
+    ...makeBoardItem(project.revision - 1, shotId),
+    requestPlan,
+  };
+  const authorization = makeAuthorization(`auth_${assetId}`, project.revision - 1, [item]);
+  const asset = addImageAsset(project, shotId, assetId, 'boardStills');
+  const job = makeJob(jobId, authorization, item, {
+    status: 'succeeded',
+    providerJobId: `remote_${jobId}`,
+    remoteStartedAt: timestamp,
+    purpose: 'board_still',
+    outputAssetIds: [asset.id],
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+    spendReceipt: {
+      authorizationId: authorization.id,
+      itemId: item.id,
+      jobId,
+      purpose: 'board_still',
+      routeId: item.routeId,
+      currency: authorization.currency,
+      rateUnit: 'generation',
+      rateMinorUnits: item.rateMinorUnits,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: item.rateMinorUnits,
+    },
+  });
+  project.spendAuthorizations.push(authorization);
+  project.jobs[job.id] = job;
+  shot.jobIds.push(job.id);
+  shot.boardAssetId = asset.id;
   return asset;
 };
 
@@ -563,7 +643,7 @@ const completeBoundDependent = (project: StudioProjectV2): StudioJobV2 => {
 };
 
 const mutationBatch = (project: StudioProjectV2, operations: StudioMutationOperationV2[]): StudioMutationBatchV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   projectId: project.id,
   expectedRevision: project.revision,
   operations,
@@ -619,6 +699,7 @@ const FINAL_OPERATION_KINDS = [
   'apply_coverage',
   'set_hard_cut',
   'set_seed_still',
+  'promote_board_panel',
   'trim_shot',
   'redetach_line',
   'rederive_line',
@@ -631,8 +712,8 @@ const FINAL_OPERATION_KINDS = [
 ] as const satisfies readonly StudioMutationOperationV2['kind'][];
 
 describe('applyStudioMutationBatchV2 final operation contract', () => {
-  it('keeps the exact exhaustive 27-operation catalog', () => {
-    expect(FINAL_OPERATION_KINDS).toHaveLength(27);
+  it('keeps the exact exhaustive 28-operation catalog', () => {
+    expect(FINAL_OPERATION_KINDS).toHaveLength(28);
     expect(new Set(FINAL_OPERATION_KINDS).size).toBe(FINAL_OPERATION_KINDS.length);
   });
 
@@ -682,6 +763,288 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
     ]);
     expect(result.createdBeatIds).toEqual(['beat_3', 'beat_alt']);
     expect(result.createdShotIds).toEqual([]);
+  });
+
+  it('sets the Board style through the exact project edit contract and restores it through undo', () => {
+    const styled = apply(
+      makeProject(),
+      [{ kind: 'edit_project', changes: { boardStyle: 'line_art' } } as unknown as StudioMutationOperationV2],
+      'mutation_board_style'
+    );
+    expect(styled.project.boardStyle).toBe('line_art');
+
+    const undone = apply(
+      persist(styled.project),
+      [{ kind: 'undo_last', entryId: 'mutation_board_style' }],
+      'mutation_undo_board_style'
+    );
+    expect(undone.project.boardStyle).toBeNull();
+    expect(undone.project.undoHistory).toEqual([]);
+  });
+
+  it('refuses to clear the Board style once durable Board job history exists', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    project.imageRouteId = 'image_route';
+    const item = makeBoardItem(project.revision - 1, 'shot_1');
+    const authorization = makeAuthorization('auth_board_history', project.revision - 1, [item]);
+    const job = makeJob('job_board_history', authorization, item, {
+      status: 'cancelled',
+      purpose: 'board_still',
+    });
+    project.spendAuthorizations.push(authorization);
+    project.jobs[job.id] = job;
+    project.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    expectReason(
+      project,
+      [{ kind: 'edit_project', changes: { boardStyle: null } } as unknown as StudioMutationOperationV2],
+      'dependency_blocked',
+      'mutation_clear_board_style'
+    );
+  });
+
+  it('refuses an undo that would clear the Board style after terminal Board history', () => {
+    const initial = makeProject();
+    initial.imageRouteId = 'image_route';
+    const project = persist(
+      apply(
+        initial,
+        [{ kind: 'edit_project', changes: { boardStyle: 'line_art' } } as unknown as StudioMutationOperationV2],
+        'mutation_board_style_before_history'
+      ).project
+    );
+    const item = makeBoardItem(project.revision - 1, 'shot_1');
+    const authorization = makeAuthorization('auth_terminal_board_after_style', project.revision - 1, [item]);
+    const job = makeJob('job_terminal_board_after_style', authorization, item, {
+      status: 'cancelled',
+      purpose: 'board_still',
+    });
+    project.spendAuthorizations.push(authorization);
+    project.jobs[job.id] = job;
+    project.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    expectReason(
+      project,
+      [{ kind: 'undo_last', entryId: 'mutation_board_style_before_history' }],
+      'undo_conflict',
+      'mutation_undo_board_style_after_history'
+    );
+  });
+
+  it('allows a style-to-style undo after terminal Board history', () => {
+    const initial = makeProject();
+    initial.boardStyle = 'grey_tone';
+    initial.imageRouteId = 'image_route';
+    const project = persist(
+      apply(
+        initial,
+        [{ kind: 'edit_project', changes: { boardStyle: 'line_art' } } as unknown as StudioMutationOperationV2],
+        'mutation_board_style_change_before_history'
+      ).project
+    );
+    const item = makeBoardItem(project.revision - 1, 'shot_1');
+    const authorization = makeAuthorization('auth_terminal_board_after_style_change', project.revision - 1, [item]);
+    const job = makeJob('job_terminal_board_after_style_change', authorization, item, {
+      status: 'cancelled',
+      purpose: 'board_still',
+    });
+    project.spendAuthorizations.push(authorization);
+    project.jobs[job.id] = job;
+    project.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    const undone = apply(
+      project,
+      [{ kind: 'undo_last', entryId: 'mutation_board_style_change_before_history' }],
+      'mutation_undo_board_style_change_after_history'
+    );
+    expect(undone.project.boardStyle).toBe('grey_tone');
+    expect(undone.project.jobs).toEqual(project.jobs);
+    expect(undone.project.spendAuthorizations).toEqual(project.spendAuthorizations);
+    expect(undone.project.undoHistory).toEqual([]);
+  });
+
+  it('pins the exact current Board panel at a segment head without mutating Board history or chainBreak', () => {
+    const project = makeProject();
+    const panel = addSucceededBoardPanel(project, 'shot_1');
+    const boardBefore = structuredClone({
+      asset: project.assets[panel.id],
+      boardAssetId: project.shots.shot_1!.boardAssetId,
+      supersededBoardAssetIds: project.shots.shot_1!.supersededBoardAssetIds,
+      job: project.jobs.job_board_shot_1,
+      chainBreak: project.shots.shot_1!.chainBreak,
+    });
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    const promoted = apply(
+      project,
+      [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: panel.id }],
+      'mutation_promote_board'
+    );
+
+    expect(promoted.project.shots.shot_1).toMatchObject({
+      seedStillId: panel.id,
+      boardAssetId: boardBefore.boardAssetId,
+      supersededBoardAssetIds: boardBefore.supersededBoardAssetIds,
+      chainBreak: boardBefore.chainBreak,
+    });
+    expect(promoted.project.assets[panel.id]).toEqual(boardBefore.asset);
+    expect(promoted.project.jobs.job_board_shot_1).toEqual(boardBefore.job);
+    expect(promoted.project.undoHistory.at(-1)).toMatchObject({
+      id: 'mutation_promote_board',
+      label: 'promote_board_panel',
+      patches: [{ kind: 'shot_fields', shotId: 'shot_1' }],
+    });
+
+    const undone = apply(
+      persist(promoted.project),
+      [{ kind: 'undo_last', entryId: 'mutation_promote_board' }],
+      'mutation_undo_promote_board'
+    );
+    expect(undone.project.shots.shot_1).toMatchObject({
+      seedStillId: null,
+      boardAssetId: panel.id,
+      chainBreak: 'none',
+    });
+    expect(undone.project.assets[panel.id]).toEqual(boardBefore.asset);
+  });
+
+  it('refuses to undo a Board promotion while new video work references its segment', () => {
+    const project = makeProject();
+    const panel = addSucceededBoardPanel(project, 'shot_1');
+    const promoted = persist(
+      apply(
+        project,
+        [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: panel.id }],
+        'mutation_promote_before_video'
+      ).project
+    );
+
+    const item = makeItem(promoted.revision - 1, 'shot_1', resolvedPlan({ kind: 'seed_still', assetId: panel.id }));
+    const authorization = makeAuthorization('auth_video_after_promotion', promoted.revision - 1, [item]);
+    const job = makeJob('job_video_after_promotion', authorization, item);
+    promoted.spendAuthorizations.push(authorization);
+    promoted.jobs[job.id] = job;
+    promoted.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(promoted)).toBe(true);
+
+    expectReason(
+      promoted,
+      [{ kind: 'undo_last', entryId: 'mutation_promote_before_video' }],
+      'undo_conflict',
+      'mutation_undo_promote_during_video'
+    );
+    expect(promoted.shots.shot_1!.seedStillId).toBe(panel.id);
+  });
+
+  it('permits an explicit hard-cut segment head but rejects an ordinary non-head Shot', () => {
+    const hardCut = makeProject();
+    hardCut.shots.shot_2!.chainBreak = 'hard_cut';
+    const hardCutPanel = addSucceededBoardPanel(hardCut, 'shot_2');
+    expect(validateStudioProjectV2(hardCut)).toBe(true);
+    expect(
+      apply(hardCut, [{ kind: 'promote_board_panel', shotId: 'shot_2', boardAssetId: hardCutPanel.id }]).project.shots
+        .shot_2
+    ).toMatchObject({ seedStillId: hardCutPanel.id, chainBreak: 'hard_cut' });
+
+    const nonHead = makeProject();
+    const nonHeadPanel = addSucceededBoardPanel(nonHead, 'shot_2');
+    expect(validateStudioProjectV2(nonHead)).toBe(true);
+    expectReason(
+      nonHead,
+      [{ kind: 'promote_board_panel', shotId: 'shot_2', boardAssetId: nonHeadPanel.id }],
+      'invalid_operation',
+      'mutation_promote_non_head'
+    );
+  });
+
+  it('rejects a mismatched, stale, already pinned, mixed, or nonterminal Board promotion', () => {
+    const mismatch = makeProject();
+    const current = addSucceededBoardPanel(mismatch, 'shot_1');
+    expectReason(
+      mismatch,
+      [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'other_board' }],
+      'invalid_operation',
+      'mutation_promote_mismatch'
+    );
+
+    const stale = structuredClone(mismatch);
+    stale.shots.shot_1!.line = 'The Board request changed after the panel was drawn';
+    expect(validateStudioProjectV2(stale)).toBe(true);
+    expectReason(
+      stale,
+      [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: current.id }],
+      'invalid_operation',
+      'mutation_promote_stale'
+    );
+
+    const alreadyPinned = structuredClone(mismatch);
+    alreadyPinned.shots.shot_1!.seedStillId = current.id;
+    expect(validateStudioProjectV2(alreadyPinned)).toBe(true);
+    expectReason(
+      alreadyPinned,
+      [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: current.id }],
+      'invalid_operation',
+      'mutation_promote_noop'
+    );
+
+    expectReason(
+      mismatch,
+      [
+        { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: current.id },
+        { kind: 'edit_shot', shotId: 'shot_1', changes: { narration: 'mixed' } },
+      ],
+      'invalid_operation',
+      'mutation_promote_mixed'
+    );
+
+    const inFlight = structuredClone(mismatch);
+    const item = makeBoardItem(inFlight.revision - 2, 'shot_1');
+    const authorization = makeAuthorization('auth_board_redraw', inFlight.revision - 2, [item]);
+    const job = makeJob('job_board_redraw', authorization, item, { purpose: 'board_still' });
+    inFlight.spendAuthorizations.push(authorization);
+    inFlight.jobs[job.id] = job;
+    inFlight.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(inFlight)).toBe(true);
+    expectReason(
+      inFlight,
+      [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: current.id }],
+      'dependency_blocked',
+      'mutation_promote_in_flight'
+    );
+
+    const downstreamInFlight = structuredClone(mismatch);
+    const downstreamItem = makeBoardItem(downstreamInFlight.revision - 2, 'shot_2');
+    const downstreamAuthorization = makeAuthorization('auth_downstream_board_redraw', downstreamInFlight.revision - 2, [
+      downstreamItem,
+    ]);
+    const downstreamJob = makeJob('job_downstream_board_redraw', downstreamAuthorization, downstreamItem, {
+      purpose: 'board_still',
+    });
+    downstreamInFlight.spendAuthorizations.push(downstreamAuthorization);
+    downstreamInFlight.jobs[downstreamJob.id] = downstreamJob;
+    downstreamInFlight.shots.shot_2!.jobIds.push(downstreamJob.id);
+    expect(validateStudioProjectV2(downstreamInFlight)).toBe(true);
+    expectReason(
+      downstreamInFlight,
+      [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: current.id }],
+      'dependency_blocked',
+      'mutation_promote_downstream_in_flight'
+    );
+
+    const pendingFrame = structuredClone(mismatch);
+    addSucceededVideoTake(pendingFrame, 'shot_1', 'take_before_promotion', true);
+    addFrameExtraction(pendingFrame, 'shot_1', 'pending');
+    expect(validateStudioProjectV2(pendingFrame)).toBe(true);
+    expectReason(
+      pendingFrame,
+      [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: current.id }],
+      'dependency_blocked',
+      'mutation_promote_pending_frame'
+    );
   });
 
   it('parks and restores an empty Beat through one exact lifted alias', () => {
@@ -1348,6 +1711,29 @@ describe('applyStudioMutationBatchV2 line history and unified undo', () => {
     expect(undone.project.assets.later_asset).toBeDefined();
   });
 
+  it('refuses any undo while a bound Board job is nonterminal', () => {
+    const initial = makeProject();
+    initial.boardStyle = 'grey_tone';
+    initial.imageRouteId = 'image_route';
+    const project = persist(
+      apply(initial, [{ kind: 'set_brief', brief: 'Undoable before Board work' }], 'mutation_before_board').project
+    );
+    const item = makeBoardItem(project.revision - 1, 'shot_1');
+    const authorization = makeAuthorization('auth_board_after_mutation', project.revision - 1, [item]);
+    const job = makeJob('job_board_after_mutation', authorization, item, { purpose: 'board_still' });
+    project.spendAuthorizations.push(authorization);
+    project.jobs[job.id] = job;
+    project.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    expectReason(
+      project,
+      [{ kind: 'undo_last', entryId: 'mutation_before_board' }],
+      'undo_conflict',
+      'mutation_undo_board_bound'
+    );
+  });
+
   it('fails closed when an authored after-fragment no longer matches the undo digest', () => {
     const changed = persist(
       apply(makeProject(), [{ kind: 'edit_shot', shotId: 'shot_1', changes: { line: 'Changed' } }], 'mutation_conflict')
@@ -1440,6 +1826,48 @@ describe('applyStudioMutationBatchV2 line history and unified undo', () => {
 });
 
 describe('applyStudioMutationBatchV2 park safety and retained lineage', () => {
+  it('blocks image-route and destructive Shot edits while a Board job is nonterminal', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    project.imageRouteId = 'image_route';
+    const item = makeBoardItem(project.revision - 1, 'shot_1');
+    const authorization = makeAuthorization('auth_board_inflight', project.revision - 1, [item]);
+    const job = makeJob('job_board_inflight', authorization, item, { purpose: 'board_still' });
+    project.spendAuthorizations.push(authorization);
+    project.jobs[job.id] = job;
+    project.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    expectReason(
+      project,
+      [{ kind: 'set_routes', imageRouteId: 'image_route_changed', videoRouteId: null }],
+      'dependency_blocked',
+      'board_image_route'
+    );
+    expectReason(
+      project,
+      [{ kind: 'edit_project', changes: { boardStyle: 'line_art' } } as unknown as StudioMutationOperationV2],
+      'dependency_blocked',
+      'board_style'
+    );
+    expectReason(project, [{ kind: 'park_shot', shotId: 'shot_1' }], 'dependency_blocked', 'board_park_shot');
+    expectReason(project, [{ kind: 'park_beat', beatId: 'beat_1' }], 'dependency_blocked', 'board_park_beat');
+    expectReason(project, [{ kind: 'delete_shot', shotId: 'shot_1' }], 'dependency_blocked', 'board_delete_shot');
+    expectReason(
+      project,
+      [{ kind: 'edit_beat', beatId: 'beat_1', changes: { action: 'Changed while drawing' } }],
+      'dependency_blocked',
+      'board_action'
+    );
+
+    const videoRouteOnly = apply(
+      project,
+      [{ kind: 'set_routes', imageRouteId: 'image_route', videoRouteId: 'video_route' }],
+      'mutation_board_video_route'
+    ).project;
+    expect(videoRouteOnly.videoRouteId).toBe('video_route');
+  });
+
   it('rejects Shot parking when its owner Beat is retained only in the Bin', () => {
     const project = makeProject();
     project.beatOrder = ['beat_2'];
@@ -1635,6 +2063,11 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
         changes: { aspectRatio },
       })),
       { kind: 'edit_project', changes: { resolution: '720p' } },
+      ...(['grey_tone', 'line_art', 'colour_key'] as const).map((boardStyle) => ({
+        kind: 'edit_project',
+        changes: { boardStyle },
+      })),
+      { kind: 'edit_project', changes: { boardStyle: null } },
       { kind: 'edit_project', changes: { targetDurationSeconds: 5 } },
       { kind: 'edit_project', changes: { targetDurationSeconds: 1440 } },
       { kind: 'edit_beat', beatId: 'beat_1', changes: { targetSeconds: 1 } },
@@ -1675,6 +2108,7 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
       { kind: 'edit_project', changes: { name: 'n'.repeat(257) } },
       { kind: 'edit_project', changes: { aspectRatio: '2:1' } },
       { kind: 'edit_project', changes: { resolution: '4k' } },
+      { kind: 'edit_project', changes: { boardStyle: 'photoreal' } },
       { kind: 'edit_project', changes: { targetDurationSeconds: 4 } },
       { kind: 'set_brief', brief: 1 },
       { kind: 'set_brief', brief: 'b'.repeat(16 * 1024 + 1) },
@@ -2148,7 +2582,7 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
     expect(() =>
       applyStudioMutationBatchV2(
         project,
-        { schemaVersion: 3, projectId: project.id, expectedRevision: project.revision, operations: sparseOperations },
+        { schemaVersion: 4, projectId: project.id, expectedRevision: project.revision, operations: sparseOperations },
         { mutationId: 'mutation_sparse', capturedAt: laterTimestamp }
       )
     ).toThrowError(StudioMutationErrorV2);

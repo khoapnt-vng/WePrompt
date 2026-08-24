@@ -43,6 +43,7 @@ export const createEmptyStudioProjectV2 = (
     aspectRatio: input.aspectRatio,
     targetDurationSeconds: input.targetDurationSeconds,
     resolution: input.resolution,
+    boardStyle: null,
     beatOrder: [],
     beats: {},
     shots: {},

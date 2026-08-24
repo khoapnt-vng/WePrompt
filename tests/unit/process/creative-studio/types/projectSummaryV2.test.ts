@@ -36,6 +36,8 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimOutSeconds: null,
   chainBreak: 'none',
   seedStillId: null,
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
   videoAssetId: null,
   supersededVideoAssetIds: [],
   assetIds: [],
@@ -122,7 +124,7 @@ const makeJob = (
 });
 
 const makeProject = (): StudioProjectV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 1,
   id: 'project_1',
   name: 'Project One',
@@ -132,6 +134,7 @@ const makeProject = (): StudioProjectV2 => ({
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '1080p',
+  boardStyle: null,
   beatOrder: [],
   beats: {},
   shots: {},

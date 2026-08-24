@@ -237,7 +237,7 @@ const route = (kind: 'image' | 'video', ordinal = 1) => ({
 });
 
 const project = (overrides: Partial<StudioRendererProjectV2> = {}): StudioRendererProjectV2 => ({
-  schemaVersion: 3,
+  schemaVersion: 4,
   revision: 3,
   id: 'project_1',
   name: 'Launch film',
@@ -247,6 +247,7 @@ const project = (overrides: Partial<StudioRendererProjectV2> = {}): StudioRender
   aspectRatio: '16:9',
   targetDurationSeconds: 30,
   resolution: '720p',
+  boardStyle: null,
   beatOrder: [],
   beats: {},
   shots: {},

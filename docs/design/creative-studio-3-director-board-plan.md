@@ -1,6 +1,6 @@
 # The Director draws the board — implementation plan
 
-**Date:** 2026-08-23 · **Status:** Slice 1 implemented; Slices 2–6 not started
+**Date:** 2026-08-23 · **Status:** Slices 1–5 implemented; Slice 6 deferred
 **Design:** `Director Storyboard - Hi-fi (standalone).html` + the designer's handoff notes
 **Related:** [bug list](../prds/creative-studio/creative-studio-3-bug-list.md) ·
 [film export](creative-studio-3-film-export.md) ·
@@ -8,6 +8,33 @@
 
 The design is good and most of it is buildable. Three of its load-bearing sentences are false against
 this codebase, and one of those is dangerous. Everything below is ordered around that.
+
+## Settled implementation decisions
+
+The hi-fi was reviewed against the live project, pricing, job, media, and Table contracts on
+2026-08-24. Where the visual prototype and product authority diverge, these decisions control the
+implementation:
+
+- **Redraw is paid.** Any action that asks a provider to create new pixels uses a fresh quote and
+  confirmation. Promoting an existing panel without generating pixels may remain free.
+- **The existing 24-Shot request ceiling remains.** Draw/Resume selects the next missing panels in
+  film order, up to 24. A 30-panel board therefore needs two explicit paid confirmations (24 + 6);
+  the UI must not imply that the first confirmation authorizes all 30.
+- **Board authority uses schema v4 with no migration.** Creative Studio has no retained production
+  data yet, so valid v3 projects are reported unsupported and remain byte-for-byte untouched. New v4
+  projects carry the current board pointer, ordered superseded-board history, and project board style.
+  Redraw publishes a new immutable asset and swaps the pointer atomically. Superseded assets, jobs,
+  authorizations, receipts, and bytes stay durable but disappear from the current-board surface; this
+  release does not delete paid history.
+- **The Table keeps `Status`.** Add the 96px `Panel` column without removing the existing status
+  surface. The hi-fi's combined `Action · Look` compression is not part of this change.
+- **Stop is bounded cancellation, not a refund.** It cancels work that has not started and requests
+  cancellation for running jobs whose provider policy permits it. Completed panels and durable spend
+  receipts remain. Copy must not promise a refund or the cancellation of an already billable call.
+
+The primary v1 surface is the Table's Panel column and one-at-a-time inline Beat expansion. Docked
+Band, contact-sheet export, generated cast sheets, permanent reference numbering, and image-aware
+Director capabilities remain later slices.
 
 ## Three claims the build cannot honour as written
 
@@ -26,9 +53,10 @@ that, every route that yields an image goes through `selectionGateDraft` → the
 A board still is an image generation at a provider. It costs real money. Thirty of them at the
 current image rate is thirty times three minor units — small, but not nothing, and not zero.
 
-**What is actually negotiable is whether drawing is _gated_, not whether it is _free_.** The design's
-"one paid gesture" instinct is right; the honest form of it is _one gate for the whole board_, not
-_no gate_. The copy has to say what it costs.
+**What is actually negotiable is how drawing is _gated_, not whether it is _free_.** The design's
+"one paid gesture" instinct becomes one honest confirmation per legal batch: with the retained
+24-Shot ceiling, the thirty-panel fixture is confirmed as 24 + 6 rather than silently widening spend
+authority. The copy has to say what each batch costs and what remains afterward.
 
 ### 2. "Board stills are separate from the first frame the chain consumes"
 
@@ -184,34 +212,48 @@ frame"; `seedStillId` stays what it is called in the store. That is a normal and
 remain unchanged. This is terminology cleanup. It neither detects variation grids nor isolates future
 board art, and it does not claim to be a prerequisite for that isolation.
 
-**Slice 2 — board-still authority and generation foundation.** A named `StudioJobPurpose` may first
-land while retaining exactly the existing two values. The behavioral change that admits
-`board_still` must then be atomic: add the fifth managed collection that `eligibleSeed` does not
-admit, update the type and registry, both validation gates, every purpose-sensitive router and job
-path (including the branches that currently treat every non-seed purpose as video), request/write
-planning, the id minter, rate card and `spendMath`. Do not let validation accept a durable board job
-before that exhaustive path exists. Only a board-still image may use the board collection, while seed
-and video primaries remain in `'assets'`. Model redraw as a new immutable asset plus an atomic
-board-pointer swap and authority-checked retirement. Board stills are then ineligible as a first frame
-**by construction**.
+**Slice 2 — board-still authority and generation foundation (implemented 2026-08-24).** The
+persisted project uses schema v4 with no migration or fold-forward; old schemas remain
+unsupported/no-touch. Each Shot gains
+`boardAssetId` and `supersededBoardAssetIds`; the project gains the global board style selected once
+and reused. A named `StudioJobPurpose` may first land while retaining exactly the existing two values.
+The behavioral change that admits `board_still` must then be atomic: add the
+fifth managed collection that `eligibleSeed` does not admit, update the type and registry, both
+validation gates, every purpose-sensitive router and job path (including the branches that currently
+treat every non-seed purpose as video), request/write planning, the id minter, rate card and
+`spendMath`. Do not let validation accept a durable board job before that exhaustive path exists.
+Only a board-still image may use the board collection, while seed and video primaries remain in
+`'assets'`. Model redraw as a new immutable asset plus an atomic board-pointer swap; append the prior
+pointer once to superseded history and retain its immutable bytes and paid audit records. Board stills
+remain ineligible for automatic fallback and generic first-frame selection **by construction**;
+Slice 5's explicit promotion operation is the only path that may pin one.
 
-**Slice 3 — drawing and spend UI.** Once Slice 2 makes the new purpose safe end to end, expose the
-app-owned board generation action and one honestly priced gate for the board. Note
-`STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST = 24 < 30`, so a thirty-shot film is **two** gates unless
-that cap is raised — the same arithmetic that produced BUG-114.
+**Slice 3 — drawing and spend UI (implemented 2026-08-24).** The app-owned Board generation actions
+use an honestly priced gate for the next film-order batch. Keep
+`STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST = 24`: Draw/Resume selects at most 24 missing panels, so the
+thirty-shot hi-fi fixture requires a second six-panel confirmation. Progress and copy must show the
+authorized batch separately from total board completeness. Stop uses the bounded cancellation rule
+above. Redraw of one panel or one Beat builds a fresh paid board-only quote.
 
-**Slice 4 — the Table column and expansion.** The column is easy; the expansion is not. `aria-rowcount`
-and the roving-focus matrix are both indexed by **beat index**, not DOM row, so injected rows corrupt
-the announced grid geometry and the arrow-key model. The whole `<tr>` currently opens the Beat panel
-modal, so a thumb click needs its own target. And a 64×36 thumb roughly doubles a row whose cell
-padding is 11px at 13px/1.35 — the "no row grows" promise needs measuring before it is believed.
+**Slice 4 — the Table column and expansion (implemented 2026-08-24).** The Table adds the hi-fi's
+96px `Panel` column while retaining the existing `Status`, `Action`, and `Look` columns. The
+expansion is not a plain extra row:
+`aria-rowcount` and the roving-focus matrix are both indexed by **beat index**, not DOM row, so the
+disclosure row must have an explicit accessible geometry and be skipped deliberately by Beat-cell
+arrow navigation. The whole `<tr>` currently opens the Beat panel modal, so the thumbnail needs its
+own button, propagation fence, `aria-expanded`/`aria-controls`, Escape behavior, and deterministic
+focus return. Keep the base Beat row height stable; expanded panels occupy a separate detail row.
 
-**Slice 5 — promotion.** The two-line/two-price gate, reusing the continuity gate's shape. Small, once
-slices 1–3 exist.
+**Slice 5 — promotion (implemented 2026-08-24).** Only an actual segment head may promote its exact
+current, fresh Board asset. The free path pins that immutable asset as the explicit first frame and
+does not change `chainBreak`. The optional paid path re-renders only the segment's existing current
+takes after a fresh quote and explicit confirmation; it remains unavailable when there are no current
+takes, the video route is unavailable, or the legal request cap would be exceeded. Promotion is an
+app-owned authoring action and is not exposed to the Director or MCP.
 
-**Slice 6 — cast sheets and numbered references.** The largest model change on the list: a subject
-entity, permanent ordinals with tombstones, a default, and multi-angle sheets — plus generated (not
-just imported) references. **Separable, and worth separating.**
+**Slice 6 — cast sheets and numbered references (deferred).** The largest model change on the list:
+a subject entity, permanent ordinals with tombstones, a default, and multi-angle sheets — plus
+generated (not just imported) references. **Separable, and worth separating.**
 
 ## What I would cut from a first release
 
