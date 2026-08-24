@@ -28,11 +28,16 @@ For every reference decision during implementation:
   an authority the plan explicitly denies the Director.
 - **Staleness is derived over typed state.** "Change a reference and dependents go dirty" is only
   computable if bindings are durable records. There is no derivation over agent behaviour.
+- **Ordering is a main-enforced gate.** The character-first, background-second rule is re-read and
+  enforced by main at submission (the plan's character-first gate), not left to conversation. The
+  Director follows the order; the app refuses violations of it.
 
 ## What must stay minimal — the noun layer
 
-The app's reference entity is exactly: **one image, a role, an approved content hash, and its Shot
-bindings.** Nothing else in v1. Explicitly out:
+The app's reference entity is exactly: **one currently approved canonical image per reference — a
+role, the approved content hash, and its Shot bindings — with the plan's candidate → approved →
+superseded lifecycle and provenance retained.** Minimal means one canonical picture at a time, not
+the deletion of approval state or history. Explicitly out:
 
 - **No permanent ordinals, no tombstones.** Detach may renumber; nobody has numbers memorised in a
   zero-user product.
@@ -41,13 +46,12 @@ bindings.** Nothing else in v1. Explicitly out:
   slice.
 - **No eviction/TTL/tier machinery for reference assets.**
 
-Where a richer behaviour is wanted — sequencing (characters before backgrounds), reference prompt
-wording, whether a binding still fits the story — that is Director conversation and proposal flow,
-not schema.
+Where a richer behaviour is wanted — reference prompt wording, whether a binding still fits the
+story, how to talk the human through the choices — that is Director conversation, not schema.
 
 ## What the Director owns
 
-Planning which references to request, composing their prompts, ordering the work, proposing
-bindings (`set_reference_plan`, `set_shot_reference_binding` as typed Director-direct operations per
-the plan), and the conversational refinement loop. Judgment over text — the one thing the Director
-can actually see.
+Planning which references to request, composing their prompts, and the conversational refinement
+loop. `set_reference_plan` and `set_shot_reference_binding` are **typed Director-direct operations**
+per the plan — no proposal card — while Beat/Shot prose stays proposal-only and `approve_reference`
+stays human-only. Judgment over text — the one thing the Director can actually see.
