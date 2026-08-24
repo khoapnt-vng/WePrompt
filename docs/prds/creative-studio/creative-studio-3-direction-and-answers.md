@@ -25,7 +25,8 @@ Studio workspace navigation.
 **Approved product amendment — 2026-08-24 (authoring IA):** §15 is the owner-approved two-surface
 authoring contract. A Beat has one **Story** text box and a Shot has one **Shooting script** text box.
 It supersedes the user-facing Action, Look, Line, Narration, on-screen-text, derivation and inheritance
-surfaces while preserving their existing content through migration.
+surfaces through a clean schema-5 cutover. Creative Studio has zero users, so no existing-project
+migration or compatibility path is required.
 
 ---
 
@@ -178,8 +179,8 @@ operations and the UI must not make them look alike.
 
 ## 4. Derivation
 
-> Superseded for the current authoring IA by §15. This section remains as historical rationale and
-> migration input for projects created under the Action/Line contract.
+> Superseded for the current authoring IA by §15. This section remains as historical rationale only;
+> schema 1–4 prototype projects are unsupported after the clean schema-5 cutover.
 
 **Detach is reversible.** `RE-DERIVE FROM THE ACTION` is in the beat panel. On re-derive the
 hand-written line goes to the beat's **line history** — not the Bin. See §10.3.
@@ -201,12 +202,12 @@ sizes instead of zoom. Nothing to persist, nothing to choose.
 
 ## 5. Narration — explicit ruling
 
-> Superseded for the current authoring IA by §15. Existing narration and on-screen text are preserved
-> inside the migrated Shooting script; they are no longer separate user-facing fields.
+> Superseded for the current authoring IA by §15. Narration and on-screen text are not separate
+> schema-5 fields. There are zero users, so no legacy-content preservation path is required.
 
-Keep `narration` and `onScreenText` as authored fields on the Shot. Do **not** drop them:
-CS2 has them, users may have typed into them, and dropping them is a migration with data
-loss for no gain.
+The earlier prototype ruling was to keep `narration` and `onScreenText` as authored fields on the
+Shot because future user content might otherwise be lost. The confirmed zero-user state removes that
+risk, and §15 replaces this ruling with one Shooting script field.
 
 But be honest about them: they have **no downstream consumer** until TTS lands, and the
 prototype does not draw them. Two immediate consequences:
@@ -368,8 +369,8 @@ quote's upper bound; revisions beyond the authorized generation count require a 
 
 ### 10.3 The Bin contradiction: preserve text and ownership
 
-> Superseded for new authoring by §15. Existing line history remains readable migration history; new
-> revisions preserve Shooting script text instead of exposing Line detach and re-derive controls.
+> Superseded for new authoring by §15. Schema 5 does not retain Line history or expose Line detach and
+> re-derive controls; ordinary revision-aware undo applies to Shooting script edits.
 
 The critique is right that a detached line is a value and every hardened shelf invariant is
 reference-shaped. So:
@@ -997,35 +998,34 @@ The Director may propose adding or revising Story and Shooting script text. A pr
 the actual text diff grouped by Beat and Shot; a list of opaque operation names is insufficient. The
 human accepts or rejects the proposal before the free authoring mutation commits.
 
-The Director may also propose semantic reference bindings under §14.5. The app still validates and
-persists ids, checks route capacity, owns spend confirmation, composes prompts and dispatches jobs.
-Instructions cannot bypass those deterministic boundaries.
+The Director may also write typed semantic reference bindings directly under §14.5. They are free,
+reversible authoring and do not create another proposal card. The app still validates and persists
+ids, checks route capacity, owns human reference approval and spend confirmation, composes prompts
+and dispatches jobs. Instructions cannot bypass those deterministic boundaries.
 
 Changing Story does not silently rewrite Shooting scripts. Because the current Story participates
 directly in prompt composition, new generation uses the new Story immediately. The Director may
 propose corresponding script edits when asked, but no background derivation overwrites authored Shot
 text.
 
-### 15.6 Existing-project migration and preservation
+### 15.6 Clean pre-user schema cutover
 
-Migration is deterministic and lossless:
+Creative Studio has zero users and no production project data. Schema 5 therefore replaces the
+prototype contract directly:
 
-- Beat `Action` becomes Story.
-- Beat `Look` is copied into each active and parked Shot's Shooting script under `Visual direction:`.
-- A no-coverage Beat's nonempty `Look` remains in a hidden legacy migration archive until its first
-  Shot is created, when it is copied once into that Shooting script.
-- Shot `Line` is copied under `Shot direction:`.
-- Nonempty `Narration` is copied under `Voiceover:`.
-- Nonempty on-screen text is copied under `On-screen text:`.
-- Existing Shot text order, Takes, assets, jobs, receipts, reference bindings, chain state and
-  revisions remain attached to their current owners.
-- Existing line-history entries remain readable in Technical details as legacy history and are never
-  discarded. New Shooting script edits use the ordinary revision-aware authoring undo contract and
-  do not create or expose Line detach or re-derive controls.
+- every new Beat has exactly one Story field;
+- every new Shot has exactly one Shooting script field;
+- old Action, Look, Line, Narration, on-screen-text, derivation and Line-history fields are rejected
+  by exact schema-5 validation;
+- schema 1–4 project files and sidecars remain unsupported and byte-identical;
+- the app does not add a migration mapper, compatibility reader, legacy archive, draft recovery,
+  sidecar settlement, migration journal or legacy-job dispatch branch; and
+- creating a fresh schema-5 project is the recovery path during this pre-user phase. The app does not
+  automatically delete an old prototype file.
 
-The migration is idempotent and records its schema version. Reopening a migrated project never
-duplicates a Look, Line, narration or on-screen-text block. If any legacy text cannot be represented,
-the project fails closed with a recovery path instead of dropping prose.
+Project content and independently persisted command, proposal, reference-request, media-manifest and
+export protocols use explicit version constants so future changes do not accidentally couple every
+record type to the project schema.
 
 ### 15.7 Acceptance boundary
 
@@ -1035,7 +1035,7 @@ The amendment is complete only when:
 2. the Beat panel exposes exactly one Story box and one Shooting script box for the selected Shot;
 3. no normal authoring surface shows Line, Narration, on-screen text, inheritance, derivation or
    detachment as independent concepts;
-4. existing authored content survives migration exactly once;
+4. fresh projects use the exact schema-5 contract while schemas 1–4 stay unsupported without rewrite;
 5. proposal review shows the Story and Shooting script text that acceptance will write;
 6. the generation readout and dispatch use the same composed prompt and frozen inputs;
 7. reference, continuity, spend and paid-media provenance rules remain enforced.
