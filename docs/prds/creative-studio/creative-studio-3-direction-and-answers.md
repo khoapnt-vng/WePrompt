@@ -22,6 +22,11 @@ workflow. It replaces independent per-Shot “reference image” generation with
 character-first, background-second stage and adds **REFERENCES** immediately before **TABLE** in the
 Studio workspace navigation.
 
+**Approved product amendment — 2026-08-24 (authoring IA):** §15 is the owner-approved two-surface
+authoring contract. A Beat has one **Story** text box and a Shot has one **Shooting script** text box.
+It supersedes the user-facing Action, Look, Line, Narration, on-screen-text, derivation and inheritance
+surfaces while preserving their existing content through migration.
+
 ---
 
 ## 1. What CS3 is
@@ -34,16 +39,17 @@ vocabulary — it is NLE vocabulary, meaning _footage I acquired_. Our object is
 continuous run of camera bounded by cuts, which is a **shot**. "Section" is a document
 word. A 20–40s unit that lands one idea is a **beat**. So:
 
-| CS2                           | CS3                                   |
-| ----------------------------- | ------------------------------------- |
-| Section                       | **Beat**                              |
-| story line                    | **Action**                            |
-| visual prompt (section)       | **Look** — conditioning, not a prompt |
-| Clip                          | **Shot**                              |
-| Take, Cut, Cast, Slate, Board | unchanged (already correct)           |
-| Shelf                         | **Bin**                               |
-| 0 clips                       | **no coverage**                       |
-| stale link                    | **continuity break**                  |
+| CS2                           | Current CS3                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------ |
+| Section                       | **Beat**                                                                       |
+| story line                    | **Story** — the Beat's one authored narrative text                             |
+| visual prompt (section)       | no separate surface; relevant direction belongs in each Shot's shooting script |
+| Clip                          | **Shot**                                                                       |
+| shot prompt / narration       | **Shooting script** — the Shot's one authored production text                  |
+| Take, Cut, Cast, Slate, Board | unchanged (already correct)                                                    |
+| Shelf                         | **Bin**                                                                        |
+| 0 clips                       | **no coverage**                                                                |
+| stale link                    | **continuity break**                                                           |
 
 Two words this buys us that CS2 lacked: **coverage** (the set of shots that covers a beat —
 "does this beat have coverage" is the real question a `0 clips` count was failing to ask)
@@ -172,6 +178,9 @@ operations and the UI must not make them look alike.
 
 ## 4. Derivation
 
+> Superseded for the current authoring IA by §15. This section remains as historical rationale and
+> migration input for projects created under the Action/Line contract.
+
 **Detach is reversible.** `RE-DERIVE FROM THE ACTION` is in the beat panel. On re-derive the
 hand-written line goes to the beat's **line history** — not the Bin. See §10.3.
 
@@ -191,6 +200,9 @@ sizes instead of zoom. Nothing to persist, nothing to choose.
 ---
 
 ## 5. Narration — explicit ruling
+
+> Superseded for the current authoring IA by §15. Existing narration and on-screen text are preserved
+> inside the migrated Shooting script; they are no longer separate user-facing fields.
 
 Keep `narration` and `onScreenText` as authored fields on the Shot. Do **not** drop them:
 CS2 has them, users may have typed into them, and dropping them is a migration with data
@@ -219,6 +231,9 @@ prototype does not draw them. Two immediate consequences:
 ---
 
 ## 7. Inherit or restate
+
+> The Bin, spend and undo rulings in this section still apply. The Look authoring and inheritance
+> rulings are superseded by §15.
 
 **Bin = Shelf, and it inherits the hardened shelf invariants** (XOR ordered/Bin membership for
 beats and shots; canonical take aliases; dependency-safe restoration; per-kind maxima). It has
@@ -353,6 +368,9 @@ quote's upper bound; revisions beyond the authorized generation count require a 
 
 ### 10.3 The Bin contradiction: preserve text and ownership
 
+> Superseded for new authoring by §15. Existing line history remains readable migration history; new
+> revisions preserve Shooting script text instead of exposing Line detach and re-derive controls.
+
 The critique is right that a detached line is a value and every hardened shelf invariant is
 reference-shaped. So:
 
@@ -384,6 +402,9 @@ reference-shaped. So:
 about real project sizes, not asserting a cap. Corrected in the text.
 
 ### 10.5 Question 11, answered properly this time
+
+> The Director and boundary-preservation rulings still apply. References to Action, Look and derived
+> prompts are replaced by Story and Shooting script under §15.
 
 I answered a different question. The density tiers ruling in §4 stands but is unrelated.
 
@@ -647,6 +668,9 @@ gated.
 
 ### 13.2 `▸ RENDERS AS` is a read-only readout
 
+> Superseded by §15's two-source prompt composition. The readout remains read-only but attributes its
+> authored inputs to Story and Shooting script rather than Action, Look and Line.
+
 **Read-only.** Three authoring surfaces stay three: Action, Look, Line. This is the whole
 reason the answer is worth having — an editable resolved prompt would need a fourth detach
 rule, and the follow-up the question correctly identified (does re-deriving overwrite a
@@ -865,3 +889,153 @@ The current contracts do not satisfy it. `studio_request_reference_images` carri
 Board request construction hard-codes `referenceInput: null`, and pricing rejects a non-null
 reference on `board_still`. Instructions alone therefore cannot deliver this flow; typed project,
 Director-tool, pricing, request and provenance contracts must change together.
+
+---
+
+## 15. Seventh round — one Story per Beat, one Shooting script per Shot
+
+The current editor exposes its internal composition model as authoring vocabulary: Action, Look,
+Line, Narration, on-screen text, inheritance, derivation and detachment. That asks the author to
+understand how the app assembles a prompt before they can describe a film. It also makes the Table
+and Beat panel read like forms rather than a script.
+
+The approved boundary is smaller:
+
+- a **Beat tells the Story**;
+- a **Shot has a Shooting script**;
+- the app composes provider prompts from those texts and the project's approved production context.
+
+These are the only two user-facing authored prose objects. Prompt composition, revisions, reference
+ids and provider instructions remain structured application state rather than additional writing
+surfaces.
+
+### 15.1 Beat authoring: Story
+
+Every Beat has one multiline **Story** text box. It describes the narrative moment covered by the
+Beat: what happens, what changes, and what the audience should understand. It is not required to
+follow a schema or fill a checklist. Location, lighting, sound, dialogue and voiceover belong in the
+Shooting script of the exact Shot where they occur.
+
+The Beat title, target duration, active Shot count and state remain compact metadata outside the text
+box. They are not headings the author must reproduce inside Story.
+
+Example:
+
+```text
+Ming walks home from school through a busy 1985 Hong Kong neighbourhood, carrying the gold stars
+from his spelling test. He approaches his mother's dai pai dong as the evening rush begins.
+```
+
+There is no separate Beat-level Action or Look. Project-wide visual intent stays in the Brief;
+approved character and background identity stays in References; Shot-specific production direction
+belongs in that Shot's Shooting script.
+
+### 15.2 Shot authoring: Shooting script
+
+Every Shot has one multiline **Shooting script** text box. It contains the production instruction for
+that exact Shot. Authors and the Director may write ordinary prose or use lightweight labels such as:
+
+```text
+Location: A crowded Hong Kong market street outside a dai pai dong.
+
+Lighting: Late-afternoon sunlight transitioning into warm neon.
+
+Shot direction: Wide eye-level establishing shot. Ming emerges from the school crowd, checks the
+gold stars on his spelling test and walks toward the market lane. Static camera with people crossing
+the foreground.
+
+Sound / voice: Street traffic, distant vendors and bicycle bells. Voiceover: "When I was eight, I
+thought my mother's day began when the lights came on."
+```
+
+Location, lighting, shot direction, sound and voice are writing aids inside one text box, not separate
+fields, tabs, modes or validation requirements. The author may omit a label, change the order or use
+one paragraph. Empty optional detail never blocks free authoring.
+
+Shot number, planned duration, chain state, reference bindings, generation state, Takes and paid
+lineage remain structured metadata outside the text. Those values have deterministic behavior and
+must not be inferred from prose.
+
+### 15.3 The clean Table and Beat panel
+
+The Table's authoring columns become:
+
+`PANEL | BEAT | STORY | SHOTS | LENGTH | STATE`
+
+**STORY** replaces the peer Action and Look columns. It is the text authors scan to understand the
+film in sequence. The Table does not display a second visual-direction line and does not expose
+prompt or derivation state.
+
+Opening a Beat presents one Story editor above its coverage. Selecting a Shot presents one Shooting
+script editor beside the preview. The panel removes the separate Action, Look, Line, Narration and
+on-screen-text editors, the Look word counter, and the Line derivation/detach controls. Existing
+transport, duration, continuity, reference, Take and spend controls retain their current authority.
+
+### 15.4 Prompt composition is derived, not authored
+
+The app creates a provider-specific prompt from one versioned input package:
+
+1. project format and Brief-level style;
+2. exact approved character and background reference ids bound to the Shot;
+3. the owning Beat's Story;
+4. the Shot's Shooting script;
+5. output-purpose, aspect-ratio, model and route instructions.
+
+The prompt is not a third source of truth. A read-only **Technical details** / **Renders as** surface
+may show the exact composed prompt for diagnosis, but normal authoring never asks the user to edit it.
+The readout and dispatch must call the same composition function. Prepared quotes freeze the exact
+input revisions, reference ids and composed prompt; any source or binding change makes confirmation
+stale before spend.
+
+Composition may wrap the two texts differently for a Board still, seed still, video Take or future
+audio output, but it does not create new authoring fields. Jobs and assets retain the frozen prompt
+and exact inputs used so an old output remains explainable after Story or Shooting script changes.
+
+### 15.5 Director and human authority
+
+The Director may propose adding or revising Story and Shooting script text. A proposal review shows
+the actual text diff grouped by Beat and Shot; a list of opaque operation names is insufficient. The
+human accepts or rejects the proposal before the free authoring mutation commits.
+
+The Director may also propose semantic reference bindings under §14.5. The app still validates and
+persists ids, checks route capacity, owns spend confirmation, composes prompts and dispatches jobs.
+Instructions cannot bypass those deterministic boundaries.
+
+Changing Story does not silently rewrite Shooting scripts. Because the current Story participates
+directly in prompt composition, new generation uses the new Story immediately. The Director may
+propose corresponding script edits when asked, but no background derivation overwrites authored Shot
+text.
+
+### 15.6 Existing-project migration and preservation
+
+Migration is deterministic and lossless:
+
+- Beat `Action` becomes Story.
+- Beat `Look` is copied into each active and parked Shot's Shooting script under `Visual direction:`.
+- A no-coverage Beat's nonempty `Look` remains in a hidden legacy migration archive until its first
+  Shot is created, when it is copied once into that Shooting script.
+- Shot `Line` is copied under `Shot direction:`.
+- Nonempty `Narration` is copied under `Voiceover:`.
+- Nonempty on-screen text is copied under `On-screen text:`.
+- Existing Shot text order, Takes, assets, jobs, receipts, reference bindings, chain state and
+  revisions remain attached to their current owners.
+- Existing line-history entries remain readable in Technical details as legacy history and are never
+  discarded. New Shooting script edits use the ordinary revision-aware authoring undo contract and
+  do not create or expose Line detach or re-derive controls.
+
+The migration is idempotent and records its schema version. Reopening a migrated project never
+duplicates a Look, Line, narration or on-screen-text block. If any legacy text cannot be represented,
+the project fails closed with a recovery path instead of dropping prose.
+
+### 15.7 Acceptance boundary
+
+The amendment is complete only when:
+
+1. the Table exposes Story rather than Action and Look;
+2. the Beat panel exposes exactly one Story box and one Shooting script box for the selected Shot;
+3. no normal authoring surface shows Line, Narration, on-screen text, inheritance, derivation or
+   detachment as independent concepts;
+4. existing authored content survives migration exactly once;
+5. proposal review shows the Story and Shooting script text that acceptance will write;
+6. the generation readout and dispatch use the same composed prompt and frozen inputs;
+7. reference, continuity, spend and paid-media provenance rules remain enforced.
