@@ -58,6 +58,10 @@ or legacy-job dispatch path. Prototype projects may be recreated.
 - Director-authored Beat/Shot prose is proposal-only. `set_reference_plan` and
   `set_shot_reference_binding` are typed Director-direct operations. `approve_reference` is a
   renderer-only human action. Chat text alone never bypasses a proposal or spend gate.
+- Keep the reference noun layer minimal per the
+  [reference scope ruling](creative-studio-3-reference-scope-ruling.md): a reference is one image,
+  a role, an approved hash, and its bindings. No ordinals, tombstones, cast sheets, generated
+  references, or eviction tiers in this tranche; richer behaviour is Director judgment, not schema.
 - Prepared quotes freeze the exact composition and resolved references. Confirmation re-derives and
   exact-compares them under the project queue before durable commit and provider dispatch.
 - This exact-field cutover is one implementation tranche: main and renderer consumers will not all
