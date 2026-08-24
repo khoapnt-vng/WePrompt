@@ -9,7 +9,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_MAX_MUTATION_OPERATIONS,
-  STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
+  STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
@@ -163,12 +163,12 @@ const V2_PROPOSAL_RULE_KEYS = new Set(['text', 'predicate']);
 const V2_RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
 const V2_PROPOSAL_DECISION_KEYS = new Set(['schemaVersion', 'proposalId', 'status', 'decidedAt']);
 const V2_PROPOSAL_SLOT_KEYS = new Set(['schemaVersion', 'proposalId', 'reservedAt']);
-const V2_REFERENCE_REQUEST_KEYS = new Set(['schemaVersion', 'id', 'projectId', 'shotIds', 'status', 'createdAt']);
+const V2_REFERENCE_REQUEST_KEYS = new Set(['schemaVersion', 'id', 'projectId', 'referenceIds', 'status', 'createdAt']);
 const V2_REFERENCE_SLOT_KEYS = new Set(['schemaVersion', 'requestId', 'reservedAt']);
 const V2_REFERENCE_DECISION_KEYS = new Set(['schemaVersion', 'requestId', 'projectId', 'decidedAt', 'outcome']);
 const V2_REFERENCE_REJECTED_OUTCOME_KEYS = new Set(['kind']);
 const V2_REFERENCE_IMPORTED_OUTCOME_KEYS = new Set(['kind', 'assetId', 'projectRevision']);
-const V2_REFERENCE_GENERATION_OUTCOME_KEYS = new Set(['kind', 'handoffId', 'shotIds']);
+const V2_REFERENCE_GENERATION_OUTCOME_KEYS = new Set(['kind', 'handoffId', 'referenceIds']);
 const V2_REFERENCE_HANDOFF_RECEIPT_KEYS = new Set(['schemaVersion', 'handoffId', 'requestId', 'completedAt', 'result']);
 const V2_REFERENCE_DISMISSED_RESULT_KEYS = new Set(['kind']);
 const V2_REFERENCE_CONFIRMED_RESULT_KEYS = new Set(['kind', 'authorizationId']);
@@ -281,6 +281,7 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   edit_project: 'operation_not_permitted',
   set_brief: 'direct',
   set_rules: 'operation_not_permitted',
+  set_project_references: 'proposal',
   add_beat: 'direct',
   edit_beat: 'direct',
   reorder_beats: 'direct',
@@ -296,6 +297,7 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   apply_coverage: 'proposal',
   set_hard_cut: 'operation_not_permitted',
   set_seed_still: 'operation_not_permitted',
+  set_shot_background_reference: 'operation_not_permitted',
   promote_board_panel: 'operation_not_permitted',
   trim_shot: 'operation_not_permitted',
   redetach_line: 'proposal',
@@ -704,7 +706,7 @@ export function parseStudioReferenceRequestV2(input: {
     value.projectId !== input.projectId ||
     !isSafeStudioDirectorId(value.id) ||
     !isSafeStudioDirectorId(value.projectId) ||
-    !isUniqueSafeIdArrayV2(value.shotIds, 1, STUDIO_MAX_REFERENCE_REQUEST_SHOTS) ||
+    !isUniqueSafeIdArrayV2(value.referenceIds, 1, STUDIO_MAX_PROJECT_REFERENCES) ||
     value.status !== 'pending' ||
     timestampMs(value.createdAt) === null ||
     !fitsReferenceRequestRecordV2(value)
@@ -747,7 +749,7 @@ const validateStudioReferenceRequestDecisionOutcomeV2 = (value: unknown): boolea
     value.kind === 'generation_gate' &&
     hasExactKeysV2(value, V2_REFERENCE_GENERATION_OUTCOME_KEYS) &&
     isSafeStudioDirectorId(value.handoffId) &&
-    isUniqueSafeIdArrayV2(value.shotIds, 1, STUDIO_MAX_REFERENCE_REQUEST_SHOTS)
+    isUniqueSafeIdArrayV2(value.referenceIds, 1, STUDIO_MAX_PROJECT_REFERENCES)
   );
 };
 

@@ -7,12 +7,16 @@
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_PROJECT_REFERENCES,
   type StudioAssetV2,
   type StudioAuthorizedConditioningDependency,
   type StudioConditioningInputSnapshot,
   type StudioGenerationRequestPlan,
   type StudioGenerationRequestTemplate,
+  type StudioJobV2,
   type StudioPrepareGenerationChoiceV2,
+  type StudioPreparedSubmissionRequestV2,
+  type StudioPrepareProjectReferencesRequestV2,
   type StudioPrepareSubmissionRequestV2,
   type StudioProjectV2,
   type StudioQuotedGeneration,
@@ -64,7 +68,7 @@ const NONTERMINAL_STATUSES = new Set([
 export type StudioUnpricedQuotedGenerationV2 = Omit<StudioQuotedGeneration, 'id' | 'rateUnit' | 'rateMinorUnits'>;
 
 export type StudioSubmissionQuoteEstimateInputV2 = {
-  project: Pick<StudioProjectV2, 'id' | 'revision' | 'beatOrder' | 'beats' | 'shots' | 'jobs'>;
+  project: Pick<StudioProjectV2, 'id' | 'revision' | 'beatOrder' | 'beats' | 'shots' | 'references' | 'jobs'>;
   originReferenceHandoffId: string | null;
   rateCard: StudioRateCardV2;
   baseItems: StudioUnpricedQuotedGenerationV2[];
@@ -439,6 +443,21 @@ const validateReferenceHandoffChoices = (request: StudioPrepareSubmissionRequest
   }
 };
 
+const isProjectReferenceAsset = (project: StudioProjectV2, shotId: string, assetId: string): boolean =>
+  Object.values(project.references).some(
+    (reference) =>
+      reference.candidateAssetId === assetId ||
+      reference.approvedAssetId === assetId ||
+      reference.supersededAssetIds.includes(assetId)
+  ) ||
+  Object.values(project.jobs).some(
+    (job) =>
+      job.projectReferenceId !== undefined &&
+      job.projectId === project.id &&
+      job.shotId === shotId &&
+      job.outputAssetIds.includes(assetId)
+  );
+
 const eligibleSeedAsset = (project: StudioProjectV2, shotId: string, assetId: string): StudioAssetV2 | null => {
   const shot = ownValue(project.shots, shotId);
   const asset = ownValue(project.assets, assetId);
@@ -450,6 +469,7 @@ const eligibleSeedAsset = (project: StudioProjectV2, shotId: string, assetId: st
     (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
     asset.briefReferenceRole === undefined &&
     asset.briefReferenceLabel === undefined &&
+    !isProjectReferenceAsset(project, shotId, assetId) &&
     shot.assetIds.includes(assetId)
     ? asset
     : null;
@@ -494,31 +514,74 @@ const selectedVideoAsset = (project: StudioProjectV2, shotId: string): StudioAss
 const hasInFlightItem = (
   project: StudioSubmissionQuoteEstimateInputV2['project'],
   shotId: string,
-  purpose: StudioQuotedGeneration['purpose']
+  purpose: StudioQuotedGeneration['purpose'],
+  projectReferenceId?: string
 ): boolean =>
   Object.values(project.jobs).some(
-    (job) => job.shotId === shotId && job.purpose === purpose && NONTERMINAL_STATUSES.has(job.status)
+    (job) =>
+      job.shotId === shotId &&
+      job.purpose === purpose &&
+      job.projectReferenceId === projectReferenceId &&
+      NONTERMINAL_STATUSES.has(job.status)
   );
 
-const activeBriefReference = (
+const hasInFlightProjectReferenceItem = (
+  project: StudioSubmissionQuoteEstimateInputV2['project'],
+  projectReferenceId: string
+): boolean =>
+  Object.values(project.jobs).some(
+    (job) => job.projectReferenceId === projectReferenceId && NONTERMINAL_STATUSES.has(job.status)
+  );
+
+/** Paid reference retries must preserve their exact proxy-Shot lineage across a handoff. */
+const isPaidProjectReferenceRetryCandidate = (job: StudioJobV2, projectReferenceId: string): boolean =>
+  job.projectReferenceId === projectReferenceId &&
+  (job.status === 'cancelled' ||
+    (job.status === 'failed' &&
+      job.error !== null &&
+      job.error.code !== 'download_failed' &&
+      job.error.code !== 'dependency_failed'));
+
+const approvedProjectReferenceInputs = (
   project: StudioProjectV2,
-  referenceAssetId: string | null
-): { assetId: string; sha256: string } | null => {
-  if (referenceAssetId === null) return null;
-  const asset = ownValue(project.assets, referenceAssetId);
+  shotId: string
+): { assetId: string; sha256: string }[] => {
+  const shot = ownValue(project.shots, shotId);
   if (
-    asset?.id !== referenceAssetId ||
-    asset.projectId !== project.id ||
-    asset.shotId !== null ||
-    asset.mediaKind !== 'image' ||
-    asset.managedAsset.collection !== 'imports' ||
-    (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look') ||
-    typeof asset.briefReferenceLabel !== 'string' ||
-    !LOWERCASE_SHA256.test(asset.sha256)
+    project.referenceOrder.length === 0 ||
+    shot === undefined ||
+    shot.referenceIds.length === 0 ||
+    new Set(shot.referenceIds).size !== shot.referenceIds.length
   ) {
     return fail('invalid_reference');
   }
-  return { assetId: asset.id, sha256: asset.sha256 };
+  const order = new Map(project.referenceOrder.map((referenceId, index) => [referenceId, index]));
+  let previousPosition = -1;
+  let backgroundCount = 0;
+  const inputs = shot.referenceIds.map((referenceId) => {
+    const reference = ownValue(project.references, referenceId);
+    const position = order.get(referenceId);
+    const asset =
+      reference?.approvedAssetId === null ? undefined : ownValue(project.assets, reference?.approvedAssetId ?? '');
+    if (
+      reference === undefined ||
+      position === undefined ||
+      position <= previousPosition ||
+      asset === undefined ||
+      asset.id !== reference.approvedAssetId ||
+      asset.projectId !== project.id ||
+      asset.mediaKind !== 'image' ||
+      asset.managedAsset.collection !== 'assets' ||
+      !LOWERCASE_SHA256.test(asset.sha256)
+    ) {
+      return fail('invalid_reference');
+    }
+    previousPosition = position;
+    if (reference.kind === 'background') backgroundCount += 1;
+    return { assetId: asset.id, sha256: asset.sha256 };
+  });
+  if (backgroundCount !== 1) return fail('invalid_reference');
+  return inputs;
 };
 
 const createChoiceTemplate = (
@@ -530,8 +593,12 @@ const createChoiceTemplate = (
   const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
   const shot = ownValue(project.shots, choice.shotId);
   if (location === undefined || beat === undefined || shot === undefined) return fail('inactive_shot');
-  const referenceInput =
-    choice.purpose === 'seed_still' ? activeBriefReference(project, choice.referenceAssetId) : null;
+  const referenceInputs =
+    choice.purpose !== 'seed_still'
+      ? []
+      : choice.referenceAssetId === null
+        ? approvedProjectReferenceInputs(project, shot.id)
+        : fail('invalid_reference');
   try {
     return createStudioGenerationRequestTemplate({
       purpose: choice.purpose,
@@ -542,7 +609,7 @@ const createChoiceTemplate = (
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
       durationSeconds: shot.durationSeconds,
-      referenceInput,
+      referenceInputs,
     });
   } catch {
     return fail('invalid_prepare_request');
@@ -865,15 +932,128 @@ export type StudioSubmissionQuoteCoreDerivationInputV2 = {
 export type StudioSubmissionQuoteGraphDerivationInputV2 = Omit<StudioSubmissionQuoteCoreDerivationInputV2, 'rateCard'>;
 
 export type StudioDerivedSubmissionQuoteGraphV2 = {
-  request: StudioPrepareSubmissionRequestV2;
+  request: StudioPreparedSubmissionRequestV2;
   baseItems: StudioUnpricedQuotedGenerationV2[];
   cascadeItems: StudioUnpricedQuotedGenerationV2[] | null;
+  /** Main-only correlation for a Director handoff; never accepted in the renderer request. */
+  originReferenceHandoffId?: string | null;
 };
 
 export type StudioDerivedSubmissionQuoteCoresV2 = {
-  request: StudioPrepareSubmissionRequestV2;
+  request: StudioPreparedSubmissionRequestV2;
   baseOnly: StudioSubmissionQuoteCore;
   withCascade: StudioSubmissionQuoteCore | null;
+};
+
+/** Builds paid candidate jobs for exact project references without exposing an alternate generic prepare path. */
+export const deriveStudioProjectReferenceSubmissionQuoteGraphV2 = (input: {
+  project: StudioProjectV2;
+  request: StudioPrepareProjectReferencesRequestV2;
+  originReferenceHandoffId?: string | null;
+}): StudioDerivedSubmissionQuoteGraphV2 => {
+  const { project, request } = input;
+  if (
+    !isExactOwnDataRecord(request, new Set(['projectId', 'expectedRevision', 'referenceIds'])) ||
+    request.projectId !== project.id ||
+    request.expectedRevision !== project.revision ||
+    !isExactDenseOwnDataArray(request.referenceIds) ||
+    request.referenceIds.length < 1 ||
+    request.referenceIds.length > STUDIO_MAX_PROJECT_REFERENCES ||
+    request.referenceIds.some((referenceId) => !SAFE_ID.test(referenceId)) ||
+    new Set(request.referenceIds).size !== request.referenceIds.length
+  ) {
+    return fail('invalid_prepare_request');
+  }
+  if (project.imageRouteId === null || !SAFE_ID.test(project.imageRouteId)) return fail('missing_route');
+  const locations = derivationShotLocations(project);
+  let previousReferencePosition = -1;
+  for (const referenceId of request.referenceIds) {
+    const position = project.referenceOrder.indexOf(referenceId);
+    if (position < 0 || position <= previousReferencePosition) return fail('invalid_reference');
+    previousReferencePosition = position;
+  }
+  const charactersApproved = project.referenceOrder
+    .map((referenceId) => ownValue(project.references, referenceId))
+    .filter((reference) => reference?.kind === 'character')
+    .every((reference) => reference?.approvedAssetId !== null);
+  const baseItems = request.referenceIds.map<StudioUnpricedQuotedGenerationV2>((referenceId) => {
+    const reference = ownValue(project.references, referenceId);
+    if (reference === undefined || (reference.kind === 'background' && !charactersApproved)) {
+      return fail('invalid_reference');
+    }
+    const candidateJob =
+      reference.candidateJobId === null ? undefined : ownValue(project.jobs, reference.candidateJobId);
+    if (
+      reference.candidateJobId !== null &&
+      (candidateJob?.id !== reference.candidateJobId ||
+        candidateJob.projectId !== project.id ||
+        candidateJob.projectReferenceId !== reference.id ||
+        candidateJob.purpose !== 'seed_still' ||
+        !ownValue(project.shots, candidateJob.shotId)?.jobIds.includes(candidateJob.id))
+    ) {
+      return fail('invalid_reference');
+    }
+    const candidateAnchor = candidateJob === undefined ? undefined : locations.get(candidateJob.shotId);
+    if (
+      candidateJob !== undefined &&
+      candidateAnchor === undefined &&
+      isPaidProjectReferenceRetryCandidate(candidateJob, reference.id)
+    ) {
+      return fail('inactive_shot');
+    }
+    const assignedAnchor = [...locations.entries()].find(([shotId]) =>
+      ownValue(project.shots, shotId)?.referenceIds.includes(reference.id)
+    );
+    const anchor =
+      candidateJob === undefined || candidateAnchor === undefined
+        ? (assignedAnchor ?? [...locations.entries()][0])
+        : ([candidateJob.shotId, candidateAnchor] as const);
+    if (anchor === undefined) return fail('inactive_shot');
+    const shot = ownValue(project.shots, anchor[0]);
+    if (shot === undefined || hasInFlightProjectReferenceItem(project, reference.id)) return fail('in_flight');
+    const instruction = [
+      reference.kind === 'character' ? 'CHARACTER REFERENCE SHEET' : 'BACKGROUND REFERENCE SHEET',
+      `SUBJECT\n${reference.label}`,
+      `DIRECTION\n${reference.prompt}`,
+      reference.kind === 'character'
+        ? 'Create one coherent character sheet in a single image with several useful views of the same identity.'
+        : 'Create one coherent recurring-location reference in a single image, without characters or text.',
+    ].join('\n\n');
+    const template = createStudioGenerationRequestTemplate({
+      purpose: 'seed_still',
+      brief: project.brief,
+      rules: project.rules,
+      look: '',
+      line: instruction,
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      durationSeconds: shot.durationSeconds,
+      referenceInputs: [],
+    });
+    return {
+      shotId: shot.id,
+      projectReferenceId: reference.id,
+      purpose: 'seed_still',
+      routeId: project.imageRouteId!,
+      generationCount: 1,
+      requestPlan: createStudioResolvedGenerationRequestPlan({
+        purpose: 'seed_still',
+        template,
+        conditioningInput: null,
+      }),
+    };
+  });
+  if (input.originReferenceHandoffId !== undefined && input.originReferenceHandoffId !== null) {
+    if (!SAFE_ID.test(input.originReferenceHandoffId)) return fail('invalid_prepare_request');
+  }
+  return {
+    request: structuredClone(request),
+    baseItems,
+    cascadeItems: null,
+    ...(input.originReferenceHandoffId === undefined
+      ? {}
+      : { originReferenceHandoffId: input.originReferenceHandoffId }),
+  };
 };
 
 /** Validates the exact request graph before any live route or rate dependency is consulted. */
@@ -957,9 +1137,12 @@ export const priceStudioSubmissionQuoteGraphV2 = (input: {
   rateCard: StudioRateCardV2;
 }): StudioDerivedSubmissionQuoteCoresV2 => {
   const { graph } = input;
+  const originReferenceHandoffId =
+    graph.originReferenceHandoffId ??
+    ('originReferenceHandoffId' in graph.request ? graph.request.originReferenceHandoffId : null);
   const baseOnly = createStudioSubmissionQuoteCoreV2({
     project: input.project,
-    originReferenceHandoffId: graph.request.originReferenceHandoffId,
+    originReferenceHandoffId,
     rateCard: scopedRateCard(input.rateCard, graph.baseItems),
     baseItems: graph.baseItems,
     cascadeItems: [],
@@ -970,7 +1153,7 @@ export const priceStudioSubmissionQuoteGraphV2 = (input: {
     try {
       withCascade = createStudioSubmissionQuoteCoreV2({
         project: input.project,
-        originReferenceHandoffId: graph.request.originReferenceHandoffId,
+        originReferenceHandoffId,
         rateCard: scopedRateCard(input.rateCard, [...graph.baseItems, ...graph.cascadeItems]),
         baseItems: graph.baseItems,
         cascadeItems: graph.cascadeItems,
@@ -1099,12 +1282,26 @@ export const createStudioSubmissionQuoteCoreV2 = (
     ) {
       return fail(locations.has(draft.shotId) ? 'invalid_quote' : 'inactive_shot');
     }
-    const pairKey = `${draft.shotId}\0${draft.purpose}`;
+    if (
+      draft.projectReferenceId !== undefined &&
+      (!SAFE_ID.test(draft.projectReferenceId) ||
+        draft.purpose !== 'seed_still' ||
+        !ownValue(project.references, draft.projectReferenceId))
+    ) {
+      fail('invalid_reference');
+    }
+    const pairKey = `${draft.shotId}\0${draft.purpose}\0${draft.projectReferenceId ?? ''}`;
     if (pairKeys.has(pairKey)) fail('duplicate_shot_purpose');
     pairKeys.add(pairKey);
     shotIds.add(draft.shotId);
     if (shotIds.size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) fail('invalid_quote');
-    if (hasInFlightItem(project, draft.shotId, draft.purpose)) fail('in_flight');
+    if (
+      draft.projectReferenceId === undefined
+        ? hasInFlightItem(project, draft.shotId, draft.purpose)
+        : hasInFlightProjectReferenceItem(project, draft.projectReferenceId)
+    ) {
+      fail('in_flight');
+    }
 
     let rate;
     try {
@@ -1122,8 +1319,10 @@ export const createStudioSubmissionQuoteCoreV2 = (
         projectRevision: project.revision,
         shotId: draft.shotId,
         purpose: draft.purpose,
+        projectReferenceId: draft.projectReferenceId ?? null,
       }),
       shotId: draft.shotId,
+      ...(draft.projectReferenceId === undefined ? {} : { projectReferenceId: draft.projectReferenceId }),
       purpose: draft.purpose,
       routeId: draft.routeId,
       generationCount: draft.generationCount,
@@ -1240,6 +1439,7 @@ const projectRendererItem = (
   const durationSeconds = rendererDurationSeconds(item);
   return {
     shotId: item.shotId,
+    ...(item.projectReferenceId === undefined ? {} : { projectReferenceId: item.projectReferenceId }),
     purpose: item.purpose,
     route: { ...route },
     generationCount: item.generationCount,

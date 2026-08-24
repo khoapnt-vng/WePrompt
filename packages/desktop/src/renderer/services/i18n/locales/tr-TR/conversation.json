@@ -905,6 +905,45 @@
       "importError": "Referans eklenemedi. Yeniden deneyin."
     },
     "workspace": {
+      "views": { "references": "Referanslar" },
+      "referenceWorkflow": {
+        "description": "Önce tutarlı karakter sayfalarını, ardından yinelenen arka planları onaylayın. Çekim adayları bu onaylı referansları otomatik olarak kullanır.",
+        "generationScope": "Oluşturma kapsamı",
+        "characters": {
+          "title": "Karakterler",
+          "description": "Adı geçen her karakter için bir kimlik sayfasını onaylayın.",
+          "empty": "Bu hikâyede adı geçen karakter yok. Arka planlar şimdi incelenebilir."
+        },
+        "backgrounds": {
+          "title": "Arka planlar",
+          "description": "Filmin görsel tutarlılığını koruyan yinelenen mekânları onaylayın.",
+          "charactersRequired": "Arka planları incelemeden önce tüm karakterleri onaylayın.",
+          "empty": "Yinelenen arka plan gerekmiyor."
+        },
+        "previewPending": "Henüz bir referans adayı oluşturulmadı.",
+        "previewAlt": "{{label}} için referans adayı",
+        "status": {
+          "idle": "Oluşturulmadı",
+          "queued": "Sırada",
+          "running": "Oluşturuluyor",
+          "succeeded": "Oluşturuldu",
+          "failed": "Oluşturma başarısız",
+          "candidate": "İncelemeye hazır",
+          "approved": "Onaylandı"
+        },
+        "approve": "Onayla",
+        "regenerate": "Yeniden oluştur",
+        "ready": "Gerekli tüm referanslar onaylandı. Tabloya devam edebilirsiniz.",
+        "notReady": "Devam etmek için gerekli tüm referansları onaylayın.",
+        "continueToTable": "Tabloya devam et"
+      },
+      "references": { "referenceCount": "{{total}} öğe için referans istendi" },
+      "handoffs": {
+        "referenceCount": "Bu aktarımda {{total}} referans var",
+        "progress": "Sırada {{queued}} · Çalışıyor {{running}} · Başarılı {{succeeded}} · Başarısız {{failed}}",
+        "reviewReferences": "Referansları incele",
+        "retryFailed": "Başarısız referansları yeniden dene"
+      },
       "table": {
         "columns": { "panel": "Panel" },
         "board": {
@@ -1002,6 +1041,24 @@
         }
       },
       "proposals": {
+        "before": "Önce",
+        "after": "Sonra",
+        "placement": "Yerleşim",
+        "ownerBeat": "Sahip Beat",
+        "order": "Sıra",
+        "beforeItem": "{{kind}} öncesi",
+        "technicalDetails": "Teknik ayrıntılar",
+        "reviewUnavailable": "Bu öneri desteklenmeyen bir değişiklik içeriyor ve kabul edilemiyor.",
+        "referenceKind": "Referans türü",
+        "referencePrompt": "Referans istemi",
+        "assignedShots": "Atanan Shot'lar",
+        "chatDecisionBusy": "Başka bir incelenmiş işlem hâlâ sürüyor.",
+        "chatDirty": "Bir Yönetmen önerisini onaylamadan veya reddetmeden önce tüm çalışma alanı taslaklarını kaydedin ya da sıfırlayın.",
+        "chatNoPending": "İşlem yapılacak bekleyen bir Yönetmen önerisi yok.",
+        "chatMultiplePending": "Birden fazla Yönetmen önerisi bekliyor. İlgili karttaki düğmeleri kullanın.",
+        "chatStale": "Bu öneri artık geçerli proje revizyonuyla eşleşmiyor.",
+        "chatAccepted": "Öneri kabul edildi.",
+        "chatRejected": "Öneri reddedildi.",
         "fixedReason": {
           "video_asset": "Bu çekimin geçerli bir görüntüsü var."
         }
@@ -1118,9 +1175,26 @@
       },
       "controls": {
         "briefAndRulesTitle": "Brief ve kurallar",
-        "undoLabel": { "promote_board_panel": "Paneli ilk kare olarak kullan" }
+        "undoLabel": {
+          "promote_board_panel": "Paneli ilk kare olarak kullan",
+          "set_project_references": "proje referansları",
+          "set_shot_background_reference": "çekim arka plan referansı"
+        }
       },
       "gate": {
+        "backgroundChoice": {
+          "title": "Her çekim için bir arka plan seçin",
+          "description": "Üretim fiyatlandırmasından önce her çekime onaylı bir arka plan atayın. Bu ücretsiz değişiklik karakter referanslarını korur.",
+          "shotLabel": "{{shotId}} çekiminin arka planı",
+          "incomplete": "Listelenen her çekim için bir arka plan seçin.",
+          "assign": "Arka planları ata",
+          "assigning": "Arka planlar atanıyor…",
+          "noneTitle": "Kullanılabilir onaylı arka plan yok.",
+          "noneBody": "Bu üretimi fiyatlandırmadan önce referansları inceleyin ve bir arka planı onaylayın.",
+          "reviewReferences": "Referansları incele",
+          "invalid": "Bu arka plan seçimleri artık güncel değil. Referansları inceleyin veya bu incelemeyi kapatıp yeniden deneyin.",
+          "failed": "Arka plan atamaları kaydedilmedi. Mevcut projeyi inceleyip yeniden deneyin."
+        },
         "purpose": { "board_still": "Pano paneli" },
         "promotion": {
           "title": "Paneli ilk kare olarak kullan",

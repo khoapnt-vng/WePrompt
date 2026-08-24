@@ -47,6 +47,8 @@ export const createEmptyStudioProjectV2 = (
     beatOrder: [],
     beats: {},
     shots: {},
+    referenceOrder: [],
+    references: {},
     bin: [],
     bedAssetId: null,
     spendPolicy: null,

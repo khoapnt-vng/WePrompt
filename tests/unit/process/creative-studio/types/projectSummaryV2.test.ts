@@ -14,12 +14,13 @@ import {
   toStudioFilmDurationV2,
   toStudioProjectSummaryV2,
 } from '@/common/types/project/creativeStudioProjectSummary';
-import type {
-  StudioAssetV2,
-  StudioShot,
-  StudioJobV2,
-  StudioProjectV2,
-  StudioBeat,
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioAssetV2,
+  type StudioBeat,
+  type StudioJobV2,
+  type StudioProjectV2,
+  type StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
@@ -35,6 +36,7 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
+  referenceIds: [],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -66,6 +68,7 @@ const makeAsset = (id: string, shotId: string, overrides: Partial<StudioAssetV2>
   managedAsset: { collection: 'assets', fileName: `${id}.png` },
   byteSize: 1,
   sha256: 'a'.repeat(64),
+  referenceAssetIds: [],
   createdAt: timestamp,
   ...overrides,
 });
@@ -95,7 +98,7 @@ const makeJob = (
       aspectRatio: '16:9',
       resolution: '1080p',
       durationSeconds: 4,
-      referenceInput: null,
+      referenceInputs: [],
       conditioningInput: { kind: 'seed_still', assetId: 'seed_1' },
     },
   },
@@ -104,7 +107,7 @@ const makeJob = (
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 4,
-    referenceInput: null,
+    referenceInputs: [],
     conditioningInput: { kind: 'seed_still', assetId: 'seed_1' },
   },
   spendReceipt: null,
@@ -124,7 +127,7 @@ const makeJob = (
 });
 
 const makeProject = (): StudioProjectV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   revision: 1,
   id: 'project_1',
   name: 'Project One',
@@ -138,6 +141,8 @@ const makeProject = (): StudioProjectV2 => ({
   beatOrder: [],
   beats: {},
   shots: {},
+  referenceOrder: [],
+  references: {},
   bin: [],
   bedAssetId: null,
   spendPolicy: null,

@@ -19,6 +19,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
+  STUDIO_PROJECT_SCHEMA_VERSION,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandMailboxV2,
@@ -100,7 +101,7 @@ const makeCommandV2 = (
   commandId: string,
   overrides: Partial<StudioDirectorCommandRecordV2> = {}
 ): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   commandId,
   projectId,
   expectedRevision: 1,
@@ -115,7 +116,7 @@ const makeSlotV2 = (
   commandId: string,
   overrides: Partial<StudioDirectorCommandSlotV2> = {}
 ): StudioDirectorCommandSlotV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   commandId,
   reservedAt: NOW,
   deadlineAt: '2026-08-16T12:00:15.000Z',
@@ -130,7 +131,7 @@ const makeLeaseV2 = (input: {
 }): StudioDirectorCommandSlotLeaseV2 => {
   const acquiredAt = input.acquiredAt ?? NOW;
   return {
-    schemaVersion: 4,
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     leaseId: input.leaseId,
     owner: input.owner,
     commandId: input.slot.commandId,
@@ -147,7 +148,7 @@ const makeReceiptV2 = (
   overrides: Partial<StudioDirectorCommandReceiptV2> = {}
 ): StudioDirectorCommandReceiptV2 =>
   ({
-    schemaVersion: 4,
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     commandId,
     projectId,
     expectedRevision: 1,
@@ -165,7 +166,7 @@ const makeRejectedReceiptV2 = (input: {
   expectedRevision: number | null;
   reasonCode: 'malformed_record' | 'unsupported_version';
 }): StudioDirectorCommandReceiptV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   commandId: input.commandId,
   projectId: input.projectId,
   expectedRevision: input.expectedRevision,
@@ -904,7 +905,7 @@ describe('Studio Director schema-2 command mailbox', () => {
       const receipt: StudioDirectorCommandReceiptV2 =
         status === 'applied'
           ? {
-              schemaVersion: 4,
+              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
               commandId: command.commandId,
               projectId,
               expectedRevision: 2,
@@ -915,7 +916,7 @@ describe('Studio Director schema-2 command mailbox', () => {
               createdShotIds: [],
             }
           : {
-              schemaVersion: 4,
+              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
               commandId: command.commandId,
               projectId,
               expectedRevision: 2,

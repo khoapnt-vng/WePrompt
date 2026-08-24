@@ -24,7 +24,9 @@ import {
   STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
-  STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_REFERENCE_LABEL_LENGTH,
+  STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
@@ -42,7 +44,7 @@ import {
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import { StudioProposalWriteError, writeProposalRecordV2 } from '@process/resources/builtinMcp/studioProposalWriter';
 import {
-  listPendingReferenceRequestShotIdsV2,
+  listPendingReferenceRequestIdsV2,
   writeReferenceRequestRecordV2,
 } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import {
@@ -217,6 +219,54 @@ const studioRuleDraftsSchemaV2 = z4
   })
   .meta({ uniqueItems: true });
 
+const studioProjectReferenceDraftSchemaV2 = z4
+  .object({
+    id: studioDirectorIdSchemaV2,
+    kind: z4.enum(['character', 'background']),
+    label: z4
+      .string()
+      .min(1)
+      .max(STUDIO_MAX_REFERENCE_LABEL_LENGTH)
+      .refine((label) => label === label.trim(), { message: 'Reference labels must be trimmed.' }),
+    prompt: z4
+      .string()
+      .min(1)
+      .max(STUDIO_MAX_REFERENCE_PROMPT_LENGTH)
+      .refine((prompt) => prompt === prompt.trim(), { message: 'Reference prompts must be trimmed.' }),
+    shotIds: z4
+      .array(studioDirectorIdSchemaV2)
+      .max(STUDIO_MAX_SHOTS_PER_PROJECT)
+      .refine((shotIds) => new Set(shotIds).size === shotIds.length, {
+        message: 'Assigned shot ids must not repeat.',
+      })
+      .meta({ uniqueItems: true }),
+  })
+  .strict();
+
+const studioProjectReferenceDraftsSchemaV2 = z4
+  .array(studioProjectReferenceDraftSchemaV2)
+  .min(1)
+  .max(STUDIO_MAX_PROJECT_REFERENCES)
+  .refine((references) => new Set(references.map((reference) => reference.id)).size === references.length, {
+    message: 'Reference ids must not repeat.',
+  })
+  .refine(
+    (references) =>
+      new Set(references.map((reference) => `${reference.kind}\0${reference.label}`)).size === references.length,
+    { message: 'Reference labels must be unique within each kind.' }
+  )
+  .refine(
+    (references) => {
+      let sawBackground = false;
+      for (const reference of references) {
+        if (reference.kind === 'background') sawBackground = true;
+        else if (sawBackground) return false;
+      }
+      return true;
+    },
+    { message: 'Character references must precede background references.' }
+  );
+
 const STUDIO_FIXED_SHOT_REASONS_V2 = [
   'owned_asset',
   'owned_job',
@@ -286,6 +336,9 @@ const studioMutationOperationSchemasV2 = {
   editProject: z4.object({ kind: z4.literal('edit_project'), changes: studioEditableProjectChangesSchemaV2 }).strict(),
   setBrief: z4.object({ kind: z4.literal('set_brief'), brief: z4.string().max(16 * 1024) }).strict(),
   setRules: z4.object({ kind: z4.literal('set_rules'), rules: studioRuleDraftsSchemaV2 }).strict(),
+  setProjectReferences: z4
+    .object({ kind: z4.literal('set_project_references'), references: studioProjectReferenceDraftsSchemaV2 })
+    .strict(),
   addBeat: z4
     .object({
       kind: z4.literal('add_beat'),
@@ -359,6 +412,13 @@ const studioMutationOperationSchemasV2 = {
       kind: z4.literal('set_seed_still'),
       shotId: studioDirectorIdSchemaV2,
       assetId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  setShotBackgroundReference: z4
+    .object({
+      kind: z4.literal('set_shot_background_reference'),
+      shotId: studioDirectorIdSchemaV2,
+      referenceId: studioDirectorIdSchemaV2,
     })
     .strict(),
   promoteBoardPanel: z4
@@ -435,6 +495,7 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.editProject,
   studioMutationOperationSchemasV2.setBrief,
   studioMutationOperationSchemasV2.setRules,
+  studioMutationOperationSchemasV2.setProjectReferences,
   studioMutationOperationSchemasV2.addBeat,
   studioMutationOperationSchemasV2.editBeat,
   studioMutationOperationSchemasV2.reorderBeats,
@@ -450,6 +511,7 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.applyCoverage,
   studioMutationOperationSchemasV2.setHardCut,
   studioMutationOperationSchemasV2.setSeedStill,
+  studioMutationOperationSchemasV2.setShotBackgroundReference,
   studioMutationOperationSchemasV2.promoteBoardPanel,
   studioMutationOperationSchemasV2.trimShot,
   studioMutationOperationSchemasV2.redetachLine,
@@ -513,11 +575,13 @@ export const studioProposeStoryboardInputSchemaV2 = z4
 
 export const studioRequestReferenceImagesInputSchemaV2 = z4
   .object({
-    shotIds: z4
+    referenceIds: z4
       .array(studioDirectorIdSchemaV2)
       .min(1)
-      .max(STUDIO_MAX_REFERENCE_REQUEST_SHOTS)
-      .refine((shotIds) => new Set(shotIds).size === shotIds.length, { message: 'Shot ids must not repeat.' })
+      .max(STUDIO_MAX_PROJECT_REFERENCES)
+      .refine((referenceIds) => new Set(referenceIds).size === referenceIds.length, {
+        message: 'Reference ids must not repeat.',
+      })
       .meta({ uniqueItems: true }),
   })
   .strict();
@@ -1009,34 +1073,61 @@ export function createProposeBriefRuleHandlerV2(
 
 export function createRequestReferenceImagesHandlerV2(
   config: StudioServerEnv | null
-): (input: { shotIds: string[] }) => Promise<StudioToolResult> {
-  return async ({ shotIds }) => {
+): (input: { referenceIds: string[] }) => Promise<StudioToolResult> {
+  return async ({ referenceIds }) => {
     if (!config) return errorResult('Creative Studio project is unavailable.');
-    if (!Array.isArray(shotIds)) return errorResult('shotIds must be an array.');
-    if (shotIds.length < 1) return errorResult('At least one shot id is required.');
-    if (shotIds.length > STUDIO_MAX_REFERENCE_REQUEST_SHOTS) {
-      return errorResult(`At most ${STUDIO_MAX_REFERENCE_REQUEST_SHOTS} shot ids may be requested at once.`);
+    if (!Array.isArray(referenceIds)) return errorResult('referenceIds must be an array.');
+    if (referenceIds.length < 1) return errorResult('At least one reference id is required.');
+    if (referenceIds.length > STUDIO_MAX_PROJECT_REFERENCES) {
+      return errorResult(`At most ${STUDIO_MAX_PROJECT_REFERENCES} reference ids may be requested at once.`);
     }
-    const invalidShotIds = shotIds.filter((shotId) => !studioDirectorIdSchemaV2.safeParse(shotId).success);
-    if (invalidShotIds.length > 0) return errorResult(`Invalid shot ids: ${invalidShotIds.join(', ')}`);
-    const duplicateShotIds = shotIds.filter((shotId, index) => shotIds.indexOf(shotId) !== index);
-    if (duplicateShotIds.length > 0) {
-      return errorResult(`Duplicate shot ids: ${[...new Set(duplicateShotIds)].join(', ')}`);
+    const invalidReferenceIds = referenceIds.filter(
+      (referenceId) => !studioDirectorIdSchemaV2.safeParse(referenceId).success
+    );
+    if (invalidReferenceIds.length > 0) {
+      return errorResult(`Invalid reference ids: ${invalidReferenceIds.join(', ')}`);
+    }
+    const duplicateReferenceIds = referenceIds.filter(
+      (referenceId, index) => referenceIds.indexOf(referenceId) !== index
+    );
+    if (duplicateReferenceIds.length > 0) {
+      return errorResult(`Duplicate reference ids: ${[...new Set(duplicateReferenceIds)].join(', ')}`);
     }
     try {
       const snapshot = await readProjectSnapshotV2(config);
       const project = snapshot.project;
-      const activeShotOrder = project.beatOrder.flatMap((beatId) => project.beats[beatId]!.shotOrder);
-      const activeShotIds = new Set(activeShotOrder);
-      const unknownShotIds = shotIds.filter((shotId) => !activeShotIds.has(shotId));
-      if (unknownShotIds.length > 0) return errorResult(`Unknown or inactive shots: ${unknownShotIds.join(', ')}`);
-      const activePositions = new Map(activeShotOrder.map((shotId, index) => [shotId, index] as const));
+      const activeReferenceIds = new Set(project.referenceOrder);
+      const unknownReferenceIds = referenceIds.filter(
+        (referenceId) =>
+          !activeReferenceIds.has(referenceId) ||
+          !Object.hasOwn(project.references, referenceId) ||
+          project.references[referenceId]?.id !== referenceId
+      );
+      if (unknownReferenceIds.length > 0) {
+        return errorResult(`Unknown or inactive references: ${unknownReferenceIds.join(', ')}`);
+      }
+      const activePositions = new Map(
+        project.referenceOrder.map((referenceId, index) => [referenceId, index] as const)
+      );
       if (
-        shotIds.some(
-          (shotId, index) => index > 0 && activePositions.get(shotId)! <= activePositions.get(shotIds[index - 1]!)!
+        referenceIds.some(
+          (referenceId, index) =>
+            index > 0 && activePositions.get(referenceId)! <= activePositions.get(referenceIds[index - 1]!)!
         )
       ) {
-        return errorResult('Shot ids must follow active film order.');
+        return errorResult('Reference ids must follow project reference order.');
+      }
+      const allCharactersApproved = project.referenceOrder.every((referenceId) => {
+        const reference = project.references[referenceId];
+        return reference?.kind !== 'character' || reference.approvedAssetId !== null;
+      });
+      const requestedBackgroundIds = referenceIds.filter(
+        (referenceId) => project.references[referenceId]?.kind === 'background'
+      );
+      if (!allCharactersApproved && requestedBackgroundIds.length > 0) {
+        return errorResult(
+          `Approve every character reference before requesting backgrounds: ${requestedBackgroundIds.join(', ')}`
+        );
       }
       const projectAuthority = pendingProjectAuthorityV2(snapshot);
       await assertPendingRecordProjectAuthorityV2({
@@ -1044,27 +1135,27 @@ export function createRequestReferenceImagesHandlerV2(
         projectAuthority,
         fs: config.fs,
       });
-      const pendingShotIds = await listPendingReferenceRequestShotIdsV2(
+      const pendingReferenceIds = await listPendingReferenceRequestIdsV2(
         config.referencePendingDir,
         config.projectId,
         config.fs,
         projectAuthority
       );
-      const alreadyQueued = shotIds.filter((shotId) => pendingShotIds.has(shotId));
-      const shotsToQueue = shotIds.filter((shotId) => !pendingShotIds.has(shotId));
-      if (shotsToQueue.length > 0) {
+      const alreadyQueued = referenceIds.filter((referenceId) => pendingReferenceIds.has(referenceId));
+      const referencesToQueue = referenceIds.filter((referenceId) => !pendingReferenceIds.has(referenceId));
+      if (referencesToQueue.length > 0) {
         await assertProjectSnapshotStatusV2(config, snapshot);
         await writeReferenceRequestRecordV2({
           pendingDir: config.referencePendingDir,
           projectId: config.projectId,
-          shotIds: shotsToQueue,
+          referenceIds: referencesToQueue,
           fs: config.fs,
           authorityFence: () => projectSnapshotStatusV2(config, snapshot),
           projectAuthority,
         });
       }
       const details = [
-        `Queued ${shotsToQueue.length} of ${shotIds.length} reference image request(s) for user approval`,
+        `Queued ${referencesToQueue.length} of ${referenceIds.length} reference image request(s) for user approval`,
         ...(alreadyQueued.length > 0 ? [`Already queued: ${alreadyQueued.join(', ')}`] : []),
         'Nothing was generated',
       ];
@@ -1132,7 +1223,7 @@ export function registerStudioToolsV2(
     'read_storyboard',
     {
       description:
-        'Read the authoritative schema-4 Beat/Shot storyboard, bin, rules, references, and current video picture before proposing changes.',
+        'Read the authoritative schema-5 Beat/Shot storyboard, project references, bin, rules, and current video picture before proposing changes.',
       inputSchema: z.object({}).strict(),
     },
     createReadStoryboardHandlerV2(config)
@@ -1141,7 +1232,7 @@ export function registerStudioToolsV2(
     'studio_request_reference_images',
     {
       description:
-        'Request supporting reference images for ordered active shot ids. This only records a request for user approval and never starts paid generation.',
+        'Request candidate images for ordered project reference ids after the reference plan is approved. Character sheets must be approved before backgrounds. This only records a request for user approval and never starts paid generation.',
       inputSchema: studioRequestReferenceImagesInputSchemaV2,
     },
     createRequestReferenceImagesHandlerV2(config)
@@ -1150,7 +1241,7 @@ export function registerStudioToolsV2(
     'propose_storyboard',
     {
       description:
-        'Record one ordered schema-4 direct- or proposal-capable mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Unavailable operations return operation_not_permitted before any ID or I/O; the final serialized proposal record must fit within 256 KiB.',
+        'Record one ordered schema-5 direct- or proposal-capable mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Unavailable operations return operation_not_permitted before any ID or I/O; the final serialized proposal record must fit within 256 KiB.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
     },
     async (input) =>
@@ -1178,7 +1269,7 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of direct-capable Beat/Shot edits to that exact revision. Canonical schema-4 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. Exact add_beat and add_shot variants require caller-provided beatId and shotId and never accept legacy firstShot fields. This never starts paid generation. A batch containing proposal-only or unavailable operations is rejected atomically at capability preflight before any ID or I/O: no operation reaches command evaluation or is applied, and the operation_not_permitted error names every rejected zero-based index, kind, disposition, and reason plus every direct-capable index. Omit unavailable operations or ask the user to perform them manually when supported. If the remaining ordered direct-and-proposal-capable subset still expresses the intended atomic change, send that whole subset to propose_storyboard for user review; resubmit a direct-only subset through studio_apply_edits only when it is independently valid and only after calling read_storyboard. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable Beat/Shot edits to that exact revision. Canonical schema-5 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. Exact add_beat and add_shot variants require caller-provided beatId and shotId and never accept legacy firstShot fields. This never starts paid generation. A batch containing proposal-only or unavailable operations is rejected atomically at capability preflight before any ID or I/O: no operation reaches command evaluation or is applied, and the operation_not_permitted error names every rejected zero-based index, kind, disposition, and reason plus every direct-capable index. Omit unavailable operations or ask the user to perform them manually when supported. If the remaining ordered direct-and-proposal-capable subset still expresses the intended atomic change, send that whole subset to propose_storyboard for user review; resubmit a direct-only subset through studio_apply_edits only when it is independently valid and only after calling read_storyboard. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
     createStudioApplyEditsHandlerV2(config, writerDeps)
@@ -1187,7 +1278,7 @@ export function registerStudioToolsV2(
     'studio_get_command_status',
     {
       description:
-        'Read the exact durable or pending schema-4 status for one commandId. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
+        'Read the exact durable or pending schema-5 status for one commandId. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
       inputSchema: studioGetCommandStatusInputSchemaV2,
     },
     createStudioGetCommandStatusHandlerV2(config, writerDeps)

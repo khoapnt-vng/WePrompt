@@ -102,6 +102,7 @@ import type {
 import type { IProjectKnowledgeListResult } from '../types/project/knowledgeTypes';
 import type {
   CreateStudioProjectInputV2,
+  StudioApproveProjectReferenceRequestV2,
   StudioApplyAuthoringBatchRequestV2,
   StudioAssetV2,
   StudioBindDirectorConversationRequestV2,
@@ -126,6 +127,7 @@ import type {
   StudioListExportsRequestV2,
   StudioParkBeatRequestV2,
   StudioParkShotRequestV2,
+  StudioPrepareProjectReferencesRequestV2,
   StudioPrepareSubmissionRequestV2,
   StudioProjectListResultV2,
   StudioProjectLoadResultV2,
@@ -1270,6 +1272,14 @@ export const creativeStudio = {
     StudioCommandResult<StudioRendererReferenceGenerationHandoffV2[]>,
     StudioProjectRequestV2
   >('creative-studio.list-reference-generation-handoffs'),
+  prepareProjectReferences: bridge.buildProvider<
+    StudioCommandResult<StudioRendererPreparedSubmissionOptionsV2>,
+    StudioPrepareProjectReferencesRequestV2
+  >('creative-studio.prepare-project-references'),
+  approveProjectReference: bridge.buildProvider<
+    StudioCommandResult<StudioRendererProjectV2>,
+    StudioApproveProjectReferenceRequestV2
+  >('creative-studio.approve-project-reference'),
   prepareSubmission: bridge.buildProvider<
     StudioCommandResult<StudioRendererPreparedSubmissionOptionsV2>,
     StudioPrepareSubmissionRequestV2

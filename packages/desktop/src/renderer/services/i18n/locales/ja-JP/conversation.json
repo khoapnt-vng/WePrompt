@@ -901,6 +901,45 @@
       "importError": "参照を追加できませんでした。もう一度お試しください。"
     },
     "workspace": {
+      "views": { "references": "リファレンス" },
+      "referenceWorkflow": {
+        "description": "まず一貫したキャラクターシートを承認し、次に繰り返し登場する背景を承認します。ショット候補には承認済みのリファレンスが自動的に使われます。",
+        "generationScope": "生成範囲",
+        "characters": {
+          "title": "キャラクター",
+          "description": "名前のある各キャラクターについて、1 枚の設定シートを承認します。",
+          "empty": "このストーリーに名前のあるキャラクターはいません。背景を確認できます。"
+        },
+        "backgrounds": {
+          "title": "背景",
+          "description": "映像の一貫性を保つため、繰り返し登場する場所を承認します。",
+          "charactersRequired": "背景を確認する前に、すべてのキャラクターを承認してください。",
+          "empty": "繰り返し登場する背景は必要ありません。"
+        },
+        "previewPending": "リファレンス候補はまだ生成されていません。",
+        "previewAlt": "{{label}} のリファレンス候補",
+        "status": {
+          "idle": "未生成",
+          "queued": "待機中",
+          "running": "生成中",
+          "succeeded": "生成済み",
+          "failed": "生成に失敗",
+          "candidate": "確認待ち",
+          "approved": "承認済み"
+        },
+        "approve": "承認",
+        "regenerate": "再生成",
+        "ready": "必要なリファレンスがすべて承認されました。テーブルに進めます。",
+        "notReady": "続行するには、必要なリファレンスをすべて承認してください。",
+        "continueToTable": "テーブルに進む"
+      },
+      "references": { "referenceCount": "{{total}} 件のリファレンスをリクエストしました" },
+      "handoffs": {
+        "referenceCount": "この引き継ぎには {{total}} 件のリファレンスがあります",
+        "progress": "待機 {{queued}} · 実行中 {{running}} · 成功 {{succeeded}} · 失敗 {{failed}}",
+        "reviewReferences": "リファレンスを確認",
+        "retryFailed": "失敗したリファレンスを再試行"
+      },
       "table": {
         "columns": { "panel": "パネル" },
         "board": {
@@ -998,6 +1037,24 @@
         }
       },
       "proposals": {
+        "before": "変更前",
+        "after": "変更後",
+        "placement": "配置",
+        "ownerBeat": "所属ビート",
+        "order": "順序",
+        "beforeItem": "{{kind}}の前",
+        "technicalDetails": "技術詳細",
+        "reviewUnavailable": "この提案には未対応の変更が含まれているため、承認できません。",
+        "referenceKind": "参照タイプ",
+        "referencePrompt": "参照プロンプト",
+        "assignedShots": "割り当てられたショット",
+        "chatDecisionBusy": "別のレビュー操作が進行中です。",
+        "chatDirty": "Director の提案を承認または却下する前に、ワークスペースのすべての下書きを保存またはリセットしてください。",
+        "chatNoPending": "操作できる保留中のディレクター提案はありません。",
+        "chatMultiplePending": "複数のディレクター提案が保留中です。対象カードのボタンを使用してください。",
+        "chatStale": "この提案は現在のプロジェクトリビジョンと一致しません。",
+        "chatAccepted": "提案を承認しました。",
+        "chatRejected": "提案を却下しました。",
         "fixedReason": {
           "video_asset": "このショットには現在の画像があります。"
         }
@@ -1114,9 +1171,26 @@
       },
       "controls": {
         "briefAndRulesTitle": "ブリーフとルール",
-        "undoLabel": { "promote_board_panel": "パネルを最初のフレームに使用" }
+        "undoLabel": {
+          "promote_board_panel": "パネルを最初のフレームに使用",
+          "set_project_references": "プロジェクト参照",
+          "set_shot_background_reference": "ショットの背景参照"
+        }
       },
       "gate": {
+        "backgroundChoice": {
+          "title": "各ショットの背景を選択",
+          "description": "生成料金を計算する前に、各ショットへ承認済みの背景を1つ割り当てます。この無料の変更ではキャラクター参照が保持されます。",
+          "shotLabel": "ショット {{shotId}} の背景",
+          "incomplete": "一覧の各ショットに背景を1つ選択してください。",
+          "assign": "背景を割り当てる",
+          "assigning": "背景を割り当てています…",
+          "noneTitle": "承認済みの背景がありません。",
+          "noneBody": "この生成の料金を計算する前に、参照を確認して背景を承認してください。",
+          "reviewReferences": "参照を確認",
+          "invalid": "この背景選択は現在の状態と一致しません。参照を確認するか、このレビューを閉じてもう一度お試しください。",
+          "failed": "背景の割り当てを保存できませんでした。現在のプロジェクトを確認して、もう一度お試しください。"
+        },
         "purpose": { "board_still": "ボードパネル" },
         "promotion": {
           "title": "パネルを最初のフレームに使用",

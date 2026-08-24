@@ -227,7 +227,7 @@ describe('schema-2 creative studio project store', () => {
   const seedReferenceRequestV2 = async (
     store: CreativeStudioStore,
     project: StudioProjectV2,
-    input: { requestId?: string; shotIds?: string[]; createdAt?: string; slotIndex?: number } = {}
+    input: { requestId?: string; referenceIds?: string[]; createdAt?: string; slotIndex?: number } = {}
   ): Promise<{
     request: StudioReferenceRequestV2;
     slot: StudioReferenceRequestSlotV2;
@@ -247,7 +247,7 @@ describe('schema-2 creative studio project store', () => {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: requestId,
       projectId: project.id,
-      shotIds: input.shotIds ?? ['shot_reference'],
+      referenceIds: input.referenceIds ?? [project.referenceOrder[0] ?? 'ref_reference'],
       status: 'pending',
       createdAt: input.createdAt ?? timestamp,
     };
@@ -264,7 +264,7 @@ describe('schema-2 creative studio project store', () => {
   const seedGenerationHandoffV2 = async (
     store: CreativeStudioStore,
     project: StudioProjectV2,
-    input: { requestId?: string; shotIds?: string[]; slotIndex?: number } = {}
+    input: { requestId?: string; referenceIds?: string[]; slotIndex?: number } = {}
   ): Promise<
     Awaited<ReturnType<typeof seedReferenceRequestV2>> & {
       decision: StudioReferenceRequestDecisionV2 & {
@@ -311,6 +311,16 @@ describe('schema-2 creative studio project store', () => {
         shot: { line: shotId, narration: '', onScreenText: '', durationSeconds: 4 },
         beforeShotId: null,
       })),
+      {
+        kind: 'set_project_references',
+        references: shotIds.map((shotId, index) => ({
+          id: index === 0 ? 'ref_reference' : `ref_reference_${index + 1}`,
+          kind: 'character',
+          label: `Reference ${index + 1}`,
+          prompt: `Character sheet for reference ${index + 1}.`,
+          shotIds: [shotId],
+        })),
+      },
     ];
     return (
       await store.applyMutationBatchV2(
@@ -328,7 +338,8 @@ describe('schema-2 creative studio project store', () => {
   const addReferenceAuthorizationV2 = (
     project: StudioProjectV2,
     handoffId: string,
-    shotId = 'shot_reference'
+    shotId = 'shot_reference',
+    referenceId = project.shots[shotId]?.referenceIds[0] ?? 'ref_reference'
   ): StudioProjectV2 => {
     const requestPlan: StudioGenerationRequestPlan = {
       kind: 'resolved',
@@ -337,7 +348,7 @@ describe('schema-2 creative studio project store', () => {
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: project.shots[shotId]!.durationSeconds,
-        referenceInput: null,
+        referenceInputs: [],
         conditioningInput: null,
       },
     };
@@ -347,9 +358,11 @@ describe('schema-2 creative studio project store', () => {
         projectRevision: project.revision,
         shotId,
         purpose: 'seed_still',
+        projectReferenceId: referenceId,
       }),
       shotId,
       purpose: 'seed_still',
+      projectReferenceId: referenceId,
       routeId: 'image_route',
       generationCount: 1,
       requestPlan,
@@ -382,6 +395,7 @@ describe('schema-2 creative studio project store', () => {
       id: `job_${handoffId}`,
       projectId: project.id,
       shotId,
+      projectReferenceId: referenceId,
       status: 'queued_local',
       provider,
       idempotencyKey: `idem_${handoffId}`,
@@ -406,6 +420,8 @@ describe('schema-2 creative studio project store', () => {
     project.spendAuthorizations.push(authorization);
     project.jobs[job.id] = job;
     project.shots[shotId]!.jobIds.push(job.id);
+    project.references[referenceId]!.candidateJobId = job.id;
+    project.references[referenceId]!.updatedAt = authorization.confirmedAt;
     return project;
   };
 
@@ -563,6 +579,7 @@ describe('schema-2 creative studio project store', () => {
       trimInSeconds: null,
       trimOutSeconds: null,
       chainBreak: 'none',
+      referenceIds: [],
       seedStillId: 'asset_seed',
       boardAssetId: null,
       supersededBoardAssetIds: [],
@@ -591,6 +608,7 @@ describe('schema-2 creative studio project store', () => {
       managedAsset: { collection: 'assets', fileName: 'asset_video.mp4' },
       byteSize: 1,
       sha256: 'a'.repeat(64),
+      referenceAssetIds: [],
       durationSeconds: 4,
       createdAt: timestamp,
     };
@@ -603,6 +621,7 @@ describe('schema-2 creative studio project store', () => {
       managedAsset: { collection: 'thumbnails', fileName: 'asset_thumbnail.png' },
       byteSize: 1,
       sha256: 'b'.repeat(64),
+      referenceAssetIds: [],
       createdAt: timestamp,
     };
     const requestPlan: StudioGenerationRequestPlan = {
@@ -612,7 +631,7 @@ describe('schema-2 creative studio project store', () => {
         aspectRatio: '16:9',
         resolution: '1080p',
         durationSeconds: 4,
-        referenceInput: null,
+        referenceInputs: [],
         conditioningInput: { kind: 'seed_still', assetId: seed.id },
       },
     };
@@ -775,7 +794,7 @@ describe('schema-2 creative studio project store', () => {
     expect(typeof store.removeConnection).toBe('function');
   });
 
-  it('returns exact load discriminants without parsing earlier payloads as schema 4', async () => {
+  it('returns exact load discriminants without parsing earlier payloads as the current schema', async () => {
     const prototypeId = 'prototype_minimal';
     mkdirSync(path.join(rootDir, prototypeId));
     writeFileSync(
@@ -4485,7 +4504,11 @@ describe('schema-2 creative studio project store', () => {
     expect(decided).toMatchObject({
       request: { id: request.id },
       decision: {
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_lifecycle_v2', shotIds: request.shotIds },
+        outcome: {
+          kind: 'generation_gate',
+          handoffId: 'handoff_lifecycle_v2',
+          referenceIds: request.referenceIds,
+        },
       },
       receipt: null,
     });
@@ -5006,7 +5029,7 @@ describe('schema-2 creative studio project store', () => {
     expect(readJson<StudioReferenceGenerationHandoffReceiptV2>(receiptFile).result).toEqual({ kind: 'dismissed' });
   });
 
-  it('selects only a current classified Brief image and allows rejection after request shots become inactive', async () => {
+  it('selects only a current classified Brief image and allows rejection after requested references become inactive', async () => {
     const { store } = createStoreV2({ createId: () => 'reference_import_v2', now: () => timestamp });
     const created = await store.createProjectV2(inputV2);
     const active = await addActiveReferenceShotsV2(store, created);
@@ -5069,20 +5092,33 @@ describe('schema-2 creative studio project store', () => {
         outcome: { kind: 'imported_reference', assetId: 'missing_asset' },
       })
     ).rejects.toMatchObject({ code: 'invalid_payload' });
-    const deleted = await store.applyMutationBatchV2(
+    const replaced = await store.applyMutationBatchV2(
       {
         schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: withReference.id,
         expectedRevision: withReference.revision,
-        operations: [{ kind: 'delete_shot', shotId: 'shot_reference' }],
+        operations: [
+          {
+            kind: 'set_project_references',
+            references: [
+              {
+                id: 'ref_replacement',
+                kind: 'character',
+                label: 'Replacement reference',
+                prompt: 'A replacement character sheet.',
+                shotIds: ['shot_reference'],
+              },
+            ],
+          },
+        ],
       },
-      { mutationId: 'delete_reference_shot', capturedAt: timestamp }
+      { mutationId: 'replace_project_reference', capturedAt: timestamp }
     );
     await expect(
       store.decideReferenceRequestV2({
         projectId: withReference.id,
         requestId: stale.request.id,
-        expectedRevision: deleted.project.revision,
+        expectedRevision: replaced.project.revision,
         outcome: { kind: 'rejected' },
       })
     ).resolves.toMatchObject({ decision: { outcome: { kind: 'rejected' } } });
@@ -5597,7 +5633,7 @@ describe('schema-2 creative studio project store', () => {
     });
     const handoffId = (
       decided.decision as StudioReferenceRequestDecisionV2 & {
-        outcome: { kind: 'generation_gate'; handoffId: string; shotIds: string[] };
+        outcome: { kind: 'generation_gate'; handoffId: string; referenceIds: string[] };
       }
     ).outcome.handoffId;
     const authorized = await store.updateProjectV2(
@@ -6440,7 +6476,7 @@ describe('schema-2 creative studio project store', () => {
         schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         id: requestId,
         projectId: referenceProject.id,
-        shotIds: ['historical_shot'],
+        referenceIds: ['historical_reference'],
         status: 'pending',
         createdAt: timestamp,
       };

@@ -157,7 +157,7 @@ const makeResolvedPlanV2 = (
     aspectRatio: '16:9',
     resolution: '720p',
     durationSeconds: purpose === 'board_still' ? 4 : 5,
-    referenceInput: null,
+    referenceInputs: [],
     conditioningInput: null,
   },
 });
@@ -228,6 +228,7 @@ const createV2Harness = async (
         trimInSeconds: null,
         trimOutSeconds: null,
         chainBreak: 'none',
+        referenceIds: [],
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -1512,7 +1513,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       const job = project.jobs.job_v2_1!;
       const snapshot = {
         ...job.requestSnapshot!,
-        referenceInput: { assetId: reference.id, sha256: reference.sha256 },
+        referenceInputs: [{ assetId: reference.id, sha256: reference.sha256 }],
       };
       job.requestPlan = { kind: 'resolved', snapshot };
       job.requestSnapshot = snapshot;
@@ -1723,6 +1724,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         trimInSeconds: null,
         trimOutSeconds: null,
         chainBreak: 'none',
+        referenceIds: [],
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -1738,7 +1740,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
           aspectRatio: '16:9',
           resolution: '720p',
           durationSeconds: 5,
-          referenceInput: null,
+          referenceInputs: [],
         },
         dependency: {
           kind: 'existing_predecessor',

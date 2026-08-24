@@ -40,6 +40,33 @@ import { DIRECTOR_PRESET_RULES, seedDirectorOpeningTurn } from './openingTurn';
 
 type DirectorConversation = Extract<TChatConversation, { type: 'aionrs' }>;
 
+export type DirectorProposalChatIntent = 'accept' | 'reject';
+
+const ACCEPT_PROPOSAL_CHAT_INTENTS = new Set([
+  'approve',
+  'approve it',
+  'apply',
+  'apply it',
+  'accept',
+  'accept it',
+  '/approve',
+]);
+const REJECT_PROPOSAL_CHAT_INTENTS = new Set(['reject', 'reject it', 'decline', 'decline it', '/reject']);
+
+/** Only exact, bounded human phrases can cross from the composer into proposal authority. */
+export const parseDirectorProposalChatIntent = (message: string): DirectorProposalChatIntent | null => {
+  const normalized = message
+    .normalize('NFKC')
+    .trim()
+    .toLocaleLowerCase('en-US')
+    .replace(/[.!?]+$/u, '')
+    .trim()
+    .replace(/\s+/gu, ' ');
+  if (ACCEPT_PROPOSAL_CHAT_INTENTS.has(normalized)) return 'accept';
+  if (REJECT_PROPOSAL_CHAT_INTENTS.has(normalized)) return 'reject';
+  return null;
+};
+
 type DirectorState =
   | { kind: 'loading'; projectId: string }
   | { kind: 'starting'; projectId: string }
@@ -823,7 +850,10 @@ const resolveBoundConversation = async (
   };
 };
 
-const DirectorConversationSurface: React.FC<{ conversation: DirectorConversation }> = ({ conversation }) => {
+const DirectorConversationSurface: React.FC<{
+  conversation: DirectorConversation;
+  onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
+}> = ({ conversation, onProposalIntent }) => {
   const onSelectModel = useCallback(
     async (provider: IProvider, modelName: string): Promise<boolean> => {
       const model = { ...provider, use_model: modelName } as TProviderWithModel;
@@ -845,6 +875,17 @@ const DirectorConversationSurface: React.FC<{ conversation: DirectorConversation
       loadedMcpStatuses={conversation.extra.mcp_statuses as IConversationMcpStatus[] | undefined}
       project_id={conversation.extra.project_id}
       session_mcp_servers={conversation.extra.session_mcp_servers}
+      beforeSend={
+        onProposalIntent === undefined
+          ? undefined
+          : async ({ message, hasAttachments }) => {
+              if (hasAttachments) return false;
+              const intent = parseDirectorProposalChatIntent(message);
+              if (intent === null) return false;
+              await onProposalIntent(intent);
+              return true;
+            }
+      }
     />
   );
 };
@@ -852,6 +893,7 @@ const DirectorConversationSurface: React.FC<{ conversation: DirectorConversation
 export type DirectorRailProps = {
   project: StudioRendererProjectV2;
   reviewedOutput?: React.ReactNode;
+  onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
   /** Owned by the shell: the collapse control lives in the app bar, not in this pane. */
   collapsed: boolean;
   contentId: string;
@@ -863,6 +905,7 @@ export type DirectorRailProps = {
 export const DirectorRail: React.FC<DirectorRailProps> = ({
   project,
   reviewedOutput,
+  onProposalIntent,
   collapsed,
   contentId,
   widthPixels,
@@ -1184,7 +1227,11 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
       <div ref={contentRef} id={contentId} className={styles.content} aria-hidden={collapsed} inert={collapsed}>
         <div className={styles.owner} data-studio-director-conversation-owner>
           {visibleState.kind === 'ready' ? (
-            <DirectorConversationSurface key={visibleState.conversation.id} conversation={visibleState.conversation} />
+            <DirectorConversationSurface
+              key={visibleState.conversation.id}
+              conversation={visibleState.conversation}
+              onProposalIntent={onProposalIntent}
+            />
           ) : (
             <div className={styles.notice} aria-live='polite'>
               {visibleState.kind === 'loading' || visibleState.kind === 'starting' ? (

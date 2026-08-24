@@ -19,6 +19,7 @@ import type {
   StudioQuotedGeneration,
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
 import {
   createCreativeStudioStore,
   type CreativeStudioStore,
@@ -132,6 +133,7 @@ const makeStoreV2 = async (
     addSecondShot?: boolean;
     includeAuthorizedJob?: boolean;
     briefReference?: boolean;
+    projectReferenceId?: string;
     adapterId?: StudioJobV2['provider']['adapterId'];
     prompt?: string;
   } = {}
@@ -192,6 +194,7 @@ const makeStoreV2 = async (
         trimInSeconds: null,
         trimOutSeconds: null,
         chainBreak: 'none',
+        referenceIds: options.projectReferenceId === undefined ? [] : [options.projectReferenceId],
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -213,6 +216,7 @@ const makeStoreV2 = async (
               trimInSeconds: null,
               trimOutSeconds: null,
               chainBreak: 'none' as const,
+              referenceIds: [],
               seedStillId: null,
               boardAssetId: null,
               supersededBoardAssetIds: [],
@@ -224,6 +228,25 @@ const makeStoreV2 = async (
           }
         : {}),
     },
+    ...(options.projectReferenceId === undefined
+      ? {}
+      : {
+          referenceOrder: [options.projectReferenceId],
+          references: {
+            [options.projectReferenceId]: {
+              id: options.projectReferenceId,
+              kind: 'character' as const,
+              label: 'Ming',
+              prompt: 'A careful engineer',
+              candidateAssetId: null,
+              candidateJobId: null,
+              approvedAssetId: null,
+              supersededAssetIds: [],
+              createdAt: current.updatedAt,
+              updatedAt: current.updatedAt,
+            },
+          },
+        }),
   }));
   let quoteBase = authored;
   const purpose = options.purpose ?? 'seed_still';
@@ -282,9 +305,9 @@ const makeStoreV2 = async (
       aspectRatio: quoteBase.aspectRatio,
       resolution: quoteBase.resolution,
       durationSeconds: purpose === 'board_still' ? 4 : 5,
-      referenceInput: options.briefReference
-        ? { assetId: 'brief_v2', sha256: createHash('sha256').update(png).digest('hex') }
-        : null,
+      referenceInputs: options.briefReference
+        ? [{ assetId: 'brief_v2', sha256: createHash('sha256').update(png).digest('hex') }]
+        : [],
       conditioningInput: purpose === 'video_take' ? { kind: 'seed_still', assetId: 'seed_v2' } : null,
     },
   };
@@ -294,8 +317,10 @@ const makeStoreV2 = async (
       projectRevision: quoteBase.revision,
       shotId: 'shot_1',
       purpose,
+      projectReferenceId: options.projectReferenceId,
     }),
     shotId: 'shot_1',
+    ...(options.projectReferenceId === undefined ? {} : { projectReferenceId: options.projectReferenceId }),
     purpose,
     routeId: purpose === 'video_take' ? 'route_video' : 'route_image',
     generationCount: 1,
@@ -352,6 +377,7 @@ const makeStoreV2 = async (
       createdAt: current.updatedAt,
       updatedAt: current.updatedAt,
       purpose,
+      ...(options.projectReferenceId === undefined ? {} : { projectReferenceId: options.projectReferenceId }),
       authorizationId: authorization.id,
       authorizationItemId: item.id,
       requestPlan,
@@ -362,6 +388,9 @@ const makeStoreV2 = async (
     current.spendAuthorizations = [authorization];
     current.jobs.job_1 = job;
     current.shots.shot_1!.jobIds.push('job_1');
+    if (options.projectReferenceId !== undefined) {
+      current.references[options.projectReferenceId]!.candidateJobId = job.id;
+    }
     return current;
   });
   return { rootDir, store, project, authorization, item };
@@ -978,6 +1007,161 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         },
       },
     });
+  });
+
+  it('commits a project-reference primary only as the exact candidate authority', async () => {
+    const { store, project } = await makeStoreV2({ projectReferenceId: 'reference_character' });
+    const media = createStudioMediaStore({ store, createId: () => 'reference_candidate_output' });
+
+    const asset = await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      declaredByteSize: png.length,
+      body: Readable.from([png]),
+    });
+
+    expect(asset).toMatchObject({
+      id: 'reference_candidate_output',
+      projectId: project.id,
+      shotId: 'shot_1',
+      mediaKind: 'image',
+      managedAsset: { collection: 'assets', fileName: 'reference_candidate_output.png' },
+      referenceAssetIds: [],
+    });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        references: {
+          reference_character: {
+            candidateJobId: 'job_1',
+            candidateAssetId: 'reference_candidate_output',
+            approvedAssetId: null,
+            supersededAssetIds: [],
+          },
+        },
+        shots: {
+          shot_1: {
+            referenceIds: ['reference_character'],
+            seedStillId: null,
+            boardAssetId: null,
+            assetIds: ['reference_candidate_output'],
+          },
+        },
+        jobs: {
+          job_1: {
+            status: 'succeeded',
+            projectReferenceId: 'reference_character',
+            outputAssetIdsByRole: { primary: 'reference_candidate_output', poster: null },
+          },
+        },
+      },
+    });
+  });
+
+  it('commits an exact live project-reference candidate after its proxy Shot changes composition', async () => {
+    const { store, project } = await makeStoreV2({ projectReferenceId: 'reference_character' });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.referenceIds = [];
+      return current;
+    });
+    const media = createStudioMediaStore({ store, createId: () => 'detached_reference_candidate_output' });
+
+    await expect(
+      media.persistProviderOutputForJobV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        declaredByteSize: png.length,
+        body: Readable.from([png]),
+      })
+    ).resolves.toMatchObject({
+      id: 'detached_reference_candidate_output',
+      shotId: 'shot_1',
+      referenceAssetIds: [],
+    });
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        references: {
+          reference_character: {
+            candidateJobId: 'job_1',
+            candidateAssetId: 'detached_reference_candidate_output',
+          },
+        },
+        shots: {
+          shot_1: {
+            referenceIds: [],
+            assetIds: ['detached_reference_candidate_output'],
+          },
+        },
+        jobs: {
+          job_1: {
+            status: 'succeeded',
+            projectReferenceId: 'reference_character',
+          },
+        },
+      },
+    });
+  });
+
+  it('refuses and cleans a project-reference output when candidate authority changes before commit', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ projectReferenceId: 'reference_character' });
+    const staleAuthorityStore = {
+      ...store,
+      withProjectAuthorityV2: <T>(
+        projectId: string,
+        operation: (snapshot: StudioProjectAuthoritySnapshotV2) => Promise<T>
+      ): Promise<T> =>
+        store.withProjectAuthorityV2(projectId, (snapshot) =>
+          operation({
+            ...snapshot,
+            commit: (update, expectedRevision, commitTag, authorizeBeforeReplace) =>
+              snapshot.commit(
+                (current) => {
+                  current.references.reference_character!.candidateJobId = null;
+                  return update(current);
+                },
+                expectedRevision,
+                commitTag,
+                authorizeBeforeReplace
+              ),
+          })
+        ),
+    } as CreativeStudioStore;
+    const media = createStudioMediaStore({
+      store: staleAuthorityStore,
+      createId: () => 'stale_reference_candidate_output',
+    });
+
+    await expect(
+      media.persistProviderOutputForJobV2({
+        projectId: project.id,
+        shotId: 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        declaredByteSize: png.length,
+        body: Readable.from([png]),
+      })
+    ).rejects.toMatchObject({ code: 'job_inactive' });
+
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        assets: {},
+        references: {
+          reference_character: { candidateJobId: 'job_1', candidateAssetId: null, approvedAssetId: null },
+        },
+        jobs: { job_1: { status: 'running', outputAssetIds: [] } },
+      },
+    });
+    await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+    await expect(fs.readdir(path.join(rootDir, project.id, 'assets'))).resolves.toEqual([]);
   });
 
   it('publishes a Board primary to its isolated collection and selects it atomically', async () => {
@@ -1660,7 +1844,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
 
     const undone = await store.applyMutationBatchV2(
       {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'undo_last', entryId: 'bed_import_mutation_1' }],
@@ -2042,7 +2226,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2158,7 +2342,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2207,7 +2391,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2304,7 +2488,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       });
       const cleared = await store.applyMutationBatchV2(
         {
-          schemaVersion: 4,
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
           projectId: project.id,
           expectedRevision: imported.project.revision,
           operations: [{ kind: 'set_bed', assetId: null }],
@@ -2373,7 +2557,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2433,7 +2617,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       fs.writeFile(
         intentPath,
         `${JSON.stringify({
-          schemaVersion: 4,
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
           kind: 'detach_bed_audio',
           projectId: project.id,
           expectedRevision: imported.project.revision,
@@ -2479,7 +2663,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await fs.writeFile(
       intentPath,
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         kind: 'import_bed_audio',
         projectId: project.id,
         expectedRevision: project.revision,
@@ -2514,7 +2698,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2529,7 +2713,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await fs.writeFile(
       intentPath,
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         kind: 'detach_bed_audio',
         projectId: project.id,
         expectedRevision: cleared.project.revision,
@@ -2869,10 +3053,12 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       expectedRevision: terminal.revision,
     });
     expect(detached.assets).not.toHaveProperty('brief_v2');
-    expect(detached.jobs.job_1!.requestSnapshot?.referenceInput).toEqual({
-      assetId: 'brief_v2',
-      sha256: createHash('sha256').update(png).digest('hex'),
-    });
+    expect(detached.jobs.job_1!.requestSnapshot?.referenceInputs).toEqual([
+      {
+        assetId: 'brief_v2',
+        sha256: createHash('sha256').update(png).digest('hex'),
+      },
+    ]);
     await expect(fs.access(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -3228,7 +3414,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     }));
     const promoted = await store.applyMutationBatchV2(
       {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: routed.revision,
         operations: [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_output_owned' }],

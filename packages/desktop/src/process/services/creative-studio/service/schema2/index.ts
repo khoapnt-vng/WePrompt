@@ -8,6 +8,7 @@ export { createEmptyStudioProjectV2 } from './factories';
 export * from './exports';
 export * from './generation';
 export * from './pricing';
+export * from './references';
 export {
   deriveStudioDirtyShotsV2,
   deriveStudioInboundShotReferencesV2,

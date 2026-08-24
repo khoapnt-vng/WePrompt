@@ -12,6 +12,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
+  STUDIO_PROJECT_SCHEMA_VERSION,
   type CreateStudioProjectInputV2,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
@@ -92,7 +93,7 @@ const publishRealPendingV2 = async (input: {
   await nodeFs.writeFile(
     path.join(directories.slots, '0.slot'),
     JSON.stringify({
-      schemaVersion: 4,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       commandId: input.commandId,
       reservedAt: '2026-08-16T12:00:00.000Z',
       deadlineAt: '2026-08-16T12:00:15.000Z',
@@ -114,7 +115,7 @@ const makeCommandV2 = (
   commandId = 'command_v2',
   overrides: Partial<StudioDirectorCommandRecordV2> = {}
 ): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   commandId,
   projectId,
   expectedRevision: 1,
@@ -344,7 +345,7 @@ describe('Studio Director schema-2 commit tracker', () => {
     });
 
     expect(tracker.pendingReceipt(command.projectId, command.commandId)).toEqual({
-      schemaVersion: 4,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       commandId: command.commandId,
       projectId: command.projectId,
       expectedRevision: 1,
@@ -378,7 +379,7 @@ describe('Studio Director schema-2 commit tracker', () => {
     expect(tracker.pendingReceipt(command.projectId, command.commandId)).toBeNull();
 
     const terminal: StudioDirectorCommandReceiptV2 = {
-      schemaVersion: 4,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       commandId: command.commandId,
       projectId: command.projectId,
       expectedRevision: 1,
@@ -406,7 +407,7 @@ describe('Studio Director schema-2 command processor', () => {
     const receipt = await waitForReceiptV2(harness);
 
     expect(receipt).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       status: 'applied',
       appliedRevision: 2,
       createdBeatIds: [],
@@ -482,7 +483,7 @@ describe('Studio Director schema-2 command processor', () => {
     harness.receiptReads.set(keyOf(ref.projectId, ref.commandId), {
       status: 'valid',
       record: {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         commandId: ref.commandId,
         projectId: ref.projectId,
         expectedRevision: 1,
@@ -952,7 +953,7 @@ describe('Studio Director schema-2 real mailbox terminal cleanup', () => {
           expect(await mailbox.readReceipt(project.id, commandId)).toMatchObject({
             status: 'valid',
             record: {
-              schemaVersion: 4,
+              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
               commandId,
               projectId: project.id,
               expectedRevision,
@@ -1147,7 +1148,7 @@ describe('Studio Director schema-2 real mailbox terminal cleanup', () => {
         })
       );
       await mailbox.writeReceipt(project.id, {
-        schemaVersion: 4,
+        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         commandId,
         projectId: project.id,
         expectedRevision: project.revision,

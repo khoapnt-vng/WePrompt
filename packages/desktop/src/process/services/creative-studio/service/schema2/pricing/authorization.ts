@@ -118,7 +118,7 @@ export const studioBoardAuthorizationScopeIsValidV2 = (quote: StudioBoardAuthori
         (item) =>
           item.requestPlan.kind === 'resolved' &&
           item.requestPlan.snapshot.durationSeconds === STUDIO_BOARD_REQUEST_DURATION_SECONDS &&
-          item.requestPlan.snapshot.referenceInput === null &&
+          item.requestPlan.snapshot.referenceInputs.length === 0 &&
           item.requestPlan.snapshot.conditioningInput === null
       ))
   );
@@ -134,7 +134,7 @@ const quotedItemRequestAuthorityIsValid = (item: StudioQuotedGeneration): boolea
       return (
         item.requestPlan.kind === 'resolved' &&
         item.requestPlan.snapshot.durationSeconds === STUDIO_BOARD_REQUEST_DURATION_SECONDS &&
-        item.requestPlan.snapshot.referenceInput === null &&
+        item.requestPlan.snapshot.referenceInputs.length === 0 &&
         item.requestPlan.snapshot.conditioningInput === null
       );
     default: {
@@ -176,16 +176,17 @@ const validateQuote = (quote: StudioSubmissionQuote): StudioQuotedGeneration[] =
           projectRevision: quote.projectRevision,
           shotId: item.shotId,
           purpose: item.purpose,
+          projectReferenceId: item.projectReferenceId ?? null,
         }) ||
       itemIds.has(item.id) ||
-      pairs.has(`${item.shotId}\0${item.purpose}`) ||
+      pairs.has(`${item.shotId}\0${item.purpose}\0${item.projectReferenceId ?? ''}`) ||
       !quotedItemRequestAuthorityIsValid(item) ||
       calculateStudioQuotedGenerationAmounts(item) === null
     ) {
       return fail('invalid_authorization');
     }
     itemIds.add(item.id);
-    pairs.add(`${item.shotId}\0${item.purpose}`);
+    pairs.add(`${item.shotId}\0${item.purpose}\0${item.projectReferenceId ?? ''}`);
   }
   const totals = calculateStudioQuoteTotals(items);
   if (

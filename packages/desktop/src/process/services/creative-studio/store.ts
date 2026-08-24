@@ -5184,8 +5184,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       if (decision.record.outcome.kind === 'generation_gate') {
         const outcome = decision.record.outcome;
         if (
-          outcome.shotIds.length !== request.record.shotIds.length ||
-          !outcome.shotIds.every((shotId, index) => shotId === request.record.shotIds[index]) ||
+          outcome.referenceIds.length !== request.record.referenceIds.length ||
+          !outcome.referenceIds.every((referenceId, index) => referenceId === request.record.referenceIds[index]) ||
           generationDecisions.has(outcome.handoffId)
         ) {
           throw new CreativeStudioStoreError('storage_error', 'Ambiguous Studio reference generation handoff');
@@ -6454,15 +6454,15 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       }
       if (
         authorization.cascadeItems.length !== 0 ||
-        authorization.baseItems.length !== generationOutcome.shotIds.length ||
+        authorization.baseItems.length !== generationOutcome.referenceIds.length ||
         Date.parse(authorization.confirmedAt) < Date.parse(decision.record.decidedAt) ||
         !authorization.baseItems.every(
           (item, index) =>
             item.purpose === 'seed_still' &&
-            item.shotId === generationOutcome.shotIds[index] &&
+            item.projectReferenceId === generationOutcome.referenceIds[index] &&
             item.generationCount === 1 &&
             item.requestPlan.kind === 'resolved' &&
-            item.requestPlan.snapshot.referenceInput === null
+            item.requestPlan.snapshot.referenceInputs.length === 0
         )
       ) {
         throw new CreativeStudioStoreError('storage_error', 'Studio authorization reference handoff scope mismatch');
@@ -6536,10 +6536,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     });
     await assertReferenceRequestLedgerEntrySetCurrentV2(ledger);
     let missing = assertReferenceAuthorizationRelationsV2({ project: input.snapshot.project, ledger });
-    const activeShotPositions = new Map(
-      input.snapshot.project.beatOrder
-        .flatMap((beatId) => input.snapshot.project.beats[beatId]?.shotOrder ?? [])
-        .map((shotId, index) => [shotId, index])
+    const activeReferencePositions = new Map(
+      input.snapshot.project.referenceOrder.map((referenceId, index) => [referenceId, index])
     );
     for (const residue of ledger.journalResidues) {
       if (residue.family !== 'decisions' || !residue.effective) continue;
@@ -6560,9 +6558,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         }
       } else if (decision.outcome.kind === 'generation_gate') {
         let previous = -1;
-        for (const shotId of request.record.shotIds) {
-          const position = activeShotPositions.get(shotId);
-          if (position === undefined || position <= previous) {
+        for (const referenceId of request.record.referenceIds) {
+          const reference = Object.hasOwn(input.snapshot.project.references, referenceId)
+            ? input.snapshot.project.references[referenceId]
+            : undefined;
+          const position = activeReferencePositions.get(referenceId);
+          if (reference?.id !== referenceId || position === undefined || position <= previous) {
             throw new CreativeStudioStoreError(
               'storage_error',
               'Studio reference generation publication is no longer active'
@@ -7004,16 +7005,20 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return { request: request.record, decision, receipt };
   };
 
-  const activeShotOrderV2 = (project: StudioProjectV2): string[] =>
-    project.beatOrder.flatMap((beatId) => project.beats[beatId]?.shotOrder ?? []);
-
-  const assertReferenceRequestShotsActiveV2 = (project: StudioProjectV2, request: StudioReferenceRequestV2): void => {
-    const positions = new Map(activeShotOrderV2(project).map((shotId, index) => [shotId, index]));
+  const assertReferenceRequestReferencesActiveV2 = (
+    project: StudioProjectV2,
+    request: StudioReferenceRequestV2
+  ): void => {
+    const positions = new Map(project.referenceOrder.map((referenceId, index) => [referenceId, index]));
     let previous = -1;
-    for (const shotId of request.shotIds) {
-      const position = positions.get(shotId);
-      if (position === undefined || position <= previous) {
-        throw new CreativeStudioStoreError('invalid_payload', 'Studio reference request shots are no longer active');
+    for (const referenceId of request.referenceIds) {
+      const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
+      const position = positions.get(referenceId);
+      if (reference?.id !== referenceId || position === undefined || position <= previous) {
+        throw new CreativeStudioStoreError(
+          'invalid_payload',
+          'Studio reference request references are no longer active'
+        );
       }
       previous = position;
     }
@@ -7255,7 +7260,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
     }
     if (intent.kind !== 'rejected') {
-      assertReferenceRequestShotsActiveV2(input.snapshot.project, request.record);
+      assertReferenceRequestReferencesActiveV2(input.snapshot.project, request.record);
     }
     const slot = assertPendingReferenceRequestSlotV2(ledger, requestId);
     const decidedAt = now();
@@ -7292,7 +7297,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       ) {
         throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff identity collides');
       }
-      outcome = { kind: 'generation_gate', handoffId, shotIds: [...request.record.shotIds] };
+      outcome = { kind: 'generation_gate', handoffId, referenceIds: [...request.record.referenceIds] };
     }
     await assertProjectSnapshotCurrentV2({ root: input.root, snapshot: input.snapshot });
     await assertReferenceRequestLedgerEntrySetCurrentV2(ledger);
@@ -7411,7 +7416,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       request.record.projectId !== input.projectId ||
       generationDecision.record.projectId !== input.projectId ||
       generationDecision.record.outcome.handoffId !== input.handoffId ||
-      !sameJson(request.record.shotIds, generationDecision.record.outcome.shotIds)
+      !sameJson(request.record.referenceIds, generationDecision.record.outcome.referenceIds)
     ) {
       throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff authority mismatch');
     }
@@ -7421,7 +7426,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     if (referenceAuthorizationByHandoffV2(input.snapshot.project).has(input.handoffId)) {
       throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff authorization is unrepaired');
     }
-    assertReferenceRequestShotsActiveV2(input.snapshot.project, request.record);
+    assertReferenceRequestReferencesActiveV2(input.snapshot.project, request.record);
     const slot = assertPendingReferenceRequestSlotV2(ledger, request.record.id);
     return { ledger, request, decision: generationDecision, slot };
   };

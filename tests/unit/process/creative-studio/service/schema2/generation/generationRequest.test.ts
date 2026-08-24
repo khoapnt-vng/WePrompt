@@ -34,7 +34,7 @@ const templateInput = () => ({
   aspectRatio: '16:9' as const,
   resolution: '1080p' as const,
   durationSeconds: 8,
-  referenceInput: null,
+  referenceInputs: [],
 });
 
 describe('composeStudioGenerationPrompt', () => {
@@ -67,7 +67,7 @@ describe('generation request plans', () => {
     const template = createStudioGenerationRequestTemplate({
       ...templateInput(),
       purpose: 'seed_still',
-      referenceInput: { assetId: 'reference_1', sha256: 'a'.repeat(64) },
+      referenceInputs: [{ assetId: 'reference_1', sha256: 'a'.repeat(64) }],
     });
 
     expect(
@@ -170,7 +170,7 @@ describe('generation request plans', () => {
     expect(() =>
       createStudioGenerationRequestTemplate({
         ...templateInput(),
-        referenceInput: { assetId: 'reference_1', sha256: 'a'.repeat(64) },
+        referenceInputs: [{ assetId: 'reference_1', sha256: 'a'.repeat(64) }],
       })
     ).toThrow(TypeError);
     const template = createStudioGenerationRequestTemplate(templateInput());

@@ -20,7 +20,7 @@ const resolvedPlan = (durationSeconds = 8): StudioGenerationRequestPlan => ({
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds,
-    referenceInput: null,
+    referenceInputs: [],
     conditioningInput: { kind: 'seed_still', assetId: 'seed_1' },
   },
 });
@@ -62,7 +62,7 @@ describe('calculateStudioQuotedGenerationAmounts', () => {
               aspectRatio: '16:9',
               resolution: '1080p',
               durationSeconds: 4,
-              referenceInput: null,
+              referenceInputs: [],
               conditioningInput: null,
             },
           },

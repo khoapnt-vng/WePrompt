@@ -47,6 +47,7 @@ const makeShot = (id: string, chainBreak: StudioShot['chainBreak']): StudioShot 
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak,
+  referenceIds: [],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -58,7 +59,7 @@ const makeShot = (id: string, chainBreak: StudioShot['chainBreak']): StudioShot 
 
 const makeProject = (): StudioProjectV2 => {
   const project: StudioProjectV2 = {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 1,
     id: 'project_1',
     name: 'Editor package',
@@ -96,6 +97,8 @@ const makeProject = (): StudioProjectV2 => {
       shot_1: makeShot('shot_1', 'none'),
       shot_2: makeShot('shot_2', 'hard_cut'),
     },
+    referenceOrder: [],
+    references: {},
     bin: [],
     bedAssetId: 'bed_1',
     spendPolicy: null,
@@ -123,7 +126,7 @@ const makeProject = (): StudioProjectV2 => {
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: shot.durationSeconds,
-        referenceInput: null,
+        referenceInputs: [],
         conditioningInput: { kind: 'seed_still' as const, assetId: seedId },
       },
     };
@@ -164,6 +167,7 @@ const makeProject = (): StudioProjectV2 => {
       byteSize: index + 10,
       sha256: DIGEST,
       durationSeconds,
+      referenceAssetIds: [],
       createdAt: NOW,
     };
     shot.seedStillId = seedId;
@@ -309,7 +313,7 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: 8,
-        referenceInput: null,
+        referenceInputs: [],
         conditioningInput: { kind: 'seed_still' as const, assetId: seedId },
       },
     };
@@ -361,6 +365,7 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
       byteSize: index + 10,
       sha256: DIGEST,
       durationSeconds: 8,
+      referenceAssetIds: [],
       createdAt: NOW,
     };
     pendingJobs.push({ authorization, item, jobId, assetId });

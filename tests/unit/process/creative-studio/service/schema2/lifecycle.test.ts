@@ -30,7 +30,7 @@ const resolvedPlan = (purpose: 'seed_still' | 'video_take'): StudioGenerationReq
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
     conditioningInput: null,
   },
 });
@@ -42,7 +42,7 @@ const deferredPredecessorPlan = (): StudioGenerationRequestPlan => ({
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
   },
   dependency: { kind: 'authorized_predecessor', upstreamItemId: 'item_upstream', predecessorShotId: 'shot_1' },
 });
@@ -54,7 +54,7 @@ const deferredSeedPlan = (): StudioGenerationRequestPlan => ({
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
   },
   dependency: { kind: 'authorized_seed', upstreamItemId: 'item_upstream', shotId: 'shot_1' },
 });
@@ -67,7 +67,7 @@ const existingPredecessorPlan = (): StudioGenerationRequestPlan =>
       aspectRatio: '16:9',
       resolution: '1080p',
       durationSeconds: 5,
-      referenceInput: null,
+      referenceInputs: [],
     },
     dependency: {
       kind: 'existing_predecessor',
@@ -179,7 +179,7 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
   });
   const dependentJob = job('job_dependent', dependent.shotId, dependent.id, dependentPlan);
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 7,
     id: 'project_1',
     name: 'Project',
@@ -215,6 +215,7 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
         trimInSeconds: null,
         trimOutSeconds: dependency === 'predecessor' ? 2 : null,
         chainBreak: 'none',
+        referenceIds: [],
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -234,6 +235,7 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
         trimInSeconds: null,
         trimOutSeconds: null,
         chainBreak: 'none',
+        referenceIds: [],
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -243,6 +245,8 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
         jobIds: dependency === 'predecessor' ? [dependentJob.id] : [],
       },
     },
+    referenceOrder: [],
+    references: {},
     bin: [],
     bedAssetId: null,
     spendPolicy: null,
@@ -552,7 +556,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
         aspectRatio: '16:9',
         resolution: '1080p',
         durationSeconds: 5,
-        referenceInput: null,
+        referenceInputs: [],
       },
       dependency: { kind: 'authorized_predecessor', upstreamItemId: 'item_dependent', predecessorShotId: 'shot_1' },
     };

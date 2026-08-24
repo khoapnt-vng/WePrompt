@@ -25,6 +25,7 @@ import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_MUTATION_OPERATIONS,
+  STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
@@ -446,6 +447,13 @@ const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
     .strict(),
   z.object({ kind: z.literal('set_hard_cut'), shotId: safeIdSchema, hardCut: z.boolean() }).strict(),
   z.object({ kind: z.literal('set_seed_still'), shotId: safeIdSchema, assetId: safeIdSchema.nullable() }).strict(),
+  z
+    .object({
+      kind: z.literal('set_shot_background_reference'),
+      shotId: safeIdSchema,
+      referenceId: safeIdSchema,
+    })
+    .strict(),
   z.object({ kind: z.literal('promote_board_panel'), shotId: safeIdSchema, boardAssetId: safeIdSchema }).strict(),
   z
     .object({
@@ -494,6 +502,15 @@ const studioV2ReferenceDecisionSchema = z
     ]),
   })
   .strict();
+const studioV2PrepareProjectReferencesSchema = z
+  .object({
+    ...studioV2MutationRequestShape,
+    referenceIds: z.array(safeIdSchema).min(1).max(STUDIO_MAX_PROJECT_REFERENCES),
+  })
+  .strict()
+  .refine((request) => new Set(request.referenceIds).size === request.referenceIds.length, {
+    message: 'duplicate project reference',
+  });
 const studioV2PrepareGenerationChoiceShape = {
   shotId: safeIdSchema,
 };
@@ -866,6 +883,14 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.list-reference-requests': studioV2ProjectRequestSchema,
   'creative-studio.decide-reference-request': studioV2ReferenceDecisionSchema,
   'creative-studio.list-reference-generation-handoffs': studioV2ProjectRequestSchema,
+  'creative-studio.prepare-project-references': studioV2PrepareProjectReferencesSchema,
+  'creative-studio.approve-project-reference': z
+    .object({
+      ...studioV2MutationRequestShape,
+      referenceId: safeIdSchema,
+      candidateAssetId: safeIdSchema,
+    })
+    .strict(),
   'creative-studio.prepare-submission': studioV2PrepareSubmissionSchema,
   'creative-studio.confirm-submission': z.object({ ...studioV2MutationRequestShape, quoteId: safeIdSchema }).strict(),
   'creative-studio.cancel-job': z.object({ ...studioV2MutationRequestShape, jobId: safeIdSchema }).strict(),

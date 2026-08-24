@@ -17,6 +17,7 @@ import type {
 const mocks = vi.hoisted(() => ({
   listRoutes: vi.fn(),
   prepare: vi.fn(),
+  prepareReferences: vi.fn(),
   confirm: vi.fn(),
 }));
 
@@ -25,6 +26,7 @@ vi.mock('@/common', () => ({
     creativeStudio: {
       listRoutes: { invoke: mocks.listRoutes },
       prepareSubmission: { invoke: mocks.prepare },
+      prepareProjectReferences: { invoke: mocks.prepareReferences },
       confirmSubmission: { invoke: mocks.confirm },
     },
   },
@@ -111,6 +113,7 @@ import {
   WorkspaceProjectMenu,
   boardPromotionGatePlan,
   continuityGateDraft,
+  deriveSpendGateBackgroundChoicePlan,
   formatMinorUnits,
   handoffGateDraft,
   initialSpendGateState,
@@ -121,6 +124,7 @@ import {
   selectionGateDraft,
   spendGateReducer,
   spendGateRouteIssue,
+  validSpendGateBackgroundChoices,
   useWorkspaceDrafts,
   useSpendGate,
   type BeatPanelActions,
@@ -177,7 +181,7 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
 
 const makeProject = (): StudioRendererProjectV2 =>
   ({
-    schemaVersion: 4,
+    schemaVersion: 5,
     revision: 3,
     id: 'project_1',
     name: 'Launch film',
@@ -228,16 +232,20 @@ const makeProject = (): StudioRendererProjectV2 =>
           trimInSeconds: null,
           trimOutSeconds: null,
           chainBreak,
+          referenceIds: [],
           seedStillId: null,
           boardAssetId: null,
           supersededBoardAssetIds: [],
           videoAssetId: null,
+          supersededVideoAssetIds: [],
           assetIds: [],
           jobIds: [],
         },
       ])
     ),
     bin: [],
+    referenceOrder: [],
+    references: {},
     bedAssetId: null,
     spendPolicy: null,
     imageRouteId: 'route_image',
@@ -327,6 +335,40 @@ const addCurrentVideoTake = (project: StudioRendererProjectV2, shotId: string): 
   return assetId;
 };
 
+const addApprovedBackground = (
+  project: StudioRendererProjectV2,
+  referenceId = 'reference_background',
+  label = 'City park'
+): string => {
+  const assetId = `asset_${referenceId}`;
+  const jobId = `job_${referenceId}`;
+  const owner = project.shots.shot_3!;
+  project.referenceOrder.push(referenceId);
+  project.references[referenceId] = {
+    id: referenceId,
+    kind: 'background',
+    label,
+    prompt: label,
+    candidateAssetId: assetId,
+    candidateJobId: jobId,
+    approvedAssetId: assetId,
+    supersededAssetIds: [],
+    createdAt: '2026-08-19T00:00:00.000Z',
+    updatedAt: '2026-08-19T00:00:00.000Z',
+  };
+  project.assets[assetId] = makeAsset(assetId, owner.id, 'image', 'assets');
+  project.jobs[jobId] = makeJob(jobId, owner.id, {
+    purpose: 'seed_still',
+    provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+    projectReferenceId: referenceId,
+    outputAssetIds: [assetId],
+    outputAssetIdsByRole: { primary: assetId, poster: null },
+  });
+  owner.assetIds.push(assetId);
+  owner.jobIds.push(jobId);
+  return referenceId;
+};
+
 const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => ({
   id,
   projectId: 'project_1',
@@ -365,6 +407,19 @@ const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => 
 const options = (): StudioRendererPreparedSubmissionOptionsV2 => ({
   baseOnly: quote('quote_base'),
   withCascade: quote('quote_cascade', true),
+});
+
+const referenceOptions = (): StudioRendererPreparedSubmissionOptionsV2 => ({
+  baseOnly: {
+    ...quote('quote_reference'),
+    baseItems: [
+      {
+        ...quote('quote_reference').baseItems[0]!,
+        projectReferenceId: 'reference_ming',
+      },
+    ],
+  },
+  withCascade: null,
 });
 
 const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
@@ -452,6 +507,9 @@ const Harness: React.FC<{
   onPromoteOnly?: ReturnType<typeof vi.fn>;
   reenterOnConfirmed?: boolean;
   rejectOnConfirmed?: boolean;
+  projectReferences?: React.ComponentProps<typeof SpendGateModal>['projectReferences'];
+  backgroundProject?: StudioRendererProjectV2;
+  onAssignBackgroundChoices?: NonNullable<Parameters<typeof useSpendGate>[0]['onAssignBackgroundChoices']>;
 }> = ({
   gateDraft = draft,
   boardPromotionImpact,
@@ -459,6 +517,9 @@ const Harness: React.FC<{
   onPromoteOnly = vi.fn(async () => true),
   reenterOnConfirmed = false,
   rejectOnConfirmed = false,
+  projectReferences,
+  backgroundProject,
+  onAssignBackgroundChoices,
 }) => {
   const gateRef = useRef<ReturnType<typeof useSpendGate> | null>(null);
   const gate = useSpendGate({
@@ -466,14 +527,20 @@ const Harness: React.FC<{
       if (reenterOnConfirmed) await gateRef.current?.confirm();
       if (rejectOnConfirmed) throw new Error('refresh failed');
     },
+    deriveBackgroundChoicePlan:
+      backgroundProject === undefined
+        ? undefined
+        : (candidateDraft) => deriveSpendGateBackgroundChoicePlan(backgroundProject, candidateDraft),
+    onAssignBackgroundChoices,
     onPromoteOnly,
   });
   gateRef.current = gate;
   return (
     <>
       <button onClick={() => gate.open(gateDraft, boardPromotionImpact)}>Open review</button>
+      <button onClick={() => void gate.prepare()}>Invoke prepare directly</button>
       <button onClick={() => void gate.confirm()}>Invoke confirm directly</button>
-      <SpendGateModal {...gate} onEditRoutes={onEditRoutes} />
+      <SpendGateModal {...gate} onEditRoutes={onEditRoutes} projectReferences={projectReferences} />
     </>
   );
 };
@@ -874,6 +941,97 @@ describe('the largest legal render batch', () => {
       projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
     });
     expect(batch).toEqual(batch.toSorted((left, right) => (left < right ? -1 : 1)));
+  });
+});
+
+describe('generation-time background choice planning', () => {
+  it('asks once for a missing seed-still Shot and accepts exactly one canonical choice', () => {
+    const project = makeProject();
+    const backgroundId = addApprovedBackground(project);
+    const plan = deriveSpendGateBackgroundChoicePlan(project, draft);
+
+    expect(plan).toMatchObject({
+      status: 'choices',
+      projectId: 'project_1',
+      expectedRevision: 3,
+      shotIds: ['shot_1'],
+      approvedBackgrounds: [{ referenceId: backgroundId, label: 'City park' }],
+    });
+    expect(validSpendGateBackgroundChoices(plan!, [{ shotId: 'shot_1', referenceId: backgroundId }])).toBe(true);
+    expect(
+      validSpendGateBackgroundChoices(plan!, [
+        { shotId: 'shot_1', referenceId: backgroundId },
+        { shotId: 'shot_1', referenceId: backgroundId },
+      ])
+    ).toBe(false);
+    expect(
+      validSpendGateBackgroundChoices(plan!, [
+        { shotId: 'shot_1', referenceId: backgroundId, unexpected: true } as never,
+      ])
+    ).toBe(false);
+  });
+
+  it('derives every distinct missing seed Shot in draft order', () => {
+    const project = makeProject();
+    addApprovedBackground(project);
+    const multiple: SpendGateDraft = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [
+        { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null },
+        { shotId: 'shot_3', purpose: 'seed_still', referenceAssetId: null },
+      ],
+      cascadeChoices: [],
+    };
+
+    expect(deriveSpendGateBackgroundChoicePlan(project, multiple)?.shotIds).toEqual(['shot_1', 'shot_3']);
+  });
+
+  it('blocks paid preparation when no canonical approved background exists', () => {
+    const plan = deriveSpendGateBackgroundChoicePlan(makeProject(), draft);
+
+    expect(plan).toMatchObject({ status: 'no_approved_backgrounds', shotIds: ['shot_1'], approvedBackgrounds: [] });
+  });
+
+  it('bypasses the chooser when the Shot already has one exact approved background', () => {
+    const project = makeProject();
+    const backgroundId = addApprovedBackground(project);
+    project.shots.shot_1!.referenceIds = [backgroundId];
+
+    expect(deriveSpendGateBackgroundChoicePlan(project, draft)).toBeNull();
+  });
+
+  it('fails closed on stale authority and duplicate seed choices', () => {
+    const project = makeProject();
+    addApprovedBackground(project);
+    const stale = { ...draft, expectedRevision: 2 };
+    const duplicate = {
+      ...draft,
+      baseChoices: [...draft.baseChoices, ...draft.baseChoices],
+    };
+
+    expect(deriveSpendGateBackgroundChoicePlan(project, stale)?.status).toBe('invalid');
+    expect(deriveSpendGateBackgroundChoicePlan(project, duplicate)?.status).toBe('invalid');
+  });
+
+  it('treats a hard-cut continuity seed as an implicit background requirement', () => {
+    const project = makeProject();
+    addApprovedBackground(project);
+    const continuityDraft: SpendGateDraft = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    };
+
+    expect(deriveSpendGateBackgroundChoicePlan(project, continuityDraft)).toMatchObject({
+      status: 'choices',
+      shotIds: ['shot_2'],
+      approvedBackgrounds: [{ referenceId: 'reference_background', label: 'City park' }],
+    });
   });
 });
 
@@ -1850,6 +2008,7 @@ describe('SpendGateModal', () => {
     vi.resetAllMocks();
     mocks.listRoutes.mockResolvedValue({ ok: true, data: routeCatalog('ready', 'ready') });
     mocks.prepare.mockResolvedValue({ ok: true, data: options() });
+    mocks.prepareReferences.mockResolvedValue({ ok: true, data: options() });
     mocks.confirm.mockResolvedValue({ ok: true, data: { projectId: 'project_1', projectRevision: 4 } });
   });
 
@@ -1861,6 +2020,103 @@ describe('SpendGateModal', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
     expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('rejects even a programmatic prepare while a background choice plan is unresolved', async () => {
+    const project = makeProject();
+    addApprovedBackground(project);
+    render(<Harness backgroundProject={project} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.gate.backgroundChoice.title')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Invoke prepare directly' }));
+
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.prepareReferences).not.toHaveBeenCalled();
+  });
+
+  it('blocks programmatic preparation for an unresolved hard-cut background', async () => {
+    const project = makeProject();
+    addApprovedBackground(project);
+    const continuityDraft: SpendGateDraft = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    };
+    render(<Harness backgroundProject={project} gateDraft={continuityDraft} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Invoke prepare directly' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.gate.backgroundChoice.title')).toBeVisible();
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.prepareReferences).not.toHaveBeenCalled();
+  });
+
+  it('rejects a background-assignment callback that widens the draft by two revisions', async () => {
+    const project = makeProject();
+    addApprovedBackground(project);
+    const onAssignBackgroundChoices = vi.fn(async ({ draft: currentDraft }) => ({
+      ...currentDraft,
+      expectedRevision: currentDraft.expectedRevision + 2,
+    }));
+    render(<Harness backgroundProject={project} onAssignBackgroundChoices={onAssignBackgroundChoices} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    fireEvent.click(within(modal).getByRole('radio', { name: 'City park' }));
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.backgroundChoice.assign',
+      })
+    );
+
+    expect(
+      await within(modal).findByText('conversation.creativeStudio.workspace.gate.backgroundChoice.failed')
+    ).toBeVisible();
+    expect(onAssignBackgroundChoices).toHaveBeenCalledTimes(1);
+    expect(mocks.prepare).not.toHaveBeenCalled();
+  });
+
+  it('prepares project references through their dedicated seam and names reference scope instead of proxy Shots', async () => {
+    mocks.prepareReferences.mockResolvedValue({ ok: true, data: referenceOptions() });
+    render(
+      <Harness
+        gateDraft={{ projectId: 'project_1', expectedRevision: 3, referenceIds: ['reference_ming'] }}
+        projectReferences={[{ id: 'reference_ming', kind: 'character', label: 'Ming' }]}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'project_references');
+    expect(modal.querySelector('[data-project-reference-scope]')).toHaveTextContent('Ming');
+
+    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+    await waitFor(() =>
+      expect(mocks.prepareReferences).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        referenceIds: ['reference_ming'],
+      })
+    );
+    expect(mocks.prepare).not.toHaveBeenCalled();
+
+    showGateBreakdown(modal);
+    const row = modal.querySelector('[data-project-reference-id="reference_ming"]');
+    expect(row).toHaveTextContent('Ming');
+    expect(row).not.toHaveTextContent('shot_1');
+  });
+
+  it('fails closed when reference preparation exposes a forbidden sibling quote', async () => {
+    mocks.prepareReferences.mockResolvedValue({ ok: true, data: options() });
+    render(<Harness gateDraft={{ projectId: 'project_1', expectedRevision: 3, referenceIds: ['reference_ming'] }} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.gate.errors.generic')).toBeVisible();
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 

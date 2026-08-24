@@ -18,7 +18,7 @@ describe('createStudioQuotedGenerationId', () => {
         shotId: 'shot_1',
         purpose: 'video_take',
       })
-    ).toBe('item_bf91f6360d990f6083c2e7c754fcd431a657e84f4f20220a9305b4104a5fcbfe');
+    ).toBe('item_46549f5822c48d16941795e360a3cb1ecb580f0528d6131d7405a71c5a67e42f');
   });
 
   it('keeps sibling quote options on the same deterministic item identity', () => {
@@ -35,7 +35,19 @@ describe('createStudioQuotedGenerationId', () => {
         shotId: 'shot_1',
         purpose: 'board_still',
       })
-    ).toBe('item_6a5ac2df92374f7cb475923fe1bc3097bc83d38d174965a5acad302fd5484d3f');
+    ).toBe('item_70b23caff1d33a7951aac019540ebc609d97ac3f6008631fc9a5a77036a313fb');
+  });
+
+  it('keeps two project references sharing one proxy Shot in separate item namespaces', () => {
+    const base = {
+      projectId: 'project_1',
+      projectRevision: 7,
+      shotId: 'shot_1',
+      purpose: 'seed_still' as const,
+    };
+    expect(createStudioQuotedGenerationId({ ...base, projectReferenceId: 'reference_ming' })).not.toBe(
+      createStudioQuotedGenerationId({ ...base, projectReferenceId: 'reference_mei' })
+    );
   });
 
   it.each([

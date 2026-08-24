@@ -6,8 +6,10 @@
 
 import type {
   StudioBoardPromotionV2,
+  StudioPrepareProjectReferencesRequestV2,
   StudioPrepareGenerationChoiceV2,
   StudioPrepareSubmissionRequestV2,
+  StudioPreparedSubmissionRequestV2,
   StudioContinuityChangeV2,
   StudioPricingRefusalReasonV2,
   StudioRendererPreparedSubmissionOptionsV2,
@@ -22,6 +24,7 @@ import {
   isStudioPricingRefusalReasonV2,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_MUTATION_OPERATIONS,
 } from '@/common/types/project/creativeStudioTypes';
 import type { WorkspaceProjection } from './workspaceProjection';
 
@@ -36,19 +39,46 @@ export type SpendGateBoardPromotionImpact = {
 };
 
 export type BoardPromotionGatePlan = {
-  draft: SpendGateDraft;
+  draft: StudioPrepareSubmissionRequestV2;
   impact: SpendGateBoardPromotionImpact;
 };
 
-export type SpendGateDraft = StudioPrepareSubmissionRequestV2;
+export type SpendGateDraft = StudioPreparedSubmissionRequestV2;
 
 export type SpendGateSelectedOption = 'baseOnly' | 'withCascade';
 
 export type SpendGateRouteIssue = 'image' | 'video' | 'image_and_video';
 
+export type SpendGateBackgroundOption = {
+  referenceId: string;
+  label: string;
+};
+
+export type SpendGateBackgroundChoicePlan = {
+  status: 'choices' | 'no_approved_backgrounds' | 'invalid';
+  identity: string;
+  projectId: string;
+  expectedRevision: number;
+  shotIds: string[];
+  approvedBackgrounds: SpendGateBackgroundOption[];
+};
+
+export type SpendGateBackgroundChoice = {
+  shotId: string;
+  referenceId: string;
+};
+
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 
+export const isProjectReferenceSpendGateDraft = (
+  draft: SpendGateDraft | null
+): draft is StudioPrepareProjectReferencesRequestV2 => draft !== null && 'referenceIds' in draft;
+
+export const spendGateProjectReferenceIds = (draft: SpendGateDraft | null): readonly string[] | null =>
+  isProjectReferenceSpendGateDraft(draft) ? draft.referenceIds : null;
+
 export const spendGateContinuityChange = (draft: SpendGateDraft | null): SpendGateContinuityChange | null => {
+  if (draft === null || isProjectReferenceSpendGateDraft(draft)) return null;
   const change = draft?.continuityChange;
   return draft?.boardPromotion === undefined &&
     change !== undefined &&
@@ -64,6 +94,7 @@ export const spendGateContinuityChange = (draft: SpendGateDraft | null): SpendGa
 };
 
 export const spendGateBoardPromotion = (draft: SpendGateDraft | null): SpendGateBoardPromotion | null => {
+  if (draft === null || isProjectReferenceSpendGateDraft(draft)) return null;
   const promotion = draft?.boardPromotion;
   return promotion !== undefined &&
     draft.continuityChange === undefined &&
@@ -77,7 +108,7 @@ export const spendGateBoardPromotion = (draft: SpendGateDraft | null): SpendGate
 };
 
 const exactBoardPromotionImpact = (
-  draft: SpendGateDraft,
+  draft: StudioPrepareSubmissionRequestV2,
   impact: SpendGateBoardPromotionImpact | undefined
 ): SpendGateBoardPromotionImpact | null => {
   if (spendGateBoardPromotion(draft) === null || impact === undefined || !Array.isArray(impact.currentTakeShotIds)) {
@@ -100,6 +131,7 @@ const exactBoardPromotionImpact = (
 export type SpendGatePhase =
   | 'closed'
   | 'choices'
+  | 'assigning_backgrounds'
   | 'promoting'
   | 'promoted'
   | 'preparing'
@@ -121,13 +153,26 @@ export type SpendGateState = {
   errorCode: string | null;
   pricingRefusalReason: StudioPricingRefusalReasonV2 | null;
   routeIssue: SpendGateRouteIssue | null;
+  backgroundChoicePlan: SpendGateBackgroundChoicePlan | null;
 };
 
 type SpendGateFailure = { code: string; reason?: unknown; routeIssue?: SpendGateRouteIssue };
 
 export type SpendGateAction =
-  | { type: 'open'; draft: SpendGateDraft; boardPromotionImpact?: SpendGateBoardPromotionImpact }
+  | {
+      type: 'open';
+      draft: SpendGateDraft;
+      boardPromotionImpact?: SpendGateBoardPromotionImpact;
+      backgroundChoicePlan?: SpendGateBackgroundChoicePlan | null;
+    }
   | { type: 'close' }
+  | { type: 'background_assignment_started' }
+  | { type: 'background_assignment_failed' }
+  | {
+      type: 'background_assignment_succeeded';
+      draft: SpendGateDraft;
+      backgroundChoicePlan: SpendGateBackgroundChoicePlan | null;
+    }
   | { type: 'promote_started' }
   | { type: 'promote_succeeded' }
   | { type: 'promote_failed'; error: SpendGateFailure }
@@ -148,6 +193,7 @@ export const initialSpendGateState = (): SpendGateState => ({
   errorCode: null,
   pricingRefusalReason: null,
   routeIssue: null,
+  backgroundChoicePlan: null,
 });
 
 const cacheFailurePhase = (code: string): SpendGatePhase => {
@@ -164,7 +210,9 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
   if (action.type === 'open') {
     const promotion = spendGateBoardPromotion(action.draft);
     const boardPromotionImpact =
-      promotion === null ? null : exactBoardPromotionImpact(action.draft, action.boardPromotionImpact);
+      promotion === null || isProjectReferenceSpendGateDraft(action.draft)
+        ? null
+        : exactBoardPromotionImpact(action.draft, action.boardPromotionImpact);
     if (promotion !== null && boardPromotionImpact === null) return state;
     return {
       phase: 'choices',
@@ -175,9 +223,47 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
       errorCode: null,
       pricingRefusalReason: null,
       routeIssue: null,
+      backgroundChoicePlan: action.backgroundChoicePlan ?? null,
     };
   }
   if (action.type === 'close') return initialSpendGateState();
+  if (action.type === 'background_assignment_started') {
+    return state.phase !== 'choices' || state.backgroundChoicePlan?.status !== 'choices'
+      ? state
+      : {
+          ...state,
+          phase: 'assigning_backgrounds',
+          errorCode: null,
+          pricingRefusalReason: null,
+          routeIssue: null,
+        };
+  }
+  if (action.type === 'background_assignment_failed') {
+    return state.phase !== 'assigning_backgrounds'
+      ? state
+      : {
+          ...state,
+          phase: 'choices',
+          errorCode: 'background_assignment_failed',
+          pricingRefusalReason: null,
+          routeIssue: null,
+        };
+  }
+  if (action.type === 'background_assignment_succeeded') {
+    return state.phase !== 'assigning_backgrounds'
+      ? state
+      : {
+          phase: 'choices',
+          draft: action.draft,
+          boardPromotionImpact: null,
+          options: null,
+          selectedOption: 'baseOnly',
+          errorCode: null,
+          pricingRefusalReason: null,
+          routeIssue: null,
+          backgroundChoicePlan: action.backgroundChoicePlan,
+        };
+  }
   if (action.type === 'promote_started') {
     return spendGateBoardPromotion(state.draft) === null || state.boardPromotionImpact === null
       ? state
@@ -228,7 +314,9 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
   }
   if (action.type === 'prepare_succeeded') {
     if (
-      (spendGateContinuityChange(state.draft) !== null || spendGateBoardPromotion(state.draft) !== null) &&
+      (isProjectReferenceSpendGateDraft(state.draft) ||
+        spendGateContinuityChange(state.draft) !== null ||
+        spendGateBoardPromotion(state.draft) !== null) &&
       action.options.withCascade !== null
     ) {
       return {
@@ -293,6 +381,7 @@ export const spendGateRouteIssue = (
   catalog: StudioRouteCatalogV2,
   draft: SpendGateDraft
 ): SpendGateRouteIssue | null => {
+  if ('referenceIds' in draft) return catalog.image.status === 'ready' ? null : 'image';
   const choices = [...draft.baseChoices, ...draft.cascadeChoices];
   const continuityChange = spendGateContinuityChange(draft);
   const boardPromotion = spendGateBoardPromotion(draft);
@@ -431,6 +520,204 @@ const activeShotLocations = (project: StudioRendererProjectV2): Map<string, Acti
   return locations;
 };
 
+const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
+
+/** Stable identity for the paid authority captured when the review gate opened. */
+export const spendGateDraftIdentity = (draft: SpendGateDraft): string => {
+  try {
+    return JSON.stringify(draft);
+  } catch {
+    return '';
+  }
+};
+
+const backgroundChoicePlanIdentity = (input: {
+  draftIdentity: string;
+  projectId: string;
+  expectedRevision: number;
+  shotIds: readonly string[];
+  approvedBackgrounds: readonly SpendGateBackgroundOption[];
+}): string =>
+  JSON.stringify([
+    input.draftIdentity,
+    input.projectId,
+    input.expectedRevision,
+    input.shotIds,
+    input.approvedBackgrounds.map((background) => [background.referenceId, background.label]),
+  ]);
+
+/**
+ * Derives the free location-choice work that must precede a generic paid seed-still estimate.
+ * A non-null result is always a hard prepare blocker, including malformed and no-option states.
+ */
+export const deriveSpendGateBackgroundChoicePlan = (
+  project: StudioRendererProjectV2,
+  draft: SpendGateDraft
+): SpendGateBackgroundChoicePlan | null => {
+  if (isProjectReferenceSpendGateDraft(draft)) return null;
+  const choices = [...draft.baseChoices, ...draft.cascadeChoices];
+  const seedChoices = choices.filter((choice) => choice.purpose === 'seed_still');
+  const continuityChange = spendGateContinuityChange(draft);
+  const malformedContinuityChange = draft.continuityChange !== undefined && continuityChange === null;
+  const continuitySeedShotId =
+    continuityChange?.hardCut === true && continuityChange.requiresSeedGeneration ? continuityChange.shotId : null;
+  if (seedChoices.length === 0 && continuitySeedShotId === null && !malformedContinuityChange) return null;
+
+  const draftIdentity = spendGateDraftIdentity(draft);
+  const locations = activeShotLocations(project);
+  const seedShotIds: string[] = [];
+  const seenSeedShotIds = new Set<string>();
+  let invalid =
+    draftIdentity.length === 0 ||
+    draft.projectId !== project.id ||
+    draft.expectedRevision !== project.revision ||
+    seedChoices.length > STUDIO_MAX_MUTATION_OPERATIONS ||
+    malformedContinuityChange;
+  for (const choice of seedChoices) {
+    if (
+      !SAFE_STUDIO_ID.test(choice.shotId) ||
+      choice.referenceAssetId !== null ||
+      seenSeedShotIds.has(choice.shotId) ||
+      !locations.has(choice.shotId)
+    ) {
+      invalid = true;
+      continue;
+    }
+    seenSeedShotIds.add(choice.shotId);
+    seedShotIds.push(choice.shotId);
+  }
+  if (continuitySeedShotId !== null) {
+    if (!locations.has(continuitySeedShotId)) invalid = true;
+    if (!seenSeedShotIds.has(continuitySeedShotId)) {
+      seenSeedShotIds.add(continuitySeedShotId);
+      seedShotIds.push(continuitySeedShotId);
+    }
+  }
+  if (seedShotIds.length > STUDIO_MAX_MUTATION_OPERATIONS) invalid = true;
+
+  const referencePositions = new Map<string, number>();
+  const approvedBackgrounds: SpendGateBackgroundOption[] = [];
+  const approvedBackgroundIds = new Set<string>();
+  for (let index = 0; index < project.referenceOrder.length; index += 1) {
+    const referenceId = project.referenceOrder[index]!;
+    const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
+    if (!SAFE_STUDIO_ID.test(referenceId) || reference?.id !== referenceId || referencePositions.has(referenceId)) {
+      invalid = true;
+      continue;
+    }
+    referencePositions.set(referenceId, index);
+    if (reference.kind !== 'background' || reference.approvedAssetId === null) continue;
+    const asset = Object.hasOwn(project.assets, reference.approvedAssetId)
+      ? project.assets[reference.approvedAssetId]
+      : undefined;
+    if (
+      asset?.id !== reference.approvedAssetId ||
+      asset.projectId !== project.id ||
+      asset.mediaKind !== 'image' ||
+      asset.managedAsset.collection !== 'assets' ||
+      asset.shotId === null ||
+      !LOWERCASE_SHA256.test(asset.sha256)
+    ) {
+      continue;
+    }
+    const producers = Object.values(project.jobs).filter(
+      (job) =>
+        job.projectId === project.id &&
+        job.shotId === asset.shotId &&
+        job.projectReferenceId === reference.id &&
+        job.purpose === 'seed_still' &&
+        job.status === 'succeeded' &&
+        job.outputAssetIdsByRole.primary === asset.id &&
+        job.outputAssetIds.filter((assetId) => assetId === asset.id).length === 1
+    );
+    const owner = Object.hasOwn(project.shots, asset.shotId) ? project.shots[asset.shotId] : undefined;
+    if (
+      producers.length !== 1 ||
+      owner?.id !== asset.shotId ||
+      !owner.assetIds.includes(asset.id) ||
+      !owner.jobIds.includes(producers[0]!.id)
+    ) {
+      continue;
+    }
+    approvedBackgroundIds.add(referenceId);
+    approvedBackgrounds.push({ referenceId, label: reference.label });
+  }
+
+  const affectedShotIds: string[] = [];
+  for (const shotId of seedShotIds) {
+    const shot = Object.hasOwn(project.shots, shotId) ? project.shots[shotId] : undefined;
+    if (shot?.id !== shotId || new Set(shot.referenceIds).size !== shot.referenceIds.length) {
+      invalid = true;
+      continue;
+    }
+    let previousPosition = -1;
+    const backgroundIds: string[] = [];
+    for (const referenceId of shot.referenceIds) {
+      const position = referencePositions.get(referenceId);
+      const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
+      if (position === undefined || position <= previousPosition || reference?.id !== referenceId) {
+        invalid = true;
+        continue;
+      }
+      previousPosition = position;
+      if (reference.kind === 'background') backgroundIds.push(referenceId);
+    }
+    if (backgroundIds.length !== 1 || !approvedBackgroundIds.has(backgroundIds[0]!)) affectedShotIds.push(shotId);
+  }
+
+  if (!invalid && affectedShotIds.length === 0) return null;
+  const status = invalid ? 'invalid' : approvedBackgrounds.length === 0 ? 'no_approved_backgrounds' : 'choices';
+  return {
+    status,
+    identity: backgroundChoicePlanIdentity({
+      draftIdentity,
+      projectId: draft.projectId,
+      expectedRevision: draft.expectedRevision,
+      shotIds: affectedShotIds,
+      approvedBackgrounds,
+    }),
+    projectId: draft.projectId,
+    expectedRevision: draft.expectedRevision,
+    shotIds: affectedShotIds,
+    approvedBackgrounds,
+  };
+};
+
+/** Exact, one-choice-per-Shot validation shared by the gate and the renderer CAS owner. */
+export const validSpendGateBackgroundChoices = (
+  plan: SpendGateBackgroundChoicePlan,
+  choices: readonly SpendGateBackgroundChoice[]
+): boolean => {
+  if (
+    plan.status !== 'choices' ||
+    choices.length !== plan.shotIds.length ||
+    choices.length === 0 ||
+    choices.length > STUDIO_MAX_MUTATION_OPERATIONS
+  ) {
+    return false;
+  }
+  const expectedShotIds = new Set(plan.shotIds);
+  const approvedBackgroundIds = new Set(plan.approvedBackgrounds.map((background) => background.referenceId));
+  const seenShotIds = new Set<string>();
+  return choices.every((choice) => {
+    if (
+      choice === null ||
+      typeof choice !== 'object' ||
+      Object.getPrototypeOf(choice) !== Object.prototype ||
+      Object.keys(choice).toSorted().join('\0') !== 'referenceId\0shotId' ||
+      !SAFE_STUDIO_ID.test(choice.shotId) ||
+      !SAFE_STUDIO_ID.test(choice.referenceId) ||
+      !expectedShotIds.has(choice.shotId) ||
+      !approvedBackgroundIds.has(choice.referenceId) ||
+      seenShotIds.has(choice.shotId)
+    ) {
+      return false;
+    }
+    seenShotIds.add(choice.shotId);
+    return true;
+  });
+};
+
 const BOARD_DRAWABLE_ACTIVITIES = new Set(['idle', 'failed', 'cancelled']);
 const BOARD_EXACT_FRESHNESS = new Set(['missing', 'current', 'stale']);
 const BOARD_EXACT_ACTIVITIES = new Set(['idle', 'queued', 'drawing', 'needs_attention', 'failed', 'cancelled']);
@@ -487,7 +774,7 @@ const exactBoardGateProjection = (input: {
 export const boardGateDraft = (input: {
   project: StudioRendererProjectV2;
   projection: WorkspaceProjection;
-}): SpendGateDraft | null => {
+}): StudioPrepareSubmissionRequestV2 | null => {
   const exact = exactBoardGateProjection(input);
   if (exact === null) return null;
   const choices = exact.boardPanels.flatMap<StudioPrepareGenerationChoiceV2>((panel) =>
@@ -510,7 +797,7 @@ export const boardSelectionGateDraft = (input: {
   project: StudioRendererProjectV2;
   projection: WorkspaceProjection;
   orderedShotIds: readonly string[];
-}): SpendGateDraft | null => {
+}): StudioPrepareSubmissionRequestV2 | null => {
   const exact = exactBoardGateProjection(input);
   if (
     exact === null ||
@@ -645,7 +932,7 @@ export const continuityGateDraft = (input: {
   projection: WorkspaceProjection;
   shotId: string;
   hardCut: boolean;
-}): SpendGateDraft | null => {
+}): StudioPrepareSubmissionRequestV2 | null => {
   if (
     !SAFE_STUDIO_ID.test(input.shotId) ||
     input.projection.projectId !== input.project.id ||
@@ -858,7 +1145,7 @@ export const selectionGateDraft = (input: {
   orderedShotIds: readonly string[];
   baseChoices?: readonly StudioPrepareGenerationChoiceV2[];
   cascadeChoices?: readonly StudioPrepareGenerationChoiceV2[];
-}): SpendGateDraft | null => {
+}): StudioPrepareSubmissionRequestV2 | null => {
   const locations = activeShotLocations(input.project);
   if (input.projection.projectId !== input.project.id || input.projection.projectRevision !== input.project.revision) {
     return null;
@@ -987,7 +1274,7 @@ export const handoffGateDraft = (
   project: StudioRendererProjectV2,
   projection: WorkspaceProjection,
   handoff: StudioRendererReferenceGenerationHandoffV2
-): SpendGateDraft | null => {
+): StudioPrepareProjectReferencesRequestV2 | null => {
   if (
     projection.projectId !== project.id ||
     projection.projectRevision !== project.revision ||
@@ -997,23 +1284,19 @@ export const handoffGateDraft = (
     return null;
   }
   if (handoff.status !== 'open' || handoff.completedAt !== null) return null;
-  const locations = activeShotLocations(project);
   const seen = new Set<string>();
   let previousIndex = -1;
-  const baseChoices: StudioPrepareGenerationChoiceV2[] = [];
-  for (const shotId of handoff.shotIds) {
-    const location = locations.get(shotId);
-    if (location === undefined || seen.has(shotId) || location.filmIndex <= previousIndex) return null;
-    seen.add(shotId);
-    previousIndex = location.filmIndex;
-    baseChoices.push({ shotId, purpose: 'seed_still', referenceAssetId: null });
+  for (const referenceId of handoff.referenceIds) {
+    const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
+    const index = project.referenceOrder.indexOf(referenceId);
+    if (reference?.id !== referenceId || seen.has(referenceId) || index <= previousIndex) return null;
+    seen.add(referenceId);
+    previousIndex = index;
   }
-  if (baseChoices.length === 0 || !withinNativeSubmissionBounds(baseChoices, [])) return null;
+  if (seen.size === 0) return null;
   return {
     projectId: project.id,
     expectedRevision: project.revision,
-    originReferenceHandoffId: handoff.handoffId,
-    baseChoices,
-    cascadeChoices: [],
+    referenceIds: [...handoff.referenceIds],
   };
 };

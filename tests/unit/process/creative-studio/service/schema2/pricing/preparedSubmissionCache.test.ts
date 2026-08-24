@@ -58,7 +58,7 @@ const makeQuote = (projectId: string, quoteId: string, prompt: string): StudioSu
           aspectRatio: '16:9',
           resolution: '1080p',
           durationSeconds: 8,
-          referenceInput: null,
+          referenceInputs: [],
           conditioningInput: null,
         },
       },
@@ -95,7 +95,7 @@ const makeAdmission = (options: AdmissionOptions = {}): StudioPreparedSubmission
               aspectRatio: '16:9',
               resolution: '1080p',
               durationSeconds: 8,
-              referenceInput: null,
+              referenceInputs: [],
             },
             dependency: {
               kind: 'authorized_predecessor',
@@ -137,6 +137,20 @@ const makeAdmission = (options: AdmissionOptions = {}): StudioPreparedSubmission
   return { request, options: prepared, providerBindings, cancellationPolicies };
 };
 
+const makeProjectReferenceAdmission = (
+  originReferenceHandoffId: string | null = null
+): StudioPreparedSubmissionCacheAdmissionV2 => {
+  const admission = makeAdmission();
+  admission.request = {
+    projectId: 'project_1',
+    expectedRevision: 7,
+    referenceIds: ['reference_character'],
+  };
+  admission.options.baseOnly.originReferenceHandoffId = originReferenceHandoffId;
+  admission.options.baseOnly.baseItems[0]!.projectReferenceId = 'reference_character';
+  return admission;
+};
+
 const serializedSessionBytes = (admission: StudioPreparedSubmissionCacheAdmissionV2): number =>
   Buffer.byteLength(
     JSON.stringify({
@@ -168,6 +182,38 @@ const expectCacheCode = (operation: () => unknown, code: string): void => {
 };
 
 describe('StudioPreparedSubmissionCacheV2', () => {
+  it('freezes exact project-reference intent and preserves a main-owned handoff correlation', () => {
+    const cache = new StudioPreparedSubmissionCacheV2({ now: () => PREPARED_AT_MS });
+    const admission = makeProjectReferenceAdmission('handoff_1');
+
+    cache.admit(admission);
+    admission.request.referenceIds = ['mutated_reference'];
+
+    const claim = cache.claim('project_1', 'quote_1');
+    expect(claim.option).toBe('baseOnly');
+    expect(claim.session.request).toEqual({
+      projectId: 'project_1',
+      expectedRevision: 7,
+      referenceIds: ['reference_character'],
+    });
+    expect(claim.quote).toMatchObject({
+      originReferenceHandoffId: 'handoff_1',
+      baseItems: [{ projectReferenceId: 'reference_character', purpose: 'seed_still' }],
+      cascadeItems: [],
+    });
+  });
+
+  it('refuses project-reference sessions whose item scope or handoff identity is not exact', () => {
+    const wrongItem = makeProjectReferenceAdmission();
+    wrongItem.options.baseOnly.baseItems[0]!.projectReferenceId = 'reference_other';
+    const unsafeHandoff = makeProjectReferenceAdmission('../handoff');
+
+    for (const admission of [wrongItem, unsafeHandoff]) {
+      const cache = new StudioPreparedSubmissionCacheV2({ now: () => PREPARED_AT_MS });
+      expect(() => cache.admit(admission)).toThrow('invalid_prepared_submission_session:reference_option_mismatch');
+    }
+  });
+
   it('stores the serialized copy, freezes the claimed authority, and isolates caller mutations', () => {
     const cache = new StudioPreparedSubmissionCacheV2({ now: () => PREPARED_AT_MS });
     const admission = makeAdmission({ withCascadeQuoteId: 'quote_2' });

@@ -11,11 +11,14 @@ import { useTranslation } from 'react-i18next';
 import type {
   StudioProposalV2,
   StudioReferenceRequestV2,
+  StudioRendererProjectV2,
   StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import { DirectorProposalCard } from './DirectorProposalCard';
 
 export type DirectorProposalsProps = {
+  project: StudioRendererProjectV2;
   proposals: readonly StudioProposalV2[];
   referenceRequests: readonly StudioReferenceRequestV2[];
   referenceGenerationHandoffs: readonly StudioRendererReferenceGenerationHandoffV2[];
@@ -28,6 +31,8 @@ export type DirectorProposalsProps = {
   onGenerateReferences: (requestId: string) => Promise<void>;
   onRejectReferences: (requestId: string) => Promise<void>;
   onReviewHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
+  onReviewReferences: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
+  onRetryFailedReferences: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
   onDismissHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => Promise<void>;
   gateLocked?: boolean;
   reviewBlockedMessageKey?: string | null;
@@ -51,6 +56,7 @@ const uniqueHandoffs = (
 
 /** Reviewed Director output with persistent, explicitly actioned generation handoffs. */
 export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
+  project,
   proposals,
   referenceRequests,
   referenceGenerationHandoffs,
@@ -63,6 +69,8 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   onGenerateReferences,
   onRejectReferences,
   onReviewHandoff,
+  onReviewReferences,
+  onRetryFailedReferences,
   onDismissHandoff,
   gateLocked = false,
   reviewBlockedMessageKey = null,
@@ -88,6 +96,7 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
       {pendingProposals.map((proposal) => (
         <DirectorProposalCard
           key={proposal.id}
+          project={project}
           proposal={proposal}
           pending={pendingActionId === proposal.id}
           acceptBlockedMessageKey={
@@ -106,8 +115,8 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           title={t('conversation.creativeStudio.workspace.references.title')}
         >
           <p>
-            {t('conversation.creativeStudio.workspace.references.shotCount', {
-              count: request.shotIds.length,
+            {t('conversation.creativeStudio.workspace.references.referenceCount', {
+              total: request.referenceIds.length,
             })}
           </p>
           <div className='flex gap-8px'>
@@ -131,10 +140,32 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           title={t('conversation.creativeStudio.workspace.handoffs.title')}
         >
           <p>
-            {t('conversation.creativeStudio.workspace.handoffs.shotCount', {
-              count: handoff.shotIds.length,
+            {t('conversation.creativeStudio.workspace.handoffs.referenceCount', {
+              total: handoff.referenceIds.length,
             })}
           </p>
+          <p data-reference-handoff-progress>
+            {t('conversation.creativeStudio.workspace.handoffs.progress', handoff.progress)}
+          </p>
+          {handoff.candidateAssetIds.length === 0 ? null : (
+            <div className='flex flex-wrap gap-8px' data-reference-handoff-thumbnails>
+              {handoff.candidateAssetIds.map((assetId) => {
+                const reference = project.referenceOrder
+                  .map((referenceId) => project.references[referenceId])
+                  .find((candidate) => candidate?.candidateAssetId === assetId);
+                return (
+                  <img
+                    alt={t('conversation.creativeStudio.workspace.referenceWorkflow.previewAlt', {
+                      label: reference?.label ?? t('conversation.creativeStudio.workspace.views.references'),
+                    })}
+                    className='h-48px w-72px rd-4px object-cover'
+                    key={assetId}
+                    src={createManagedStudioAssetUrl(project.id, assetId)}
+                  />
+                );
+              })}
+            </div>
+          )}
           {handoff.status === 'open' ? (
             <div className='flex gap-8px'>
               <Button
@@ -154,7 +185,21 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
               {reviewBlockedMessageKey === null ? null : <p>{t(reviewBlockedMessageKey)}</p>}
             </div>
           ) : (
-            <p>{t(`conversation.creativeStudio.workspace.handoffs.${handoff.status}`)}</p>
+            <>
+              <p>{t(`conversation.creativeStudio.workspace.handoffs.${handoff.status}`)}</p>
+              {handoff.status === 'confirmed' ? (
+                <div className='flex flex-wrap gap-8px'>
+                  <Button type='primary' onClick={() => onReviewReferences(handoff)}>
+                    {t('conversation.creativeStudio.workspace.handoffs.reviewReferences')}
+                  </Button>
+                  {handoff.retryReferenceIds.length === 0 ? null : (
+                    <Button disabled={gateLocked} onClick={() => onRetryFailedReferences(handoff)}>
+                      {t('conversation.creativeStudio.workspace.handoffs.retryFailed')}
+                    </Button>
+                  )}
+                </div>
+              ) : null}
+            </>
           )}
         </Card>
       ))}

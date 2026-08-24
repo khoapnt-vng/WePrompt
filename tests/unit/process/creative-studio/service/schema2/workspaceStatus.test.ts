@@ -41,6 +41,7 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
+  referenceIds: [],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -63,7 +64,7 @@ const makeBeat = (id: string, shotOrder: string[] = []): StudioBeat => ({
 });
 
 const makeProject = (shotOrder = ['shot_1', 'shot_2']): StudioProjectV2 => ({
-  schemaVersion: 4,
+  schemaVersion: 5,
   revision: 7,
   id: 'project_1',
   name: 'Project One',
@@ -77,6 +78,8 @@ const makeProject = (shotOrder = ['shot_1', 'shot_2']): StudioProjectV2 => ({
   beatOrder: ['beat_1'],
   beats: { beat_1: makeBeat('beat_1', shotOrder) },
   shots: Object.fromEntries(shotOrder.map((shotId) => [shotId, makeShot(shotId)])),
+  referenceOrder: [],
+  references: {},
   bin: [],
   bedAssetId: null,
   spendPolicy: null,
@@ -132,7 +135,7 @@ const resolvedPlan = (
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
     conditioningInput,
   },
 });
@@ -147,7 +150,7 @@ const deferredPredecessorPlan = (
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
   },
   dependency: { kind: 'authorized_predecessor', upstreamItemId, predecessorShotId },
 });
@@ -159,7 +162,7 @@ const deferredSeedPlan = (upstreamItemId = 'item_seed', shotId = 'shot_1'): Stud
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
   },
   dependency: { kind: 'authorized_seed', upstreamItemId, shotId },
 });

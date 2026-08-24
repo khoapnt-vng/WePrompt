@@ -17,6 +17,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_PREPARED_QUOTE_TTL_SECONDS,
   STUDIO_PROPOSAL_V2_PENDING_TTL_MS,
@@ -104,6 +105,9 @@ const createStudioMcpProtocolHarnessV2 = async (
   };
 };
 
+const SERVICE_REFERENCE_AUTHORIZATION_ID = 'authorization_reference_background';
+const SERVICE_REFERENCE_JOB_ID = 'job_reference_background';
+
 const makeSchema2ServiceProject = (): StudioProjectV2 => {
   const input: CreateStudioProjectInputV2 = {
     name: 'Schema 2 launch',
@@ -157,11 +161,129 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
           },
           beforeShotId: null,
         },
+        {
+          kind: 'set_project_references',
+          references: [
+            {
+              id: 'ref_background',
+              kind: 'background',
+              label: 'City skyline',
+              prompt: 'Warm city skyline from sunrise through evening.',
+              shotIds: ['clip_1', 'clip_2'],
+            },
+          ],
+        },
       ],
     },
     { mutationId: 'service_schema_2_fixture', capturedAt }
   );
-  return { ...result.project, revision: empty.revision + 1, updatedAt: capturedAt };
+  const project = { ...result.project, revision: empty.revision + 1, updatedAt: capturedAt };
+  const referenceId = 'ref_background';
+  const assetId = 'asset_reference_background';
+  const authorizationId = SERVICE_REFERENCE_AUTHORIZATION_ID;
+  const jobId = SERVICE_REFERENCE_JOB_ID;
+  const requestPlan = {
+    kind: 'resolved' as const,
+    snapshot: {
+      prompt: 'BACKGROUND REFERENCE SHEET\n\nSUBJECT\nCity skyline',
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      durationSeconds: project.shots.clip_1!.durationSeconds,
+      referenceInputs: [],
+      conditioningInput: null,
+    },
+  };
+  const item: StudioQuotedGeneration = {
+    id: createStudioQuotedGenerationId({
+      projectId: project.id,
+      projectRevision: 1,
+      shotId: 'clip_1',
+      purpose: 'seed_still',
+      projectReferenceId: referenceId,
+    }),
+    shotId: 'clip_1',
+    projectReferenceId: referenceId,
+    purpose: 'seed_still',
+    routeId: 'image_route_fixture',
+    generationCount: 1,
+    requestPlan,
+    rateUnit: 'generation',
+    rateMinorUnits: 1,
+  };
+  const provider = { providerId: 'provider_fixture', adapterId: 'weprompt-image-v1', model: 'image-model' } as const;
+  project.assets[assetId] = {
+    id: assetId,
+    projectId: project.id,
+    shotId: 'clip_1',
+    mediaKind: 'image',
+    mimeType: 'image/png',
+    managedAsset: { collection: 'assets', fileName: 'asset_reference_background.png' },
+    byteSize: 1,
+    sha256: 'a'.repeat(64),
+    referenceAssetIds: [],
+    createdAt: capturedAt,
+  };
+  project.spendAuthorizations.push({
+    id: authorizationId,
+    projectId: project.id,
+    projectRevision: 1,
+    originReferenceHandoffId: null,
+    rateCardDigest: 'b'.repeat(64),
+    currency: 'USD',
+    baseItems: [item],
+    cascadeItems: [],
+    lowerMinorUnits: 1,
+    upperMinorUnits: 1,
+    expiresAt: '2026-08-17T00:05:00.000Z',
+    confirmedAt: capturedAt,
+    providerBindings: [{ itemId: item.id, provider }],
+    idempotencyKeys: [{ itemId: item.id, key: 'idempotency_reference_background' }],
+  });
+  project.jobs[jobId] = {
+    id: jobId,
+    projectId: project.id,
+    shotId: 'clip_1',
+    projectReferenceId: referenceId,
+    status: 'succeeded',
+    provider,
+    idempotencyKey: 'idempotency_reference_background',
+    providerJobId: 'remote_reference_background',
+    remoteStartedAt: capturedAt,
+    cancellationPolicy: 'none',
+    outputAssetIds: [assetId],
+    purpose: 'seed_still',
+    authorizationId,
+    authorizationItemId: item.id,
+    requestPlan,
+    requestSnapshot: requestPlan.snapshot,
+    spendReceipt: {
+      authorizationId,
+      itemId: item.id,
+      jobId,
+      purpose: 'seed_still',
+      routeId: item.routeId,
+      currency: 'USD',
+      rateUnit: 'generation',
+      rateMinorUnits: 1,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: 1,
+    },
+    outputAssetIdsByRole: { primary: assetId, poster: null },
+    error: null,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: capturedAt,
+    updatedAt: capturedAt,
+  };
+  project.shots.clip_1!.assetIds.push(assetId);
+  project.shots.clip_1!.jobIds.push(jobId);
+  project.references[referenceId]!.candidateAssetId = assetId;
+  project.references[referenceId]!.candidateJobId = jobId;
+  project.references[referenceId]!.approvedAssetId = assetId;
+  return project;
 };
 
 describe('CreativeStudioServiceV2', () => {
@@ -243,7 +365,7 @@ describe('CreativeStudioServiceV2', () => {
         aspectRatio: '16:9',
         resolution: '1080p',
         durationSeconds: 5,
-        referenceInput: null,
+        referenceInputs: [],
         conditioningInput: null,
       },
     },
@@ -252,7 +374,7 @@ describe('CreativeStudioServiceV2', () => {
       aspectRatio: '16:9',
       resolution: '1080p',
       durationSeconds: 5,
-      referenceInput: null,
+      referenceInputs: [],
       conditioningInput: null,
     },
     spendReceipt: null,
@@ -354,7 +476,7 @@ describe('CreativeStudioServiceV2', () => {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: 'reference_request_service_1',
       projectId: current.id,
-      shotIds: ['clip_1'],
+      referenceIds: ['ref_background'],
       status: 'pending',
       createdAt: '2026-08-17T00:00:01.000Z',
     };
@@ -364,7 +486,11 @@ describe('CreativeStudioServiceV2', () => {
     const decideReferenceRequestV2 = vi.fn<CreativeStudioStore['decideReferenceRequestV2']>(async (input) => {
       const outcome =
         input.outcome.kind === 'generation_gate'
-          ? { kind: 'generation_gate' as const, handoffId: 'handoff_service_1', shotIds: [...referenceRequest.shotIds] }
+          ? {
+              kind: 'generation_gate' as const,
+              handoffId: 'handoff_service_1',
+              referenceIds: [...referenceRequest.referenceIds],
+            }
           : input.outcome.kind === 'imported_reference'
             ? {
                 kind: 'imported_reference' as const,
@@ -392,7 +518,7 @@ describe('CreativeStudioServiceV2', () => {
       outcome: {
         kind: 'generation_gate' as const,
         handoffId: 'handoff_service_1',
-        shotIds: [...referenceRequest.shotIds],
+        referenceIds: [...referenceRequest.referenceIds],
       },
     };
     let referenceGenerationReceipt:
@@ -1324,6 +1450,31 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.exportCatalogStore.create).toHaveBeenCalledOnce();
   });
 
+  it('never exports a project-reference output as a Shot still fallback', async () => {
+    const project = makeSchema2ServiceProject();
+    const referenceAsset = project.assets.asset_reference_background!;
+    project.shots.clip_1!.seedStillId = null;
+    referenceAsset.createdAt = '2026-08-17T23:59:59.000Z';
+    const resolveAssetWithProjectAuthorityV2 = vi.fn<StudioMediaStore['resolveAssetWithProjectAuthorityV2']>();
+    const harness = makeHarness(project, {
+      createExportId: () => 'reference_leak_export',
+      resolveAssetWithProjectAuthorityV2,
+    });
+
+    await expect(
+      harness.service.createExport({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expectedCatalogRevision: 1,
+        shape: 'still',
+        shotId: 'clip_1',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(resolveAssetWithProjectAuthorityV2).not.toHaveBeenCalled();
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['stale_catalog_revision', 'stale_project'],
     ['stale_project_revision', 'stale_project'],
@@ -1639,39 +1790,135 @@ describe('CreativeStudioServiceV2', () => {
     ).rejects.toMatchObject({ code: 'invalid_payload' });
   });
 
-  it('projects reference generation handoffs without durable authorization identity', () => {
+  it('projects reference handoffs from immutable authorization jobs without exposing their identity', () => {
+    const project = makeSchema2ServiceProject();
+    project.spendAuthorizations[0]!.originReferenceHandoffId = 'handoff_1';
     const decision = {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       requestId: 'reference_request_1',
       projectId: 'project_v2',
       decidedAt: '2026-08-17T00:00:01.000Z',
-      outcome: { kind: 'generation_gate' as const, handoffId: 'handoff_1', shotIds: ['clip_1', 'clip_2'] },
+      outcome: {
+        kind: 'generation_gate' as const,
+        handoffId: 'handoff_1',
+        referenceIds: ['ref_background'],
+      },
     };
 
     expect(projectStudioReferenceGenerationHandoffV2(decision, null)).toEqual({
       handoffId: 'handoff_1',
       requestId: 'reference_request_1',
-      shotIds: ['clip_1', 'clip_2'],
+      referenceIds: ['ref_background'],
       decidedAt: decision.decidedAt,
       status: 'open',
       completedAt: null,
+      progress: { queued: 0, running: 0, succeeded: 0, failed: 0 },
+      candidateAssetIds: [],
+      retryReferenceIds: [],
     });
-    const confirmed = projectStudioReferenceGenerationHandoffV2(decision, {
+    const receipt = {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       handoffId: 'handoff_1',
       requestId: 'reference_request_1',
       completedAt: '2026-08-17T00:00:02.000Z',
-      result: { kind: 'confirmed', authorizationId: 'authorization_secret' },
-    });
+      result: { kind: 'confirmed' as const, authorizationId: SERVICE_REFERENCE_AUTHORIZATION_ID },
+    };
+    const confirmed = projectStudioReferenceGenerationHandoffV2(decision, receipt, project);
     expect(confirmed).toEqual({
       handoffId: 'handoff_1',
       requestId: 'reference_request_1',
-      shotIds: ['clip_1', 'clip_2'],
+      referenceIds: ['ref_background'],
       decidedAt: decision.decidedAt,
       status: 'confirmed',
       completedAt: '2026-08-17T00:00:02.000Z',
+      progress: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+      candidateAssetIds: ['asset_reference_background'],
+      retryReferenceIds: [],
     });
-    expect(JSON.stringify(confirmed)).not.toContain('authorization_secret');
+    expect(JSON.stringify(confirmed)).not.toContain(SERVICE_REFERENCE_AUTHORIZATION_ID);
+
+    const laterCandidate = structuredClone(project);
+    laterCandidate.references.ref_background!.candidateJobId = 'job_from_later_regeneration';
+    laterCandidate.references.ref_background!.candidateAssetId = null;
+    expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, laterCandidate)).toEqual(confirmed);
+
+    const failed = structuredClone(project);
+    failed.jobs[SERVICE_REFERENCE_JOB_ID]!.status = 'failed';
+    failed.jobs[SERVICE_REFERENCE_JOB_ID]!.error = {
+      code: 'provider_unavailable',
+      messageKey: 'providerUnavailable',
+    };
+    failed.jobs[SERVICE_REFERENCE_JOB_ID]!.outputAssetIds = [];
+    failed.jobs[SERVICE_REFERENCE_JOB_ID]!.outputAssetIdsByRole.primary = null;
+    expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, failed)).toMatchObject({
+      progress: { queued: 0, running: 0, succeeded: 0, failed: 1 },
+      candidateAssetIds: [],
+      retryReferenceIds: ['ref_background'],
+    });
+
+    for (const [status, error, retryReferenceIds] of [
+      ['needs_attention', { code: 'submission_unknown', messageKey: 'submissionUnknown' }, []],
+      ['cancelled', null, ['ref_background']],
+      ['failed', { code: 'download_failed', messageKey: 'downloadFailed' }, []],
+      ['failed', { code: 'poll_deadline', messageKey: 'pollDeadline' }, ['ref_background']],
+    ] as const) {
+      const terminal = structuredClone(project);
+      terminal.jobs[SERVICE_REFERENCE_JOB_ID]!.status = status;
+      terminal.jobs[SERVICE_REFERENCE_JOB_ID]!.error = error;
+      terminal.jobs[SERVICE_REFERENCE_JOB_ID]!.outputAssetIds = [];
+      terminal.jobs[SERVICE_REFERENCE_JOB_ID]!.outputAssetIdsByRole.primary = null;
+      expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, terminal)).toMatchObject({
+        progress: { queued: 0, running: 0, succeeded: 0, failed: 1 },
+        retryReferenceIds,
+      });
+    }
+
+    const retried = structuredClone(failed);
+    const retryAssetId = 'asset_reference_background_retry';
+    retried.assets[retryAssetId] = {
+      ...structuredClone(retried.assets.asset_reference_background!),
+      id: retryAssetId,
+      managedAsset: { collection: 'assets', fileName: `${retryAssetId}.png` },
+    };
+    retried.jobs.job_reference_background_retry = {
+      ...structuredClone(retried.jobs[SERVICE_REFERENCE_JOB_ID]!),
+      id: 'job_reference_background_retry',
+      status: 'succeeded',
+      authorizationId: 'authorization_reference_background_retry',
+      authorizationItemId: 'item_reference_background_retry',
+      idempotencyKey: 'idempotency_reference_background_retry',
+      outputAssetIds: [retryAssetId],
+      outputAssetIdsByRole: { primary: retryAssetId, poster: null },
+      error: null,
+      retryOfJobId: SERVICE_REFERENCE_JOB_ID,
+      retryReason: 'provider_failure',
+    };
+    retried.shots.clip_1!.jobIds.push('job_reference_background_retry');
+    retried.shots.clip_1!.assetIds.push(retryAssetId);
+    retried.references.ref_background!.candidateJobId = 'job_reference_background_retry';
+    retried.references.ref_background!.candidateAssetId = retryAssetId;
+    expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, retried)).toMatchObject({
+      progress: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+      candidateAssetIds: [retryAssetId],
+      retryReferenceIds: [],
+    });
+
+    const pollDeadlineRetried = structuredClone(retried);
+    pollDeadlineRetried.jobs[SERVICE_REFERENCE_JOB_ID]!.error = {
+      code: 'poll_deadline',
+      messageKey: 'pollDeadline',
+    };
+    pollDeadlineRetried.jobs.job_reference_background_retry!.retryReason = 'submission_unknown';
+    pollDeadlineRetried.jobs.job_reference_background_retry!.duplicateChargeAcknowledged = true;
+    pollDeadlineRetried.jobs.job_reference_background_retry!.duplicateChargeAcknowledgedAt = '2026-08-17T00:00:02.000Z';
+    expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, pollDeadlineRetried)).toMatchObject({
+      progress: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+      candidateAssetIds: [retryAssetId],
+      retryReferenceIds: [],
+    });
+    expect(() => projectStudioReferenceGenerationHandoffV2(decision, receipt)).toThrowError(
+      expect.objectContaining({ code: 'storage_error' })
+    );
     expect(projectStudioReferenceGenerationHandoffV2({ ...decision, outcome: { kind: 'rejected' } }, null)).toBeNull();
     expect(() =>
       projectStudioReferenceGenerationHandoffV2(
@@ -1710,7 +1957,7 @@ describe('CreativeStudioServiceV2', () => {
     });
     expect(decided).toMatchObject({
       requestId: harness.referenceRequest.id,
-      outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', shotIds: ['clip_1'] },
+      outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', referenceIds: ['ref_background'] },
     });
     expect(harness.decideReferenceRequestV2).toHaveBeenCalledExactlyOnceWith({
       projectId: 'project_v2',
@@ -1723,8 +1970,15 @@ describe('CreativeStudioServiceV2', () => {
       ...structuredClone(decided),
       requestId: 'reference_request_service_2',
       decidedAt: '2026-08-17T00:00:03.000Z',
-      outcome: { kind: 'generation_gate' as const, handoffId: 'handoff_service_2', shotIds: ['clip_1'] },
+      outcome: {
+        kind: 'generation_gate' as const,
+        handoffId: 'handoff_service_2',
+        referenceIds: ['ref_background'],
+      },
     };
+    const handoffProject = harness.getProject();
+    handoffProject.spendAuthorizations[0]!.originReferenceHandoffId = 'handoff_service_2';
+    harness.setProject(handoffProject);
     harness.listReferenceRequestsV2.mockResolvedValueOnce([
       {
         request: {
@@ -1738,7 +1992,7 @@ describe('CreativeStudioServiceV2', () => {
           handoffId: 'handoff_service_2',
           requestId: laterDecision.requestId,
           completedAt: '2026-08-17T00:00:04.000Z',
-          result: { kind: 'confirmed', authorizationId: 'authorization_secret' },
+          result: { kind: 'confirmed', authorizationId: SERVICE_REFERENCE_AUTHORIZATION_ID },
         },
       },
       {
@@ -1761,41 +2015,66 @@ describe('CreativeStudioServiceV2', () => {
       {
         handoffId: 'handoff_service_1',
         requestId: harness.referenceRequest.id,
-        shotIds: ['clip_1'],
+        referenceIds: ['ref_background'],
         decidedAt: decided.decidedAt,
         status: 'open',
         completedAt: null,
+        progress: { queued: 0, running: 0, succeeded: 0, failed: 0 },
+        candidateAssetIds: [],
+        retryReferenceIds: [],
       },
       {
         handoffId: 'handoff_service_2',
         requestId: laterDecision.requestId,
-        shotIds: ['clip_1'],
+        referenceIds: ['ref_background'],
         decidedAt: laterDecision.decidedAt,
         status: 'confirmed',
         completedAt: '2026-08-17T00:00:04.000Z',
+        progress: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+        candidateAssetIds: ['asset_reference_background'],
+        retryReferenceIds: [],
       },
     ]);
-    expect(JSON.stringify(handoffs)).not.toContain('authorization_secret');
+    expect(JSON.stringify(handoffs)).not.toContain(SERVICE_REFERENCE_AUTHORIZATION_ID);
   });
 
   it('prepares and confirms only the exact ordered seed-only reference handoff', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
     const harness = makeHarness(project);
+    harness.listReferenceRequestsV2.mockResolvedValueOnce([
+      {
+        request: structuredClone(harness.referenceRequest),
+        decision: {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          requestId: harness.referenceRequest.id,
+          projectId: project.id,
+          decidedAt: '2026-08-17T00:00:02.000Z',
+          outcome: {
+            kind: 'generation_gate',
+            handoffId: 'handoff_service_1',
+            referenceIds: ['ref_background'],
+          },
+        },
+        receipt: null,
+      },
+    ]);
 
-    const prepared = await harness.service.prepareSubmission({
+    const prepared = await harness.service.prepareProjectReferences({
       projectId: project.id,
       expectedRevision: project.revision,
-      originReferenceHandoffId: 'handoff_service_1',
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [],
+      referenceIds: ['ref_background'],
     });
 
     expect(prepared).toMatchObject({
-      baseOnly: { projectId: project.id, projectRevision: project.revision, baseItems: [{ shotId: 'clip_1' }] },
+      baseOnly: {
+        projectId: project.id,
+        projectRevision: project.revision,
+        baseItems: [{ shotId: 'clip_1' }],
+      },
       withCascade: null,
     });
-    expect(harness.readReferenceGenerationHandoffV2).toHaveBeenCalledExactlyOnceWith(project.id, 'handoff_service_1');
+    expect(harness.listReferenceRequestsV2).toHaveBeenCalledExactlyOnceWith(project.id);
     await expect(
       harness.service.confirmSubmission({
         projectId: project.id,
@@ -1804,15 +2083,24 @@ describe('CreativeStudioServiceV2', () => {
       })
     ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
     expect(harness.confirmReferenceGenerationHandoffV2).toHaveBeenCalledTimes(1);
-    expect(harness.getProject().spendAuthorizations).toEqual([
+    expect(harness.getProject().spendAuthorizations).toContainEqual(
       expect.objectContaining({
         id: prepared.baseOnly.id,
         originReferenceHandoffId: 'handoff_service_1',
-        baseItems: [expect.objectContaining({ shotId: 'clip_1', purpose: 'seed_still', generationCount: 1 })],
+        baseItems: [
+          expect.objectContaining({
+            shotId: 'clip_1',
+            projectReferenceId: 'ref_background',
+            purpose: 'seed_still',
+            generationCount: 1,
+          }),
+        ],
         cascadeItems: [],
-      }),
-    ]);
-    expect(Object.values(harness.getProject().jobs).map((job) => job.purpose)).toEqual(['seed_still']);
+      })
+    );
+    expect(
+      Object.values(harness.getProject().jobs).filter((job) => job.authorizationId === prepared.baseOnly.id)
+    ).toEqual([expect.objectContaining({ purpose: 'seed_still', projectReferenceId: 'ref_background' })]);
     expect(harness.submitShots).toHaveBeenCalledTimes(1);
     await expect(
       harness.service.confirmSubmission({
@@ -1823,7 +2111,129 @@ describe('CreativeStudioServiceV2', () => {
     ).rejects.toMatchObject({ code: 'quote_not_found' });
   });
 
-  it('refuses malformed, reordered, replaced, and broader handoff choices before pricing or provider work', async () => {
+  it('regenerates an approved reference after every shot stops using it', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    for (const shot of Object.values(project.shots)) shot.referenceIds = [];
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareProjectReferences({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      referenceIds: ['ref_background'],
+    });
+
+    expect(prepared.baseOnly.baseItems).toEqual([
+      expect.objectContaining({
+        shotId: 'clip_1',
+        purpose: 'seed_still',
+      }),
+    ]);
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+
+    const committed = harness.getProject();
+    const regenerated = Object.values(committed.jobs).find((job) => job.authorizationId === prepared.baseOnly.id)!;
+    expect(committed.spendAuthorizations).toContainEqual(
+      expect.objectContaining({
+        id: prepared.baseOnly.id,
+        baseItems: [
+          expect.objectContaining({
+            shotId: 'clip_1',
+            projectReferenceId: 'ref_background',
+            purpose: 'seed_still',
+          }),
+        ],
+      })
+    );
+    expect(regenerated).toMatchObject({
+      shotId: 'clip_1',
+      projectReferenceId: 'ref_background',
+      purpose: 'seed_still',
+    });
+    expect(committed.references.ref_background).toMatchObject({
+      candidateJobId: regenerated.id,
+      candidateAssetId: null,
+      approvedAssetId: 'asset_reference_background',
+    });
+    expect(committed.shots.clip_1!.referenceIds).toEqual([]);
+    expect(committed.shots.clip_2!.referenceIds).toEqual([]);
+    expect(validateStudioProjectV2(committed)).toBe(true);
+    expect(harness.submitShots).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      label: 'cancelled candidate',
+      status: 'cancelled',
+      error: null,
+      expectedRetryReason: 'provider_failure',
+      expectedDuplicateChargeAcknowledged: false,
+    },
+    {
+      label: 'poll-deadline candidate',
+      status: 'failed',
+      error: { code: 'poll_deadline', messageKey: 'pollDeadline' },
+      expectedRetryReason: 'submission_unknown',
+      expectedDuplicateChargeAcknowledged: true,
+    },
+  ] as const)(
+    'carries paid project-reference lineage from a $label',
+    async ({ status, error, expectedRetryReason, expectedDuplicateChargeAcknowledged }) => {
+      const project = makeSchema2ServiceProject();
+      project.imageRouteId = imageRoute.choiceId;
+      const predecessor = project.jobs[SERVICE_REFERENCE_JOB_ID]!;
+      const oldAssetId = predecessor.outputAssetIdsByRole.primary!;
+      predecessor.status = status;
+      predecessor.error = error === null ? null : { ...error };
+      predecessor.outputAssetIds = [];
+      predecessor.outputAssetIdsByRole = { primary: null, poster: null };
+      predecessor.spendReceipt = null;
+      if (status === 'cancelled') {
+        predecessor.providerJobId = null;
+        predecessor.remoteStartedAt = null;
+      }
+      delete project.assets[oldAssetId];
+      project.shots.clip_1!.assetIds = project.shots.clip_1!.assetIds.filter((assetId) => assetId !== oldAssetId);
+      project.references.ref_background!.candidateAssetId = null;
+      project.references.ref_background!.approvedAssetId = null;
+
+      const harness = makeHarness(project);
+      const prepared = await harness.service.prepareProjectReferences({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        referenceIds: ['ref_background'],
+      });
+      await harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      });
+
+      const committed = harness.getProject();
+      const retry = Object.values(committed.jobs).find((job) => job.authorizationId === prepared.baseOnly.id)!;
+      expect(retry).toMatchObject({
+        projectReferenceId: 'ref_background',
+        retryOfJobId: SERVICE_REFERENCE_JOB_ID,
+        retryReason: expectedRetryReason,
+        duplicateChargeAcknowledged: expectedDuplicateChargeAcknowledged,
+        duplicateChargeAcknowledgedAt: expectedDuplicateChargeAcknowledged ? '2026-08-17T00:00:02.000Z' : null,
+      });
+      expect(committed.references.ref_background).toMatchObject({
+        candidateJobId: retry.id,
+        candidateAssetId: null,
+      });
+      expect(validateStudioProjectV2(committed)).toBe(true);
+    }
+  );
+
+  it('refuses malformed, unknown, ambiguous, and already-authorized project-reference preparation', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
     const createQuoteId = vi.fn(() => 'quote_must_not_be_created');
@@ -1831,90 +2241,62 @@ describe('CreativeStudioServiceV2', () => {
     const exact = {
       projectId: project.id,
       expectedRevision: project.revision,
-      originReferenceHandoffId: 'handoff_service_1',
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still' as const, referenceAssetId: null }],
-      cascadeChoices: [],
+      referenceIds: ['ref_background'],
     };
     const malformed = [
-      { ...exact, baseChoices: [] },
-      {
-        ...exact,
-        baseChoices: [
-          ...exact.baseChoices,
-          { shotId: 'clip_2', purpose: 'seed_still' as const, referenceAssetId: null },
-        ],
-      },
-      { ...exact, baseChoices: [...exact.baseChoices, ...exact.baseChoices] },
-      { ...exact, baseChoices: [{ ...exact.baseChoices[0]!, purpose: 'video_take' as const }] },
-      { ...exact, baseChoices: [{ ...exact.baseChoices[0]!, generationCount: 2 }] },
-      { ...exact, baseChoices: [{ ...exact.baseChoices[0]!, referenceAssetId: 'reference_1' }] },
-      {
-        ...exact,
-        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take' as const, referenceAssetId: null }],
-      },
+      { ...exact, referenceIds: [] },
+      { ...exact, referenceIds: ['ref_background', 'ref_background'] },
+      { ...exact, referenceIds: ['../unsafe'] },
+      { ...exact, extra: true },
     ];
 
     for (const request of malformed) {
-      // Each shape deliberately violates the frozen handoff subset.
+      // Each shape deliberately violates the exact renderer preparation contract.
       // eslint-disable-next-line no-await-in-loop
-      await expect(harness.service.prepareSubmission(request)).rejects.toMatchObject({ code: 'invalid_payload' });
+      await expect(harness.service.prepareProjectReferences(request as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
     }
-    harness.readReferenceGenerationHandoffV2.mockResolvedValueOnce({
-      request: { ...harness.referenceRequest, shotIds: ['clip_1', 'clip_2'] },
-      decision: {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
-        requestId: harness.referenceRequest.id,
-        projectId: project.id,
-        decidedAt: '2026-08-17T00:00:02.000Z',
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', shotIds: ['clip_1', 'clip_2'] },
-      },
-      receipt: null,
-    });
     await expect(
-      harness.service.prepareSubmission({
-        ...exact,
-        baseChoices: [
-          { shotId: 'clip_2', purpose: 'seed_still', referenceAssetId: null },
-          { shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null },
-        ],
-      })
-    ).rejects.toMatchObject({ code: 'invalid_payload' });
-    harness.readReferenceGenerationHandoffV2.mockResolvedValueOnce({
+      harness.service.prepareProjectReferences({ ...exact, referenceIds: ['missing_reference'] })
+    ).rejects.toMatchObject({ code: 'invalid_reference' });
+
+    const openEntry = {
       request: structuredClone(harness.referenceRequest),
       decision: {
         schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         requestId: harness.referenceRequest.id,
         projectId: project.id,
         decidedAt: '2026-08-17T00:00:02.000Z',
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', shotIds: ['clip_1'] },
-      },
-      receipt: {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
-        handoffId: 'handoff_service_1',
-        requestId: harness.referenceRequest.id,
-        completedAt: '2026-08-17T00:00:03.000Z',
-        result: { kind: 'dismissed' },
-      },
-    });
-    await expect(harness.service.prepareSubmission(exact)).rejects.toMatchObject({ code: 'invalid_payload' });
-    harness.readReferenceGenerationHandoffV2.mockResolvedValueOnce({
-      request: structuredClone(harness.referenceRequest),
-      decision: {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
-        requestId: 'other_reference_request',
-        projectId: project.id,
-        decidedAt: '2026-08-17T00:00:02.000Z',
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_service_1', shotIds: ['clip_1'] },
+        outcome: {
+          kind: 'generation_gate' as const,
+          handoffId: 'handoff_service_1',
+          referenceIds: ['ref_background'],
+        },
       },
       receipt: null,
-    });
-    await expect(harness.service.prepareSubmission(exact)).rejects.toMatchObject({ code: 'invalid_payload' });
+    };
+    harness.listReferenceRequestsV2.mockResolvedValueOnce([
+      openEntry,
+      {
+        request: { ...structuredClone(openEntry.request), id: 'reference_request_service_ambiguous' },
+        decision: {
+          ...structuredClone(openEntry.decision),
+          requestId: 'reference_request_service_ambiguous',
+          outcome: { ...openEntry.decision.outcome, handoffId: 'handoff_service_ambiguous' },
+        },
+        receipt: null,
+      },
+    ]);
+    await expect(harness.service.prepareProjectReferences(exact)).rejects.toMatchObject({ code: 'storage_error' });
+
     const existingOrigin = structuredClone(project);
     existingOrigin.spendAuthorizations.push({
       originReferenceHandoffId: 'handoff_service_1',
     } as never);
     harness.setProject(existingOrigin);
-    await expect(harness.service.prepareSubmission(exact)).rejects.toMatchObject({ code: 'invalid_payload' });
+    harness.listReferenceRequestsV2.mockResolvedValueOnce([openEntry]);
+    await expect(harness.service.prepareProjectReferences(exact)).rejects.toMatchObject({ code: 'invalid_payload' });
 
     expect(harness.loadRateCard).not.toHaveBeenCalled();
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
@@ -2200,7 +2582,9 @@ describe('CreativeStudioServiceV2', () => {
         expectedRevision: project.revision,
       })
     ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
-    const committedJob = Object.values(harness.getProject().jobs)[0]!;
+    const committedJob = Object.values(harness.getProject().jobs).find(
+      (job) => job.authorizationId === prepared.baseOnly.id
+    )!;
     expect(committedJob.id).toMatch(/^job_[a-f0-9]{32}$/);
     expect(committedJob.idempotencyKey).toMatch(/^key_[a-f0-9]{32}$/);
   });
@@ -2234,7 +2618,7 @@ describe('CreativeStudioServiceV2', () => {
       aspectRatio: '16:9' as const,
       resolution: '1080p' as const,
       durationSeconds: 4,
-      referenceInput: null,
+      referenceInputs: [],
       conditioningInput: null,
     };
     project.jobs.board_job = makeSchema2Job(project, {
@@ -2262,6 +2646,34 @@ describe('CreativeStudioServiceV2', () => {
         issues: [],
       },
     ]);
+    expect(readiness.payableShotIds).toEqual(['clip_1']);
+  });
+
+  it('keeps Shot generation ready while project-reference jobs run or fail', async () => {
+    const project = makeSchema2ServiceProject();
+    const shot = project.shots.clip_1!;
+    project.jobs.reference_pending = makeSchema2Job(project, {
+      id: 'reference_pending',
+      projectReferenceId: 'ref_background',
+      status: 'running',
+      providerJobId: 'remote_reference_pending',
+      error: null,
+    });
+    project.jobs.reference_failed = makeSchema2Job(project, {
+      id: 'reference_failed',
+      projectReferenceId: 'ref_background',
+      status: 'failed',
+      error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+    });
+    shot.jobIds.push('reference_pending', 'reference_failed');
+    const harness = makeHarness(project);
+
+    const readiness = await harness.service.getGenerationReadiness({
+      projectId: project.id,
+      beatIds: ['section_1'],
+    });
+
+    expect(readiness.shots).toEqual([{ shotId: 'clip_1', beatId: 'section_1', ready: true, issues: [] }]);
     expect(readiness.payableShotIds).toEqual(['clip_1']);
   });
 
@@ -3479,10 +3891,12 @@ describe('CreativeStudioServiceV2', () => {
     expect(committed.assets[board.id]).toEqual(boardBefore.asset);
     expect(committed.jobs.job_board_promote_1).toEqual(boardBefore.producer);
     expect(committed.undoHistory).toEqual(project.undoHistory);
-    expect(committed.spendAuthorizations).toEqual([
-      expect.objectContaining({ id: prepared.baseOnly.id, cascadeItems: [] }),
-    ]);
-    const replacementJobs = Object.values(committed.jobs).filter((job) => job.id !== 'job_board_promote_1');
+    expect(
+      committed.spendAuthorizations.filter((authorization) => authorization.id !== SERVICE_REFERENCE_AUTHORIZATION_ID)
+    ).toEqual([expect.objectContaining({ id: prepared.baseOnly.id, cascadeItems: [] })]);
+    const replacementJobs = Object.values(committed.jobs).filter(
+      (job) => job.id !== 'job_board_promote_1' && job.id !== SERVICE_REFERENCE_JOB_ID
+    );
     expect(replacementJobs).toEqual([
       expect.objectContaining({
         shotId: 'clip_1',
@@ -3531,8 +3945,8 @@ describe('CreativeStudioServiceV2', () => {
       })
     ).rejects.toThrow();
     expect(harness.getProject()).toEqual(mismatched);
-    expect(harness.getProject().spendAuthorizations).toEqual([]);
-    expect(Object.keys(harness.getProject().jobs)).toEqual(['job_board_promote_1']);
+    expect(harness.getProject().spendAuthorizations).toEqual(mismatched.spendAuthorizations);
+    expect(Object.keys(harness.getProject().jobs)).toEqual(Object.keys(mismatched.jobs));
     expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
@@ -3579,8 +3993,10 @@ describe('CreativeStudioServiceV2', () => {
       endpointSeconds: 8,
       status: 'pending',
     });
-    expect(committed.spendAuthorizations).toHaveLength(1);
-    expect(Object.values(committed.jobs)).toEqual([
+    expect(
+      committed.spendAuthorizations.filter((authorization) => authorization.id !== SERVICE_REFERENCE_AUTHORIZATION_ID)
+    ).toHaveLength(1);
+    expect(Object.values(committed.jobs).filter((job) => job.id !== SERVICE_REFERENCE_JOB_ID)).toEqual([
       expect.objectContaining({
         shotId: 'clip_2',
         status: 'waiting_for_conditioning',
@@ -3642,8 +4058,8 @@ describe('CreativeStudioServiceV2', () => {
     ).rejects.toMatchObject({ code: 'storage_error' });
 
     expect(harness.getProject()).toEqual(beforeConfirm);
-    expect(harness.getProject().spendAuthorizations).toEqual([]);
-    expect(harness.getProject().jobs).toEqual({});
+    expect(harness.getProject().spendAuthorizations).toEqual(beforeConfirm.spendAuthorizations);
+    expect(harness.getProject().jobs).toEqual(beforeConfirm.jobs);
     expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
@@ -3679,6 +4095,7 @@ describe('CreativeStudioServiceV2', () => {
       managedAsset: { collection: 'conditioningFrames', fileName: 'frame_rejoin_1.png' },
       byteSize: 15,
       sha256: 'f'.repeat(64),
+      referenceAssetIds: [],
       createdAt: '2026-08-17T00:00:02.000Z',
     };
     const ready = harness.getProject();
@@ -3702,7 +4119,9 @@ describe('CreativeStudioServiceV2', () => {
       byteSize: frameAsset.byteSize,
       sha256: frameAsset.sha256,
     });
-    const waitingJob = Object.values(ready.jobs)[0]!;
+    const waitingJob = Object.values(ready.jobs).find(
+      (job) => job.purpose === 'video_take' && job.status === 'waiting_for_conditioning'
+    )!;
 
     await expect(
       harness.service.retryConditioningFrame({
@@ -3843,14 +4262,20 @@ describe('CreativeStudioServiceV2', () => {
       seedStillId: reuseSeed ? 'seed_sever_2' : null,
     });
     expect(committed.undoHistory).toEqual(project.undoHistory);
-    expect(committed.spendAuthorizations).toEqual([
+    expect(
+      committed.spendAuthorizations.filter((authorization) => authorization.id !== SERVICE_REFERENCE_AUTHORIZATION_ID)
+    ).toEqual([
       expect.objectContaining({
         id: prepared.baseOnly.id,
         baseItems: expect.any(Array),
         cascadeItems: [],
       }),
     ]);
-    expect(Object.values(committed.jobs).map(({ purpose, status }) => [purpose, status])).toEqual(
+    expect(
+      Object.values(committed.jobs)
+        .filter((job) => job.id !== SERVICE_REFERENCE_JOB_ID)
+        .map(({ purpose, status }) => [purpose, status])
+    ).toEqual(
       reuseSeed
         ? [['video_take', 'queued_local']]
         : [
@@ -3893,7 +4318,11 @@ describe('CreativeStudioServiceV2', () => {
         expectedRevision: project.revision,
       })
     ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
-    expect(harness.getProject().spendAuthorizations).toHaveLength(1);
+    expect(
+      harness
+        .getProject()
+        .spendAuthorizations.filter((authorization) => authorization.id !== SERVICE_REFERENCE_AUTHORIZATION_ID)
+    ).toHaveLength(1);
     await expect(
       harness.service.confirmSubmission({
         projectId: project.id,
@@ -3901,7 +4330,11 @@ describe('CreativeStudioServiceV2', () => {
         expectedRevision: project.revision,
       })
     ).rejects.toMatchObject({ code: 'quote_not_found' });
-    expect(harness.getProject().spendAuthorizations).toHaveLength(1);
+    expect(
+      harness
+        .getProject()
+        .spendAuthorizations.filter((authorization) => authorization.id !== SERVICE_REFERENCE_AUTHORIZATION_ID)
+    ).toHaveLength(1);
   });
 
   it('leaves stale and expired continuity confirmations byte-identical', async () => {
@@ -3978,6 +4411,40 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.loadRateCard).not.toHaveBeenCalled();
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
     expect(admit).not.toHaveBeenCalled();
+  });
+
+  it('refuses a selected image route whose conditioning capacity is below the exact approved reference set', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const preparedSubmissionCache = new StudioPreparedSubmissionCacheV2();
+    const admit = vi.spyOn(preparedSubmissionCache, 'admit');
+    const harness = makeHarness(project, { preparedSubmissionCache });
+    const incapableImageRoute = {
+      ...structuredClone(imageRoute),
+      constraints: { ...structuredClone(imageRoute.constraints), maxConditioningImages: 0 },
+    };
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [incapableImageRoute, structuredClone(videoRoute)],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_reference_capacity_zero',
+    });
+    const before = harness.getProject();
+
+    await expect(
+      harness.service.prepareSubmission({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+        cascadeChoices: [],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_route' });
+
+    expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(1);
+    expect(harness.loadRateCard).toHaveBeenCalledTimes(1);
+    expect(admit).not.toHaveBeenCalled();
+    expect(harness.getProject()).toEqual(before);
+    expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
   it('keeps and confirms the base option when only cascade binding availability changes', async () => {
@@ -4259,8 +4726,10 @@ describe('CreativeStudioServiceV2', () => {
     ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
 
     const committed = harness.getProject();
-    expect(committed.spendAuthorizations).toHaveLength(1);
-    expect(committed.spendAuthorizations[0]).toMatchObject({
+    const committedAuthorization = committed.spendAuthorizations.find(
+      (authorization) => authorization.id === prepared.withCascade!.id
+    );
+    expect(committedAuthorization).toMatchObject({
       id: prepared.withCascade!.id,
       baseItems: [{ purpose: 'seed_still', generationCount: 1 }],
       cascadeItems: [{ purpose: 'video_take', generationCount: 1 }],
@@ -4270,11 +4739,13 @@ describe('CreativeStudioServiceV2', () => {
       ],
     });
     expect(
-      Object.values(committed.jobs).map(({ status, purpose, requestSnapshot }) => ({
-        status,
-        purpose,
-        requestSnapshot: requestSnapshot === null ? null : requestSnapshot.conditioningInput,
-      }))
+      Object.values(committed.jobs)
+        .filter((job) => job.id !== SERVICE_REFERENCE_JOB_ID)
+        .map(({ status, purpose, requestSnapshot }) => ({
+          status,
+          purpose,
+          requestSnapshot: requestSnapshot === null ? null : requestSnapshot.conditioningInput,
+        }))
     ).toEqual([
       { status: 'queued_local', purpose: 'seed_still', requestSnapshot: null },
       { status: 'waiting_for_conditioning', purpose: 'video_take', requestSnapshot: null },
@@ -4355,7 +4826,11 @@ describe('CreativeStudioServiceV2', () => {
       quoteId: prepared.withCascade!.id,
       expectedRevision: project.revision,
     });
-    expect(harness.getProject().spendAuthorizations).toEqual([
+    expect(
+      harness
+        .getProject()
+        .spendAuthorizations.filter((authorization) => authorization.id !== SERVICE_REFERENCE_AUTHORIZATION_ID)
+    ).toEqual([
       expect.objectContaining({
         id: prepared.withCascade!.id,
         lowerMinorUnits: prepared.withCascade!.lowerMinorUnits,
@@ -4472,6 +4947,63 @@ describe('CreativeStudioServiceV2', () => {
     ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
   });
 
+  it.each([
+    { label: 'cancelled', status: 'cancelled', error: null },
+    {
+      label: 'poll-deadline',
+      status: 'failed',
+      error: { code: 'poll_deadline', messageKey: 'pollDeadline' },
+    },
+  ] as const)('does not extend project-reference retry exceptions to an ordinary $label Shot job', async (entry) => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    const first = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+    });
+    await harness.service.confirmSubmission({
+      projectId: project.id,
+      quoteId: first.baseOnly.id,
+      expectedRevision: project.revision,
+    });
+    const terminal = harness.getProject();
+    const predecessor = terminal.jobs.job_service_1!;
+    predecessor.status = entry.status;
+    predecessor.error = entry.error === null ? null : { ...entry.error };
+    if (entry.status === 'failed') {
+      predecessor.providerJobId = 'remote_ordinary_poll_deadline';
+      predecessor.remoteStartedAt = '2026-08-17T00:00:02.000Z';
+    }
+    harness.setProject(terminal);
+
+    const second = await harness.service.prepareSubmission({
+      projectId: terminal.id,
+      expectedRevision: terminal.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+    });
+    await harness.service.confirmSubmission({
+      projectId: terminal.id,
+      quoteId: second.baseOnly.id,
+      expectedRevision: terminal.revision,
+    });
+
+    const committed = harness.getProject();
+    expect(committed.jobs.job_service_2).toMatchObject({
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+    });
+    expect(validateStudioProjectV2(committed)).toBe(true);
+  });
+
   it('carries acknowledged submission-unknown lineage only into the next reviewed confirmation', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
@@ -4546,7 +5078,9 @@ describe('CreativeStudioServiceV2', () => {
     });
 
     const paid = harness.getProject();
-    const seedJob = Object.values(paid.jobs).find((job) => job.purpose === 'seed_still')!;
+    const seedJob = Object.values(paid.jobs).find(
+      (job) => job.purpose === 'seed_still' && job.projectReferenceId === undefined
+    )!;
     const seedAsset: StudioAssetV2 = {
       id: 'seed_generated',
       projectId: paid.id,
@@ -4556,6 +5090,7 @@ describe('CreativeStudioServiceV2', () => {
       managedAsset: { collection: 'assets', fileName: 'seed_generated.png' },
       byteSize: 8,
       sha256: 'c'.repeat(64),
+      referenceAssetIds: ['asset_reference_background'],
       createdAt: '2026-08-17T00:00:02.000Z',
     };
     paid.assets[seedAsset.id] = seedAsset;
@@ -4875,6 +5410,18 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
     kind: 'set_rules',
     rules: [{ id: 'rule_1', text: 'Avoid competitor logos.', predicate: { kind: 'forbidden_terms', terms: ['logo'] } }],
   },
+  {
+    kind: 'set_project_references',
+    references: [
+      {
+        id: 'ref_ming',
+        kind: 'character',
+        label: 'Ming',
+        prompt: 'Character turnaround sheet for Ming.',
+        shotIds: ['clip_1'],
+      },
+    ],
+  },
   { kind: 'add_beat', beatId: 'section_new', beat: editableBeatV2(), beforeBeatId: null },
   { kind: 'edit_beat', beatId: 'section_1', changes: { targetSeconds: 12 } },
   { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
@@ -4904,6 +5451,7 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
   },
   { kind: 'set_hard_cut', shotId: 'clip_1', hardCut: true },
   { kind: 'set_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
+  { kind: 'set_shot_background_reference', shotId: 'clip_1', referenceId: 'ref_background' },
   { kind: 'promote_board_panel', shotId: 'clip_1', boardAssetId: 'asset_board' },
   { kind: 'trim_shot', shotId: 'clip_1', trimInSeconds: 0, trimOutSeconds: 4.5 },
   { kind: 'redetach_line', shotId: 'clip_1', line: 'A human-authored line' },
@@ -4939,7 +5487,7 @@ const referenceRequestRecordV2 = (
   schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   id: requestId,
   projectId: REFERENCE_WRITER_PROJECT_ID_V2,
-  shotIds: [shotId],
+  referenceIds: [shotId],
   status: 'pending',
   createdAt: new Date(createdAtMs).toISOString(),
 });
@@ -5003,7 +5551,7 @@ const pendingRequestInputV2 = (pendingDir: string, recordId = 'request_boundary'
 
 const referenceDecisionV2 = (
   requestId: string,
-  outcome: { kind: 'rejected' } | { kind: 'generation_gate'; handoffId: string; shotIds: string[] }
+  outcome: { kind: 'rejected' } | { kind: 'generation_gate'; handoffId: string; referenceIds: string[] }
 ) => ({
   schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   requestId,
@@ -5087,7 +5635,7 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: shot.durationSeconds,
-        referenceInput: null,
+        referenceInputs: [],
         conditioningInput: { kind: 'seed_still' as const, assetId: seed.id },
       },
     };
@@ -5131,6 +5679,7 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
       managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
       byteSize: 1,
       sha256: 'a'.repeat(64),
+      referenceAssetIds: [],
       durationSeconds: shot.durationSeconds,
       createdAt,
     };
@@ -5386,7 +5935,7 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(28);
+      expect(operationKinds).toHaveLength(30);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds
@@ -5449,11 +5998,17 @@ describe('Studio MCP schema-2 server', () => {
 
       const referenceSchema = tools.find((tool) => tool.name === 'studio_request_reference_images')?.inputSchema;
       const referenceValidator = new AjvJsonSchemaValidator().getValidator(referenceSchema as never);
-      expect(referenceSchema).toMatchObject({ type: 'object', additionalProperties: false, required: ['shotIds'] });
-      expect(referenceValidator({ shotIds: Array.from({ length: 24 }, (_, index) => `clip_${index}`) })).toMatchObject({
-        valid: true,
+      expect(referenceSchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+        required: ['referenceIds'],
       });
-      expect(referenceValidator({ shotIds: [], unknown: true })).toMatchObject({ valid: false });
+      expect(
+        referenceValidator({
+          referenceIds: Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES }, (_, index) => `ref_${index}`),
+        })
+      ).toMatchObject({ valid: true });
+      expect(referenceValidator({ referenceIds: [], unknown: true })).toMatchObject({ valid: false });
     } finally {
       await harness.close();
     }
@@ -5537,7 +6092,7 @@ describe('Studio MCP schema-2 server', () => {
           ],
         })
       ).toMatchObject({ valid: true });
-      expect(referenceValidator({ shotIds: ['clip_1', 'clip_1'] })).toMatchObject({ valid: false });
+      expect(referenceValidator({ referenceIds: ['clip_1', 'clip_1'] })).toMatchObject({ valid: false });
     } finally {
       await harness.close();
     }
@@ -5770,13 +6325,13 @@ describe('Studio MCP schema-2 server', () => {
         operations: [{ kind: 'rederive_line', shotId: 'clip_1', line: '' }],
       }).success
     ).toBe(false);
-    for (const shotIds of [
+    for (const referenceIds of [
       [],
-      Array.from({ length: 25 }, (_, index) => `clip_${index}`),
+      Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES + 1 }, (_, index) => `ref_${index}`),
       ['clip_1', 'clip_1'],
       ['unsafe/shot'],
     ]) {
-      expect(studioRequestReferenceImagesInputSchemaV2.safeParse({ shotIds }).success).toBe(false);
+      expect(studioRequestReferenceImagesInputSchemaV2.safeParse({ referenceIds }).success).toBe(false);
     }
   });
 
@@ -5977,7 +6532,7 @@ describe('Studio MCP schema-2 server', () => {
   it('projects validated Beat/Shot state with only the canonical picture pointer', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
     const project = makeSchema2ServiceProject();
-    addGeneratedVideosForMcpV2(project, 26);
+    addGeneratedVideosForMcpV2(project, 25);
     const briefReferences: StudioAssetV2[] = [
       ['cast_b', 'cast', 'Second cast'],
       ['cast_a', 'cast', 'First cast'],
@@ -6032,7 +6587,7 @@ describe('Studio MCP schema-2 server', () => {
     expect(result.isError).toBeUndefined();
     expect(view.beatOrder).toEqual(['section_1', 'section_2']);
     expect(view.beats.section_1.shotOrder).toEqual(['clip_1']);
-    expect(view.shots.clip_1).toMatchObject({ hasVideo: true, videoAssetId: 'take_26' });
+    expect(view.shots.clip_1).toMatchObject({ hasVideo: true, videoAssetId: 'take_25' });
     expect(view.shots.clip_1).not.toHaveProperty('selectedTakeId');
     expect(view.shots.clip_1).not.toHaveProperty('availableTakeIds');
     expect(view.bin).toEqual([]);
@@ -6211,7 +6766,7 @@ describe('Studio MCP schema-2 server', () => {
             base_revision: unsupportedManifest.revision,
             operations: [{ kind: 'set_brief', brief: `Must remain schema ${schemaVersion}` }],
           }),
-          createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] }),
+          createRequestReferenceImagesHandlerV2(config)({ referenceIds: ['ref_ming'] }),
         ]);
 
         expect(outcomes.every((result) => result.isError === true)).toBe(true);
@@ -6274,7 +6829,7 @@ describe('Studio MCP schema-2 server', () => {
                 base_revision: project.revision,
                 operations: [{ kind: 'set_brief', brief: 'Must stay in the authorizing project' }],
               })
-            : await createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] });
+            : await createRequestReferenceImagesHandlerV2(config)({ referenceIds: ['ref_background'] });
 
         expect(result.isError).toBe(true);
         expect(await captureForeignProject()).toEqual(before);
@@ -6322,7 +6877,7 @@ describe('Studio MCP schema-2 server', () => {
                   schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
                   id: recordId,
                   projectId: project.id,
-                  shotIds: ['clip_2'],
+                  referenceIds: ['clip_2'],
                   status: 'pending',
                   createdAt,
                 }
@@ -6414,7 +6969,7 @@ describe('Studio MCP schema-2 server', () => {
                 base_revision: originalProject.revision,
                 operations: [{ kind: 'set_brief', brief: 'Must not cross the root generation' }],
               })
-            : await createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] });
+            : await createRequestReferenceImagesHandlerV2(config)({ referenceIds: ['ref_background'] });
 
         expect(replacementInstalled).toBe(true);
         expect(result.isError).toBe(true);
@@ -6453,7 +7008,7 @@ describe('Studio MCP schema-2 server', () => {
             base_revision: 3,
             operations: [{ kind: 'set_brief', brief: 'Must not be queued' }],
           }),
-          createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] }),
+          createRequestReferenceImagesHandlerV2(config)({ referenceIds: ['ref_ming'] }),
         ]);
 
         expect(outcomes.every((result) => result.isError === true)).toBe(true);
@@ -6484,7 +7039,7 @@ describe('Studio MCP schema-2 server', () => {
         operations: [{ kind: 'set_brief', brief: 'Must not be written' }],
       })
     ).resolves.toMatchObject({ isError: true });
-    await expect(createRequestReferenceImagesHandlerV2(config)({ shotIds: ['clip_1'] })).resolves.toMatchObject({
+    await expect(createRequestReferenceImagesHandlerV2(config)({ referenceIds: ['ref_ming'] })).resolves.toMatchObject({
       isError: true,
     });
     await expect(readdir(pendingDir)).resolves.toEqual([]);
@@ -6562,34 +7117,34 @@ describe('Studio MCP schema-2 server', () => {
     const pendingDir = path.join(projectDir, 'reference-requests', 'pending');
     const slotsDir = path.join(projectDir, 'reference-requests', 'slots');
     await createSidecarFamilyV2(projectDir, 'reference-requests');
-    const shotIds = Array.from({ length: 24 }, (_, index) => `clip_${index + 1}`);
+    const referenceIds = Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES }, (_, index) => `ref_${index + 1}`);
     const projectAuthority = await capturePendingProjectAuthorityV2(projectDir);
 
     const record = await referenceRequestWriter.writeReferenceRequestRecordV2({
       pendingDir,
       projectId: 'project_v2',
       requestId: 'request_valid',
-      shotIds,
+      referenceIds,
       projectAuthority,
     });
-    expect(record).toMatchObject({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, shotIds });
+    expect(record).toMatchObject({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, referenceIds });
     expect(JSON.parse(await readFile(path.join(slotsDir, '0.slot'), 'utf8'))).toMatchObject({
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       requestId: 'request_valid',
     });
     const beforePending = await readdir(pendingDir);
     const beforeSlots = await readdir(slotsDir);
-    const hostileShotIds = new Proxy(['clip_1'], {
+    const hostileReferenceIds = new Proxy(['ref_1'], {
       ownKeys() {
         throw new Error('hostile ownKeys');
       },
     });
-    for (const invalidShotIds of [
+    for (const invalidReferenceIds of [
       [],
-      Array.from({ length: 25 }, (_, index) => `clip_${index}`),
-      ['clip_1', 'clip_1'],
-      ['unsafe/shot'],
-      hostileShotIds,
+      Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES + 1 }, (_, index) => `ref_${index}`),
+      ['ref_1', 'ref_1'],
+      ['unsafe/ref'],
+      hostileReferenceIds,
     ]) {
       // Keep the no-side-effect queue oracle deterministic between malformed direct calls.
       // eslint-disable-next-line no-await-in-loop
@@ -6597,8 +7152,8 @@ describe('Studio MCP schema-2 server', () => {
         referenceRequestWriter.writeReferenceRequestRecordV2({
           pendingDir,
           projectId: 'project_v2',
-          requestId: `invalid_${invalidShotIds.length}`,
-          shotIds: invalidShotIds,
+          requestId: `invalid_${invalidReferenceIds.length}`,
+          referenceIds: invalidReferenceIds,
           projectAuthority,
         })
       ).rejects.toMatchObject({ code: 'storage' });
@@ -6608,7 +7163,7 @@ describe('Studio MCP schema-2 server', () => {
 
     await writeFile(
       path.join(pendingDir, 'bad_date.json'),
-      JSON.stringify({ ...record, id: 'bad_date', shotIds: ['clip_bad_date'], createdAt: '2026-08-17' })
+      JSON.stringify({ ...record, id: 'bad_date', referenceIds: ['clip_bad_date'], createdAt: '2026-08-17' })
     );
     await writeFile(
       path.join(pendingDir, 'legacy.json'),
@@ -6621,14 +7176,14 @@ describe('Studio MCP schema-2 server', () => {
         createdAt: '2026-08-17T00:00:00.000Z',
       })
     );
-    await expect(
-      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2')
-    ).resolves.toEqual(new Set(shotIds));
+    await expect(referenceRequestWriter.listPendingReferenceRequestIdsV2(pendingDir, 'project_v2')).resolves.toEqual(
+      new Set(referenceIds)
+    );
 
     const racedFile = path.join(pendingDir, 'raced.json');
     const canonicalRacedFile = path.join(await nodeFs.realpath(pendingDir), 'raced.json');
     const oversizedTarget = path.join(projectDir, 'oversized.json');
-    await writeFile(racedFile, JSON.stringify({ ...record, id: 'raced', shotIds: ['clip_raced'] }));
+    await writeFile(racedFile, JSON.stringify({ ...record, id: 'raced', referenceIds: ['clip_raced'] }));
     await writeFile(
       path.join(slotsDir, '1.slot'),
       JSON.stringify({
@@ -6657,7 +7212,7 @@ describe('Studio MCP schema-2 server', () => {
       },
     });
     await expect(
-      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2', racedFs)
+      referenceRequestWriter.listPendingReferenceRequestIdsV2(pendingDir, 'project_v2', racedFs)
     ).rejects.toMatchObject({ code: 'storage' });
     expect(swapped).toBe(true);
     await rm(racedFile);
@@ -6690,7 +7245,7 @@ describe('Studio MCP schema-2 server', () => {
       },
     });
     await expect(
-      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(pendingDir, 'project_v2', mismatchedDirectoryFs)
+      referenceRequestWriter.listPendingReferenceRequestIdsV2(pendingDir, 'project_v2', mismatchedDirectoryFs)
     ).resolves.toEqual(new Set());
     await rm(projectDir, { recursive: true, force: true });
   });
@@ -6699,7 +7254,7 @@ describe('Studio MCP schema-2 server', () => {
     const missingRoot = await mkdtemp(path.join(tmpdir(), 'studio-reference-missing-'));
     const missingPendingDir = path.join(missingRoot, 'pending');
     await expect(
-      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+      referenceRequestWriter.listPendingReferenceRequestIdsV2(
         missingPendingDir,
         REFERENCE_WRITER_PROJECT_ID_V2,
         nodeFs,
@@ -6708,7 +7263,7 @@ describe('Studio MCP schema-2 server', () => {
       )
     ).resolves.toEqual(new Set());
     await expect(
-      referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+      referenceRequestWriter.listPendingReferenceRequestIdsV2(
         missingPendingDir,
         REFERENCE_WRITER_PROJECT_ID_V2,
         nodeFs,
@@ -6723,9 +7278,9 @@ describe('Studio MCP schema-2 server', () => {
     Object.defineProperty(sparseShotIds, 'compensating_key', { value: 'not-an-index', enumerable: true });
     try {
       for (const input of [
-        { projectId: '../unsafe', requestId: 'request_safe', shotIds: ['shot_safe'] },
-        { projectId: REFERENCE_WRITER_PROJECT_ID_V2, requestId: '../unsafe', shotIds: ['shot_safe'] },
-        { projectId: REFERENCE_WRITER_PROJECT_ID_V2, requestId: 'request_sparse', shotIds: sparseShotIds },
+        { projectId: '../unsafe', requestId: 'request_safe', referenceIds: ['shot_safe'] },
+        { projectId: REFERENCE_WRITER_PROJECT_ID_V2, requestId: '../unsafe', referenceIds: ['shot_safe'] },
+        { projectId: REFERENCE_WRITER_PROJECT_ID_V2, requestId: 'request_sparse', referenceIds: sparseShotIds },
       ]) {
         // Each invalid identity must fail before any V2 reservation or record publication.
         // eslint-disable-next-line no-await-in-loop
@@ -6795,7 +7350,7 @@ describe('Studio MCP schema-2 server', () => {
       );
 
       await expect(
-        referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+        referenceRequestWriter.listPendingReferenceRequestIdsV2(
           fixture.pendingDir,
           REFERENCE_WRITER_PROJECT_ID_V2,
           nodeFs,
@@ -6817,7 +7372,7 @@ describe('Studio MCP schema-2 server', () => {
         pendingDir: duplicateFixture.pendingDir,
         projectId: REFERENCE_WRITER_PROJECT_ID_V2,
         requestId: 'request_duplicate_slot',
-        shotIds: ['shot_duplicate_slot'],
+        referenceIds: ['shot_duplicate_slot'],
         projectAuthority: duplicateFixture.projectAuthority,
       });
       const duplicateSlot = JSON.stringify({
@@ -6829,7 +7384,7 @@ describe('Studio MCP schema-2 server', () => {
       const pendingBefore = await readFile(path.join(duplicateFixture.pendingDir, `${record.id}.json`), 'utf8');
 
       await expect(
-        referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+        referenceRequestWriter.listPendingReferenceRequestIdsV2(
           duplicateFixture.pendingDir,
           REFERENCE_WRITER_PROJECT_ID_V2,
           nodeFs,
@@ -6850,12 +7405,12 @@ describe('Studio MCP schema-2 server', () => {
         pendingDir: replacementFixture.pendingDir,
         projectId: REFERENCE_WRITER_PROJECT_ID_V2,
         requestId: 'request_pending_replacement',
-        shotIds: ['shot_pending_replacement'],
+        referenceIds: ['shot_pending_replacement'],
         projectAuthority: replacementFixture.projectAuthority,
       });
       const slotFile = path.join(await nodeFs.realpath(replacementFixture.slotsDir), '0.slot');
       const pendingFile = path.join(await nodeFs.realpath(replacementFixture.pendingDir), `${record.id}.json`);
-      const replacementBytes = JSON.stringify({ ...record, shotIds: ['shot_replacement'] });
+      const replacementBytes = JSON.stringify({ ...record, referenceIds: ['shot_replacement'] });
       await writeFile(pendingFile, JSON.stringify({ ...record, createdAt: '1970-01-01T00:00:00.000Z' }));
       let slotOpens = 0;
       let replaced = false;
@@ -6880,7 +7435,7 @@ describe('Studio MCP schema-2 server', () => {
       });
 
       await expect(
-        referenceRequestWriter.listPendingReferenceRequestShotIdsV2(
+        referenceRequestWriter.listPendingReferenceRequestIdsV2(
           replacementFixture.pendingDir,
           REFERENCE_WRITER_PROJECT_ID_V2,
           replacingFs,
@@ -6923,7 +7478,7 @@ describe('Studio MCP schema-2 server', () => {
           pendingDir: fixture.pendingDir,
           projectId: REFERENCE_WRITER_PROJECT_ID_V2,
           requestId: 'request_over_capacity',
-          shotIds: ['shot_1'],
+          referenceIds: ['shot_1'],
           projectAuthority: fixture.projectAuthority,
         })
       ).rejects.toMatchObject({ code: 'capacity' });
@@ -6989,7 +7544,7 @@ describe('Studio MCP schema-2 server', () => {
             pendingDir: fixture.pendingDir,
             projectId: REFERENCE_WRITER_PROJECT_ID_V2,
             requestId: `request_rejected_${index}`,
-            shotIds: ['shot_new'],
+            referenceIds: ['shot_new'],
             projectAuthority: fixture.projectAuthority,
           })
         ).rejects.toMatchObject({ code: 'storage' });
@@ -7027,7 +7582,7 @@ describe('Studio MCP schema-2 server', () => {
           pendingDir: fixture.pendingDir,
           projectId: REFERENCE_WRITER_PROJECT_ID_V2,
           requestId: 'request_after_duplicate',
-          shotIds: ['shot_new'],
+          referenceIds: ['shot_new'],
           projectAuthority: fixture.projectAuthority,
         })
       ).rejects.toMatchObject({ code: 'storage' });
@@ -7062,7 +7617,7 @@ describe('Studio MCP schema-2 server', () => {
           pendingDir: fixture.pendingDir,
           projectId: REFERENCE_WRITER_PROJECT_ID_V2,
           requestId: 'request_current_project',
-          shotIds: ['shot_new'],
+          referenceIds: ['shot_new'],
           projectAuthority: fixture.projectAuthority,
         })
       ).rejects.toMatchObject({ code: 'storage' });
@@ -7097,7 +7652,7 @@ describe('Studio MCP schema-2 server', () => {
           pendingDir: fixture.pendingDir,
           projectId: REFERENCE_WRITER_PROJECT_ID_V2,
           requestId: 'request_after_cleanup_restart',
-          shotIds: ['shot_new'],
+          referenceIds: ['shot_new'],
           projectAuthority: fixture.projectAuthority,
         })
       ).resolves.toMatchObject({ id: 'request_after_cleanup_restart' });
@@ -7127,7 +7682,7 @@ describe('Studio MCP schema-2 server', () => {
         pendingDir: fixture.pendingDir,
         projectId: REFERENCE_WRITER_PROJECT_ID_V2,
         requestId,
-        shotIds: [shotId],
+        referenceIds: [shotId],
         fs: recordFs,
         projectAuthority: fixture.projectAuthority,
       });
@@ -7271,7 +7826,7 @@ describe('Studio MCP schema-2 server', () => {
           pendingDir: fixture.pendingDir,
           projectId: REFERENCE_WRITER_PROJECT_ID_V2,
           requestId: 'request_after_mixed_cleanup',
-          shotIds: ['shot_new'],
+          referenceIds: ['shot_new'],
           projectAuthority: fixture.projectAuthority,
         })
       ).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
@@ -7314,7 +7869,7 @@ describe('Studio MCP schema-2 server', () => {
           pendingDir: fixture.pendingDir,
           projectId: REFERENCE_WRITER_PROJECT_ID_V2,
           requestId: 'request_after_authority_race',
-          shotIds: ['shot_new'],
+          referenceIds: ['shot_new'],
           projectAuthority: fixture.projectAuthority,
           authorityFence,
         })
@@ -7356,6 +7911,33 @@ describe('Studio MCP schema-2 server', () => {
     await createSidecarFamilyV2(projectDir, 'proposals');
     await createSidecarFamilyV2(projectDir, 'reference-requests');
     const project = makeSchema2ServiceProject();
+    project.referenceOrder = ['ref_ming', 'ref_mei', 'ref_background'];
+    project.references.ref_ming = {
+      id: 'ref_ming',
+      kind: 'character',
+      label: 'Ming',
+      prompt: 'Character turnaround sheet for Ming.',
+      candidateAssetId: null,
+      candidateJobId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      createdAt: '2026-08-17T00:00:00.000Z',
+      updatedAt: '2026-08-17T00:00:00.000Z',
+    };
+    project.references.ref_mei = {
+      id: 'ref_mei',
+      kind: 'character',
+      label: 'Mei',
+      prompt: 'Character turnaround sheet for Mei.',
+      candidateAssetId: null,
+      candidateJobId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      createdAt: '2026-08-17T00:00:00.000Z',
+      updatedAt: '2026-08-17T00:00:00.000Z',
+    };
+    project.shots.clip_1!.referenceIds = ['ref_ming', 'ref_background'];
+    project.shots.clip_2!.referenceIds = ['ref_mei', 'ref_background'];
     await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
     const config = { projectId: project.id, projectDir, pendingDir, referencePendingDir };
 
@@ -7408,25 +7990,27 @@ describe('Studio MCP schema-2 server', () => {
 
     const referenceHandler = createRequestReferenceImagesHandlerV2(config);
     for (const input of [
-      { shotIds: null as unknown as string[] },
-      { shotIds: [] },
-      { shotIds: Array.from({ length: 25 }, (_, index) => `clip_${index}`) },
-      { shotIds: ['unsafe/shot'] },
-      { shotIds: ['clip_1', 'clip_1'] },
-      { shotIds: ['inactive_clip'] },
-      { shotIds: ['clip_2', 'clip_1'] },
+      { referenceIds: null as unknown as string[] },
+      { referenceIds: [] },
+      {
+        referenceIds: Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES + 1 }, (_, index) => `ref_${index}`),
+      },
+      { referenceIds: ['unsafe/shot'] },
+      { referenceIds: ['clip_1', 'clip_1'] },
+      { referenceIds: ['inactive_clip'] },
+      { referenceIds: ['ref_mei', 'ref_ming'] },
     ]) {
       // These validation outcomes share one dedup inbox and are intentionally observed in order.
       // eslint-disable-next-line no-await-in-loop
       await expect(referenceHandler(input)).resolves.toMatchObject({ isError: true });
     }
-    await expect(createRequestReferenceImagesHandlerV2(null)({ shotIds: ['clip_1'] })).resolves.toMatchObject({
+    await expect(createRequestReferenceImagesHandlerV2(null)({ referenceIds: ['ref_ming'] })).resolves.toMatchObject({
       isError: true,
     });
-    const queued = await referenceHandler({ shotIds: ['clip_1', 'clip_2'] });
+    const queued = await referenceHandler({ referenceIds: ['ref_ming', 'ref_mei'] });
     expect(queued.content[0].text).toMatch(/Queued 2 of 2.*Nothing was generated/i);
-    const repeated = await referenceHandler({ shotIds: ['clip_1', 'clip_2'] });
-    expect(repeated.content[0].text).toMatch(/Queued 0 of 2.*Already queued: clip_1, clip_2/i);
+    const repeated = await referenceHandler({ referenceIds: ['ref_ming', 'ref_mei'] });
+    expect(repeated.content[0].text).toMatch(/Queued 0 of 2.*Already queued: ref_ming, ref_mei/i);
     const referenceEntries = await readdir(referencePendingDir);
     expect(referenceEntries.filter((name) => name.endsWith('.json'))).toHaveLength(1);
     expect(referenceEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
@@ -7854,7 +8438,7 @@ describe('Studio MCP schema-2 server', () => {
             : referenceDecisionV2(requestId, {
                 kind: 'generation_gate',
                 handoffId,
-                shotIds: ['shot_different'],
+                referenceIds: ['shot_different'],
               });
       await writeFile(
         path.join(path.dirname(fixture.pendingDir), 'decisions', `${requestId}.json`),
@@ -7892,7 +8476,9 @@ describe('Studio MCP schema-2 server', () => {
     const phase = await stageReadyReferenceRequestV2(fixture.pendingDir, requestId);
     await writeFile(
       path.join(path.dirname(fixture.pendingDir), 'decisions', `${requestId}.json`),
-      JSON.stringify(referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, shotIds: ['shot_existing'] }))
+      JSON.stringify(
+        referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, referenceIds: ['shot_existing'] })
+      )
     );
     try {
       await expect(
@@ -7922,7 +8508,9 @@ describe('Studio MCP schema-2 server', () => {
     const receiptFile = path.join(receiptsDir, `${handoffId}.json`);
     await writeFile(
       decisionFile,
-      JSON.stringify(referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, shotIds: ['shot_existing'] }))
+      JSON.stringify(
+        referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, referenceIds: ['shot_existing'] })
+      )
     );
     await nodeFs.link(decisionFile, `${decisionFile}.publish`);
     await writeFile(receiptFile, JSON.stringify(referenceReceiptV2(requestId, handoffId)));
@@ -7951,7 +8539,9 @@ describe('Studio MCP schema-2 server', () => {
     const phase = await stageReadyReferenceRequestV2(fixture.pendingDir, requestId);
     await writeFile(
       path.join(path.dirname(fixture.pendingDir), 'decisions', `${requestId}.json`),
-      JSON.stringify(referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, shotIds: ['shot_existing'] }))
+      JSON.stringify(
+        referenceDecisionV2(requestId, { kind: 'generation_gate', handoffId, referenceIds: ['shot_existing'] })
+      )
     );
     await writeFile(
       path.join(path.dirname(fixture.pendingDir), 'receipts', `${handoffId}.json`),

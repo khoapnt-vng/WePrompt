@@ -47,7 +47,7 @@ const template = {
   aspectRatio: '16:9',
   resolution: '1080p',
   durationSeconds: 8,
-  referenceInput: null,
+  referenceInputs: [],
 } as const;
 
 const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
@@ -61,6 +61,7 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
+  referenceIds: [],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -88,6 +89,7 @@ const makeQuote = () => {
       },
     },
     shots: { shot_1: makeShot('shot_1'), shot_2: makeShot('shot_2') },
+    references: {},
     jobs: {},
   };
   const core = createStudioSubmissionQuoteCoreV2({
@@ -164,6 +166,7 @@ const makeBoardAuthorizationInput = () => {
       },
     },
     shots: { shot_1: makeShot('shot_1') },
+    references: {},
     jobs: {},
   };
   const quote = {
@@ -270,7 +273,7 @@ const makeReferencedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV
   const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
   const plan = input.quote.baseItems[0]!.requestPlan;
   if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
-  plan.snapshot.referenceInput = { assetId: 'reference_1', sha256: 'a'.repeat(64) };
+  plan.snapshot.referenceInputs = [{ assetId: 'reference_1', sha256: 'a'.repeat(64) }];
   return input;
 };
 

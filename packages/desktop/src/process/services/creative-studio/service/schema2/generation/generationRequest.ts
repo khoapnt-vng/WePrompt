@@ -38,7 +38,7 @@ export type StudioGenerationRequestTemplateInput = StudioGenerationPromptInput &
   aspectRatio: StudioAspectRatio;
   resolution: StudioResolution;
   durationSeconds: number;
-  referenceInput: StudioGenerationReferenceInputSnapshot | null;
+  referenceInputs: readonly StudioGenerationReferenceInputSnapshot[];
 };
 
 export type StudioResolvedGenerationRequestPlanInput = {
@@ -62,13 +62,23 @@ const assertEndpoint = (value: number): void => {
   }
 };
 
-const cloneReferenceInput = (
-  input: StudioGenerationReferenceInputSnapshot | null
-): StudioGenerationReferenceInputSnapshot | null => {
-  if (input === null) return null;
+const cloneReferenceInput = (input: StudioGenerationReferenceInputSnapshot): StudioGenerationReferenceInputSnapshot => {
   assertSafeId(input.assetId, 'referenceInput.assetId');
   if (!LOWERCASE_SHA256.test(input.sha256)) throw new TypeError('referenceInput.sha256 must be lowercase SHA-256');
   return { assetId: input.assetId, sha256: input.sha256 };
+};
+
+const cloneReferenceInputs = (
+  inputs: readonly StudioGenerationReferenceInputSnapshot[]
+): StudioGenerationReferenceInputSnapshot[] => {
+  if (!Array.isArray(inputs)) throw new TypeError('referenceInputs must be an array');
+  const seen = new Set<string>();
+  return inputs.map((input) => {
+    const cloned = cloneReferenceInput(input);
+    if (seen.has(cloned.assetId)) throw new TypeError('referenceInputs must not repeat an asset');
+    seen.add(cloned.assetId);
+    return cloned;
+  });
 };
 
 const cloneConditioningInput = (input: StudioConditioningInputSnapshot): StudioConditioningInputSnapshot => {
@@ -142,7 +152,7 @@ const assertTemplate = (template: StudioGenerationRequestTemplate): StudioGenera
     aspectRatio: template.aspectRatio,
     resolution: template.resolution,
     durationSeconds: template.durationSeconds,
-    referenceInput: cloneReferenceInput(template.referenceInput),
+    referenceInputs: cloneReferenceInputs(template.referenceInputs),
   };
 };
 
@@ -172,7 +182,7 @@ export const createStudioGenerationRequestTemplate = (
   if (input.purpose !== 'seed_still' && input.purpose !== 'video_take') {
     throw new TypeError('purpose must be a Studio generation purpose');
   }
-  if (input.purpose === 'video_take' && input.referenceInput !== null) {
+  if (input.purpose === 'video_take' && input.referenceInputs.length > 0) {
     throw new TypeError('video requests cannot carry a Brief reference input');
   }
   return assertTemplate({
@@ -180,7 +190,7 @@ export const createStudioGenerationRequestTemplate = (
     aspectRatio: input.aspectRatio,
     resolution: input.resolution,
     durationSeconds: input.durationSeconds,
-    referenceInput: input.referenceInput,
+    referenceInputs: cloneReferenceInputs(input.referenceInputs),
   });
 };
 
@@ -191,12 +201,12 @@ export const createStudioResolvedGenerationRequestPlan = (
   const template = assertTemplate(input.template);
   if (input.purpose === 'seed_still' || input.purpose === 'board_still') {
     if (input.conditioningInput !== null) throw new TypeError('still requests cannot carry conditioning input');
-    if (input.purpose === 'board_still' && template.referenceInput !== null) {
+    if (input.purpose === 'board_still' && template.referenceInputs.length > 0) {
       throw new TypeError('board requests cannot carry a Brief reference input');
     }
   } else if (input.purpose === 'video_take') {
     if (input.conditioningInput === null) throw new TypeError('direct video requests require conditioning input');
-    if (template.referenceInput !== null) throw new TypeError('video requests cannot carry a Brief reference input');
+    if (template.referenceInputs.length > 0) throw new TypeError('video requests cannot carry a Brief reference input');
   } else {
     throw new TypeError('purpose must be a Studio generation purpose');
   }
@@ -214,7 +224,7 @@ export const createStudioDeferredGenerationRequestPlan = (
   input: StudioDeferredGenerationRequestPlanInput
 ): Extract<StudioGenerationRequestPlan, { kind: 'after_take_selection' }> => {
   const template = assertTemplate(input.template);
-  if (template.referenceInput !== null)
+  if (template.referenceInputs.length > 0)
     throw new TypeError('deferred video requests cannot carry a Brief reference input');
   return { kind: 'after_take_selection', template, dependency: cloneDependency(input.dependency) };
 };
@@ -250,11 +260,12 @@ export const studioGenerationRequestTemplatesEqual = (
   left.aspectRatio === right.aspectRatio &&
   left.resolution === right.resolution &&
   Object.is(left.durationSeconds, right.durationSeconds) &&
-  ((left.referenceInput === null && right.referenceInput === null) ||
-    (left.referenceInput !== null &&
-      right.referenceInput !== null &&
-      left.referenceInput.assetId === right.referenceInput.assetId &&
-      left.referenceInput.sha256 === right.referenceInput.sha256));
+  left.referenceInputs.length === right.referenceInputs.length &&
+  left.referenceInputs.every(
+    (reference, index) =>
+      reference.assetId === right.referenceInputs[index]?.assetId &&
+      reference.sha256 === right.referenceInputs[index]?.sha256
+  );
 
 export const studioConditioningInputsEqual = (
   left: StudioConditioningInputSnapshot | null,

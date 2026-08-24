@@ -103,6 +103,12 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toContain('read_storyboard');
   });
 
+  it('keeps a recorded proposal pending until a later read proves human acceptance', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/pending human review/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never claim.*applied/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/cannot approve or reject your own proposal/i);
+  });
+
   it('answers in the language the person writes in, since the rules themselves are English', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/language/i);
   });

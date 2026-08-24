@@ -13,7 +13,7 @@ import {
 } from '@/process/services/creative-studio/service/schema2';
 
 describe('createEmptyStudioProjectV2', () => {
-  it('creates the exact empty schema-4 project state with no Board style selected', () => {
+  it('creates the exact empty schema-5 project state with no Board style or references selected', () => {
     const project = createEmptyStudioProjectV2(
       {
         name: '  Project One  ',
@@ -28,7 +28,7 @@ describe('createEmptyStudioProjectV2', () => {
     );
 
     expect(project).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       revision: 1,
       id: 'project_1',
       name: 'Project One',
@@ -43,6 +43,8 @@ describe('createEmptyStudioProjectV2', () => {
       beatOrder: [],
       beats: {},
       shots: {},
+      referenceOrder: [],
+      references: {},
       bin: [],
       bedAssetId: null,
       spendPolicy: null,

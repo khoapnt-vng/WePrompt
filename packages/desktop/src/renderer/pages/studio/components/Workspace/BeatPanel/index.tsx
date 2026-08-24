@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Dropdown, Input, InputNumber, Menu, Modal, Popconfirm, Select } from '@arco-design/web-react';
+import { Alert, Button, Dropdown, Input, InputNumber, Menu, Modal, Popconfirm } from '@arco-design/web-react';
 import { MoreOne } from '@icon-park/react';
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -48,11 +48,6 @@ export type BeatPanelReviewGraph = {
   choices: readonly [BeatPanelReviewChoiceIdentity, ...BeatPanelReviewChoiceIdentity[]];
 };
 
-export type BeatPanelBriefReferenceOption = {
-  assetId: string;
-  label: string;
-};
-
 export type BeatPanelShotSave = {
   shotId: string;
   changes: StudioEditableShotChanges;
@@ -86,7 +81,6 @@ export type BeatPanelProps = {
   beatIndex: number;
   projection: WorkspaceProjection;
   drafts: UseWorkspaceDraftsResult;
-  briefReferenceOptions: readonly BeatPanelBriefReferenceOption[];
   reviewGraphs: readonly BeatPanelReviewGraph[];
   errorMessageKey: string | null;
   pending: boolean;
@@ -126,48 +120,7 @@ const wordCount = (value: string): number => {
   return trimmed.length === 0 ? 0 : trimmed.split(/\s+/u).length;
 };
 
-type GatePreferenceRecord = Record<string, Pick<BeatPanelReviewPreference, 'referenceAssetId'>>;
-
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
-
-const parseGatePreferences = (value: unknown): GatePreferenceRecord => {
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-    const result: GatePreferenceRecord = Object.create(null) as GatePreferenceRecord;
-    for (const [key, candidate] of Object.entries(parsed)) {
-      const keyMatch = /^([A-Za-z0-9_-]{1,256}):(seed_still|video_take)$/.exec(key);
-      if (keyMatch === null || typeof candidate !== 'object' || candidate === null) continue;
-      const row = candidate as Record<string, unknown>;
-      if (
-        keyMatch[2] !== 'seed_still' ||
-        (row.referenceAssetId !== null &&
-          (typeof row.referenceAssetId !== 'string' || !SAFE_STUDIO_ID.test(row.referenceAssetId)))
-      ) {
-        continue;
-      }
-      result[key] = {
-        referenceAssetId: row.referenceAssetId as string | null,
-      };
-    }
-    return result;
-  } catch {
-    return {};
-  }
-};
-
-const exactBriefReferenceOptions = (
-  options: readonly BeatPanelBriefReferenceOption[]
-): BeatPanelBriefReferenceOption[] => {
-  const counts = new Map<string, number>();
-  options.forEach(({ assetId }) => counts.set(assetId, (counts.get(assetId) ?? 0) + 1));
-  return options.flatMap((option) =>
-    SAFE_STUDIO_ID.test(option.assetId) && option.label.trim().length > 0 && counts.get(option.assetId) === 1
-      ? [{ assetId: option.assetId, label: option.label.trim() }]
-      : []
-  );
-};
 
 const reviewPreferenceKey = (shotId: string, purpose: BeatPanelReviewPreference['purpose']): string =>
   `${shotId}:${purpose}`;
@@ -327,21 +280,14 @@ const SeedStillCard: React.FC<SeedStillCardProps> = ({
 type ShotCardProps = {
   actions: BeatPanelActions;
   beat: WorkspaceBeatProjection;
-  briefReferenceOptions: readonly BeatPanelBriefReferenceOption[];
   canMoveNext: boolean;
   canMovePrevious: boolean;
   drafts: UseWorkspaceDraftsResult;
   disabled: boolean;
-  gatePreferences: GatePreferenceRecord;
   hidden: boolean;
   index: number;
   onMove: (index: number, delta: -1 | 1) => void;
   onParkSettled: (shotId: string, parked: boolean) => void;
-  onUpdateReviewPreference: (
-    shotId: string,
-    purpose: BeatPanelReviewPreference['purpose'],
-    changes: Pick<BeatPanelReviewPreference, 'referenceAssetId'>
-  ) => void;
   projectId: string;
   projection: WorkspaceProjection;
   reviewBlocked: boolean;
@@ -352,17 +298,14 @@ type ShotCardProps = {
 const ShotCard: React.FC<ShotCardProps> = ({
   actions,
   beat,
-  briefReferenceOptions,
   canMoveNext,
   canMovePrevious,
   drafts,
   disabled,
-  gatePreferences,
   hidden,
   index,
   onMove,
   onParkSettled,
-  onUpdateReviewPreference,
   projectId,
   projection,
   reviewBlocked,
@@ -438,19 +381,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
   };
   const history = beat.lineHistory;
   const reviewPreferences =
-    reviewChoices?.map((choice): BeatPanelReviewChoice => {
-      const stored = gatePreferences[reviewPreferenceKey(choice.shotId, choice.purpose)];
-      const referenceAssetId =
-        choice.purpose === 'seed_still' &&
-        stored?.referenceAssetId !== null &&
-        briefReferenceOptions.some((option) => option.assetId === stored?.referenceAssetId)
-          ? (stored?.referenceAssetId ?? null)
-          : null;
-      return {
-        ...choice,
-        referenceAssetId,
-      };
-    }) ?? null;
+    reviewChoices?.map((choice): BeatPanelReviewChoice => ({ ...choice, referenceAssetId: null })) ?? null;
   const reviewedGenerationBlocked =
     reviewChoices === null ||
     reviewChoices.some((choice) => {
@@ -941,48 +872,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
           </article>
         )}
         <div className={styles.shotFooter} data-shot-footer>
-          {reviewPreferences?.some((preference) => preference.purpose === 'seed_still') ? (
-            <div className={styles.generationPreferences}>
-              {reviewPreferences
-                .filter((preference) => preference.purpose === 'seed_still')
-                .map((preference) => {
-                  const position = exactShotPosition(projection, preference.shotId)!;
-                  const purpose = t(`${KEY_ROOT}.generation.purpose.seedStill`);
-                  const choiceLabel = t(`${KEY_ROOT}.generation.choiceLabel`, {
-                    beatIndex: position.beatIndex + 1,
-                    shotIndex: position.shotIndex + 1,
-                    purpose,
-                  });
-                  return (
-                    <label key={reviewPreferenceKey(preference.shotId, preference.purpose)}>
-                      <span>{t(`${KEY_ROOT}.generation.referenceForChoice`, { choice: choiceLabel })}</span>
-                      <Select
-                        allowClear
-                        aria-label={t(`${KEY_ROOT}.generation.referenceForChoice`, { choice: choiceLabel })}
-                        disabled={disabled}
-                        onChange={(value) =>
-                          onUpdateReviewPreference(preference.shotId, preference.purpose, {
-                            referenceAssetId:
-                              typeof value === 'string' &&
-                              briefReferenceOptions.some((option) => option.assetId === value)
-                                ? value
-                                : null,
-                          })
-                        }
-                        placeholder={t(`${KEY_ROOT}.generation.noReference`)}
-                        value={preference.referenceAssetId ?? undefined}
-                      >
-                        {briefReferenceOptions.map((option) => (
-                          <Select.Option key={option.assetId} value={option.assetId}>
-                            <span dir='auto'>{option.label}</span>
-                          </Select.Option>
-                        ))}
-                      </Select>
-                    </label>
-                  );
-                })}
-            </div>
-          ) : null}
           {reviewPreferences === null ? (
             <p className={styles.blocker} role='status'>
               {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
@@ -1160,7 +1049,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   beatIndex,
   projection,
   drafts,
-  briefReferenceOptions,
   reviewGraphs,
   errorMessageKey,
   pending,
@@ -1210,11 +1098,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
       )
     );
   const coverageDisabled = mutationLocked || drafts.staleRevision || coverageDraftDirty;
-  const gatePreferences = useMemo(() => parseGatePreferences(drafts.value('gate.choices')), [drafts.entries]);
-  const safeBriefReferenceOptions = useMemo(
-    () => exactBriefReferenceOptions(briefReferenceOptions),
-    [briefReferenceOptions]
-  );
   const lookWords = wordCount(look);
   const lookWarns = lookWords > STUDIO_LOOK_SOFT_WORD_LIMIT;
   const safeBeatIndex = beatIds[beatIndex] === beat.id ? beatIndex : beatIds.indexOf(beat.id);
@@ -1303,24 +1186,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
         t(`${KEY_ROOT}.reorder.announcement`, { from: index + 1, to: nextIndex + 1, total: beat.shots.length })
       );
     }
-  };
-
-  const updateReviewPreference = (
-    shotId: string,
-    purpose: BeatPanelReviewPreference['purpose'],
-    changes: Pick<BeatPanelReviewPreference, 'referenceAssetId'>
-  ): void => {
-    if (mutationLocked || purpose !== 'seed_still' || !SAFE_STUDIO_ID.test(shotId)) return;
-    const key = reviewPreferenceKey(shotId, purpose);
-    const current = gatePreferences[key] ?? { referenceAssetId: null };
-    const next = { ...current, ...changes };
-    if (
-      next.referenceAssetId !== null &&
-      !safeBriefReferenceOptions.some((option) => option.assetId === next.referenceAssetId)
-    ) {
-      return;
-    }
-    drafts.setValue('gate.choices', JSON.stringify({ ...gatePreferences, [key]: next }));
   };
 
   const commitPlanningDurations = (changes: CoveragePlanningPairChange): Promise<boolean> => {
@@ -1584,12 +1449,10 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                   key={shot.id}
                   actions={actions}
                   beat={beat}
-                  briefReferenceOptions={safeBriefReferenceOptions}
                   canMoveNext={index < beat.shots.length - 1}
                   canMovePrevious={index > 0}
                   disabled={mutationLocked}
                   drafts={drafts}
-                  gatePreferences={gatePreferences}
                   hidden={shot.id !== inspectedShotId}
                   index={index}
                   onMove={(position, delta) => void moveShot(position, delta)}
@@ -1600,7 +1463,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                     }
                     setShotLiftAnnouncement(t(`${KEY_ROOT}.lift.shotFailed`));
                   }}
-                  onUpdateReviewPreference={updateReviewPreference}
                   projectId={projectId}
                   projection={projection}
                   reviewBlocked={reviewBlockedMessageKey !== null || gateLocked}

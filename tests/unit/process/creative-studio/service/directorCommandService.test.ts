@@ -16,6 +16,7 @@ import type {
   StudioDirectorOperationV2,
   StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandServiceV2,
   StudioDirectorCommandApplyErrorV2,
@@ -52,7 +53,7 @@ const makeCommandV2 = (
   operations: StudioDirectorOperationV2[],
   overrides: Partial<StudioDirectorCommandRecordV2> = {}
 ): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   commandId: 'command_v2',
   projectId: project.id,
   expectedRevision: project.revision,

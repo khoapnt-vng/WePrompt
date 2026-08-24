@@ -5,13 +5,14 @@ import { resolve } from 'node:path';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  StudioAssetV2,
-  StudioCascadeProgressV2,
-  StudioRendererJobV2,
-  StudioRendererProjectV2,
-  StudioRendererChainStatusV2,
-  StudioRendererWorkspaceStatusV2,
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioAssetV2,
+  type StudioCascadeProgressV2,
+  type StudioRendererJobV2,
+  type StudioRendererProjectV2,
+  type StudioRendererChainStatusV2,
+  type StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   hasGenerationAffectingWorkspaceDrafts,
@@ -76,6 +77,7 @@ const makeShot = (id: string, line: string, chainBreak: 'none' | 'hard_cut' = 'h
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak,
+  referenceIds: [] as string[],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [] as string[],
@@ -87,7 +89,7 @@ const makeShot = (id: string, line: string, chainBreak: 'none' | 'hard_cut' = 'h
 
 const makeProject = (): StudioRendererProjectV2 =>
   ({
-    schemaVersion: 4,
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     revision: 3,
     id: 'project_1',
     name: 'Launch film',
@@ -136,6 +138,8 @@ const makeProject = (): StudioRendererProjectV2 =>
       shot_3: makeShot('shot_3', 'Third'),
       shot_parked: makeShot('shot_parked', 'Parked'),
     },
+    referenceOrder: [],
+    references: {},
     bin: [],
     bedAssetId: null,
     spendPolicy: null,
@@ -583,6 +587,52 @@ describe('projectWorkspace', () => {
     ]);
     expect(shot.currentPicture).toMatchObject({ assetId: 'video_current', sourceDurationSeconds: 10 });
     expect(shot).not.toHaveProperty('videoTakes');
+  });
+
+  it('keeps reference outputs and jobs out of Shot seed, activity, and recovery state', () => {
+    const project = makeProject();
+    const shot = project.shots.shot_1!;
+    const referenceAsset = makeAsset('reference_background', shot.id, 'image', 'assets', '2026-08-19T03:00:00.000Z');
+    project.assets[referenceAsset.id] = referenceAsset;
+    shot.assetIds.push(referenceAsset.id);
+    shot.seedStillId = referenceAsset.id;
+
+    const succeeded = makeJob('job_reference_succeeded', shot.id, {
+      purpose: 'seed_still',
+      projectReferenceId: 'ref_background',
+      outputAssetIds: [referenceAsset.id],
+      outputAssetIdsByRole: { primary: referenceAsset.id, poster: null },
+    });
+    const running = makeJob('job_reference_running', shot.id, {
+      purpose: 'seed_still',
+      projectReferenceId: 'ref_background',
+      status: 'running',
+    });
+    const attention = makeJob('job_reference_attention', shot.id, {
+      purpose: 'seed_still',
+      projectReferenceId: 'ref_background',
+      status: 'needs_attention',
+      error: { code: 'submission_unknown', messageKey: 'submissionUnknown' },
+      canRetry: true,
+    });
+    for (const job of [succeeded, running, attention]) {
+      project.jobs[job.id] = job;
+      shot.jobIds.push(job.id);
+    }
+
+    const projected = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+
+    expect(projected).toMatchObject({
+      explicitSeedAssetId: null,
+      effectiveSeedAssetId: null,
+      seedStills: [],
+      displayState: 'draft',
+      retainedWork: false,
+      seedGenerationInFlight: false,
+      seedGenerationBlocked: false,
+      attentionJobs: [],
+      hasEffectiveSeed: false,
+    });
   });
 
   it('admits only an explicitly pinned Board panel into the first-frame choices and never into fallback', () => {

@@ -12,6 +12,7 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioProposalV2,
   type StudioReferenceRequestV2,
+  type StudioRendererProjectV2,
   type StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { DirectorProposals } from '@renderer/pages/studio/components/Shell/DirectorProposals';
@@ -48,7 +49,7 @@ const referenceRequest = (id: string): StudioReferenceRequestV2 => ({
   schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   id,
   projectId: 'project-1',
-  shotIds: ['shot-1', 'shot-2'],
+  referenceIds: ['reference-1', 'reference-2'],
   status: 'pending',
   createdAt: '2026-08-19T00:00:00.000Z',
 });
@@ -59,11 +60,39 @@ const handoff = (
 ): StudioRendererReferenceGenerationHandoffV2 => ({
   handoffId,
   requestId: `request-${handoffId}`,
-  shotIds: ['shot-1'],
+  referenceIds: ['reference-1'],
   decidedAt: '2026-08-19T00:00:00.000Z',
   status,
   completedAt: status === 'open' ? null : '2026-08-19T01:00:00.000Z',
+  progress: { queued: 0, running: 0, succeeded: status === 'confirmed' ? 1 : 0, failed: 0 },
+  candidateAssetIds: status === 'confirmed' ? ['asset-reference-1'] : [],
+  retryReferenceIds: [],
 });
+
+const project = {
+  id: 'project-1',
+  revision: 3,
+  brief: 'Current brief',
+  referenceOrder: ['reference-1'],
+  references: {
+    'reference-1': {
+      id: 'reference-1',
+      kind: 'character',
+      label: 'Ming',
+      prompt: 'Character sheet',
+      candidateAssetId: 'asset-reference-1',
+      candidateJobId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      createdAt: '2026-08-19T00:00:00.000Z',
+      updatedAt: '2026-08-19T00:00:00.000Z',
+    },
+  },
+  beatOrder: [],
+  beats: {},
+  shots: {},
+  bin: [],
+} as StudioRendererProjectV2;
 
 describe('DirectorProposals', () => {
   const onAcceptProposal = vi.fn(async () => undefined);
@@ -71,6 +100,8 @@ describe('DirectorProposals', () => {
   const onGenerateReferences = vi.fn(async () => undefined);
   const onRejectReferences = vi.fn(async () => undefined);
   const onReviewHandoff = vi.fn();
+  const onReviewReferences = vi.fn();
+  const onRetryFailedReferences = vi.fn();
   const onDismissHandoff = vi.fn(async () => undefined);
 
   beforeEach(() => {
@@ -79,6 +110,8 @@ describe('DirectorProposals', () => {
     onGenerateReferences.mockClear();
     onRejectReferences.mockClear();
     onReviewHandoff.mockClear();
+    onReviewReferences.mockClear();
+    onRetryFailedReferences.mockClear();
     onDismissHandoff.mockClear();
   });
 
@@ -94,6 +127,7 @@ describe('DirectorProposals', () => {
   ) =>
     render(
       <DirectorProposals
+        project={project}
         proposals={proposals}
         referenceRequests={referenceRequests}
         referenceGenerationHandoffs={referenceGenerationHandoffs}
@@ -103,6 +137,8 @@ describe('DirectorProposals', () => {
         onGenerateReferences={onGenerateReferences}
         onRejectReferences={onRejectReferences}
         onReviewHandoff={onReviewHandoff}
+        onReviewReferences={onReviewReferences}
+        onRetryFailedReferences={onRetryFailedReferences}
         onDismissHandoff={onDismissHandoff}
         {...locks}
       />
@@ -142,12 +178,28 @@ describe('DirectorProposals', () => {
     });
   });
 
-  it('keeps terminal handoff cards persistent without actions', () => {
+  it('keeps a confirmed handoff actionable with durable progress and exact result thumbnails', () => {
     const { container } = renderList([proposal('accepted', 'accepted')], [], [handoff('confirmed', 'confirmed')]);
 
     expect(container).not.toBeEmptyDOMElement();
-    expect(screen.getByText('conversation.creativeStudio.workspace.handoffs.confirmed')).toBeVisible();
-    expect(within(screen.getByTestId('studio-handoff-confirmed')).queryByRole('button')).not.toBeInTheDocument();
+    const card = within(screen.getByTestId('studio-handoff-confirmed'));
+    expect(card.getByText(/workspace\.handoffs\.progress/)).toBeVisible();
+    expect(
+      card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.reviewReferences' })
+    ).toBeEnabled();
+    expect(card.getByRole('img', { name: /Ming/ })).toBeVisible();
+  });
+
+  it('retries only the failed identities carried by a partial handoff', () => {
+    const partial = {
+      ...handoff('partial', 'confirmed'),
+      progress: { queued: 0, running: 0, succeeded: 0, failed: 1 },
+      retryReferenceIds: ['reference-1'],
+    };
+    renderList([], [], [partial]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.retryFailed' }));
+    expect(onRetryFailedReferences).toHaveBeenCalledWith(partial);
   });
 
   it('blocks dirty-generation review with guidance while leaving free dismissal available', () => {

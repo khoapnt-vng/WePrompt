@@ -29,6 +29,7 @@ import {
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_PROJECT_REFERENCES,
 } from '@/common/types/project/creativeStudioTypes';
 
 const VALID_PAYLOADS = {
@@ -247,6 +248,17 @@ const VALID_PAYLOADS = {
     outcome: { kind: 'generation_gate' },
   },
   'creative-studio.list-reference-generation-handoffs': { projectId: 'project_1' },
+  'creative-studio.prepare-project-references': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    referenceIds: ['reference_character'],
+  },
+  'creative-studio.approve-project-reference': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    referenceId: 'reference_character',
+    candidateAssetId: 'asset_candidate',
+  },
   'creative-studio.prepare-submission': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -1021,6 +1033,35 @@ const INVALID_PAYLOADS = [
     { projectId: 'project_1', expectedRevision: 1, briefConversationId: 'conversation_1' },
   ],
   [
+    'creative-studio.prepare-project-references',
+    'empty project-reference scope',
+    { ...VALID_PAYLOADS['creative-studio.prepare-project-references'], referenceIds: [] },
+  ],
+  [
+    'creative-studio.prepare-project-references',
+    'duplicate project-reference scope',
+    {
+      ...VALID_PAYLOADS['creative-studio.prepare-project-references'],
+      referenceIds: ['reference_character', 'reference_character'],
+    },
+  ],
+  [
+    'creative-studio.prepare-project-references',
+    'renderer supplied handoff correlation',
+    {
+      ...VALID_PAYLOADS['creative-studio.prepare-project-references'],
+      originReferenceHandoffId: 'handoff_private',
+    },
+  ],
+  [
+    'creative-studio.approve-project-reference',
+    'renderer supplied approval history',
+    {
+      ...VALID_PAYLOADS['creative-studio.approve-project-reference'],
+      supersededAssetIds: ['asset_previous'],
+    },
+  ],
+  [
     'creative-studio.prepare-submission',
     'empty base choices',
     { ...VALID_PAYLOADS['creative-studio.prepare-submission'], baseChoices: [] },
@@ -1352,6 +1393,7 @@ describe('native bridge payload schemas', () => {
     { kind: 'reorder_shots', beatId: 'beat_1', shotOrder: ['shot_1'] },
     { kind: 'set_hard_cut', shotId: 'shot_1', hardCut: true },
     { kind: 'set_seed_still', shotId: 'shot_1', assetId: null },
+    { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_background' },
     { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_1' },
     { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: null, trimOutSeconds: null },
     { kind: 'redetach_line', shotId: 'shot_1', line: 'Detached' },
@@ -1382,6 +1424,26 @@ describe('native bridge payload schemas', () => {
   it.each(authoringOperations)('accepts renderer authoring operation $kind', (operation) => {
     const payload = { projectId: 'project_1', expectedRevision: 1, operations: [operation] };
     expect(parseNativeBridgePayload('creative-studio.apply-authoring-batch', payload)).toEqual(payload);
+  });
+
+  it.each([
+    { kind: 'set_shot_background_reference', shotId: '../shot', referenceId: 'reference_background' },
+    { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: '../reference' },
+    { kind: 'set_shot_background_reference', shotId: 'shot_1' },
+    {
+      kind: 'set_shot_background_reference',
+      shotId: 'shot_1',
+      referenceId: 'reference_background',
+      extra: true,
+    },
+  ])('rejects malformed Shot background-reference authoring %#', (operation) => {
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: [operation],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
   it('preserves the reviewed order of mixed Beat and Shot Bin entries', () => {
@@ -1697,6 +1759,8 @@ describe('native bridge payload schemas', () => {
   });
 
   it.each([
+    ['creative-studio.prepare-project-references', VALID_PAYLOADS['creative-studio.prepare-project-references']],
+    ['creative-studio.approve-project-reference', VALID_PAYLOADS['creative-studio.approve-project-reference']],
     ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
     ['creative-studio.retry-job-download', VALID_PAYLOADS['creative-studio.retry-job-download']],
     [
@@ -1713,6 +1777,8 @@ describe('native bridge payload schemas', () => {
   });
 
   it.each([
+    ['creative-studio.prepare-project-references', VALID_PAYLOADS['creative-studio.prepare-project-references']],
+    ['creative-studio.approve-project-reference', VALID_PAYLOADS['creative-studio.approve-project-reference']],
     ['creative-studio.prepare-submission', VALID_PAYLOADS['creative-studio.prepare-submission']],
     ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
     ['creative-studio.retry-job-download', VALID_PAYLOADS['creative-studio.retry-job-download']],
@@ -1737,6 +1803,20 @@ describe('native bridge payload schemas', () => {
       const payload = { projectId: 'project_1', requestId: 'request_1', expectedRevision: 2, outcome };
       expect(parseNativeBridgePayload('creative-studio.decide-reference-request', payload)).toEqual(payload);
     }
+  });
+
+  it('bounds project-reference preparation at the shared project limit', () => {
+    const maximum = {
+      ...VALID_PAYLOADS['creative-studio.prepare-project-references'],
+      referenceIds: Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES }, (_, index) => `reference_${index}`),
+    };
+    expect(parseNativeBridgePayload('creative-studio.prepare-project-references', maximum)).toEqual(maximum);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-project-references', {
+        ...maximum,
+        referenceIds: [...maximum.referenceIds, 'reference_overflow'],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
   it('loads presentation limits through the side-effect-free common policy boundary', () => {
@@ -1796,6 +1876,8 @@ describe('native bridge payload schemas', () => {
       'creative-studio.list-reference-requests',
       'creative-studio.decide-reference-request',
       'creative-studio.list-reference-generation-handoffs',
+      'creative-studio.prepare-project-references',
+      'creative-studio.approve-project-reference',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
       'creative-studio.cancel-job',
@@ -1833,6 +1915,8 @@ describe('native bridge payload schemas', () => {
     const exactOnceProviderKeys = [
       'creative-studio.get-director-session-authority',
       'creative-studio.bind-director-conversation',
+      'creative-studio.prepare-project-references',
+      'creative-studio.approve-project-reference',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
       'creative-studio.cancel-job',
@@ -1858,9 +1942,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(50);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(50);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(50);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);

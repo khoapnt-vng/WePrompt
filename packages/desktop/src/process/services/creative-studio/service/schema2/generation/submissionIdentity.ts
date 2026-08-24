@@ -8,13 +8,14 @@ import { createHash } from 'node:crypto';
 import type { StudioQuotedGeneration } from '@/common/types/project/creativeStudioTypes';
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
-const QUOTED_GENERATION_ID_NAMESPACE = 'creative-studio/quoted-generation/v1';
+const QUOTED_GENERATION_ID_NAMESPACE = 'creative-studio/quoted-generation/v2';
 
 export type StudioQuotedGenerationIdentityInput = {
   projectId: string;
   projectRevision: number;
   shotId: string;
   purpose: StudioQuotedGeneration['purpose'];
+  projectReferenceId?: string | null;
 };
 
 const assertSafeId = (value: string, field: string): void => {
@@ -25,6 +26,9 @@ const assertSafeId = (value: string, field: string): void => {
 export const createStudioQuotedGenerationId = (input: StudioQuotedGenerationIdentityInput): string => {
   assertSafeId(input.projectId, 'projectId');
   assertSafeId(input.shotId, 'shotId');
+  if (input.projectReferenceId !== undefined && input.projectReferenceId !== null) {
+    assertSafeId(input.projectReferenceId, 'projectReferenceId');
+  }
   if (!Number.isSafeInteger(input.projectRevision) || input.projectRevision < 1) {
     throw new RangeError('projectRevision must be a positive safe integer');
   }
@@ -37,6 +41,7 @@ export const createStudioQuotedGenerationId = (input: StudioQuotedGenerationIden
     Number.prototype.toString.call(input.projectRevision),
     input.shotId,
     input.purpose,
+    input.projectReferenceId ?? '',
   ].join('\0');
   return `item_${createHash('sha256').update(canonical, 'utf8').digest('hex')}`;
 };

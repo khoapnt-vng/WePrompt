@@ -11,6 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { BeatPanel } from '../BeatPanel';
 import { BoardView, binItemFocusKey } from './Board';
 import { CutView } from './Cut';
+import { ReferencesView, type ReferenceWorkspaceItem } from './References';
 import { TableView } from './Table';
 import type { WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
@@ -30,9 +31,13 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   boardActions,
   cutActions,
   beatPanelActions,
-  beatPanelBriefReferenceOptions,
   beatPanelReviewGraphs,
   beatPanelReviewBlockedMessageKey,
+  referenceActions,
+  referencePendingId = null,
+  referenceErrorMessageKey = null,
+  focusedReferenceIds = [],
+  focusedReferenceAssetIds = [],
 }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<{
@@ -64,6 +69,66 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       return beatKeys.some((key) => dirtyKeys.has(key)) ? [beat.id] : [];
     });
   }, [drafts.dirtyKeys, projection.activeBeats]);
+  const projectReferences = useMemo<ReferenceWorkspaceItem[]>(
+    () =>
+      project.referenceOrder.flatMap((referenceId) => {
+        const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
+        if (reference?.id !== referenceId) return [];
+        const candidateJob =
+          reference.candidateJobId !== null && Object.hasOwn(project.jobs, reference.candidateJobId)
+            ? project.jobs[reference.candidateJobId]
+            : undefined;
+        const candidateJobValid =
+          candidateJob?.id === reference.candidateJobId &&
+          candidateJob.projectId === project.id &&
+          candidateJob.projectReferenceId === reference.id &&
+          candidateJob.purpose === 'seed_still' &&
+          Object.hasOwn(project.shots, candidateJob.shotId) &&
+          project.shots[candidateJob.shotId]?.id === candidateJob.shotId &&
+          project.shots[candidateJob.shotId]?.jobIds.includes(candidateJob.id);
+        const generationStatus: ReferenceWorkspaceItem['generationStatus'] =
+          reference.candidateJobId === null
+            ? reference.candidateAssetId === null
+              ? 'idle'
+              : 'succeeded'
+            : !candidateJobValid
+              ? 'failed'
+              : candidateJob.status === 'queued_local' ||
+                  candidateJob.status === 'submitting' ||
+                  candidateJob.status === 'queued_remote'
+                ? 'queued'
+                : candidateJob.status === 'running'
+                  ? 'running'
+                  : candidateJob.status === 'succeeded'
+                    ? 'succeeded'
+                    : 'failed';
+        return [
+          {
+            id: reference.id,
+            kind: reference.kind,
+            label: reference.label,
+            description: reference.prompt,
+            approvedAssetId: reference.approvedAssetId,
+            candidateAssetId: reference.candidateAssetId,
+            generationStatus,
+            candidateJob: candidateJobValid
+              ? {
+                  id: candidateJob.id,
+                  status: candidateJob.status,
+                  error: candidateJob.error,
+                  canCancel: candidateJob.canCancel,
+                  canRetry: candidateJob.canRetry,
+                  canRetryDownload: candidateJob.canRetryDownload,
+                }
+              : null,
+          },
+        ];
+      }),
+    [project]
+  );
+  const referencesReady =
+    projectReferences.length === project.referenceOrder.length &&
+    projectReferences.every((reference) => reference.approvedAssetId !== null);
 
   useEffect(() => {
     if (
@@ -115,6 +180,28 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
 
   return (
     <div className={styles.root} data-studio-workspace-controls data-active-view={activeView}>
+      {activeView === 'references' ? (
+        <ReferencesView
+          actions={
+            referenceActions ?? {
+              approve: async () => false,
+              regenerate: () => undefined,
+              retryJob: async () => false,
+              retryDownload: async () => false,
+              cancelJob: async () => false,
+              continueToTable: () => undefined,
+            }
+          }
+          errorMessageKey={referenceErrorMessageKey}
+          focusedAssetIds={focusedReferenceAssetIds}
+          focusedReferenceIds={focusedReferenceIds}
+          gateLocked={gateLocked || referenceActions === undefined}
+          pendingReferenceId={referencePendingId}
+          projectId={project.id}
+          readyForTable={referencesReady}
+          references={projectReferences}
+        />
+      ) : null}
       {activeView === 'table' ? (
         <TableView
           actions={tableBoardActions}
@@ -160,7 +247,6 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           beat={openBeat}
           beatIds={projection.activeBeatIds}
           beatIndex={openBeatIndex}
-          briefReferenceOptions={beatPanelBriefReferenceOptions}
           drafts={drafts}
           errorMessageKey={errorMessageKey}
           gateLocked={gateLocked}

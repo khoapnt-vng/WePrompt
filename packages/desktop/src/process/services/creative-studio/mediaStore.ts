@@ -332,11 +332,11 @@ const providerPrimaryCollectionV2 = (
 const nonterminalJobNeedsBriefReferenceV2 = (project: StudioProjectV2, assetId: string): boolean =>
   Object.values(project.jobs).some((job) => {
     if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') return false;
-    const referenceInput =
+    const referenceInputs =
       job.requestPlan.kind === 'resolved'
-        ? job.requestPlan.snapshot.referenceInput
-        : job.requestPlan.template.referenceInput;
-    return referenceInput?.assetId === assetId;
+        ? job.requestPlan.snapshot.referenceInputs
+        : job.requestPlan.template.referenceInputs;
+    return referenceInputs.some((referenceInput) => referenceInput.assetId === assetId);
   });
 
 export type InternalImportReferenceInputV2 = {
@@ -4083,6 +4083,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         }
         const sourceLook = job.requestSnapshot?.prompt ?? `${beat.look.trim()}\n\n${shot.line.trim()}`;
         if (sourceLook.length <= STUDIO_ASSET_SOURCE_LOOK_MAX_LENGTH) asset.sourceLook = sourceLook;
+        asset.referenceAssetIds = (job.requestSnapshot?.referenceInputs ?? []).map((reference) => reference.assetId);
         defineRecordValue(current.assets, asset.id, asset);
         shot.assetIds.push(asset.id);
         if (job.purpose === 'video_take') {
@@ -4098,6 +4099,14 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         job.error = null;
         delete job.progress;
         job.updatedAt = now();
+        if (job.projectReferenceId !== undefined) {
+          const reference = ownRecordValue(current.references, job.projectReferenceId);
+          if (reference === undefined || reference.candidateJobId !== job.id) {
+            throw new CreativeStudioMediaError('job_inactive');
+          }
+          reference.candidateAssetId = asset.id;
+          reference.updatedAt = job.updatedAt;
+        }
         return current;
       },
       authorizeManagedFile
@@ -4127,6 +4136,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         ) {
           throw new CreativeStudioMediaError('invalid_media');
         }
+        posterAsset.referenceAssetIds = (job.requestSnapshot?.referenceInputs ?? []).map(
+          (reference) => reference.assetId
+        );
         defineRecordValue(current.assets, posterAsset.id, posterAsset);
         shot.assetIds.push(posterAsset.id);
         job.outputAssetIds.push(posterAsset.id);
@@ -4163,6 +4175,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         ) {
           throw new CreativeStudioMediaError('invalid_media');
         }
+        posterAsset.referenceAssetIds = (job.requestSnapshot?.referenceInputs ?? []).map(
+          (reference) => reference.assetId
+        );
         defineRecordValue(current.assets, posterAsset.id, posterAsset);
         shot.assetIds.push(posterAsset.id);
         job.outputAssetIds.push(posterAsset.id);

@@ -125,6 +125,8 @@ const EMPTY_AT_PATH: Array<string | FileOrFolderItem> = [];
 const EMPTY_UPLOAD_FILES: string[] = [];
 const initialMessageInFlight = new Map<string, string>();
 
+export type AionrsBeforeSend = (input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>;
+
 const toPresentationSourceRefs = (descriptors: readonly PresentationSourceDescriptor[]): PresentationSourceRef[] =>
   descriptors.map((descriptor) => ({
     grantId: descriptor.grantId,
@@ -190,7 +192,17 @@ const AionrsSendBox: React.FC<{
   agent_name?: string;
   teamSendMessage?: (payload: { input: string; files: string[] }) => Promise<void>;
   teamRuntime?: TeamSendBoxRuntime;
-}> = ({ conversation_id, modelSelection, modelSelector, session_mode, agent_name, teamSendMessage, teamRuntime }) => {
+  beforeSend?: AionrsBeforeSend;
+}> = ({
+  conversation_id,
+  modelSelection,
+  modelSelector,
+  session_mode,
+  agent_name,
+  teamSendMessage,
+  teamRuntime,
+  beforeSend,
+}) => {
   const [workspacePath, setWorkspacePath] = useState('');
   const [dynamicModes, setDynamicModes] = useState<AgentModeOption[]>([]);
   const [currentMode, setCurrentMode] = useState<string | undefined>(session_mode);
@@ -1199,6 +1211,12 @@ const AionrsSendBox: React.FC<{
   ]);
 
   const onSendHandler = async (message: string) => {
+    if (
+      beforeSend !== undefined &&
+      (await beforeSend({ message, hasAttachments: uploadFile.length > 0 || atPath.length > 0 }))
+    ) {
+      return;
+    }
     if (managedPresentationEligible && managedPresentationSubmission === undefined) {
       setContent(message);
       if (hasLegacyPresentationAttachments) setShowPresentationSourceReselect(true);

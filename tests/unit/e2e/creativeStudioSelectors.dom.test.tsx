@@ -51,7 +51,7 @@ const studioSpecSelectors = (): string[] => {
 };
 
 const project: StudioRendererProjectV2 = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   revision: 1,
   id: 'project-1',
   name: 'Launch film',
@@ -65,6 +65,8 @@ const project: StudioRendererProjectV2 = {
   beatOrder: [],
   beats: {},
   shots: {},
+  referenceOrder: [],
+  references: {},
   bin: [],
   bedAssetId: null,
   spendPolicy: null,

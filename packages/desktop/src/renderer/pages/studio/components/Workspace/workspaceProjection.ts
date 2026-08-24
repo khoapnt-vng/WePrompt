@@ -299,6 +299,18 @@ const videoPosterId = (project: StudioRendererProjectV2, shot: StudioShot, video
     : null;
 };
 
+const isProjectReferenceOutput = (project: StudioRendererProjectV2, shot: StudioShot, assetId: string): boolean =>
+  shot.jobIds.some((jobId) => {
+    const job = ownValue(project.jobs, jobId);
+    return (
+      job?.id === jobId &&
+      job.projectId === project.id &&
+      job.shotId === shot.id &&
+      job.projectReferenceId !== undefined &&
+      job.outputAssetIds.includes(assetId)
+    );
+  });
+
 const isEligibleImageTake = (project: StudioRendererProjectV2, shot: StudioShot, asset: StudioAssetV2): boolean =>
   asset.mediaKind === 'image' &&
   (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
@@ -306,6 +318,7 @@ const isEligibleImageTake = (project: StudioRendererProjectV2, shot: StudioShot,
   asset.briefReferenceLabel === undefined &&
   asset.projectId === project.id &&
   asset.shotId === shot.id &&
+  !isProjectReferenceOutput(project, shot, asset.id) &&
   shot.assetIds.includes(asset.id);
 
 const validVideoSourceDuration = (asset: StudioAssetV2): number | null =>
@@ -338,6 +351,7 @@ const validExplicitSeedStillId = (project: StudioRendererProjectV2, shot: Studio
       seed.managedAsset.collection === 'boardStills') &&
     seed.briefReferenceRole === undefined &&
     seed.briefReferenceLabel === undefined &&
+    !isProjectReferenceOutput(project, shot, seed.id) &&
     shot.assetIds.includes(seed.id)
     ? seed.id
     : null;
@@ -403,10 +417,15 @@ const projectSeedStills = (input: {
   return seedStills;
 };
 
-const hasOwnedJob = (project: StudioRendererProjectV2, shot: StudioShot): boolean =>
+const hasOwnedShotJob = (project: StudioRendererProjectV2, shot: StudioShot): boolean =>
   shot.jobIds.some((jobId) => {
     const job = ownValue(project.jobs, jobId);
-    return job?.id === jobId && job.projectId === project.id && job.shotId === shot.id;
+    return (
+      job?.id === jobId &&
+      job.projectId === project.id &&
+      job.shotId === shot.id &&
+      job.projectReferenceId === undefined
+    );
   });
 
 /**
@@ -445,6 +464,7 @@ const hasOwnedGenerationWithStatus = (
       job?.id === jobId &&
       job.projectId === project.id &&
       job.shotId === shot.id &&
+      job.projectReferenceId === undefined &&
       job.purpose === purpose &&
       statuses.has(job.status)
     );
@@ -457,6 +477,7 @@ const ownedAttentionJobs = (project: StudioRendererProjectV2, shot: StudioShot):
     return job?.id === jobId &&
       job.projectId === project.id &&
       job.shotId === shot.id &&
+      job.projectReferenceId === undefined &&
       job.status === 'needs_attention' &&
       job.error !== null &&
       (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
@@ -553,7 +574,9 @@ const projectShot = (
     coverAssetId: currentPicture?.posterAssetId ?? effectiveSeedAssetId,
     displayState,
     retainedWork:
-      shot.assetIds.some((assetId) => isOwnedAsset(project, shot, assetId) !== null) || hasOwnedJob(project, shot),
+      shot.assetIds.some(
+        (assetId) => isOwnedAsset(project, shot, assetId) !== null && !isProjectReferenceOutput(project, shot, assetId)
+      ) || hasOwnedShotJob(project, shot),
     videoGenerationInFlight: hasOwnedGenerationWithStatus(project, shot, 'video_take', GENERATION_IN_FLIGHT_STATUSES),
     seedGenerationInFlight: hasOwnedGenerationWithStatus(project, shot, 'seed_still', GENERATION_IN_FLIGHT_STATUSES),
     videoGenerationBlocked: hasOwnedGenerationWithStatus(project, shot, 'video_take', GENERATION_BLOCKING_STATUSES),
@@ -1524,8 +1547,7 @@ export const projectWorkspace = (
       const value: WorkspaceBinnedShotProjection = {
         ...projectedShot,
         coverAssetId: binnedCoverAssetId,
-        retainedWork:
-          shot.assetIds.some((assetId) => isOwnedAsset(project, shot, assetId) !== null) || hasOwnedJob(project, shot),
+        retainedWork: projectedShot.retainedWork,
         beatId: owner.beat.id,
         beatTitle: owner.beat.title,
         ownerBeatBinned: owner.beatBinned,

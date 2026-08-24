@@ -14,6 +14,9 @@ import {
   STUDIO_MAX_BEATS,
   STUDIO_MAX_LINE_HISTORY_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_REFERENCE_LABEL_LENGTH,
+  STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_SHOT_SECONDS,
@@ -38,6 +41,7 @@ import {
   type StudioMutationOperationV2,
   type StudioMutationReducerContextV2,
   type StudioProjectV2,
+  type StudioProjectReferenceDraftV2,
   type StudioShot,
   type StudioSpendPolicy,
   type StudioUndoPatch,
@@ -96,6 +100,7 @@ const SHOT_INPUT_KEYS = new Set(['line', 'narration', 'onScreenText', 'durationS
 const SHOT_CHANGE_KEYS = new Set(SHOT_INPUT_KEYS);
 const RULE_DRAFT_KEYS = new Set(['id', 'text', 'predicate']);
 const RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
+const PROJECT_REFERENCE_DRAFT_KEYS = new Set(['id', 'kind', 'label', 'prompt', 'shotIds']);
 const SPEND_POLICY_KEYS = new Set(['currency', 'maxPerBatchMinorUnits']);
 const BIN_BEAT_KEYS = new Set(['kind', 'beatId', 'reason']);
 const BIN_SHOT_KEYS = new Set(['kind', 'beatId', 'shotId', 'reason']);
@@ -103,6 +108,8 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   edit_project: new Set(['kind', 'changes']),
   set_brief: new Set(['kind', 'brief']),
   set_rules: new Set(['kind', 'rules']),
+  set_project_references: new Set(['kind', 'references']),
+  set_shot_background_reference: new Set(['kind', 'shotId', 'referenceId']),
   add_beat: new Set(['kind', 'beatId', 'beat', 'beforeBeatId']),
   edit_beat: new Set(['kind', 'beatId', 'changes']),
   reorder_beats: new Set(['kind', 'beatOrder']),
@@ -211,6 +218,37 @@ const isUniqueSafeIdArray = (value: unknown, maximumLength: number): value is st
     const id = value[index];
     if (!isSafeId(id) || ids.has(id)) return false;
     ids.add(id);
+  }
+  return true;
+};
+
+const isProjectReferenceDraft = (value: unknown): value is StudioProjectReferenceDraftV2 =>
+  isRecord(value) &&
+  hasExactKeys(value, PROJECT_REFERENCE_DRAFT_KEYS) &&
+  isSafeId(value.id) &&
+  (value.kind === 'character' || value.kind === 'background') &&
+  typeof value.label === 'string' &&
+  value.label.trim().length > 0 &&
+  value.label === value.label.trim() &&
+  value.label.length <= STUDIO_MAX_REFERENCE_LABEL_LENGTH &&
+  typeof value.prompt === 'string' &&
+  value.prompt.trim().length > 0 &&
+  value.prompt === value.prompt.trim() &&
+  value.prompt.length <= STUDIO_MAX_REFERENCE_PROMPT_LENGTH &&
+  isUniqueSafeIdArray(value.shotIds, STUDIO_MAX_SHOTS_PER_PROJECT);
+
+const isProjectReferenceDraftArray = (value: unknown): value is StudioProjectReferenceDraftV2[] => {
+  if (!isDenseArray(value, STUDIO_MAX_PROJECT_REFERENCES) || value.length < 1) return false;
+  const ids = new Set<string>();
+  const labels = new Set<string>();
+  let sawBackground = false;
+  for (const candidate of value) {
+    if (!isProjectReferenceDraft(candidate) || ids.has(candidate.id)) return false;
+    const labelIdentity = `${candidate.kind}\0${candidate.label}`;
+    if (labels.has(labelIdentity) || (sawBackground && candidate.kind === 'character')) return false;
+    ids.add(candidate.id);
+    labels.add(labelIdentity);
+    if (candidate.kind === 'background') sawBackground = true;
   }
   return true;
 };
@@ -400,6 +438,12 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
       return;
     case 'set_rules':
       if (!isRuleDraftArray(operation.rules)) fail('invalid_operation');
+      return;
+    case 'set_project_references':
+      if (!isProjectReferenceDraftArray(operation.references)) fail('invalid_operation');
+      return;
+    case 'set_shot_background_reference':
+      if (!isSafeId(operation.shotId) || !isSafeId(operation.referenceId)) fail('invalid_operation');
       return;
     case 'add_beat':
       if (!isSafeId(operation.beatId) || !isEditableBeat(operation.beat) || !isSafeAnchor(operation.beforeBeatId)) {
@@ -674,6 +718,34 @@ const hasBoundNonterminalJob = (
       predicate(job)
   );
 
+const hasCanonicalApprovedProjectReferenceAsset = (project: StudioProjectV2, referenceId: string): boolean => {
+  const reference = ownValue(project.references, referenceId);
+  if (reference?.approvedAssetId === null || reference === undefined) return false;
+  const asset = ownValue(project.assets, reference.approvedAssetId);
+  if (
+    asset?.id !== reference.approvedAssetId ||
+    asset.projectId !== project.id ||
+    asset.mediaKind !== 'image' ||
+    asset.managedAsset.collection !== 'assets' ||
+    asset.shotId === null
+  ) {
+    return false;
+  }
+  const producer = Object.values(project.jobs).filter(
+    (job) =>
+      job.projectId === project.id &&
+      job.shotId === asset.shotId &&
+      job.projectReferenceId === reference.id &&
+      job.purpose === 'seed_still' &&
+      job.status === 'succeeded' &&
+      job.outputAssetIdsByRole.primary === asset.id &&
+      job.outputAssetIds.filter((assetId) => assetId === asset.id).length === 1
+  );
+  if (producer.length !== 1) return false;
+  const owner = ownValue(project.shots, asset.shotId);
+  return owner?.id === asset.shotId && owner.assetIds.includes(asset.id) && owner.jobIds.includes(producer[0]!.id);
+};
+
 const hasBoardHistory = (project: StudioProjectV2): boolean =>
   Object.values(project.jobs).some((job) => job.purpose === 'board_still') ||
   Object.values(project.shots).some((shot) => shot.boardAssetId !== null || shot.supersededBoardAssetIds.length > 0);
@@ -739,6 +811,8 @@ const projectFields = (project: StudioProjectV2): Extract<StudioUndoPatch, { kin
   brief: project.brief,
   rules: structuredClone(project.rules),
   beatOrder: [...project.beatOrder],
+  referenceOrder: [...project.referenceOrder],
+  references: structuredClone(project.references),
   imageRouteId: project.imageRouteId,
   videoRouteId: project.videoRouteId,
   spendPolicy: project.spendPolicy === null ? null : { ...project.spendPolicy },
@@ -755,7 +829,7 @@ const canonicalJson = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   const record = value as Record<string, unknown>;
   return `{${Object.keys(record)
-    .sort()
+    .toSorted()
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
     .join(',')}}`;
 };
@@ -1136,6 +1210,196 @@ export const applyStudioMutationBatchV2 = (
         break;
       }
 
+      case 'set_project_references': {
+        const activeShotIds = draft.beatOrder.flatMap((beatId) => ownValue(draft.beats, beatId)?.shotOrder ?? []);
+        const activePositions = new Map(activeShotIds.map((shotId, index) => [shotId, index]));
+        const referencesByShot = new Map<string, string[]>();
+        for (const reference of operation.references) {
+          let previousPosition = -1;
+          for (const shotId of reference.shotIds) {
+            const position = activePositions.get(shotId);
+            if (position === undefined || position <= previousPosition) fail('invalid_operation');
+            previousPosition = position;
+            const assigned = referencesByShot.get(shotId) ?? [];
+            if (
+              reference.kind === 'background' &&
+              assigned.some((referenceId) =>
+                operation.references.some(
+                  (candidate) => candidate.id === referenceId && candidate.kind === 'background'
+                )
+              )
+            ) {
+              fail('invalid_operation');
+            }
+            assigned.push(reference.id);
+            referencesByShot.set(shotId, assigned);
+          }
+        }
+
+        const nextReferenceIds = operation.references.map((reference) => reference.id);
+        const nextReferenceIdSet = new Set(nextReferenceIds);
+        const removedReferences = draft.referenceOrder.flatMap((referenceId) => {
+          const reference = ownValue(draft.references, referenceId);
+          return reference !== undefined && !nextReferenceIdSet.has(referenceId) ? [reference] : [];
+        });
+        if (
+          removedReferences.some(
+            (reference) =>
+              reference.candidateAssetId !== null ||
+              reference.candidateJobId !== null ||
+              reference.approvedAssetId !== null ||
+              reference.supersededAssetIds.length > 0 ||
+              Object.values(draft.jobs).some((job) => job.projectReferenceId === reference.id) ||
+              Object.values(draft.shots).some(
+                (shot) =>
+                  shot.referenceIds.includes(reference.id) &&
+                  draft.bin.some((item) => item.kind === 'shot' && item.shotId === shot.id)
+              )
+          )
+        ) {
+          fail('dependency_blocked');
+        }
+
+        for (const reference of operation.references) {
+          const existing = ownValue(draft.references, reference.id);
+          if (
+            existing !== undefined &&
+            (existing.kind !== reference.kind ||
+              existing.label !== reference.label ||
+              existing.prompt !== reference.prompt) &&
+            hasBoundNonterminalJob(draft, (job) => job.projectReferenceId === reference.id)
+          ) {
+            fail('dependency_blocked');
+          }
+          if (
+            existing !== undefined &&
+            existing.kind !== reference.kind &&
+            (existing.candidateAssetId !== null ||
+              existing.candidateJobId !== null ||
+              existing.approvedAssetId !== null ||
+              existing.supersededAssetIds.length > 0 ||
+              Object.values(draft.jobs).some((job) => job.projectReferenceId === existing.id))
+          ) {
+            fail('dependency_blocked');
+          }
+        }
+
+        const nextReferences: StudioProjectV2['references'] = {};
+        for (const reference of operation.references) {
+          const existing = ownValue(draft.references, reference.id);
+          const definitionChanged =
+            existing === undefined ||
+            existing.kind !== reference.kind ||
+            existing.label !== reference.label ||
+            existing.prompt !== reference.prompt;
+          defineOwn(nextReferences, reference.id, {
+            id: reference.id,
+            kind: reference.kind,
+            label: reference.label,
+            prompt: reference.prompt,
+            candidateAssetId: existing?.candidateAssetId ?? null,
+            candidateJobId: existing?.candidateJobId ?? null,
+            approvedAssetId: existing?.approvedAssetId ?? null,
+            supersededAssetIds: [...(existing?.supersededAssetIds ?? [])],
+            createdAt: existing?.createdAt ?? reducerContext.capturedAt,
+            updatedAt: definitionChanged ? reducerContext.capturedAt : existing.updatedAt,
+          });
+        }
+
+        const nextAssignments = new Map<string, string[]>();
+        for (const shotId of activeShotIds) nextAssignments.set(shotId, [...(referencesByShot.get(shotId) ?? [])]);
+        for (const item of draft.bin) {
+          if (item.kind !== 'shot') continue;
+          const shot = ownValue(draft.shots, item.shotId);
+          if (shot === undefined) fail('invalid_operation');
+          if (shot.referenceIds.some((referenceId) => !nextReferenceIdSet.has(referenceId))) {
+            fail('dependency_blocked');
+          }
+          const assigned = nextReferenceIds.filter((referenceId) => shot.referenceIds.includes(referenceId));
+          nextAssignments.set(shot.id, assigned);
+        }
+
+        const changedShotIds = [...nextAssignments].flatMap(([shotId, referenceIds]) => {
+          const shot = ownValue(draft.shots, shotId);
+          if (shot === undefined) fail('invalid_operation');
+          return sameValue(shot.referenceIds, referenceIds) ? [] : [shotId];
+        });
+        if (
+          changedShotIds.some((shotId) => hasBoundNonterminalJob(draft, (job) => job.shotId === shotId)) ||
+          removedReferences.some((reference) =>
+            hasBoundNonterminalJob(draft, (job) => job.projectReferenceId === reference.id)
+          )
+        ) {
+          fail('dependency_blocked');
+        }
+
+        if (
+          sameValue(draft.referenceOrder, nextReferenceIds) &&
+          sameValue(draft.references, nextReferences) &&
+          changedShotIds.length === 0
+        ) {
+          fail('invalid_operation');
+        }
+        touchProject(tracker, draft);
+        draft.referenceOrder = nextReferenceIds;
+        draft.references = nextReferences;
+        for (const [shotId, referenceIds] of nextAssignments) {
+          const shot = ownValue(draft.shots, shotId);
+          if (shot === undefined) fail('invalid_operation');
+          if (sameValue(shot.referenceIds, referenceIds)) continue;
+          touchShot(tracker, draft, shotId);
+          defineOwn(draft.shots, shotId, { ...shot, referenceIds: [...referenceIds] });
+        }
+        break;
+      }
+
+      case 'set_shot_background_reference': {
+        const shot = ownValue(draft.shots, operation.shotId);
+        const owner = findActiveShotOwner(draft, operation.shotId);
+        const reference = ownValue(draft.references, operation.referenceId);
+        const referencePosition = draft.referenceOrder.indexOf(operation.referenceId);
+        if (
+          shot?.id !== operation.shotId ||
+          owner === undefined ||
+          owner.shotOrder.filter((shotId) => shotId === operation.shotId).length !== 1 ||
+          reference?.id !== operation.referenceId ||
+          reference.kind !== 'background' ||
+          referencePosition < 0 ||
+          draft.referenceOrder.filter((referenceId) => referenceId === operation.referenceId).length !== 1 ||
+          !hasCanonicalApprovedProjectReferenceAsset(draft, operation.referenceId)
+        ) {
+          fail('invalid_operation');
+        }
+
+        const retainedCharacterIds = new Set(
+          shot.referenceIds.filter((referenceId) => ownValue(draft.references, referenceId)?.kind === 'character')
+        );
+        const nextReferenceIds = draft.referenceOrder.filter(
+          (referenceId) => retainedCharacterIds.has(referenceId) || referenceId === operation.referenceId
+        );
+        if (sameValue(shot.referenceIds, nextReferenceIds)) fail('invalid_operation');
+        if (hasBoundNonterminalJob(draft, (job) => job.shotId === shot.id)) fail('dependency_blocked');
+
+        const removedReferenceIds = new Set(
+          shot.referenceIds.filter((referenceId) => !nextReferenceIds.includes(referenceId))
+        );
+        if (
+          Object.values(draft.jobs).some(
+            (job) =>
+              job.shotId === shot.id &&
+              job.projectReferenceId !== undefined &&
+              NONTERMINAL_JOB_STATUSES.has(job.status) &&
+              removedReferenceIds.has(job.projectReferenceId)
+          )
+        ) {
+          fail('dependency_blocked');
+        }
+
+        touchShot(tracker, draft, shot.id);
+        defineOwn(draft.shots, shot.id, { ...shot, referenceIds: nextReferenceIds });
+        break;
+      }
+
       case 'add_beat': {
         if (operation.beforeBeatId !== null && !draft.beatOrder.includes(operation.beforeBeatId)) {
           fail('invalid_operation');
@@ -1275,6 +1539,7 @@ export const applyStudioMutationBatchV2 = (
           trimInSeconds: null,
           trimOutSeconds: null,
           chainBreak: 'none',
+          referenceIds: [],
           seedStillId: null,
           boardAssetId: null,
           supersededBoardAssetIds: [],
@@ -1499,6 +1764,7 @@ export const applyStudioMutationBatchV2 = (
               trimInSeconds: null,
               trimOutSeconds: null,
               chainBreak: proposed.chainBreak,
+              referenceIds: [],
               seedStillId: null,
               boardAssetId: null,
               supersededBoardAssetIds: [],

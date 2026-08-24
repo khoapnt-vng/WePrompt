@@ -9,7 +9,10 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IProvider, ISessionMcpServer, TChatConversation, TProviderWithModel } from '@/common/config/storage';
-import type { StudioRendererProjectV2 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioRendererProjectV2,
+} from '@/common/types/project/creativeStudioTypes';
 import { DIRECTOR_PRESET_RULES } from '@/renderer/pages/studio/components/Workspace/DirectorRail/openingTurn';
 
 const harness = vi.hoisted(() => ({
@@ -21,6 +24,9 @@ const harness = vi.hoisted(() => ({
   chatMounts: 0,
   chatUnmounts: 0,
   renderedChatConversation: undefined as TChatConversation | undefined,
+  beforeSend: undefined as
+    | ((input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>)
+    | undefined,
   uuid: vi.fn(),
   descriptor: vi.fn(),
   authority: vi.fn(),
@@ -80,8 +86,17 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection'
 }));
 
 vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
-  default: ({ conversation_id, conversation }: { conversation_id: string; conversation: TChatConversation }) => {
+  default: ({
+    conversation_id,
+    conversation,
+    beforeSend,
+  }: {
+    conversation_id: string;
+    conversation: TChatConversation;
+    beforeSend?: (input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>;
+  }) => {
     harness.renderedChatConversation = conversation;
+    harness.beforeSend = beforeSend;
     const [draft, setDraft] = React.useState('');
     React.useEffect(() => {
       harness.chatMounts += 1;
@@ -162,6 +177,7 @@ import {
   hasExactDirectorAuthoritySnapshot,
   hasExactDirectorMcpSnapshot,
   hasSafeRouteCatalog,
+  parseDirectorProposalChatIntent,
 } from '@/renderer/pages/studio/components/Workspace/DirectorRail';
 
 const provider = {
@@ -237,7 +253,7 @@ const route = (kind: 'image' | 'video', ordinal = 1) => ({
 });
 
 const project = (overrides: Partial<StudioRendererProjectV2> = {}): StudioRendererProjectV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   revision: 3,
   id: 'project_1',
   name: 'Launch film',
@@ -251,6 +267,8 @@ const project = (overrides: Partial<StudioRendererProjectV2> = {}): StudioRender
   beatOrder: [],
   beats: {},
   shots: {},
+  referenceOrder: [],
+  references: {},
   bin: [],
   bedAssetId: null,
   spendPolicy: null,
@@ -316,6 +334,7 @@ describe('DirectorRail', () => {
     harness.chatMounts = 0;
     harness.chatUnmounts = 0;
     harness.renderedChatConversation = undefined;
+    harness.beforeSend = undefined;
     harness.uuid
       .mockReset()
       .mockReturnValueOnce('conversation_director')
@@ -648,6 +667,46 @@ describe('DirectorRail', () => {
     render(<DirectorRail project={project()} />);
     await screen.findByRole('textbox', { name: 'Director composer' });
     expect(harness.create.mock.calls[0][0].extra.preset_rules).toBe(DIRECTOR_PRESET_RULES);
+  });
+
+  it.each([
+    ['Approve', 'accept'],
+    ['apply it.', 'accept'],
+    ['/approve', 'accept'],
+    ['Reject!', 'reject'],
+    ['/reject', 'reject'],
+  ] as const)('recognizes only an exact proposal decision phrase: %s', (message, intent) => {
+    expect(parseDirectorProposalChatIntent(message)).toBe(intent);
+  });
+
+  it.each(['yes', 'okay', 'approve these proposals', 'approve and render', 'do not reject', ''])(
+    'does not grant proposal authority to an ambiguous chat phrase: %s',
+    (message) => {
+      expect(parseDirectorProposalChatIntent(message)).toBeNull();
+    }
+  );
+
+  it('consumes one exact human approval without forwarding it to the Director model', async () => {
+    const onProposalIntent = vi.fn(async () => undefined);
+    render(<DirectorRail project={project()} onProposalIntent={onProposalIntent} />);
+    await screen.findByRole('textbox', { name: 'Director composer' });
+
+    await expect(harness.beforeSend?.({ message: 'approve', hasAttachments: false })).resolves.toBe(true);
+    expect(onProposalIntent).toHaveBeenCalledOnce();
+    expect(onProposalIntent).toHaveBeenCalledWith('accept');
+    expect(harness.send).not.toHaveBeenCalled();
+  });
+
+  it('leaves ordinary messages and messages with attachments on the normal chat path', async () => {
+    const onProposalIntent = vi.fn(async () => undefined);
+    render(<DirectorRail project={project()} onProposalIntent={onProposalIntent} />);
+    await screen.findByRole('textbox', { name: 'Director composer' });
+
+    await expect(
+      harness.beforeSend?.({ message: 'Please make the ending warmer.', hasAttachments: false })
+    ).resolves.toBe(false);
+    await expect(harness.beforeSend?.({ message: 'approve', hasAttachments: true })).resolves.toBe(false);
+    expect(onProposalIntent).not.toHaveBeenCalled();
   });
 
   it('waits for a complete claimant catalogue before an automatic fresh create', async () => {

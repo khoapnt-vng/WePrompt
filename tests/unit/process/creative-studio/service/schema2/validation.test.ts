@@ -16,6 +16,7 @@ import {
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_UNDO_ENTRIES,
   STUDIO_MAX_UNDO_PATCHES_PER_ENTRY,
+  STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAssetV2,
   type StudioBeat,
   type StudioConditioningInputSnapshot,
@@ -57,6 +58,7 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
+  referenceIds: [],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -80,7 +82,7 @@ const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<Studi
 });
 
 const makeProject = (projectId = 'project_1'): StudioProjectV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   revision: 1,
   id: projectId,
   name: `Project ${projectId}`,
@@ -94,6 +96,8 @@ const makeProject = (projectId = 'project_1'): StudioProjectV2 => ({
   beatOrder: ['beat_1'],
   beats: { beat_1: makeBeat('beat_1', ['shot_1']) },
   shots: { shot_1: makeShot('shot_1') },
+  referenceOrder: [],
+  references: {},
   bin: [],
   bedAssetId: null,
   spendPolicy: null,
@@ -122,6 +126,7 @@ const makeImageAsset = (
   managedAsset: { collection, fileName: `${id}.png` },
   byteSize: 1,
   sha256: digest,
+  referenceAssetIds: [],
   createdAt: timestamp,
   ...overrides,
 });
@@ -135,6 +140,7 @@ const makeVideoAsset = (id: string, shotId: string | null = 'shot_1', durationSe
   managedAsset: { collection: 'assets', fileName: `${id}.mp4` },
   byteSize: 1,
   sha256: digest,
+  referenceAssetIds: [],
   durationSeconds,
   createdAt: timestamp,
 });
@@ -159,7 +165,7 @@ const seedPlan = (referenceInput: { assetId: string; sha256: string } | null = n
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 8,
-    referenceInput,
+    referenceInputs: referenceInput === null ? [] : [referenceInput],
     conditioningInput: null,
   },
 });
@@ -171,7 +177,7 @@ const boardPlan = (): StudioGenerationRequestPlan => ({
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 4,
-    referenceInput: null,
+    referenceInputs: [],
     conditioningInput: null,
   },
 });
@@ -179,7 +185,7 @@ const boardPlan = (): StudioGenerationRequestPlan => ({
 const referencedBoardPlan = (): StudioGenerationRequestPlan => {
   const plan = boardPlan();
   if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
-  plan.snapshot.referenceInput = { assetId: 'reference_1', sha256: digest };
+  plan.snapshot.referenceInputs = [{ assetId: 'reference_1', sha256: digest }];
   return plan;
 };
 
@@ -197,7 +203,7 @@ const deferredBoardPlan = (): StudioGenerationRequestPlan => ({
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 8,
-    referenceInput: null,
+    referenceInputs: [],
   },
   dependency: { kind: 'authorized_seed', upstreamItemId: 'seed_item_1', shotId: 'shot_1' },
 });
@@ -209,7 +215,7 @@ const videoPlan = (conditioningInput: StudioConditioningInputSnapshot): StudioGe
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 8,
-    referenceInput: null,
+    referenceInputs: [],
     conditioningInput,
   },
 });
@@ -221,7 +227,7 @@ const deferredVideoPlan = (upstreamItemId: string, predecessorShotId: string): S
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 8,
-    referenceInput: null,
+    referenceInputs: [],
   },
   dependency: {
     kind: 'authorized_predecessor',
@@ -337,6 +343,71 @@ const addFailedSeedAuthorization = (
   });
   addAuthorizationWithJobs(project, authorization, [job]);
   return job;
+};
+
+const addProjectReferenceRetryLineage = (
+  project: StudioProjectV2,
+  predecessorOverrides: Partial<StudioJobV2>,
+  retryOverrides: Partial<StudioJobV2>
+): { predecessor: StudioJobV2; retry: StudioJobV2 } => {
+  const referenceId = 'ref_background';
+  project.referenceOrder = [referenceId];
+  project.references[referenceId] = {
+    id: referenceId,
+    kind: 'background',
+    label: 'City skyline',
+    prompt: 'A recurring city skyline.',
+    candidateAssetId: null,
+    candidateJobId: null,
+    approvedAssetId: null,
+    supersededAssetIds: [],
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  project.shots.shot_1!.referenceIds = [referenceId];
+
+  const predecessorRevision = project.revision;
+  const predecessorItem = makeItem(predecessorRevision, 'shot_1', 'seed_still', seedPlan(), 1, project.id);
+  predecessorItem.projectReferenceId = referenceId;
+  predecessorItem.id = createStudioQuotedGenerationId({
+    projectId: project.id,
+    projectRevision: predecessorRevision,
+    shotId: 'shot_1',
+    purpose: 'seed_still',
+    projectReferenceId: referenceId,
+  });
+  const predecessorAuthorization = makeAuthorization(
+    'auth_reference_predecessor',
+    predecessorRevision,
+    [predecessorItem],
+    [],
+    project.id
+  );
+  const predecessor = makeJob('job_reference_predecessor', predecessorAuthorization, predecessorItem, {
+    projectReferenceId: referenceId,
+    ...predecessorOverrides,
+  });
+  addAuthorizationWithJobs(project, predecessorAuthorization, [predecessor]);
+
+  const retryRevision = project.revision;
+  const retryItem = makeItem(retryRevision, 'shot_1', 'seed_still', seedPlan(), 1, project.id);
+  retryItem.projectReferenceId = referenceId;
+  retryItem.id = createStudioQuotedGenerationId({
+    projectId: project.id,
+    projectRevision: retryRevision,
+    shotId: 'shot_1',
+    purpose: 'seed_still',
+    projectReferenceId: referenceId,
+  });
+  const retryAuthorization = makeAuthorization('auth_reference_retry', retryRevision, [retryItem], [], project.id);
+  const retry = makeJob('job_reference_retry', retryAuthorization, retryItem, {
+    projectReferenceId: referenceId,
+    retryOfJobId: predecessor.id,
+    ...retryOverrides,
+  });
+  addAuthorizationWithJobs(project, retryAuthorization, [retry]);
+  project.references[referenceId]!.candidateJobId = retry.id;
+  return { predecessor, retry };
 };
 
 const addHumanSeed = (project: StudioProjectV2, shotId = 'shot_1', assetId = 'seed_1'): StudioAssetV2 => {
@@ -518,7 +589,7 @@ const addShots = (project: StudioProjectV2, beatId: string, count: number, offse
 };
 
 describe('validateStudioProjectV2 exact project and authorship contract', () => {
-  it('accepts only the exact schema-4 Board shape and leaves schema 3 unsupported', () => {
+  it('accepts only the exact current-schema Board shape and leaves schema 3 unsupported', () => {
     const legacy = structuredClone(makeProject()) as unknown as Record<string, unknown>;
     legacy.schemaVersion = 3;
     delete legacy.boardStyle;
@@ -1004,6 +1075,177 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(secondProject)).toBe(true);
   });
 
+  it.each([
+    {
+      label: 'cancelled candidate',
+      predecessor: { status: 'cancelled', error: null },
+      retry: {
+        retryReason: 'provider_failure',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+      },
+      invalidRetry: {
+        retryReason: 'submission_unknown',
+        duplicateChargeAcknowledged: true,
+        duplicateChargeAcknowledgedAt: confirmedAt,
+      },
+    },
+    {
+      label: 'failed poll-deadline candidate',
+      predecessor: {
+        status: 'failed',
+        error: { code: 'poll_deadline', messageKey: 'pollDeadline' },
+        providerJobId: 'remote_reference_poll_deadline',
+        remoteStartedAt: timestamp,
+      },
+      retry: {
+        retryReason: 'submission_unknown',
+        duplicateChargeAcknowledged: true,
+        duplicateChargeAcknowledgedAt: confirmedAt,
+      },
+      invalidRetry: {
+        retryReason: 'provider_failure',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+      },
+    },
+  ] as const)('accepts the exact paid lineage semantics for a project-reference $label', (entry) => {
+    const project = makeProject();
+    const { retry } = addProjectReferenceRetryLineage(project, entry.predecessor, entry.retry);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    Object.assign(retry, entry.invalidRetry);
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('requires project-reference needs-attention work to recover or terminalize before paid lineage', () => {
+    const project = makeProject();
+    const { predecessor } = addProjectReferenceRetryLineage(
+      project,
+      {
+        status: 'needs_attention',
+        error: { code: 'submission_unknown', messageKey: 'submissionUnknown' },
+      },
+      {
+        retryReason: 'submission_unknown',
+        duplicateChargeAcknowledged: true,
+        duplicateChargeAcknowledgedAt: confirmedAt,
+      }
+    );
+    expect(validateStudioProjectV2(project)).toBe(false);
+
+    predecessor.status = 'failed';
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('decouples project-reference proxy ownership from composition and rejects duplicate live work globally', () => {
+    const terminal = makeProject();
+    addProjectReferenceRetryLineage(
+      terminal,
+      { status: 'failed', error: { code: 'timeout', messageKey: 'timeout' } },
+      {
+        status: 'failed',
+        error: { code: 'timeout', messageKey: 'timeout' },
+        retryReason: 'provider_failure',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+      }
+    );
+    terminal.shots.shot_1!.referenceIds = [];
+    expect(validateStudioProjectV2(terminal)).toBe(true);
+
+    const nonterminal = makeProject();
+    addProjectReferenceRetryLineage(
+      nonterminal,
+      { status: 'failed', error: { code: 'timeout', messageKey: 'timeout' } },
+      {
+        retryReason: 'provider_failure',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+      }
+    );
+    nonterminal.shots.shot_1!.referenceIds = [];
+    expect(validateStudioProjectV2(nonterminal)).toBe(true);
+
+    nonterminal.beats.beat_1!.shotOrder.push('shot_2');
+    nonterminal.shots.shot_2 = makeShot('shot_2');
+    const duplicateRevision = nonterminal.revision;
+    const duplicateItem = makeItem(duplicateRevision, 'shot_2', 'seed_still', seedPlan(), 1, nonterminal.id);
+    duplicateItem.projectReferenceId = 'ref_background';
+    duplicateItem.id = createStudioQuotedGenerationId({
+      projectId: nonterminal.id,
+      projectRevision: duplicateRevision,
+      shotId: 'shot_2',
+      purpose: 'seed_still',
+      projectReferenceId: 'ref_background',
+    });
+    const duplicateAuthorization = makeAuthorization(
+      'auth_duplicate_live_reference',
+      duplicateRevision,
+      [duplicateItem],
+      [],
+      nonterminal.id
+    );
+    const duplicateJob = makeJob('job_duplicate_live_reference', duplicateAuthorization, duplicateItem, {
+      projectReferenceId: 'ref_background',
+    });
+    addAuthorizationWithJobs(nonterminal, duplicateAuthorization, [duplicateJob]);
+    expect(validateStudioProjectV2(nonterminal)).toBe(false);
+  });
+
+  it('keeps failed project-reference downloads on same-job recovery instead of paid lineage', () => {
+    const project = makeProject();
+    const { predecessor, retry } = addProjectReferenceRetryLineage(
+      project,
+      {
+        status: 'failed',
+        error: { code: 'download_failed', messageKey: 'downloadFailed' },
+        providerJobId: 'remote_reference_download',
+        remoteStartedAt: timestamp,
+      },
+      {
+        retryReason: 'provider_failure',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+      }
+    );
+    const authorization = project.spendAuthorizations.find(
+      (candidate) => candidate.id === predecessor.authorizationId
+    )!;
+    predecessor.spendReceipt = createStudioSpendReceiptV2({
+      authorization,
+      itemId: predecessor.authorizationItemId,
+      jobId: predecessor.id,
+    });
+    expect(validateStudioProjectV2(project)).toBe(false);
+
+    retry.retryOfJobId = null;
+    retry.retryReason = null;
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('preserves ordinary Shot failed submission-unknown retry validation', () => {
+    const project = makeProject();
+    const predecessorItem = makeItem(project.revision, 'shot_1', 'seed_still', seedPlan());
+    const predecessorAuthorization = makeAuthorization('auth_ordinary_unknown', project.revision, [predecessorItem]);
+    const predecessor = makeJob('job_ordinary_unknown', predecessorAuthorization, predecessorItem, {
+      status: 'failed',
+      error: { code: 'submission_unknown', messageKey: 'submissionUnknown' },
+    });
+    addAuthorizationWithJobs(project, predecessorAuthorization, [predecessor]);
+
+    const retryItem = makeItem(project.revision, 'shot_1', 'seed_still', seedPlan());
+    const retryAuthorization = makeAuthorization('auth_ordinary_unknown_retry', project.revision, [retryItem]);
+    const retry = makeJob('job_ordinary_unknown_retry', retryAuthorization, retryItem, {
+      retryOfJobId: predecessor.id,
+      retryReason: 'submission_unknown',
+      duplicateChargeAcknowledged: true,
+      duplicateChargeAcknowledgedAt: confirmedAt,
+    });
+    addAuthorizationWithJobs(project, retryAuthorization, [retry]);
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
   it('requires receipts for succeeded/post-completion failures and rejects them precompletion', () => {
     const project = makeProject();
     addSucceededVideoTake(project);
@@ -1123,7 +1365,7 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
         aspectRatio: '16:9',
         resolution: '1080p',
         durationSeconds: 8,
-        referenceInput: null,
+        referenceInputs: [],
       },
       dependency: { kind: 'authorized_seed', upstreamItemId: upstream.id, shotId: 'shot_1' },
     };
@@ -1193,7 +1435,7 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
         aspectRatio: '16:9' as const,
         resolution: '1080p' as const,
         durationSeconds: 8,
-        referenceInput: null,
+        referenceInputs: [],
       },
       dependency: {
         kind: 'existing_predecessor' as const,
@@ -1261,6 +1503,59 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(false);
     firstJob.status = 'failed';
     firstJob.error = { code: 'timeout', messageKey: 'timeout' };
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('allows distinct project references to share one proxy Shot and purpose in an authorization', () => {
+    const project = makeProject();
+    const referenceIds = ['ref_character', 'ref_background'] as const;
+    project.referenceOrder = [...referenceIds];
+    project.references.ref_character = {
+      id: 'ref_character',
+      kind: 'character',
+      label: 'Ming',
+      prompt: 'Character sheet for Ming.',
+      candidateAssetId: null,
+      candidateJobId: 'job_ref_character',
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    project.references.ref_background = {
+      id: 'ref_background',
+      kind: 'background',
+      label: 'Courtyard',
+      prompt: 'Recurring courtyard background.',
+      candidateAssetId: null,
+      candidateJobId: 'job_ref_background',
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    project.shots.shot_1!.referenceIds = [...referenceIds];
+
+    const items = referenceIds.map((projectReferenceId) => {
+      const item = makeItem(project.revision, 'shot_1', 'seed_still', seedPlan());
+      item.projectReferenceId = projectReferenceId;
+      item.id = createStudioQuotedGenerationId({
+        projectId: project.id,
+        projectRevision: project.revision,
+        shotId: item.shotId,
+        purpose: item.purpose,
+        projectReferenceId,
+      });
+      return item;
+    });
+    const authorization = makeAuthorization('auth_shared_reference_proxy', project.revision, items);
+    const jobs = items.map((item) =>
+      makeJob(`job_${item.projectReferenceId!}`, authorization, item, {
+        projectReferenceId: item.projectReferenceId,
+      })
+    );
+    addAuthorizationWithJobs(project, authorization, jobs);
+
     expect(validateStudioProjectV2(project)).toBe(true);
   });
 

@@ -739,11 +739,14 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       idempotencyKey: job.idempotencyKey,
     } as const;
     let firstFrame: ResolvedStudioGenerationRequest['firstFrame'];
-    let conditioningImages: ResolvedStudioGenerationRequest['conditioningImages'];
-    if (snapshot.referenceInput !== null) {
-      const reference = ownValueV2(project.assets, snapshot.referenceInput.assetId);
-      if (reference?.sha256 !== snapshot.referenceInput.sha256) throw new StudioJobManagerError('invalid_request');
-      conditioningImages = [await deps.mediaStore.resolveProviderInputV2(project.id, reference.id)];
+    let conditioningImages: Array<Awaited<ReturnType<StudioMediaStore['resolveProviderInputV2']>>>;
+    if (snapshot.referenceInputs.length > 0) {
+      conditioningImages = [];
+      for (const referenceInput of snapshot.referenceInputs) {
+        const reference = ownValueV2(project.assets, referenceInput.assetId);
+        if (reference?.sha256 !== referenceInput.sha256) throw new StudioJobManagerError('invalid_request');
+        conditioningImages.push(await deps.mediaStore.resolveProviderInputV2(project.id, reference.id));
+      }
     }
     if (snapshot.conditioningInput !== null) {
       const inputAssetId =

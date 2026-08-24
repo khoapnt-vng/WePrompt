@@ -13,11 +13,12 @@ import {
   type StudioBriefRule,
   type StudioBriefRuleDraft,
 } from '@/common/types/project/creativeStudioRules';
-import type {
-  StudioRendererChainStatusV2,
-  StudioRendererProjectV2,
-  StudioRendererWorkspaceStatusV2,
-  StudioRouteCatalogV2,
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioRendererChainStatusV2,
+  type StudioRendererProjectV2,
+  type StudioRendererWorkspaceStatusV2,
+  type StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { WorkspaceProjectMenu } from '@/renderer/pages/studio/components/Workspace/Views/WorkspaceProjectMenu';
 import type { WorkspaceMutationCallbacks } from '@/renderer/pages/studio/components/Workspace/Views/viewTypes';
@@ -84,7 +85,7 @@ const makeProject = (
   overrides: Partial<StudioRendererProjectV2> = {}
 ): StudioRendererProjectV2 =>
   ({
-    schemaVersion: 4,
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     revision: 7,
     id: 'project_1',
     name: 'Launch film',
@@ -97,6 +98,8 @@ const makeProject = (
     beatOrder: [],
     beats: {},
     shots: {},
+    referenceOrder: [],
+    references: {},
     bin: [],
     bedAssetId: null,
     spendPolicy: null,

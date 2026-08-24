@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {
-  STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
+  STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
@@ -33,7 +33,7 @@ import {
 export type WriteReferenceRequestInputV2 = {
   pendingDir: string;
   projectId: string;
-  shotIds: string[];
+  referenceIds: string[];
   /** Test seam; production omits it and gets a UUID. */
   requestId?: string;
   /** Test seam for V2 identity and publication races. */
@@ -51,8 +51,8 @@ const isSafeId = (value: unknown): value is string =>
 const directoryIdentity = (stats: Awaited<ReturnType<RecordIoFileSystem['lstat']>>): string =>
   JSON.stringify([stats.isDirectory(), stats.isSymbolicLink(), stats.dev, stats.ino]);
 
-/** Reads only exact schema-2 request records; schema-1 sidecars never establish shot deduplication. */
-export const listPendingReferenceRequestShotIdsV2 = async (
+/** Reads only exact schema-5 request records; older sidecars never establish reference deduplication. */
+export const listPendingReferenceRequestIdsV2 = async (
   pendingDir: string,
   projectId: string,
   injectedFs: RecordIoFileSystem = fs,
@@ -133,7 +133,7 @@ export const listPendingReferenceRequestShotIdsV2 = async (
   if (duplicateLiveRequestId) {
     throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
   }
-  const shotIds = new Set<string>();
+  const referenceIds = new Set<string>();
   const identifiedPending: Array<{
     file: string;
     bytes: string;
@@ -199,7 +199,7 @@ export const listPendingReferenceRequestShotIdsV2 = async (
       identifiedPending.push({ file: identifiedFile, ...identified });
       joinedRequestIds.add(requestId);
       if (Date.parse(parsed.record.createdAt) <= pendingCutoffMs) continue;
-      for (const shotId of parsed.record.shotIds) shotIds.add(shotId);
+      for (const referenceId of parsed.record.referenceIds) referenceIds.add(referenceId);
     } catch (error) {
       if (error instanceof StudioPendingRecordWriteError) throw error;
       throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request queue');
@@ -262,40 +262,40 @@ export const listPendingReferenceRequestShotIdsV2 = async (
   if (projectAuthority !== undefined) {
     await assertPendingRecordProjectAuthorityV2({ pendingDir, projectAuthority, fs: injectedFs });
   }
-  return shotIds;
+  return referenceIds;
 };
 
-/** Writes one ordered schema-2 shot batch without starting generation. */
+/** Writes one ordered schema-5 project-reference batch without starting generation. */
 export const writeReferenceRequestRecordV2 = async (
   input: WriteReferenceRequestInputV2
 ): Promise<StudioReferenceRequestV2> => {
-  let validated: { projectId: string; requestId: string | undefined; shotIds: string[] };
+  let validated: { projectId: string; requestId: string | undefined; referenceIds: string[] };
   try {
     const projectId = input.projectId;
     const requestId = input.requestId;
-    const requestedShotIds = input.shotIds;
+    const requestedReferenceIds = input.referenceIds;
     if (
       !isSafeId(projectId) ||
       (requestId !== undefined && !isSafeId(requestId)) ||
-      !Array.isArray(requestedShotIds) ||
-      requestedShotIds.length < 1 ||
-      requestedShotIds.length > STUDIO_MAX_REFERENCE_REQUEST_SHOTS ||
-      Reflect.ownKeys(requestedShotIds).length !== requestedShotIds.length + 1
+      !Array.isArray(requestedReferenceIds) ||
+      requestedReferenceIds.length < 1 ||
+      requestedReferenceIds.length > STUDIO_MAX_PROJECT_REFERENCES ||
+      Reflect.ownKeys(requestedReferenceIds).length !== requestedReferenceIds.length + 1
     ) {
       throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
     }
     const seen = new Set<string>();
-    for (let index = 0; index < requestedShotIds.length; index += 1) {
-      if (!Object.hasOwn(requestedShotIds, index)) {
+    for (let index = 0; index < requestedReferenceIds.length; index += 1) {
+      if (!Object.hasOwn(requestedReferenceIds, index)) {
         throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
       }
-      const shotId = requestedShotIds[index];
-      if (!isSafeId(shotId) || seen.has(shotId)) {
+      const referenceId = requestedReferenceIds[index];
+      if (!isSafeId(referenceId) || seen.has(referenceId)) {
         throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
       }
-      seen.add(shotId);
+      seen.add(referenceId);
     }
-    const shotIds = [...requestedShotIds];
+    const referenceIds = [...requestedReferenceIds];
     const validationId = requestId ?? 'x'.repeat(256);
     const validation = parseStudioReferenceRequestV2({
       projectId,
@@ -304,7 +304,7 @@ export const writeReferenceRequestRecordV2 = async (
         schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
         id: validationId,
         projectId,
-        shotIds,
+        referenceIds,
         status: 'pending',
         createdAt: '1970-01-01T00:00:00.000Z',
       },
@@ -312,7 +312,11 @@ export const writeReferenceRequestRecordV2 = async (
     if (validation.status !== 'valid') {
       throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
     }
-    validated = { projectId: validation.record.projectId, requestId, shotIds: validation.record.shotIds };
+    validated = {
+      projectId: validation.record.projectId,
+      requestId,
+      referenceIds: validation.record.referenceIds,
+    };
   } catch (error) {
     if (error instanceof StudioPendingRecordWriteError) throw error;
     throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 reference request');
@@ -321,7 +325,7 @@ export const writeReferenceRequestRecordV2 = async (
     schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
     id: validated.requestId ?? randomUUID(),
     projectId: validated.projectId,
-    shotIds: validated.shotIds,
+    referenceIds: validated.referenceIds,
     status: 'pending',
     createdAt: new Date().toISOString(),
   };

@@ -16,7 +16,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 
-import { rememberStudioView, resolveStudioEntryView, studioViewPath } from '../../studioPhaseRoute';
+import { studioEntryPath, studioProjectPath } from '../../studioPhaseRoute';
 import { purgeStoredStudioRuleDrafts } from '../Workspace/Views/WorkspaceProjectMenu';
 import { purgeStoredWorkspaceDrafts } from '../Workspace/useWorkspaceDrafts';
 import { Composer } from './Composer';
@@ -88,8 +88,7 @@ export const StudioLibrary: React.FC = () => {
           return;
         }
         const created = result.data as StudioRendererProjectV2;
-        rememberStudioView(created.id, 'table');
-        navigate(studioViewPath(created.id, 'table'));
+        navigate(studioProjectPath(created.id));
       } catch {
         setCreateErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
       } finally {
@@ -207,7 +206,7 @@ export const StudioLibrary: React.FC = () => {
                     project={candidate}
                     locale={i18n.resolvedLanguage ?? i18n.language}
                     disabled={mutationBusy || deleteCandidate !== null}
-                    onOpen={() => navigate(studioViewPath(candidate.id, resolveStudioEntryView(candidate.id)))}
+                    onOpen={() => navigate(studioEntryPath(candidate.id))}
                     onDelete={() => void prepareDelete(candidate)}
                   />
                 ))}

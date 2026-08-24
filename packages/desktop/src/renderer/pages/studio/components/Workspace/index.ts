@@ -4,7 +4,6 @@ export { BeatPanel } from './BeatPanel';
 export type { WorkspaceShotSegmentState } from './BeatPanel/segmentState';
 export type {
   BeatPanelActions,
-  BeatPanelBriefReferenceOption,
   BeatPanelImportResult,
   BeatPanelProps,
   BeatPanelReviewChoice,
@@ -18,6 +17,7 @@ export {
   boardPromotionGatePlan,
   boardSelectionGateDraft,
   continuityGateDraft,
+  deriveSpendGateBackgroundChoicePlan,
   formatMinorUnits,
   handoffGateDraft,
   initialSpendGateState,
@@ -29,12 +29,17 @@ export {
   spendGateBoardPromotion,
   spendGateRouteIssue,
   spendGateContinuityChange,
+  spendGateDraftIdentity,
   summarizeQuote,
+  validSpendGateBackgroundChoices,
 } from './spendGate';
 export type {
   BoardPromotionGatePlan,
   SpendGateBoardPromotion,
   SpendGateBoardPromotionImpact,
+  SpendGateBackgroundChoice,
+  SpendGateBackgroundChoicePlan,
+  SpendGateBackgroundOption,
   SpendGateContinuityChange,
   SpendGateDraft,
   SpendGatePhase,
@@ -84,6 +89,7 @@ export type { WorkspaceShellHandle, WorkspaceShellProps } from './WorkspaceShell
 export {
   BoardView,
   CutView,
+  ReferencesView,
   TableView,
   WorkspaceControls,
   WorkspaceProjectMenu,
@@ -97,6 +103,9 @@ export type {
   CutCreateExportInput,
   CutImportResult,
   CutViewProps,
+  ReferenceWorkspaceItem,
+  ReferencesViewActions,
+  ReferencesViewProps,
   TableBoardActions,
   TableViewProps,
   WorkspaceControlsProps,

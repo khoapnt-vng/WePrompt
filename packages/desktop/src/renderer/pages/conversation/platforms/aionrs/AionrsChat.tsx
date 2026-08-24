@@ -23,7 +23,7 @@ import HOC from '@renderer/utils/ui/HOC';
 import React, { useEffect, useMemo } from 'react';
 import LocalImageView from '@renderer/components/media/LocalImageView';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
-import AionrsSendBox from './AionrsSendBox';
+import AionrsSendBox, { type AionrsBeforeSend } from './AionrsSendBox';
 import type { AionrsModelSelection } from './useAionrsModelSelection';
 
 const AionrsChat: React.FC<{
@@ -45,6 +45,8 @@ const AionrsChat: React.FC<{
   project_id?: string;
   /** Frozen-at-create MCP snapshot; validated by the hint, not trusted here. */
   session_mcp_servers?: ISessionMcpServer[];
+  /** Optional human-submit interception. Assistant output never enters this path. */
+  beforeSend?: AionrsBeforeSend;
 }> = ({
   conversation_id,
   conversation,
@@ -63,6 +65,7 @@ const AionrsChat: React.FC<{
   assistantId,
   project_id,
   session_mcp_servers,
+  beforeSend,
 }) => {
   useMessageLstCache(conversation_id);
   usePendingConfirmationsRecovery(conversation_id);
@@ -114,6 +117,7 @@ const AionrsChat: React.FC<{
             agent_name={agent_name}
             teamSendMessage={teamSendMessage}
             teamRuntime={teamRuntime}
+            beforeSend={beforeSend}
           />
         </div>
       </ConversationArtifactProvider>

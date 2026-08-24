@@ -16,10 +16,11 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceProjection } from '../workspaceProjection';
-import type { BeatPanelActions, BeatPanelBriefReferenceOption, BeatPanelReviewGraph } from '../BeatPanel';
+import type { BeatPanelActions, BeatPanelReviewGraph } from '../BeatPanel';
 import type { BoardActions } from './Board';
 import type { CutActions } from './Cut';
 import type { TableBoardActions } from './Table';
+import type { ReferencesViewActions } from './References';
 
 export type WorkspaceAuthoringOperationV2 = Exclude<StudioRendererAuthoringOperationV2, { kind: 'set_hard_cut' }>;
 
@@ -52,9 +53,13 @@ export type WorkspaceControlsProps = {
   boardActions: BoardActions;
   cutActions: CutActions;
   beatPanelActions: BeatPanelActions;
-  beatPanelBriefReferenceOptions: readonly BeatPanelBriefReferenceOption[];
   beatPanelReviewGraphs: readonly BeatPanelReviewGraph[];
   beatPanelReviewBlockedMessageKey: string | null;
+  referenceActions?: ReferencesViewActions;
+  referencePendingId?: string | null;
+  referenceErrorMessageKey?: string | null;
+  focusedReferenceIds?: readonly string[];
+  focusedReferenceAssetIds?: readonly string[];
 };
 
 export type WorkspaceProjectMenuProps = Pick<

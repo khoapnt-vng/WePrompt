@@ -72,3 +72,32 @@
   border: 1px solid var(--color-border-2);
   border-radius: 8px;
 }
+
+.backgroundChoices {
+  display: grid;
+  gap: 12px;
+}
+
+.backgroundChoices header,
+.backgroundChoice {
+  display: grid;
+  gap: 8px;
+}
+
+.backgroundChoice {
+  min-inline-size: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+}
+
+.backgroundChoice legend {
+  padding-inline: 4px;
+  font-weight: 600;
+}
+
+.backgroundOptions {
+  display: grid;
+  gap: 6px;
+}

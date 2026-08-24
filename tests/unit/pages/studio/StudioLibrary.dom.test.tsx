@@ -3,7 +3,11 @@ import React from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { StudioProjectSummaryV2, StudioRendererProjectV2 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioProjectSummaryV2,
+  type StudioRendererProjectV2,
+} from '@/common/types/project/creativeStudioTypes';
 
 const mocks = vi.hoisted(() => ({
   bridge: {
@@ -44,7 +48,7 @@ const summary = (overrides: Partial<StudioProjectSummaryV2> = {}): StudioProject
 });
 
 const project = (): StudioRendererProjectV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   revision: 7,
   id: 'project_1',
   name: 'Launch film',
@@ -58,6 +62,8 @@ const project = (): StudioRendererProjectV2 => ({
   beatOrder: [],
   beats: {},
   shots: {},
+  referenceOrder: [],
+  references: {},
   bin: [],
   bedAssetId: null,
   spendPolicy: null,
@@ -91,7 +97,7 @@ const renderLibrary = () =>
     </MemoryRouter>
   );
 
-describe('StudioLibrary schema-4 projects', () => {
+describe('StudioLibrary current-schema projects', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
@@ -130,7 +136,7 @@ describe('StudioLibrary schema-4 projects', () => {
     expect(screen.getByText('conversation.creativeStudio.workspace.library.quarantinedTitle')).toBeVisible();
   });
 
-  it('creates a schema-2 project and opens Table', async () => {
+  it('creates a project through the view-less entry so first reference work can take precedence', async () => {
     renderLibrary();
     fireEvent.change(await screen.findByLabelText('conversation.creativeStudio.workspace.library.composer.label'), {
       target: { value: 'A launch film.' },
@@ -148,7 +154,8 @@ describe('StudioLibrary schema-4 projects', () => {
         resolution: '720p',
       })
     );
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1'));
+    expect(screen.getByTestId('location')).not.toHaveTextContent('/studio/project_1/table');
   });
 
   it('keeps a whitespace-only Brief local and supports the explicit keyboard submit gesture', async () => {
@@ -297,7 +304,7 @@ describe('StudioLibrary schema-4 projects', () => {
     expect(screen.getByText('conversation.creativeStudio.workspace.library.noPoster')).toBeVisible();
   });
 
-  it('distinguishes complete and untouched projects and opens the remembered workspace entry', async () => {
+  it('distinguishes complete and untouched projects and defers an unremembered first entry', async () => {
     mocks.bridge.listProjects.invoke.mockResolvedValue(
       ok({
         projects: [
@@ -316,6 +323,7 @@ describe('StudioLibrary schema-4 projects', () => {
     expect(spine.closest('[data-status]')).toHaveAttribute('data-status', 'spine');
 
     fireEvent.click(screen.getByRole('button', { name: 'Complete film' }));
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_complete/table'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_complete'));
+    expect(screen.getByTestId('location')).not.toHaveTextContent('/studio/project_complete/table');
   });
 });

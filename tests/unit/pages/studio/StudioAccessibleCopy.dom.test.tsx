@@ -14,6 +14,7 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioProposalV2,
   type StudioReferenceRequestV2,
+  type StudioRendererProjectV2,
   type StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { Composer } from '@renderer/pages/studio/components/Library/Composer';
@@ -42,12 +43,20 @@ const coverageProposal: StudioProposalV2 = {
         beatId: 'beat-one',
         shots: [
           {
+            shotId: 'shot-fixed',
+            line: 'The fixed opening remains in frame.',
+            narration: 'Keep this narration.',
+            onScreenText: 'Keep this title.',
+            durationSeconds: 5,
+            chainBreak: 'none',
+          },
+          {
             shotId: 'shot-new',
             line: 'The paper plane crosses frame.',
             narration: '',
             onScreenText: '',
             durationSeconds: 5,
-            chainBreak: 'hard_cut',
+            chainBreak: 'none',
           },
         ],
         fixedShots: [
@@ -75,7 +84,7 @@ const referenceRequest: StudioReferenceRequestV2 = {
   schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   id: 'reference-1',
   projectId: 'project-1',
-  shotIds: ['shot-1'],
+  referenceIds: ['reference-1'],
   status: 'pending',
   createdAt: '2026-08-19T00:00:00.000Z',
 };
@@ -83,10 +92,103 @@ const referenceRequest: StudioReferenceRequestV2 = {
 const handoff: StudioRendererReferenceGenerationHandoffV2 = {
   handoffId: 'handoff-1',
   requestId: 'reference-2',
-  shotIds: ['shot-2'],
+  referenceIds: ['reference-2'],
   decidedAt: '2026-08-19T00:00:00.000Z',
   status: 'open',
   completedAt: null,
+  progress: { queued: 1, running: 0, succeeded: 0, failed: 0 },
+  candidateAssetIds: [],
+  retryReferenceIds: [],
+};
+
+const project: StudioRendererProjectV2 = {
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  revision: 4,
+  id: 'project-1',
+  name: 'Accessible review project',
+  brief: 'The current brief',
+  rules: [],
+  briefConversationId: null,
+  aspectRatio: '16:9',
+  targetDurationSeconds: 30,
+  resolution: '720p',
+  boardStyle: null,
+  beatOrder: ['beat-one', 'beat-two'],
+  beats: {
+    'beat-one': {
+      id: 'beat-one',
+      title: 'Opening',
+      action: 'The fixed opening leads into a paper plane.',
+      look: 'Warm daylight.',
+      actionRevision: 1,
+      targetSeconds: 10,
+      shotOrder: ['shot-fixed'],
+      lineHistory: [],
+    },
+    'beat-two': {
+      id: 'beat-two',
+      title: 'Continuation',
+      action: 'The story continues.',
+      look: 'Warm daylight.',
+      actionRevision: 1,
+      targetSeconds: 5,
+      shotOrder: ['shot-detached'],
+      lineHistory: [],
+    },
+  },
+  shots: {
+    'shot-fixed': {
+      id: 'shot-fixed',
+      line: 'The fixed opening remains in frame.',
+      derivation: 'detached',
+      derivedFromActionRevision: null,
+      narration: 'Keep this narration.',
+      onScreenText: 'Keep this title.',
+      durationSeconds: 5,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: 'none',
+      referenceIds: [],
+      seedStillId: 'asset-seed',
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
+      videoAssetId: 'asset-video',
+      supersededVideoAssetIds: [],
+      assetIds: ['asset-owned'],
+      jobIds: ['job-owned'],
+    },
+    'shot-detached': {
+      id: 'shot-detached',
+      line: 'The old detached line.',
+      derivation: 'detached',
+      derivedFromActionRevision: null,
+      narration: '',
+      onScreenText: '',
+      durationSeconds: 5,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: 'none',
+      referenceIds: [],
+      seedStillId: null,
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
+      assetIds: [],
+      jobIds: [],
+    },
+  },
+  referenceOrder: [],
+  references: {},
+  bin: [],
+  bedAssetId: null,
+  spendPolicy: null,
+  imageRouteId: null,
+  videoRouteId: null,
+  assets: {},
+  jobs: {},
+  createdAt: '2026-08-19T00:00:00.000Z',
+  updatedAt: '2026-08-19T00:00:00.000Z',
 };
 
 describe('Creative Studio workspace accessible copy', () => {
@@ -118,6 +220,7 @@ describe('Creative Studio workspace accessible copy', () => {
   it('names every reviewed decision and the explicit open-handoff actions', () => {
     renderEnglish(
       <DirectorProposals
+        project={project}
         proposals={[proposal]}
         referenceRequests={[referenceRequest]}
         referenceGenerationHandoffs={[handoff]}
@@ -127,6 +230,8 @@ describe('Creative Studio workspace accessible copy', () => {
         onGenerateReferences={vi.fn(async () => undefined)}
         onRejectReferences={vi.fn(async () => undefined)}
         onReviewHandoff={vi.fn()}
+        onReviewReferences={vi.fn()}
+        onRetryFailedReferences={vi.fn()}
         onDismissHandoff={vi.fn(async () => undefined)}
       />
     );
@@ -144,6 +249,7 @@ describe('Creative Studio workspace accessible copy', () => {
   it('explains every fixed-coverage reason and the exact line replacement before Apply', () => {
     renderEnglish(
       <DirectorProposals
+        project={project}
         proposals={[coverageProposal]}
         referenceRequests={[]}
         referenceGenerationHandoffs={[]}
@@ -153,6 +259,8 @@ describe('Creative Studio workspace accessible copy', () => {
         onGenerateReferences={vi.fn(async () => undefined)}
         onRejectReferences={vi.fn(async () => undefined)}
         onReviewHandoff={vi.fn()}
+        onReviewReferences={vi.fn()}
+        onRetryFailedReferences={vi.fn()}
         onDismissHandoff={vi.fn(async () => undefined)}
       />
     );
@@ -167,9 +275,13 @@ describe('Creative Studio workspace accessible copy', () => {
     expect(review).toHaveTextContent('A generation request uses it as conditioning input.');
     expect(review).toHaveTextContent('It has authored narration.');
     expect(review).toHaveTextContent('It has authored on-screen text.');
-    const rederivedShotId = screen.getByText('shot-detached', { selector: 'bdi' });
+    const rederivedShotId = screen.getByText('Shot 1 · shot-detached · Owner Beat · Continuation · beat-two', {
+      selector: 'bdi',
+    });
     expect(rederivedShotId).toBeVisible();
-    expect(rederivedShotId.parentElement).toHaveTextContent('Shot shot-detached');
+    expect(rederivedShotId.parentElement).toHaveTextContent(
+      'rederive line · Shot 1 · shot-detached · Owner Beat · Continuation · beat-two'
+    );
     const replacement = screen.getByText('The reviewed replacement line.');
     const apply = screen.getByRole('button', { name: 'Accept proposal' });
     expect(replacement.compareDocumentPosition(apply)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);

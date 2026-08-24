@@ -85,7 +85,7 @@ export const createStudioBoardGenerationRequestPlan = (
     aspectRatio: input.aspectRatio,
     resolution: input.resolution,
     durationSeconds: STUDIO_BOARD_REQUEST_DURATION_SECONDS,
-    referenceInput: null,
+    referenceInputs: [],
   };
   return createStudioResolvedGenerationRequestPlan({
     purpose: 'board_still',

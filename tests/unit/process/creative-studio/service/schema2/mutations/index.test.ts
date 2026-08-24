@@ -14,6 +14,7 @@ import {
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAssetV2,
   type StudioBeat,
   type StudioConditioningInputSnapshot,
@@ -79,6 +80,7 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
+  referenceIds: [],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -102,7 +104,7 @@ const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<Studi
 });
 
 const makeProject = (): StudioProjectV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   revision: 7,
   id: 'project_1',
   name: 'Project One',
@@ -122,6 +124,8 @@ const makeProject = (): StudioProjectV2 => ({
     shot_1: makeShot('shot_1'),
     shot_2: makeShot('shot_2'),
   },
+  referenceOrder: [],
+  references: {},
   bin: [],
   bedAssetId: null,
   spendPolicy: null,
@@ -167,6 +171,7 @@ const makeImageAsset = (
   managedAsset: { collection, fileName: `${id}.png` },
   byteSize: 1,
   sha256: digest,
+  referenceAssetIds: [],
   createdAt: timestamp,
   ...overrides,
 });
@@ -180,6 +185,7 @@ const makeVideoAsset = (id: string, shotId: string, durationSeconds = 10): Studi
   managedAsset: { collection: 'assets', fileName: `${id}.mp4` },
   byteSize: 1,
   sha256: digest,
+  referenceAssetIds: [],
   durationSeconds,
   createdAt: timestamp,
 });
@@ -216,7 +222,7 @@ const resolvedPlan = (conditioningInput: StudioConditioningInputSnapshot | null)
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
     conditioningInput,
   },
 });
@@ -228,7 +234,7 @@ const deferredPlan = (upstreamItemId: string, predecessorShotId: string): Studio
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
   },
   dependency: {
     kind: 'authorized_predecessor',
@@ -282,7 +288,7 @@ const makeBoardItem = (projectRevision: number, shotId: string): StudioQuotedGen
       aspectRatio: '16:9',
       resolution: '1080p',
       durationSeconds: 4,
-      referenceInput: null,
+      referenceInputs: [],
       conditioningInput: null,
     },
   };
@@ -310,7 +316,7 @@ const authorizedSeedPlan = (upstreamItemId: string, shotId: string): StudioGener
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
-    referenceInput: null,
+    referenceInputs: [],
   },
   dependency: { kind: 'authorized_seed', upstreamItemId, shotId },
 });
@@ -404,6 +410,38 @@ const addSucceededSeedJob = (
   });
   project.jobs[job.id] = job;
   project.shots[item.shotId]!.jobIds.push(job.id);
+  return asset;
+};
+
+const addApprovedProjectReference = (
+  project: StudioProjectV2,
+  referenceId: string,
+  anchorShotId: string,
+  assetId: string
+): StudioAssetV2 => {
+  const reference = project.references[referenceId];
+  if (reference === undefined || !project.shots[anchorShotId]?.referenceIds.includes(referenceId)) {
+    throw new Error('Approved reference fixture requires one exact assigned anchor Shot');
+  }
+  const item: StudioQuotedGeneration = {
+    ...makeSeedItem(project.revision - 1, anchorShotId),
+    id: createStudioQuotedGenerationId({
+      projectId: project.id,
+      projectRevision: project.revision - 1,
+      shotId: anchorShotId,
+      purpose: 'seed_still',
+      projectReferenceId: referenceId,
+    }),
+    projectReferenceId: referenceId,
+  };
+  const authorization = makeAuthorization(`authorization_${referenceId}`, project.revision - 1, [item]);
+  const jobId = `job_${referenceId}`;
+  project.spendAuthorizations.push(authorization);
+  const asset = addSucceededSeedJob(project, authorization, item, jobId, assetId);
+  project.jobs[jobId]!.projectReferenceId = referenceId;
+  reference.candidateJobId = jobId;
+  reference.candidateAssetId = asset.id;
+  reference.approvedAssetId = asset.id;
   return asset;
 };
 
@@ -643,7 +681,7 @@ const completeBoundDependent = (project: StudioProjectV2): StudioJobV2 => {
 };
 
 const mutationBatch = (project: StudioProjectV2, operations: StudioMutationOperationV2[]): StudioMutationBatchV2 => ({
-  schemaVersion: 4,
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
   projectId: project.id,
   expectedRevision: project.revision,
   operations,
@@ -680,10 +718,57 @@ const expectReason = (
   expect(project).toEqual(before);
 };
 
+const makeApprovedBackgroundSelectionProject = (): StudioProjectV2 => {
+  const project = makeProject();
+  project.beats.beat_2!.shotOrder = ['shot_3'];
+  project.shots.shot_3 = makeShot('shot_3');
+  const planned = persist(
+    apply(
+      project,
+      [
+        {
+          kind: 'set_project_references',
+          references: [
+            {
+              id: 'reference_character',
+              kind: 'character',
+              label: 'Ming',
+              prompt: 'A careful engineer in a blue coat',
+              shotIds: ['shot_1', 'shot_2', 'shot_3'],
+            },
+            {
+              id: 'reference_workshop',
+              kind: 'background',
+              label: 'Workshop',
+              prompt: 'A luminous paper workshop',
+              shotIds: ['shot_1'],
+            },
+            {
+              id: 'reference_rooftop',
+              kind: 'background',
+              label: 'Rooftop',
+              prompt: 'A quiet rooftop at blue hour',
+              shotIds: ['shot_2', 'shot_3'],
+            },
+          ],
+        },
+      ],
+      'mutation_reference_choice_plan'
+    ).project
+  );
+  planned.imageRouteId = 'image_route';
+  addApprovedProjectReference(planned, 'reference_character', 'shot_1', 'asset_reference_character');
+  addApprovedProjectReference(planned, 'reference_workshop', 'shot_1', 'asset_reference_workshop');
+  addApprovedProjectReference(planned, 'reference_rooftop', 'shot_3', 'asset_reference_rooftop');
+  expect(validateStudioProjectV2(planned)).toBe(true);
+  return planned;
+};
+
 const FINAL_OPERATION_KINDS = [
   'edit_project',
   'set_brief',
   'set_rules',
+  'set_project_references',
   'add_beat',
   'edit_beat',
   'reorder_beats',
@@ -699,6 +784,7 @@ const FINAL_OPERATION_KINDS = [
   'apply_coverage',
   'set_hard_cut',
   'set_seed_still',
+  'set_shot_background_reference',
   'promote_board_panel',
   'trim_shot',
   'redetach_line',
@@ -712,8 +798,8 @@ const FINAL_OPERATION_KINDS = [
 ] as const satisfies readonly StudioMutationOperationV2['kind'][];
 
 describe('applyStudioMutationBatchV2 final operation contract', () => {
-  it('keeps the exact exhaustive 28-operation catalog', () => {
-    expect(FINAL_OPERATION_KINDS).toHaveLength(28);
+  it('keeps the exact exhaustive 30-operation catalog', () => {
+    expect(FINAL_OPERATION_KINDS).toHaveLength(30);
     expect(new Set(FINAL_OPERATION_KINDS).size).toBe(FINAL_OPERATION_KINDS.length);
   });
 
@@ -763,6 +849,288 @@ describe('applyStudioMutationBatchV2 final operation contract', () => {
     ]);
     expect(result.createdBeatIds).toEqual(['beat_3', 'beat_alt']);
     expect(result.createdShotIds).toEqual([]);
+  });
+
+  it('reconciles the full active reference plan while preserving same-ID durable authority', () => {
+    const planned = persist(
+      apply(
+        makeProject(),
+        [
+          {
+            kind: 'set_project_references',
+            references: [
+              {
+                id: 'reference_character',
+                kind: 'character',
+                label: 'Ming',
+                prompt: 'A careful engineer',
+                shotIds: ['shot_1', 'shot_2'],
+              },
+              {
+                id: 'reference_background',
+                kind: 'background',
+                label: 'Workshop',
+                prompt: 'A luminous paper workshop',
+                shotIds: ['shot_1', 'shot_2'],
+              },
+            ],
+          },
+        ],
+        'mutation_reference_plan'
+      ).project
+    );
+    const initialCharacter = structuredClone(planned.references.reference_character!);
+    planned.imageRouteId = 'image_route';
+    const candidateItem: StudioQuotedGeneration = {
+      ...makeSeedItem(planned.revision - 1, 'shot_1'),
+      id: createStudioQuotedGenerationId({
+        projectId: planned.id,
+        projectRevision: planned.revision - 1,
+        shotId: 'shot_1',
+        purpose: 'seed_still',
+        projectReferenceId: 'reference_character',
+      }),
+      projectReferenceId: 'reference_character',
+    };
+    const candidateAuthorization = makeAuthorization('authorization_reference_candidate', planned.revision - 1, [
+      candidateItem,
+    ]);
+    const candidateJob = makeJob('job_reference_candidate', candidateAuthorization, candidateItem, {
+      projectReferenceId: 'reference_character',
+      purpose: 'seed_still',
+      status: 'failed',
+      error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+    });
+    planned.spendAuthorizations.push(candidateAuthorization);
+    planned.jobs[candidateJob.id] = candidateJob;
+    planned.shots.shot_1!.jobIds.push(candidateJob.id);
+    planned.references.reference_character!.candidateJobId = candidateJob.id;
+    expect(validateStudioProjectV2(planned)).toBe(true);
+
+    const reconciled = apply(
+      planned,
+      [
+        {
+          kind: 'set_project_references',
+          references: [
+            {
+              id: 'reference_character',
+              kind: 'character',
+              label: 'Ming',
+              prompt: 'A careful engineer in a blue coat',
+              shotIds: ['shot_1'],
+            },
+            {
+              id: 'reference_background',
+              kind: 'background',
+              label: 'Workshop',
+              prompt: 'A luminous paper workshop',
+              shotIds: ['shot_1', 'shot_2'],
+            },
+          ],
+        },
+      ],
+      'mutation_reference_reconcile',
+      '2026-08-17T00:00:02.000Z'
+    );
+
+    expect(reconciled.project.referenceOrder).toEqual(['reference_character', 'reference_background']);
+    expect(reconciled.project.shots.shot_1!.referenceIds).toEqual(['reference_character', 'reference_background']);
+    expect(reconciled.project.shots.shot_2!.referenceIds).toEqual(['reference_background']);
+    expect(reconciled.project.references.reference_character).toMatchObject({
+      candidateAssetId: null,
+      candidateJobId: 'job_reference_candidate',
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      createdAt: initialCharacter.createdAt,
+      updatedAt: '2026-08-17T00:00:02.000Z',
+    });
+  });
+
+  it('sets one approved Shot background in canonical order while preserving character and approval authority', () => {
+    const project = makeApprovedBackgroundSelectionProject();
+    const referencesBefore = structuredClone(project.references);
+    const jobsBefore = structuredClone(project.jobs);
+    const authorizationsBefore = structuredClone(project.spendAuthorizations);
+    const result = apply(
+      project,
+      [
+        {
+          kind: 'set_shot_background_reference',
+          shotId: 'shot_1',
+          referenceId: 'reference_rooftop',
+        },
+      ],
+      'mutation_choose_background'
+    );
+
+    expect(result.project.shots.shot_1!.referenceIds).toEqual(['reference_character', 'reference_rooftop']);
+    expect(Object.values(result.project.shots).some((shot) => shot.referenceIds.includes('reference_workshop'))).toBe(
+      false
+    );
+    expect(validateStudioProjectV2({ ...result.project, revision: result.project.revision + 1 })).toBe(true);
+    expect(result.project.references).toEqual(referencesBefore);
+    expect(result.project.jobs).toEqual(jobsBefore);
+    expect(result.project.spendAuthorizations).toEqual(authorizationsBefore);
+    expect(result.project.undoHistory.at(-1)).toMatchObject({
+      id: 'mutation_choose_background',
+      label: 'set_shot_background_reference',
+    });
+
+    const undone = apply(
+      persist(result.project),
+      [{ kind: 'undo_last', entryId: 'mutation_choose_background' }],
+      'mutation_undo_background_choice'
+    );
+    expect(undone.project.shots.shot_1!.referenceIds).toEqual(['reference_character', 'reference_workshop']);
+  });
+
+  it('fills a missing Shot background without exposing character selection', () => {
+    const project = makeApprovedBackgroundSelectionProject();
+    project.shots.shot_1!.referenceIds = ['reference_character'];
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    const result = apply(project, [
+      {
+        kind: 'set_shot_background_reference',
+        shotId: 'shot_1',
+        referenceId: 'reference_rooftop',
+      },
+    ]);
+
+    expect(result.project.shots.shot_1!.referenceIds).toEqual(['reference_character', 'reference_rooftop']);
+  });
+
+  it('fails closed for a stale, unapproved, wrong-kind, inactive, or no-op background choice', () => {
+    const project = makeApprovedBackgroundSelectionProject();
+    const inactive = structuredClone(project);
+    inactive.beats.beat_1!.shotOrder = ['shot_2'];
+    inactive.bin.push({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' });
+    expect(validateStudioProjectV2(inactive)).toBe(true);
+    const unapproved = structuredClone(project);
+    unapproved.references.reference_rooftop!.approvedAssetId = null;
+    expect(validateStudioProjectV2(unapproved)).toBe(true);
+
+    for (const [candidate, operation] of [
+      [project, { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_missing' }],
+      [project, { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_character' }],
+      [project, { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_workshop' }],
+      [unapproved, { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_rooftop' }],
+      [inactive, { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_rooftop' }],
+    ] as const) {
+      expectReason(candidate, [operation], 'invalid_operation');
+    }
+  });
+
+  it('blocks a background change across bound Shot work or a nonterminal reference candidate', () => {
+    const bound = makeApprovedBackgroundSelectionProject();
+    const item = makeSeedItem(bound.revision - 1, 'shot_1');
+    const authorization = makeAuthorization('authorization_bound_background_choice', bound.revision - 1, [item]);
+    const job = makeJob('job_bound_background_choice', authorization, item, { purpose: 'seed_still' });
+    bound.spendAuthorizations.push(authorization);
+    bound.jobs[job.id] = job;
+    bound.shots.shot_1!.jobIds.push(job.id);
+    expect(validateStudioProjectV2(bound)).toBe(true);
+    expectReason(
+      bound,
+      [
+        {
+          kind: 'set_shot_background_reference',
+          shotId: 'shot_1',
+          referenceId: 'reference_rooftop',
+        },
+      ],
+      'dependency_blocked',
+      'mutation_bound_background_choice'
+    );
+
+    const candidate = makeApprovedBackgroundSelectionProject();
+    const candidateItem: StudioQuotedGeneration = {
+      ...makeSeedItem(candidate.revision, 'shot_1'),
+      id: createStudioQuotedGenerationId({
+        projectId: candidate.id,
+        projectRevision: candidate.revision,
+        shotId: 'shot_1',
+        purpose: 'seed_still',
+        projectReferenceId: 'reference_workshop',
+      }),
+      projectReferenceId: 'reference_workshop',
+    };
+    const candidateAuthorization = makeAuthorization('authorization_pending_reference_workshop', candidate.revision, [
+      candidateItem,
+    ]);
+    const candidateJob = makeJob('job_pending_reference_workshop', candidateAuthorization, candidateItem, {
+      purpose: 'seed_still',
+      projectReferenceId: 'reference_workshop',
+    });
+    candidate.spendAuthorizations.push(candidateAuthorization);
+    candidate.jobs[candidateJob.id] = candidateJob;
+    candidate.shots.shot_1!.jobIds.push(candidateJob.id);
+    candidate.references.reference_workshop!.candidateJobId = candidateJob.id;
+    candidate.references.reference_workshop!.candidateAssetId = null;
+    candidate.revision += 1;
+    expect(validateStudioProjectV2(candidate)).toBe(true);
+    expectReason(
+      candidate,
+      [
+        {
+          kind: 'set_shot_background_reference',
+          shotId: 'shot_1',
+          referenceId: 'reference_rooftop',
+        },
+      ],
+      'dependency_blocked',
+      'mutation_pending_reference_candidate'
+    );
+  });
+
+  it('refuses to orphan a reference still assigned to a retained binned Shot', () => {
+    const planned = persist(
+      apply(makeProject(), [
+        {
+          kind: 'set_project_references',
+          references: [
+            {
+              id: 'reference_character',
+              kind: 'character',
+              label: 'Ming',
+              prompt: 'A careful engineer',
+              shotIds: ['shot_2'],
+            },
+            {
+              id: 'reference_background',
+              kind: 'background',
+              label: 'Workshop',
+              prompt: 'A luminous paper workshop',
+              shotIds: ['shot_1', 'shot_2'],
+            },
+          ],
+        },
+      ]).project
+    );
+    const parked = persist(
+      apply(planned, [{ kind: 'park_shot', shotId: 'shot_2' }], 'mutation_park_referenced_shot').project
+    );
+
+    expectReason(
+      parked,
+      [
+        {
+          kind: 'set_project_references',
+          references: [
+            {
+              id: 'reference_background',
+              kind: 'background',
+              label: 'Workshop',
+              prompt: 'A luminous paper workshop',
+              shotIds: ['shot_1'],
+            },
+          ],
+        },
+      ],
+      'dependency_blocked',
+      'mutation_orphan_binned_reference'
+    );
   });
 
   it('sets the Board style through the exact project edit contract and restores it through undo', () => {
@@ -2074,6 +2442,19 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
       { kind: 'edit_beat', beatId: 'beat_1', changes: { targetSeconds: 1440 } },
       { kind: 'set_rules', rules: [{ id: 'rule_null', text: 'A rule', predicate: null }] },
       {
+        kind: 'set_project_references',
+        references: [
+          {
+            id: 'reference_unassigned',
+            kind: 'background',
+            label: 'Unassigned location',
+            prompt: 'A preserved location with no current Shot assignment',
+            shotIds: [],
+          },
+        ],
+      },
+      { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_background' },
+      {
         kind: 'reorder_bin',
         bin: [
           { kind: 'beat', beatId: 'beat_1', reason: 'alternate' },
@@ -2228,6 +2609,9 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
       { kind: 'apply_coverage', beatId: 'beat_1', shots: [], fixedShots: [{}] },
       { kind: 'set_hard_cut', shotId: 'shot_1', hardCut: 'yes' },
       { kind: 'set_seed_still', shotId: 'shot_1', assetId: '../asset' },
+      { kind: 'set_shot_background_reference', shotId: '../shot', referenceId: 'reference_background' },
+      { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: '../reference' },
+      { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_background', extra: true },
       { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: -1, trimOutSeconds: null },
       { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: -0, trimOutSeconds: null },
       { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: Number.POSITIVE_INFINITY, trimOutSeconds: null },
@@ -2582,7 +2966,12 @@ describe('applyStudioMutationBatchV2 bounds, totality, and rollback', () => {
     expect(() =>
       applyStudioMutationBatchV2(
         project,
-        { schemaVersion: 4, projectId: project.id, expectedRevision: project.revision, operations: sparseOperations },
+        {
+          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          projectId: project.id,
+          expectedRevision: project.revision,
+          operations: sparseOperations,
+        },
         { mutationId: 'mutation_sparse', capturedAt: laterTimestamp }
       )
     ).toThrowError(StudioMutationErrorV2);

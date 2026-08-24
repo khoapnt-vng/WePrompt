@@ -26,9 +26,11 @@ import {
 import {
   createStudioRateCardV2,
   createStudioSubmissionQuoteCoreV2,
+  deriveStudioProjectReferenceSubmissionQuoteGraphV2,
   deriveStudioSubmissionQuoteCoresV2,
   deriveStudioSubmissionQuoteGraphV2,
   evaluateStudioBudgetV2,
+  priceStudioSubmissionQuoteGraphV2,
   studioSubmissionQuoteCoresEqual,
   toStudioRendererSubmissionQuoteV2,
   type StudioSubmissionQuoteEstimateInputV2,
@@ -56,7 +58,7 @@ const template = {
   aspectRatio: '16:9',
   resolution: '1080p',
   durationSeconds: 8,
-  referenceInput: null,
+  referenceInputs: [],
 } as const;
 
 const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
@@ -70,6 +72,7 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
+  referenceIds: [],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -96,6 +99,7 @@ const makeProject = (shotIds = ['shot_1', 'shot_2']): StudioSubmissionQuoteEstim
     },
   },
   shots: Object.fromEntries(shotIds.map((shotId) => [shotId, makeShot(shotId)])),
+  references: {},
   jobs: {},
 });
 
@@ -194,6 +198,19 @@ const addDerivationAsset = (
   return result;
 };
 
+const makePendingCharacterReference = (id: string, label: string): StudioProjectV2['references'][string] => ({
+  id,
+  kind: 'character',
+  label,
+  prompt: `A stable character sheet for ${label}.`,
+  candidateAssetId: null,
+  candidateJobId: null,
+  approvedAssetId: null,
+  supersededAssetIds: [],
+  createdAt: '2026-08-18T00:00:00.000Z',
+  updatedAt: '2026-08-18T00:00:00.000Z',
+});
+
 const makeDerivationProject = (): StudioProjectV2 => {
   const project = createEmptyStudioProjectV2(
     {
@@ -221,6 +238,28 @@ const makeDerivationProject = (): StudioProjectV2 => {
     lineHistory: [],
   };
   for (const shotId of project.beats.beat_1.shotOrder) project.shots[shotId] = makeShot(shotId);
+  const backgroundAsset = addDerivationAsset(project, {
+    id: 'approved_background',
+    shotId: 'shot_1',
+    mediaKind: 'image',
+    managedAsset: { collection: 'assets', fileName: 'approved_background.png' },
+  });
+  project.referenceOrder = ['reference_background'];
+  project.references.reference_background = {
+    id: 'reference_background',
+    kind: 'background',
+    label: 'Recurring space',
+    prompt: 'The same clean daylight atrium.',
+    candidateAssetId: null,
+    candidateJobId: null,
+    approvedAssetId: backgroundAsset.id,
+    supersededAssetIds: [],
+    createdAt: '2026-08-18T00:00:00.000Z',
+    updatedAt: '2026-08-18T00:00:00.000Z',
+  };
+  for (const shotId of project.beats.beat_1.shotOrder) {
+    project.shots[shotId]!.referenceIds = ['reference_background'];
+  }
   const seed = addDerivationAsset(project, {
     id: 'seed_1',
     shotId: 'shot_1',
@@ -350,6 +389,13 @@ const choice = (
   referenceAssetId,
 });
 
+const deriveFirstSeedQuote = (project: StudioProjectV2) =>
+  deriveStudioSubmissionQuoteCoresV2({
+    project,
+    request: prepareRequest([choice('shot_1', 'seed_still')], []),
+    rateCard: createStudioRateCardV2([imageRate]),
+  });
+
 const continuityRequest = (
   shotId: string,
   hardCut: boolean,
@@ -404,7 +450,7 @@ describe('schema-2 Studio estimates', () => {
         kind: 'resolved',
         snapshot: expect.objectContaining({
           durationSeconds: 4,
-          referenceInput: null,
+          referenceInputs: [],
           conditioningInput: null,
         }),
       })
@@ -679,6 +725,41 @@ describe('schema-2 Studio estimates', () => {
     ]);
     expect(options.baseOnly.cascadeItems).toEqual([]);
     expect(JSON.stringify(options)).not.toContain('shot_4');
+  });
+
+  it('does not reuse a displaced project-reference output as a Shot seed', () => {
+    const project = makeDerivationProject();
+    const historicalReferenceOutput = addDerivationAsset(project, {
+      id: 'historical_reference_output',
+      shotId: 'shot_2',
+      mediaKind: 'image',
+      managedAsset: { collection: 'assets', fileName: 'historical_reference_output.png' },
+    });
+    const jobId = 'historical_reference_job';
+    project.jobs[jobId] = {
+      id: jobId,
+      projectId: project.id,
+      shotId: 'shot_2',
+      status: 'succeeded',
+      purpose: 'seed_still',
+      projectReferenceId: 'reference_background',
+      outputAssetIds: [historicalReferenceOutput.id],
+    } as StudioProjectV2['jobs'][string];
+    project.shots.shot_2!.jobIds.push(jobId);
+
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: continuityRequest('shot_2', true, true),
+      rateCard: createStudioRateCardV2([imageRate, videoRate]),
+    });
+
+    expect(
+      options.baseOnly.baseItems.map(({ shotId, purpose, generationCount }) => [shotId, purpose, generationCount])
+    ).toEqual([
+      ['shot_2', 'seed_still', 1],
+      ['shot_2', 'video_take', 1],
+      ['shot_3', 'video_take', 1],
+    ]);
   });
 
   it('prices exactly one new seed and one mandatory replacement per affected Shot when sever has no seed', () => {
@@ -1077,21 +1158,55 @@ describe('schema-2 Studio estimates', () => {
     );
   });
 
-  it('freezes only an active classified Brief reference into a seed template', () => {
+  it('freezes multiple approved characters and exactly one background in canonical reference order', () => {
     const project = makeDerivationProject();
-    const reference = addDerivationAsset(project, {
-      id: 'brief_ref',
-      shotId: null,
+    const characterA = addDerivationAsset(project, {
+      id: 'approved_character_a',
+      shotId: 'shot_1',
       mediaKind: 'image',
-      managedAsset: { collection: 'imports', fileName: 'brief_ref.png' },
-      briefReferenceRole: 'look',
-      briefReferenceLabel: 'Atrium',
+      managedAsset: { collection: 'assets', fileName: 'approved_character_a.png' },
     });
+    const characterB = addDerivationAsset(project, {
+      id: 'approved_character_b',
+      shotId: 'shot_1',
+      mediaKind: 'image',
+      managedAsset: { collection: 'assets', fileName: 'approved_character_b.png' },
+    });
+    const background = project.references.reference_background!;
+    project.referenceOrder = ['reference_character_a', 'reference_character_b', background.id];
+    project.references = {
+      reference_character_a: {
+        id: 'reference_character_a',
+        kind: 'character',
+        label: 'Ming',
+        prompt: 'A precise character sheet for Ming.',
+        candidateAssetId: null,
+        candidateJobId: null,
+        approvedAssetId: characterA.id,
+        supersededAssetIds: [],
+        createdAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+      reference_character_b: {
+        id: 'reference_character_b',
+        kind: 'character',
+        label: 'Mei',
+        prompt: 'A precise character sheet for Mei.',
+        candidateAssetId: null,
+        candidateJobId: null,
+        approvedAssetId: characterB.id,
+        supersededAssetIds: [],
+        createdAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+      [background.id]: background,
+    };
+    project.shots.shot_1!.referenceIds = [...project.referenceOrder];
 
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
       request: prepareRequest(
-        [choice('shot_1', 'seed_still', reference.id)],
+        [choice('shot_1', 'seed_still')],
         [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
       ),
       rateCard: createStudioRateCardV2([imageRate, videoRate]),
@@ -1100,22 +1215,217 @@ describe('schema-2 Studio estimates', () => {
     expect(options.baseOnly.baseItems[0]?.requestPlan).toEqual(
       expect.objectContaining({
         kind: 'resolved',
-        snapshot: expect.objectContaining({ referenceInput: { assetId: reference.id, sha256: reference.sha256 } }),
+        snapshot: expect.objectContaining({
+          referenceInputs: [
+            { assetId: characterA.id, sha256: characterA.sha256 },
+            { assetId: characterB.id, sha256: characterB.sha256 },
+            { assetId: background.approvedAssetId, sha256: project.assets[background.approvedAssetId!]!.sha256 },
+          ],
+        }),
       })
     );
 
-    delete reference.briefReferenceRole;
-    delete reference.briefReferenceLabel;
+    project.shots.shot_1!.referenceIds = ['reference_character_a', 'reference_character_b'];
     expect(() =>
       deriveStudioSubmissionQuoteCoresV2({
         project,
-        request: prepareRequest(
-          [choice('shot_1', 'seed_still', reference.id)],
-          [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-        ),
-        rateCard: createStudioRateCardV2([imageRate, videoRate]),
+        request: prepareRequest([choice('shot_1', 'seed_still')], []),
+        rateCard: createStudioRateCardV2([imageRate]),
       })
     ).toThrow(expect.objectContaining({ code: 'invalid_reference' }));
+  });
+
+  it('fails closed for malformed, ambiguous, missing, or unapproved Shot reference composition', () => {
+    const unknown = makeDerivationProject();
+    unknown.shots.shot_1!.referenceIds = ['reference_unknown'];
+
+    const duplicate = makeDerivationProject();
+    duplicate.shots.shot_1!.referenceIds = ['reference_background', 'reference_background'];
+
+    const ambiguousBackground = makeDerivationProject();
+    const secondBackgroundAsset = addDerivationAsset(ambiguousBackground, {
+      id: 'approved_background_2',
+      shotId: 'shot_1',
+      mediaKind: 'image',
+      managedAsset: { collection: 'assets', fileName: 'approved_background_2.png' },
+    });
+    ambiguousBackground.referenceOrder.push('reference_background_2');
+    ambiguousBackground.references.reference_background_2 = {
+      id: 'reference_background_2',
+      kind: 'background',
+      label: 'Second recurring space',
+      prompt: 'A different location that makes the Shot ambiguous.',
+      candidateAssetId: null,
+      candidateJobId: null,
+      approvedAssetId: secondBackgroundAsset.id,
+      supersededAssetIds: [],
+      createdAt: '2026-08-18T00:00:00.000Z',
+      updatedAt: '2026-08-18T00:00:00.000Z',
+    };
+    ambiguousBackground.shots.shot_1!.referenceIds = [...ambiguousBackground.referenceOrder];
+
+    const missing = makeDerivationProject();
+    missing.shots.shot_1!.referenceIds = [];
+
+    const unapprovedCharacter = makeDerivationProject();
+    unapprovedCharacter.referenceOrder.unshift('reference_character');
+    unapprovedCharacter.references.reference_character = makePendingCharacterReference('reference_character', 'Ming');
+    unapprovedCharacter.shots.shot_1!.referenceIds = ['reference_character', 'reference_background'];
+
+    const unapprovedBackground = makeDerivationProject();
+    unapprovedBackground.references.reference_background!.approvedAssetId = null;
+
+    for (const project of [
+      unknown,
+      duplicate,
+      ambiguousBackground,
+      missing,
+      unapprovedCharacter,
+      unapprovedBackground,
+    ]) {
+      expect(() => deriveFirstSeedQuote(project)).toThrow(expect.objectContaining({ code: 'invalid_reference' }));
+    }
+  });
+
+  it('keeps two reference candidates sharing one proxy Shot distinct and gates backgrounds on character approval', () => {
+    const project = makeDerivationProject();
+    const background = project.references.reference_background!;
+    project.referenceOrder = ['reference_ming', 'reference_mei', background.id];
+    project.references = {
+      reference_ming: makePendingCharacterReference('reference_ming', 'Ming'),
+      reference_mei: makePendingCharacterReference('reference_mei', 'Mei'),
+      [background.id]: background,
+    };
+    project.shots.shot_1!.referenceIds = [...project.referenceOrder];
+
+    const graph = deriveStudioProjectReferenceSubmissionQuoteGraphV2({
+      project,
+      request: {
+        projectId: project.id,
+        expectedRevision: project.revision,
+        referenceIds: ['reference_ming', 'reference_mei'],
+      },
+    });
+    const quote = priceStudioSubmissionQuoteGraphV2({
+      project,
+      graph,
+      rateCard: createStudioRateCardV2([imageRate]),
+    }).baseOnly;
+    expect(quote.baseItems.map((item) => [item.shotId, item.projectReferenceId])).toEqual([
+      ['shot_1', 'reference_ming'],
+      ['shot_1', 'reference_mei'],
+    ]);
+    expect(new Set(quote.baseItems.map((item) => item.id)).size).toBe(2);
+    const rendererQuote = toStudioRendererSubmissionQuoteV2(
+      { ...quote, id: 'quote_reference_characters', expiresAt: '2026-08-18T00:05:00.000Z' },
+      null,
+      (routeId) => ({ choiceId: routeId, providerId: 'image-provider', model: 'image-model' })
+    );
+    expect(rendererQuote.baseItems.map((item) => [item.shotId, item.projectReferenceId])).toEqual([
+      ['shot_1', 'reference_ming'],
+      ['shot_1', 'reference_mei'],
+    ]);
+
+    expect(() =>
+      deriveStudioProjectReferenceSubmissionQuoteGraphV2({
+        project,
+        request: {
+          projectId: project.id,
+          expectedRevision: project.revision,
+          referenceIds: [background.id],
+        },
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_reference' }));
+  });
+
+  it('regenerates an unassigned approved reference on its active terminal candidate owner', () => {
+    const project = makeDerivationProject();
+    const reference = project.references.reference_background!;
+    const candidateJobId = 'job_terminal_reference_background';
+    project.jobs[candidateJobId] = {
+      id: candidateJobId,
+      projectId: project.id,
+      shotId: 'shot_2',
+      status: 'succeeded',
+      purpose: 'seed_still',
+      projectReferenceId: reference.id,
+    } as StudioProjectV2['jobs'][string];
+    project.shots.shot_2!.jobIds.push(candidateJobId);
+    reference.candidateJobId = candidateJobId;
+    for (const shot of Object.values(project.shots)) shot.referenceIds = [];
+
+    const graph = deriveStudioProjectReferenceSubmissionQuoteGraphV2({
+      project,
+      request: {
+        projectId: project.id,
+        expectedRevision: project.revision,
+        referenceIds: [reference.id],
+      },
+    });
+
+    expect(graph.baseItems).toEqual([
+      expect.objectContaining({
+        shotId: 'shot_2',
+        purpose: 'seed_still',
+        projectReferenceId: reference.id,
+      }),
+    ]);
+  });
+
+  it('requires restoring a failed project-reference proxy Shot before a paid retry', () => {
+    const project = makeDerivationProject();
+    const reference = project.references.reference_background!;
+    const candidateJobId = 'job_failed_reference_background';
+    project.jobs[candidateJobId] = {
+      id: candidateJobId,
+      projectId: project.id,
+      shotId: 'shot_2',
+      status: 'failed',
+      error: { code: 'timeout', messageKey: 'timeout' },
+      purpose: 'seed_still',
+      projectReferenceId: reference.id,
+    } as StudioProjectV2['jobs'][string];
+    project.shots.shot_2!.jobIds.push(candidateJobId);
+    reference.candidateJobId = candidateJobId;
+    project.beats.beat_1!.shotOrder = ['shot_1', 'shot_3'];
+    project.bin.push({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_2', reason: 'lifted' });
+
+    expect(() =>
+      deriveStudioProjectReferenceSubmissionQuoteGraphV2({
+        project,
+        request: {
+          projectId: project.id,
+          expectedRevision: project.revision,
+          referenceIds: [reference.id],
+        },
+      })
+    ).toThrow(expect.objectContaining({ code: 'inactive_shot' }));
+  });
+
+  it('blocks a project-reference quote while that reference has live work on any proxy Shot', () => {
+    const project = makeDerivationProject();
+    const reference = project.references.reference_background!;
+    const liveJobId = 'job_live_reference_background';
+    project.jobs[liveJobId] = {
+      id: liveJobId,
+      projectId: project.id,
+      shotId: 'shot_3',
+      status: 'running',
+      purpose: 'seed_still',
+      projectReferenceId: reference.id,
+    } as StudioProjectV2['jobs'][string];
+    project.shots.shot_3!.jobIds.push(liveJobId);
+
+    expect(() =>
+      deriveStudioProjectReferenceSubmissionQuoteGraphV2({
+        project,
+        request: {
+          projectId: project.id,
+          expectedRevision: project.revision,
+          referenceIds: [reference.id],
+        },
+      })
+    ).toThrow(expect.objectContaining({ code: 'in_flight' }));
   });
 
   it('rejects incomplete nonempty, extra, reordered, and wrong-purpose cascade choices', () => {

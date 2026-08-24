@@ -906,6 +906,45 @@
       "importError": "No se pudo añadir la referencia. Inténtalo de nuevo."
     },
     "workspace": {
+      "views": { "references": "Referencias" },
+      "referenceWorkflow": {
+        "description": "Aprueba primero fichas de personaje estables y después los fondos recurrentes. Los candidatos de Shot usan automáticamente estas referencias aprobadas.",
+        "generationScope": "Alcance de la generación",
+        "characters": {
+          "title": "Personajes",
+          "description": "Aprueba una ficha de identidad para cada personaje con nombre.",
+          "empty": "Esta historia no tiene personajes con nombre. Ya se pueden revisar los fondos."
+        },
+        "backgrounds": {
+          "title": "Fondos",
+          "description": "Aprueba las ubicaciones recurrentes que mantienen la coherencia visual de la película.",
+          "charactersRequired": "Aprueba todos los personajes antes de revisar los fondos.",
+          "empty": "No se requieren fondos recurrentes."
+        },
+        "previewPending": "Todavía no se ha generado un candidato de referencia.",
+        "previewAlt": "Candidato de referencia para {{label}}",
+        "status": {
+          "idle": "No generado",
+          "queued": "En cola",
+          "running": "Generando",
+          "succeeded": "Generado",
+          "failed": "Error de generación",
+          "candidate": "Listo para revisar",
+          "approved": "Aprobado"
+        },
+        "approve": "Aprobar",
+        "regenerate": "Volver a generar",
+        "ready": "Todas las referencias necesarias están aprobadas. Puedes continuar a la Tabla.",
+        "notReady": "Aprueba todas las referencias necesarias para continuar.",
+        "continueToTable": "Continuar a la Tabla"
+      },
+      "references": { "referenceCount": "Referencias solicitadas para {{total}} elementos" },
+      "handoffs": {
+        "referenceCount": "Esta entrega contiene {{total}} referencias",
+        "progress": "En cola {{queued}} · En curso {{running}} · Correctas {{succeeded}} · Fallidas {{failed}}",
+        "reviewReferences": "Revisar referencias",
+        "retryFailed": "Reintentar referencias fallidas"
+      },
       "table": {
         "columns": { "panel": "Panel" },
         "board": {
@@ -1003,6 +1042,24 @@
         }
       },
       "proposals": {
+        "before": "Antes",
+        "after": "Después",
+        "placement": "Ubicación",
+        "ownerBeat": "Beat propietario",
+        "order": "Orden",
+        "beforeItem": "Antes de {{kind}}",
+        "technicalDetails": "Detalles técnicos",
+        "reviewUnavailable": "Esta propuesta contiene un cambio no compatible y no se puede aceptar.",
+        "referenceKind": "Tipo de referencia",
+        "referencePrompt": "Prompt de referencia",
+        "assignedShots": "Shots asignados",
+        "chatDecisionBusy": "Otra acción revisada sigue en curso.",
+        "chatDirty": "Guarda o restablece todos los borradores del espacio de trabajo antes de aceptar o rechazar una propuesta del Director.",
+        "chatNoPending": "No hay ninguna propuesta del Director pendiente.",
+        "chatMultiplePending": "Hay más de una propuesta del Director pendiente. Usa los botones de la tarjeta exacta.",
+        "chatStale": "Esta propuesta ya no coincide con la revisión actual del proyecto.",
+        "chatAccepted": "Propuesta aceptada.",
+        "chatRejected": "Propuesta rechazada.",
         "fixedReason": {
           "video_asset": "Este plano tiene una imagen actual."
         }
@@ -1119,9 +1176,26 @@
       },
       "controls": {
         "briefAndRulesTitle": "Brief y reglas",
-        "undoLabel": { "promote_board_panel": "Usar panel como primer fotograma" }
+        "undoLabel": {
+          "promote_board_panel": "Usar panel como primer fotograma",
+          "set_project_references": "referencias del proyecto",
+          "set_shot_background_reference": "referencia de fondo del plano"
+        }
       },
       "gate": {
+        "backgroundChoice": {
+          "title": "Elige un fondo para cada plano",
+          "description": "Asigna un fondo aprobado antes de calcular el precio de la generación. Este cambio gratuito conserva las referencias de personajes.",
+          "shotLabel": "Fondo para el plano {{shotId}}",
+          "incomplete": "Elige un fondo para cada plano de la lista.",
+          "assign": "Asignar fondos",
+          "assigning": "Asignando fondos…",
+          "noneTitle": "No hay fondos aprobados disponibles.",
+          "noneBody": "Revisa las referencias y aprueba un fondo antes de calcular el precio de esta generación.",
+          "reviewReferences": "Revisar referencias",
+          "invalid": "Estas opciones de fondo ya no están vigentes. Revisa las referencias o cierra esta revisión e inténtalo de nuevo.",
+          "failed": "No se guardaron las asignaciones de fondo. Revisa el proyecto actual e inténtalo de nuevo."
+        },
         "purpose": { "board_still": "Panel del Board" },
         "promotion": {
           "title": "Usar panel como primer fotograma",

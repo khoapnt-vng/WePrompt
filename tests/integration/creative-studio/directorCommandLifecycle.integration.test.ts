@@ -99,6 +99,7 @@ const addTerminalPaidShotLineage = (project: StudioProjectV2, shotId: string): S
     byteSize: 1,
     sha256: 'b'.repeat(64),
     durationSeconds: 10,
+    referenceAssetIds: [],
     createdAt: next.updatedAt,
   };
   const item: StudioQuotedGeneration = {
@@ -119,7 +120,7 @@ const addTerminalPaidShotLineage = (project: StudioProjectV2, shotId: string): S
         aspectRatio: next.aspectRatio,
         resolution: next.resolution,
         durationSeconds: shot.durationSeconds,
-        referenceInput: null,
+        referenceInputs: [],
         conditioningInput: { kind: 'seed_still', assetId: seedId },
       },
     },
@@ -713,6 +714,25 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
             },
             beforeShotId: null,
           },
+          {
+            kind: 'set_project_references',
+            references: [
+              {
+                id: 'ref_character_1',
+                kind: 'character',
+                label: 'Establishing character',
+                prompt: 'Character reference for the establishing frame.',
+                shotIds: ['shot_reference_1'],
+              },
+              {
+                id: 'ref_character_2',
+                kind: 'character',
+                label: 'Product character',
+                prompt: 'Character reference for the product detail.',
+                shotIds: ['shot_reference_2'],
+              },
+            ],
+          },
         ],
       },
       { mutationId: 'seed_reference_shots', capturedAt: new Date().toISOString() },
@@ -752,7 +772,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
     try {
       const requested = await client.callTool({
         name: 'studio_request_reference_images',
-        arguments: { shotIds: ['shot_reference_1', 'shot_reference_2'] },
+        arguments: { referenceIds: ['ref_character_1', 'ref_character_2'] },
       });
       expect(requested.isError).not.toBe(true);
       expect(requested.content).toEqual([
@@ -767,7 +787,7 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
         request: expect.objectContaining({
           schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
           projectId: project.id,
-          shotIds: ['shot_reference_1', 'shot_reference_2'],
+          referenceIds: ['ref_character_1', 'ref_character_2'],
           status: 'pending',
         }),
         decision: null,
@@ -782,14 +802,14 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
         outcome: { kind: 'generation_gate' },
       });
       expect(decided).toMatchObject({
-        request: { id: pending.request.id, shotIds: ['shot_reference_1', 'shot_reference_2'] },
+        request: { id: pending.request.id, referenceIds: ['ref_character_1', 'ref_character_2'] },
         decision: {
           requestId: pending.request.id,
           projectId: project.id,
           outcome: {
             kind: 'generation_gate',
             handoffId: 'handoff_v2_reference',
-            shotIds: ['shot_reference_1', 'shot_reference_2'],
+            referenceIds: ['ref_character_1', 'ref_character_2'],
           },
         },
         receipt: null,
@@ -800,19 +820,25 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
         {
           handoffId: 'handoff_v2_reference',
           requestId: pending.request.id,
-          shotIds: ['shot_reference_1', 'shot_reference_2'],
+          referenceIds: ['ref_character_1', 'ref_character_2'],
           decidedAt: expect.any(String),
           status: 'open',
           completedAt: null,
+          progress: { queued: 0, running: 0, succeeded: 0, failed: 0 },
+          candidateAssetIds: [],
+          retryReferenceIds: [],
         },
       ]);
       expect(Object.keys(handoffs[0]!)).toEqual([
         'handoffId',
         'requestId',
-        'shotIds',
+        'referenceIds',
         'decidedAt',
         'status',
         'completedAt',
+        'progress',
+        'candidateAssetIds',
+        'retryReferenceIds',
       ]);
 
       const restartedCommit = vi.fn();

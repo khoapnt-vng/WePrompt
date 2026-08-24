@@ -25,7 +25,7 @@ export type {
  * unsaved-draft preflight before closing the window. A second copy of this list would not
  * just be a style problem — a view missing from main's copy closes with no prompt and loses the drafts.
  */
-export const STUDIO_VIEWS = ['table', 'board', 'cut'] as const;
+export const STUDIO_VIEWS = ['references', 'table', 'board', 'cut'] as const;
 
 export type StudioView = (typeof STUDIO_VIEWS)[number];
 
@@ -110,7 +110,7 @@ export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown';
 
 export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_running';
 
-export const STUDIO_PROJECT_SCHEMA_VERSION = 4 as const;
+export const STUDIO_PROJECT_SCHEMA_VERSION = 5 as const;
 export const STUDIO_MAX_BEATS = 24;
 export const STUDIO_MAX_SHOTS_PER_BEAT = 8;
 export const STUDIO_MAX_SHOTS_PER_PROJECT = 96;
@@ -137,6 +137,9 @@ export const STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT = STUDIO_MAX_SHOTS_PER_PROJECT
 export const STUDIO_MAX_EXPORT_DIRECTORY_DEPTH = 4;
 export const STUDIO_BED_FADE_OUT_SECONDS = 2;
 export const STUDIO_MAX_REFERENCE_REQUEST_SHOTS = 24;
+export const STUDIO_MAX_PROJECT_REFERENCES = 48;
+export const STUDIO_MAX_REFERENCE_LABEL_LENGTH = 256;
+export const STUDIO_MAX_REFERENCE_PROMPT_LENGTH = 8 * 1024;
 export const STUDIO_PROPOSAL_V2_PENDING_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT = 50;
@@ -311,6 +314,8 @@ export type StudioShot = {
   trimInSeconds: number | null;
   trimOutSeconds: number | null;
   chainBreak: 'none' | 'hard_cut';
+  /** Ordered project-reference identities authored for this Shot. */
+  referenceIds: string[];
   seedStillId: string | null;
   boardAssetId: string | null;
   supersededBoardAssetIds: string[];
@@ -318,6 +323,28 @@ export type StudioShot = {
   supersededVideoAssetIds: string[];
   assetIds: string[];
   jobIds: string[];
+};
+
+export type StudioProjectReferenceKindV2 = 'character' | 'background';
+
+/** Durable candidate/approval authority for one project-level reference sheet. */
+export type StudioProjectReferenceV2 = {
+  id: string;
+  kind: StudioProjectReferenceKindV2;
+  label: string;
+  prompt: string;
+  candidateAssetId: string | null;
+  candidateJobId: string | null;
+  approvedAssetId: string | null;
+  /** Replaced approvals remain attributable and reachable; entries are append-only. */
+  supersededAssetIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StudioProjectReferenceDraftV2 = Pick<StudioProjectReferenceV2, 'id' | 'kind' | 'label' | 'prompt'> & {
+  /** Input-only assignment; the reducer writes the sole durable authority to each Shot.referenceIds. */
+  shotIds: string[];
 };
 
 export type StudioBinItem =
@@ -382,7 +409,8 @@ export type StudioGenerationRequestSnapshot = {
   aspectRatio: StudioAspectRatio;
   resolution: StudioResolution;
   durationSeconds: number;
-  referenceInput: StudioGenerationReferenceInputSnapshot | null;
+  /** Ordered exact approved project-reference assets submitted to the provider. */
+  referenceInputs: StudioGenerationReferenceInputSnapshot[];
   conditioningInput: StudioConditioningInputSnapshot | null;
 };
 
@@ -428,6 +456,8 @@ export type StudioSpendPolicy = {
 export type StudioQuotedGeneration = {
   id: string;
   shotId: string;
+  /** Present only when this image job creates a candidate for a project reference. */
+  projectReferenceId?: string;
   purpose: StudioJobPurpose;
   routeId: string;
   generationCount: number;
@@ -457,6 +487,24 @@ export type StudioPrepareGenerationChoiceV2 = {
   shotId: string;
   purpose: StudioJobPurpose;
   referenceAssetId: string | null;
+};
+
+export type StudioPrepareProjectReferencesRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  referenceIds: string[];
+};
+
+/** Main-owned cached intent; only the ordinary arm is accepted by the generic prepare IPC. */
+export type StudioPreparedSubmissionRequestV2 =
+  | StudioPrepareSubmissionRequestV2
+  | StudioPrepareProjectReferencesRequestV2;
+
+export type StudioApproveProjectReferenceRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  referenceId: string;
+  candidateAssetId: string;
 };
 
 export type StudioContinuityChangeV2 = {
@@ -529,6 +577,7 @@ export type StudioPreparedSubmissionOptionsV2 = {
 
 export type StudioRendererQuotedGenerationV2 = {
   shotId: string;
+  projectReferenceId?: string;
   purpose: StudioJobPurpose;
   route: StudioRendererMediaModelRef;
   generationCount: number;
@@ -583,7 +632,7 @@ export type StudioReferenceRequestDecisionV2 = {
     | { kind: 'rejected' }
     | { kind: 'expired' }
     | { kind: 'imported_reference'; assetId: string; projectRevision: number }
-    | { kind: 'generation_gate'; handoffId: string; shotIds: string[] };
+    | { kind: 'generation_gate'; handoffId: string; referenceIds: string[] };
 };
 
 export type StudioReferenceGenerationHandoffReceiptV2 = {
@@ -597,10 +646,13 @@ export type StudioReferenceGenerationHandoffReceiptV2 = {
 export type StudioRendererReferenceGenerationHandoffV2 = {
   handoffId: string;
   requestId: string;
-  shotIds: string[];
+  referenceIds: string[];
   decidedAt: string;
   status: 'open' | 'dismissed' | 'confirmed';
   completedAt: string | null;
+  progress: { queued: number; running: number; succeeded: number; failed: number };
+  candidateAssetIds: string[];
+  retryReferenceIds: string[];
 };
 
 export type StudioDismissReferenceGenerationHandoffRequestV2 = {
@@ -723,6 +775,7 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'reorder_shots'
       | 'set_hard_cut'
       | 'set_seed_still'
+      | 'set_shot_background_reference'
       | 'promote_board_panel'
       | 'trim_shot'
       | 'redetach_line'
@@ -885,6 +938,8 @@ export type StudioAssetV2 = {
   briefReferenceLabel?: string;
   /** Beat/Shot look provenance for generated conditioning media. */
   sourceLook?: string;
+  /** Exact approved reference assets used to create this generated output, in provider order. */
+  referenceAssetIds?: string[];
 };
 
 export type StudioExportShapeV2 = 'editor_folder' | 'still' | 'script';
@@ -1025,6 +1080,8 @@ export type StudioJobV2 = {
   createdAt: string;
   updatedAt: string;
   purpose: StudioJobPurpose;
+  /** Candidate destination for a project-reference generation, absent for ordinary Shot jobs. */
+  projectReferenceId?: string;
   authorizationId: string;
   authorizationItemId: string;
   requestPlan: StudioGenerationRequestPlan;
@@ -1084,6 +1141,8 @@ export type StudioUndoPatch =
         brief: string;
         rules: StudioBriefRule[];
         beatOrder: string[];
+        referenceOrder: string[];
+        references: Record<string, StudioProjectReferenceV2>;
         imageRouteId: string | null;
         videoRouteId: string | null;
         spendPolicy: StudioSpendPolicy | null;
@@ -1147,6 +1206,8 @@ export type StudioProjectV2 = {
   beatOrder: string[];
   beats: Record<string, StudioBeat>;
   shots: Record<string, StudioShot>;
+  referenceOrder: string[];
+  references: Record<string, StudioProjectReferenceV2>;
   bin: StudioBinItem[];
   bedAssetId: string | null;
   spendPolicy: StudioSpendPolicy | null;
@@ -1219,6 +1280,8 @@ export type StudioMutationOperationV2 =
   | { kind: 'edit_project'; changes: StudioEditableProjectSettingsChanges }
   | { kind: 'set_brief'; brief: string }
   | { kind: 'set_rules'; rules: StudioBriefRuleDraft[] }
+  | { kind: 'set_project_references'; references: StudioProjectReferenceDraftV2[] }
+  | { kind: 'set_shot_background_reference'; shotId: string; referenceId: string }
   | {
       kind: 'add_beat';
       beatId: string;
@@ -1333,7 +1396,7 @@ export type StudioReferenceRequestV2 = {
   schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
   id: string;
   projectId: string;
-  shotIds: string[];
+  referenceIds: string[];
   status: 'pending';
   createdAt: string;
 };
@@ -1344,7 +1407,7 @@ export type StudioReferenceRequestSlotV2 = {
   reservedAt: string;
 };
 
-export type StudioReferenceRequestAuthorityV2 = Pick<StudioReferenceRequestV2, 'id' | 'shotIds'>;
+export type StudioReferenceRequestAuthorityV2 = Pick<StudioReferenceRequestV2, 'id' | 'referenceIds'>;
 
 export type StudioRouteIssue = {
   code: 'provider_unavailable' | 'unsupported_media' | 'invalid_duration' | 'invalid_resolution' | 'invalid_reference';

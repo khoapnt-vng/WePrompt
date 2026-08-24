@@ -15,6 +15,9 @@ import {
   STUDIO_MAX_GENERATION_PROMPT_LENGTH,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_LINE_HISTORY_PER_BEAT,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_REFERENCE_LABEL_LENGTH,
+  STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_SHOT_SECONDS,
@@ -29,6 +32,7 @@ import {
   type StudioGenerationRequestPlan,
   type StudioJobV2,
   type StudioJobPurpose,
+  type StudioProjectReferenceV2,
   type StudioProjectV2,
   type StudioProviderAdapterId,
   type StudioShot,
@@ -119,6 +123,8 @@ const PROJECT_REQUIRED_KEYS = new Set([
   'beatOrder',
   'beats',
   'shots',
+  'referenceOrder',
+  'references',
   'bin',
   'bedAssetId',
   'spendPolicy',
@@ -155,6 +161,7 @@ const SHOT_KEYS = new Set([
   'trimInSeconds',
   'trimOutSeconds',
   'chainBreak',
+  'referenceIds',
   'seedStillId',
   'boardAssetId',
   'supersededBoardAssetIds',
@@ -181,6 +188,7 @@ const ASSET_OPTIONAL_KEYS = new Set([
   'briefReferenceRole',
   'briefReferenceLabel',
   'sourceLook',
+  'referenceAssetIds',
 ]);
 const MANAGED_ASSET_KEYS = new Set(['collection', 'fileName']);
 const JOB_REQUIRED_KEYS = new Set([
@@ -208,12 +216,24 @@ const JOB_REQUIRED_KEYS = new Set([
   'createdAt',
   'updatedAt',
 ]);
-const JOB_OPTIONAL_KEYS = new Set(['remoteStartedAt', 'progress']);
+const JOB_OPTIONAL_KEYS = new Set(['remoteStartedAt', 'progress', 'projectReferenceId']);
 const PROVIDER_KEYS = new Set(['providerId', 'adapterId', 'model']);
 const JOB_ERROR_KEYS = new Set(['code', 'messageKey']);
 const OUTPUT_ROLE_KEYS = new Set(['primary', 'poster']);
 const RULE_KEYS = new Set(['id', 'scope', 'text', 'predicate', 'createdAt']);
 const RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
+const PROJECT_REFERENCE_KEYS = new Set([
+  'id',
+  'kind',
+  'label',
+  'prompt',
+  'candidateAssetId',
+  'candidateJobId',
+  'approvedAssetId',
+  'supersededAssetIds',
+  'createdAt',
+  'updatedAt',
+]);
 const BIN_BEAT_KEYS = new Set(['kind', 'beatId', 'reason']);
 const BIN_SHOT_KEYS = new Set(['kind', 'beatId', 'shotId', 'reason']);
 const SPEND_POLICY_KEYS = new Set(['currency', 'maxPerBatchMinorUnits']);
@@ -233,7 +253,7 @@ const AUTHORIZATION_KEYS = new Set([
   'providerBindings',
   'idempotencyKeys',
 ]);
-const QUOTED_ITEM_KEYS = new Set([
+const QUOTED_ITEM_REQUIRED_KEYS = new Set([
   'id',
   'shotId',
   'purpose',
@@ -243,6 +263,7 @@ const QUOTED_ITEM_KEYS = new Set([
   'rateUnit',
   'rateMinorUnits',
 ]);
+const QUOTED_ITEM_OPTIONAL_KEYS = new Set(['projectReferenceId']);
 const PROVIDER_BINDING_KEYS = new Set(['itemId', 'provider']);
 const IDEMPOTENCY_ENTRY_KEYS = new Set(['itemId', 'key']);
 const REQUEST_PLAN_RESOLVED_KEYS = new Set(['kind', 'snapshot']);
@@ -252,10 +273,10 @@ const REQUEST_SNAPSHOT_KEYS = new Set([
   'aspectRatio',
   'resolution',
   'durationSeconds',
-  'referenceInput',
+  'referenceInputs',
   'conditioningInput',
 ]);
-const REQUEST_TEMPLATE_KEYS = new Set(['prompt', 'aspectRatio', 'resolution', 'durationSeconds', 'referenceInput']);
+const REQUEST_TEMPLATE_KEYS = new Set(['prompt', 'aspectRatio', 'resolution', 'durationSeconds', 'referenceInputs']);
 const REFERENCE_INPUT_KEYS = new Set(['assetId', 'sha256']);
 const CONDITIONING_SEED_KEYS = new Set(['kind', 'assetId']);
 const CONDITIONING_PREDECESSOR_KEYS = new Set([
@@ -301,6 +322,8 @@ const PROJECT_PATCH_BEFORE_KEYS = new Set([
   'brief',
   'rules',
   'beatOrder',
+  'referenceOrder',
+  'references',
   'imageRouteId',
   'videoRouteId',
   'spendPolicy',
@@ -617,6 +640,7 @@ const validateShotRecord = (
   isNullableTrim(value.trimInSeconds) &&
   isNullableTrim(value.trimOutSeconds) &&
   (value.chainBreak === 'none' || value.chainBreak === 'hard_cut') &&
+  isUniqueSafeIdArray(value.referenceIds, STUDIO_MAX_PROJECT_REFERENCES) &&
   isNullableSafeId(value.seedStillId) &&
   isNullableSafeId(value.boardAssetId) &&
   isUniqueSafeIdArray(value.supersededBoardAssetIds) &&
@@ -626,6 +650,25 @@ const validateShotRecord = (
 
 const validateShot = (shotId: string, value: unknown): value is StudioShot =>
   validateShotRecord(shotId, value, SHOT_KEYS, true);
+
+const validateProjectReference = (referenceId: string, value: unknown): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, PROJECT_REFERENCE_KEYS) &&
+  value.id === referenceId &&
+  isSafeId(referenceId) &&
+  (value.kind === 'character' || value.kind === 'background') &&
+  isNonEmptyStringWithin(value.label, STUDIO_MAX_REFERENCE_LABEL_LENGTH) &&
+  value.label === (value.label as string).trim() &&
+  isNonEmptyStringWithin(value.prompt, STUDIO_MAX_REFERENCE_PROMPT_LENGTH) &&
+  value.prompt === (value.prompt as string).trim() &&
+  isNullableSafeId(value.candidateAssetId) &&
+  isNullableSafeId(value.candidateJobId) &&
+  isNullableSafeId(value.approvedAssetId) &&
+  isUniqueSafeIdArray(value.supersededAssetIds, STUDIO_MAX_PROJECT_REFERENCES) &&
+  !value.supersededAssetIds.includes(value.approvedAssetId) &&
+  isCanonicalTimestamp(value.createdAt) &&
+  isCanonicalTimestamp(value.updatedAt) &&
+  Date.parse(value.createdAt as string) <= Date.parse(value.updatedAt as string);
 
 const validateProposedShotSnapshot = (value: unknown): boolean =>
   isRecord(value) &&
@@ -706,6 +749,8 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
     (value.height !== undefined && !isIntegerInRange(value.height, 1, Number.MAX_SAFE_INTEGER)) ||
     (value.mediaKind === 'image' && value.durationSeconds !== undefined) ||
     (value.mediaKind !== 'image' && !isFinitePositive(value.durationSeconds)) ||
+    (value.referenceAssetIds !== undefined &&
+      !isUniqueSafeIdArray(value.referenceAssetIds, STUDIO_MAX_PROJECT_REFERENCES)) ||
     !isCanonicalTimestamp(value.createdAt)
   ) {
     return false;
@@ -753,12 +798,23 @@ const providersEqual = (left: unknown, right: unknown): boolean =>
   left.adapterId === right.adapterId &&
   left.model === right.model;
 
-const validateReferenceInput = (value: unknown): boolean =>
-  value === null ||
-  (isRecord(value) &&
-    hasExactKeys(value, REFERENCE_INPUT_KEYS) &&
-    isSafeId(value.assetId) &&
-    isLowercaseDigest(value.sha256));
+const validateReferenceInputs = (value: unknown): boolean => {
+  if (!isDenseArray(value, STUDIO_MAX_PROJECT_REFERENCES)) return false;
+  const assetIds = new Set<string>();
+  return arrayEvery(value, (input) => {
+    if (
+      !isRecord(input) ||
+      !hasExactKeys(input, REFERENCE_INPUT_KEYS) ||
+      !isSafeId(input.assetId) ||
+      assetIds.has(input.assetId) ||
+      !isLowercaseDigest(input.sha256)
+    ) {
+      return false;
+    }
+    assetIds.add(input.assetId);
+    return true;
+  });
+};
 
 const validateConditioningInput = (value: unknown): boolean => {
   if (value === null) return true;
@@ -783,7 +839,7 @@ const validateRequestFields = (value: Record<string, unknown>): boolean =>
   typeof value.resolution === 'string' &&
   RESOLUTIONS.has(value.resolution) &&
   isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS) &&
-  validateReferenceInput(value.referenceInput);
+  validateReferenceInputs(value.referenceInputs);
 
 const validateRequestSnapshot = (value: unknown): boolean =>
   isRecord(value) &&
@@ -828,10 +884,17 @@ const validateRequestPlan = (value: unknown): boolean => {
   );
 };
 
-const referencesEqual = (left: unknown, right: unknown): boolean => {
-  if (left === null || right === null) return left === right;
-  return isRecord(left) && isRecord(right) && left.assetId === right.assetId && left.sha256 === right.sha256;
-};
+const referencesEqual = (left: unknown, right: unknown): boolean =>
+  Array.isArray(left) &&
+  Array.isArray(right) &&
+  left.length === right.length &&
+  left.every(
+    (reference, index) =>
+      isRecord(reference) &&
+      isRecord(right[index]) &&
+      reference.assetId === right[index].assetId &&
+      reference.sha256 === right[index].sha256
+  );
 
 const conditioningInputsEqual = (left: unknown, right: unknown): boolean => {
   if (left === null || right === null) return left === right;
@@ -852,7 +915,7 @@ const requestNonConditioningFieldsEqual = (left: unknown, right: unknown): boole
   left.aspectRatio === right.aspectRatio &&
   left.resolution === right.resolution &&
   left.durationSeconds === right.durationSeconds &&
-  referencesEqual(left.referenceInput, right.referenceInput);
+  referencesEqual(left.referenceInputs, right.referenceInputs);
 
 const requestSnapshotsEqual = (left: unknown, right: unknown): boolean =>
   requestNonConditioningFieldsEqual(left, right) &&
@@ -941,6 +1004,7 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
     isUniqueSafeIdArray(value.outputAssetIds) &&
     typeof value.purpose === 'string' &&
     PURPOSES.has(value.purpose) &&
+    (value.projectReferenceId === undefined || isSafeId(value.projectReferenceId)) &&
     isSafeId(value.authorizationId) &&
     isSafeId(value.authorizationItemId) &&
     validateRequestPlan(value.requestPlan) &&
@@ -1042,9 +1106,10 @@ const validateSpendPolicy = (value: unknown): boolean =>
 const validateQuotedItem = (value: unknown, projectId: string, projectRevision: number): boolean => {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, QUOTED_ITEM_KEYS) ||
+    !hasKeys(value, QUOTED_ITEM_REQUIRED_KEYS, QUOTED_ITEM_OPTIONAL_KEYS) ||
     !isSafeId(value.id) ||
     !isSafeId(value.shotId) ||
+    (value.projectReferenceId !== undefined && !isSafeId(value.projectReferenceId)) ||
     typeof value.purpose !== 'string' ||
     !PURPOSES.has(value.purpose) ||
     !isSafeId(value.routeId) ||
@@ -1057,6 +1122,7 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
     return false;
   }
   const plan = value.requestPlan as Record<string, unknown>;
+  if (value.projectReferenceId !== undefined && value.purpose !== 'seed_still') return false;
   if (value.purpose === 'seed_still') {
     if (
       value.rateUnit !== 'generation' ||
@@ -1072,7 +1138,8 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
       plan.kind !== 'resolved' ||
       !isRecord(plan.snapshot) ||
       plan.snapshot.durationSeconds !== STUDIO_BOARD_REQUEST_DURATION_SECONDS ||
-      plan.snapshot.referenceInput !== null ||
+      !Array.isArray(plan.snapshot.referenceInputs) ||
+      plan.snapshot.referenceInputs.length !== 0 ||
       plan.snapshot.conditioningInput !== null
     ) {
       return false;
@@ -1081,9 +1148,13 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
     value.rateUnit !== 'second' ||
     (plan.kind === 'resolved' &&
       (!isRecord(plan.snapshot) ||
-        plan.snapshot.referenceInput !== null ||
+        !Array.isArray(plan.snapshot.referenceInputs) ||
+        plan.snapshot.referenceInputs.length !== 0 ||
         plan.snapshot.conditioningInput === null)) ||
-    (plan.kind === 'after_take_selection' && (!isRecord(plan.template) || plan.template.referenceInput !== null))
+    (plan.kind === 'after_take_selection' &&
+      (!isRecord(plan.template) ||
+        !Array.isArray(plan.template.referenceInputs) ||
+        plan.template.referenceInputs.length !== 0))
   ) {
     return false;
   }
@@ -1094,6 +1165,7 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
         projectRevision,
         shotId: value.shotId as string,
         purpose: value.purpose as StudioJobPurpose,
+        projectReferenceId: typeof value.projectReferenceId === 'string' ? value.projectReferenceId : null,
       }) &&
     calculateStudioQuotedGenerationAmounts(value as Parameters<typeof calculateStudioQuotedGenerationAmounts>[0]) !==
       null
@@ -1125,17 +1197,19 @@ const validateAuthorizationShape = (value: unknown, projectId: string, currentRe
   const items = [...value.baseItems, ...value.cascadeItems];
   if (items.length === 0 || items.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) return false;
   const itemIds = new Set<string>();
-  const shotPurposeKeys = new Set<string>();
+  const generationAuthorityKeys = new Set<string>();
   const shotIds = new Set<string>();
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
     if (!validateQuotedItem(item, projectId, value.projectRevision as number)) return false;
     const quoted = item as Record<string, unknown>;
     const itemId = quoted.id as string;
-    const shotPurposeKey = `${quoted.shotId as string}\0${quoted.purpose as string}`;
-    if (itemIds.has(itemId) || shotPurposeKeys.has(shotPurposeKey)) return false;
+    const generationAuthorityKey = `${quoted.shotId as string}\0${quoted.purpose as string}\0${
+      typeof quoted.projectReferenceId === 'string' ? quoted.projectReferenceId : ''
+    }`;
+    if (itemIds.has(itemId) || generationAuthorityKeys.has(generationAuthorityKey)) return false;
     itemIds.add(itemId);
-    shotPurposeKeys.add(shotPurposeKey);
+    generationAuthorityKeys.add(generationAuthorityKey);
     shotIds.add(quoted.shotId as string);
     if (shotIds.size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) return false;
   }
@@ -1215,6 +1289,25 @@ const validateFrameExtractionShape = (frameId: string, value: unknown): boolean 
   return value.frameAssetId === null && value.errorCode === null;
 };
 
+const validateProjectPatchReferences = (order: unknown, references: unknown): boolean => {
+  if (!isUniqueSafeIdArray(order, STUDIO_MAX_PROJECT_REFERENCES) || !isRecord(references)) return false;
+  const referenceIds = Object.keys(references);
+  if (
+    referenceIds.length !== order.length ||
+    !referenceIds.every((referenceId) => validateProjectReference(referenceId, references[referenceId])) ||
+    !arrayEvery(order, (referenceId) => Object.hasOwn(references, referenceId))
+  ) {
+    return false;
+  }
+  let sawBackground = false;
+  for (const referenceId of order) {
+    const reference = references[referenceId] as StudioProjectReferenceV2;
+    if (sawBackground && reference.kind === 'character') return false;
+    if (reference.kind === 'background') sawBackground = true;
+  }
+  return true;
+};
+
 const validateProjectPatchBefore = (value: unknown): boolean =>
   isRecord(value) &&
   hasExactKeys(value, PROJECT_PATCH_BEFORE_KEYS) &&
@@ -1228,6 +1321,7 @@ const validateProjectPatchBefore = (value: unknown): boolean =>
   isStringWithin(value.brief, 16 * 1024) &&
   validateRules(value.rules) &&
   isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS) &&
+  validateProjectPatchReferences(value.referenceOrder, value.references) &&
   isNullableRouteId(value.imageRouteId) &&
   isNullableRouteId(value.videoRouteId) &&
   validateSpendPolicy(value.spendPolicy) &&
@@ -1341,9 +1435,9 @@ const isCanonicalVideoTake = (asset: StudioAssetV2 | undefined, shotId: string):
   asset.managedAsset.collection === 'assets' &&
   asset.durationSeconds !== undefined;
 
-const requestReference = (job: StudioJobV2): { assetId: string; sha256: string } | null => {
+const requestReferences = (job: StudioJobV2): { assetId: string; sha256: string }[] => {
   const request = job.requestPlan.kind === 'resolved' ? job.requestPlan.snapshot : job.requestPlan.template;
-  return request.referenceInput;
+  return request.referenceInputs;
 };
 
 const requestDurationSeconds = (plan: StudioJobV2['requestPlan']): number =>
@@ -1402,6 +1496,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     !isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS) ||
     !isRecord(value.beats) ||
     !isRecord(value.shots) ||
+    !isUniqueSafeIdArray(value.referenceOrder, STUDIO_MAX_PROJECT_REFERENCES) ||
+    !isRecord(value.references) ||
     !validateBinStructure(value.bin) ||
     !isNullableSafeId(value.bedAssetId) ||
     !validateSpendPolicy(value.spendPolicy) ||
@@ -1421,11 +1517,16 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   const project = value as StudioProjectV2;
   const beatIds = Object.keys(project.beats);
   const shotIds = Object.keys(project.shots);
+  const referenceIds = Object.keys(project.references);
   if (
     beatIds.length > STUDIO_MAX_BEATS ||
     shotIds.length > STUDIO_MAX_SHOTS_PER_PROJECT ||
+    referenceIds.length > STUDIO_MAX_PROJECT_REFERENCES ||
     !beatIds.every((beatId) => validateBeat(beatId, project.beats[beatId])) ||
     !shotIds.every((shotId) => validateShot(shotId, project.shots[shotId])) ||
+    !referenceIds.every((referenceId) => validateProjectReference(referenceId, project.references[referenceId])) ||
+    project.referenceOrder.length !== referenceIds.length ||
+    !arrayEvery(project.referenceOrder, (referenceId) => Object.hasOwn(project.references, referenceId)) ||
     !arrayEvery(project.beatOrder, (beatId) => Object.hasOwn(project.beats, beatId))
   ) {
     return false;
@@ -1462,6 +1563,29 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     shotOwners.set(shotId, beatId);
   }
   if (shotOwners.size !== shotIds.length) return false;
+
+  const referenceLabels = new Set<string>();
+  let sawBackgroundReference = false;
+  for (const referenceId of project.referenceOrder) {
+    const reference = ownValue(project.references, referenceId);
+    if (reference === undefined || (sawBackgroundReference && reference.kind === 'character')) return false;
+    const labelIdentity = `${reference.kind}\0${reference.label}`;
+    if (referenceLabels.has(labelIdentity)) return false;
+    referenceLabels.add(labelIdentity);
+    if (reference.kind === 'background') sawBackgroundReference = true;
+  }
+  for (const shot of Object.values(project.shots)) {
+    let backgroundCount = 0;
+    let previousReferencePosition = -1;
+    for (const referenceId of shot.referenceIds) {
+      const reference = ownValue(project.references, referenceId);
+      const position = project.referenceOrder.indexOf(referenceId);
+      if (reference === undefined || position <= previousReferencePosition) return false;
+      previousReferencePosition = position;
+      if (reference.kind === 'background') backgroundCount += 1;
+    }
+    if (backgroundCount > 1) return false;
+  }
 
   const inactiveShotIds = new Set<string>(binnedShotOwnerIds.keys());
   for (const [shotId, beatId] of shotOwners) {
@@ -1677,6 +1801,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     return (
       producer?.status === 'succeeded' &&
       producer.purpose === purpose &&
+      producer.projectReferenceId === undefined &&
       producer.outputAssetIdsByRole.primary === asset.id
     );
   };
@@ -1797,22 +1922,35 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const predecessorIndex = ownerJobPositions?.get(predecessor.id);
     const retryIndex = ownerJobPositions?.get(job.id);
     if (predecessorIndex === undefined || retryIndex === undefined || predecessorIndex >= retryIndex) return false;
+    if (predecessor.purpose !== job.purpose || predecessor.projectReferenceId !== job.projectReferenceId) {
+      return false;
+    }
+    const isExactProjectReferenceRetry =
+      job.projectReferenceId !== undefined && predecessor.projectReferenceId === job.projectReferenceId;
+    const isProjectReferencePollDeadline =
+      isExactProjectReferenceRetry && predecessor.status === 'failed' && predecessor.error?.code === 'poll_deadline';
     if (job.retryReason === 'submission_unknown') {
+      const isSubmissionUnknownPredecessor =
+        predecessor.error?.code === 'submission_unknown' &&
+        (predecessor.status === 'failed' ||
+          (!isExactProjectReferenceRetry && predecessor.status === 'needs_attention'));
+      if ((!isSubmissionUnknownPredecessor && !isProjectReferencePollDeadline) || !job.duplicateChargeAcknowledged) {
+        return false;
+      }
+    } else {
+      const isProviderFailurePredecessor =
+        predecessor.status === 'failed' &&
+        predecessor.error?.code !== 'submission_unknown' &&
+        predecessor.error?.code !== 'download_failed' &&
+        (!isExactProjectReferenceRetry || predecessor.error?.code !== 'poll_deadline');
+      const isProjectReferenceCancellation = isExactProjectReferenceRetry && predecessor.status === 'cancelled';
       if (
-        (predecessor.status !== 'needs_attention' && predecessor.status !== 'failed') ||
-        predecessor.error?.code !== 'submission_unknown' ||
-        !job.duplicateChargeAcknowledged
+        job.retryReason !== 'provider_failure' ||
+        (!isProviderFailurePredecessor && !isProjectReferenceCancellation) ||
+        job.duplicateChargeAcknowledged
       ) {
         return false;
       }
-    } else if (
-      job.retryReason !== 'provider_failure' ||
-      predecessor.status !== 'failed' ||
-      predecessor.error?.code === 'submission_unknown' ||
-      predecessor.error?.code === 'download_failed' ||
-      job.duplicateChargeAcknowledged
-    ) {
-      return false;
     }
   }
 
@@ -1846,6 +1984,16 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
       const item = items[itemIndex]!;
       if (!Object.hasOwn(project.shots, item.shotId) || itemLinks.has(item.id)) return false;
+      if (item.projectReferenceId !== undefined) {
+        const targetReference = ownValue(project.references, item.projectReferenceId);
+        if (
+          item.purpose !== 'seed_still' ||
+          targetReference === undefined ||
+          (item.requestPlan.kind === 'resolved' && item.requestPlan.snapshot.referenceInputs.length !== 0)
+        ) {
+          return false;
+        }
+      }
       itemPositions.set(item.id, itemIndex);
       const idempotencyKey = authorization.idempotencyKeys[itemIndex]!.key;
       if (globalIdempotencyKeys.has(idempotencyKey)) return false;
@@ -1894,9 +2042,16 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       link.authorization.id !== job.authorizationId ||
       link.item.shotId !== job.shotId ||
       link.item.purpose !== job.purpose ||
+      link.item.projectReferenceId !== job.projectReferenceId ||
       !requestPlansEqual(link.item.requestPlan, job.requestPlan) ||
       !providersEqual(link.provider, job.provider) ||
       link.idempotencyKey !== job.idempotencyKey
+    ) {
+      return false;
+    }
+    if (
+      job.projectReferenceId !== undefined &&
+      (!Object.hasOwn(project.references, job.projectReferenceId) || job.purpose !== 'seed_still')
     ) {
       return false;
     }
@@ -1940,10 +2095,36 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       }
     }
 
-    const reference = requestReference(job);
-    if (reference !== null && !isTerminalJob(job)) {
+    const references = requestReferences(job);
+    const producedReferenceAssetIds = references.map((reference) => reference.assetId);
+    for (const outputAssetId of job.outputAssetIds) {
+      const output = ownValue(project.assets, outputAssetId);
+      if (
+        output === undefined ||
+        output.referenceAssetIds === undefined ||
+        output.referenceAssetIds.length !== producedReferenceAssetIds.length ||
+        output.referenceAssetIds.some((assetId, index) => assetId !== producedReferenceAssetIds[index])
+      ) {
+        return false;
+      }
+    }
+    for (const reference of references) {
       const source = ownValue(project.assets, reference.assetId);
-      if (!source || !isClassifiedBriefImage(source) || source.sha256 !== reference.sha256) return false;
+      const projectReferenceAuthority = project.referenceOrder.some((referenceId) => {
+        const projectReference = ownValue(project.references, referenceId);
+        return isTerminalJob(job)
+          ? projectReference?.approvedAssetId === reference.assetId ||
+              projectReference?.supersededAssetIds.includes(reference.assetId) === true
+          : projectReference?.approvedAssetId === reference.assetId;
+      });
+      if (isTerminalJob(job) && !projectReferenceAuthority) continue;
+      if (
+        source === undefined ||
+        source.sha256 !== reference.sha256 ||
+        (!isClassifiedBriefImage(source) && !projectReferenceAuthority)
+      ) {
+        return false;
+      }
     }
     if (job.requestSnapshot !== null) {
       const conditioning = job.requestSnapshot.conditioningInput;
@@ -2069,12 +2250,25 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
   if (jobsByLogicalEntry.size !== Object.keys(project.jobs).length) return false;
 
+  const liveProjectReferenceIds = new Set<string>();
+  for (const job of Object.values(project.jobs)) {
+    if (job.projectReferenceId === undefined || isTerminalJob(job)) continue;
+    if (liveProjectReferenceIds.has(job.projectReferenceId)) return false;
+    liveProjectReferenceIds.add(job.projectReferenceId);
+  }
+
   for (const link of itemLinks.values()) {
     const jobs = jobsByItemId.get(link.item.id)!;
     if (!jobs.some((job) => !isTerminalJob(job))) continue;
     for (const otherLink of itemLinks.values()) {
       if (otherLink.item.id === link.item.id) continue;
-      if (otherLink.item.shotId !== link.item.shotId || otherLink.item.purpose !== link.item.purpose) continue;
+      if (
+        otherLink.item.shotId !== link.item.shotId ||
+        otherLink.item.purpose !== link.item.purpose ||
+        otherLink.item.projectReferenceId !== link.item.projectReferenceId
+      ) {
+        continue;
+      }
       if (jobsByItemId.get(otherLink.item.id)?.some((job) => !isTerminalJob(job))) return false;
     }
   }
@@ -2105,6 +2299,38 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       ) {
         return false;
       }
+    }
+  }
+
+  const isReferenceOutput = (referenceId: string, assetId: string): boolean => {
+    const producer = outputProducerByAssetId.get(assetId);
+    return (
+      producer?.status === 'succeeded' &&
+      producer.purpose === 'seed_still' &&
+      producer.projectReferenceId === referenceId &&
+      producer.outputAssetIdsByRole.primary === assetId
+    );
+  };
+  for (const referenceId of project.referenceOrder) {
+    const reference = ownValue(project.references, referenceId)!;
+    const candidateJob =
+      reference.candidateJobId === null ? undefined : ownValue(project.jobs, reference.candidateJobId);
+    if (
+      (reference.candidateJobId === null) !== (candidateJob === undefined) ||
+      (candidateJob !== undefined &&
+        (candidateJob.projectReferenceId !== referenceId || candidateJob.purpose !== 'seed_still'))
+    ) {
+      return false;
+    }
+    const expectedCandidateAssetId =
+      candidateJob?.status === 'succeeded' ? candidateJob.outputAssetIdsByRole.primary : null;
+    if (
+      reference.candidateAssetId !== expectedCandidateAssetId ||
+      (reference.candidateAssetId !== null && !isReferenceOutput(referenceId, reference.candidateAssetId)) ||
+      (reference.approvedAssetId !== null && !isReferenceOutput(referenceId, reference.approvedAssetId)) ||
+      reference.supersededAssetIds.some((assetId) => !isReferenceOutput(referenceId, assetId))
+    ) {
+      return false;
     }
   }
 

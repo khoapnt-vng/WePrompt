@@ -901,6 +901,45 @@
       "importError": "无法添加参考图，请重试。"
     },
     "workspace": {
+      "views": { "references": "参考图" },
+      "referenceWorkflow": {
+        "description": "先批准稳定的角色设定图，再批准重复出现的背景。镜头候选会自动使用这些已批准的参考图。",
+        "generationScope": "生成范围",
+        "characters": {
+          "title": "角色",
+          "description": "为每个有名字的角色批准一张身份设定图。",
+          "empty": "此故事没有有名字的角色。现在可以审核背景。"
+        },
+        "backgrounds": {
+          "title": "背景",
+          "description": "批准重复出现的场景，让影片保持视觉一致。",
+          "charactersRequired": "请先批准所有角色，再审核背景。",
+          "empty": "不需要重复出现的背景。"
+        },
+        "previewPending": "尚未生成参考图候选。",
+        "previewAlt": "{{label}} 的参考图候选",
+        "status": {
+          "idle": "尚未生成",
+          "queued": "已排队",
+          "running": "生成中",
+          "succeeded": "已生成",
+          "failed": "生成失败",
+          "candidate": "待审核",
+          "approved": "已批准"
+        },
+        "approve": "批准",
+        "regenerate": "重新生成",
+        "ready": "所有必需的参考图均已批准。可以继续前往表格。",
+        "notReady": "批准所有必需的参考图后才能继续。",
+        "continueToTable": "继续前往表格"
+      },
+      "references": { "referenceCount": "已为 {{total}} 个项目请求参考图" },
+      "handoffs": {
+        "referenceCount": "此交接包含 {{total}} 张参考图",
+        "progress": "排队 {{queued}} · 运行 {{running}} · 成功 {{succeeded}} · 失败 {{failed}}",
+        "reviewReferences": "审核参考图",
+        "retryFailed": "重试失败的参考图"
+      },
       "table": {
         "columns": { "panel": "分镜" },
         "board": {
@@ -998,6 +1037,24 @@
         }
       },
       "proposals": {
+        "before": "之前",
+        "after": "之后",
+        "placement": "位置",
+        "ownerBeat": "所属节拍",
+        "order": "顺序",
+        "beforeItem": "在{{kind}}之前",
+        "technicalDetails": "技术详情",
+        "reviewUnavailable": "此提案包含不支持的更改，无法接受。",
+        "referenceKind": "参考类型",
+        "referencePrompt": "参考提示词",
+        "assignedShots": "已分配镜头",
+        "chatDecisionBusy": "另一个审核操作仍在进行中。",
+        "chatDirty": "请先保存或重置所有工作区草稿，再批准或拒绝导演提案。",
+        "chatNoPending": "当前没有待处理的导演提案。",
+        "chatMultiplePending": "有多个导演提案待处理。请使用对应卡片上的按钮。",
+        "chatStale": "此提案已与当前项目版本不匹配。",
+        "chatAccepted": "提案已接受。",
+        "chatRejected": "提案已拒绝。",
         "fixedReason": {
           "video_asset": "此镜头有当前画面。"
         }
@@ -1114,9 +1171,26 @@
       },
       "controls": {
         "briefAndRulesTitle": "简报与规则",
-        "undoLabel": { "promote_board_panel": "将分镜用作首帧" }
+        "undoLabel": {
+          "promote_board_panel": "将分镜用作首帧",
+          "set_project_references": "项目参考",
+          "set_shot_background_reference": "镜头背景参考"
+        }
       },
       "gate": {
+        "backgroundChoice": {
+          "title": "为每个镜头选择背景",
+          "description": "在计算生成费用前，为每个镜头分配一个已批准的背景。此免费更改会保留角色参考。",
+          "shotLabel": "镜头 {{shotId}} 的背景",
+          "incomplete": "请为列表中的每个镜头选择一个背景。",
+          "assign": "分配背景",
+          "assigning": "正在分配背景…",
+          "noneTitle": "没有可用的已批准背景。",
+          "noneBody": "请先检查参考并批准一个背景，再计算本次生成的费用。",
+          "reviewReferences": "检查参考",
+          "invalid": "这些背景选择已不是最新状态。请检查参考，或关闭此审核后重试。",
+          "failed": "未能保存背景分配。请检查当前项目并重试。"
+        },
         "purpose": { "board_still": "分镜" },
         "promotion": {
           "title": "将分镜用作首帧",

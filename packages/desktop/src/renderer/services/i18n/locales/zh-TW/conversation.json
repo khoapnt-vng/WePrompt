@@ -901,6 +901,45 @@
       "importError": "無法新增參考圖，請再試一次。"
     },
     "workspace": {
+      "views": { "references": "參考圖" },
+      "referenceWorkflow": {
+        "description": "先核准穩定的角色設定圖，再核准重複出現的背景。鏡頭候選會自動使用這些已核准的參考圖。",
+        "generationScope": "產生範圍",
+        "characters": {
+          "title": "角色",
+          "description": "為每個有名字的角色核准一張身分設定圖。",
+          "empty": "此故事沒有有名字的角色。現在可以檢閱背景。"
+        },
+        "backgrounds": {
+          "title": "背景",
+          "description": "核准重複出現的場景，讓影片保持視覺一致。",
+          "charactersRequired": "請先核准所有角色，再檢閱背景。",
+          "empty": "不需要重複出現的背景。"
+        },
+        "previewPending": "尚未產生參考圖候選。",
+        "previewAlt": "{{label}} 的參考圖候選",
+        "status": {
+          "idle": "尚未產生",
+          "queued": "已排入佇列",
+          "running": "產生中",
+          "succeeded": "已產生",
+          "failed": "產生失敗",
+          "candidate": "待檢閱",
+          "approved": "已核准"
+        },
+        "approve": "核准",
+        "regenerate": "重新產生",
+        "ready": "所有必要的參考圖均已核准。可以繼續前往表格。",
+        "notReady": "核准所有必要的參考圖後才能繼續。",
+        "continueToTable": "繼續前往表格"
+      },
+      "references": { "referenceCount": "已為 {{total}} 個項目請求參考圖" },
+      "handoffs": {
+        "referenceCount": "此交接包含 {{total}} 張參考圖",
+        "progress": "佇列 {{queued}} · 執行中 {{running}} · 成功 {{succeeded}} · 失敗 {{failed}}",
+        "reviewReferences": "檢閱參考圖",
+        "retryFailed": "重試失敗的參考圖"
+      },
       "table": {
         "columns": { "panel": "分鏡" },
         "board": {
@@ -998,6 +1037,24 @@
         }
       },
       "proposals": {
+        "before": "之前",
+        "after": "之後",
+        "placement": "位置",
+        "ownerBeat": "所屬節拍",
+        "order": "順序",
+        "beforeItem": "在{{kind}}之前",
+        "technicalDetails": "技術詳情",
+        "reviewUnavailable": "此提案包含不支援的變更，無法接受。",
+        "referenceKind": "參考類型",
+        "referencePrompt": "參考提示詞",
+        "assignedShots": "已指派鏡頭",
+        "chatDecisionBusy": "另一個審核操作仍在進行中。",
+        "chatDirty": "請先儲存或重設所有工作區草稿，再核准或拒絕導演提案。",
+        "chatNoPending": "目前沒有待處理的導演提案。",
+        "chatMultiplePending": "有多個導演提案待處理。請使用對應卡片上的按鈕。",
+        "chatStale": "此提案已與目前專案版本不符。",
+        "chatAccepted": "提案已接受。",
+        "chatRejected": "提案已拒絕。",
         "fixedReason": {
           "video_asset": "此鏡頭有目前畫面。"
         }
@@ -1114,9 +1171,26 @@
       },
       "controls": {
         "briefAndRulesTitle": "簡報與規則",
-        "undoLabel": { "promote_board_panel": "將分鏡用作首幀" }
+        "undoLabel": {
+          "promote_board_panel": "將分鏡用作首幀",
+          "set_project_references": "專案參考",
+          "set_shot_background_reference": "鏡頭背景參考"
+        }
       },
       "gate": {
+        "backgroundChoice": {
+          "title": "為每個鏡頭選擇背景",
+          "description": "在計算生成費用前，為每個鏡頭指派一個已核准的背景。此免費變更會保留角色參考。",
+          "shotLabel": "鏡頭 {{shotId}} 的背景",
+          "incomplete": "請為清單中的每個鏡頭選擇一個背景。",
+          "assign": "指派背景",
+          "assigning": "正在指派背景…",
+          "noneTitle": "沒有可用的已核准背景。",
+          "noneBody": "請先檢查參考並核准一個背景，再計算此次生成的費用。",
+          "reviewReferences": "檢查參考",
+          "invalid": "這些背景選擇已不是最新狀態。請檢查參考，或關閉此審查後再試一次。",
+          "failed": "未能儲存背景指派。請檢查目前的專案並再試一次。"
+        },
         "purpose": { "board_still": "分鏡" },
         "promotion": {
           "title": "將分鏡用作首幀",

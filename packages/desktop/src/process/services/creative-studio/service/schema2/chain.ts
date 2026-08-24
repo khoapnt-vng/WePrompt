@@ -78,6 +78,21 @@ const selectedVideoTake = (project: StudioProjectV2, shot: StudioShot): StudioAs
   return asset?.mediaKind === 'video' && isCanonicalStudioGeneratedTakeV2(asset, project.id, shot) ? asset : null;
 };
 
+const isProjectReferenceAsset = (project: StudioProjectV2, shotId: string, assetId: string): boolean =>
+  Object.values(project.references).some(
+    (reference) =>
+      reference.candidateAssetId === assetId ||
+      reference.approvedAssetId === assetId ||
+      reference.supersededAssetIds.includes(assetId)
+  ) ||
+  Object.values(project.jobs).some(
+    (job) =>
+      job.projectReferenceId !== undefined &&
+      job.projectId === project.id &&
+      job.shotId === shotId &&
+      job.outputAssetIds.includes(assetId)
+  );
+
 const eligibleSeed = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
   const asset = ownValue(project.assets, assetId);
   return asset?.id === assetId &&
@@ -85,6 +100,7 @@ const eligibleSeed = (project: StudioProjectV2, shot: StudioShot, assetId: strin
     asset.shotId === shot.id &&
     asset.mediaKind === 'image' &&
     (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
+    !isProjectReferenceAsset(project, shot.id, asset.id) &&
     shot.assetIds.includes(asset.id)
     ? asset
     : null;
@@ -128,20 +144,31 @@ const producingJob = (project: StudioProjectV2, shot: StudioShot, assetId: strin
   return jobs.length === 1 ? jobs[0]! : null;
 };
 
-const currentReferenceInput = (project: StudioProjectV2, job: StudioJobV2) => {
-  const recorded = job.requestSnapshot?.referenceInput ?? null;
-  if (recorded === null) return null;
-  const asset = ownValue(project.assets, recorded.assetId);
-  return asset?.id === recorded.assetId &&
-    asset.projectId === project.id &&
-    asset.shotId === null &&
-    asset.mediaKind === 'image' &&
-    asset.managedAsset.collection === 'imports' &&
-    asset.sha256 === recorded.sha256 &&
-    (asset.briefReferenceRole === 'cast' || asset.briefReferenceRole === 'look') &&
-    typeof asset.briefReferenceLabel === 'string'
-    ? { assetId: asset.id, sha256: asset.sha256 }
-    : null;
+const currentReferenceInputs = (project: StudioProjectV2, shot: StudioShot, job: StudioJobV2) => {
+  if (shot.referenceIds.length > 0) {
+    const references = shot.referenceIds.map((referenceId) => ownValue(project.references, referenceId));
+    if (references.some((reference) => reference?.approvedAssetId === null || reference === undefined)) return [];
+    return references
+      .map((reference) => {
+        const asset = ownValue(project.assets, reference!.approvedAssetId!);
+        return asset === undefined ? null : { assetId: asset.id, sha256: asset.sha256 };
+      })
+      .filter((reference): reference is { assetId: string; sha256: string } => reference !== null);
+  }
+  const recorded = job.requestSnapshot?.referenceInputs ?? [];
+  return recorded.flatMap((reference) => {
+    const asset = ownValue(project.assets, reference.assetId);
+    return asset?.id === reference.assetId &&
+      asset.projectId === project.id &&
+      asset.shotId === null &&
+      asset.mediaKind === 'image' &&
+      asset.managedAsset.collection === 'imports' &&
+      asset.sha256 === reference.sha256 &&
+      (asset.briefReferenceRole === 'cast' || asset.briefReferenceRole === 'look') &&
+      typeof asset.briefReferenceLabel === 'string'
+      ? [{ assetId: asset.id, sha256: asset.sha256 }]
+      : [];
+  });
 };
 
 const currentRequestTemplate = (project: StudioProjectV2, shot: StudioShot, job: StudioJobV2) => {
@@ -157,7 +184,7 @@ const currentRequestTemplate = (project: StudioProjectV2, shot: StudioShot, job:
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
       durationSeconds: shot.durationSeconds,
-      referenceInput: job.purpose === 'seed_still' ? currentReferenceInput(project, job) : null,
+      referenceInputs: job.purpose === 'seed_still' ? currentReferenceInputs(project, shot, job) : [],
     });
   } catch {
     return null;

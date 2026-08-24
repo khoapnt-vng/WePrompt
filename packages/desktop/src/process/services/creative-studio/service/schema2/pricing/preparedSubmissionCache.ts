@@ -13,7 +13,7 @@ import {
   STUDIO_PREPARED_QUOTE_TTL_SECONDS,
   type StudioCancellationPolicy,
   type StudioPreparedSubmissionOptionsV2,
-  type StudioPrepareSubmissionRequestV2,
+  type StudioPreparedSubmissionRequestV2,
   type StudioSpendAuthorization,
   type StudioSubmissionCacheErrorCodeV2,
   type StudioSubmissionQuote,
@@ -23,7 +23,7 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 
 export type StudioPreparedSubmissionSessionV2 = {
   preparedAt: string;
-  request: StudioPrepareSubmissionRequestV2;
+  request: StudioPreparedSubmissionRequestV2;
   options: StudioPreparedSubmissionOptionsV2;
   providerBindings: StudioSpendAuthorization['providerBindings'];
   cancellationPolicies: Array<{ itemId: string; policy: StudioCancellationPolicy }>;
@@ -112,6 +112,11 @@ const serializeSession = (
 
 const quoteItems = (quote: StudioSubmissionQuote) => [...quote.baseItems, ...quote.cascadeItems];
 
+const isProjectReferenceRequest = (
+  request: StudioPreparedSubmissionRequestV2
+): request is Extract<StudioPreparedSubmissionRequestV2, { referenceIds: string[] }> =>
+  Object.hasOwn(request, 'referenceIds');
+
 const validateSession = (session: StudioPreparedSubmissionSessionV2, expectedExpiresAt: string): void => {
   const { request, options, providerBindings, cancellationPolicies } = session;
   const baseOnly = options.baseOnly;
@@ -120,12 +125,9 @@ const validateSession = (session: StudioPreparedSubmissionSessionV2, expectedExp
     !SAFE_ID.test(request.projectId) ||
     !Number.isSafeInteger(request.expectedRevision) ||
     request.expectedRevision < 1 ||
-    !isDenseArray(request.baseChoices) ||
-    !isDenseArray(request.cascadeChoices) ||
     !SAFE_ID.test(baseOnly.id) ||
     baseOnly.projectId !== request.projectId ||
     baseOnly.projectRevision !== request.expectedRevision ||
-    baseOnly.originReferenceHandoffId !== request.originReferenceHandoffId ||
     baseOnly.expiresAt !== expectedExpiresAt ||
     baseOnly.cascadeItems.length !== 0 ||
     !canonicalTimestamp(baseOnly.expiresAt)
@@ -133,7 +135,31 @@ const validateSession = (session: StudioPreparedSubmissionSessionV2, expectedExp
     return invariant('base_option_mismatch');
   }
 
-  if (request.cascadeChoices.length === 0 && withCascade !== null) {
+  if (isProjectReferenceRequest(request)) {
+    if (
+      Object.keys(request).length !== 3 ||
+      !isDenseArray(request.referenceIds) ||
+      request.referenceIds.length === 0 ||
+      request.referenceIds.some((referenceId) => typeof referenceId !== 'string' || !SAFE_ID.test(referenceId)) ||
+      new Set(request.referenceIds).size !== request.referenceIds.length ||
+      (baseOnly.originReferenceHandoffId !== null && !SAFE_ID.test(baseOnly.originReferenceHandoffId)) ||
+      baseOnly.baseItems.length !== request.referenceIds.length ||
+      baseOnly.baseItems.some(
+        (item, index) => item.projectReferenceId !== request.referenceIds[index] || item.purpose !== 'seed_still'
+      ) ||
+      withCascade !== null
+    ) {
+      return invariant('reference_option_mismatch');
+    }
+  } else if (
+    !isDenseArray(request.baseChoices) ||
+    !isDenseArray(request.cascadeChoices) ||
+    baseOnly.originReferenceHandoffId !== request.originReferenceHandoffId
+  ) {
+    return invariant('base_option_mismatch');
+  }
+
+  if (!isProjectReferenceRequest(request) && request.cascadeChoices.length === 0 && withCascade !== null) {
     return invariant('cascade_option_presence');
   }
   if (
@@ -142,7 +168,8 @@ const validateSession = (session: StudioPreparedSubmissionSessionV2, expectedExp
       withCascade.id === baseOnly.id ||
       withCascade.projectId !== request.projectId ||
       withCascade.projectRevision !== request.expectedRevision ||
-      withCascade.originReferenceHandoffId !== request.originReferenceHandoffId ||
+      withCascade.originReferenceHandoffId !==
+        (isProjectReferenceRequest(request) ? null : request.originReferenceHandoffId) ||
       withCascade.expiresAt !== expectedExpiresAt ||
       withCascade.currency !== baseOnly.currency ||
       withCascade.cascadeItems.length === 0 ||

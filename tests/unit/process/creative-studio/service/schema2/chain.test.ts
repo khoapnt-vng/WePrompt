@@ -57,6 +57,7 @@ const makeShot = (shotId: string): StudioShot => ({
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
+  referenceIds: [],
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -103,7 +104,7 @@ const makeSnapshot = (
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
       durationSeconds: shot.durationSeconds,
-      referenceInput: null,
+      referenceInputs: [],
     }),
     conditioningInput,
   };
@@ -378,6 +379,52 @@ describe('deriveStudioDirtyShotsV2', () => {
     expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
   });
 
+  it('does not use a newer displaced project-reference output as an implicit seed', () => {
+    const project = makeTwoShotProject();
+    const shot = project.shots.shot_1!;
+    shot.seedStillId = null;
+    const referenceId = 'reference_character';
+    project.referenceOrder = [referenceId];
+    project.references[referenceId] = {
+      id: referenceId,
+      kind: 'character',
+      label: 'Ming',
+      prompt: 'A stable character sheet for Ming.',
+      candidateAssetId: null,
+      candidateJobId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    shot.referenceIds = [referenceId];
+    const historicalReferenceOutput = makeAsset(
+      project,
+      shot.id,
+      'historical_reference_output',
+      'image',
+      'assets',
+      '2026-08-18T00:00:01.000Z'
+    );
+    project.assets[historicalReferenceOutput.id] = historicalReferenceOutput;
+    shot.assetIds.push(historicalReferenceOutput.id);
+    const jobId = 'historical_reference_job';
+    project.jobs[jobId] = {
+      id: jobId,
+      projectId: project.id,
+      shotId: shot.id,
+      status: 'succeeded',
+      purpose: 'seed_still',
+      projectReferenceId: referenceId,
+      outputAssetIds: [historicalReferenceOutput.id],
+      outputAssetIdsByRole: { primary: historicalReferenceOutput.id, poster: null },
+      requestSnapshot: null,
+    } as StudioJobV2;
+    shot.jobIds.push(jobId);
+
+    expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
+  });
+
   it('never treats a newer Board panel as an implicit first frame', () => {
     const project = makeTwoShotProject();
     const shot = project.shots.shot_1!;
@@ -418,7 +465,7 @@ describe('deriveStudioDirtyShotsV2', () => {
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: shot.durationSeconds,
-        referenceInput: { assetId: referenceId, sha256: referenceSha },
+        referenceInputs: [{ assetId: referenceId, sha256: referenceSha }],
       }),
       conditioningInput: null,
     };
@@ -540,7 +587,7 @@ describe('deriveStudioInboundShotReferencesV2', () => {
           aspectRatio: downstreamSnapshot.aspectRatio,
           resolution: downstreamSnapshot.resolution,
           durationSeconds: downstreamSnapshot.durationSeconds,
-          referenceInput: downstreamSnapshot.referenceInput,
+          referenceInputs: downstreamSnapshot.referenceInputs,
         },
         dependency: {
           kind: 'authorized_predecessor',
@@ -608,7 +655,7 @@ describe('deriveStudioInboundShotReferencesV2', () => {
           aspectRatio: downstream.requestSnapshot!.aspectRatio,
           resolution: downstream.requestSnapshot!.resolution,
           durationSeconds: downstream.requestSnapshot!.durationSeconds,
-          referenceInput: null,
+          referenceInputs: [],
         },
         dependency: {
           kind: 'authorized_seed',

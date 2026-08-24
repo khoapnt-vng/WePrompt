@@ -904,6 +904,45 @@
       "importError": "Die Referenz konnte nicht hinzugefügt werden. Versuche es erneut."
     },
     "workspace": {
+      "views": { "references": "Referenzen" },
+      "referenceWorkflow": {
+        "description": "Genehmigen Sie zuerst stabile Charakterblätter und danach wiederkehrende Hintergründe. Shot-Kandidaten verwenden diese genehmigten Referenzen automatisch.",
+        "generationScope": "Generierungsumfang",
+        "characters": {
+          "title": "Charaktere",
+          "description": "Genehmigen Sie ein Identitätsblatt für jeden benannten Charakter.",
+          "empty": "Diese Geschichte enthält keine benannten Charaktere. Hintergründe können jetzt geprüft werden."
+        },
+        "backgrounds": {
+          "title": "Hintergründe",
+          "description": "Genehmigen Sie wiederkehrende Orte, die den Film visuell konsistent halten.",
+          "charactersRequired": "Genehmigen Sie alle Charaktere, bevor Sie Hintergründe prüfen.",
+          "empty": "Es sind keine wiederkehrenden Hintergründe erforderlich."
+        },
+        "previewPending": "Es wurde noch kein Referenzkandidat erzeugt.",
+        "previewAlt": "Referenzkandidat für {{label}}",
+        "status": {
+          "idle": "Nicht erzeugt",
+          "queued": "In Warteschlange",
+          "running": "Wird erzeugt",
+          "succeeded": "Erzeugt",
+          "failed": "Erzeugung fehlgeschlagen",
+          "candidate": "Bereit zur Prüfung",
+          "approved": "Genehmigt"
+        },
+        "approve": "Genehmigen",
+        "regenerate": "Neu erzeugen",
+        "ready": "Alle erforderlichen Referenzen sind genehmigt. Sie können mit der Tabelle fortfahren.",
+        "notReady": "Genehmigen Sie alle erforderlichen Referenzen, um fortzufahren.",
+        "continueToTable": "Weiter zur Tabelle"
+      },
+      "references": { "referenceCount": "Referenzen für {{total}} Elemente angefordert" },
+      "handoffs": {
+        "referenceCount": "Diese Übergabe enthält {{total}} Referenzen",
+        "progress": "Warteschlange {{queued}} · Läuft {{running}} · Erfolgreich {{succeeded}} · Fehlgeschlagen {{failed}}",
+        "reviewReferences": "Referenzen prüfen",
+        "retryFailed": "Fehlgeschlagene Referenzen wiederholen"
+      },
       "table": {
         "columns": { "panel": "Panel" },
         "board": {
@@ -1001,6 +1040,24 @@
         }
       },
       "proposals": {
+        "before": "Vorher",
+        "after": "Nachher",
+        "placement": "Platzierung",
+        "ownerBeat": "Zugehöriger Beat",
+        "order": "Reihenfolge",
+        "beforeItem": "Vor {{kind}}",
+        "technicalDetails": "Technische Details",
+        "reviewUnavailable": "Dieser Vorschlag enthält eine nicht unterstützte Änderung und kann nicht angenommen werden.",
+        "referenceKind": "Referenztyp",
+        "referencePrompt": "Referenz-Prompt",
+        "assignedShots": "Zugewiesene Shots",
+        "chatDecisionBusy": "Eine andere geprüfte Aktion läuft noch.",
+        "chatDirty": "Speichere oder verwerfe alle Arbeitsbereichsentwürfe, bevor du einen Director-Vorschlag annimmst oder ablehnst.",
+        "chatNoPending": "Es gibt keinen ausstehenden Regievorschlag.",
+        "chatMultiplePending": "Mehrere Regievorschläge sind ausstehend. Verwende die Schaltflächen der passenden Karte.",
+        "chatStale": "Dieser Vorschlag entspricht nicht mehr der aktuellen Projektversion.",
+        "chatAccepted": "Vorschlag angenommen.",
+        "chatRejected": "Vorschlag abgelehnt.",
         "fixedReason": {
           "video_asset": "Dieser Shot hat ein aktuelles Bild."
         }
@@ -1117,9 +1174,26 @@
       },
       "controls": {
         "briefAndRulesTitle": "Brief & Regeln",
-        "undoLabel": { "promote_board_panel": "Panel als erstes Bild verwenden" }
+        "undoLabel": {
+          "promote_board_panel": "Panel als erstes Bild verwenden",
+          "set_project_references": "Projektreferenzen",
+          "set_shot_background_reference": "Shot-Hintergrundreferenz"
+        }
       },
       "gate": {
+        "backgroundChoice": {
+          "title": "Hintergrund für jeden Shot auswählen",
+          "description": "Weise vor der Preisberechnung jedem Shot einen genehmigten Hintergrund zu. Diese kostenlose Änderung behält die Charakterreferenzen bei.",
+          "shotLabel": "Hintergrund für Shot {{shotId}}",
+          "incomplete": "Wähle für jeden aufgeführten Shot einen Hintergrund aus.",
+          "assign": "Hintergründe zuweisen",
+          "assigning": "Hintergründe werden zugewiesen…",
+          "noneTitle": "Keine genehmigten Hintergründe verfügbar.",
+          "noneBody": "Prüfe die Referenzen und genehmige einen Hintergrund, bevor du den Preis für diese Generierung berechnest.",
+          "reviewReferences": "Referenzen prüfen",
+          "invalid": "Diese Hintergrundauswahl ist nicht mehr aktuell. Prüfe die Referenzen oder schließe diese Prüfung und versuche es erneut.",
+          "failed": "Die Hintergründe wurden nicht zugewiesen. Prüfe das aktuelle Projekt und versuche es erneut."
+        },
         "purpose": { "board_still": "Board-Panel" },
         "promotion": {
           "title": "Panel als erstes Bild verwenden",

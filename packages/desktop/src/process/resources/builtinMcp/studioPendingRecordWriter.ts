@@ -1211,8 +1211,10 @@ const preflightPendingFamilyV2 = async (input: {
     }
     if (
       decision.outcome.kind === 'generation_gate' &&
-      (decision.outcome.shotIds.length !== request.record.shotIds.length ||
-        !decision.outcome.shotIds.every((shotId, index) => shotId === request.record.shotIds[index]))
+      (decision.outcome.referenceIds.length !== request.record.referenceIds.length ||
+        !decision.outcome.referenceIds.every(
+          (referenceId, index) => referenceId === request.record.referenceIds[index]
+        ))
     ) {
       throwForSidecarSchemaV2('invalid');
     }

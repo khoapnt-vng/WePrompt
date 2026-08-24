@@ -12,7 +12,7 @@ import { Link } from 'react-router-dom';
 import type { StudioRendererProjectV2 } from '@/common/types/project/creativeStudioTypes';
 import SidebarIcon from '@/renderer/components/base/SidebarIcon';
 import { STUDIO_VIEWS, studioViewPath, type StudioView } from '@/renderer/pages/studio/studioPhaseRoute';
-import { DirectorRail } from './DirectorRail';
+import { DirectorRail, type DirectorProposalChatIntent } from './DirectorRail';
 import styles from './Workspace.module.css';
 import type { StudioBarStats } from './workspaceProjection';
 
@@ -21,6 +21,7 @@ export type WorkspaceShellProps = {
   activeView: StudioView;
   stats?: StudioBarStats;
   reviewedOutput?: React.ReactNode;
+  onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
   /** The bar's primary action. It spends money, so it is the control that never leaves the bar. */
   renderAction?: React.ReactNode;
   notice?: React.ReactNode;
@@ -92,10 +93,11 @@ const storeRailWidth = (width: number): void => {
 
 /**
  * Where the Director is useful, per the division of labour: it acts before the picture exists and the
- * human decides after it does. The Table is the pre-picture view and the rail opens there; the Board
- * and the Cut are judgements about pixels and motion the Director cannot see, so it starts shut.
+ * human decides after it does. References and the Table are pre-picture views and the rail opens
+ * there; the Board and the Cut are judgements about pixels and motion the Director cannot see, so it
+ * starts shut.
  */
-export const railCollapsedDefaultForView = (view: StudioView): boolean => view !== 'table';
+export const railCollapsedDefaultForView = (view: StudioView): boolean => view === 'board' || view === 'cut';
 
 /** One view of one project. Ids are opaque and may contain the separator, so the id is length-tagged. */
 export const railPreferenceKey = (projectId: string, view: StudioView): string =>
@@ -138,7 +140,7 @@ const clock = (seconds: number | null | undefined): string | null => {
  * rail therefore has no header of its own and its collapse control is the leftmost thing in the bar.
  */
 export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceShellProps>(function WorkspaceShell(
-  { project, activeView, stats, reviewedOutput, renderAction, notice, projectMenu, children },
+  { project, activeView, stats, reviewedOutput, onDirectorProposalIntent, renderAction, notice, projectMenu, children },
   ref
 ) {
   const { t } = useTranslation();
@@ -277,6 +279,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
         <DirectorRail
           project={project}
           reviewedOutput={reviewedOutput}
+          onProposalIntent={onDirectorProposalIntent}
           collapsed={railCollapsed}
           contentId={railContentId}
           widthPixels={railWidth}

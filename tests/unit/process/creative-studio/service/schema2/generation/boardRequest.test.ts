@@ -66,7 +66,7 @@ describe('Studio Board generation request', () => {
         aspectRatio: '16:9',
         resolution: '1080p',
         durationSeconds: 4,
-        referenceInput: null,
+        referenceInputs: [],
         conditioningInput: null,
       },
     });

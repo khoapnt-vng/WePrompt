@@ -657,7 +657,6 @@ const panelProps = (
   beatIndex: projection.activeBeats.findIndex((row) => row.id === beat.id),
   projection,
   drafts,
-  briefReferenceOptions: [],
   reviewGraphs: beat.shots.map(
     (shot): BeatPanelReviewGraph => ({
       triggerShotId: shot.id,
@@ -2257,12 +2256,9 @@ describe('BeatPanel', () => {
     expect(within(card).queryByRole('button', { name: 'Clear first-frame pin' })).toBeNull();
   });
 
-  it('reviews the complete ordered seed-and-video graph with reference-only preferences and safe Brief labels', () => {
+  it('reviews the complete ordered seed-and-video graph without the retired per-Shot reference picker', () => {
     const beat = makeBeat();
-    const gateChoices = {
-      'shot_1:seed_still': { referenceAssetId: 'brief_ref' },
-    };
-    const drafts = makeDrafts({ 'gate.choices': JSON.stringify(gateChoices) });
+    const drafts = makeDrafts();
     const actions = makeActions();
     const reviewGraph: BeatPanelReviewGraph = {
       triggerShotId: 'shot_1',
@@ -2275,12 +2271,6 @@ describe('BeatPanel', () => {
     const result = render(
       <BeatPanel
         {...panelProps(beat, drafts, actions, makeProjection([beat]), {
-          briefReferenceOptions: [
-            { assetId: 'brief_ref', label: 'Hero portrait' },
-            { assetId: 'duplicate_ref', label: 'Duplicate one' },
-            { assetId: 'duplicate_ref', label: 'Duplicate two' },
-            { assetId: 'blank_ref', label: '   ' },
-          ],
           reviewGraphs: [
             reviewGraph,
             { triggerShotId: 'shot_2', choices: [{ shotId: 'shot_2', purpose: 'video_take' }] },
@@ -2291,28 +2281,15 @@ describe('BeatPanel', () => {
 
     const triggerCard = within(shotCard(result.container, 'shot_1'));
     expect(triggerCard.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
-    const reference = triggerCard.getByRole('combobox', {
-      name: 'Brief reference for Beat 1 Shot 1 first frame',
-    });
-    expect(reference).toHaveValue('brief_ref');
-    expect(within(reference).getByRole('option', { name: 'Hero portrait' })).toBeInTheDocument();
-    expect(within(reference).queryByRole('option', { name: /Duplicate/ })).toBeNull();
-    expect(result.container.textContent).not.toContain('brief_ref');
-
-    fireEvent.change(reference, { target: { value: '' } });
-    const persisted = JSON.parse(String(drafts.setValue.mock.calls.at(-1)?.[1])) as Record<
-      string,
-      { referenceAssetId: string | null }
-    >;
-    expect(drafts.setValue).toHaveBeenLastCalledWith('gate.choices', expect.any(String));
-    expect(persisted['shot_1:seed_still']?.referenceAssetId).toBeNull();
+    expect(triggerCard.queryByRole('combobox', { name: /Brief reference/u })).toBeNull();
 
     fireEvent.click(triggerCard.getByRole('button', { name: 'Review first-frame generation' }));
     expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [
-      { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: 'brief_ref' },
+      { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null },
       { shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null },
       { shotId: 'shot_2', purpose: 'video_take', referenceAssetId: null },
     ]);
+    expect(drafts.setValue).not.toHaveBeenCalledWith('gate.choices', expect.any(String));
   });
 
   it('fails closed on a missing or duplicate reviewed graph instead of fabricating a payable choice', () => {

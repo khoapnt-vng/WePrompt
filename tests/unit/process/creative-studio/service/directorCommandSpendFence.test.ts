@@ -218,6 +218,7 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       trimInSeconds: null,
       trimOutSeconds: null,
       chainBreak: 'none',
+      referenceIds: [],
       seedStillId: 'seed_1',
       boardAssetId: null,
       supersededBoardAssetIds: [],
@@ -248,6 +249,7 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       byteSize: 1,
       sha256: 'b'.repeat(64),
       durationSeconds: 10,
+      referenceAssetIds: [],
       createdAt: confirmedAt,
     };
     project.assets.seed_1 = seed;
@@ -262,7 +264,7 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: shot.durationSeconds,
-        referenceInput: null,
+        referenceInputs: [],
       }),
       conditioningInput: { kind: 'seed_still' as const, assetId: seed.id },
     };

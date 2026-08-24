@@ -140,6 +140,7 @@ describe('Creative Studio project recovery integration', () => {
             supersededBoardAssetIds: [],
             videoAssetId: null,
             supersededVideoAssetIds: [],
+            referenceIds: [],
             assetIds: [],
             jobIds: [],
           },
@@ -176,6 +177,8 @@ describe('Creative Studio project recovery integration', () => {
         },
       ]);
       let quoteIndex = 0;
+      let jobIndex = 0;
+      let idempotencyIndex = 0;
       const beforeService = createCreativeStudioServiceV2({
         store,
         mediaStore,
@@ -183,13 +186,63 @@ describe('Creative Studio project recovery integration', () => {
         jobManager: before,
         rateCard: async () => rateCard,
         createQuoteId: () => `quote_v2_recovery_${++quoteIndex}`,
-        createJobId: () => 'job_v2_recovery',
-        createIdempotencyKey: () => 'idempotency_v2_recovery',
+        createJobId: () => (++jobIndex === 1 ? 'job_v2_recovery_reference' : 'job_v2_recovery'),
+        createIdempotencyKey: () =>
+          ++idempotencyIndex === 1 ? 'idempotency_v2_recovery_reference' : 'idempotency_v2_recovery',
         onProjectUpdated: () => {},
+      });
+
+      const referenceId = 'reference_v2_recovery_background';
+      const referenceDefined = await beforeService.applyMutations(
+        {
+          schemaVersion: configured.schemaVersion,
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          operations: [
+            {
+              kind: 'set_project_references',
+              references: [
+                {
+                  id: referenceId,
+                  kind: 'background',
+                  label: 'Glass-city sunrise',
+                  prompt: 'A sunrise reflected through a quiet glass city.',
+                  shotIds: ['clip_recovery'],
+                },
+              ],
+            },
+          ],
+        },
+        { mutationId: 'define_v2_recovery_reference', capturedAt: new Date().toISOString() }
+      );
+      const referencePrepared = await beforeService.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: referenceDefined.project.revision,
+        referenceIds: [referenceId],
+      });
+      await beforeService.confirmSubmission({
+        projectId: configured.id,
+        quoteId: referencePrepared.baseOnly.id,
+        expectedRevision: referenceDefined.project.revision,
+      });
+      for (const delayMs of [2_000, 4_000, 8_000]) (await beforeClock.take(delayMs)).release();
+      const referenceCompleted = await waitFor(async () => {
+        const loaded = await store.getProjectV2(configured.id);
+        if (loaded.status !== 'supported') return null;
+        const job = loaded.project.jobs.job_v2_recovery_reference;
+        return job?.status === 'succeeded' && job.outputAssetIdsByRole.primary !== null
+          ? { project: loaded.project, assetId: job.outputAssetIdsByRole.primary }
+          : null;
+      });
+      const approved = await beforeService.approveProjectReference({
+        projectId: configured.id,
+        expectedRevision: referenceCompleted.project.revision,
+        referenceId,
+        candidateAssetId: referenceCompleted.assetId,
       });
       const prepared = await beforeService.prepareSubmission({
         projectId: configured.id,
-        expectedRevision: configured.revision,
+        expectedRevision: approved.revision,
         originReferenceHandoffId: null,
         baseChoices: [
           {
@@ -210,9 +263,9 @@ describe('Creative Studio project recovery integration', () => {
         beforeService.confirmSubmission({
           projectId: configured.id,
           quoteId: prepared.baseOnly.id,
-          expectedRevision: configured.revision,
+          expectedRevision: approved.revision,
         })
-      ).resolves.toEqual({ projectId: configured.id, projectRevision: configured.revision + 1 });
+      ).resolves.toEqual({ projectId: configured.id, projectRevision: approved.revision + 1 });
       const pending = await waitFor(async () => {
         try {
           const loaded = await store.getProjectV2(configured.id);
@@ -294,12 +347,12 @@ describe('Creative Studio project recovery integration', () => {
         receiptAuthorizationId: prepared.baseOnly.id,
         outputAssetIds: [primaryAssetId],
         outputAssetIdsByRole: { primary: primaryAssetId, poster: null },
-        shotJobIds: ['job_v2_recovery'],
-        shotAssetIds: [primaryAssetId],
+        shotJobIds: ['job_v2_recovery_reference', 'job_v2_recovery'],
+        shotAssetIds: [referenceCompleted.assetId, primaryAssetId],
         videoAssetId: null,
         assetShotId: 'clip_recovery',
         assetMediaKind: 'image',
-        authorizationIds: [prepared.baseOnly.id],
+        authorizationIds: [referencePrepared.baseOnly.id, prepared.baseOnly.id],
         beatOrder: [],
         bin: [{ kind: 'beat', beatId: 'section_recovery', reason: 'lifted' }],
       });

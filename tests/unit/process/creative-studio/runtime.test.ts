@@ -226,7 +226,7 @@ const createHarness = (
     copy: vi.fn(),
     resolveRevealPath: vi.fn(),
     repair: vi.fn(async () => ({
-      schemaVersion: 4 as const,
+      schemaVersion: 5 as const,
       projectId: 'runtime_recovery',
       revision: 1,
       artifacts: [],
@@ -668,6 +668,7 @@ describe('Creative Studio schema-2 runtime activation', () => {
       trimInSeconds: null,
       trimOutSeconds: null,
       chainBreak: 'none',
+      referenceIds: ['reference_background'],
       seedStillId: null,
       boardAssetId: null,
       supersededBoardAssetIds: [],
@@ -676,6 +677,32 @@ describe('Creative Studio schema-2 runtime activation', () => {
       assetIds: [],
       jobIds: [],
     };
+    project.referenceOrder = ['reference_background'];
+    project.references.reference_background = {
+      id: 'reference_background',
+      kind: 'background',
+      label: 'Reveal space',
+      prompt: 'A soft daylight product reveal environment.',
+      candidateAssetId: null,
+      candidateJobId: null,
+      approvedAssetId: 'asset_reference_background',
+      supersededAssetIds: [],
+      createdAt: '2026-08-19T00:00:00.000Z',
+      updatedAt: '2026-08-19T00:00:00.000Z',
+    };
+    project.assets.asset_reference_background = {
+      id: 'asset_reference_background',
+      projectId: project.id,
+      shotId: 'shot_1',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'assets', fileName: 'asset_reference_background.png' },
+      byteSize: 1,
+      sha256: 'a'.repeat(64),
+      referenceAssetIds: [],
+      createdAt: '2026-08-19T00:00:00.000Z',
+    };
+    project.shots.shot_1.assetIds.push('asset_reference_background');
     const generationCatalog: StudioGenerationRouteCatalog = {
       routes: [imageRoute],
       diagnostics: [{ status: 'available', route: imageRoute }],

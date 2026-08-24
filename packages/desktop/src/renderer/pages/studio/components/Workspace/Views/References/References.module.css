@@ -1,0 +1,160 @@
+.root {
+  display: grid;
+  min-inline-size: 0;
+  gap: 24px;
+}
+
+.introduction {
+  display: grid;
+  max-inline-size: 720px;
+  gap: 6px;
+}
+
+.introduction p,
+.sectionHeader h3,
+.sectionHeader p,
+.cardBody h4,
+.cardBody p,
+.footer p {
+  margin: 0;
+}
+
+.section {
+  display: grid;
+  min-inline-size: 0;
+  gap: 12px;
+}
+
+.section + .section {
+  border-block-start: 1px solid var(--color-border-2);
+  padding-block-start: 22px;
+}
+
+.sectionHeader {
+  display: grid;
+  gap: 4px;
+}
+
+.sectionHeader p,
+.cardDescription,
+.empty,
+.footer p {
+  color: var(--color-text-3);
+}
+
+.jobError {
+  color: rgb(var(--danger-6));
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: grid;
+  overflow: hidden;
+  min-inline-size: 0;
+  border: 1px solid var(--color-border-2);
+  border-radius: 10px;
+  background: var(--color-bg-2);
+}
+
+.cardHighlighted {
+  border-color: var(--color-primary-6);
+  animation: reference-highlight 1600ms ease-out;
+}
+
+.preview {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  aspect-ratio: 16 / 10;
+  place-items: center;
+  background: var(--color-fill-2);
+}
+
+.preview img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.previewPlaceholder {
+  padding: 18px;
+  color: var(--color-text-3);
+  text-align: center;
+}
+
+.status {
+  position: absolute;
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+}
+
+.cardBody {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+}
+
+.cardTitle {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.cardTitle h4 {
+  overflow: hidden;
+  min-inline-size: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-block-start: 1px solid var(--color-border-2);
+  padding-block-start: 18px;
+}
+
+@keyframes reference-highlight {
+  0% {
+    box-shadow: 0 0 0 0 var(--color-primary-light-3);
+  }
+
+  35% {
+    box-shadow: 0 0 0 5px var(--color-primary-light-3);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 var(--color-primary-light-3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cardHighlighted {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

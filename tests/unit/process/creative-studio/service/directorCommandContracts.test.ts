@@ -12,7 +12,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_MAX_MUTATION_OPERATIONS,
-  STUDIO_MAX_REFERENCE_REQUEST_SHOTS,
+  STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_PROJECT_SCHEMA_VERSION,
   isValidProviderJobId,
   type StudioDirectorCommandReceiptV2,
@@ -181,11 +181,12 @@ describe('Studio Director V2 command contracts', () => {
     expect(source).not.toMatch(/export function parseStudioDirectorCommandReceipt\s*\(/u);
   });
 
-  it('freezes an exhaustive 28-kind capability table and rejects unknown provenance', () => {
+  it('freezes an exhaustive 30-kind capability table and rejects unknown provenance', () => {
     const expected = {
       edit_project: 'operation_not_permitted',
       set_brief: 'direct',
       set_rules: 'operation_not_permitted',
+      set_project_references: 'proposal',
       add_beat: 'direct',
       edit_beat: 'direct',
       reorder_beats: 'direct',
@@ -201,6 +202,7 @@ describe('Studio Director V2 command contracts', () => {
       apply_coverage: 'proposal',
       set_hard_cut: 'operation_not_permitted',
       set_seed_still: 'operation_not_permitted',
+      set_shot_background_reference: 'operation_not_permitted',
       promote_board_panel: 'operation_not_permitted',
       trim_shot: 'operation_not_permitted',
       redetach_line: 'proposal',
@@ -216,7 +218,7 @@ describe('Studio Director V2 command contracts', () => {
     >;
 
     expect(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2).toEqual(expected);
-    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(28);
+    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(30);
     expect(Object.isFrozen(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toBe(true);
     for (const [kind, disposition] of Object.entries(expected)) {
       expect(classifyStudioDirectorOperationV2(kind), kind).toBe(disposition);
@@ -229,6 +231,7 @@ describe('Studio Director V2 command contracts', () => {
   it.each([
     { kind: 'edit_project', changes: { name: 'Not direct' } },
     { kind: 'park_beat', beatId: 'section_1' },
+    { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_background' },
     { kind: 'set_routes', imageRouteId: null, videoRouteId: null },
     { kind: 'undo_last', entryId: 'mutation_1' },
   ])('rejects the known but unavailable $kind capability', (operation) => {
@@ -680,7 +683,28 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     reservedAt: NOW,
   };
 
-  it('accepts exact mutation-batch, legacy hard-cut, and pin-rule proposals plus their decision and slot', () => {
+  it('accepts exact mutation-batch, project-reference, legacy hard-cut, and pin-rule proposals', () => {
+    const projectReferences: StudioProposalRecordV2 = {
+      ...mutationProposal,
+      id: 'proposal_references',
+      payload: {
+        kind: 'mutation_batch',
+        operations: [
+          {
+            kind: 'set_project_references',
+            references: [
+              {
+                id: 'ref_ming',
+                kind: 'character',
+                label: 'Ming',
+                prompt: 'Character turnaround sheet for Ming.',
+                shotIds: ['clip_1'],
+              },
+            ],
+          },
+        ],
+      },
+    };
     const legacyHardCut: StudioProposalRecordV2 = {
       ...mutationProposal,
       id: 'proposal_hard_cut',
@@ -701,6 +725,13 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     expect(
       parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_1', value: mutationProposal })
     ).toEqual({ status: 'valid', record: mutationProposal });
+    expect(
+      parseStudioProposalRecordV2({
+        projectId: 'project_1',
+        proposalId: 'proposal_references',
+        value: projectReferences,
+      })
+    ).toEqual({ status: 'valid', record: projectReferences });
     expect(
       parseStudioProposalRecordV2({
         projectId: 'project_1',
@@ -783,25 +814,29 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     });
   });
 
-  it('accepts 1 and 24 ordered unique shot IDs and rejects 0, 25, or duplicates', () => {
-    const shots24 = Array.from({ length: STUDIO_MAX_REFERENCE_REQUEST_SHOTS }, (_, index) => `clip_${index}`);
-    const reference = (shotIds: string[]): StudioReferenceRequestV2 => ({
+  it('accepts the bounded ordered unique project-reference IDs and rejects empty, oversized, or duplicates', () => {
+    const maximumReferences = Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES }, (_, index) => `ref_${index}`);
+    const reference = (referenceIds: string[]): StudioReferenceRequestV2 => ({
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: 'request_1',
       projectId: 'project_1',
-      shotIds,
+      referenceIds,
       status: 'pending',
       createdAt: NOW,
     });
-    const parse = (shotIds: string[]) =>
-      parseStudioReferenceRequestV2({ projectId: 'project_1', requestId: 'request_1', value: reference(shotIds) });
+    const parse = (referenceIds: string[]) =>
+      parseStudioReferenceRequestV2({
+        projectId: 'project_1',
+        requestId: 'request_1',
+        value: reference(referenceIds),
+      });
 
-    expect(parse(['clip_1'])).toMatchObject({ status: 'valid' });
+    expect(parse(['ref_1'])).toMatchObject({ status: 'valid' });
     expect(parse(['constructor', 'toString', '__proto__'])).toMatchObject({ status: 'valid' });
-    expect(parse(shots24)).toEqual({ status: 'valid', record: reference(shots24) });
+    expect(parse(maximumReferences)).toEqual({ status: 'valid', record: reference(maximumReferences) });
     expect(parse([])).toEqual({ status: 'invalid' });
-    expect(parse([...shots24, 'clip_25'])).toEqual({ status: 'invalid' });
-    expect(parse(['clip_1', 'clip_1'])).toEqual({ status: 'invalid' });
+    expect(parse([...maximumReferences, 'ref_extra'])).toEqual({ status: 'invalid' });
+    expect(parse(['ref_1', 'ref_1'])).toEqual({ status: 'invalid' });
   });
 
   it('accepts an exact V2 reference slot and reports V1 reference sidecars as unsupported', () => {
@@ -814,7 +849,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
       id: 'request_1',
       projectId: 'project_1',
-      shotIds: ['clip_1'],
+      referenceIds: ['ref_1'],
       status: 'pending',
       createdAt: NOW,
     };
@@ -860,7 +895,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
         requestId: 'request_generation',
         projectId: 'project_1',
         decidedAt: NOW,
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: ['shot_2', 'shot_1'] },
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', referenceIds: ['ref_2', 'ref_1'] },
       },
     ];
     for (const decision of decisions) {
@@ -903,12 +938,12 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
       requestId: 'request_1',
       projectId: 'project_1',
       decidedAt: NOW,
-      outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: ['shot_1', 'shot_2'] },
+      outcome: { kind: 'generation_gate', handoffId: 'handoff_1', referenceIds: ['ref_1', 'ref_2'] },
     };
     const parse = (value: unknown, projectId = 'project_1', requestId = 'request_1') =>
       parseStudioReferenceRequestDecisionV2({ projectId, requestId, value });
-    const sparseShotIds = Array(2) as string[];
-    sparseShotIds[1] = 'shot_1';
+    const sparseReferenceIds = Array(2) as string[];
+    sparseReferenceIds[1] = 'ref_1';
     const invalidValues: unknown[] = [
       { ...generationDecision, provider: 'secret' },
       { ...generationDecision, projectId: 'project_other' },
@@ -931,23 +966,23 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
       },
       {
         ...generationDecision,
-        outcome: { kind: 'generation_gate', handoffId: 'unsafe/handoff', shotIds: ['shot_1'] },
+        outcome: { kind: 'generation_gate', handoffId: 'unsafe/handoff', referenceIds: ['ref_1'] },
       },
       {
         ...generationDecision,
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: [] },
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', referenceIds: [] },
       },
       {
         ...generationDecision,
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: ['shot_1', 'shot_1'] },
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', referenceIds: ['ref_1', 'ref_1'] },
       },
       {
         ...generationDecision,
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: sparseShotIds },
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', referenceIds: sparseReferenceIds },
       },
       {
         ...generationDecision,
-        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', shotIds: ['shot_1'], extra: true },
+        outcome: { kind: 'generation_gate', handoffId: 'handoff_1', referenceIds: ['ref_1'], extra: true },
       },
       { ...generationDecision, outcome: { kind: 'unknown' } },
     ];

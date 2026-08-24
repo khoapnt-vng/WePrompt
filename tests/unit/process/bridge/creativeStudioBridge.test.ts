@@ -36,6 +36,8 @@ const providerNames = [
   'listReferenceRequests',
   'decideReferenceRequest',
   'listReferenceGenerationHandoffs',
+  'prepareProjectReferences',
+  'approveProjectReference',
   'prepareSubmission',
   'confirmSubmission',
   'cancelJob',
@@ -91,6 +93,8 @@ const mocks = vi.hoisted(() => ({
       'listReferenceRequests',
       'decideReferenceRequest',
       'listReferenceGenerationHandoffs',
+      'prepareProjectReferences',
+      'approveProjectReference',
       'prepareSubmission',
       'confirmSubmission',
       'cancelJob',
@@ -253,6 +257,8 @@ const createService = () =>
     listReferenceRequests: vi.fn(async () => []),
     decideReferenceRequest: vi.fn(),
     listReferenceGenerationHandoffs: vi.fn(async () => []),
+    prepareProjectReferences: vi.fn(async () => preparedSubmission),
+    approveProjectReference: vi.fn(async () => rendererProject),
     prepareSubmission: vi.fn(async () => preparedSubmission),
     confirmSubmission: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8 })),
     cancelJob: vi.fn(),
@@ -605,6 +611,32 @@ describe('initCreativeStudioBridge', () => {
     ]) {
       expect(serialized).not.toContain(`"${forbiddenKey}"`);
     }
+  });
+
+  it('routes project-reference preparation and approval through their exact service seams', async () => {
+    initCreativeStudioBridge(dependencies);
+    const prepareInput = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      referenceIds: ['reference_character', 'reference_background'],
+    };
+    const approvalInput = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      referenceId: 'reference_character',
+      candidateAssetId: 'asset_candidate',
+    };
+
+    await expect(registeredHandler('prepareProjectReferences')(prepareInput as never)).resolves.toEqual({
+      ok: true,
+      data: preparedSubmission,
+    });
+    await expect(registeredHandler('approveProjectReference')(approvalInput as never)).resolves.toEqual({
+      ok: true,
+      data: rendererProject,
+    });
+    expect(service.prepareProjectReferences).toHaveBeenCalledExactlyOnceWith(prepareInput);
+    expect(service.approveProjectReference).toHaveBeenCalledExactlyOnceWith(approvalInput);
   });
 
   it('routes confirm and dismiss through their exact safe service seams', async () => {
@@ -1419,7 +1451,7 @@ describe('createCreativeStudioCloseHandshake', () => {
    */
   it('interpolates view segments into the route pattern without needing regex escaping', () => {
     // Guards the guard: an empty shared list would make every derived case below vacuous.
-    expect(STUDIO_VIEWS).toEqual(['table', 'board', 'cut']);
+    expect(STUDIO_VIEWS).toEqual(['references', 'table', 'board', 'cut']);
     for (const view of STUDIO_VIEWS) {
       expect(view, `${view} must stay a plain lowercase segment`).toMatch(/^[a-z]+$/);
     }
