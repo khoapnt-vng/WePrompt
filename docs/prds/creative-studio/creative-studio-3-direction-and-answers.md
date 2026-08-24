@@ -834,3 +834,34 @@ review or replace project references.
 
 The existing prepare/confirm spend boundary remains mandatory for every generation and separate from
 free authoring approval.
+
+### 14.5 The Director proposes; the app binds
+
+This is deliberately hybrid. It is not a prompt-only Director behavior and it is not a manual
+assignment form that discards the Director's understanding of the story.
+
+**The Director owns semantic choice.** After character and background references are approved, the
+Director proposes one typed binding for every active Shot: the Shot id, zero or more character
+reference ids, and one background reference id when the Shot has a location. Its skill instructions
+teach when to call that tool, but the tool accepts only ids from the app-provided catalogue of
+approved project references. The Director cannot invent a label or resolve an asset by prose at
+dispatch time.
+
+**The app owns authority.** It validates ownership, role, approval, Shot membership and route
+reference capacity; persists the binding as project state; displays it in a **Shot bindings** section
+under Characters and Backgrounds; and lets the user correct it as free, reversible authoring. There
+is no extra proposal approval card for a binding change.
+
+**Generation consumes the persisted binding.** **Draw next batch** and first-frame preparation read
+the exact stored references instead of asking the Director again. The spend review shows and freezes
+those ids with the authored Shot and route. Any binding, approval, asset, route or capacity change
+makes confirmation stale. Missing, ambiguous, unapproved, stale or over-capacity bindings block the
+affected Shot with a specific recovery action; the app never falls back to an unconditioned request.
+
+Every resulting job and asset records the exact reference ids used. This is the boundary in one
+sentence: **the Director proposes meaning; the app enforces truth.**
+
+The current contracts do not satisfy it. `studio_request_reference_images` carries only Shot ids,
+Board request construction hard-codes `referenceInput: null`, and pricing rejects a non-null
+reference on `board_still`. Instructions alone therefore cannot deliver this flow; typed project,
+Director-tool, pricing, request and provenance contracts must change together.
