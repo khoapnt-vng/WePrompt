@@ -2,6 +2,11 @@
 
 Written 2026-08-22. Scope agreed with the owner the same day.
 
+**Owner-approved amendment — 2026-08-24:** the reference workflow in §6 and
+`creative-studio-3-direction-and-answers.md` §14 supersedes this document's earlier decision to put
+references after the film spine. The earlier Slice 5 evidence remains useful as a record of what the
+old Cast/Look mechanism proved, but it is not the target workflow.
+
 **The MVP is this sentence:** a pilot user types one line about what they want, answers two or three
 questions, and watches a film — without ever opening a settings form.
 
@@ -134,7 +139,7 @@ chosen automatically.
 
 _Done when:_ a pilot user watches their film end to end without leaving the app. **Met.**
 
-### Slice 5 — cast and look references — **surface built 2026-08-22; round trip not yet demonstrated**
+### Slice 5 — cast and look references — **historical mechanism; superseded 2026-08-24**
 
 The plan assumed this slice was a round trip to verify. It was a missing screen. Every other part —
 both IPCs, the Beat panel's per-Shot picker, twelve locales of authored copy — already existed, and
@@ -187,3 +192,943 @@ than a conversation, the fix is the wording of the rules, not the policy.
 accepted trade for speed. It is safe only because the confirm gate remains; it stops being safe the
 moment anything renders without one, so that is the line to hold while everything else relaxes.
 §7's ranges and §11.3's budget cap are the answer when pilot users start asking, and they will.
+
+---
+
+## 6. Creative Studio Reference Workflow Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Deliver the approved character-first, background-second References workflow and make every Board or first-frame generation consume an explicit, validated per-Shot reference binding.
+
+**Architecture:** Extend the existing Creative Studio project, Director command, prepare/confirm spend, job, media, and workspace contracts as one schema-5 cutover. The Director writes semantic reference plans and Shot bindings through typed, free authoring operations; the main process remains the only authority that approves reference assets, resolves bindings to immutable asset snapshots, checks route capacity, prices work, dispatches providers, and records provenance. The renderer exposes the authoritative state in a persistent References view and never supplies conditioning asset ids at spend time.
+
+**Tech Stack:** TypeScript strict mode, Electron main/preload/renderer IPC, React, Arco Design, UnoCSS/CSS Modules, Zod 4 MCP schemas, Vitest 4, Testing Library, Playwright E2E, i18next.
+
+**Spec:** `docs/superpowers/specs/2026-08-24-creative-studio-reference-flow-design.md` and tracked direction `docs/prds/creative-studio/creative-studio-3-direction-and-answers.md` §14.
+
+## Global Constraints
+
+- Read `CONTRIBUTING.md`, `.claude/skills/architecture/SKILL.md`, `.claude/skills/testing/SKILL.md`, and `.claude/skills/i18n/SKILL.md` before implementation.
+- Preserve the process boundary: filesystem, pricing, provider resolution, approval, and dispatch stay in main; renderer uses `ipcBridge` only.
+- Use Arco components for interactions, `@icon-park/react` for icons, semantic tokens, and i18n keys for every changed user-facing string.
+- Keep `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/` at ten direct children by adding one `References/` directory and removing the superseded `ProjectReferences.tsx` in the same UI task.
+- Keep the MVP exclusions intact: no costume/expression variants, prop library, layers, masks, manual compositing, face replacement, relationship graph, or reference-strength control.
+- Spend confirmation remains mandatory for reference generation, regeneration, Board generation, and seed-still generation. Free plan, approval, and binding edits never start paid work.
+- The renderer must never send conditioning asset ids. It sends only a generation target; main resolves current approved assets, freezes ids and SHA-256 values into the quote, and rejects stale confirmation by project revision.
+- Bump the unreleased project and Director sidecar contract from schema 4 to schema 5. Match the repository's existing cutover policy: schema 4 remains `unsupported_prototype_schema`; do not add an implicit migration or rewrite prior records in this feature.
+- `docs/superpowers/` is intentionally ignored. Do not force-add this plan or its spec.
+- Use `apply_patch` for edits. Preserve unrelated work. Run focused tests after each task and the complete verification matrix in Task 9.
+
+---
+
+## Canonical schema-5 contracts
+
+Use these names and shapes consistently; do not create a second catalogue or renderer-only binding model.
+
+```ts
+export type StudioReferenceKindV2 = 'character' | 'background';
+
+export type StudioReferenceDraftV2 = {
+  id: string;
+  kind: StudioReferenceKindV2;
+  label: string;
+  prompt: string;
+};
+
+export type StudioProjectReferenceV2 = StudioReferenceDraftV2 & {
+  approvedAssetId: string | null;
+  candidateAssetId: string | null;
+  supersededAssetIds: string[];
+  jobIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StudioShotReferenceBindingV2 = {
+  status: 'unassigned' | 'ready';
+  characterReferenceIds: string[];
+  backgroundReferenceId: string | null;
+};
+
+export type StudioGenerationTargetV2 = { kind: 'shot'; shotId: string } | { kind: 'reference'; referenceId: string };
+
+export type StudioGenerationReferenceInputSnapshot = {
+  referenceId: string;
+  kind: StudioReferenceKindV2;
+  assetId: string;
+  sha256: string;
+};
+```
+
+Add these project facts:
+
+```ts
+referencePlanStatus: 'unplanned' | 'planned';
+referenceOrder: string[];
+references: Record<string, StudioProjectReferenceV2>;
+```
+
+Add `referenceBinding: StudioShotReferenceBindingV2` to every `StudioShot`. New Shots start `unassigned`. `status: 'ready'` with an empty character array and `backgroundReferenceId: null` is the explicit “no references required” decision.
+
+Task 4 completes the generation cutover: every `StudioGenerationRequestSnapshot` and template uses `referenceInputs: StudioGenerationReferenceInputSnapshot[]`, never singular `referenceInput`; every `StudioAssetV2` has required `projectReferenceId: string | null` and `generationReferenceAssetIds: string[]`; and every `StudioJobV2`, `StudioQuotedGeneration`, `StudioRendererQuotedGenerationV2`, and `StudioPrepareGenerationChoiceV2` uses `target: StudioGenerationTargetV2` instead of a top-level `shotId`.
+
+The only new job purpose is `reference_image`. Character and background reference generation both use it; `target.referenceId` carries the semantic distinction.
+
+---
+
+## Task 1: Cut the durable project contract to schema 5
+
+**Files:**
+
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/mutations/index.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/factories.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/validation.test.ts`
+- Test: `tests/unit/process/creative-studio/store.test.ts`
+- Test: `tests/integration/creative-studio/schema2Cutover.integration.test.ts`
+
+- [ ] **Step 1: Add failing factory and validation tests for the exact schema-5 shape.**
+
+Assert that a new project contains an unplanned empty catalogue, every newly added Shot has an unassigned binding, duplicate reference ids fail, a ready binding may be explicitly empty, and schema-4 payloads remain unsupported.
+
+```ts
+expect(project).toMatchObject({
+  schemaVersion: 5,
+  referencePlanStatus: 'unplanned',
+  referenceOrder: [],
+  references: {},
+});
+expect(project.shots.shot_1.referenceBinding).toEqual({
+  status: 'unassigned',
+  characterReferenceIds: [],
+  backgroundReferenceId: null,
+});
+```
+
+- [ ] **Step 2: Run the focused tests and confirm the contract is absent.**
+
+Run:
+
+```bash
+bunx vitest run tests/unit/process/creative-studio/service/schema2/factories.test.ts tests/unit/process/creative-studio/service/schema2/validation.test.ts tests/unit/process/creative-studio/store.test.ts tests/integration/creative-studio/schema2Cutover.integration.test.ts
+```
+
+Expected: FAIL on schema version 4 and missing `referencePlanStatus`, `referenceOrder`, `references`, and `referenceBinding`.
+
+- [ ] **Step 3: Add the canonical types and bump `STUDIO_PROJECT_SCHEMA_VERSION` to 5.**
+
+Add the project-reference, Shot-binding, and draft contracts from “Canonical schema-5 contracts.” Leave generation target, snapshot, job, and asset provenance changes for Task 4 so this task remains buildable. Add these bounds:
+
+```ts
+export const STUDIO_MAX_PROJECT_REFERENCES = 24;
+export const STUDIO_MAX_REFERENCE_LABEL_LENGTH = 120;
+export const STUDIO_MAX_REFERENCE_PROMPT_LENGTH = 4 * 1024;
+```
+
+- [ ] **Step 4: Seed the empty catalogue and unassigned Shot binding in every factory/reducer creation path.**
+
+Update `createEmptyStudioProjectV2`, `add_shot`, `apply_coverage`, restore paths, and test factories. Park/restore preserves a still-valid binding; restore resets it to `unassigned` if any referenced catalogue id no longer exists.
+
+- [ ] **Step 5: Extend exact-key and graph validation.**
+
+Validation must prove:
+
+- `referenceOrder` is a unique safe-id array and names every own key in `references` exactly once;
+- reference kind, label, prompt, timestamps, asset lists, and job lists are bounded and canonical;
+- candidate/approved/superseded asset ids, when present, resolve to project-owned image assets with `shotId: null`;
+- reference job ids, when present, resolve to project-owned image jobs; Task 4 tightens this to the discriminated reference target;
+- ready bindings use unique character ids of kind `character` and an optional id of kind `background`;
+- unassigned bindings contain no ids;
+- referenced entities have an approved asset when a binding is ready;
+- a binding cannot contain duplicate semantic references.
+
+- [ ] **Step 6: Preserve the explicit schema cutover behavior.**
+
+Update error copy/comments/tests from schema 4 to schema 5. Keep schema 1–4 records byte-for-byte untouched and returned as `unsupported_prototype_schema`; malformed schema-5 records remain `storage_error`.
+
+- [ ] **Step 7: Re-run the focused tests and typecheck.**
+
+```bash
+bunx vitest run tests/unit/process/creative-studio/service/schema2/factories.test.ts tests/unit/process/creative-studio/service/schema2/validation.test.ts tests/unit/process/creative-studio/store.test.ts tests/integration/creative-studio/schema2Cutover.integration.test.ts
+bunx tsc --noEmit
+```
+
+Expected: PASS. Update existing typed project/Shot fixtures mechanically to the exact schema-5 fields until TypeScript passes; do not make the new fields optional to shorten the cutover.
+
+- [ ] **Step 8: Commit the contract cutover.**
+
+```bash
+git add packages/desktop/src/common/types/project/creativeStudioTypes.ts packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts packages/desktop/src/process/services/creative-studio/service/schema2/mutations/index.ts packages/desktop/src/process/services/creative-studio/store.ts tests/unit/process/creative-studio/service/schema2/factories.test.ts tests/unit/process/creative-studio/service/schema2/validation.test.ts tests/unit/process/creative-studio/store.test.ts tests/integration/creative-studio/schema2Cutover.integration.test.ts
+git commit -m "feat(studio): add schema-5 reference state"
+```
+
+## Task 2: Add reversible reference-plan, approval, and Shot-binding authoring
+
+**Files:**
+
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/mutations/index.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/v2Service.ts`
+- Modify: `packages/desktop/src/common/adapter/ipcBridge.ts`
+- Modify: `packages/desktop/src/process/bridge/creativeStudioBridge.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/mutations/index.test.ts`
+- Test: `tests/unit/process/creative-studio/service/directorCommandContracts.test.ts`
+- Test: `tests/unit/process/bridge/creativeStudioBridge.test.ts`
+- Test: `tests/unit/process/creative-studio/service/index.test.ts`
+
+- [ ] **Step 1: Write failing mutation tests for the three operations.**
+
+Use these exact operation shapes:
+
+```ts
+type StudioMutationOperationV2 =
+  | {
+      kind: 'set_reference_plan';
+      references: StudioReferenceDraftV2[];
+    }
+  | {
+      kind: 'approve_reference';
+      referenceId: string;
+      candidateAssetId: string;
+    }
+  | {
+      kind: 'set_shot_reference_binding';
+      shotId: string;
+      characterReferenceIds: string[];
+      backgroundReferenceId: string | null;
+    }
+  | ExistingOperations;
+```
+
+Cover successful initial plan creation, an empty planned catalogue, duplicate ids, second-plan refusal, approval without a candidate, candidate promotion while retaining the old approved asset as superseded, wrong-kind binding, unapproved binding, duplicate character ids, inactive Shot, undo, and stale revision.
+
+- [ ] **Step 2: Run the focused mutation/bridge tests.**
+
+```bash
+bunx vitest run tests/unit/process/creative-studio/service/schema2/mutations/index.test.ts tests/unit/process/creative-studio/service/directorCommandContracts.test.ts tests/unit/process/bridge/creativeStudioBridge.test.ts tests/unit/process/creative-studio/service/index.test.ts
+```
+
+Expected: FAIL because the operation union, reducer, IPC allowlist, and Director disposition table do not know these kinds.
+
+- [ ] **Step 3: Implement `set_reference_plan`.**
+
+It is valid only while `referencePlanStatus === 'unplanned'`. It creates all records using the reducer timestamp, preserves Director order, changes status to `planned`, and emits one new undo patch:
+
+```ts
+type StudioUndoPatch =
+  | {
+      kind: 'reference_catalog';
+      before: Pick<StudioProjectV2, 'referencePlanStatus' | 'referenceOrder' | 'references'>;
+      afterDigest: string;
+    }
+  | ExistingUndoPatches;
+```
+
+- [ ] **Step 4: Implement `approve_reference`.**
+
+Require the named current candidate. Move the previous approved asset to `supersededAssetIds`, set `approvedAssetId` to the candidate, clear `candidateAssetId`, update the timestamp, and make any prepared quote stale through the project revision change. Do not delete media.
+
+- [ ] **Step 5: Implement `set_shot_reference_binding`.**
+
+Validate only active Shots and approved project references. Persist `status: 'ready'`; an empty/null input is the explicit no-reference decision. Capture the change through the existing `shot_fields` undo patch.
+
+- [ ] **Step 6: Expose only the intended authorities.**
+
+- Add all three operations to renderer authoring so References can approve/correct.
+- Mark `set_reference_plan` and `set_shot_reference_binding` as Director `direct`.
+- Mark `approve_reference` as `operation_not_permitted` for the Director.
+- Keep all three out of reviewed proposal-only flows; binding changes must not create proposal cards.
+
+- [ ] **Step 7: Re-run the focused tests and typecheck the changed boundary.**
+
+```bash
+bunx vitest run tests/unit/process/creative-studio/service/schema2/mutations/index.test.ts tests/unit/process/creative-studio/service/directorCommandContracts.test.ts tests/unit/process/bridge/creativeStudioBridge.test.ts tests/unit/process/creative-studio/service/index.test.ts
+bunx tsc --noEmit
+```
+
+Expected: PASS.
+
+- [ ] **Step 8: Commit reversible authoring.**
+
+```bash
+git add packages/desktop/src/common/types/project/creativeStudioTypes.ts packages/desktop/src/process/services/creative-studio/service/schema2/mutations/index.ts packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts packages/desktop/src/process/services/creative-studio/service/v2Service.ts packages/desktop/src/common/adapter/ipcBridge.ts packages/desktop/src/process/bridge/creativeStudioBridge.ts tests/unit/process/creative-studio/service/schema2/mutations/index.test.ts tests/unit/process/creative-studio/service/directorCommandContracts.test.ts tests/unit/process/bridge/creativeStudioBridge.test.ts tests/unit/process/creative-studio/service/index.test.ts
+git commit -m "feat(studio): author reference plans and bindings"
+```
+
+## Task 3: Give the Director typed reference catalogue and request contracts
+
+**Files:**
+
+- Modify: `packages/desktop/src/process/resources/builtinMcp/studioServer.ts`
+- Modify: `packages/desktop/src/process/resources/builtinMcp/studioReferenceRequestWriter.ts`
+- Modify: `packages/desktop/src/process/resources/builtinMcp/studioPendingRecordWriter.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/DirectorRail/openingTurn.ts`
+- Test: `tests/unit/process/creative-studio/service/index.test.ts`
+- Test: `tests/unit/process/creative-studio/service/directorCommandContracts.test.ts`
+- Test: `tests/unit/process/creative-studio/service/studioDirectorCommandWriter.test.ts`
+- Test: `tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts`
+- Test: `tests/unit/pages/studio/workspace/DirectorOpeningTurn.test.ts`
+
+- [ ] **Step 1: Write failing read/tool contract tests.**
+
+`read_storyboard` must return:
+
+```ts
+{
+  referencePlanStatus: 'planned',
+  references: [
+    {
+      id: 'ref_ming',
+      kind: 'character',
+      label: 'Ming',
+      approvalStatus: 'approved',
+      approvedAssetId: 'asset_ming',
+    },
+  ],
+  shots: {
+    shot_1: {
+      referenceBinding: {
+        status: 'ready',
+        characterReferenceIds: ['ref_ming'],
+        backgroundReferenceId: 'ref_dai_pai_dong',
+      },
+    },
+  },
+}
+```
+
+Update the request schema to `{ referenceIds: string[] }`; reject unknown, repeated, already-pending, already-running, wrong-order, or background-before-characters-approved ids.
+
+- [ ] **Step 2: Run the Director-focused tests.**
+
+```bash
+bunx vitest run tests/unit/process/creative-studio/service/index.test.ts tests/unit/process/creative-studio/service/directorCommandContracts.test.ts tests/unit/process/creative-studio/service/studioDirectorCommandWriter.test.ts tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts tests/unit/pages/studio/workspace/DirectorOpeningTurn.test.ts
+```
+
+Expected: FAIL on the old `briefReferences`/`shotIds` contracts.
+
+- [ ] **Step 3: Replace `briefReferences` in `read_storyboard`.**
+
+Return the ordered catalogue with derived `approvalStatus: 'awaiting_generation' | 'candidate_ready' | 'approved'`, the approved asset id only, and every active Shot binding. Do not expose filesystem paths, hashes, provider credentials, superseded assets, or candidate internals.
+
+- [ ] **Step 4: Change `studio_request_reference_images` and sidecars to reference ids.**
+
+Use:
+
+```ts
+export type StudioReferenceRequestV2 = {
+  schemaVersion: 5;
+  id: string;
+  projectId: string;
+  referenceIds: string[];
+  status: 'pending';
+  createdAt: string;
+};
+```
+
+Rename the request limit to `STUDIO_MAX_REFERENCE_REQUEST_ITEMS`. Keep the pending-record authority fence, byte limit, TTL, uniqueness, immutable request/decision/receipt model, and atomic collision handling.
+
+- [ ] **Step 5: Make the request card action mean “review spend,” not another authoring approval.**
+
+Keep the request sidecar as the exact paid scope. The UI action records the existing `generation_gate` decision and opens the spend review in the same user action. Chat text alone remains non-authoritative; the explicit spend confirmation is still required.
+
+- [ ] **Step 6: Update Director instructions.**
+
+Add rules that require this order:
+
+1. agree the story direction;
+2. call `read_storyboard`;
+3. write one `set_reference_plan` through `studio_apply_edits`;
+4. request character ids first;
+5. after character approval, request background ids;
+6. after all approvals, write one `set_shot_reference_binding` per active Shot;
+7. never invent ids and never imply a request generated media.
+
+- [ ] **Step 7: Re-run the focused tests.**
+
+Expected: PASS, including stale snapshot and duplicate pending-request races.
+
+- [ ] **Step 8: Commit Director contracts.**
+
+```bash
+git add packages/desktop/src/process/resources/builtinMcp/studioServer.ts packages/desktop/src/process/resources/builtinMcp/studioReferenceRequestWriter.ts packages/desktop/src/process/resources/builtinMcp/studioPendingRecordWriter.ts packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts packages/desktop/src/process/services/creative-studio/store.ts packages/desktop/src/renderer/pages/studio/components/Workspace/DirectorRail/openingTurn.ts tests/unit/process/creative-studio/service/index.test.ts tests/unit/process/creative-studio/service/directorCommandContracts.test.ts tests/unit/process/creative-studio/service/studioDirectorCommandWriter.test.ts tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts tests/unit/pages/studio/workspace/DirectorOpeningTurn.test.ts
+git commit -m "feat(studio): type Director reference requests"
+```
+
+## Task 4: Generalize paid generation to reference targets and multiple frozen inputs
+
+**Files:**
+
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/generation/generationRequest.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/generation/submissionIdentity.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/authorization.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/jobManager.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/mediaStore.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/chain.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/generation/generationRequest.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/generation/submissionIdentity.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/pricing/authorization.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts`
+- Test: `tests/unit/process/creative-studio/jobManager.test.ts`
+- Test: `tests/unit/process/creative-studio/mediaStore.test.ts`
+- Test: `tests/integration/creative-studio/generationLifecycle.integration.test.ts`
+
+- [ ] **Step 1: Write failing tests for discriminated targets and multi-reference snapshots.**
+
+Cover a reference target, a Shot target with three ordered reference inputs, duplicate input rejection, lowercase hash enforcement, deterministic identity changes when order/id/hash changes, route-capacity rejection, and output-asset provenance.
+
+```ts
+expect(job.target).toEqual({ kind: 'shot', shotId: 'shot_1' });
+expect(job.requestSnapshot?.referenceInputs.map(({ assetId }) => assetId)).toEqual([
+  'asset_ming',
+  'asset_mei',
+  'asset_dai_pai_dong',
+]);
+expect(output.generationReferenceAssetIds).toEqual(['asset_ming', 'asset_mei', 'asset_dai_pai_dong']);
+```
+
+- [ ] **Step 2: Run the generation-core tests.**
+
+```bash
+bunx vitest run tests/unit/process/creative-studio/service/schema2/generation/generationRequest.test.ts tests/unit/process/creative-studio/service/schema2/generation/submissionIdentity.test.ts tests/unit/process/creative-studio/service/schema2/pricing/authorization.test.ts tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts tests/unit/process/creative-studio/jobManager.test.ts tests/unit/process/creative-studio/mediaStore.test.ts tests/integration/creative-studio/generationLifecycle.integration.test.ts
+```
+
+Expected: FAIL on singular `referenceInput` and Shot-only job/quote types.
+
+- [ ] **Step 3: Add `reference_image`, then replace top-level `shotId` with `target` across choices, quote items, authorizations, jobs, receipts, renderer quotes, and identity material.**
+
+Add strict helpers:
+
+```ts
+export const studioGenerationTargetKey = (target: StudioGenerationTargetV2): string =>
+  target.kind === 'shot' ? `shot:${target.shotId}` : `reference:${target.referenceId}`;
+```
+
+All uniqueness, in-flight, retry, cancellation, and authorization checks use that key plus purpose. Chain and frame-extraction logic must reject non-Shot targets before reading Shot state.
+
+- [ ] **Step 4: Replace singular `referenceInput` with immutable `referenceInputs`.**
+
+Clone and validate a dense unique ordered list. Video templates require `[]`; image templates permit the list subject to the selected route. Keep conditioning frames separate in `conditioningInput`.
+
+- [ ] **Step 5: Dispatch every frozen reference input.**
+
+In `jobManager.ts`, re-resolve each asset, prove the persisted SHA-256 still matches, preserve order, and pass all inputs through the existing adapter contract:
+
+```ts
+const conditioningImages = await Promise.all(
+  snapshot.referenceInputs.map(({ assetId, sha256 }) => {
+    const asset = ownValueV2(project.assets, assetId);
+    if (asset?.sha256 !== sha256) throw new StudioJobManagerError('invalid_request');
+    return deps.mediaStore.resolveProviderInputV2(project.id, assetId);
+  })
+);
+```
+
+Pass `conditioningImageLimit: route.constraints.maxConditioningImages` and fail before provider submission when the frozen list exceeds it.
+
+- [ ] **Step 6: Persist generation ownership and provenance.**
+
+- Reference job output: `shotId: null`, `projectReferenceId: target.referenceId`.
+- Shot job output: `shotId: target.shotId`, `projectReferenceId: null`.
+- Any generated output: `generationReferenceAssetIds` equals the frozen `referenceInputs` asset order.
+- Imports and extracted frames: `projectReferenceId: null`, `generationReferenceAssetIds: []`.
+
+On reference success, append the job id and atomically set `candidateAssetId`; if a prior unapproved candidate exists, move it to `supersededAssetIds`. Never replace `approvedAssetId`.
+
+- [ ] **Step 7: Re-run the generation tests and full typecheck.**
+
+Expected: PASS with zero remaining `referenceInput` or Shot-only quote assumptions.
+
+```bash
+rg -n "referenceInput|\.shotId" packages/desktop/src/process/services/creative-studio packages/desktop/src/renderer/pages/studio
+bunx tsc --noEmit
+```
+
+Review every match; allowed `.shotId` matches must be behind `target.kind === 'shot'` or unrelated authored Shot state.
+
+- [ ] **Step 8: Commit the generation contract.**
+
+```bash
+git add packages/desktop/src/common/types/project/creativeStudioTypes.ts packages/desktop/src/process/services/creative-studio/service/schema2/generation/generationRequest.ts packages/desktop/src/process/services/creative-studio/service/schema2/generation/submissionIdentity.ts packages/desktop/src/process/services/creative-studio/service/schema2/pricing/authorization.ts packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts packages/desktop/src/process/services/creative-studio/jobManager.ts packages/desktop/src/process/services/creative-studio/mediaStore.ts packages/desktop/src/process/services/creative-studio/store.ts packages/desktop/src/process/services/creative-studio/service/schema2/chain.ts packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts tests/unit/process/creative-studio/service/schema2/generation/generationRequest.test.ts tests/unit/process/creative-studio/service/schema2/generation/submissionIdentity.test.ts tests/unit/process/creative-studio/service/schema2/pricing/authorization.test.ts tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts tests/unit/process/creative-studio/jobManager.test.ts tests/unit/process/creative-studio/mediaStore.test.ts tests/integration/creative-studio/generationLifecycle.integration.test.ts
+git commit -m "refactor(studio): support reference generation targets"
+```
+
+## Task 5: Price and run project-reference generation with recoverable handoffs
+
+**Files:**
+
+- Create: `packages/desktop/src/process/services/creative-studio/service/schema2/generation/referenceRequest.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/generation/index.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/v2Service.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/store.ts`
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/spendGate.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/generation/referenceRequest.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts`
+- Test: `tests/unit/process/creative-studio/store.test.ts`
+- Test: `tests/unit/pages/studio/workspace/SpendGate.dom.test.tsx`
+- Test: `tests/integration/creative-studio/generationLifecycle.integration.test.ts`
+
+- [ ] **Step 1: Add failing prompt and quote tests for character/background reference targets.**
+
+Freeze these prompt contracts:
+
+```ts
+const referenceOutputInstruction = (kind: StudioReferenceKindV2): string =>
+  kind === 'character'
+    ? 'Create one clean character reference sheet in a single image with front, three-quarter, side, and back views. Keep identity, age, wardrobe, proportions, and art style consistent. Do not add captions, borders, UI, or multiple alternative identities.'
+    : 'Create one clean environment reference image with no characters. Establish the recurring location, layout, materials, palette, period, and art style. Do not add captions, borders, UI, or a contact-sheet grid.';
+```
+
+Assert that character targets can be quoted together, backgrounds are refused until every character record has an approved asset, approved references can be regenerated without clearing the current approval, and a retry selects only failed reference ids.
+
+- [ ] **Step 2: Run the focused reference-generation tests.**
+
+```bash
+bunx vitest run tests/unit/process/creative-studio/service/schema2/generation/referenceRequest.test.ts tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts tests/unit/process/creative-studio/store.test.ts tests/unit/pages/studio/workspace/SpendGate.dom.test.tsx tests/integration/creative-studio/generationLifecycle.integration.test.ts
+```
+
+Expected: FAIL because `reference_image` quote construction and target-aware handoffs are not implemented.
+
+- [ ] **Step 3: Build the canonical reference request plan.**
+
+`createStudioReferenceGenerationRequestPlan(project, reference)` must use project Brief/rules, the Director-authored reference prompt, the kind-specific output instruction, project aspect ratio/resolution, fixed four-second image plumbing, `referenceInputs: []`, and `conditioningInput: null`.
+
+- [ ] **Step 4: Derive reference spend only from persisted ids.**
+
+Change `handoffGateDraft` to create choices like:
+
+```ts
+{
+  target: { kind: 'reference', referenceId: 'ref_ming' },
+  purpose: 'reference_image',
+}
+```
+
+Main re-reads the request, catalogue, project revision, reference state, character-first gate, image route, and in-flight jobs. It refuses caller-added or omitted targets and freezes the exact reference label/kind into the renderer quote display projection.
+
+- [ ] **Step 5: Extend the handoff projection into a derived lifecycle.**
+
+Use this renderer-safe shape:
+
+```ts
+export type StudioRendererReferenceGenerationHandoffV2 = {
+  handoffId: string;
+  requestId: string;
+  referenceIds: string[];
+  decidedAt: string;
+  status: 'awaiting_spend' | 'running' | 'succeeded' | 'partially_failed' | 'failed' | 'dismissed';
+  counts: {
+    queued: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+  };
+  resultAssetIds: string[];
+  failedReferenceIds: string[];
+  completedAt: string | null;
+};
+```
+
+Derive it from the immutable request/decision/receipt plus the authorization and current jobs. Confirmation stores the authorization id but does not collapse running work into “completed.” A handoff is succeeded only when every requested reference has a successful job output; partial/failed states retain successes.
+
+- [ ] **Step 6: Add retry authority for failed targets only.**
+
+The retry UI creates a new reference request containing `failedReferenceIds`. Existing succeeded targets are excluded from the new quote, keep their candidate/approved asset, and cannot be charged again by that retry.
+
+- [ ] **Step 7: Re-run focused tests.**
+
+Expected: PASS for initial generation, regeneration, reload while running, partial failure, failed-only retry, and approved-asset stability.
+
+- [ ] **Step 8: Commit reference generation and handoffs.**
+
+```bash
+git add packages/desktop/src/process/services/creative-studio/service/schema2/generation/referenceRequest.ts packages/desktop/src/process/services/creative-studio/service/schema2/generation/index.ts packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts packages/desktop/src/process/services/creative-studio/service/v2Service.ts packages/desktop/src/process/services/creative-studio/store.ts packages/desktop/src/common/types/project/creativeStudioTypes.ts packages/desktop/src/renderer/pages/studio/components/Workspace/spendGate.ts tests/unit/process/creative-studio/service/schema2/generation/referenceRequest.test.ts tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts tests/unit/process/creative-studio/store.test.ts tests/unit/pages/studio/workspace/SpendGate.dom.test.tsx tests/integration/creative-studio/generationLifecycle.integration.test.ts
+git commit -m "feat(studio): generate reusable project references"
+```
+
+## Task 6: Resolve bindings deterministically for Board and first-frame generation
+
+**Files:**
+
+- Create: `packages/desktop/src/process/services/creative-studio/service/schema2/generation/referenceBinding.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/generation/index.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/generation/boardRequest.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/generation/generationRequest.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts`
+- Modify: `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/authorization.ts`
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/spendGate.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/generation/referenceBinding.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/generation/boardRequest.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/generation/generationRequest.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts`
+- Test: `tests/unit/process/creative-studio/service/schema2/pricing/authorization.test.ts`
+- Test: `tests/unit/pages/studio/workspace/SpendGate.dom.test.tsx`
+
+- [ ] **Step 1: Write the fail-closed binding resolver tests first.**
+
+Use a result union with Shot-specific recovery facts:
+
+```ts
+export type StudioReferenceBindingResolutionV2 =
+  | { ok: true; referenceInputs: StudioGenerationReferenceInputSnapshot[] }
+  | {
+      ok: false;
+      shotId: string;
+      reason:
+        | 'unassigned'
+        | 'unknown_reference'
+        | 'wrong_kind'
+        | 'unapproved_reference'
+        | 'missing_asset'
+        | 'capacity_exceeded';
+    };
+```
+
+Cover ordered characters followed by background, explicit no-reference, unassigned, deleted/stale ids, wrong kind, unapproved candidate, missing asset, duplicate asset, route limit 0/1/N, and project ownership.
+
+- [ ] **Step 2: Run the focused binding/Board tests.**
+
+```bash
+bunx vitest run tests/unit/process/creative-studio/service/schema2/generation/referenceBinding.test.ts tests/unit/process/creative-studio/service/schema2/generation/boardRequest.test.ts tests/unit/process/creative-studio/service/schema2/generation/generationRequest.test.ts tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts tests/unit/process/creative-studio/service/schema2/pricing/authorization.test.ts tests/unit/pages/studio/workspace/SpendGate.dom.test.tsx
+```
+
+Expected: FAIL because Board hard-codes an empty reference and seed-still selection still accepts renderer asset ids.
+
+- [ ] **Step 3: Implement the pure resolver.**
+
+Resolve semantic reference ids to the current approved asset ids and hashes in binding order. Capacity is checked against the main-resolved image route. `status: 'ready'` with no refs returns `{ ok: true, referenceInputs: [] }`; `unassigned` never silently becomes empty.
+
+- [ ] **Step 4: Make Board and seed-still builders accept only resolved snapshots.**
+
+```ts
+createStudioBoardGenerationRequestPlan({
+  ...authoredFacts,
+  referenceInputs: resolution.referenceInputs,
+});
+
+createStudioGenerationRequestTemplate({
+  purpose: 'seed_still',
+  ...authoredFacts,
+  referenceInputs: resolution.referenceInputs,
+});
+```
+
+Video remains `referenceInputs: []`; its continuity `conditioningInput` is unchanged.
+
+- [ ] **Step 5: Remove renderer-selected reference assets from all spend drafts.**
+
+The Beat panel and `SpendGateDraft` send target/purpose only. `boardGateDraft`, per-Beat Board, retry Board, seed-still, and reference handoff drafts never contain asset ids. Main derives, prices, displays, and freezes the exact inputs.
+
+- [ ] **Step 6: Add exact references to spend review and stale confirmation.**
+
+Project each quote item's resolved inputs as renderer-safe `{ referenceId, label, kind, assetId }[]`. Display them under the target name. Because approval, binding, route, or asset changes increment project revision, `confirmSubmission` rejects the old quote as stale before any job or charge.
+
+- [ ] **Step 7: Surface Shot-specific refusal data.**
+
+Extend pricing refusal output with safe `{ shotId, reason }` details for binding failures. Renderer maps them to “Review Shot binding” and navigates to the exact row in References; provider diagnostics and paths remain private.
+
+- [ ] **Step 8: Re-run focused tests and typecheck.**
+
+Expected: PASS. Tests must prove Board and first-frame plans carry exact bindings, an unassigned Shot produces no quote, and over-capacity fails before provider dispatch.
+
+- [ ] **Step 9: Commit deterministic dispatch.**
+
+```bash
+git add packages/desktop/src/process/services/creative-studio/service/schema2/generation/referenceBinding.ts packages/desktop/src/process/services/creative-studio/service/schema2/generation/index.ts packages/desktop/src/process/services/creative-studio/service/schema2/generation/boardRequest.ts packages/desktop/src/process/services/creative-studio/service/schema2/generation/generationRequest.ts packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts packages/desktop/src/process/services/creative-studio/service/schema2/pricing/authorization.ts packages/desktop/src/common/types/project/creativeStudioTypes.ts packages/desktop/src/renderer/pages/studio/components/Workspace/spendGate.ts tests/unit/process/creative-studio/service/schema2/generation/referenceBinding.test.ts tests/unit/process/creative-studio/service/schema2/generation/boardRequest.test.ts tests/unit/process/creative-studio/service/schema2/generation/generationRequest.test.ts tests/unit/process/creative-studio/service/schema2/pricing/estimate.test.ts tests/unit/process/creative-studio/service/schema2/pricing/authorization.test.ts tests/unit/pages/studio/workspace/SpendGate.dom.test.tsx
+git commit -m "feat(studio): bind references to shot generation"
+```
+
+## Task 7: Build the persistent References workspace and retire the conflicting picker
+
+**Files:**
+
+- Create: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/index.tsx`
+- Create: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/References.module.css`
+- Create: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/referenceStatus.ts`
+- Delete: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/ProjectReferences.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/index.ts`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/WorkspaceControls.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/viewTypes.ts`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/WorkspaceProjectMenu.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/index.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/WorkspaceShell.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/studioPhaseRoute.ts`
+- Modify: `packages/desktop/src/renderer/pages/studio/StudioPage.tsx`
+- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- Modify: `packages/desktop/src/renderer/services/i18n/locales/{zh-CN,en-US,ja-JP,zh-TW,ko-KR,tr-TR,ru-RU,uk-UA,pt-BR,de-DE,es-ES,fa-IR}/conversation.json`
+- Test: `tests/unit/pages/studio/workspace/ReferencesView.dom.test.tsx`
+- Delete: `tests/unit/pages/studio/workspace/ProjectReferences.dom.test.tsx`
+- Test: `tests/unit/pages/studio/workspace/TableView.dom.test.tsx`
+- Test: `tests/unit/pages/studio/StudioPage.dom.test.tsx`
+- Test: `tests/unit/process/bridge/creativeStudioBridge.test.ts`
+- Test: `tests/unit/pages/studio/studioI18n.test.ts`
+
+- [ ] **Step 1: Write failing navigation and References-view DOM tests.**
+
+Assert `STUDIO_VIEWS` is exactly `['references', 'table', 'board', 'cut']`; `/studio/:id/references` receives close-preflight protection; Characters renders before Backgrounds; background generation is disabled until every character is approved; approved and replacement candidate states are distinct; Shot bindings list every active Shot; and Continue to Table appears only when the catalogue is approved and every active Shot binding is ready.
+
+- [ ] **Step 2: Run the focused renderer tests.**
+
+```bash
+bunx vitest run tests/unit/pages/studio/workspace/ReferencesView.dom.test.tsx tests/unit/pages/studio/workspace/TableView.dom.test.tsx tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/process/bridge/creativeStudioBridge.test.ts tests/unit/pages/studio/studioI18n.test.ts
+```
+
+Expected: FAIL because `references` is not a view and no page exists.
+
+- [ ] **Step 3: Add `references` to the shared route vocabulary.**
+
+Keep `defaultStudioView()` as `table`. The existing shared `STUDIO_VIEWS` continues to drive renderer links and main-process close preflight. Add the navigation translation key in all twelve locale files.
+
+- [ ] **Step 4: Implement the three-section page.**
+
+- **Characters:** label, approved image, optional pending candidate, status, Approve, Regenerate.
+- **Backgrounds:** same card contract; generation disabled with an explanatory status until character approvals are complete.
+- **Shot bindings:** Beat/Shot label, character multi-select, background select, save action, and a specific invalid/capacity alert.
+
+Use Arco `Card`, `Button`, `Select`, `Alert`, `Progress`, and `Empty`. Use `createManagedStudioAssetUrl` for image URLs. Approval and binding save call the shared authoring batch with the current revision.
+
+- [ ] **Step 5: Wire generation actions without bypassing spend.**
+
+An initial Director request reaches the normal prepare/confirm spend gate through its durable handoff. A card's Regenerate action opens the same gate for exactly that persisted reference target with `originReferenceHandoffId: null`; it does not manufacture a second Director request and never calls a provider directly. Disable it while that reference already has an open request or in-flight job.
+
+- [ ] **Step 6: Remove the conflicting Cast/Look path.**
+
+Remove `ProjectReferences` from `WorkspaceProjectMenu`, the Beat panel `referenceAssetId` preference/dropdown/localStorage contract, `beatPanelBriefReferenceOptions`, and the renderer's ability to choose a reference asset at spend time. Leave managed import/detach main APIs only if another non-Studio caller exists; otherwise delete their bridge/service/tests in this same task.
+
+- [ ] **Step 7: Keep Table semantics unchanged.**
+
+Table thumbnails remain Board panels only. No character/background control or image is added to Table rows. Update tests to prove successful reference assets do not change “panels drawn,” Board freshness, or the Board thumbnail slot.
+
+- [ ] **Step 8: Complete i18n and accessibility checks.**
+
+Add English source copy and structurally matching translations for all twelve configured languages. Every thumbnail has a reference-kind/name alt; icon buttons have labels; sections use headings; binding errors use `role='alert'`; progress updates use a polite live region.
+
+```bash
+bun run i18n:types
+node scripts/check-i18n.js
+```
+
+Expected: PASS.
+
+- [ ] **Step 9: Re-run renderer tests and typecheck.**
+
+Expected: PASS with no `ProjectReferences`, `briefReferenceOptions`, or Beat-panel `referenceAssetId` references.
+
+- [ ] **Step 10: Commit the workspace.**
+
+```bash
+git add packages/desktop/src/renderer/pages/studio/components/Workspace/Views packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/index.tsx packages/desktop/src/renderer/pages/studio/components/Workspace/WorkspaceShell.tsx packages/desktop/src/renderer/pages/studio/studioPhaseRoute.ts packages/desktop/src/renderer/pages/studio/StudioPage.tsx packages/desktop/src/common/types/project/creativeStudioTypes.ts packages/desktop/src/renderer/services/i18n/locales tests/unit/pages/studio/workspace tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/process/bridge/creativeStudioBridge.test.ts tests/unit/pages/studio/studioI18n.test.ts
+git commit -m "feat(studio): add References workspace"
+```
+
+## Task 8: Return progress and results to References
+
+**Files:**
+
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Shell/DirectorProposals.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/index.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/StudioPage.tsx`
+- Modify: `packages/desktop/src/renderer/pages/studio/hooks/useStudioProject.ts`
+- Modify: `packages/desktop/src/renderer/pages/studio/studioPhaseRoute.ts`
+- Modify: `packages/desktop/src/renderer/services/i18n/locales/{zh-CN,en-US,ja-JP,zh-TW,ko-KR,tr-TR,ru-RU,uk-UA,pt-BR,de-DE,es-ES,fa-IR}/conversation.json`
+- Test: `tests/unit/pages/studio/Shell/DirectorProposals.dom.test.tsx`
+- Test: `tests/unit/pages/studio/workspace/ReferencesView.dom.test.tsx`
+- Test: `tests/unit/pages/studio/StudioPage.dom.test.tsx`
+- Test: `tests/unit/pages/studio/StudioAccessibleCopy.dom.test.tsx`
+
+- [ ] **Step 1: Write failing handoff and navigation tests.**
+
+Cover awaiting spend, queued/running counts, all-success thumbnails, partial-failure thumbnails plus failed-only Retry, Review references navigation, exact-card focus/highlight, and reload reconstruction. Also cover one-time auto-open and “do not steal focus again.”
+
+- [ ] **Step 2: Run the focused UI tests.**
+
+```bash
+bunx vitest run tests/unit/pages/studio/Shell/DirectorProposals.dom.test.tsx tests/unit/pages/studio/workspace/ReferencesView.dom.test.tsx tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/StudioAccessibleCopy.dom.test.tsx
+```
+
+Expected: FAIL because handoffs currently expose only open/dismissed/confirmed text and no result action.
+
+- [ ] **Step 3: Render the durable handoff lifecycle.**
+
+The card names references, shows spend review before confirmation, renders queued/running/succeeded/failed counts after confirmation, keeps successful thumbnails on partial failure, and exposes only failed ids to Retry. `succeeded` and `partially_failed` show **Review references**.
+
+- [ ] **Step 4: Implement exact-result navigation without changing the Studio URL grammar.**
+
+Keep a renderer-local focus intent in `StudioPage`:
+
+```ts
+type StudioReferenceFocusIntent = {
+  projectId: string;
+  referenceIds: string[];
+  nonce: number;
+};
+```
+
+`Review references` sets the intent and navigates to `studioViewPath(projectId, 'references')`. `ReferencesView` scrolls the first matching card into view, focuses its heading, highlights every matching card for one animation cycle, then reports the intent consumed. Do not add query parameters that would bypass the main route matcher.
+
+- [ ] **Step 5: Auto-open only once.**
+
+When `referencePlanStatus` first becomes `planned` with at least one reference, navigate to References only if localStorage lacks `aionui:creative-studio:references-opened:<projectId>`. Set the key before navigation. Later candidates, approvals, bindings, and reloads never pull the user away. Explicit Review references always navigates.
+
+- [ ] **Step 6: Re-run i18n and focused UI tests.**
+
+```bash
+bun run i18n:types
+node scripts/check-i18n.js
+bunx vitest run tests/unit/pages/studio/Shell/DirectorProposals.dom.test.tsx tests/unit/pages/studio/workspace/ReferencesView.dom.test.tsx tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/StudioAccessibleCopy.dom.test.tsx
+```
+
+Expected: PASS.
+
+- [ ] **Step 7: Commit the result handoff.**
+
+```bash
+git add packages/desktop/src/renderer/pages/studio/components/Shell/DirectorProposals.tsx packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/index.tsx packages/desktop/src/renderer/pages/studio/StudioPage.tsx packages/desktop/src/renderer/pages/studio/hooks/useStudioProject.ts packages/desktop/src/renderer/pages/studio/studioPhaseRoute.ts packages/desktop/src/renderer/services/i18n/locales tests/unit/pages/studio/Shell/DirectorProposals.dom.test.tsx tests/unit/pages/studio/workspace/ReferencesView.dom.test.tsx tests/unit/pages/studio/StudioPage.dom.test.tsx tests/unit/pages/studio/StudioAccessibleCopy.dom.test.tsx
+git commit -m "fix(studio): return reference results to workspace"
+```
+
+## Task 9: Prove the complete workflow and prepare the branch
+
+**Files:**
+
+- Modify: `tests/e2e/features/workspaces/creative-studio.e2e.ts`
+- Modify: `tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts`
+- Modify: `tests/integration/creative-studio/generationLifecycle.integration.test.ts`
+- Modify: `tests/integration/creative-studio/projectRecovery.integration.test.ts`
+- Modify: `docs/prds/creative-studio/creative-studio-3-direction-and-answers.md` only if implementation changes a documented contract; otherwise leave the approved §14 unchanged.
+
+- [ ] **Step 1: Add one E2E happy path with deterministic fake media.**
+
+The scenario must:
+
+1. create a brief containing Ming, Mei, and the dai pai dong;
+2. apply the Director reference plan;
+3. confirm two character generations;
+4. approve both sheets;
+5. confirm one background generation;
+6. approve the background;
+7. apply explicit bindings to two Shots;
+8. open Table and draw the next Board batch;
+9. assert each provider request receives the exact expected reference asset order;
+10. assert resulting jobs/assets retain provenance;
+11. assert Review references focuses the three reference cards;
+12. reload and assert catalogue, approvals, bindings, and handoff state persist.
+
+- [ ] **Step 2: Add fail-closed integration coverage.**
+
+Cover unassigned binding, unapproved reference, reference replacement after quote, route changed after quote, capacity exceeded, one provider failure among three references, failed-only retry, app restart while jobs run, and schema-4 unsupported load.
+
+- [ ] **Step 3: Run the Creative Studio coverage gate.**
+
+```bash
+bun run test:coverage:creative-studio
+```
+
+Expected: PASS with changed Creative Studio code at or above the repository's 80% target.
+
+- [ ] **Step 4: Run repository-required generated/i18n checks and auto-fix.**
+
+```bash
+bun run lint:fix
+bun run format
+bun run i18n:types
+node scripts/check-i18n.js
+bunx tsc --noEmit
+```
+
+Expected: all commands exit 0.
+
+- [ ] **Step 5: Run the full test suite.**
+
+```bash
+bun run test
+```
+
+Expected: PASS. If an environment-limited E2E launch fails, rerun the exact affected test in the permitted desktop/browser context and record that evidence separately; do not label it a code failure without reproduction.
+
+- [ ] **Step 6: Review the diff and repository structure.**
+
+```bash
+git diff --check
+git status --short
+find packages/desktop/src/renderer/pages/studio/components/Workspace/Views -mindepth 1 -maxdepth 1 | wc -l
+rg -n "referenceInput|briefReferenceOptions|ProjectReferences|referenceAssetId" packages/desktop/src tests
+```
+
+Expected:
+
+- `git diff --check` exits 0;
+- Views has at most ten direct children;
+- remaining legacy-reference matches are intentional compatibility tests or non-Studio code;
+- no tracked file under `docs/superpowers/` appears in status.
+
+- [ ] **Step 7: Commit final tests/doc alignment.**
+
+```bash
+git add tests/e2e/features/workspaces/creative-studio.e2e.ts tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts tests/integration/creative-studio/generationLifecycle.integration.test.ts tests/integration/creative-studio/projectRecovery.integration.test.ts docs/prds/creative-studio/creative-studio-3-direction-and-answers.md
+git commit -m "test(studio): cover reference workflow"
+```
+
+If the tracked direction document did not change, omit it from `git add`.
+
+- [ ] **Step 8: Request code review before any push.**
+
+Review specifically for process-boundary violations, quote staleness, sidecar authority races, asset/job reverse links, retry double-charge risk, route capacity, background-before-character gating, accessibility, i18n parity, and the absence of silent unconditioned fallback.
+
+- [ ] **Step 9: Push only after explicit user authorization.**
+
+Use the repository wrapper, never raw `git push`:
+
+```bash
+just push
+```
+
+Expected: lint, format-check, typecheck, tests, and push all succeed. Report the pushed branch and commit SHA.
+
+---
+
+## Acceptance trace
+
+| Approved criterion                                                            | Owning tasks |
+| ----------------------------------------------------------------------------- | ------------ |
+| Character cards precede backgrounds; independent approve/regenerate           | 1, 2, 5, 7   |
+| Backgrounds wait for all characters                                           | 3, 5, 7      |
+| Persistent References tab before Table; one-time auto-open; Continue to Table | 7, 8         |
+| Director uses app-provided ids and typed Shot bindings                        | 2, 3         |
+| App validates approval, ownership, kind, active Shot, and route capacity      | 1, 2, 6      |
+| Board and first-frame generation consume persisted bindings                   | 4, 6         |
+| Spend freezes and displays exact reference assets                             | 4, 6         |
+| Jobs/assets retain exact provenance                                           | 4, 9         |
+| Missing/stale/unapproved/over-capacity bindings fail closed                   | 6, 9         |
+| Handoff shows progress, partial success, retry, thumbnails, Review references | 5, 8         |
+| Table thumbnails remain Board-only                                            | 7            |
+| Paid confirmation remains mandatory                                           | 5, 6, 7      |
+| Restart/reload recovery                                                       | 5, 8, 9      |
+
+## Self-review checklist
+
+- [ ] Every approved criterion maps to at least one implementation task and one test.
+- [ ] The plan contains no alternate source of truth for references or bindings.
+- [ ] The renderer never supplies conditioning asset ids or provider credentials.
+- [ ] Free authoring and paid generation authorities remain separate.
+- [ ] Reference regeneration cannot replace an approved asset without explicit approval.
+- [ ] Reference retry cannot include or recharge successful targets.
+- [ ] Board/seed generation cannot fall back to an empty reference list from an unassigned binding.
+- [ ] Schema-4 cutover behavior is explicit and tested.
+- [ ] All changed UI copy is present in twelve locales.
+- [ ] No new directory exceeds ten direct children.
+- [ ] No `docs/superpowers/` file is force-added.
