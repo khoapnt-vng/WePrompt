@@ -2612,7 +2612,17 @@ describe('BeatPanel', () => {
         {...panelProps(beat, makeDrafts({ 'shot.shot_1.shootingScript': 'Unsaved local work' }), actions, projection)}
       />
     );
-    expect(shotCard(result.container, 'shot_1').querySelector('[data-shot-overflow-trigger]')).toBeDisabled();
+    // The trigger stays reachable because the menu also holds planned duration; lift alone is
+    // refused while local edits are unsaved.
+    const shotTrigger = shotCard(result.container, 'shot_1').querySelector<HTMLButtonElement>(
+      '[data-shot-overflow-trigger]'
+    );
+    expect(shotTrigger).toBeEnabled();
+    fireEvent.keyDown(shotTrigger!, { key: 'Enter' });
+    const shotOverflowMenu = shotCard(result.container, 'shot_1').querySelector<HTMLElement>(
+      '[data-shot-overflow-menu]'
+    );
+    expect(within(shotOverflowMenu!).getByRole('menuitem', { name: 'Move to Bin' })).toBeDisabled();
     expect(screen.getAllByText('Save or reset local edits first').length).toBeGreaterThan(0);
   });
 

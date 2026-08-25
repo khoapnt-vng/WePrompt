@@ -10,6 +10,8 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
   type StudioEditableBeatChanges,
   type StudioEditableShotChanges,
   type StudioGenerationBlockV2,
@@ -304,6 +306,10 @@ type ShotCardProps = {
   projection: WorkspaceProjection;
   reviewBlocked: boolean;
   reviewGraph: BeatPanelReviewGraph | null;
+  /** Set when a duration blocker's remedy points at this Shot, so the hidden field is revealed. */
+  revealDuration: boolean;
+  /** A duration blocker can point at a downstream Shot, so the reveal is raised to the Beat. */
+  onRevealDuration: (shotId: string) => void;
   shot: WorkspaceShotProjection;
 };
 
@@ -320,8 +326,10 @@ const ShotCard: React.FC<ShotCardProps> = ({
   onParkSettled,
   projectId,
   projection,
+  onRevealDuration,
   reviewBlocked,
   reviewGraph,
+  revealDuration,
   shot,
 }) => {
   const { t } = useTranslation();
@@ -352,6 +360,9 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const shotCardRef = useRef<HTMLElement | null>(null);
   const shootingScriptKey = shotDraftKey(shot.id, 'shootingScript');
   const durationKey = shotDraftKey(shot.id, 'durationSeconds');
+  // Planned duration leaves the Shot editor and is revealed from that Shot's overflow menu.
+  const [durationOpen, setDurationOpen] = useState(false);
+  const durationFieldRef = useRef<HTMLLabelElement | null>(null);
   const shootingScript = draftString(drafts, shootingScriptKey, shot.shootingScript);
   const durationSeconds = draftNumber(drafts, durationKey, shot.durationSeconds);
   const draftKeys = [shootingScriptKey, durationKey] as const;
@@ -579,8 +590,25 @@ const ShotCard: React.FC<ShotCardProps> = ({
       title: t(`${KEY_ROOT}.lift.shotTitle`, { index: index + 1 }),
     });
   };
+  useEffect(() => {
+    if (revealDuration) setDurationOpen(true);
+  }, [revealDuration]);
+
+  useEffect(() => {
+    if (!durationOpen) return;
+    durationFieldRef.current?.querySelector('input')?.focus();
+  }, [durationOpen]);
+
   const shotMenu = (
     <Menu data-shot-id={shot.id} data-shot-overflow-menu>
+      <Menu.Item
+        key='planned-duration'
+        data-shot-duration-reveal
+        disabled={disabled}
+        onClick={() => setDurationOpen(true)}
+      >
+        {t(`${KEY_ROOT}.fields.duration`)}
+      </Menu.Item>
       <Menu.Item
         key='move-to-bin'
         data-shot-move-to-bin
@@ -657,7 +685,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
               aria-label={`${t('common.more')} · ${t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}`}
               data-shot-id={shot.id}
               data-shot-overflow-trigger
-              disabled={disabled || lifting || !liftAllowed}
+              disabled={disabled || lifting}
               icon={<MoreOne aria-hidden='true' />}
               loading={lifting}
               shape='circle'
@@ -679,20 +707,22 @@ const ShotCard: React.FC<ShotCardProps> = ({
             value={shootingScript}
           />
         </label>
-        <label data-shot-duration-field>
-          <span>{t(`${KEY_ROOT}.fields.duration`)}</span>
-          <InputNumber
-            aria-label={t(`${KEY_ROOT}.fields.durationFor`, { index: index + 1 })}
-            disabled={disabled}
-            max={15}
-            min={4}
-            onChange={(value) => {
-              if (typeof value === 'number' && Number.isSafeInteger(value)) drafts.setValue(durationKey, value);
-            }}
-            precision={0}
-            value={durationSeconds}
-          />
-        </label>
+        {durationOpen ? (
+          <label data-shot-duration-field ref={durationFieldRef}>
+            <span>{t(`${KEY_ROOT}.fields.duration`)}</span>
+            <InputNumber
+              aria-label={t(`${KEY_ROOT}.fields.durationFor`, { index: index + 1 })}
+              disabled={disabled}
+              max={STUDIO_MAX_SHOT_SECONDS}
+              min={STUDIO_MIN_SHOT_SECONDS}
+              onChange={(value) => {
+                if (typeof value === 'number' && Number.isSafeInteger(value)) drafts.setValue(durationKey, value);
+              }}
+              precision={0}
+              value={durationSeconds}
+            />
+          </label>
+        ) : null}
       </div>
       <div className={styles.shotActionCluster}>
         <div className={styles.shotActionBand} data-shot-action-band>
@@ -835,10 +865,9 @@ const ShotCard: React.FC<ShotCardProps> = ({
                   onClick={() => {
                     if (reviewBlock === null) return;
                     if (reviewBlockRemedy === 'duration') {
-                      const fields = document.querySelectorAll<HTMLInputElement>(
-                        `[data-shot-card][data-shot-id="${blockedShotId}"] [data-shot-duration-field] input`
-                      );
-                      if (fields.length === 1) fields[0]!.focus();
+                      // The field is revealed from the Shot's menu, so the remedy opens it rather
+                      // than reaching for an input that is not on screen. The card focuses it.
+                      onRevealDuration(blockedShotId);
                       return;
                     }
                     actions.resolveGenerationBlock(blockedShotId, reviewBlock);
@@ -1088,6 +1117,8 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   // Story is context for this screen rather than its work: it reads on hover and opens to edit.
   const [storyOpen, setStoryOpen] = useState(false);
   const storyFieldRef = useRef<HTMLLabelElement | null>(null);
+  // A duration blocker's remedy may point at a downstream Shot, so the reveal lives at Beat level.
+  const [durationRevealShotId, setDurationRevealShotId] = useState<string | null>(null);
   const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
   const restoreMenuFocusAfterCloseRef = useRef(false);
   const beatLiftAuthorityRef = useRef({
@@ -1333,6 +1364,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   useEffect(() => {
     setTargetOpen(false);
     setStoryOpen(false);
+    setDurationRevealShotId(null);
     setMenuOpen(false);
     confirmationHandleRef.current?.close();
     confirmationHandleRef.current = null;
@@ -1491,6 +1523,8 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                   hidden={shot.id !== inspectedShotId}
                   index={index}
                   onMove={(position, delta) => void moveShot(position, delta)}
+                  onRevealDuration={setDurationRevealShotId}
+                  revealDuration={durationRevealShotId === shot.id}
                   onParkSettled={(shotId, parked) => {
                     if (parked) {
                       onParkShotSuccess(shotId);
