@@ -1081,6 +1081,10 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const [reorderAnnouncement, setReorderAnnouncement] = useState('');
   const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
   const beatMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // The target leaves the layout but stays reachable: the overflow menu reveals it on demand rather
+  // than a nested Modal, which this panel — itself a Modal — would have to trap focus inside.
+  const [targetOpen, setTargetOpen] = useState(false);
+  const targetFieldRef = useRef<HTMLLabelElement | null>(null);
   const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
   const restoreMenuFocusAfterCloseRef = useRef(false);
   const beatLiftAuthorityRef = useRef({
@@ -1277,6 +1281,14 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
         {t(`${KEY_ROOT}.common.resetBeat`)}
       </Menu.Item>
       <Menu.Item
+        key='beat-target'
+        data-beat-target-reveal
+        disabled={mutationLocked}
+        onClick={() => setTargetOpen(true)}
+      >
+        {t(`${KEY_ROOT}.fields.targetSeconds`)}
+      </Menu.Item>
+      <Menu.Item
         key='resplit'
         data-beat-resplit
         disabled={mutationLocked}
@@ -1306,6 +1318,12 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   }, [beatLiftAllowed, mutationLocked]);
 
   useEffect(() => {
+    if (!targetOpen) return;
+    targetFieldRef.current?.querySelector('input')?.focus();
+  }, [targetOpen]);
+
+  useEffect(() => {
+    setTargetOpen(false);
     setMenuOpen(false);
     confirmationHandleRef.current?.close();
     confirmationHandleRef.current = null;
@@ -1414,17 +1432,19 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
             />
           </label>
           <div className={styles.beatMetaRow} data-beat-meta-row>
-            <label className={styles.beatTargetField} data-beat-field='target'>
-              <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
-              <InputNumber
-                aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
-                disabled={mutationLocked}
-                min={1}
-                onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
-                precision={0}
-                value={targetSeconds ?? undefined}
-              />
-            </label>
+            {targetOpen ? (
+              <label className={styles.beatTargetField} data-beat-field='target' ref={targetFieldRef}>
+                <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
+                <InputNumber
+                  aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
+                  disabled={mutationLocked}
+                  min={1}
+                  onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
+                  precision={0}
+                  value={targetSeconds ?? undefined}
+                />
+              </label>
+            ) : null}
           </div>
         </section>
 

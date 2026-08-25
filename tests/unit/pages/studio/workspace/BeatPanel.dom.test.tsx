@@ -1815,17 +1815,23 @@ describe('BeatPanel', () => {
     const storyField = fields.querySelector<HTMLElement>('[data-beat-field="story"]');
     const targetField = fields.querySelector<HTMLElement>('[data-beat-field="target"]');
     const metaRow = fields.querySelector<HTMLElement>('[data-beat-meta-row]');
-    if (storyField === null || targetField === null || metaRow === null) {
+    if (storyField === null || metaRow === null) {
       throw new Error('Beat authoring field hooks are incomplete');
     }
     // Save, Reset and re-split moved into the Beat overflow menu; the editor holds fields only.
     expect(fields.querySelector('[data-beat-editor-actions]')).toBeNull();
+    // The target is revealed from that menu rather than occupying the panel by default.
+    expect(targetField).toBeNull();
+    fireEvent.click(within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Beat target' }));
+    const revealed = document.querySelector<HTMLElement>('[data-beat-field="target"]');
+    if (revealed === null) throw new Error('Beat target was not revealed from the menu');
+    expect(within(revealed).getByRole('spinbutton', { name: 'Beat target' })).toBeVisible();
 
     expect(storyField.tagName).toBe('LABEL');
     expect(within(storyField).getByRole('textbox', { name: 'Story' })).toBeVisible();
     expect(within(storyField).getByText('Story · What happens in this Beat', { exact: true })).toBeVisible();
     expect(storyField.nextElementSibling).toBe(metaRow);
-    expect(metaRow).toContainElement(targetField);
+
     expect(fields.querySelectorAll('textarea')).toHaveLength(1);
   });
 
