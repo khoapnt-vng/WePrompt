@@ -85,6 +85,7 @@ export const NATIVE_BRIDGE_PROVIDER_KEYS = [
   'creative-studio.list-reference-requests',
   'creative-studio.decide-reference-request',
   'creative-studio.list-reference-generation-handoffs',
+  'creative-studio.get-generation-capability',
   'creative-studio.prepare-project-references',
   'creative-studio.prepare-submission',
   'creative-studio.confirm-submission',

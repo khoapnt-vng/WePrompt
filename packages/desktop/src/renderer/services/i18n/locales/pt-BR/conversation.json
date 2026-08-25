@@ -1839,12 +1839,12 @@
         "frame": "Este mecanismo não consegue criar {{ratio}}.",
         "resolution": "Este mecanismo não consegue criar {{resolution}}.",
         "duration": "Este mecanismo não consegue criar uma tomada de {{seconds}} s.",
-        "firstFrame": "Este mecanismo não consegue começar com uma imagem de referência.",
+        "firstFrame": "Este mecanismo não consegue começar pelo primeiro quadro revisado.",
         "catalogUnloaded": "A lista de mecanismos ainda não foi carregada.",
         "aria": "Não é possível renderizar. {{reason}}",
         "actionSetEngines": "Definir mecanismos",
         "actionRemoveReference": "Remover a referência",
-        "actionShorten": "Encurtar esta tomada"
+        "actionShorten": "Ajustar a duração da tomada"
       }
     },
     "shell": {

@@ -135,6 +135,17 @@ describe('main adapter IPC security boundary', () => {
 
   it.each([
     [
+      'get-generation-capability',
+      {
+        projectId: 'project_1',
+        expectedRevision: 3,
+        items: [
+          { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' },
+          { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
+        ],
+      },
+    ],
+    [
       'prepare-submission',
       {
         projectId: 'project_1',
@@ -160,19 +171,21 @@ describe('main adapter IPC security boundary', () => {
     }
   );
 
-  it.each(['prepare-submission', 'confirm-submission', 'dismiss-reference-generation-handoff'])(
-    'rejects a malformed Task 8 Creative Studio provider %s payload before dispatch',
-    async (providerName) => {
-      const sender = createRegisteredSender();
-      await expect(
-        getInvokeHandler()(
-          { sender },
-          createRequest(`subscribe-creative-studio.${providerName}`, { projectId: 'project_1' })
-        )
-      ).rejects.toThrow(/invalid operation payload/i);
-      expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
-    }
-  );
+  it.each([
+    'get-generation-capability',
+    'prepare-submission',
+    'confirm-submission',
+    'dismiss-reference-generation-handoff',
+  ])('rejects a malformed Task 8 Creative Studio provider %s payload before dispatch', async (providerName) => {
+    const sender = createRegisteredSender();
+    await expect(
+      getInvokeHandler()(
+        { sender },
+        createRequest(`subscribe-creative-studio.${providerName}`, { projectId: 'project_1' })
+      )
+    ).rejects.toThrow(/invalid operation payload/i);
+    expect(mocks.bridgeEmitter.emit).not.toHaveBeenCalled();
+  });
 
   it('allows only the strict Task 9 Director conversation binding through the native manifest', async () => {
     const sender = createRegisteredSender();

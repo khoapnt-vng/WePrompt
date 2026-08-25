@@ -1799,12 +1799,12 @@
         "frame": "このエンジンは {{ratio}} を作成できません。",
         "resolution": "このエンジンは {{resolution}} を作成できません。",
         "duration": "このエンジンは {{seconds}} 秒のショットを作成できません。",
-        "firstFrame": "このエンジンは参照画像から開始できません。",
+        "firstFrame": "このエンジンはレビュー済みの最初のフレームから開始できません。",
         "catalogUnloaded": "エンジン一覧はまだ読み込まれていません。",
         "aria": "レンダリングできません。{{reason}}",
         "actionSetEngines": "エンジンを設定",
         "actionRemoveReference": "参照を削除",
-        "actionShorten": "このショットを短くする"
+        "actionShorten": "ショットの長さを調整"
       }
     },
     "shell": {

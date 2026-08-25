@@ -9,14 +9,11 @@ export { CreativeStudioServiceError } from './projectMutations';
 export type { StudioDecideReferenceRequestInputV2 } from '../store';
 export {
   createCreativeStudioServiceV2,
-  derivePayableShotIds,
   projectStudioReferenceGenerationHandoffV2,
   type CreativeStudioServiceV2,
   type CreativeStudioServiceV2Deps,
-  type StudioGenerationReadinessV2,
+  type StudioGenerationCapabilityV2,
   type StudioRouteCatalogV2,
-  type StudioShotGenerationReadinessV2,
-  type StudioShotReadinessIssueV2,
 } from './v2Service';
 export {
   createStudioDirectorCommandServiceV2,

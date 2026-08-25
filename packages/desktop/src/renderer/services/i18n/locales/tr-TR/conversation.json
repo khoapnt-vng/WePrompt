@@ -1818,12 +1818,12 @@
         "frame": "Bu motor {{ratio}} oranında üretemez.",
         "resolution": "Bu motor {{resolution}} çözünürlükte üretemez.",
         "duration": "Bu motor {{seconds}} sn uzunluğunda bir çekim üretemez.",
-        "firstFrame": "Bu motor bir referans görüntüden başlayamaz.",
+        "firstFrame": "Bu motor incelenmiş ilk kareden başlayamaz.",
         "catalogUnloaded": "Motor listesi henüz yüklenmedi.",
         "aria": "Oluşturulamıyor. {{reason}}",
         "actionSetEngines": "Motorları ayarla",
         "actionRemoveReference": "Referansı kaldır",
-        "actionShorten": "Bu çekimi kısalt"
+        "actionShorten": "Çekim uzunluğunu ayarla"
       }
     },
     "shell": {

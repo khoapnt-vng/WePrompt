@@ -20,6 +20,8 @@ import {
   type StudioBinItem,
   type StudioBriefRuleDraft,
   type StudioCommandResult,
+  type StudioGenerationBlockV2,
+  type StudioGenerationCapabilityItemV2,
   type StudioRendererAuthoringOperationV2,
   type StudioRendererExportCatalogV2,
   type StudioRendererJobV2,
@@ -69,6 +71,11 @@ import {
   type WorkspaceProjection,
   type WorkspaceShellHandle,
 } from './components/Workspace';
+import {
+  generationBlockForItem,
+  generationBlockGroupsForItems,
+  generationCapabilityIsCurrent,
+} from './components/Workspace/Gate/generationBlockers';
 import { useStudioProject } from './hooks/useStudioProject';
 import {
   hasOpenedStudioReferences,
@@ -83,6 +90,65 @@ import {
 import styles from './StudioPage.module.css';
 
 type StudioReferenceDecisionIntent = { kind: 'rejected' } | { kind: 'generation_gate' };
+
+const shotCapabilityItemsForDraft = (draft: SpendGateDraft): StudioGenerationCapabilityItemV2[] =>
+  'baseChoices' in draft
+    ? [...draft.baseChoices, ...draft.cascadeChoices].flatMap((choice) =>
+        choice.target.kind === 'shot'
+          ? [
+              {
+                target: { kind: 'shot' as const, shotId: choice.target.shotId },
+                purpose: choice.purpose,
+              },
+            ]
+          : []
+      )
+    : [];
+
+const referenceCapabilityItems = (referenceIds: readonly string[]): StudioGenerationCapabilityItemV2[] =>
+  referenceIds.map((referenceId) => ({
+    target: { kind: 'reference', referenceId },
+    purpose: 'reference_image',
+  }));
+
+/** Mirrors Main's prospective continuity scope only to disclose capability blockers before review. */
+const continuityCapabilityItemsForDraft = (
+  project: StudioRendererProjectV2,
+  draft: SpendGateDraft
+): StudioGenerationCapabilityItemV2[] | null => {
+  if (!('baseChoices' in draft) || draft.continuityChange === undefined) return null;
+  const change = draft.continuityChange;
+  const locations = project.beatOrder.flatMap((beatId) => {
+    const beat = Object.hasOwn(project.beats, beatId) ? project.beats[beatId] : undefined;
+    const shotIndex = beat?.id === beatId ? beat.shotOrder.indexOf(change.shotId) : -1;
+    return beat?.id === beatId && shotIndex >= 0 ? [{ beat, shotIndex }] : [];
+  });
+  if (locations.length !== 1) return null;
+  const { beat, shotIndex } = locations[0]!;
+  const affectedShotIds: string[] = [];
+  for (let index = shotIndex; index < beat.shotOrder.length; index += 1) {
+    const affectedShotId = beat.shotOrder[index]!;
+    const affectedShot = Object.hasOwn(project.shots, affectedShotId) ? project.shots[affectedShotId] : undefined;
+    if (affectedShot?.id !== affectedShotId) return null;
+    if (index > shotIndex && affectedShot.chainBreak === 'hard_cut') break;
+    affectedShotIds.push(affectedShotId);
+  }
+  if (affectedShotIds.length === 0) return null;
+  return [
+    ...(change.requiresSeedGeneration
+      ? [
+          {
+            target: { kind: 'shot' as const, shotId: change.shotId },
+            purpose: 'seed_still' as const,
+          },
+        ]
+      : []),
+    ...affectedShotIds.map((shotId) => ({
+      target: { kind: 'shot' as const, shotId },
+      purpose: 'video_take' as const,
+    })),
+  ];
+};
 
 type StudioCloseContract = {
   dirtyDraftCount: number;
@@ -230,6 +296,7 @@ const StudioProjectPage: React.FC<{
     workspaceStatus,
     chainStatus,
     routeCatalog,
+    generationCapability,
     exportCatalog,
     loadState,
     errorMessageKey,
@@ -285,6 +352,7 @@ const StudioProjectPage: React.FC<{
   const [ruleDraftDirtyCount, setRuleDraftDirtyCount] = useState(0);
   const [activeRuleDraftDirtyCount, setActiveRuleDraftDirtyCount] = useState(0);
   const [briefDialogRequest, setBriefDialogRequest] = useState(0);
+  const [briefRouteFocusRole, setBriefRouteFocusRole] = useState<'image' | 'video' | null>(null);
   const [referenceFocusIntent, setReferenceFocusIntent] = useState<StudioReferenceFocusIntent | null>(null);
   const referenceFocusSequenceRef = useRef(0);
   const referencesAutoOpenedRef = useRef<string | null>(null);
@@ -302,6 +370,8 @@ const StudioProjectPage: React.FC<{
     () => (project === null ? null : projectWorkspace(project, workspaceStatus, chainStatus)),
     [chainStatus, project, workspaceStatus]
   );
+  const currentGenerationCapability =
+    project !== null && generationCapabilityIsCurrent(project, generationCapability) ? generationCapability : null;
   const canonicalDraftValues = useMemo(() => (project === null ? {} : projectDraftValues(project)), [project]);
   const drafts = useWorkspaceDrafts({
     projectId,
@@ -491,7 +561,8 @@ const StudioProjectPage: React.FC<{
     spendGate.state.phase === 'confirming' ||
     spendGate.state.phase === 'quote_in_use';
   const editSpendGateRoutes = useCallback(
-    (_issue: SpendGateRouteIssue): void => {
+    (issue: SpendGateRouteIssue): void => {
+      setBriefRouteFocusRole(issue === 'image_and_video' ? null : issue);
       setBriefDialogRequest((request) => request + 1);
       void refetchRoutes();
     },
@@ -505,8 +576,32 @@ const StudioProjectPage: React.FC<{
   const renderFilm = useCallback((): void => {
     const current = projectRef.current;
     if (current === null || projection === null || spendGateLocked) return;
-    const shotIds = filmRenderBatchShotIds({ project: current, projection });
+    if (generationDraftsBlockReview) {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+      return;
+    }
+    const candidateShotIds = filmRenderBatchShotIds({ project: current, projection });
+    const blockedItems: StudioGenerationCapabilityItemV2[] = [];
+    const shotIds = candidateShotIds.filter((shotId) => {
+      const candidate = selectionGateDraft({ project: current, projection, orderedShotIds: [shotId] });
+      if (candidate === null) return false;
+      const groups = generationBlockGroupsForItems(currentGenerationCapability, shotCapabilityItemsForDraft(candidate));
+      if (groups.length === 0) return true;
+      blockedItems.push(...groups.flatMap((group) => group.items));
+      return false;
+    });
+    const disclosureGroups = generationBlockGroupsForItems(currentGenerationCapability, blockedItems);
     if (shotIds.length === 0) {
+      const blockedDraft = selectionGateDraft({
+        project: current,
+        projection,
+        orderedShotIds: candidateShotIds,
+      });
+      if (blockedDraft !== null && disclosureGroups.length > 0) {
+        setActionErrorMessageKey(null);
+        spendGate.open(blockedDraft, undefined, { groups: disclosureGroups, blocksPrepare: true });
+        return;
+      }
       setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.renderFilmEmpty');
       return;
     }
@@ -515,8 +610,20 @@ const StudioProjectPage: React.FC<{
       setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
       return;
     }
-    spendGate.open(draft);
-  }, [projection, setActionErrorMessageKey, spendGate.open, spendGateLocked]);
+    setActionErrorMessageKey(null);
+    spendGate.open(
+      draft,
+      undefined,
+      disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: false }
+    );
+  }, [
+    currentGenerationCapability,
+    generationDraftsBlockReview,
+    projection,
+    setActionErrorMessageKey,
+    spendGate.open,
+    spendGateLocked,
+  ]);
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
   const beatPanelReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
@@ -531,7 +638,7 @@ const StudioProjectPage: React.FC<{
       ? 'conversation.creativeStudio.workspace.controls.statusRequired'
       : routeCatalog === null
         ? 'conversation.creativeStudio.workspace.controls.routeCatalogRequired'
-        : routeCatalog.image.status !== 'ready'
+        : currentGenerationCapability === null && routeCatalog.image.status !== 'ready'
           ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
           : null;
   const beatPanelReviewGraphs = useMemo<BeatPanelReviewGraph[]>(() => {
@@ -546,9 +653,23 @@ const StudioProjectPage: React.FC<{
       );
       const [firstChoice, ...remainingChoices] = choices;
       if (firstChoice === undefined) return [];
-      return [{ triggerShotId, choices: [firstChoice, ...remainingChoices] }];
+      const block =
+        choices.flatMap((item) => {
+          const reason = generationBlockForItem(currentGenerationCapability, {
+            target: { kind: 'shot', shotId: item.shotId },
+            purpose: item.purpose,
+          });
+          return reason === null ? [] : [{ item, reason }];
+        })[0] ?? null;
+      return [
+        {
+          triggerShotId,
+          choices: [firstChoice, ...remainingChoices],
+          block,
+        },
+      ];
     });
-  }, [project, projection]);
+  }, [currentGenerationCapability, project, projection]);
 
   const openBoardSpendGate = useCallback(
     (
@@ -582,7 +703,10 @@ const StudioProjectPage: React.FC<{
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
         return;
       }
-      if (current.imageRouteId === null || routeCatalog.image.status !== 'ready') {
+      if (
+        currentGenerationCapability === null &&
+        (current.imageRouteId === null || routeCatalog.image.status !== 'ready')
+      ) {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
         return;
       }
@@ -591,7 +715,7 @@ const StudioProjectPage: React.FC<{
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
         return;
       }
-      const routeIssue = spendGateRouteIssue(routeCatalog, draft);
+      const routeIssue = currentGenerationCapability === null ? spendGateRouteIssue(routeCatalog, draft) : null;
       if (routeIssue !== null) {
         setActionErrorMessageKey(
           routeIssue === 'image'
@@ -600,10 +724,50 @@ const StudioProjectPage: React.FC<{
         );
         return;
       }
+      const payableDraft =
+        'baseChoices' in draft && draft.baseChoices.every((choice) => choice.purpose === 'board_still')
+          ? {
+              ...draft,
+              baseChoices: draft.baseChoices.filter(
+                (choice) =>
+                  choice.target.kind === 'shot' &&
+                  generationBlockForItem(currentGenerationCapability, {
+                    target: { kind: 'shot', shotId: choice.target.shotId },
+                    purpose: 'board_still',
+                  }) === null
+              ),
+            }
+          : draft;
+      const disclosureGroups =
+        'baseChoices' in draft && draft.baseChoices.every((choice) => choice.purpose === 'board_still')
+          ? generationBlockGroupsForItems(currentGenerationCapability, shotCapabilityItemsForDraft(draft))
+          : [];
+      if (
+        'baseChoices' in draft &&
+        'baseChoices' in payableDraft &&
+        draft.baseChoices.length > 0 &&
+        payableDraft.baseChoices.length === 0
+      ) {
+        setActionErrorMessageKey(null);
+        spendGate.open(draft, undefined, { groups: disclosureGroups, blocksPrepare: true });
+        return;
+      }
       setActionErrorMessageKey(null);
-      spendGate.open(draft);
+      spendGate.open(
+        payableDraft,
+        undefined,
+        disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: false }
+      );
     },
-    [generationDraftsBlockReview, projection, routeCatalog, setActionErrorMessageKey, spendGate.open, spendGateLocked]
+    [
+      currentGenerationCapability,
+      generationDraftsBlockReview,
+      projection,
+      routeCatalog,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+    ]
   );
 
   const runWorkspaceCommitAtRevision = useCallback(
@@ -1169,6 +1333,7 @@ const StudioProjectPage: React.FC<{
         }
         const draft = defaultDraft;
         if (
+          currentGenerationCapability === null &&
           draft.baseChoices.some((choice) => choice.purpose === 'seed_still') &&
           routeCatalog?.image.status !== 'ready'
         ) {
@@ -1176,14 +1341,23 @@ const StudioProjectPage: React.FC<{
           return;
         }
         if (
+          currentGenerationCapability === null &&
           draft.baseChoices.some((choice) => choice.purpose === 'video_take') &&
           routeCatalog?.video.status !== 'ready'
         ) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.videoRouteBlocked');
           return;
         }
+        const disclosureGroups = generationBlockGroupsForItems(
+          currentGenerationCapability,
+          shotCapabilityItemsForDraft(draft)
+        );
         setActionErrorMessageKey(null);
-        spendGate.open(draft);
+        spendGate.open(
+          draft,
+          undefined,
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
       },
       reviewContinuity: (shotId, hardCut) => {
         const current = projectRef.current;
@@ -1196,7 +1370,10 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
           return;
         }
-        const routeIssue = routeCatalog === null ? null : spendGateRouteIssue(routeCatalog, draft);
+        const routeIssue =
+          currentGenerationCapability !== null || routeCatalog === null
+            ? null
+            : spendGateRouteIssue(routeCatalog, draft);
         if (routeIssue !== null) {
           setActionErrorMessageKey(
             routeIssue === 'image'
@@ -1207,8 +1384,32 @@ const StudioProjectPage: React.FC<{
           );
           return;
         }
+        const capabilityItems = continuityCapabilityItemsForDraft(current, draft);
+        if (capabilityItems === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+          return;
+        }
+        const disclosureGroups = generationBlockGroupsForItems(currentGenerationCapability, capabilityItems);
         setActionErrorMessageKey(null);
-        spendGate.open(draft);
+        spendGate.open(
+          draft,
+          undefined,
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
+      },
+      resolveGenerationBlock: (shotId, block: StudioGenerationBlockV2) => {
+        if (block.code === 'reference_binding') {
+          openReferenceFocus({ shotIds: [shotId] });
+          return;
+        }
+        if (block.code === 'catalog_unloaded' || block.code === 'health') return;
+        if (block.code === 'needs_setup') {
+          navigate('/settings/model');
+          return;
+        }
+        setBriefRouteFocusRole(block.role);
+        setBriefDialogRequest((request) => request + 1);
+        void refetchRoutes();
       },
       retryGenerationJob: async (jobId, acknowledgePossibleDuplicateCharge) =>
         runJobRecovery(
@@ -1246,8 +1447,11 @@ const StudioProjectPage: React.FC<{
     }),
     [
       beatPanelReviewBlockedMessageKey,
+      currentGenerationCapability,
       focusDirectorForReviewedRequest,
       mutations,
+      navigate,
+      openReferenceFocus,
       projection,
       refetchProjectWorkspace,
       routeCatalog,
@@ -1434,12 +1638,25 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
           return;
         }
+        const disclosureGroups = generationBlockGroupsForItems(
+          currentGenerationCapability,
+          plan.impact.currentTakeShotIds.map((currentTakeShotId) => ({
+            target: { kind: 'shot' as const, shotId: currentTakeShotId },
+            purpose: 'video_take' as const,
+          }))
+        );
         setActionErrorMessageKey(null);
-        spendGate.open(plan.draft, {
-          ...plan.impact,
-          paidRouteReady:
-            current.videoRouteId !== null && routeCatalog !== null && routeCatalog.video.status === 'ready',
-        });
+        spendGate.open(
+          plan.draft,
+          {
+            ...plan.impact,
+            paidRouteReady:
+              disclosureGroups.length === 0 &&
+              (currentGenerationCapability !== null ||
+                (current.videoRouteId !== null && routeCatalog !== null && routeCatalog.video.status === 'ready')),
+          },
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
       },
       retryJob: (jobId, acknowledgePossibleDuplicateCharge) => {
         if (spendGateLocked) return;
@@ -1493,6 +1710,7 @@ const StudioProjectPage: React.FC<{
     }),
     [
       generationDraftsBlockReview,
+      currentGenerationCapability,
       mutations,
       openBoardSpendGate,
       projection,
@@ -1800,7 +2018,10 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
           return;
         }
-        if (current.imageRouteId === null || routeCatalog.image.status !== 'ready') {
+        if (
+          currentGenerationCapability === null &&
+          (current.imageRouteId === null || routeCatalog.image.status !== 'ready')
+        ) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
           return;
         }
@@ -1818,8 +2039,16 @@ const StudioProjectPage: React.FC<{
           );
           return;
         }
+        const disclosureGroups = generationBlockGroupsForItems(
+          currentGenerationCapability,
+          referenceCapabilityItems([reference.id])
+        );
         setActionErrorMessageKey(null);
-        spendGate.open({ projectId: current.id, expectedRevision: current.revision, referenceIds: [reference.id] });
+        spendGate.open(
+          { projectId: current.id, expectedRevision: current.revision, referenceIds: [reference.id] },
+          undefined,
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
       },
       retryJob: async (referenceId, jobId, acknowledgePossibleDuplicateCharge): Promise<boolean> =>
         runReferenceJobRecovery(
@@ -1898,6 +2127,7 @@ const StudioProjectPage: React.FC<{
       },
     }),
     [
+      currentGenerationCapability,
       generationDraftsBlockReview,
       navigate,
       pendingReferenceId,
@@ -2263,7 +2493,7 @@ const StudioProjectPage: React.FC<{
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
         return;
       }
-      if (routeCatalog?.image.status !== 'ready') {
+      if (currentGenerationCapability === null && routeCatalog.image.status !== 'ready') {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
         return;
       }
@@ -2272,9 +2502,18 @@ const StudioProjectPage: React.FC<{
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
         return;
       }
-      spendGate.open(draft);
+      const disclosureGroups = generationBlockGroupsForItems(
+        currentGenerationCapability,
+        referenceCapabilityItems(draft.referenceIds)
+      );
+      spendGate.open(
+        draft,
+        undefined,
+        disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+      );
     },
     [
+      currentGenerationCapability,
       generationDraftsBlockReview,
       projection,
       routeCatalog,
@@ -2383,7 +2622,10 @@ const StudioProjectPage: React.FC<{
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
         return;
       }
-      if (current.imageRouteId === null || routeCatalog.image.status !== 'ready') {
+      if (
+        currentGenerationCapability === null &&
+        (current.imageRouteId === null || routeCatalog.image.status !== 'ready')
+      ) {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
         return;
       }
@@ -2423,10 +2665,25 @@ const StudioProjectPage: React.FC<{
         setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
         return;
       }
+      const disclosureGroups = generationBlockGroupsForItems(
+        currentGenerationCapability,
+        referenceCapabilityItems(retryIds)
+      );
       setActionErrorMessageKey(null);
-      spendGate.open({ projectId: current.id, expectedRevision: current.revision, referenceIds: retryIds });
+      spendGate.open(
+        { projectId: current.id, expectedRevision: current.revision, referenceIds: retryIds },
+        undefined,
+        disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+      );
     },
-    [generationDraftsBlockReview, routeCatalog, setActionErrorMessageKey, spendGate.open, spendGateLocked]
+    [
+      currentGenerationCapability,
+      generationDraftsBlockReview,
+      routeCatalog,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+    ]
   );
 
   const dismissHandoff = useCallback(
@@ -2518,11 +2775,13 @@ const StudioProjectPage: React.FC<{
               project={project}
               projection={projection}
               routeCatalog={routeCatalog}
+              generationCapability={currentGenerationCapability}
               drafts={drafts}
               pending={workspacePending}
               errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
               mutations={mutations}
               briefDialogRequest={briefDialogRequest}
+              briefRouteFocusRole={briefRouteFocusRole}
               onRuleDraftDirtyCountChange={setRuleDraftDirtyCount}
               onActiveRuleDraftDirtyCountChange={setActiveRuleDraftDirtyCount}
             />
@@ -2571,7 +2830,10 @@ const StudioProjectPage: React.FC<{
             drafts={drafts}
             pending={workspacePending}
             gateLocked={spendGateLocked}
-            imageRouteReady={project.imageRouteId !== null && routeCatalog?.image.status === 'ready'}
+            imageRouteReady={
+              currentGenerationCapability !== null ||
+              (project.imageRouteId !== null && routeCatalog?.image.status === 'ready')
+            }
             errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
             exportErrorMessageKey={exportErrorMessageKey}
             mutations={mutations}

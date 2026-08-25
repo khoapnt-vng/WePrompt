@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   StudioCascadeProgressV2,
+  StudioGenerationBlockV2,
   StudioRendererParkEligibilityV2,
 } from '@/common/types/project/creativeStudioTypes';
 import type {
@@ -227,6 +228,13 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.generation.renderVideo': 'Generate again',
         'conversation.creativeStudio.workspace.beatPanel.generation.reviewUnavailable':
           'Generation review is unavailable',
+        'conversation.creativeStudio.models.blocked.catalogUnloaded': 'The engine list has not loaded yet.',
+        'conversation.creativeStudio.models.blocked.duration': 'This engine cannot make a shot {{seconds}}s long.',
+        'conversation.creativeStudio.models.blocked.notAnswering': 'The engine is not answering.',
+        'conversation.creativeStudio.models.blocked.actionSetEngines': 'Set engines',
+        'conversation.creativeStudio.models.blocked.actionShorten': 'Adjust shot length',
+        'conversation.creativeStudio.references.bindings.unassigned': 'This Shot has no reference decision yet.',
+        'conversation.creativeStudio.workspace.gate.reviewShotBinding': 'Review Shot binding',
         'conversation.creativeStudio.workspace.beatPanel.lift.beat': 'Move to Bin',
         'conversation.creativeStudio.workspace.beatPanel.lift.beatTitle': 'Move this Beat to the Bin?',
         'conversation.creativeStudio.workspace.beatPanel.lift.confirmBeat': 'Move to Bin',
@@ -322,6 +330,7 @@ vi.mock('react-i18next', () => ({
         return `Rejoining Shot ${String(values?.shot)} clears its first-frame selection and uses Shot ${String(values?.previous)}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.`;
       }
       if (key.endsWith('.fields.shootingScriptFor')) return `Shooting script for Shot ${String(values?.index)}`;
+      if (key.endsWith('.fields.durationFor')) return `Duration for Shot ${String(values?.index)}`;
       if (key.endsWith('For')) return `${key.split('.').at(-1)?.replace('For', '')} Shot ${String(values?.index)}`;
       if (key.endsWith('.reorder.previous')) return `Move Shot ${String(values?.index)} up`;
       if (key.endsWith('.reorder.next')) return `Move Shot ${String(values?.index)} down`;
@@ -364,6 +373,9 @@ vi.mock('react-i18next', () => ({
       }
       if (key.endsWith('.generation.choiceLabel')) {
         return `Beat ${String(values?.beatIndex)} Shot ${String(values?.shotIndex)} ${String(values?.purpose)}`;
+      }
+      if (key === 'conversation.creativeStudio.models.blocked.duration') {
+        return `This engine cannot make a shot ${String(values?.seconds)}s long.`;
       }
       if (key.endsWith('.generation.referenceForChoice')) return `Brief reference for ${String(values?.choice)}`;
       if (key.endsWith('.lift.shotTitle')) return `Move Shot ${String(values?.index)} to the Bin?`;
@@ -559,6 +571,7 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   parkBeat: vi.fn().mockResolvedValue(true),
   reviewShot: vi.fn(),
   reviewContinuity: vi.fn(),
+  resolveGenerationBlock: vi.fn(),
   retryGenerationJob: vi.fn().mockResolvedValue(true),
   cancelGenerationJob: vi.fn().mockResolvedValue(true),
   retryConditioning: vi.fn().mockResolvedValue(true),
@@ -638,6 +651,7 @@ const panelProps = (
           purpose: shot.segmentHead && shot.effectiveSeedAssetId === null ? 'seed_still' : 'video_take',
         },
       ],
+      block: null,
     })
   ),
   errorMessageKey: null,
@@ -2194,13 +2208,18 @@ describe('BeatPanel', () => {
         { shotId: 'shot_1', purpose: 'video_take' },
         { shotId: 'shot_2', purpose: 'video_take' },
       ],
+      block: null,
     };
     const result = render(
       <BeatPanel
         {...panelProps(beat, drafts, actions, makeProjection([beat]), {
           reviewGraphs: [
             reviewGraph,
-            { triggerShotId: 'shot_2', choices: [{ shotId: 'shot_2', purpose: 'video_take' }] },
+            {
+              triggerShotId: 'shot_2',
+              choices: [{ shotId: 'shot_2', purpose: 'video_take' }],
+              block: null,
+            },
           ],
         })}
       />
@@ -2232,6 +2251,183 @@ describe('BeatPanel', () => {
     expect(screen.getByRole('button', { name: 'Review first-frame generation' })).toBeDisabled();
     expect(screen.getByText('Generation review is unavailable')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Review first-frame generation' }));
+    expect(actions.reviewShot).not.toHaveBeenCalled();
+  });
+
+  it('keeps a blocked Render visible and exposes the exact Main reason as its accessible description', () => {
+    const shot = makeShot('shot_1', 0);
+    const beat = makeBeat('beat_1', [shot]);
+    const block: StudioGenerationBlockV2 = { code: 'duration', role: 'image', seconds: 8 };
+    render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), {
+          reviewGraphs: [
+            {
+              triggerShotId: shot.id,
+              choices: [{ shotId: shot.id, purpose: 'seed_still' }],
+              block: { item: { shotId: shot.id, purpose: 'seed_still' }, reason: block },
+            },
+          ],
+        })}
+      />
+    );
+
+    const renderButton = screen.getByRole('button', { name: 'Review first-frame generation' });
+    expect(renderButton).toBeVisible();
+    expect(renderButton).toBeDisabled();
+    expect(renderButton).toHaveAccessibleDescription('This engine cannot make a shot 8s long.');
+    expect(screen.getByText('This engine cannot make a shot 8s long.')).toHaveAttribute('role', 'status');
+  });
+
+  it('focuses an exact downstream duration field locally without delegating or opening paid review', () => {
+    const shot1 = makeShot('shot_1', 0);
+    const shot2 = makeShot('shot_2', 1);
+    const beat = makeBeat('beat_1', [shot1, shot2]);
+    const actions = makeActions();
+    const { container } = render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), {
+          reviewGraphs: [
+            {
+              triggerShotId: shot1.id,
+              choices: [
+                { shotId: shot1.id, purpose: 'seed_still' },
+                { shotId: shot2.id, purpose: 'video_take' },
+              ],
+              block: {
+                item: { shotId: shot2.id, purpose: 'video_take' },
+                reason: { code: 'duration', role: 'video', seconds: 8 },
+              },
+            },
+            {
+              triggerShotId: shot2.id,
+              choices: [{ shotId: shot2.id, purpose: 'video_take' }],
+              block: null,
+            },
+          ],
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adjust shot length' }));
+    const downstreamDuration = container.querySelector<HTMLInputElement>(
+      '[data-shot-card][data-shot-id="shot_2"] [data-shot-duration-field] input'
+    );
+    expect(downstreamDuration).not.toBeNull();
+    expect(downstreamDuration).toHaveFocus();
+    expect(actions.resolveGenerationBlock).not.toHaveBeenCalled();
+    expect(actions.reviewShot).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: 'reference binding',
+      block: {
+        code: 'reference_binding',
+        role: 'image',
+        reason: 'unassigned',
+        selectedCount: 0,
+        limit: 1,
+      } satisfies StudioGenerationBlockV2,
+      remedy: 'Review Shot binding',
+    },
+    {
+      label: 'route selection',
+      block: { code: 'no_engine', role: 'image' } satisfies StudioGenerationBlockV2,
+      remedy: 'Set engines',
+    },
+  ])('delegates the exact $label blocker through its safe remedy', ({ block, remedy }) => {
+    const shot = makeShot('shot_1', 0);
+    const beat = makeBeat('beat_1', [shot]);
+    const actions = makeActions();
+    render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), {
+          reviewGraphs: [
+            {
+              triggerShotId: shot.id,
+              choices: [{ shotId: shot.id, purpose: 'seed_still' }],
+              block: { item: { shotId: shot.id, purpose: 'seed_still' }, reason: block },
+            },
+          ],
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: remedy }));
+    expect(actions.resolveGenerationBlock).toHaveBeenCalledTimes(1);
+    expect(actions.resolveGenerationBlock).toHaveBeenCalledWith(shot.id, block);
+    expect(actions.reviewShot).not.toHaveBeenCalled();
+  });
+
+  it('routes a cascade blocker remedy to the exact downstream Shot reported by Main', () => {
+    const shot1 = makeShot('shot_1', 0);
+    const shot2 = makeShot('shot_2', 1);
+    const beat = makeBeat('beat_1', [shot1, shot2]);
+    const actions = makeActions();
+    const reason = { code: 'no_engine', role: 'video' } satisfies StudioGenerationBlockV2;
+    render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), {
+          reviewGraphs: [
+            {
+              triggerShotId: shot1.id,
+              choices: [
+                { shotId: shot1.id, purpose: 'seed_still' },
+                { shotId: shot2.id, purpose: 'video_take' },
+              ],
+              block: { item: { shotId: shot2.id, purpose: 'video_take' }, reason },
+            },
+            {
+              triggerShotId: shot2.id,
+              choices: [{ shotId: shot2.id, purpose: 'video_take' }],
+              block: null,
+            },
+          ],
+        })}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Set engines' }));
+    expect(actions.resolveGenerationBlock).toHaveBeenCalledWith(shot2.id, reason);
+    expect(actions.reviewShot).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: 'unloaded catalog',
+      block: { code: 'catalog_unloaded', role: 'image' } satisfies StudioGenerationBlockV2,
+      reason: 'The engine list has not loaded yet.',
+    },
+    {
+      label: 'unhealthy engine',
+      block: { code: 'health', role: 'image' } satisfies StudioGenerationBlockV2,
+      reason: 'The engine is not answering.',
+    },
+  ])('offers no unsafe action for an $label blocker', ({ block, reason }) => {
+    const shot = makeShot('shot_1', 0);
+    const beat = makeBeat('beat_1', [shot]);
+    const actions = makeActions();
+    render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), {
+          reviewGraphs: [
+            {
+              triggerShotId: shot.id,
+              choices: [{ shotId: shot.id, purpose: 'seed_still' }],
+              block: { item: { shotId: shot.id, purpose: 'seed_still' }, reason: block },
+            },
+          ],
+        })}
+      />
+    );
+
+    expect(screen.getByText(reason)).toHaveAttribute('role', 'status');
+    expect(screen.getByRole('button', { name: 'Review first-frame generation' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Set engines' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Adjust shot length' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review Shot binding' })).toBeNull();
+    expect(actions.resolveGenerationBlock).not.toHaveBeenCalled();
     expect(actions.reviewShot).not.toHaveBeenCalled();
   });
 

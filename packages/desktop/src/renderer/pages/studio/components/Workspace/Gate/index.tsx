@@ -29,10 +29,12 @@ import {
   type SpendGateDraft,
   type SpendGateBoardPromotion,
   type SpendGateBoardPromotionImpact,
+  type SpendGateGenerationDisclosure,
   type SpendGateSelectedOption,
   type SpendGateState,
   type SpendGateRouteIssue,
 } from '../spendGate';
+import { generationBlockMessage } from './generationBlockers';
 import styles from './SpendGateModal.module.css';
 
 // The spend gate can open from inside the Beat panel modal. Arco gives sibling modals the same
@@ -51,7 +53,11 @@ export type UseSpendGateInput = {
 
 export type UseSpendGateResult = {
   state: SpendGateState;
-  open: (draft: SpendGateDraft, boardPromotionImpact?: SpendGateBoardPromotionImpact) => void;
+  open: (
+    draft: SpendGateDraft,
+    boardPromotionImpact?: SpendGateBoardPromotionImpact,
+    generationDisclosure?: SpendGateGenerationDisclosure
+  ) => void;
   close: () => void;
   promoteOnly: () => Promise<void>;
   prepare: () => Promise<void>;
@@ -72,25 +78,33 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
   const terminalSuccessRef = useRef(false);
   stateRef.current = state;
 
-  const open = useCallback((draft: SpendGateDraft, boardPromotionImpact?: SpendGateBoardPromotionImpact) => {
-    if (
-      promotingRef.current ||
-      confirmingRef.current ||
-      terminalSuccessRef.current ||
-      stateRef.current.phase === 'quote_in_use'
-    ) {
-      return;
-    }
-    gateGenerationRef.current += 1;
-    preparingRef.current = false;
-    confirmingRef.current = false;
-    terminalSuccessRef.current = false;
-    dispatch({
-      type: 'open',
-      draft,
-      ...(boardPromotionImpact === undefined ? {} : { boardPromotionImpact }),
-    });
-  }, []);
+  const open = useCallback(
+    (
+      draft: SpendGateDraft,
+      boardPromotionImpact?: SpendGateBoardPromotionImpact,
+      generationDisclosure?: SpendGateGenerationDisclosure
+    ) => {
+      if (
+        promotingRef.current ||
+        confirmingRef.current ||
+        terminalSuccessRef.current ||
+        stateRef.current.phase === 'quote_in_use'
+      ) {
+        return;
+      }
+      gateGenerationRef.current += 1;
+      preparingRef.current = false;
+      confirmingRef.current = false;
+      terminalSuccessRef.current = false;
+      dispatch({
+        type: 'open',
+        draft,
+        ...(boardPromotionImpact === undefined ? {} : { boardPromotionImpact }),
+        ...(generationDisclosure === undefined ? {} : { generationDisclosure }),
+      });
+    },
+    []
+  );
   const close = useCallback(() => {
     if (promotingRef.current || confirmingRef.current || stateRef.current.phase === 'quote_in_use') {
       return;
@@ -151,6 +165,7 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
     const promotion = spendGateBoardPromotion(current.draft);
     if (
       current.draft === null ||
+      current.generationDisclosure?.blocksPrepare === true ||
       promotingRef.current ||
       preparingRef.current ||
       confirmingRef.current ||
@@ -353,6 +368,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
     boardPromotionPaidCount > 0 &&
     boardPromotionPaidCount <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST &&
     boardPromotionImpact?.paidRouteReady !== false;
+  const generationPrepareBlocked = state.generationDisclosure?.blocksPrepare === true;
   const boardPromotionIdentity =
     boardPromotion === null
       ? null
@@ -423,6 +439,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   const paidPromotionPrepareAvailable =
     boardPromotion !== null &&
     boardPromotionPaidAvailable &&
+    !generationPrepareBlocked &&
     state.routeIssue === null &&
     ((state.phase === 'choices' && boardPromotionChoice === 'promote_and_rerender') ||
       state.phase === 'error' ||
@@ -540,6 +557,62 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
             ) : null}
           </>
         ) : null}
+
+        {state.generationDisclosure === null ? null : (
+          <div data-generation-capability-disclosure>
+            {state.generationDisclosure.groups.map((group, index) => {
+              const message = generationBlockMessage(group.block);
+              const reason = t(message.key, message.values);
+              const shotIds = [
+                ...new Set(group.items.flatMap((item) => (item.target.kind === 'shot' ? [item.target.shotId] : []))),
+              ];
+              const referenceIds = [
+                ...new Set(
+                  group.items.flatMap((item) => (item.target.kind === 'reference' ? [item.target.referenceId] : []))
+                ),
+              ];
+              return (
+                <div data-generation-block-code={group.block.code} key={`${JSON.stringify(group.block)}:${index}`}>
+                  <Alert
+                    type='warning'
+                    content={
+                      <div>
+                        {shotIds.length === 0 ? null : (
+                          <p
+                            data-generation-block-scope={
+                              state.generationDisclosure?.blocksPrepare ? 'exact' : 'excluded'
+                            }
+                          >
+                            {state.generationDisclosure?.blocksPrepare ? (
+                              <>
+                                {reason}: <bdi dir='auto'>{shotIds.join(' · ')}</bdi>
+                              </>
+                            ) : (
+                              t('conversation.creativeStudio.phase.produce.batchExcluded', {
+                                count: shotIds.length,
+                                reason,
+                              })
+                            )}
+                          </p>
+                        )}
+                        {referenceIds.length === 0 ? null : (
+                          <p>
+                            {t('conversation.creativeStudio.workspace.referenceWorkflow.generationScope')} — {reason}:{' '}
+                            <bdi dir='auto'>
+                              {referenceIds
+                                .map((referenceId) => projectReferenceById.get(referenceId)?.label ?? referenceId)
+                                .join(' · ')}
+                            </bdi>
+                          </p>
+                        )}
+                      </div>
+                    }
+                  />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {state.phase === 'promoting' ? (
           <div className={styles.loading}>
@@ -832,6 +905,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
           (state.phase === 'choices' || state.phase === 'refresh_required' || state.phase === 'quote_cache_full') ? (
             <Button
               type='primary'
+              disabled={generationPrepareBlocked}
               onClick={() => {
                 setExpandedQuoteId(null);
                 void prepare();

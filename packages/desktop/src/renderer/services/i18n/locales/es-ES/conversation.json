@@ -1834,12 +1834,12 @@
         "frame": "Este motor no puede crear {{ratio}}.",
         "resolution": "Este motor no puede crear {{resolution}}.",
         "duration": "Este motor no puede crear un plano de {{seconds}} s.",
-        "firstFrame": "Este motor no puede empezar desde una imagen de referencia.",
+        "firstFrame": "Este motor no puede empezar desde el primer fotograma revisado.",
         "catalogUnloaded": "La lista de motores aún no se ha cargado.",
         "aria": "No se puede renderizar. {{reason}}",
         "actionSetEngines": "Definir motores",
         "actionRemoveReference": "Quitar la referencia",
-        "actionShorten": "Acortar este plano"
+        "actionShorten": "Ajustar la duración del plano"
       }
     },
     "shell": {

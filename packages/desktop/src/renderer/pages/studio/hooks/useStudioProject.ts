@@ -18,6 +18,8 @@ import type {
   StudioRendererProjectV2,
   StudioRendererReferenceGenerationHandoffV2,
   StudioRendererWorkspaceStatusV2,
+  StudioGenerationCapabilityV2,
+  StudioGenerationCapabilityItemV2,
   StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -32,6 +34,7 @@ export type UseStudioProjectResult = {
   workspaceStatus: StudioRendererWorkspaceStatusV2 | null;
   chainStatus: StudioRendererChainStatusV2 | null;
   routeCatalog: StudioRouteCatalogV2 | null;
+  generationCapability: StudioGenerationCapabilityV2 | null;
   exportCatalog: StudioRendererExportCatalogV2 | null;
   loadState: StudioProjectLoadState;
   errorMessageKey: string | null;
@@ -89,6 +92,23 @@ const uniqueHandoffs = (
 
 const routeRelevantSignature = (project: StudioRendererProjectV2): string =>
   JSON.stringify([project.imageRouteId, project.videoRouteId, project.aspectRatio, project.resolution]);
+
+const generationCapabilityItems = (project: StudioRendererProjectV2): StudioGenerationCapabilityItemV2[] => [
+  ...project.beatOrder.flatMap((beatId) => {
+    const beat = Object.hasOwn(project.beats, beatId) ? project.beats[beatId] : undefined;
+    return beat?.id === beatId
+      ? beat.shotOrder.flatMap((shotId) => [
+          { target: { kind: 'shot' as const, shotId }, purpose: 'seed_still' as const },
+          { target: { kind: 'shot' as const, shotId }, purpose: 'board_still' as const },
+          { target: { kind: 'shot' as const, shotId }, purpose: 'video_take' as const },
+        ])
+      : [];
+  }),
+  ...project.referenceOrder.map((referenceId) => ({
+    target: { kind: 'reference' as const, referenceId },
+    purpose: 'reference_image' as const,
+  })),
+];
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 
@@ -189,6 +209,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     StudioRendererReferenceGenerationHandoffV2[]
   >([]);
   const [routeCatalog, setRouteCatalog] = useState<StudioRouteCatalogV2 | null>(null);
+  const [generationCapability, setGenerationCapability] = useState<StudioGenerationCapabilityV2 | null>(null);
   const [exportCatalog, setExportCatalog] = useState<StudioRendererExportCatalogV2 | null>(null);
   const [loadState, setLoadState] = useState<StudioProjectLoadState>(projectId ? 'loading' : 'idle');
   const [errorMessageKey, setErrorMessageKey] = useState<string | null>(null);
@@ -204,8 +225,12 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const handoffRequestRef = useRef(0);
   const referencePairRequestRef = useRef(0);
   const routeRequestRef = useRef(0);
+  const capabilityRequestRef = useRef(0);
+  const routeRefreshActiveRef = useRef<number | null>(null);
+  const capabilityRefreshPendingRef = useRef(false);
   const exportRequestRef = useRef(0);
   const projectRef = useRef<StudioRendererProjectV2 | null>(null);
+  const routeCatalogRef = useRef<StudioRouteCatalogV2 | null>(null);
   const exportCatalogRef = useRef<StudioRendererExportCatalogV2 | null>(null);
 
   useLayoutEffect(() => {
@@ -308,8 +333,11 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           const current = projectRef.current?.id === requestedProjectId ? projectRef.current : null;
           setProjectWorkspace({ project: current, workspaceStatus: null, chainStatus: null });
           routeRequestRef.current += 1;
+          capabilityRequestRef.current += 1;
           exportRequestRef.current += 1;
+          routeCatalogRef.current = null;
           setRouteCatalog(null);
+          setGenerationCapability(null);
           exportCatalogRef.current = null;
           setExportCatalog(null);
           setRouteErrorMessageKey(null);
@@ -330,8 +358,11 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           projectRef.current = null;
           setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
           routeRequestRef.current += 1;
+          capabilityRequestRef.current += 1;
           exportRequestRef.current += 1;
+          routeCatalogRef.current = null;
           setRouteCatalog(null);
+          setGenerationCapability(null);
           exportCatalogRef.current = null;
           setExportCatalog(null);
           setRouteErrorMessageKey(null);
@@ -348,7 +379,10 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
         }
         if (current !== null && routeRelevantSignature(current) !== routeRelevantSignature(loaded.snapshot.project)) {
           routeRequestRef.current += 1;
+          capabilityRequestRef.current += 1;
+          routeCatalogRef.current = null;
           setRouteCatalog(null);
+          setGenerationCapability(null);
           setRouteErrorMessageKey(null);
         }
         projectRef.current = loaded.snapshot.project;
@@ -553,6 +587,75 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     [loadReferenceHandoffs, loadReferenceRequests]
   );
 
+  const loadGenerationCapability = useCallback(
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<boolean> => {
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return false;
+      }
+      const boundProject = projectRef.current;
+      const boundCatalog = routeCatalogRef.current;
+      if (boundProject?.id !== requestedProjectId || boundCatalog === null) return false;
+      if (routeRefreshActiveRef.current !== null) {
+        capabilityRefreshPendingRef.current = true;
+        return false;
+      }
+      const request = ++capabilityRequestRef.current;
+      try {
+        const capabilityResult = await ipcBridge.creativeStudio.getGenerationCapability.invoke({
+          projectId: requestedProjectId,
+          expectedRevision: boundProject.revision,
+          items: generationCapabilityItems(boundProject),
+        });
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          capabilityRequestRef.current !== request
+        ) {
+          return false;
+        }
+        const current = projectRef.current;
+        if (current?.id !== requestedProjectId || current.revision !== boundProject.revision) return false;
+        if (
+          capabilityResult.ok === false ||
+          capabilityResult.data.projectId !== requestedProjectId ||
+          capabilityResult.data.projectRevision !== boundProject.revision ||
+          capabilityResult.data.catalogVersion !== boundCatalog.catalogVersion
+        ) {
+          routeCatalogRef.current = null;
+          setRouteCatalog(null);
+          setGenerationCapability(null);
+          setRouteErrorMessageKey(
+            capabilityResult.ok === false
+              ? capabilityResult.error.messageKey
+              : 'conversation.creativeStudio.workspace.errors.storage'
+          );
+          return false;
+        }
+        setGenerationCapability(capabilityResult.data as StudioGenerationCapabilityV2);
+        setRouteErrorMessageKey(null);
+        return true;
+      } catch {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          capabilityRequestRef.current === request
+        ) {
+          routeCatalogRef.current = null;
+          setRouteCatalog(null);
+          setGenerationCapability(null);
+          setRouteErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        }
+        return false;
+      }
+    },
+    []
+  );
+
   const loadRoutes = useCallback(
     async (requestedBinding: StudioProjectBinding, generation: number): Promise<boolean> => {
       const requestedProjectId = requestedBinding.projectId;
@@ -567,6 +670,8 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       if (boundProject?.id !== requestedProjectId) return false;
       const boundSignature = routeRelevantSignature(boundProject);
       const request = ++routeRequestRef.current;
+      routeRefreshActiveRef.current = request;
+      capabilityRequestRef.current += 1;
       try {
         const result = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: requestedProjectId });
         if (
@@ -577,13 +682,61 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           return false;
         }
         const current = projectRef.current;
-        if (current?.id !== requestedProjectId || routeRelevantSignature(current) !== boundSignature) return false;
+        if (current?.id !== requestedProjectId || routeRelevantSignature(current) !== boundSignature) {
+          return false;
+        }
         if (result.ok === false) {
+          routeCatalogRef.current = null;
           setRouteCatalog(null);
+          setGenerationCapability(null);
           setRouteErrorMessageKey(result.error.messageKey);
           return false;
         }
+        const capabilityResult = await ipcBridge.creativeStudio.getGenerationCapability.invoke({
+          projectId: requestedProjectId,
+          expectedRevision: current.revision,
+          items: generationCapabilityItems(current),
+        });
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          routeRequestRef.current !== request
+        ) {
+          return false;
+        }
+        const latestProject = projectRef.current;
+        if (latestProject?.id !== requestedProjectId || routeRelevantSignature(latestProject) !== boundSignature) {
+          return false;
+        }
+        if (latestProject.revision !== current.revision) {
+          // The provider snapshot is still valid for an unchanged route signature. Install it, then
+          // let the queued capability read derive against the newest project revision.
+          routeCatalogRef.current = result.data as StudioRouteCatalogV2;
+          setRouteCatalog(result.data as StudioRouteCatalogV2);
+          setGenerationCapability(null);
+          setRouteErrorMessageKey(null);
+          capabilityRefreshPendingRef.current = true;
+          return false;
+        }
+        if (
+          capabilityResult.ok === false ||
+          capabilityResult.data.projectId !== requestedProjectId ||
+          capabilityResult.data.projectRevision !== current.revision ||
+          capabilityResult.data.catalogVersion !== result.data.catalogVersion
+        ) {
+          routeCatalogRef.current = null;
+          setRouteCatalog(null);
+          setGenerationCapability(null);
+          setRouteErrorMessageKey(
+            capabilityResult.ok === false
+              ? capabilityResult.error.messageKey
+              : 'conversation.creativeStudio.workspace.errors.storage'
+          );
+          return false;
+        }
+        routeCatalogRef.current = result.data as StudioRouteCatalogV2;
         setRouteCatalog(result.data as StudioRouteCatalogV2);
+        setGenerationCapability(capabilityResult.data as StudioGenerationCapabilityV2);
         setRouteErrorMessageKey(null);
         return true;
       } catch {
@@ -592,13 +745,23 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           generationRef.current === generation &&
           routeRequestRef.current === request
         ) {
+          routeCatalogRef.current = null;
           setRouteCatalog(null);
+          setGenerationCapability(null);
           setRouteErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
         }
         return false;
+      } finally {
+        if (routeRefreshActiveRef.current === request) {
+          routeRefreshActiveRef.current = null;
+          if (capabilityRefreshPendingRef.current) {
+            capabilityRefreshPendingRef.current = false;
+            void loadGenerationCapability(requestedBinding, generation);
+          }
+        }
       }
     },
-    []
+    [loadGenerationCapability]
   );
 
   const applyExportCatalog = useCallback((requestedBinding: StudioProjectBinding, value: unknown): boolean => {
@@ -676,6 +839,10 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   useEffect(() => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
+    routeRequestRef.current += 1;
+    capabilityRequestRef.current += 1;
+    routeRefreshActiveRef.current = null;
+    capabilityRefreshPendingRef.current = false;
     const boundProjectId = binding.projectId;
 
     if (!boundProjectId) {
@@ -684,7 +851,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       setProposals([]);
       setReferenceRequests([]);
       setReferenceGenerationHandoffs([]);
+      routeCatalogRef.current = null;
       setRouteCatalog(null);
+      setGenerationCapability(null);
       exportCatalogRef.current = null;
       setExportCatalog(null);
       setLoadState('idle');
@@ -704,7 +873,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     setReferenceErrorMessageKey(null);
     projectRef.current = null;
     setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
+    routeCatalogRef.current = null;
     setRouteCatalog(null);
+    setGenerationCapability(null);
     exportCatalogRef.current = null;
     setExportCatalog(null);
     setWorkspaceErrorMessageKey(null);
@@ -713,7 +884,13 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
 
     const unsubscribeProject = ipcBridge.creativeStudio.projectUpdated.on(({ projectId: updatedProjectId }) => {
       if (updatedProjectId === boundProjectId && activeBindingRef.current === binding) {
-        void loadProjectWorkspace(binding, generation, false);
+        void (async () => {
+          if ((await loadProjectWorkspace(binding, generation, false)) !== null) {
+            await (routeCatalogRef.current === null
+              ? loadRoutes(binding, generation)
+              : loadGenerationCapability(binding, generation));
+          }
+        })();
         // Reference handoff progress is projected from project-owned job state. Job transitions emit
         // projectUpdated, not a reference-sidecar event, so refresh both authorities from this signal.
         void loadReferences(binding, generation);
@@ -744,7 +921,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       unsubscribeProposal();
       unsubscribeReference();
     };
-  }, [binding, loadExports, loadProjectWorkspace, loadProposals, loadReferences, loadRoutes]);
+  }, [binding, loadExports, loadGenerationCapability, loadProjectWorkspace, loadProposals, loadReferences, loadRoutes]);
 
   const refetchProjectWorkspace = useCallback(async (): Promise<StudioRendererProjectV2 | null> => {
     if (binding.projectId === undefined || activeBindingRef.current !== binding) return null;
@@ -794,13 +971,13 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const refetchAll = useCallback(async (): Promise<void> => {
     if (binding.projectId === undefined || activeBindingRef.current !== binding) return;
     const generation = generationRef.current;
-    await Promise.all([
+    const [refreshed] = await Promise.all([
       loadProjectWorkspace(binding, generation, false),
       loadProposals(binding, generation),
       loadReferences(binding, generation),
-      loadExports(binding, generation),
     ]);
-  }, [binding, loadExports, loadProjectWorkspace, loadProposals, loadReferences]);
+    if (refreshed !== null) await Promise.all([loadRoutes(binding, generation), loadExports(binding, generation)]);
+  }, [binding, loadExports, loadProjectWorkspace, loadProposals, loadReferences, loadRoutes]);
 
   return {
     project,
@@ -810,6 +987,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     workspaceStatus,
     chainStatus,
     routeCatalog,
+    generationCapability,
     exportCatalog,
     loadState,
     errorMessageKey,

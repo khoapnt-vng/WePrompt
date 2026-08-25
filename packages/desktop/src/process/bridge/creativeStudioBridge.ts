@@ -724,6 +724,9 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.listReferenceGenerationHandoffs.provider((input) =>
     runCommand(() => dependencies.getService().listReferenceGenerationHandoffs(input))
   );
+  ipcBridge.creativeStudio.getGenerationCapability.provider((input) =>
+    runCommand(() => dependencies.getService().getGenerationCapability(input))
+  );
   ipcBridge.creativeStudio.prepareProjectReferences.provider((input) =>
     runCommand(() => dependencies.getService().prepareProjectReferences(input))
   );

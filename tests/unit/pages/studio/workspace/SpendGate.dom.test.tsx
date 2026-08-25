@@ -130,6 +130,7 @@ import {
   type CutActions,
   type SpendGateBoardPromotionImpact,
   type SpendGateDraft,
+  type SpendGateGenerationDisclosure,
   type TableBoardActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
@@ -547,6 +548,7 @@ const promotionDraft: SpendGateDraft = {
 const Harness: React.FC<{
   gateDraft?: SpendGateDraft;
   boardPromotionImpact?: SpendGateBoardPromotionImpact;
+  generationDisclosure?: SpendGateGenerationDisclosure;
   onEditRoutes?: ReturnType<typeof vi.fn>;
   onPromoteOnly?: ReturnType<typeof vi.fn>;
   reenterOnConfirmed?: boolean;
@@ -555,6 +557,7 @@ const Harness: React.FC<{
 }> = ({
   gateDraft = draft,
   boardPromotionImpact,
+  generationDisclosure,
   onEditRoutes = vi.fn(),
   onPromoteOnly = vi.fn(async () => true),
   reenterOnConfirmed = false,
@@ -572,7 +575,7 @@ const Harness: React.FC<{
   gateRef.current = gate;
   return (
     <>
-      <button onClick={() => gate.open(gateDraft, boardPromotionImpact)}>Open review</button>
+      <button onClick={() => gate.open(gateDraft, boardPromotionImpact, generationDisclosure)}>Open review</button>
       <button onClick={() => void gate.prepare()}>Invoke prepare directly</button>
       <button onClick={() => void gate.confirm()}>Invoke confirm directly</button>
       <SpendGateModal
@@ -1987,6 +1990,59 @@ describe('SpendGateModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('discloses a blocked exact intent and refuses both visible and direct prepare attempts', async () => {
+    const generationDisclosure: SpendGateGenerationDisclosure = {
+      groups: [
+        {
+          block: { code: 'no_engine', role: 'image' },
+          items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+        },
+      ],
+      blocksPrepare: true,
+    };
+    render(<Harness generationDisclosure={generationDisclosure} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
+    const exactScope = modal.querySelector('[data-generation-block-scope="exact"]');
+    expect(exactScope).toHaveTextContent('conversation.creativeStudio.models.blocked.noEngine');
+    expect(exactScope).toHaveTextContent('shot_1');
+    expect(exactScope).not.toHaveTextContent('conversation.creativeStudio.phase.produce.batchExcluded');
+    expect(
+      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Invoke prepare directly' }));
+    expect(mocks.prepare).not.toHaveBeenCalled();
+  });
+
+  it('keeps a narrowed batch reviewable while retaining its grouped omission disclosure', async () => {
+    const generationDisclosure: SpendGateGenerationDisclosure = {
+      groups: [
+        {
+          block: { code: 'duration', role: 'video', seconds: 9 },
+          items: [{ target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' }],
+        },
+      ],
+      blocksPrepare: false,
+    };
+    render(<Harness generationDisclosure={generationDisclosure} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    const prepareButton = within(modal).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.gate.prepare',
+    });
+    expect(prepareButton).toBeEnabled();
+    fireEvent.click(prepareButton);
+
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(1));
+    expect(modal.querySelector('[data-generation-block-code="duration"]')).toBeVisible();
+    expect(modal.querySelector('[data-generation-block-scope="excluded"]')).toHaveTextContent(
+      'conversation.creativeStudio.phase.produce.batchExcluded'
+    );
   });
 
   it('prepares project references through their dedicated seam and names reference scope instead of proxy Shots', async () => {

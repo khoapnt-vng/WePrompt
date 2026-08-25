@@ -26,6 +26,7 @@ import {
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_REFERENCE_LABEL_LENGTH,
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
@@ -327,6 +328,33 @@ const studioV2MutationRequestShape = {
   projectId: safeIdSchema,
   expectedRevision: studioExpectedRevisionSchema,
 };
+const studioGenerationCapabilityItemSchema = z.union([
+  z
+    .object({
+      target: z.object({ kind: z.literal('shot'), shotId: safeIdSchema }).strict(),
+      purpose: z.enum(['seed_still', 'board_still', 'video_take']),
+    })
+    .strict(),
+  z
+    .object({
+      target: z.object({ kind: z.literal('reference'), referenceId: safeIdSchema }).strict(),
+      purpose: z.literal('reference_image'),
+    })
+    .strict(),
+]);
+const studioGenerationCapabilitySchema = z
+  .object({
+    ...studioV2MutationRequestShape,
+    items: z
+      .array(studioGenerationCapabilityItemSchema)
+      .max(STUDIO_MAX_SHOTS_PER_PROJECT * 3 + STUDIO_MAX_PROJECT_REFERENCES)
+      .refine(
+        (items) =>
+          new Set(items.map((item) => `${item.target.kind}\u0000${JSON.stringify(item.target)}\u0000${item.purpose}`))
+            .size === items.length
+      ),
+  })
+  .strict();
 const studioV2EditableProjectChangesSchema = z
   .object({
     name: z
@@ -900,6 +928,7 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.list-reference-requests': studioV2ProjectRequestSchema,
   'creative-studio.decide-reference-request': studioV2ReferenceDecisionSchema,
   'creative-studio.list-reference-generation-handoffs': studioV2ProjectRequestSchema,
+  'creative-studio.get-generation-capability': studioGenerationCapabilitySchema,
   'creative-studio.prepare-project-references': studioV2PrepareProjectReferencesSchema,
   'creative-studio.prepare-submission': studioV2PrepareSubmissionSchema,
   'creative-studio.confirm-submission': z.object({ ...studioV2MutationRequestShape, quoteId: safeIdSchema }).strict(),

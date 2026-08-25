@@ -15,6 +15,7 @@ import {
 } from '@/common/types/project/creativeStudioRules';
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioGenerationCapabilityV2,
   type StudioRendererChainStatusV2,
   type StudioRendererProjectV2,
   type StudioRendererWorkspaceStatusV2,
@@ -203,6 +204,9 @@ type MenuHarnessProps = {
   organisationRules?: readonly StudioBriefRule[];
   requestShapeLocked?: boolean;
   routeCatalog?: StudioRouteCatalogV2 | null;
+  generationCapability?: StudioGenerationCapabilityV2 | null;
+  briefDialogRequest?: number;
+  briefRouteFocusRole?: 'image' | 'video' | null;
   staleRevision?: boolean;
   onRuleDraftDirtyCountChange?: (count: number) => void;
   mutations: WorkspaceMutationCallbacks;
@@ -215,6 +219,9 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
   organisationRules = [],
   requestShapeLocked,
   routeCatalog = null,
+  generationCapability = null,
+  briefDialogRequest = 0,
+  briefRouteFocusRole = null,
   staleRevision,
   onRuleDraftDirtyCountChange,
   mutations,
@@ -244,6 +251,9 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
       project={project}
       projection={projection}
       routeCatalog={routeCatalog}
+      generationCapability={generationCapability}
+      briefDialogRequest={briefDialogRequest}
+      briefRouteFocusRole={briefRouteFocusRole}
       drafts={staleRevision === undefined ? drafts : { ...drafts, staleRevision }}
       pending={pending}
       errorMessageKey={errorMessageKey}
@@ -528,6 +538,74 @@ describe('WorkspaceProjectMenu', () => {
 
     expect(refreshRoutes).toHaveBeenCalledTimes(1);
     expect(applyAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('renders each current Main capability blocker once under its exact route role', async () => {
+    const { callbacks } = makeMutations();
+    const authority = makeProject();
+    const generationCapability: StudioGenerationCapabilityV2 = {
+      projectId: authority.id,
+      projectRevision: authority.revision,
+      catalogVersion: 'catalog_1',
+      supportedItems: [],
+      blocks: [
+        {
+          block: { code: 'duration', role: 'image', seconds: 9 },
+          items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'board_still' }],
+        },
+        {
+          block: { code: 'duration', role: 'image', seconds: 9 },
+          items: [{ target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'seed_still' }],
+        },
+        {
+          block: { code: 'first_frame', role: 'video' },
+          items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+        },
+      ],
+    };
+    render(
+      <MenuHarness
+        generationCapability={generationCapability}
+        mutations={callbacks}
+        project={authority}
+        routeCatalog={readyRouteCatalog}
+      />
+    );
+    const dialog = await openBriefAndRules();
+
+    expect(dialog.querySelectorAll('[data-generation-block-role="image"]')).toHaveLength(1);
+    expect(dialog.querySelectorAll('[data-generation-block-role="video"]')).toHaveLength(1);
+  });
+
+  it('ignores a stale capability projection and focuses the requested route selector', async () => {
+    const { callbacks } = makeMutations();
+    const authority = makeProject();
+    const staleCapability: StudioGenerationCapabilityV2 = {
+      projectId: authority.id,
+      projectRevision: authority.revision - 1,
+      catalogVersion: 'catalog_1',
+      supportedItems: [],
+      blocks: [
+        {
+          block: { code: 'first_frame', role: 'video' },
+          items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+        },
+      ],
+    };
+    render(
+      <MenuHarness
+        briefDialogRequest={1}
+        briefRouteFocusRole='video'
+        generationCapability={staleCapability}
+        mutations={callbacks}
+        project={authority}
+        routeCatalog={readyRouteCatalog}
+      />
+    );
+    const dialog = await screen.findByRole('dialog', { name: BRIEF_RULES_TITLE });
+
+    expect(dialog.querySelector('[data-generation-block-role]')).toBeNull();
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: VIDEO_ROUTE })).toHaveFocus());
   });
 
   it('renders structured project controls and an injected locked organisation row', async () => {

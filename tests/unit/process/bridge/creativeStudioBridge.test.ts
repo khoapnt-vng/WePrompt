@@ -36,6 +36,7 @@ const providerNames = [
   'listReferenceRequests',
   'decideReferenceRequest',
   'listReferenceGenerationHandoffs',
+  'getGenerationCapability',
   'prepareProjectReferences',
   'prepareSubmission',
   'confirmSubmission',
@@ -90,6 +91,7 @@ const mocks = vi.hoisted(() => ({
       'listReferenceRequests',
       'decideReferenceRequest',
       'listReferenceGenerationHandoffs',
+      'getGenerationCapability',
       'prepareProjectReferences',
       'prepareSubmission',
       'confirmSubmission',
@@ -163,6 +165,21 @@ const workspaceStatus: StudioRendererWorkspaceStatusV2 = {
   cascadeProgress: [],
   currentVideoJobs: [],
   parkEligibility: [],
+};
+const generationCapability = {
+  projectId: 'project_1',
+  projectRevision: 7,
+  catalogVersion: 'catalog_1',
+  supportedItems: [
+    { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const },
+    { target: { kind: 'reference' as const, referenceId: 'reference_1' }, purpose: 'reference_image' as const },
+  ],
+  blocks: [
+    {
+      block: { code: 'first_frame' as const, role: 'video' as const },
+      items: [{ target: { kind: 'shot' as const, shotId: 'shot_3' }, purpose: 'video_take' as const }],
+    },
+  ],
 };
 const preparedSubmission = {
   baseOnly: {
@@ -251,6 +268,7 @@ const createService = () =>
     listReferenceRequests: vi.fn(async () => []),
     decideReferenceRequest: vi.fn(),
     listReferenceGenerationHandoffs: vi.fn(async () => []),
+    getGenerationCapability: vi.fn(async () => generationCapability),
     prepareProjectReferences: vi.fn(async () => preparedSubmission),
     prepareSubmission: vi.fn(async () => preparedSubmission),
     confirmSubmission: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8 })),
@@ -439,6 +457,31 @@ describe('initCreativeStudioBridge', () => {
       'projectDir',
       'pendingDir',
       'referencePendingDir',
+    ]);
+  });
+
+  it('routes the exact generation-capability request through Main and returns its deterministic projection', async () => {
+    initCreativeStudioBridge(dependencies);
+    const input = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      items: [
+        { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const },
+        { target: { kind: 'reference' as const, referenceId: 'reference_1' }, purpose: 'reference_image' as const },
+        { target: { kind: 'shot' as const, shotId: 'shot_3' }, purpose: 'video_take' as const },
+      ],
+    };
+
+    const result = await registeredHandler('getGenerationCapability')(input as never);
+
+    expect(service.getGenerationCapability).toHaveBeenCalledExactlyOnceWith(input);
+    expect(result).toEqual({ ok: true, data: generationCapability });
+    expect(Object.keys((result as { data: object }).data).toSorted()).toEqual([
+      'blocks',
+      'catalogVersion',
+      'projectId',
+      'projectRevision',
+      'supportedItems',
     ]);
   });
 

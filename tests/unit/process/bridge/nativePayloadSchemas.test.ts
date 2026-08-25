@@ -30,6 +30,7 @@ import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
 } from '@/common/types/project/creativeStudioTypes';
 
 const VALID_PAYLOADS = {
@@ -248,6 +249,11 @@ const VALID_PAYLOADS = {
     outcome: { kind: 'generation_gate' },
   },
   'creative-studio.list-reference-generation-handoffs': { projectId: 'project_1' },
+  'creative-studio.get-generation-capability': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+  },
   'creative-studio.prepare-project-references': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -1764,6 +1770,145 @@ describe('native bridge payload schemas', () => {
     }
   });
 
+  it('accepts the exact bounded generation-capability item union, including every Shot purpose and a reference image', () => {
+    const payload = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      items: [
+        { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const },
+        { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'board_still' as const },
+        { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'video_take' as const },
+        {
+          target: { kind: 'reference' as const, referenceId: 'reference_1' },
+          purpose: 'reference_image' as const,
+        },
+      ],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.get-generation-capability', payload)).toEqual(payload);
+    expect(
+      parseNativeBridgePayload('creative-studio.get-generation-capability', {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [],
+      })
+    ).toEqual({ projectId: 'project_1', expectedRevision: 7, items: [] });
+  });
+
+  it('enforces the generation-capability maximum at three purposes per possible Shot plus every project reference', () => {
+    const purposes = ['seed_still', 'board_still', 'video_take'] as const;
+    const maximum = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      items: [
+        ...Array.from({ length: STUDIO_MAX_SHOTS_PER_PROJECT }, (_, shotIndex) =>
+          purposes.map((purpose) => ({
+            target: { kind: 'shot' as const, shotId: `shot_${shotIndex}` },
+            purpose,
+          }))
+        ).flat(),
+        ...Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES }, (_, referenceIndex) => ({
+          target: { kind: 'reference' as const, referenceId: `reference_${referenceIndex}` },
+          purpose: 'reference_image' as const,
+        })),
+      ],
+    };
+
+    expect(maximum.items).toHaveLength(STUDIO_MAX_SHOTS_PER_PROJECT * 3 + STUDIO_MAX_PROJECT_REFERENCES);
+    expect(parseNativeBridgePayload('creative-studio.get-generation-capability', maximum)).toEqual(maximum);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.get-generation-capability', {
+        ...maximum,
+        items: [...maximum.items, { target: { kind: 'shot', shotId: 'shot_over_limit' }, purpose: 'seed_still' }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    ['missing items', { projectId: 'project_1', expectedRevision: 7 }],
+    ['non-array items', { projectId: 'project_1', expectedRevision: 7, items: 'shot_1' }],
+    [
+      'duplicate Shot-purpose pair',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [
+          { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' },
+          { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' },
+        ],
+      },
+    ],
+    [
+      'unsafe Shot id',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot', shotId: '../shot_1' }, purpose: 'seed_still' }],
+      },
+    ],
+    [
+      'unknown purpose',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'reference_still' }],
+      },
+    ],
+    [
+      'reference target paired with a Shot purpose',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'reference', referenceId: 'reference_1' }, purpose: 'seed_still' }],
+      },
+    ],
+    [
+      'Shot target paired with the reference purpose',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'reference_image' }],
+      },
+    ],
+    [
+      'unknown item authority',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still', routeId: 'route_private' }],
+      },
+    ],
+    [
+      'missing Shot id',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot' }, purpose: 'seed_still' }],
+      },
+    ],
+    [
+      'missing purpose',
+      { projectId: 'project_1', expectedRevision: 7, items: [{ target: { kind: 'shot', shotId: 'shot_1' } }] },
+    ],
+  ] as const)('rejects a generation-capability request with %s', (_label, payload) => {
+    expect(() => parseNativeBridgePayload('creative-studio.get-generation-capability', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+  });
+
+  it('rejects a sparse generation-capability item array', () => {
+    const items = [{ target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const }];
+    items.length = 2;
+
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.get-generation-capability', {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items,
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
   it('accepts every reviewed reference-decision intent and no receipt authority', () => {
     for (const outcome of [{ kind: 'rejected' as const }, { kind: 'generation_gate' as const }]) {
       const payload = { projectId: 'project_1', requestId: 'request_1', expectedRevision: 2, outcome };
@@ -1850,6 +1995,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.list-reference-requests',
       'creative-studio.decide-reference-request',
       'creative-studio.list-reference-generation-handoffs',
+      'creative-studio.get-generation-capability',
       'creative-studio.prepare-project-references',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
@@ -1888,6 +2034,7 @@ describe('native bridge payload schemas', () => {
     const exactOnceProviderKeys = [
       'creative-studio.get-director-session-authority',
       'creative-studio.bind-director-conversation',
+      'creative-studio.get-generation-capability',
       'creative-studio.prepare-project-references',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
@@ -1914,9 +2061,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);

@@ -1799,12 +1799,12 @@
         "frame": "此引擎無法製作 {{ratio}}。",
         "resolution": "此引擎無法製作 {{resolution}}。",
         "duration": "此引擎無法製作長度為 {{seconds}} 秒的鏡頭。",
-        "firstFrame": "此引擎無法從參考圖片開始。",
+        "firstFrame": "此引擎無法從已審閱的首幀開始。",
         "catalogUnloaded": "引擎清單尚未載入。",
         "aria": "無法算繪。{{reason}}",
         "actionSetEngines": "設定引擎",
         "actionRemoveReference": "移除參考圖片",
-        "actionShorten": "縮短此鏡頭"
+        "actionShorten": "調整鏡頭長度"
       }
     },
     "shell": {

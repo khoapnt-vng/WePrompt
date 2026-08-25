@@ -8,6 +8,7 @@ import type {
   StudioBriefRule,
   StudioBriefRuleDraft,
   StudioEditableProjectSettingsChanges,
+  StudioGenerationCapabilityV2,
   StudioRendererAuthoringOperationV2,
   StudioRendererExportCatalogV2,
   StudioRendererProjectV2,
@@ -69,7 +70,9 @@ export type WorkspaceProjectMenuProps = Pick<
   'project' | 'projection' | 'drafts' | 'pending' | 'errorMessageKey' | 'mutations'
 > & {
   routeCatalog: StudioRouteCatalogV2 | null;
+  generationCapability?: StudioGenerationCapabilityV2 | null;
   briefDialogRequest?: number;
+  briefRouteFocusRole?: 'image' | 'video' | null;
   onRuleDraftDirtyCountChange?: (count: number) => void;
   onActiveRuleDraftDirtyCountChange?: (count: number) => void;
   /** Injected so the locked layer remains directly testable while this release ships it empty. */

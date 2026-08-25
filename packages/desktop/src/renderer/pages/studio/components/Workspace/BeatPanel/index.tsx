@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next';
 import {
   type StudioEditableBeatChanges,
   type StudioEditableShotChanges,
+  type StudioGenerationBlockV2,
   type StudioRendererParkBlockerCodeV2,
   type StudioRendererParkEligibilityV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -19,6 +20,7 @@ import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManag
 
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../workspaceProjection';
+import { generationBlockAction, generationBlockMessage } from '../Gate/generationBlockers';
 import styles from './BeatPanel.module.css';
 import { BeatPlayer } from './BeatPlayer';
 import { CoverageBar } from './CoverageBar';
@@ -44,6 +46,10 @@ export type BeatPanelReviewChoice = BeatPanelReviewChoiceIdentity;
 export type BeatPanelReviewGraph = {
   triggerShotId: string;
   choices: readonly [BeatPanelReviewChoiceIdentity, ...BeatPanelReviewChoiceIdentity[]];
+  block: {
+    item: BeatPanelReviewChoiceIdentity;
+    reason: StudioGenerationBlockV2;
+  } | null;
 };
 
 export type BeatPanelShotSave = {
@@ -62,6 +68,7 @@ export type BeatPanelActions = {
   parkBeat: (beatId: string) => Promise<boolean>;
   reviewShot: (triggerShotId: string, choices: readonly [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]) => void;
   reviewContinuity: (shotId: string, hardCut: boolean) => void;
+  resolveGenerationBlock: (shotId: string, block: StudioGenerationBlockV2) => void;
   retryGenerationJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   cancelGenerationJob: (jobId: string) => Promise<boolean>;
   retryConditioning: (dependentShotId: string) => Promise<boolean>;
@@ -151,7 +158,7 @@ const exactReviewGraph = (
   graphs: readonly BeatPanelReviewGraph[],
   triggerShotId: string,
   expectedPurpose: BeatPanelReviewPreference['purpose']
-): BeatPanelReviewGraph['choices'] | null => {
+): BeatPanelReviewGraph | null => {
   const matches = graphs.filter((graph) => graph.triggerShotId === triggerShotId);
   if (matches.length !== 1) return null;
   const choices = matches[0]!.choices;
@@ -171,7 +178,14 @@ const exactReviewGraph = (
     if (identities.has(identity)) return null;
     identities.add(identity);
   }
-  return choices;
+  const block = matches[0]!.block ?? null;
+  if (
+    block !== null &&
+    !choices.some((choice) => choice.shotId === block.item.shotId && choice.purpose === block.item.purpose)
+  ) {
+    return null;
+  }
+  return { triggerShotId, choices, block };
 };
 
 const BLOCKER_KEYS = {
@@ -280,7 +294,7 @@ type ShotCardProps = {
   projectId: string;
   projection: WorkspaceProjection;
   reviewBlocked: boolean;
-  reviewChoices: BeatPanelReviewGraph['choices'] | null;
+  reviewGraph: BeatPanelReviewGraph | null;
   shot: WorkspaceShotProjection;
 };
 
@@ -298,7 +312,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
   projectId,
   projection,
   reviewBlocked,
-  reviewChoices,
+  reviewGraph,
   shot,
 }) => {
   const { t } = useTranslation();
@@ -310,6 +324,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const [recoveringJobId, setRecoveringJobId] = useState<string | null>(null);
   const chainChangeDescriptionId = useId();
   const generationRecoveryId = useId();
+  const generationBlockDescriptionId = useId();
   const liftButtonRef = useRef<HTMLButtonElement | null>(null);
   const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
   const restoreLiftFocusAfterCloseRef = useRef(false);
@@ -363,7 +378,12 @@ const ShotCard: React.FC<ShotCardProps> = ({
     projectRevision: projection.projectRevision,
     shotId: shot.id,
   };
+  const reviewChoices = reviewGraph?.choices ?? null;
+  const reviewBlock = reviewGraph?.block?.reason ?? null;
+  const blockedShotId = reviewGraph?.block?.item.shotId ?? shot.id;
   const reviewPreferences = reviewChoices?.map((choice): BeatPanelReviewChoice => ({ ...choice })) ?? null;
+  const reviewBlockCopy = reviewBlock === null ? null : generationBlockMessage(reviewBlock);
+  const reviewBlockRemedy = reviewBlock === null ? 'none' : generationBlockAction(reviewBlock);
   const reviewedGenerationBlocked =
     reviewChoices === null ||
     reviewChoices.some((choice) => {
@@ -573,7 +593,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
     currentPictureUrl !== null &&
     (shot.currentPicture.posterAssetId === null || currentPicturePosterUrl !== null);
   return (
-    <article ref={shotCardRef} className={styles.shotCard} data-shot-id={shot.id} hidden={hidden}>
+    <article ref={shotCardRef} className={styles.shotCard} data-shot-card data-shot-id={shot.id} hidden={hidden}>
       <header className={styles.shotHeader}>
         <div>
           <h3 className={styles.shotTitle}>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
@@ -649,7 +669,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
             value={shootingScript}
           />
         </label>
-        <label>
+        <label data-shot-duration-field>
           <span>{t(`${KEY_ROOT}.fields.duration`)}</span>
           <InputNumber
             aria-label={t(`${KEY_ROOT}.fields.durationFor`, { index: index + 1 })}
@@ -786,13 +806,50 @@ const ShotCard: React.FC<ShotCardProps> = ({
           </article>
         )}
         <div className={styles.shotFooter} data-shot-footer>
-          {reviewPreferences === null ? (
+          {reviewBlockCopy === null && reviewPreferences === null ? (
             <p className={styles.blocker} role='status'>
               {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
             </p>
-          ) : null}
+          ) : reviewBlockCopy === null ? null : (
+            <div>
+              <p className={styles.blocker} id={generationBlockDescriptionId} role='status'>
+                {t(reviewBlockCopy.key, reviewBlockCopy.values)}
+              </p>
+              {reviewBlockRemedy === 'none' ? null : (
+                <Button
+                  onClick={() => {
+                    if (reviewBlock === null) return;
+                    if (reviewBlockRemedy === 'duration') {
+                      const fields = document.querySelectorAll<HTMLInputElement>(
+                        `[data-shot-card][data-shot-id="${blockedShotId}"] [data-shot-duration-field] input`
+                      );
+                      if (fields.length === 1) fields[0]!.focus();
+                      return;
+                    }
+                    actions.resolveGenerationBlock(blockedShotId, reviewBlock);
+                  }}
+                  size='small'
+                >
+                  {t(
+                    reviewBlockRemedy === 'routes'
+                      ? 'conversation.creativeStudio.models.blocked.actionSetEngines'
+                      : reviewBlockRemedy === 'references'
+                        ? 'conversation.creativeStudio.workspace.gate.reviewShotBinding'
+                        : 'conversation.creativeStudio.models.blocked.actionShorten'
+                  )}
+                </Button>
+              )}
+            </div>
+          )}
           <Button
-            disabled={disabled || reviewBlocked || reviewedGenerationBlocked || reviewPreferences === null}
+            aria-describedby={reviewBlock === null ? undefined : generationBlockDescriptionId}
+            disabled={
+              disabled ||
+              reviewBlocked ||
+              reviewedGenerationBlocked ||
+              reviewPreferences === null ||
+              reviewBlock !== null
+            }
             onClick={() => {
               if (reviewPreferences !== null && reviewPreferences.length > 0) {
                 actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
@@ -1351,7 +1408,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                   projectId={projectId}
                   projection={projection}
                   reviewBlocked={reviewBlockedMessageKey !== null || gateLocked}
-                  reviewChoices={exactReviewGraph(
+                  reviewGraph={exactReviewGraph(
                     projection,
                     reviewGraphs,
                     shot.id,

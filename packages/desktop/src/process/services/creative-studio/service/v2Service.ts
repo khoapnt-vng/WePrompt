@@ -10,7 +10,8 @@ import { Readable } from 'node:stream';
 import type { IProvider, ISessionMcpServer } from '@/common/config/storage';
 import {
   isStudioPricingRefusalReasonV2,
-  STUDIO_MAX_BEATS,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   type CreateStudioProjectInputV2,
@@ -37,6 +38,10 @@ import {
   type StudioJobPurpose,
   type StudioJobV2,
   type StudioExportArtifactRequestV2,
+  type StudioGenerationBlockV2,
+  type StudioGenerationCapabilityItemV2,
+  type StudioGenerationCapabilityRequestV2,
+  type StudioGenerationCapabilityV2,
   type StudioListExportsRequestV2,
   type StudioMediaChoiceRef,
   type StudioMediaKind,
@@ -144,6 +149,8 @@ import {
   projectStudioChainBoundaryVerificationIdsV2,
   projectStudioChainStatusV2,
   projectStudioWorkspaceStatusV2,
+  STUDIO_BOARD_REQUEST_DURATION_SECONDS,
+  resolveStudioReferenceBindingV2,
   resolveStudioCanonicalBoardAssetV2,
   resolveStudioCurrentBoardPanelAuthorityV2,
   studioGenerationTargetKey,
@@ -155,17 +162,9 @@ import {
 import { CreativeStudioServiceError } from './projectMutations';
 import { deriveStudioProposalReviewV2 } from './schema2/mutations/proposalReview';
 
-export type { StudioRouteCatalogV2 } from '@/common/types/project/creativeStudioTypes';
+export type { StudioGenerationCapabilityV2, StudioRouteCatalogV2 } from '@/common/types/project/creativeStudioTypes';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
-const ACTIVE_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
-  'waiting_for_conditioning',
-  'queued_local',
-  'submitting',
-  'queued_remote',
-  'running',
-  'needs_attention',
-]);
 const ROUTE_INTEGRATION_LABELS = {
   'weprompt-image-v1': 'imageApi',
   'byteplus-seedance-v1': 'bytePlusSeedance',
@@ -209,26 +208,6 @@ const MEDIA_INTEGRATIONS = [
 const CAPTURED_POSTER_DATA_URL_PREFIX = 'data:image/png;base64,';
 const CAPTURED_POSTER_MAX_BYTES = 50 * 1024 * 1024;
 const CAPTURED_POSTER_MAX_BASE64_LENGTH = Math.ceil(CAPTURED_POSTER_MAX_BYTES / 3) * 4;
-
-export type StudioShotReadinessIssueV2 =
-  | 'missing_beat_title'
-  | 'invalid_shot_duration'
-  | 'active_job'
-  | 'latest_job_failed';
-
-export type StudioShotGenerationReadinessV2 = {
-  shotId: string;
-  beatId: string;
-  ready: boolean;
-  issues: StudioShotReadinessIssueV2[];
-};
-
-export type StudioGenerationReadinessV2 = {
-  projectId: string;
-  revision: number;
-  shots: StudioShotGenerationReadinessV2[];
-  payableShotIds: string[];
-};
 
 export type StudioExportDestinationPickerV2 = (input: {
   suggestedName: string;
@@ -282,7 +261,7 @@ export type CreativeStudioServiceV2 = {
     height: number;
   }): Promise<StudioAssetV2>;
   listRoutes(input?: { projectId?: string }): Promise<StudioRouteCatalogV2>;
-  getGenerationReadiness(input: { projectId: string; beatIds: string[] }): Promise<StudioGenerationReadinessV2>;
+  getGenerationCapability(input: StudioGenerationCapabilityRequestV2): Promise<StudioGenerationCapabilityV2>;
   getProjectWorkspace(input: { projectId: string }): Promise<StudioProjectWorkspaceLoadResultV2>;
   listProposals(input: { projectId: string }): Promise<StudioRendererProposalV2[]>;
   acceptProposal(input: { projectId: string; proposalId: string }): Promise<{
@@ -927,6 +906,224 @@ const toRouteCatalog = (
   };
 };
 
+const capabilityRole = (purpose: StudioGenerationCapabilityItemV2['purpose']): StudioMediaKind =>
+  purpose === 'video_take' ? 'video' : 'image';
+
+/** One capability predicate shared by disclosure and final quote authorization. */
+const generationRouteCapabilityBlock = (input: {
+  route: StudioGenerationRoute;
+  project: StudioProjectV2;
+  role: StudioMediaKind;
+  durationSeconds: number;
+  requiresFirstFrame: boolean;
+}): StudioGenerationBlockV2 | null => {
+  const { route, project, role, durationSeconds, requiresFirstFrame } = input;
+  if (route.health === 'unavailable') return { code: 'health', role };
+  if (!route.constraints.silentOutput && route.adapterId !== 'openrouter-video-v1') {
+    return { code: 'retired', role };
+  }
+  if (!route.constraints.aspectRatios.includes(project.aspectRatio)) {
+    return { code: 'frame', role, ratio: project.aspectRatio };
+  }
+  if (!route.constraints.resolutions.includes(project.resolution)) {
+    return { code: 'resolution', role, resolution: project.resolution };
+  }
+  if (
+    durationSeconds < route.constraints.minDurationSeconds ||
+    durationSeconds > route.constraints.maxDurationSeconds ||
+    (route.constraints.supportedDurationSeconds !== undefined &&
+      !route.constraints.supportedDurationSeconds.includes(durationSeconds))
+  ) {
+    return { code: 'duration', role, seconds: durationSeconds };
+  }
+  if (requiresFirstFrame && !route.constraints.supportsFirstFrame) {
+    return { code: 'first_frame', role: 'video' };
+  }
+  return null;
+};
+
+const generationBlockForItem = (
+  project: StudioProjectV2,
+  generation: StudioGenerationRouteCatalog | null,
+  item: StudioGenerationCapabilityItemV2
+): StudioGenerationBlockV2 | null => {
+  const role = capabilityRole(item.purpose);
+  if (generation === null || generation.generationCatalogVersion.trim().length === 0) {
+    return { code: 'catalog_unloaded', role };
+  }
+  const selection = role === 'image' ? project.imageRouteId : project.videoRouteId;
+  if (selection === null) return { code: 'no_engine', role };
+
+  const route = generation.routes.find(
+    (candidate) => candidate.kind === role && routeMatchesSelection(candidate, selection)
+  );
+  if (route === undefined) {
+    const diagnostic = generation.diagnostics.find(
+      (candidate) =>
+        candidate.status !== 'available' &&
+        createStudioMediaChoiceId({
+          providerId: candidate.providerId,
+          adapterId: candidate.adapterId,
+          model: candidate.model,
+          kind: role,
+        }) === selection
+    );
+    if (diagnostic?.status === 'needs_setup') return { code: 'needs_setup', role };
+    if (diagnostic?.status === 'health') return { code: 'health', role };
+    return { code: 'retired', role };
+  }
+  const shot = item.target.kind === 'shot' ? ownValue(project.shots, item.target.shotId) : undefined;
+  if (item.target.kind === 'shot' && shot === undefined) return { code: 'retired', role };
+  const reference =
+    item.target.kind === 'reference' ? ownValue(project.references, item.target.referenceId) : undefined;
+  if (item.target.kind === 'reference' && reference === undefined) return { code: 'retired', role };
+  const durationSeconds =
+    item.purpose === 'board_still' || item.purpose === 'reference_image'
+      ? STUDIO_BOARD_REQUEST_DURATION_SECONDS
+      : shot!.durationSeconds;
+  const capabilityBlock = generationRouteCapabilityBlock({
+    route,
+    project,
+    role,
+    durationSeconds,
+    requiresFirstFrame: item.purpose === 'video_take',
+  });
+  if (capabilityBlock !== null) return capabilityBlock;
+  if (item.target.kind === 'shot' && item.purpose !== 'video_take') {
+    const binding = resolveStudioReferenceBindingV2({
+      project,
+      shotId: shot!.id,
+      maxConditioningImages: route.constraints.maxConditioningImages,
+    });
+    if (binding.ok === false) {
+      return {
+        code: 'reference_binding',
+        role: 'image',
+        reason: binding.reason,
+        selectedCount:
+          shot!.referenceBinding.characterReferenceIds.length +
+          (shot!.referenceBinding.backgroundReferenceId === null ? 0 : 1),
+        limit: route.constraints.maxConditioningImages,
+      };
+    }
+  }
+  return null;
+};
+
+const CAPABILITY_PURPOSE_ORDER: Record<StudioGenerationCapabilityItemV2['purpose'], number> = {
+  seed_still: 0,
+  board_still: 1,
+  video_take: 2,
+  reference_image: 0,
+};
+
+const cloneCapabilityItem = (item: StudioGenerationCapabilityItemV2): StudioGenerationCapabilityItemV2 => {
+  if (item.target.kind === 'reference') {
+    return { target: { kind: 'reference', referenceId: item.target.referenceId }, purpose: 'reference_image' };
+  }
+  if (item.purpose === 'reference_image') throw invalid('Invalid Studio Shot capability purpose');
+  return { target: { kind: 'shot', shotId: item.target.shotId }, purpose: item.purpose };
+};
+
+const capabilityItemIdentity = (item: StudioGenerationCapabilityItemV2): string =>
+  item.target.kind === 'shot'
+    ? `shot\0${item.target.shotId}\0${item.purpose}`
+    : `reference\0${item.target.referenceId}\0reference_image`;
+
+const orderedCapabilityItems = (project: StudioProjectV2, value: unknown): StudioGenerationCapabilityItemV2[] => {
+  if (!isDenseArray(value, STUDIO_MAX_SHOTS_PER_PROJECT * 3 + STUDIO_MAX_PROJECT_REFERENCES)) {
+    throw invalid('Invalid Studio generation capability items');
+  }
+  const activeShotIndex = new Map<string, number>();
+  for (const beatId of project.beatOrder) {
+    const beat = ownValue(project.beats, beatId);
+    if (beat === undefined) continue;
+    for (const shotId of beat.shotOrder) {
+      if (!activeShotIndex.has(shotId)) activeShotIndex.set(shotId, activeShotIndex.size);
+    }
+  }
+  const activeReferenceIndex = new Map(project.referenceOrder.map((referenceId, index) => [referenceId, index]));
+  const seen = new Set<string>();
+  const items = value.map((candidate): StudioGenerationCapabilityItemV2 => {
+    if (!isRecord(candidate) || !hasExactKeys(candidate, ['target', 'purpose']) || !isRecord(candidate.target)) {
+      throw invalid('Invalid Studio generation capability item');
+    }
+    let item: StudioGenerationCapabilityItemV2;
+    if (
+      hasExactKeys(candidate.target, ['kind', 'shotId']) &&
+      candidate.target.kind === 'shot' &&
+      isSafeId(candidate.target.shotId) &&
+      activeShotIndex.has(candidate.target.shotId) &&
+      (candidate.purpose === 'seed_still' || candidate.purpose === 'board_still' || candidate.purpose === 'video_take')
+    ) {
+      item = {
+        target: { kind: 'shot', shotId: candidate.target.shotId },
+        purpose: candidate.purpose,
+      };
+    } else if (
+      hasExactKeys(candidate.target, ['kind', 'referenceId']) &&
+      candidate.target.kind === 'reference' &&
+      isSafeId(candidate.target.referenceId) &&
+      activeReferenceIndex.has(candidate.target.referenceId) &&
+      candidate.purpose === 'reference_image'
+    ) {
+      item = {
+        target: { kind: 'reference', referenceId: candidate.target.referenceId },
+        purpose: 'reference_image',
+      };
+    } else {
+      throw invalid('Invalid Studio generation capability item');
+    }
+    const identity = capabilityItemIdentity(item);
+    if (seen.has(identity)) throw invalid('Duplicate Studio generation capability item');
+    seen.add(identity);
+    return item;
+  });
+  return items.toSorted((left, right) => {
+    if (left.target.kind !== right.target.kind) return left.target.kind === 'shot' ? -1 : 1;
+    const targetOrder =
+      left.target.kind === 'shot' && right.target.kind === 'shot'
+        ? activeShotIndex.get(left.target.shotId)! - activeShotIndex.get(right.target.shotId)!
+        : left.target.kind === 'reference' && right.target.kind === 'reference'
+          ? activeReferenceIndex.get(left.target.referenceId)! - activeReferenceIndex.get(right.target.referenceId)!
+          : 0;
+    return targetOrder || CAPABILITY_PURPOSE_ORDER[left.purpose] - CAPABILITY_PURPOSE_ORDER[right.purpose];
+  });
+};
+
+const deriveGenerationCapability = (
+  project: StudioProjectV2,
+  generation: StudioGenerationRouteCatalog | null,
+  items: readonly StudioGenerationCapabilityItemV2[]
+): StudioGenerationCapabilityV2 => {
+  const supportedItems: StudioGenerationCapabilityItemV2[] = [];
+  const blocks: StudioGenerationCapabilityV2['blocks'] = [];
+  const groupByBlock = new Map<string, StudioGenerationCapabilityV2['blocks'][number]>();
+  for (const item of items) {
+    const block = generationBlockForItem(project, generation, item);
+    if (block === null) {
+      supportedItems.push(cloneCapabilityItem(item));
+      continue;
+    }
+    const key = JSON.stringify(block);
+    const existing = groupByBlock.get(key);
+    if (existing !== undefined) {
+      existing.items.push(cloneCapabilityItem(item));
+      continue;
+    }
+    const group = { block, items: [cloneCapabilityItem(item)] };
+    blocks.push(group);
+    groupByBlock.set(key, group);
+  }
+  return {
+    projectId: project.id,
+    projectRevision: project.revision,
+    catalogVersion: generation?.generationCatalogVersion ?? null,
+    supportedItems,
+    blocks,
+  };
+};
+
 const quotedItems = (
   quote: Pick<StudioSubmissionQuoteCore, 'baseItems' | 'cascadeItems'>
 ): StudioQuotedGeneration[] => [...quote.baseItems, ...quote.cascadeItems];
@@ -960,16 +1157,15 @@ const resolveQuotedRoute = (
     item.requestPlan.kind === 'resolved'
       ? item.requestPlan.snapshot.referenceInputs
       : item.requestPlan.template.referenceInputs;
-  if (
-    route === null ||
-    !routeSupportsProject(route, project) ||
-    durationSeconds < route.constraints.minDurationSeconds ||
-    durationSeconds > route.constraints.maxDurationSeconds ||
-    (route.constraints.supportedDurationSeconds !== undefined &&
-      !route.constraints.supportedDurationSeconds.includes(durationSeconds)) ||
-    (item.purpose === 'video_take' && !route.constraints.supportsFirstFrame) ||
-    referenceInputs.length > route.constraints.maxConditioningImages
-  ) {
+  if (route === null) throw new CreativeStudioServiceError('invalid_route');
+  const capabilityBlock = generationRouteCapabilityBlock({
+    route,
+    project,
+    role: kind,
+    durationSeconds,
+    requiresFirstFrame: item.purpose === 'video_take',
+  });
+  if (capabilityBlock !== null || referenceInputs.length > route.constraints.maxConditioningImages) {
     throw new CreativeStudioServiceError('invalid_route');
   }
   return route;
@@ -1290,90 +1486,6 @@ const supportedProject = (result: StudioProjectStoreLoadResultV2): StudioProject
   throw new CreativeStudioStoreError('not_found', 'Studio project not found');
 };
 
-const shotDurationIsValid = (shot: StudioProjectV2['shots'][string]): boolean =>
-  Number.isInteger(shot.durationSeconds) &&
-  shot.durationSeconds >= STUDIO_MIN_SHOT_SECONDS &&
-  shot.durationSeconds <= STUDIO_MAX_SHOT_SECONDS;
-
-const readinessForShot = (
-  project: StudioProjectV2,
-  beatId: string,
-  shotId: string
-): StudioShotGenerationReadinessV2 => {
-  const beat = ownValue(project.beats, beatId)!;
-  const shot = ownValue(project.shots, shotId)!;
-  const issues: StudioShotReadinessIssueV2[] = [];
-  if (beat.title.trim().length === 0) issues.push('missing_beat_title');
-  if (!shotDurationIsValid(shot)) issues.push('invalid_shot_duration');
-  const jobs = shot.jobIds.flatMap((jobId) => {
-    const job = ownValue(project.jobs, jobId);
-    return job?.id === jobId &&
-      job.projectId === project.id &&
-      job.target.kind === 'shot' &&
-      job.target.shotId === shot.id &&
-      job.purpose !== 'board_still'
-      ? [job]
-      : [];
-  });
-  if (jobs.some((job) => ACTIVE_JOB_STATUSES.has(job.status))) issues.push('active_job');
-  const latest = jobs.at(-1);
-  if (latest?.status === 'failed' || latest?.status === 'needs_attention') issues.push('latest_job_failed');
-  return { shotId, beatId, ready: issues.length === 0, issues };
-};
-
-export const derivePayableShotIds = (project: StudioProjectV2, selectedBeatIds: readonly string[]): string[] => {
-  const selected = new Set(selectedBeatIds);
-  const payable: string[] = [];
-  const seen = new Set<string>();
-  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
-    const beatId = project.beatOrder[beatIndex]!;
-    if (!selected.has(beatId)) continue;
-    const beat = ownValue(project.beats, beatId);
-    if (beat === undefined) continue;
-    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
-      const shotId = beat.shotOrder[shotIndex]!;
-      if (!seen.has(shotId) && readinessForShot(project, beatId, shotId).ready) {
-        seen.add(shotId);
-        payable.push(shotId);
-      }
-    }
-  }
-  return payable;
-};
-
-const orderedReadiness = (
-  project: StudioProjectV2,
-  selectedBeatIds: readonly string[]
-): StudioShotGenerationReadinessV2[] => {
-  const selected = new Set(selectedBeatIds);
-  const result: StudioShotGenerationReadinessV2[] = [];
-  for (let beatIndex = 0; beatIndex < project.beatOrder.length; beatIndex += 1) {
-    const beatId = project.beatOrder[beatIndex]!;
-    if (!selected.has(beatId)) continue;
-    const beat = ownValue(project.beats, beatId)!;
-    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
-      result.push(readinessForShot(project, beatId, beat.shotOrder[shotIndex]!));
-    }
-  }
-  return result;
-};
-
-const assertBeatSelection: (project: StudioProjectV2, beatIds: unknown) => asserts beatIds is string[] = (
-  project,
-  beatIds
-) => {
-  if (!isDenseArray(beatIds, STUDIO_MAX_BEATS)) throw invalid('Invalid Studio beat selection');
-  const active = new Set(project.beatOrder);
-  const seen = new Set<string>();
-  for (let index = 0; index < beatIds.length; index += 1) {
-    const beatId = beatIds[index];
-    if (!isSafeId(beatId) || !active.has(beatId) || seen.has(beatId)) {
-      throw invalid('Invalid Studio beat selection');
-    }
-    seen.add(beatId);
-  }
-};
-
 /** Creates the sole registered Beat/Shot service after the atomic schema-2 cutover. */
 export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps): CreativeStudioServiceV2 => {
   const readNow = (): Date => {
@@ -1391,6 +1503,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   const createConnectionId = deps.createConnectionId ?? randomUUID;
   const exportCatalogStore = deps.exportCatalogStore ?? createStudioExportCatalogStoreV2();
   const activeClaims = new Set<StudioPreparedSubmissionClaimV2>();
+  let generationRoutesSnapshot: StudioGenerationRouteCatalog | null = null;
+  let generationRoutesFlight: Promise<StudioGenerationRouteCatalog> | null = null;
   let disposed = false;
 
   const cacheFailure = (code: 'quote_not_found'): StudioPreparedSubmissionCacheErrorV2 =>
@@ -1412,13 +1526,30 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     deps.onProjectUpdated(project.id);
     return toRendererProject(project);
   };
-  const listGenerationRoutes = async (): Promise<StudioGenerationRouteCatalog> => {
+  const refreshGenerationRoutes = async (): Promise<StudioGenerationRouteCatalog> => {
+    if (generationRoutesFlight !== null) return generationRoutesFlight;
+    const request = (async (): Promise<StudioGenerationRouteCatalog> => {
+      try {
+        const catalog = await deps.providerResolver.listGenerationRoutes();
+        generationRoutesSnapshot = catalog;
+        return catalog;
+      } catch {
+        generationRoutesSnapshot = null;
+        throw new CreativeStudioServiceError('provider_error');
+      }
+    })();
+    generationRoutesFlight = request;
     try {
-      return await deps.providerResolver.listGenerationRoutes();
-    } catch {
-      throw new CreativeStudioServiceError('provider_error');
+      return await request;
+    } finally {
+      if (generationRoutesFlight === request) generationRoutesFlight = null;
     }
   };
+  // Capability refreshes happen on every project revision, including job progress. Reuse the latest
+  // provider snapshot for those pure project derivations; explicit route refresh and every paid
+  // prepare/confirm boundary still rediscover providers before authorizing work.
+  const currentGenerationRoutes = async (): Promise<StudioGenerationRouteCatalog> =>
+    generationRoutesSnapshot ?? refreshGenerationRoutes();
   const rethrowExportFailure = (error: unknown): never => {
     if (error instanceof StudioExportCatalogErrorV2) {
       if (error.code === 'stale_catalog_revision' || error.code === 'stale_project_revision') {
@@ -2231,7 +2362,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       const [proposalPaths, referencePaths, generation] = await Promise.all([
         deps.store.resolveProposalPathsV2(input.projectId),
         deps.store.resolveReferenceRequestPathsV2(input.projectId),
-        listGenerationRoutes(),
+        refreshGenerationRoutes(),
       ]);
       if (proposalPaths.projectDir !== referencePaths.projectDir) {
         throw new CreativeStudioStoreError('storage_error', 'Studio sidecar authority mismatch');
@@ -2597,20 +2728,28 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     async listRoutes(input = {}): Promise<StudioRouteCatalogV2> {
       if (input.projectId !== undefined) assertSafeId(input.projectId, 'project id');
       const project = input.projectId === undefined ? null : await loadSupported(input.projectId);
-      return toRouteCatalog(await listGenerationRoutes(), project);
+      return toRouteCatalog(await refreshGenerationRoutes(), project);
     },
 
-    async getGenerationReadiness(input): Promise<StudioGenerationReadinessV2> {
+    async getGenerationCapability(input): Promise<StudioGenerationCapabilityV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedRevision', 'items'])) {
+        throw invalid('Invalid Studio generation capability request');
+      }
       assertSafeId(input.projectId, 'project id');
+      assertRevision(input.expectedRevision);
       const project = await loadSupported(input.projectId);
-      assertBeatSelection(project, input.beatIds);
-      const shots = orderedReadiness(project, input.beatIds);
-      return {
-        projectId: project.id,
-        revision: project.revision,
-        shots: shots,
-        payableShotIds: shots.filter((shot) => shot.ready).map((shot) => shot.shotId),
-      };
+      if (project.revision !== input.expectedRevision) {
+        throw new CreativeStudioStoreError('stale_project', 'Studio generation capability revision is stale');
+      }
+      const items = orderedCapabilityItems(project, input.items);
+      let generation: StudioGenerationRouteCatalog | null;
+      try {
+        generation = await currentGenerationRoutes();
+      } catch (error) {
+        if (error instanceof CreativeStudioServiceError && error.code === 'provider_error') generation = null;
+        else throw error;
+      }
+      return deriveGenerationCapability(project, generation, items);
     },
 
     async getProjectWorkspace(input): Promise<StudioProjectWorkspaceLoadResultV2> {
@@ -2878,7 +3017,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
 
       let graph;
-      const generation = await listGenerationRoutes();
+      const generation = await refreshGenerationRoutes();
       try {
         graph = deriveStudioProjectReferenceSubmissionQuoteGraphV2({
           project,
@@ -2911,7 +3050,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         return rethrowPricingFailure(error);
       }
       let graph;
-      const generation = await listGenerationRoutes();
+      const generation = await refreshGenerationRoutes();
       try {
         graph = deriveStudioSubmissionQuoteGraphV2({
           project,
@@ -2946,7 +3085,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
             if (!evaluateStudioBudgetV2(quoteCore(claim.quote), mutableProject.spendPolicy).allowed) {
               throw invalid('Studio spend policy refused the quote');
             }
-            const generation = await listGenerationRoutes();
+            const generation = await refreshGenerationRoutes();
             const resolveRoute = compositionRouteLookup(generation, mutableProject);
             let graph;
             try {

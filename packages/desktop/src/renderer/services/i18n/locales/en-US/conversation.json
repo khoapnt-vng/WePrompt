@@ -1251,12 +1251,12 @@
         "frame": "This engine cannot make {{ratio}}.",
         "resolution": "This engine cannot make {{resolution}}.",
         "duration": "This engine cannot make a shot {{seconds}}s long.",
-        "firstFrame": "This engine cannot start from a reference image.",
+        "firstFrame": "This engine cannot start from the reviewed first frame.",
         "catalogUnloaded": "The engine list has not loaded yet.",
         "aria": "Cannot render. {{reason}}",
         "actionSetEngines": "Set engines",
         "actionRemoveReference": "Remove the reference",
-        "actionShorten": "Shorten this shot"
+        "actionShorten": "Adjust shot length"
       }
     },
     "shell": {

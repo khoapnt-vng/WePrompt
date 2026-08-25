@@ -102,6 +102,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/viewTypes.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/WorkspaceShell.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/index.ts',
+  'packages/desktop/src/renderer/pages/studio/components/Workspace/Gate/generationBlockers.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/spendGate.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/useWorkspaceDrafts.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/workspaceProjection.ts',

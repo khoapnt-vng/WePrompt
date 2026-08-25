@@ -121,6 +121,8 @@ import type {
   StudioImportBedAudioRequestV2,
   StudioImportSeedStillRequestV2,
   StudioJobRequest,
+  StudioGenerationCapabilityRequestV2,
+  StudioGenerationCapabilityV2,
   StudioExportArtifactRequestV2,
   StudioListExportsRequestV2,
   StudioParkBeatRequestV2,
@@ -1267,6 +1269,10 @@ export const creativeStudio = {
     StudioCommandResult<StudioRendererReferenceGenerationHandoffV2[]>,
     StudioProjectRequestV2
   >('creative-studio.list-reference-generation-handoffs'),
+  getGenerationCapability: bridge.buildProvider<
+    StudioCommandResult<StudioGenerationCapabilityV2>,
+    StudioGenerationCapabilityRequestV2
+  >('creative-studio.get-generation-capability'),
   prepareProjectReferences: bridge.buildProvider<
     StudioCommandResult<StudioRendererPreparedSubmissionOptionsV2>,
     StudioPrepareProjectReferencesRequestV2

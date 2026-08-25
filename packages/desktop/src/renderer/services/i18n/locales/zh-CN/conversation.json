@@ -1799,12 +1799,12 @@
         "frame": "此引擎无法生成 {{ratio}}。",
         "resolution": "此引擎无法生成 {{resolution}}。",
         "duration": "此引擎无法生成 {{seconds}} 秒的镜头。",
-        "firstFrame": "此引擎无法从参考图像开始。",
+        "firstFrame": "此引擎无法从已审阅的首帧开始。",
         "catalogUnloaded": "引擎列表尚未加载。",
         "aria": "无法渲染。{{reason}}",
         "actionSetEngines": "设置引擎",
         "actionRemoveReference": "移除参考图",
-        "actionShorten": "缩短此镜头"
+        "actionShorten": "调整镜头长度"
       }
     },
     "shell": {

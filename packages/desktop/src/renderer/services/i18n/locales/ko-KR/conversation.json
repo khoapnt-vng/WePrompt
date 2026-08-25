@@ -1799,12 +1799,12 @@
         "frame": "이 엔진은 {{ratio}}을(를) 만들 수 없습니다.",
         "resolution": "이 엔진은 {{resolution}}을(를) 만들 수 없습니다.",
         "duration": "이 엔진은 {{seconds}}초 길이의 샷을 만들 수 없습니다.",
-        "firstFrame": "이 엔진은 참조 이미지에서 시작할 수 없습니다.",
+        "firstFrame": "이 엔진은 검토된 첫 프레임에서 시작할 수 없습니다.",
         "catalogUnloaded": "엔진 목록이 아직 로드되지 않았습니다.",
         "aria": "렌더링할 수 없습니다. {{reason}}",
         "actionSetEngines": "엔진 설정",
         "actionRemoveReference": "참조 제거",
-        "actionShorten": "이 샷 줄이기"
+        "actionShorten": "샷 길이 조정"
       }
     },
     "shell": {

@@ -30,6 +30,7 @@ import {
   type StudioBriefRuleDraft,
 } from '@/common/types/project/creativeStudioRules';
 import { majorUnitsToMinorUnits } from '../spendGate';
+import { generationBlockMessage, generationCapabilityIsCurrent } from '../Gate/generationBlockers';
 import type { WorkspaceDraftValue } from '../useWorkspaceDrafts';
 import styles from './WorkspaceControls.module.css';
 import type { WorkspaceProjectMenuProps } from './viewTypes';
@@ -430,8 +431,11 @@ const RuleValidationMessage: React.FC<{ validation: RuleValidation }> = ({ valid
   );
 };
 
-const AccessibleSelect: React.FC<SelectProps & { accessibleName: string }> = ({ accessibleName, ...props }) => {
-  const selectRef = useRef<SelectHandle | null>(null);
+const AccessibleSelect: React.FC<
+  SelectProps & { accessibleName: string; controlRef?: React.MutableRefObject<SelectHandle | null> }
+> = ({ accessibleName, controlRef, ...props }) => {
+  const localRef = useRef<SelectHandle | null>(null);
+  const selectRef = controlRef ?? localRef;
   useLayoutEffect(() => {
     selectRef.current?.dom?.setAttribute('aria-label', accessibleName);
   }, [accessibleName]);
@@ -753,11 +757,13 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   project,
   projection,
   routeCatalog,
+  generationCapability,
   drafts,
   pending,
   errorMessageKey,
   mutations,
   briefDialogRequest = 0,
+  briefRouteFocusRole = null,
   onRuleDraftDirtyCountChange,
   onActiveRuleDraftDirtyCountChange,
   organisationRules = ORGANISATION_STUDIO_RULES,
@@ -765,6 +771,18 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   const { t } = useTranslation();
   const [initialStoredRuleDrafts] = useState(() => loadStoredRuleDrafts(project.id));
   const acknowledgeRuleAdoption = mutations.acknowledgeRuleAdoption;
+  const currentGenerationCapability = generationCapabilityIsCurrent(project, generationCapability)
+    ? generationCapability
+    : null;
+  const generationBlocksForRole = (role: 'image' | 'video') => {
+    const blocks =
+      currentGenerationCapability === null
+        ? routeCatalog === null
+          ? [{ code: 'catalog_unloaded' as const, role }]
+          : []
+        : currentGenerationCapability.blocks.map((group) => group.block).filter((block) => block.role === role);
+    return [...new Map(blocks.map((block) => [JSON.stringify(block), block] as const)).values()];
+  };
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<ProjectDialog>(null);
@@ -786,6 +804,8 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   const [storedRuleEdits, setStoredRuleEdits] = useState<StoredRuleEditDraft[]>(initialStoredRuleDrafts.edits);
   const [removalFocusRequest, setRemovalFocusRequest] = useState(0);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const imageRouteSelectRef = useRef<SelectHandle | null>(null);
+  const videoRouteSelectRef = useRef<SelectHandle | null>(null);
   const addRuleButtonRef = useRef<HTMLButtonElement | null>(null);
   const projectRuleEditButtonsRef = useRef(new Map<string, HTMLButtonElement>());
   const removalFocusTargetRef = useRef<string | null | undefined>(undefined);
@@ -801,6 +821,10 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
     setMenuOpen(false);
     setDialog('brief');
   }, [briefDialogRequest]);
+  const focusRequestedBriefRoute = useCallback((): void => {
+    if (briefRouteFocusRole === 'image') imageRouteSelectRef.current?.focus();
+    if (briefRouteFocusRole === 'video') videoRouteSelectRef.current?.focus();
+  }, [briefRouteFocusRole]);
   type AddAttempt = {
     projectId: string;
     draft: StudioBriefRuleDraft;
@@ -1256,6 +1280,7 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
         unmountOnExit={false}
         className={styles.projectModal}
         onCancel={() => setDialog(null)}
+        afterOpen={focusRequestedBriefRoute}
         afterClose={restoreTriggerFocus}
       >
         <div className={styles.modalBody} data-studio-brief-rules>
@@ -1282,6 +1307,7 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
                 <AccessibleSelect
                   accessibleName={t('conversation.creativeStudio.workspace.controls.imageRoute')}
                   allowClear
+                  controlRef={imageRouteSelectRef}
                   disabled={pending}
                   value={asString(drafts.value('brief.imageRouteId')) || undefined}
                   onChange={(value) => drafts.setValue('brief.imageRouteId', value ?? '')}
@@ -1297,12 +1323,21 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
                     `conversation.creativeStudio.workspace.controls.routeStatus.${routeCatalog?.image.status ?? 'unavailable'}`
                   )}
                 </small>
+                {generationBlocksForRole('image').map((block) => {
+                  const message = generationBlockMessage(block);
+                  return (
+                    <small data-generation-block-role='image' key={JSON.stringify(block)} role='status'>
+                      {t(message.key, message.values)}
+                    </small>
+                  );
+                })}
               </label>
               <label>
                 {t('conversation.creativeStudio.workspace.controls.videoRoute')}
                 <AccessibleSelect
                   accessibleName={t('conversation.creativeStudio.workspace.controls.videoRoute')}
                   allowClear
+                  controlRef={videoRouteSelectRef}
                   disabled={pending}
                   value={asString(drafts.value('brief.videoRouteId')) || undefined}
                   onChange={(value) => drafts.setValue('brief.videoRouteId', value ?? '')}
@@ -1318,6 +1353,14 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
                     `conversation.creativeStudio.workspace.controls.routeStatus.${routeCatalog?.video.status ?? 'unavailable'}`
                   )}
                 </small>
+                {generationBlocksForRole('video').map((block) => {
+                  const message = generationBlockMessage(block);
+                  return (
+                    <small data-generation-block-role='video' key={JSON.stringify(block)} role='status'>
+                      {t(message.key, message.values)}
+                    </small>
+                  );
+                })}
               </label>
               <label>
                 {t('conversation.creativeStudio.workspace.controls.spendCurrency')}

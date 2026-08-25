@@ -1697,6 +1697,59 @@ export type StudioRouteCatalogV2 = {
   catalogVersion: string;
 };
 
+/** One renderer-requested target whose persisted route/input capability Main may explain. */
+export type StudioGenerationCapabilityItemV2 =
+  | {
+      target: Extract<StudioGenerationTargetV2, { kind: 'shot' }>;
+      purpose: Extract<StudioJobPurpose, 'seed_still' | 'board_still' | 'video_take'>;
+    }
+  | {
+      target: Extract<StudioGenerationTargetV2, { kind: 'reference' }>;
+      purpose: 'reference_image';
+    };
+
+/** Renderer-safe, deterministic reasons why Main will not admit a generation item. */
+export type StudioGenerationBlockV2 =
+  | { code: 'catalog_unloaded'; role: StudioMediaKind }
+  | { code: 'no_engine'; role: StudioMediaKind }
+  | { code: 'needs_setup'; role: StudioMediaKind }
+  | { code: 'health'; role: StudioMediaKind }
+  | { code: 'retired'; role: StudioMediaKind }
+  | { code: 'frame'; role: StudioMediaKind; ratio: StudioAspectRatio }
+  | { code: 'resolution'; role: StudioMediaKind; resolution: StudioResolution }
+  | { code: 'duration'; role: StudioMediaKind; seconds: number }
+  | { code: 'first_frame'; role: 'video' }
+  | {
+      code: 'reference_binding';
+      role: 'image';
+      reason: StudioReferenceBindingFailureReasonV2;
+      selectedCount: number;
+      limit: number;
+    };
+
+export type StudioGenerationCapabilityBlockGroupV2 = {
+  block: StudioGenerationBlockV2;
+  items: StudioGenerationCapabilityItemV2[];
+};
+
+export type StudioGenerationCapabilityRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  items: StudioGenerationCapabilityItemV2[];
+};
+
+/**
+ * Main-owned route/input capability disclosure. A supported item is not proof of payability:
+ * preparation and confirmation still derive dependency topology, identity, price, and spend authority.
+ */
+export type StudioGenerationCapabilityV2 = {
+  projectId: string;
+  projectRevision: number;
+  catalogVersion: string | null;
+  supportedItems: StudioGenerationCapabilityItemV2[];
+  blocks: StudioGenerationCapabilityBlockGroupV2[];
+};
+
 export type StudioCommandErrorCode =
   | 'feature_disabled'
   | 'invalid_payload'

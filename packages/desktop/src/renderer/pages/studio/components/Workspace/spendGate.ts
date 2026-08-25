@@ -6,6 +6,7 @@
 
 import type {
   StudioBoardPromotionV2,
+  StudioGenerationCapabilityBlockGroupV2,
   StudioPrepareProjectReferencesRequestV2,
   StudioPrepareGenerationChoiceV2,
   StudioPrepareSubmissionRequestV2,
@@ -37,6 +38,13 @@ export type SpendGateBoardPromotionImpact = {
   currentTakeShotIds: string[];
   /** Renderer-only availability fact; false hides paid review without blocking the free mutation. */
   paidRouteReady?: boolean;
+};
+
+/** Renderer-only explanation of capability-scoped omissions or a blocked exact intent. */
+export type SpendGateGenerationDisclosure = {
+  groups: StudioGenerationCapabilityBlockGroupV2[];
+  /** True when the draft represents one exact intent that must not be narrowed. */
+  blocksPrepare: boolean;
 };
 
 export type BoardPromotionGatePlan = {
@@ -137,6 +145,7 @@ export type SpendGateState = {
   phase: SpendGatePhase;
   draft: SpendGateDraft | null;
   boardPromotionImpact: SpendGateBoardPromotionImpact | null;
+  generationDisclosure: SpendGateGenerationDisclosure | null;
   options: StudioRendererPreparedSubmissionOptionsV2 | null;
   selectedOption: SpendGateSelectedOption;
   errorCode: string | null;
@@ -152,6 +161,7 @@ export type SpendGateAction =
       type: 'open';
       draft: SpendGateDraft;
       boardPromotionImpact?: SpendGateBoardPromotionImpact;
+      generationDisclosure?: SpendGateGenerationDisclosure;
     }
   | { type: 'close' }
   | { type: 'promote_started' }
@@ -169,6 +179,7 @@ export const initialSpendGateState = (): SpendGateState => ({
   phase: 'closed',
   draft: null,
   boardPromotionImpact: null,
+  generationDisclosure: null,
   options: null,
   selectedOption: 'baseOnly',
   errorCode: null,
@@ -199,6 +210,10 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
       phase: 'choices',
       draft: action.draft,
       boardPromotionImpact,
+      generationDisclosure:
+        action.generationDisclosure === undefined || action.generationDisclosure.groups.length === 0
+          ? null
+          : action.generationDisclosure,
       options: null,
       selectedOption: 'baseOnly',
       errorCode: null,

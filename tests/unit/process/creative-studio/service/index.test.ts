@@ -31,6 +31,7 @@ import {
   type CreateStudioProjectInputV2,
   type StudioAssetV2,
   type StudioExportCatalogV2,
+  type StudioGenerationCapabilityItemV2,
   type StudioGenerationRequestPlan,
   type StudioJobV2,
   type StudioMutationOperationV2,
@@ -50,7 +51,6 @@ import {
 } from '@process/services/creative-studio/store';
 import {
   createCreativeStudioServiceV2,
-  derivePayableShotIds,
   projectStudioReferenceGenerationHandoffV2,
 } from '@process/services/creative-studio/service';
 import {
@@ -125,6 +125,16 @@ const shotChoiceV2 = (
   shotId: string,
   purpose: 'seed_still' | 'board_still' | 'video_take'
 ): StudioPrepareGenerationChoiceV2 => ({ target: { kind: 'shot', shotId }, purpose });
+
+const shotCapabilityV2 = (
+  shotId: string,
+  purpose: 'seed_still' | 'board_still' | 'video_take'
+): StudioGenerationCapabilityItemV2 => ({ target: { kind: 'shot', shotId }, purpose });
+
+const referenceCapabilityV2 = (referenceId: string): StudioGenerationCapabilityItemV2 => ({
+  target: { kind: 'reference', referenceId },
+  purpose: 'reference_image',
+});
 
 const makeSchema2ServiceProject = (): StudioProjectV2 => {
   const input: CreateStudioProjectInputV2 = {
@@ -1154,9 +1164,10 @@ describe('CreativeStudioServiceV2', () => {
         } as never),
       () => harness.service.bindDirectorConversation(symbolKeyedBinding),
       () =>
-        harness.service.getGenerationReadiness({
+        harness.service.getGenerationCapability({
           projectId: 'project_v2',
-          beatIds: Object.assign([] as string[], { length: 1 }),
+          expectedRevision: 2,
+          items: Object.assign([], { length: 1 }) as never,
         }),
       () => harness.service.retryConditioningFrame([] as never),
       () =>
@@ -2514,11 +2525,17 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
-  it('confirms a Board-only batch and exposes its latest jobs through the workspace status seam', async () => {
+  it('keeps a 12-second target advisory when a spendable Board-only batch plans 10 seconds', async () => {
     const project = makeSchema2ServiceProject();
     project.boardStyle = 'grey_tone';
     project.imageRouteId = imageRoute.choiceId;
     const harness = makeHarness(project);
+    const plannedDurationSeconds = project.beatOrder
+      .flatMap((beatId) => project.beats[beatId]!.shotOrder)
+      .reduce((total, shotId) => total + project.shots[shotId]!.durationSeconds, 0);
+
+    expect(project.targetDurationSeconds).toBe(12);
+    expect(plannedDurationSeconds).toBe(10);
 
     const prepared = await harness.service.prepareSubmission({
       projectId: project.id,
@@ -2528,12 +2545,15 @@ describe('CreativeStudioServiceV2', () => {
       cascadeChoices: [],
     });
     expect(prepared.withCascade).toBeNull();
+    expect(prepared.baseOnly.baseItems).toHaveLength(2);
 
-    await harness.service.confirmSubmission({
-      projectId: project.id,
-      quoteId: prepared.baseOnly.id,
-      expectedRevision: project.revision,
-    });
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
     const committed = harness.getProject();
     const boardJobs = Object.values(committed.jobs).filter((job) => job.purpose === 'board_still');
     const workspace = await harness.service.getProjectWorkspace({ projectId: project.id });
@@ -2727,25 +2747,48 @@ describe('CreativeStudioServiceV2', () => {
     expect(committedJob.idempotencyKey).toMatch(/^key_[a-f0-9]{32}$/);
   });
 
-  it('derives payable shots in persisted beat and shot order', async () => {
+  it('projects supported generation items in persisted Shot and purpose order', async () => {
     const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
     const harness = makeHarness(project);
 
-    const result = await harness.service.getGenerationReadiness({
+    const result = await harness.service.getGenerationCapability({
       projectId: 'project_v2',
-      beatIds: ['section_2', 'section_1'],
+      expectedRevision: project.revision,
+      items: [
+        shotCapabilityV2('clip_2', 'video_take'),
+        shotCapabilityV2('clip_1', 'video_take'),
+        shotCapabilityV2('clip_1', 'seed_still'),
+      ],
     });
 
-    expect(derivePayableShotIds(project, ['section_2', 'section_1'])).toEqual(['clip_1', 'clip_2']);
-    expect(result.payableShotIds).toEqual(['clip_1', 'clip_2']);
-    expect(result.shots.every((shot) => shot.ready)).toBe(true);
+    expect(result).toMatchObject({
+      projectId: project.id,
+      projectRevision: project.revision,
+      catalogVersion: 'catalog_v2',
+      blocks: [],
+    });
+    expect(result.supportedItems).toEqual([
+      shotCapabilityV2('clip_1', 'seed_still'),
+      shotCapabilityV2('clip_1', 'video_take'),
+      shotCapabilityV2('clip_2', 'video_take'),
+    ]);
+  });
+
+  it('rejects stale generation capability before resolving the route catalog', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+
+    await expect(
+      harness.service.getGenerationCapability({
+        projectId: project.id,
+        expectedRevision: project.revision + 1,
+        items: [shotCapabilityV2('clip_1', 'seed_still')],
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
-
-    const subset = await harness.service.getGenerationReadiness({
-      projectId: 'project_v2',
-      beatIds: ['section_1'],
-    });
-    expect(subset.payableShotIds).toEqual(['clip_1']);
   });
 
   it('keeps video generation ready while a Board redraw is nonterminal', async () => {
@@ -2759,22 +2802,17 @@ describe('CreativeStudioServiceV2', () => {
       error: null,
     });
     project.shots.clip_1.jobIds = ['board_job'];
+    project.videoRouteId = videoRoute.choiceId;
     const harness = makeHarness(project);
 
-    const readiness = await harness.service.getGenerationReadiness({
+    const capability = await harness.service.getGenerationCapability({
       projectId: project.id,
-      beatIds: ['section_1'],
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'video_take')],
     });
 
-    expect(readiness.shots).toEqual([
-      {
-        shotId: 'clip_1',
-        beatId: 'section_1',
-        ready: true,
-        issues: [],
-      },
-    ]);
-    expect(readiness.payableShotIds).toEqual(['clip_1']);
+    expect(capability.supportedItems).toEqual([shotCapabilityV2('clip_1', 'video_take')]);
+    expect(capability.blocks).toEqual([]);
   });
 
   it('keeps Shot generation ready while project-reference jobs run or fail', async () => {
@@ -2795,32 +2833,357 @@ describe('CreativeStudioServiceV2', () => {
       error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
     });
     project.references.ref_background!.jobIds.push('reference_pending', 'reference_failed');
+    project.imageRouteId = imageRoute.choiceId;
     const harness = makeHarness(project);
 
-    const readiness = await harness.service.getGenerationReadiness({
+    const capability = await harness.service.getGenerationCapability({
       projectId: project.id,
-      beatIds: ['section_1'],
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'seed_still')],
     });
 
-    expect(readiness.shots).toEqual([{ shotId: 'clip_1', beatId: 'section_1', ready: true, issues: [] }]);
-    expect(readiness.payableShotIds).toEqual(['clip_1']);
+    expect(capability.supportedItems).toEqual([shotCapabilityV2('clip_1', 'seed_still')]);
+    expect(capability.blocks).toEqual([]);
   });
 
-  it('reports exact authored and durable blockers without treating optional copy as required', async () => {
+  it('groups exact missing-engine blockers without treating optional copy as required', async () => {
     const project = makeSchema2ServiceProject();
     project.beats.section_1.title = '';
     project.shots.clip_2.shootingScript = '';
     const harness = makeHarness(project);
 
-    const result = await harness.service.getGenerationReadiness({
+    const result = await harness.service.getGenerationCapability({
       projectId: project.id,
-      beatIds: ['section_1', 'section_2'],
+      expectedRevision: project.revision,
+      items: [
+        shotCapabilityV2('clip_1', 'seed_still'),
+        shotCapabilityV2('clip_1', 'video_take'),
+        shotCapabilityV2('clip_2', 'seed_still'),
+        shotCapabilityV2('clip_2', 'video_take'),
+      ],
     });
 
-    expect(result.payableShotIds).toEqual(['clip_2']);
-    expect(result.shots.map(({ shotId, issues }) => ({ shotId, issues }))).toEqual([
-      { shotId: 'clip_1', issues: ['missing_beat_title'] },
-      { shotId: 'clip_2', issues: [] },
+    expect(result.supportedItems).toEqual([]);
+    expect(result.blocks).toEqual([
+      {
+        block: { code: 'no_engine', role: 'image' },
+        items: [shotCapabilityV2('clip_1', 'seed_still'), shotCapabilityV2('clip_2', 'seed_still')],
+      },
+      {
+        block: { code: 'no_engine', role: 'video' },
+        items: [shotCapabilityV2('clip_1', 'video_take'), shotCapabilityV2('clip_2', 'video_take')],
+      },
+    ]);
+  });
+
+  it('coalesces an initial route refresh with capability derivation and reuses that provider snapshot', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+    const catalog: StudioGenerationRouteCatalog = {
+      routes: [imageRoute, videoRoute],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_atomic',
+    };
+    let resolveCatalog!: (value: StudioGenerationRouteCatalog) => void;
+    const catalogFlight = new Promise<StudioGenerationRouteCatalog>((resolve) => {
+      resolveCatalog = resolve;
+    });
+    harness.providerResolver.listGenerationRoutes.mockReturnValue(catalogFlight);
+
+    const routesPromise = harness.service.listRoutes({ projectId: project.id });
+    const capabilityPromise = harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'seed_still')],
+    });
+    await vi.waitFor(() => expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledOnce());
+    resolveCatalog(catalog);
+
+    const [routes, capability] = await Promise.all([routesPromise, capabilityPromise]);
+    expect(routes.catalogVersion).toBe('catalog_atomic');
+    expect(capability.catalogVersion).toBe('catalog_atomic');
+    await harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'board_still')],
+    });
+    expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledOnce();
+  });
+
+  it('fails closed with renderer-safe catalog blockers when route discovery fails', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockRejectedValueOnce(new Error('secret resolver diagnostic'));
+
+    const capability = await harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'seed_still'), shotCapabilityV2('clip_1', 'video_take')],
+    });
+
+    expect(capability).toMatchObject({ catalogVersion: null, supportedItems: [] });
+    expect(capability.blocks).toEqual([
+      {
+        block: { code: 'catalog_unloaded', role: 'image' },
+        items: [shotCapabilityV2('clip_1', 'seed_still')],
+      },
+      {
+        block: { code: 'catalog_unloaded', role: 'video' },
+        items: [shotCapabilityV2('clip_1', 'video_take')],
+      },
+    ]);
+    expect(JSON.stringify(capability)).not.toContain('secret resolver diagnostic');
+  });
+
+  it.each([
+    ['health', { ...imageRoute, health: 'unavailable' as const }, { code: 'health', role: 'image' }],
+    [
+      'aspect ratio',
+      {
+        ...imageRoute,
+        constraints: { ...imageRoute.constraints, aspectRatios: ['9:16' as const] },
+      },
+      { code: 'frame', role: 'image', ratio: '16:9' },
+    ],
+    [
+      'resolution',
+      {
+        ...imageRoute,
+        constraints: { ...imageRoute.constraints, resolutions: ['720p' as const] },
+      },
+      { code: 'resolution', role: 'image', resolution: '1080p' },
+    ],
+    [
+      'duration',
+      {
+        ...imageRoute,
+        constraints: { ...imageRoute.constraints, supportedDurationSeconds: [4] },
+      },
+      { code: 'duration', role: 'image', seconds: 5 },
+    ],
+  ])('projects an exact %s capability blocker for the persisted image route', async (_label, route, block) => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [route, videoRoute],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_blocked',
+    });
+
+    const capability = await harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'seed_still')],
+    });
+
+    expect(capability.supportedItems).toEqual([]);
+    expect(capability.blocks).toEqual([{ block, items: [shotCapabilityV2('clip_1', 'seed_still')] }]);
+  });
+
+  it('uses the fixed four-second Board request duration for discrete image-route capability', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [
+        {
+          ...imageRoute,
+          constraints: { ...imageRoute.constraints, supportedDurationSeconds: [4] },
+        },
+        videoRoute,
+      ],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_board_fixed_duration',
+    });
+
+    const capability = await harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'seed_still'), shotCapabilityV2('clip_1', 'board_still')],
+    });
+
+    expect(project.shots.clip_1.durationSeconds).toBe(5);
+    expect(capability.supportedItems).toEqual([shotCapabilityV2('clip_1', 'board_still')]);
+    expect(capability.blocks).toEqual([
+      {
+        block: { code: 'duration', role: 'image', seconds: 5 },
+        items: [shotCapabilityV2('clip_1', 'seed_still')],
+      },
+    ]);
+  });
+
+  it('uses the fixed four-second reference-image request duration through the target union', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [
+        {
+          ...imageRoute,
+          constraints: { ...imageRoute.constraints, supportedDurationSeconds: [4] },
+        },
+        videoRoute,
+      ],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_reference_fixed_duration',
+    });
+
+    const capability = await harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [referenceCapabilityV2('ref_background')],
+    });
+
+    expect(capability.supportedItems).toEqual([referenceCapabilityV2('ref_background')]);
+    expect(capability.blocks).toEqual([]);
+  });
+
+  it.each([
+    ['needs_setup', 'needs_setup' as const],
+    ['health', 'health' as const],
+  ])('projects a selected-route %s diagnostic without leaking provider details', async (code, status) => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [videoRoute],
+      diagnostics: [
+        {
+          status,
+          providerId: imageRoute.providerId,
+          providerName: 'Sensitive provider name',
+          adapterId: imageRoute.adapterId,
+          model: imageRoute.model,
+        },
+      ],
+      generationCatalogVersion: 'catalog_diagnostic',
+    });
+
+    const capability = await harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'seed_still')],
+    });
+
+    expect(capability.blocks).toEqual([
+      {
+        block: { code, role: 'image' },
+        items: [shotCapabilityV2('clip_1', 'seed_still')],
+      },
+    ]);
+    expect(JSON.stringify(capability)).not.toContain('Sensitive provider name');
+  });
+
+  it('projects retired, first-frame, and reference-capacity blockers from exact persisted authority', async () => {
+    const retiredProject = makeSchema2ServiceProject();
+    retiredProject.imageRouteId = imageRoute.choiceId;
+    const retiredHarness = makeHarness(retiredProject);
+    retiredHarness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [videoRoute],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_retired',
+    });
+    await expect(
+      retiredHarness.service.getGenerationCapability({
+        projectId: retiredProject.id,
+        expectedRevision: retiredProject.revision,
+        items: [shotCapabilityV2('clip_1', 'seed_still')],
+      })
+    ).resolves.toMatchObject({
+      blocks: [{ block: { code: 'retired', role: 'image' } }],
+    });
+
+    const firstFrameProject = makeSchema2ServiceProject();
+    firstFrameProject.videoRouteId = videoRoute.choiceId;
+    const firstFrameHarness = makeHarness(firstFrameProject);
+    firstFrameHarness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [
+        imageRoute,
+        {
+          ...videoRoute,
+          constraints: { ...videoRoute.constraints, supportsFirstFrame: false },
+        },
+      ],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_first_frame',
+    });
+    await expect(
+      firstFrameHarness.service.getGenerationCapability({
+        projectId: firstFrameProject.id,
+        expectedRevision: firstFrameProject.revision,
+        items: [shotCapabilityV2('clip_1', 'video_take')],
+      })
+    ).resolves.toMatchObject({
+      blocks: [{ block: { code: 'first_frame', role: 'video' } }],
+    });
+
+    const capacityProject = makeSchema2ServiceProject();
+    capacityProject.imageRouteId = imageRoute.choiceId;
+    const capacityHarness = makeHarness(capacityProject);
+    capacityHarness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [
+        {
+          ...imageRoute,
+          constraints: { ...imageRoute.constraints, maxConditioningImages: 0 },
+        },
+        videoRoute,
+      ],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_capacity',
+    });
+    await expect(
+      capacityHarness.service.getGenerationCapability({
+        projectId: capacityProject.id,
+        expectedRevision: capacityProject.revision,
+        items: [shotCapabilityV2('clip_1', 'board_still')],
+      })
+    ).resolves.toMatchObject({
+      blocks: [
+        {
+          block: {
+            code: 'reference_binding',
+            role: 'image',
+            reason: 'capacity_exceeded',
+            selectedCount: 1,
+            limit: 0,
+          },
+        },
+      ],
+    });
+  });
+
+  it('projects an unassigned Shot reference binding through Main capability authority', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.shots.clip_1.referenceBinding = {
+      status: 'unassigned',
+      characterReferenceIds: [],
+      backgroundReferenceId: null,
+    };
+    const harness = makeHarness(project);
+
+    const capability = await harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'board_still')],
+    });
+
+    expect(capability.supportedItems).toEqual([]);
+    expect(capability.blocks).toEqual([
+      {
+        block: {
+          code: 'reference_binding',
+          role: 'image',
+          reason: 'unassigned',
+          selectedCount: 0,
+          limit: 1,
+        },
+        items: [shotCapabilityV2('clip_1', 'board_still')],
+      },
     ]);
   });
 
@@ -3559,7 +3922,6 @@ describe('CreativeStudioServiceV2', () => {
       },
       { mutationId: 'service_free_batch', capturedAt: '2026-08-17T00:00:02.000Z' }
     );
-    await harness.service.getGenerationReadiness({ projectId: project.id, beatIds: ['section_1'] });
     await harness.service.persistCapturedPoster({
       projectId: project.id,
       shotId: 'clip_1',
@@ -3694,9 +4056,10 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.retryJobV2).not.toHaveBeenCalled();
   });
 
-  it('derives duration, active-job, and latest-failure blockers', async () => {
+  it('derives the exact planned-duration blocker without consulting selected Take playback timing', async () => {
     const project = makeSchema2ServiceProject();
     project.shots.clip_1.durationSeconds = 3;
+    project.videoRouteId = videoRoute.choiceId;
     project.assets.take_1 = {
       id: 'take_1',
       projectId: project.id,
@@ -3714,41 +4077,77 @@ describe('CreativeStudioServiceV2', () => {
       compositionDigest: null,
     };
     project.shots.clip_1.assetIds = ['take_1'];
-    project.jobs.active_job = makeSchema2Job(project, {
-      id: 'active_job',
-      status: 'running',
-      providerJobId: 'remote_active',
-      error: null,
-    });
-    project.jobs.failed_job = makeSchema2Job(project, {
-      id: 'failed_job',
-      target: { kind: 'shot', shotId: 'clip_2' },
-      error: { code: 'timeout', messageKey: 'timeout' },
-    });
-    project.shots.clip_1.jobIds = ['active_job'];
-    project.shots.clip_2.jobIds = ['failed_job'];
+    project.shots.clip_1.videoAssetId = 'take_1';
+    project.shots.clip_1.trimInSeconds = 1;
+    project.shots.clip_1.trimOutSeconds = 2;
     const harness = makeHarness(project);
 
-    const readiness = await harness.service.getGenerationReadiness({
+    const capability = await harness.service.getGenerationCapability({
       projectId: project.id,
-      beatIds: ['section_1', 'section_2'],
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'video_take')],
     });
 
-    expect(readiness.shots).toEqual([
+    expect(
+      project.assets.take_1.durationSeconds! -
+        project.shots.clip_1.trimInSeconds! -
+        project.shots.clip_1.trimOutSeconds!
+    ).toBe(7);
+    expect(capability.supportedItems).toEqual([]);
+    expect(capability.blocks).toEqual([
       {
-        shotId: 'clip_1',
-        beatId: 'section_1',
-        ready: false,
-        issues: ['invalid_shot_duration', 'active_job'],
-      },
-      {
-        shotId: 'clip_2',
-        beatId: 'section_2',
-        ready: false,
-        issues: ['latest_job_failed'],
+        block: { code: 'duration', role: 'video', seconds: 3 },
+        items: [shotCapabilityV2('clip_1', 'video_take')],
       },
     ]);
-    expect(readiness.payableShotIds).toEqual([]);
+  });
+
+  it('prices and records video authority from planned Shot duration, not selected Take playback timing', async () => {
+    const project = makeSchema2ServiceProject();
+    project.shots.clip_1!.durationSeconds = 6;
+    addGeneratedVideosForMcpV2(project, 1);
+    project.videoRouteId = videoRoute.choiceId;
+    const shot = project.shots.clip_1!;
+    const selectedTake = project.assets[shot.videoAssetId!]!;
+    selectedTake.durationSeconds = 10;
+    shot.trimInSeconds = 1;
+    shot.trimOutSeconds = 2;
+    const harness = makeHarness(project);
+
+    expect(selectedTake.durationSeconds! - shot.trimInSeconds! - shot.trimOutSeconds!).toBe(7);
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [shotChoiceV2(shot.id, 'video_take')],
+      cascadeChoices: [],
+    });
+    expect(prepared.baseOnly.baseItems).toEqual([
+      expect.objectContaining({
+        target: { kind: 'shot', shotId: shot.id },
+        purpose: 'video_take',
+        durationSeconds: 6,
+        requestedTotalMinorUnits: 30,
+      }),
+    ]);
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+    const generated = Object.values(harness.getProject().jobs).find(
+      (job) => job.authorizationId === prepared.baseOnly.id
+    )!;
+    expect(generated.requestSnapshot?.durationSeconds).toBe(6);
+    expect(generated.spendReceipt).toBeNull();
+    expect(harness.getProject().spendAuthorizations.find(({ id }) => id === prepared.baseOnly.id)).toMatchObject({
+      lowerMinorUnits: 30,
+      upperMinorUnits: 30,
+      baseItems: [{ requestPlan: { kind: 'resolved', snapshot: { durationSeconds: 6 } } }],
+    });
   });
 
   it('keeps a Shot with a current picture payable for Generate again', async () => {
@@ -3767,27 +4166,33 @@ describe('CreativeStudioServiceV2', () => {
     };
     project.shots.clip_1.assetIds = ['picture_1'];
     project.shots.clip_1.videoAssetId = 'picture_1';
+    project.videoRouteId = videoRoute.choiceId;
     const harness = makeHarness(project);
 
-    const readiness = await harness.service.getGenerationReadiness({
+    const capability = await harness.service.getGenerationCapability({
       projectId: project.id,
-      beatIds: ['section_1'],
+      expectedRevision: project.revision,
+      items: [shotCapabilityV2('clip_1', 'video_take')],
     });
 
-    expect(readiness.shots).toEqual([{ shotId: 'clip_1', beatId: 'section_1', ready: true, issues: [] }]);
-    expect(readiness.payableShotIds).toEqual(['clip_1']);
+    expect(capability.supportedItems).toEqual([shotCapabilityV2('clip_1', 'video_take')]);
+    expect(capability.blocks).toEqual([]);
   });
 
   it.each([
     ['a non-array', null],
-    ['a duplicate active beat', ['section_1', 'section_1']],
-    ['a non-active beat', ['section_missing']],
-  ])('rejects %s in a readiness selection', async (_label, beatIds) => {
+    ['a duplicate item', [shotCapabilityV2('clip_1', 'video_take'), shotCapabilityV2('clip_1', 'video_take')]],
+    ['a non-active Shot', [{ target: { kind: 'shot', shotId: 'shot_missing' }, purpose: 'video_take' }]],
+  ])('rejects %s in a capability selection', async (_label, items) => {
     const project = makeSchema2ServiceProject();
     const harness = makeHarness(project);
 
     await expect(
-      harness.service.getGenerationReadiness({ projectId: project.id, beatIds: beatIds as never })
+      harness.service.getGenerationCapability({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        items: items as never,
+      })
     ).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
   });
@@ -3862,7 +4267,7 @@ describe('CreativeStudioServiceV2', () => {
     harness.store.getProjectV2.mockResolvedValue(loadResult);
 
     await expect(
-      harness.service.getGenerationReadiness({ projectId: 'project_v2', beatIds: [] })
+      harness.service.getGenerationCapability({ projectId: 'project_v2', expectedRevision: 1, items: [] })
     ).rejects.toMatchObject({
       code: loadResult.status === 'unsupported_prototype_schema' ? 'unsupported_prototype_schema' : 'not_found',
     });

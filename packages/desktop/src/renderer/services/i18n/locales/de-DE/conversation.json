@@ -1817,12 +1817,12 @@
         "frame": "Diese Engine kann {{ratio}} nicht erstellen.",
         "resolution": "Diese Engine kann {{resolution}} nicht erstellen.",
         "duration": "Diese Engine kann keine {{seconds}} s lange Einstellung erstellen.",
-        "firstFrame": "Diese Engine kann nicht mit einem Referenzbild beginnen.",
+        "firstFrame": "Diese Engine kann nicht mit dem geprüften ersten Frame beginnen.",
         "catalogUnloaded": "Die Engine-Liste wurde noch nicht geladen.",
         "aria": "Rendern nicht möglich. {{reason}}",
         "actionSetEngines": "Engines festlegen",
         "actionRemoveReference": "Referenz entfernen",
-        "actionShorten": "Diese Einstellung kürzen"
+        "actionShorten": "Aufnahmelänge anpassen"
       }
     },
     "shell": {

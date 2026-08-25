@@ -37,6 +37,7 @@ export type {
   SpendGateBoardPromotionImpact,
   SpendGateContinuityChange,
   SpendGateDraft,
+  SpendGateGenerationDisclosure,
   SpendGatePhase,
   SpendGateQuoteSummary,
   SpendGateRouteIssue,
