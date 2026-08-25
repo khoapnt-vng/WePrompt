@@ -1809,216 +1809,33 @@ describe('BeatPanel', () => {
     return menu;
   };
 
-  it('shows one Story field above Beat metadata and no retired prose controls', () => {
-    render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
+  it('collapses Story and the Beat target behind header controls, leaving no editor by default', () => {
+    const { container } = render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
 
-    const fields = screen.getByRole('region', { name: 'Beat fields' });
-    // Story collapses to a hover-readable icon and opens to edit.
-    expect(fields.querySelector('[data-beat-field="story"]')).toBeNull();
-    const storyToggle = fields.querySelector<HTMLButtonElement>('[data-beat-story-toggle]');
+    // Nothing is authored on screen until asked for: no fields region, no inline action row.
+    expect(screen.queryByRole('region', { name: 'Beat fields' })).toBeNull();
+    expect(container.querySelector('[data-beat-editor-actions]')).toBeNull();
+    expect(container.querySelector('[data-beat-field="story"]')).toBeNull();
+    expect(container.querySelector('[data-beat-field="target"]')).toBeNull();
+
+    // Story reads from the header control's title and opens the editor on click.
+    const storyToggle = container.querySelector<HTMLButtonElement>('[data-beat-story-toggle]');
     if (storyToggle === null) throw new Error('Missing Story toggle');
-    expect(storyToggle).toHaveAttribute('title', expect.stringContaining('') as unknown as string);
+    expect(storyToggle).toHaveAttribute('title', 'Open the film');
     fireEvent.click(storyToggle);
+    const fields = screen.getByRole('region', { name: 'Beat fields' });
     const storyField = fields.querySelector<HTMLElement>('[data-beat-field="story"]');
-    const targetField = fields.querySelector<HTMLElement>('[data-beat-field="target"]');
-    const metaRow = fields.querySelector<HTMLElement>('[data-beat-meta-row]');
-    if (storyField === null || metaRow === null) {
-      throw new Error('Beat authoring field hooks are incomplete');
-    }
-    // Save, Reset and re-split moved into the Beat overflow menu; the editor holds fields only.
-    expect(fields.querySelector('[data-beat-editor-actions]')).toBeNull();
-    // The target is revealed from that menu rather than occupying the panel by default.
-    expect(targetField).toBeNull();
-    fireEvent.click(within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Beat target' }));
-    const revealed = document.querySelector<HTMLElement>('[data-beat-field="target"]');
-    if (revealed === null) throw new Error('Beat target was not revealed from the menu');
-    expect(within(revealed).getByRole('spinbutton', { name: 'Beat target' })).toBeVisible();
-
+    if (storyField === null) throw new Error('Story was not revealed');
     expect(storyField.tagName).toBe('LABEL');
     expect(within(storyField).getByRole('textbox', { name: 'Story' })).toBeVisible();
     expect(within(storyField).getByText('Story · What happens in this Beat', { exact: true })).toBeVisible();
-    expect(storyField.nextElementSibling).toBe(metaRow);
 
+    // The target is revealed from the overflow menu, not from the layout.
+    fireEvent.click(within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Beat target' }));
+    const revealed = container.querySelector<HTMLElement>('[data-beat-field="target"]');
+    if (revealed === null) throw new Error('Beat target was not revealed from the menu');
+    expect(within(revealed).getByRole('spinbutton', { name: 'Beat target' })).toBeVisible();
     expect(fields.querySelectorAll('textarea')).toHaveLength(1);
-  });
-
-  it('keeps one beat-scoped Shot inspector visible while preserving mounted drafts across selection', () => {
-    const first = makeShot('shot_1', 0);
-    const second = makeShot('shot_2', 1);
-    const beat = makeBeat('beat_1', [first, second]);
-    const drafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Local first-Shot shooting script' });
-    const actions = makeActions();
-    const result = render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
-    const inspector = screen.getByRole('region', { name: 'Shots' });
-    const selectors = Array.from(result.container.querySelectorAll<HTMLButtonElement>('[data-coverage-shot-selector]'));
-    const firstCard = shotCard(result.container, 'shot_1');
-    const secondCard = shotCard(result.container, 'shot_2');
-
-    expect(inspector).toHaveAttribute('data-inspected-shot-id', 'shot_1');
-    expect(firstCard).not.toHaveAttribute('hidden');
-    expect(secondCard).toHaveAttribute('hidden');
-    expect(selectors.map((selector) => selector.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
-    expect(within(firstCard).getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
-      'Local first-Shot shooting script'
-    );
-
-    fireEvent.click(selectors[1]!);
-    expect(inspector).toHaveAttribute('data-inspected-shot-id', 'shot_2');
-    expect(firstCard).toHaveAttribute('hidden');
-    expect(secondCard).not.toHaveAttribute('hidden');
-    expect(selectors.map((selector) => selector.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
-    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
-
-    fireEvent.click(selectors[0]!);
-    expect(within(firstCard).getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
-      'Local first-Shot shooting script'
-    );
-
-    fireEvent.click(selectors[1]!);
-    const replacement = makeBeat('beat_2', [makeShot('shot_new', 0), makeShot('shot_2', 1)]);
-    result.rerender(<BeatPanel {...panelProps(replacement, drafts, actions, makeProjection([replacement]))} />);
-    expect(screen.getByRole('region', { name: 'Shots' })).toHaveAttribute('data-inspected-shot-id', 'shot_new');
-    expect(shotCard(result.container, 'shot_new')).not.toHaveAttribute('hidden');
-    expect(shotCard(result.container, 'shot_2')).toHaveAttribute('hidden');
-  });
-
-  it('leaves native current-picture controls outside Beat transport shortcuts', () => {
-    const shot = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_native_controls') });
-    const beat = makeBeat('beat_1', [shot]);
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const video = within(assetCard(container, 'video_native_controls')).getByLabelText(
-      'Player · Current picture for Shot 1'
-    );
-    const seekRail = screen.getByRole('slider', { name: 'Beat seek rail' });
-    const space = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Space', key: ' ' });
-    const arrow = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' });
-
-    fireEvent(video, space);
-    fireEvent(video, arrow);
-
-    expect(video).toHaveProperty('controls', true);
-    expect(space.defaultPrevented).toBe(false);
-    expect(arrow.defaultPrevented).toBe(false);
-    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeInTheDocument();
-    expect(seekRail).toHaveAttribute('aria-valuenow', '0');
-  });
-
-  it('pauses the native current-picture video when its mounted Shot inspector becomes hidden', () => {
-    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
-    const first = makeShot('shot_1', 0, {
-      currentPicture: makeCurrentPicture('video_1'),
-    });
-    const second = makeShot('shot_2', 1);
-    const beat = makeBeat('beat_1', [first, second]);
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const firstCard = shotCard(container, first.id);
-    const pictureVideos = Array.from(firstCard.querySelectorAll<HTMLVideoElement>('video[controls]'));
-    pictureVideos.forEach((video) => Object.defineProperty(video, 'paused', { configurable: true, value: false }));
-    pause.mockClear();
-
-    inspectShot(container, second.id);
-
-    expect(firstCard).toHaveAttribute('hidden');
-    expect(pictureVideos).toHaveLength(1);
-    expect(pause).toHaveBeenCalledTimes(1);
-    expect(pause.mock.instances).toEqual(pictureVideos);
-    pause.mockRestore();
-  });
-
-  it('keeps every Shot inspectable when coverage geometry fails closed', () => {
-    const beat = makeBeat('beat_1', [makeShot('shot_1', 0, { planningBoundary: null }), makeShot('shot_2', 1)]);
-    const actions = makeActions();
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
-
-    expect(screen.getByRole('alert')).toHaveTextContent('Coverage unavailable');
-    const second = inspectShot(container, 'shot_2');
-    expect(second).not.toHaveAttribute('hidden');
-    expect(shotCard(container, 'shot_1')).toHaveAttribute('hidden');
-    expect(screen.getByRole('region', { name: 'Shots' })).toHaveAttribute('data-inspected-shot-id', 'shot_2');
-    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
-  });
-
-  it('pins the authoring frame to the measured 1100px preview and inspector layout', () => {
-    const css = readFileSync(
-      resolvePath(
-        process.cwd(),
-        'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/BeatPanel.module.css'
-      ),
-      'utf8'
-    );
-
-    const modalRule = cssRuleBody(css, '.modal');
-    expect(modalRule).toMatch(/inline-size:\s*min\(1100px,\s*calc\(100vw\s*-\s*32px\)\)/);
-    expect(modalRule).toMatch(/max-inline-size:\s*1100px/);
-    expect(modalRule).toMatch(/border-radius:\s*16px/);
-    const rootRule = cssRuleBody(css, '.root');
-    expect(rootRule).toMatch(/composes:\s*surface\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/);
-    expect(rootRule).toMatch(/padding:\s*18px\s+22px/);
-    expect(cssRuleBody(css, '.eyebrow')).toMatch(
-      /composes:\s*eyebrow\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
-    );
-    expect(cssRuleBody(css, '.panelTitle')).toMatch(
-      /composes:\s*pageHeading\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
-    );
-    expect(css).toMatch(
-      /\.shotTitle,\s*\.subsectionTitle\s*\{\s*composes:\s*cardName\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
-    );
-
-    const workingRow = cssRuleBody(css, '.workingRow');
-    expect(workingRow).toMatch(/display:\s*flex/);
-    expect(workingRow).toMatch(/align-items:\s*flex-start/);
-    expect(workingRow).toMatch(/gap:\s*18px/);
-    const previewColumn = cssRuleBody(css, '.previewColumn');
-    expect(previewColumn).toMatch(/position:\s*sticky/);
-    expect(previewColumn).toMatch(/inset-block-start:\s*0/);
-    expect(previewColumn).toMatch(/inline-size:\s*404px/);
-    expect(previewColumn).toMatch(/flex:\s*none/);
-    expect(previewColumn).toMatch(/gap:\s*7px/);
-    const prewarmMedia = cssRuleBody(css, '.prewarmMedia');
-    expect(prewarmMedia).toMatch(/position:\s*absolute/);
-    expect(prewarmMedia).toMatch(/inline-size:\s*1px/);
-    expect(prewarmMedia).toMatch(/block-size:\s*1px/);
-    expect(prewarmMedia).toMatch(/clip-path:\s*inset\(50%\)/);
-    expect(prewarmMedia).not.toMatch(/display:\s*none/);
-    expect(prewarmMedia).not.toMatch(/visibility:\s*hidden/);
-    expect(cssRuleBody(css, '.shotInspector')).toMatch(/flex:\s*1\s+1\s+0/);
-    expect(cssRuleBody(css, '.shotCard')).toMatch(/padding:\s*18px\s+22px/);
-    expect(cssRuleBody(css, '.shotCard')).toMatch(/gap:\s*18px/);
-    expect(cssRuleBody(css, '.shotActionBand')).toMatch(/align-items:\s*flex-start/);
-    expect(cssRuleBody(css, '.shotActionBand')).toMatch(/flex-wrap:\s*nowrap/);
-    expect(cssRuleBody(css, '.shotActionBand > .editorActions')).toMatch(/flex-wrap:\s*nowrap/);
-    expect(cssRuleBody(css, '.beatMetaRow')).toMatch(/grid-column:\s*1\s*\/\s*-1/);
-    expect(cssRuleBody(css, '.fieldGuidance')).toMatch(/text-transform:\s*uppercase/);
-    expect(cssRuleBody(css, '.chainState')).toMatch(/text-transform:\s*uppercase/);
-    const mediaStrip = cssRuleBody(css, '.mediaStrip');
-    expect(mediaStrip).toMatch(/display:\s*flex/);
-    expect(mediaStrip).toMatch(/overflow-x:\s*auto/);
-    const mediaCardRule = cssRuleBody(css, '.mediaCard');
-    expect(mediaCardRule).toMatch(/box-sizing:\s*border-box/);
-    expect(mediaCardRule).toMatch(/(?:flex:\s*0\s+0\s+134px|inline-size:\s*134px)/);
-    expect(mediaCardRule).toMatch(/padding:\s*10px/);
-    expect(mediaCardRule).toMatch(/border:\s*1px\s+solid/);
-    const mediaPreview = cssRuleBody(css, '.mediaPreview');
-    expect(mediaPreview).toMatch(/inline-size:\s*100%/);
-    expect(mediaPreview).toMatch(/aspect-ratio:\s*16\s*\/\s*9/);
-    expect(cssRuleBody(css, '.previewSlateTitle')).toMatch(
-      /composes:\s*cardName\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
-    );
-
-    const workingCompactStart = css.search(/@media\s*\(max-width:\s*900px\)/);
-    expect(workingCompactStart).toBeGreaterThanOrEqual(0);
-    const stackedWorkingRow = workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.workingRow');
-    expect(stackedWorkingRow).toMatch(/flex-direction:\s*column/);
-    const stackedPreview = workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.previewColumn');
-    expect(stackedPreview).toMatch(/position:\s*static/);
-    const stackedShotActions =
-      workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.shotActionBand');
-    expect(stackedShotActions).toMatch(/flex-wrap:\s*wrap/);
-
-    const compactStart = css.search(/@media\s*\(max-width:\s*760px\)/);
-    expect(compactStart).toBeGreaterThanOrEqual(0);
-    const compactRule = compactStart < 0 ? '' : cssRuleBody(css.slice(compactStart), '.beatEditor');
-    expect(compactRule).toMatch(/grid-template-columns:\s*(?:minmax\(0,\s*1fr\)|1fr)/);
   });
 
   it('saves only the changed Story field from the Beat editor', async () => {

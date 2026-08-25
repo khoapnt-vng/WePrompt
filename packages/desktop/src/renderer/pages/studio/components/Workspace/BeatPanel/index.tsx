@@ -1408,6 +1408,16 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           </div>
           <div className={styles.actions}>
             <Button
+              aria-expanded={storyOpen}
+              aria-label={t(`${KEY_ROOT}.fields.story`)}
+              data-beat-story-toggle
+              icon={<Notes aria-hidden='true' />}
+              onClick={() => setStoryOpen((open) => !open)}
+              shape='circle'
+              title={story}
+              type='text'
+            />
+            <Button
               aria-label={t(`${KEY_ROOT}.previousBeat`)}
               disabled={pending || previousBeatId === null}
               onClick={() => previousBeatId !== null && onSelectBeat(previousBeatId)}
@@ -1459,48 +1469,39 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
 
         {errorMessageKey === null ? null : <Alert content={t(errorMessageKey)} type='error' />}
 
-        <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
-          <Button
-            aria-expanded={storyOpen}
-            aria-label={t(`${KEY_ROOT}.fields.story`)}
-            data-beat-story-toggle
-            icon={<Notes aria-hidden='true' />}
-            onClick={() => setStoryOpen((open) => !open)}
-            shape='circle'
-            size='small'
-            title={story}
-            type='text'
-          />
-          {storyOpen ? (
-            <label className={styles.beatField} data-beat-field='story' ref={storyFieldRef}>
-              <span className={styles.beatFieldHeading}>
-                <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
-              </span>
-              <Input.TextArea
-                aria-label={t(`${KEY_ROOT}.fields.story`)}
-                autoSize={{ minRows: 3, maxRows: 8 }}
-                disabled={mutationLocked}
-                onChange={(value) => drafts.setValue(storyKey, value)}
-                value={story}
-              />
-            </label>
-          ) : null}
-          <div className={styles.beatMetaRow} data-beat-meta-row>
-            {targetOpen ? (
-              <label className={styles.beatTargetField} data-beat-field='target' ref={targetFieldRef}>
-                <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
-                <InputNumber
-                  aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
+        {!storyOpen && !targetOpen ? null : (
+          <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
+            {storyOpen ? (
+              <label className={styles.beatField} data-beat-field='story' ref={storyFieldRef}>
+                <span className={styles.beatFieldHeading}>
+                  <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
+                </span>
+                <Input.TextArea
+                  aria-label={t(`${KEY_ROOT}.fields.story`)}
+                  autoSize={{ minRows: 3, maxRows: 8 }}
                   disabled={mutationLocked}
-                  min={1}
-                  onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
-                  precision={0}
-                  value={targetSeconds ?? undefined}
+                  onChange={(value) => drafts.setValue(storyKey, value)}
+                  value={story}
                 />
               </label>
             ) : null}
-          </div>
-        </section>
+            <div className={styles.beatMetaRow} data-beat-meta-row>
+              {targetOpen ? (
+                <label className={styles.beatTargetField} data-beat-field='target' ref={targetFieldRef}>
+                  <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
+                  <InputNumber
+                    aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
+                    disabled={mutationLocked}
+                    min={1}
+                    onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
+                    precision={0}
+                    value={targetSeconds ?? undefined}
+                  />
+                </label>
+              ) : null}
+            </div>
+          </section>
+        )}
 
         <BeatPlayer
           beat={beat}
