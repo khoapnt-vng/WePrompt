@@ -8,6 +8,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { IProvider } from '@/common/config/storage';
+import { STUDIO_MUTATION_BATCH_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioE2EFakeBundle,
   createStudioE2EFakeRemoteState,
@@ -115,22 +116,15 @@ describe('Creative Studio project recovery integration', () => {
           section_recovery: {
             id: 'section_recovery',
             title: 'Recovery beat',
-            action: 'Keep the paid work durable',
-            look: 'A sunrise reflected in a glass city',
-            actionRevision: 1,
+            story: 'Keep the paid work durable at sunrise in a glass city.',
             targetSeconds: null,
             shotOrder: ['clip_recovery'],
-            lineHistory: [],
           },
         },
         shots: {
           clip_recovery: {
             id: 'clip_recovery',
-            line: 'A paper aircraft crosses the reflection',
-            derivation: 'derived',
-            derivedFromActionRevision: 1,
-            narration: '',
-            onScreenText: '',
+            shootingScript: 'A paper aircraft crosses the reflection.',
             durationSeconds: 5,
             trimInSeconds: null,
             trimOutSeconds: null,
@@ -140,7 +134,7 @@ describe('Creative Studio project recovery integration', () => {
             supersededBoardAssetIds: [],
             videoAssetId: null,
             supersededVideoAssetIds: [],
-            referenceIds: [],
+            referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
             assetIds: [],
             jobIds: [],
           },
@@ -192,22 +186,19 @@ describe('Creative Studio project recovery integration', () => {
         onProjectUpdated: () => {},
       });
 
-      const referenceId = 'reference_v2_recovery_background';
       const referenceDefined = await beforeService.applyMutations(
         {
-          schemaVersion: configured.schemaVersion,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: configured.id,
           expectedRevision: configured.revision,
           operations: [
             {
-              kind: 'set_project_references',
+              kind: 'set_reference_plan',
               references: [
                 {
-                  id: referenceId,
                   kind: 'background',
                   label: 'Glass-city sunrise',
                   prompt: 'A sunrise reflected through a quiet glass city.',
-                  shotIds: ['clip_recovery'],
                 },
               ],
             },
@@ -215,6 +206,7 @@ describe('Creative Studio project recovery integration', () => {
         },
         { mutationId: 'define_v2_recovery_reference', capturedAt: new Date().toISOString() }
       );
+      const referenceId = referenceDefined.project.referenceOrder[0]!;
       const referencePrepared = await beforeService.prepareProjectReferences({
         projectId: configured.id,
         expectedRevision: referenceDefined.project.revision,
@@ -234,28 +226,37 @@ describe('Creative Studio project recovery integration', () => {
           ? { project: loaded.project, assetId: job.outputAssetIdsByRole.primary }
           : null;
       });
-      const approved = await beforeService.approveProjectReference({
-        projectId: configured.id,
-        expectedRevision: referenceCompleted.project.revision,
-        referenceId,
-        candidateAssetId: referenceCompleted.assetId,
-      });
+      const approved = await beforeService.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: referenceCompleted.project.revision,
+          operations: [
+            { kind: 'approve_reference', referenceId, candidateAssetId: referenceCompleted.assetId },
+            {
+              kind: 'set_shot_reference_binding',
+              shotId: 'clip_recovery',
+              characterReferenceIds: [],
+              backgroundReferenceId: referenceId,
+            },
+          ],
+        },
+        { mutationId: 'approve_and_bind_v2_recovery_reference', capturedAt: new Date().toISOString() }
+      );
       const prepared = await beforeService.prepareSubmission({
         projectId: configured.id,
-        expectedRevision: approved.revision,
+        expectedRevision: approved.project.revision,
         originReferenceHandoffId: null,
         baseChoices: [
           {
-            shotId: 'clip_recovery',
+            target: { kind: 'shot', shotId: 'clip_recovery' },
             purpose: 'seed_still',
-            referenceAssetId: null,
           },
         ],
         cascadeChoices: [
           {
-            shotId: 'clip_recovery',
+            target: { kind: 'shot', shotId: 'clip_recovery' },
             purpose: 'video_take',
-            referenceAssetId: null,
           },
         ],
       });
@@ -263,9 +264,9 @@ describe('Creative Studio project recovery integration', () => {
         beforeService.confirmSubmission({
           projectId: configured.id,
           quoteId: prepared.baseOnly.id,
-          expectedRevision: approved.revision,
+          expectedRevision: approved.project.revision,
         })
-      ).resolves.toEqual({ projectId: configured.id, projectRevision: approved.revision + 1 });
+      ).resolves.toEqual({ projectId: configured.id, projectRevision: approved.project.revision + 1 });
       const pending = await waitFor(async () => {
         try {
           const loaded = await store.getProjectV2(configured.id);
@@ -324,7 +325,7 @@ describe('Creative Studio project recovery integration', () => {
       expect({
         providerJobId: recoveredJob.providerJobId,
         status: recoveredJob.status,
-        shotId: recoveredJob.shotId,
+        target: recoveredJob.target,
         purpose: recoveredJob.purpose,
         authorizationId: recoveredJob.authorizationId,
         receiptAuthorizationId: recoveredJob.spendReceipt?.authorizationId,
@@ -332,6 +333,9 @@ describe('Creative Studio project recovery integration', () => {
         outputAssetIdsByRole: recoveredJob.outputAssetIdsByRole,
         shotJobIds: parked.shots.clip_recovery.jobIds,
         shotAssetIds: parked.shots.clip_recovery.assetIds,
+        referenceJobIds: parked.references[referenceId]?.jobIds,
+        referenceAssetProjectReferenceId: parked.assets[referenceCompleted.assetId]?.projectReferenceId,
+        referenceAssetShotId: parked.assets[referenceCompleted.assetId]?.shotId,
         videoAssetId: parked.shots.clip_recovery.videoAssetId,
         assetShotId: primaryAssetId ? parked.assets[primaryAssetId]?.shotId : null,
         assetMediaKind: primaryAssetId ? parked.assets[primaryAssetId]?.mediaKind : null,
@@ -341,14 +345,17 @@ describe('Creative Studio project recovery integration', () => {
       }).toEqual({
         providerJobId: pending.providerJobId,
         status: 'succeeded',
-        shotId: 'clip_recovery',
+        target: { kind: 'shot', shotId: 'clip_recovery' },
         purpose: 'seed_still',
         authorizationId: prepared.baseOnly.id,
         receiptAuthorizationId: prepared.baseOnly.id,
         outputAssetIds: [primaryAssetId],
         outputAssetIdsByRole: { primary: primaryAssetId, poster: null },
-        shotJobIds: ['job_v2_recovery_reference', 'job_v2_recovery'],
-        shotAssetIds: [referenceCompleted.assetId, primaryAssetId],
+        shotJobIds: ['job_v2_recovery'],
+        shotAssetIds: [primaryAssetId],
+        referenceJobIds: ['job_v2_recovery_reference'],
+        referenceAssetProjectReferenceId: referenceId,
+        referenceAssetShotId: null,
         videoAssetId: null,
         assetShotId: 'clip_recovery',
         assetMediaKind: 'image',

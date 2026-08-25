@@ -23,7 +23,10 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   calculateStudioQuoteTotals,
+  composeStudioGenerationV2,
   createStudioQuotedGenerationId,
+  deriveStudioInstructionProfileV2,
+  studioGenerationCompositionDigestV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import { createStudioSpendReceiptV2 } from '@/process/services/creative-studio/service/schema2/pricing';
 import { validateStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/validation';
@@ -35,19 +38,20 @@ import {
 
 const NOW = '2026-08-20T00:00:00.000Z';
 const DIGEST = 'a'.repeat(64);
+const PROVIDER = {
+  providerId: 'provider_1',
+  adapterId: 'weprompt-media-gateway-v1' as const,
+  model: 'video-model',
+};
 
 const makeShot = (id: string, chainBreak: StudioShot['chainBreak']): StudioShot => ({
   id,
-  line: `Line for ${id}`,
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  narration: `Narration for ${id}`,
-  onScreenText: '',
+  shootingScript: `Shooting script for ${id}`,
   durationSeconds: 8,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak,
-  referenceIds: [],
+  referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -75,28 +79,23 @@ const makeProject = (): StudioProjectV2 => {
       beat_1: {
         id: 'beat_1',
         title: 'Covered beat',
-        action: 'First action',
-        look: '',
-        actionRevision: 1,
+        story: 'First story',
         targetSeconds: null,
         shotOrder: ['shot_1', 'shot_2'],
-        lineHistory: [],
       },
       beat_2: {
         id: 'beat_2',
         title: 'Uncovered beat',
-        action: 'Second action',
-        look: '',
-        actionRevision: 1,
+        story: 'Second story',
         targetSeconds: 5,
         shotOrder: [],
-        lineHistory: [],
       },
     },
     shots: {
       shot_1: makeShot('shot_1', 'none'),
       shot_2: makeShot('shot_2', 'hard_cut'),
     },
+    referencePlanStatus: 'unplanned',
     referenceOrder: [],
     references: {},
     bin: [],
@@ -119,10 +118,31 @@ const makeProject = (): StudioProjectV2 => {
     const assetId = `take_${index + 1}`;
     const seedId = `seed_${index + 1}`;
     const durationSeconds = index === 0 ? 10 : 12;
+    const target = { kind: 'shot' as const, shotId };
+    const source = {
+      kind: 'shot' as const,
+      beatId: 'beat_1',
+      story: project.beats.beat_1!.story,
+      shotId,
+      shootingScript: shot.shootingScript,
+    };
+    const composition = composeStudioGenerationV2({
+      projectRevision: project.revision,
+      brief: project.brief,
+      rules: project.rules,
+      source,
+      purpose: 'video_take',
+      referenceInputs: [],
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      route: PROVIDER,
+      boardStyle: null,
+      instructionProfile: deriveStudioInstructionProfileV2(PROVIDER, 'video_take', source),
+    });
     const requestPlan = {
       kind: 'resolved' as const,
       snapshot: {
-        prompt: `Prompt for ${shotId}`,
+        composition,
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: shot.durationSeconds,
@@ -134,10 +154,10 @@ const makeProject = (): StudioProjectV2 => {
       id: createStudioQuotedGenerationId({
         projectId: project.id,
         projectRevision: project.revision,
-        shotId,
+        target,
         purpose: 'video_take',
       }),
-      shotId,
+      target,
       purpose: 'video_take',
       routeId: project.videoRouteId!,
       generationCount: 1,
@@ -155,6 +175,10 @@ const makeProject = (): StudioProjectV2 => {
       managedAsset: { collection: 'imports', fileName: `${seedId}.png` },
       byteSize: 5,
       sha256: DIGEST,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
       createdAt: NOW,
     };
     project.assets[assetId] = {
@@ -167,7 +191,10 @@ const makeProject = (): StudioProjectV2 => {
       byteSize: index + 10,
       sha256: DIGEST,
       durationSeconds,
-      referenceAssetIds: [],
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: `job_${index + 1}`,
+      compositionDigest: studioGenerationCompositionDigestV2(composition),
       createdAt: NOW,
     };
     shot.seedStillId = seedId;
@@ -180,11 +207,6 @@ const makeProject = (): StudioProjectV2 => {
 
   const totals = calculateStudioQuoteTotals(items);
   if (totals === null) throw new Error('invalid editor-folder quote fixture');
-  const provider = {
-    providerId: 'provider_1',
-    adapterId: 'weprompt-media-gateway-v1' as const,
-    model: 'video-model',
-  };
   const authorization: StudioSpendAuthorization = {
     id: 'authorization_1',
     projectId: project.id,
@@ -198,7 +220,7 @@ const makeProject = (): StudioProjectV2 => {
     upperMinorUnits: totals.upperMinorUnits,
     expiresAt: '2026-08-20T00:05:00.000Z',
     confirmedAt: '2026-08-20T00:00:01.000Z',
-    providerBindings: items.map((item) => ({ itemId: item.id, provider })),
+    providerBindings: items.map((item) => ({ itemId: item.id, provider: PROVIDER })),
     idempotencyKeys: items.map((item, index) => ({
       itemId: item.id,
       key: `key_${index + 1}`,
@@ -212,9 +234,9 @@ const makeProject = (): StudioProjectV2 => {
     const job: StudioJobV2 = {
       id: jobId,
       projectId: project.id,
-      shotId: item.shotId,
+      target: structuredClone(item.target),
       status: 'succeeded',
-      provider,
+      provider: PROVIDER,
       idempotencyKey: `key_${index + 1}`,
       providerJobId: `provider_job_${index + 1}`,
       remoteStartedAt: NOW,
@@ -230,6 +252,7 @@ const makeProject = (): StudioProjectV2 => {
       purpose: 'video_take',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
+      composition: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot.composition : null!,
       requestPlan: item.requestPlan,
       requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
       spendReceipt: createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId }),
@@ -247,6 +270,10 @@ const makeProject = (): StudioProjectV2 => {
     byteSize: 20,
     sha256: 'c'.repeat(64),
     durationSeconds: 30,
+    projectReferenceId: null,
+    generationReferenceAssetIds: [],
+    producerJobId: null,
+    compositionDigest: null,
     createdAt: NOW,
   };
   expect(validateStudioProjectV2(project)).toBe(true);
@@ -282,12 +309,9 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
     project.beats[beatId] = {
       id: beatId,
       title: `Maximum-capacity beat ${beatGroup + 1}`,
-      action: `Action for maximum-capacity beat ${beatGroup + 1}`,
-      look: '',
-      actionRevision: 1,
+      story: `Story for maximum-capacity beat ${beatGroup + 1}`,
       targetSeconds: null,
       shotOrder: [],
-      lineHistory: [],
     };
   }
 
@@ -306,10 +330,31 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
     const beatId = beatGroup === 0 ? 'beat_1' : `beat_${beatGroup + 2}`;
     const authorizationIndex = Math.floor((index - 1) / STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST);
     const authorization = authorizations[authorizationIndex]!;
+    const target = { kind: 'shot' as const, shotId };
+    const source = {
+      kind: 'shot' as const,
+      beatId,
+      story: project.beats[beatId]!.story,
+      shotId,
+      shootingScript: `Shooting script for ${shotId}`,
+    };
+    const composition = composeStudioGenerationV2({
+      projectRevision: authorization.projectRevision,
+      brief: project.brief,
+      rules: project.rules,
+      source,
+      purpose: 'video_take',
+      referenceInputs: [],
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      route: provider,
+      boardStyle: null,
+      instructionProfile: deriveStudioInstructionProfileV2(provider, 'video_take', source),
+    });
     const requestPlan = {
       kind: 'resolved' as const,
       snapshot: {
-        prompt: `Prompt for ${shotId}`,
+        composition,
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
         durationSeconds: 8,
@@ -321,10 +366,10 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
       id: createStudioQuotedGenerationId({
         projectId: project.id,
         projectRevision: authorization.projectRevision,
-        shotId,
+        target,
         purpose: 'video_take',
       }),
-      shotId,
+      target,
       purpose: 'video_take',
       routeId: project.videoRouteId!,
       generationCount: 1,
@@ -353,6 +398,10 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
       managedAsset: { collection: 'imports', fileName: `${seedId}.png` },
       byteSize: 5,
       sha256: DIGEST,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
       createdAt: NOW,
     };
     project.assets[assetId] = {
@@ -365,7 +414,10 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
       byteSize: index + 10,
       sha256: DIGEST,
       durationSeconds: 8,
-      referenceAssetIds: [],
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: jobId,
+      compositionDigest: studioGenerationCompositionDigestV2(composition),
       createdAt: NOW,
     };
     pendingJobs.push({ authorization, item, jobId, assetId });
@@ -381,10 +433,10 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
     project.jobs[jobId] = {
       id: jobId,
       projectId: project.id,
-      shotId: item.shotId,
+      target: structuredClone(item.target),
       status: 'succeeded',
       provider,
-      idempotencyKey: `key_${item.shotId.slice('shot_'.length)}`,
+      idempotencyKey: `key_${item.target.kind === 'shot' ? item.target.shotId.slice('shot_'.length) : ''}`,
       providerJobId: `provider_${jobId}`,
       remoteStartedAt: NOW,
       cancellationPolicy: 'queued_and_running',
@@ -399,6 +451,7 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
       purpose: 'video_take',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
+      composition: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot.composition : null!,
       requestPlan: item.requestPlan,
       requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
       spendReceipt: createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId }),
@@ -502,12 +555,9 @@ describe('composeStudioEditorFolderV2', () => {
     project.beats.beat_3 = {
       id: 'beat_3',
       title: 'Another uncovered beat',
-      action: '',
-      look: '',
-      actionRevision: 1,
+      story: '',
       targetSeconds: 3,
       shotOrder: [],
-      lineHistory: [],
     };
     const result = composeStudioEditorFolderV2(project, proofsFor(project, 'take_1', 'take_2', 'bed_1'));
     const slate = result.files.find(({ relativePath }) => relativePath === 'media/slate.png');
@@ -562,7 +612,9 @@ describe('composeStudioEditorFolderV2', () => {
         delete project.jobs[jobId];
       }
       const authorization = project.spendAuthorizations[0]!;
-      authorization.baseItems = authorization.baseItems.filter((item) => project.shots[item.shotId]!.videoAssetId);
+      authorization.baseItems = authorization.baseItems.filter(
+        (item) => item.target.kind === 'shot' && project.shots[item.target.shotId]!.videoAssetId
+      );
       authorization.providerBindings = authorization.providerBindings.filter(({ itemId }) =>
         authorization.baseItems.some((item) => item.id === itemId)
       );

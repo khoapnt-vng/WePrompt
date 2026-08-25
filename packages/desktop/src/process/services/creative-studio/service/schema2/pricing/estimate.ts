@@ -8,14 +8,17 @@ import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_REFERENCE_LABEL_LENGTH,
   type StudioAssetV2,
   type StudioAuthorizedConditioningDependency,
   type StudioConditioningInputSnapshot,
   type StudioGenerationRequestPlan,
   type StudioGenerationRequestTemplate,
-  type StudioJobV2,
+  type StudioGenerationTargetV2,
+  type StudioMediaModelRef,
   type StudioPrepareGenerationChoiceV2,
   type StudioPreparedSubmissionRequestV2,
+  type StudioPricingRefusalDetailsV2,
   type StudioPrepareProjectReferencesRequestV2,
   type StudioPrepareSubmissionRequestV2,
   type StudioProjectV2,
@@ -27,6 +30,7 @@ import {
   type StudioSpendPolicy,
   type StudioSubmissionQuote,
   type StudioSubmissionQuoteCore,
+  type StudioReferenceKindV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
@@ -38,11 +42,16 @@ import {
   calculateStudioQuoteTotals,
   calculateStudioQuotedGenerationAmounts,
   createStudioBoardGenerationRequestPlan,
+  composeStudioGenerationV2,
   createStudioDeferredGenerationRequestPlan,
   createStudioFrameExtractionId,
   createStudioGenerationRequestTemplate,
   createStudioQuotedGenerationId,
+  createStudioReferenceGenerationRequestPlan,
   createStudioResolvedGenerationRequestPlan,
+  deriveStudioInstructionProfileV2,
+  resolveStudioReferenceBindingV2,
+  studioGenerationTargetKey,
 } from '../generation';
 import { studioBoardAuthorizationScopeIsValidV2 } from './authorization';
 import {
@@ -55,7 +64,15 @@ import {
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const CURRENCY = /^[A-Z]{3}$/;
-const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
+const isGenerationTarget = (value: unknown): value is StudioGenerationTargetV2 => {
+  if (value === null || typeof value !== 'object') return false;
+  const target = value as Record<string, unknown>;
+  return (
+    Reflect.ownKeys(target).length === 2 &&
+    ((target.kind === 'shot' && typeof target.shotId === 'string' && SAFE_ID.test(target.shotId)) ||
+      (target.kind === 'reference' && typeof target.referenceId === 'string' && SAFE_ID.test(target.referenceId)))
+  );
+};
 const NONTERMINAL_STATUSES = new Set([
   'waiting_for_conditioning',
   'queued_local',
@@ -66,6 +83,16 @@ const NONTERMINAL_STATUSES = new Set([
 ]);
 
 export type StudioUnpricedQuotedGenerationV2 = Omit<StudioQuotedGeneration, 'id' | 'rateUnit' | 'rateMinorUnits'>;
+
+export type StudioCompositionRouteAuthorityV2 = {
+  provider: StudioMediaModelRef;
+  maxConditioningImages: number;
+};
+
+export type StudioCompositionRouteLookupV2 = (
+  routeId: string,
+  purpose: StudioQuotedGeneration['purpose']
+) => StudioCompositionRouteAuthorityV2;
 
 export type StudioSubmissionQuoteEstimateInputV2 = {
   project: Pick<StudioProjectV2, 'id' | 'revision' | 'beatOrder' | 'beats' | 'shots' | 'references' | 'jobs'>;
@@ -91,11 +118,13 @@ export type StudioPricingErrorCodeV2 =
 
 export class StudioPricingErrorV2 extends Error {
   readonly code: StudioPricingErrorCodeV2;
+  readonly details: StudioPricingRefusalDetailsV2 | null;
 
-  constructor(code: StudioPricingErrorCodeV2) {
+  constructor(code: StudioPricingErrorCodeV2, details: StudioPricingRefusalDetailsV2 | null = null) {
     super(code);
     this.name = 'StudioPricingErrorV2';
     this.code = code;
+    this.details = details === null ? null : structuredClone(details);
   }
 }
 
@@ -107,8 +136,8 @@ export type StudioBudgetEvaluationV2 =
       verdict: Extract<StudioRendererBudgetVerdictV2, { kind: 'over_cap' | 'currency_mismatch' }>;
     };
 
-const fail = (code: StudioPricingErrorCodeV2): never => {
-  throw new StudioPricingErrorV2(code);
+const fail = (code: StudioPricingErrorCodeV2, details: StudioPricingRefusalDetailsV2 | null = null): never => {
+  throw new StudioPricingErrorV2(code, details);
 };
 
 const isDenseArray = (value: unknown): value is unknown[] => {
@@ -163,7 +192,8 @@ const PREPARE_REQUEST_KEYS = new Set([
 ]);
 const CONTINUITY_PREPARE_REQUEST_KEYS = new Set([...PREPARE_REQUEST_KEYS, 'continuityChange']);
 const BOARD_PROMOTION_PREPARE_REQUEST_KEYS = new Set([...PREPARE_REQUEST_KEYS, 'boardPromotion']);
-const PREPARE_CHOICE_KEYS = new Set(['shotId', 'purpose', 'referenceAssetId']);
+const PREPARE_CHOICE_KEYS = new Set(['target', 'purpose']);
+const SHOT_TARGET_KEYS = new Set(['kind', 'shotId']);
 const CONTINUITY_CHANGE_KEYS = new Set(['shotId', 'hardCut', 'requiresSeedGeneration']);
 const BOARD_PROMOTION_KEYS = new Set(['shotId', 'boardAssetId']);
 
@@ -196,21 +226,19 @@ const isExactDenseOwnDataArray = (value: unknown): value is unknown[] => {
 
 const parsePrepareChoice = (value: unknown): StudioPrepareGenerationChoiceV2 => {
   if (!isExactOwnDataRecord(value, PREPARE_CHOICE_KEYS)) return fail('invalid_prepare_request');
-  const { shotId, purpose, referenceAssetId } = value;
-  const forbiddenReference = (purpose === 'board_still' || purpose === 'video_take') && referenceAssetId !== null;
+  const { target, purpose } = value;
   if (
-    typeof shotId !== 'string' ||
-    !SAFE_ID.test(shotId) ||
-    (purpose !== 'seed_still' && purpose !== 'board_still' && purpose !== 'video_take') ||
-    (referenceAssetId !== null && (typeof referenceAssetId !== 'string' || !SAFE_ID.test(referenceAssetId))) ||
-    forbiddenReference
+    !isExactOwnDataRecord(target, SHOT_TARGET_KEYS) ||
+    target.kind !== 'shot' ||
+    typeof target.shotId !== 'string' ||
+    !SAFE_ID.test(target.shotId) ||
+    (purpose !== 'seed_still' && purpose !== 'board_still' && purpose !== 'video_take')
   ) {
-    return fail(forbiddenReference ? 'invalid_reference' : 'invalid_prepare_request');
+    return fail('invalid_prepare_request');
   }
   return {
-    shotId: shotId as string,
+    target: { kind: 'shot', shotId: target.shotId },
     purpose: purpose as StudioPrepareGenerationChoiceV2['purpose'],
-    referenceAssetId: referenceAssetId as string | null,
   };
 };
 
@@ -229,8 +257,7 @@ const parsePrepareRequest = (value: unknown, project: StudioProjectV2): StudioPr
     typeof expectedRevision !== 'number' ||
     !Number.isSafeInteger(expectedRevision) ||
     expectedRevision < 1 ||
-    (originReferenceHandoffId !== null &&
-      (typeof originReferenceHandoffId !== 'string' || !SAFE_ID.test(originReferenceHandoffId))) ||
+    originReferenceHandoffId !== null ||
     !isExactDenseOwnDataArray(baseChoices) ||
     !isExactDenseOwnDataArray(cascadeChoices) ||
     (!continuityRequest && !boardPromotionRequest && baseChoices.length === 0) ||
@@ -238,10 +265,10 @@ const parsePrepareRequest = (value: unknown, project: StudioProjectV2): StudioPr
   ) {
     return fail('invalid_prepare_request');
   }
-  const parsed = {
+  const parsed: StudioPrepareSubmissionRequestV2 = {
     projectId,
     expectedRevision,
-    originReferenceHandoffId: originReferenceHandoffId as string | null,
+    originReferenceHandoffId: null,
     baseChoices: baseChoices.map(parsePrepareChoice),
     cascadeChoices: cascadeChoices.map(parsePrepareChoice),
   };
@@ -291,10 +318,10 @@ const parsePrepareRequest = (value: unknown, project: StudioProjectV2): StudioPr
   };
 };
 
-type DerivationShotLocation = ActiveShotLocation & { filmIndex: number };
+type ActiveFilmShotLocation = ActiveShotLocation & { filmIndex: number };
 
-const derivationShotLocations = (project: StudioProjectV2): Map<string, DerivationShotLocation> => {
-  const result = new Map<string, DerivationShotLocation>();
+const activeFilmShotLocations = (project: StudioProjectV2): Map<string, ActiveFilmShotLocation> => {
+  const result = new Map<string, ActiveFilmShotLocation>();
   let filmIndex = 0;
   for (const beatId of project.beatOrder) {
     const beat = ownValue(project.beats, beatId);
@@ -312,33 +339,39 @@ const derivationShotLocations = (project: StudioProjectV2): Map<string, Derivati
 const choicePurposeOrder = (purpose: StudioPrepareGenerationChoiceV2['purpose']): number =>
   purpose === 'seed_still' ? 0 : purpose === 'board_still' ? 1 : 2;
 
+const choiceShotId = (choice: StudioPrepareGenerationChoiceV2): string => {
+  if (choice.target.kind !== 'shot') return fail('invalid_prepare_request');
+  return choice.target.shotId;
+};
+
 const comparePrepareChoices = (
-  left: Pick<StudioPrepareGenerationChoiceV2, 'shotId' | 'purpose'>,
-  right: Pick<StudioPrepareGenerationChoiceV2, 'shotId' | 'purpose'>,
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  left: StudioPrepareGenerationChoiceV2,
+  right: StudioPrepareGenerationChoiceV2,
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>
 ): number => {
-  const leftIndex = locations.get(left.shotId)?.filmIndex ?? Number.MAX_SAFE_INTEGER;
-  const rightIndex = locations.get(right.shotId)?.filmIndex ?? Number.MAX_SAFE_INTEGER;
+  const leftIndex = locations.get(choiceShotId(left))?.filmIndex ?? Number.MAX_SAFE_INTEGER;
+  const rightIndex = locations.get(choiceShotId(right))?.filmIndex ?? Number.MAX_SAFE_INTEGER;
   return leftIndex - rightIndex || choicePurposeOrder(left.purpose) - choicePurposeOrder(right.purpose);
 };
 
-const choicePairKey = (choice: Pick<StudioPrepareGenerationChoiceV2, 'shotId' | 'purpose'>): string =>
-  `${choice.shotId}\0${choice.purpose}`;
+const choicePairKey = (choice: StudioPrepareGenerationChoiceV2): string =>
+  `${studioGenerationTargetKey(choice.target)}\0${choice.purpose}`;
 
 const validateChoiceOrderAndIdentity = (
   request: StudioPrepareSubmissionRequestV2,
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>
 ): void => {
   const combined = [...request.baseChoices, ...request.cascadeChoices];
   if (combined.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) fail('invalid_prepare_request');
   const pairKeys = new Set<string>();
   const shotIds = new Set<string>();
   for (const choice of combined) {
-    if (!locations.has(choice.shotId)) fail('inactive_shot');
+    const shotId = choiceShotId(choice);
+    if (!locations.has(shotId)) fail('inactive_shot');
     const pairKey = choicePairKey(choice);
     if (pairKeys.has(pairKey)) fail('duplicate_shot_purpose');
     pairKeys.add(pairKey);
-    shotIds.add(choice.shotId);
+    shotIds.add(shotId);
     if (shotIds.size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) fail('invalid_prepare_request');
   }
   for (const choices of [request.baseChoices, request.cascadeChoices]) {
@@ -350,7 +383,7 @@ const validateChoiceOrderAndIdentity = (
   }
 };
 
-const segmentHeadIndex = (project: StudioProjectV2, location: DerivationShotLocation): number => {
+const segmentHeadIndex = (project: StudioProjectV2, location: ActiveFilmShotLocation): number => {
   const beat = ownValue(project.beats, location.beatId);
   if (beat === undefined) return fail('invalid_prepare_request');
   for (let shotIndex = location.shotIndex; shotIndex > 0; shotIndex -= 1) {
@@ -365,11 +398,11 @@ const segmentHeadIndex = (project: StudioProjectV2, location: DerivationShotLoca
 const validateIndependentBaseAnchors = (
   project: StudioProjectV2,
   baseChoices: readonly StudioPrepareGenerationChoiceV2[],
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>
 ): void => {
   const segmentKeys = new Set<string>();
   for (const choice of baseChoices) {
-    const location = locations.get(choice.shotId);
+    const location = locations.get(choiceShotId(choice));
     if (location === undefined) return fail('inactive_shot');
     const headIndex = segmentHeadIndex(project, location);
     if (choice.purpose === 'seed_still' && location.shotIndex !== headIndex) fail('invalid_prepare_request');
@@ -382,13 +415,14 @@ const validateIndependentBaseAnchors = (
 const deriveExpectedCascadePairs = (
   project: StudioProjectV2,
   baseChoices: readonly StudioPrepareGenerationChoiceV2[],
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>
 ): { shotId: string; purpose: 'video_take' }[] => {
   const expected = new Map<string, { shotId: string; purpose: 'video_take' }>();
   for (const baseChoice of baseChoices) {
-    const location = locations.get(baseChoice.shotId);
+    const baseShotId = choiceShotId(baseChoice);
+    const location = locations.get(baseShotId);
     const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
-    const shot = ownValue(project.shots, baseChoice.shotId);
+    const shot = ownValue(project.shots, baseShotId);
     if (location === undefined || beat === undefined || shot === undefined) fail('inactive_shot');
 
     const firstCascadeIndex = baseChoice.purpose === 'seed_still' ? location.shotIndex : location.shotIndex + 1;
@@ -397,18 +431,24 @@ const deriveExpectedCascadePairs = (
       const downstream = ownValue(project.shots, downstreamId);
       if (downstream === undefined) fail('invalid_prepare_request');
       if (shotIndex > location.shotIndex && downstream.chainBreak === 'hard_cut') break;
-      if (hasInFlightItem(project, downstreamId, 'video_take')) break;
+      if (hasInFlightItem(project, { kind: 'shot', shotId: downstreamId }, 'video_take')) break;
       const pairKey = `${downstreamId}\0video_take`;
       expected.set(pairKey, { shotId: downstreamId, purpose: 'video_take' });
     }
   }
-  return [...expected.values()].toSorted((left, right) => comparePrepareChoices(left, right, locations));
+  return [...expected.values()].toSorted((left, right) =>
+    comparePrepareChoices(
+      { target: { kind: 'shot', shotId: left.shotId }, purpose: left.purpose },
+      { target: { kind: 'shot', shotId: right.shotId }, purpose: right.purpose },
+      locations
+    )
+  );
 };
 
 const canonicalizeExactCascade = (
   project: StudioProjectV2,
   request: StudioPrepareSubmissionRequestV2,
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>
 ): StudioPrepareSubmissionRequestV2 => {
   const expected = deriveExpectedCascadePairs(project, request.baseChoices, locations);
   if (request.cascadeChoices.length === 0) {
@@ -416,9 +456,8 @@ const canonicalizeExactCascade = (
     return {
       ...request,
       cascadeChoices: expected.map<StudioPrepareGenerationChoiceV2>(({ shotId, purpose }) => ({
-        shotId,
+        target: { kind: 'shot', shotId },
         purpose,
-        referenceAssetId: null,
       })),
     };
   }
@@ -426,37 +465,15 @@ const canonicalizeExactCascade = (
   for (let index = 0; index < expected.length; index += 1) {
     const choice = request.cascadeChoices[index]!;
     const expectedChoice = expected[index]!;
-    if (choice.shotId !== expectedChoice.shotId || choice.purpose !== expectedChoice.purpose) {
+    if (choiceShotId(choice) !== expectedChoice.shotId || choice.purpose !== expectedChoice.purpose) {
       fail('invalid_prepare_request');
     }
   }
   return request;
 };
 
-const validateReferenceHandoffChoices = (request: StudioPrepareSubmissionRequestV2): void => {
-  if (
-    request.originReferenceHandoffId === null ||
-    request.cascadeChoices.length !== 0 ||
-    request.baseChoices.some((choice) => choice.purpose !== 'seed_still' || choice.referenceAssetId !== null)
-  ) {
-    fail('invalid_prepare_request');
-  }
-};
-
-const isProjectReferenceAsset = (project: StudioProjectV2, shotId: string, assetId: string): boolean =>
-  Object.values(project.references).some(
-    (reference) =>
-      reference.candidateAssetId === assetId ||
-      reference.approvedAssetId === assetId ||
-      reference.supersededAssetIds.includes(assetId)
-  ) ||
-  Object.values(project.jobs).some(
-    (job) =>
-      job.projectReferenceId !== undefined &&
-      job.projectId === project.id &&
-      job.shotId === shotId &&
-      job.outputAssetIds.includes(assetId)
-  );
+const isProjectReferenceAsset = (project: StudioProjectV2, assetId: string): boolean =>
+  ownValue(project.assets, assetId)?.projectReferenceId !== null;
 
 const eligibleSeedAsset = (project: StudioProjectV2, shotId: string, assetId: string): StudioAssetV2 | null => {
   const shot = ownValue(project.shots, shotId);
@@ -467,9 +484,7 @@ const eligibleSeedAsset = (project: StudioProjectV2, shotId: string, assetId: st
     asset.shotId === shotId &&
     asset.mediaKind === 'image' &&
     (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
-    asset.briefReferenceRole === undefined &&
-    asset.briefReferenceLabel === undefined &&
-    !isProjectReferenceAsset(project, shotId, assetId) &&
+    !isProjectReferenceAsset(project, assetId) &&
     shot.assetIds.includes(assetId)
     ? asset
     : null;
@@ -513,103 +528,74 @@ const selectedVideoAsset = (project: StudioProjectV2, shotId: string): StudioAss
 
 const hasInFlightItem = (
   project: StudioSubmissionQuoteEstimateInputV2['project'],
-  shotId: string,
-  purpose: StudioQuotedGeneration['purpose'],
-  projectReferenceId?: string
+  target: StudioGenerationTargetV2,
+  purpose: StudioQuotedGeneration['purpose']
 ): boolean =>
   Object.values(project.jobs).some(
     (job) =>
-      job.shotId === shotId &&
+      studioGenerationTargetKey(job.target) === studioGenerationTargetKey(target) &&
       job.purpose === purpose &&
-      job.projectReferenceId === projectReferenceId &&
       NONTERMINAL_STATUSES.has(job.status)
   );
 
 const hasInFlightProjectReferenceItem = (
   project: StudioSubmissionQuoteEstimateInputV2['project'],
   projectReferenceId: string
-): boolean =>
-  Object.values(project.jobs).some(
-    (job) => job.projectReferenceId === projectReferenceId && NONTERMINAL_STATUSES.has(job.status)
-  );
-
-/** Paid reference retries must preserve their exact proxy-Shot lineage across a handoff. */
-const isPaidProjectReferenceRetryCandidate = (job: StudioJobV2, projectReferenceId: string): boolean =>
-  job.projectReferenceId === projectReferenceId &&
-  (job.status === 'cancelled' ||
-    (job.status === 'failed' &&
-      job.error !== null &&
-      job.error.code !== 'download_failed' &&
-      job.error.code !== 'dependency_failed'));
-
-const approvedProjectReferenceInputs = (
-  project: StudioProjectV2,
-  shotId: string
-): { assetId: string; sha256: string }[] => {
-  const shot = ownValue(project.shots, shotId);
-  if (
-    project.referenceOrder.length === 0 ||
-    shot === undefined ||
-    shot.referenceIds.length === 0 ||
-    new Set(shot.referenceIds).size !== shot.referenceIds.length
-  ) {
-    return fail('invalid_reference');
-  }
-  const order = new Map(project.referenceOrder.map((referenceId, index) => [referenceId, index]));
-  let previousPosition = -1;
-  let backgroundCount = 0;
-  const inputs = shot.referenceIds.map((referenceId) => {
-    const reference = ownValue(project.references, referenceId);
-    const position = order.get(referenceId);
-    const asset =
-      reference?.approvedAssetId === null ? undefined : ownValue(project.assets, reference?.approvedAssetId ?? '');
-    if (
-      reference === undefined ||
-      position === undefined ||
-      position <= previousPosition ||
-      asset === undefined ||
-      asset.id !== reference.approvedAssetId ||
-      asset.projectId !== project.id ||
-      asset.mediaKind !== 'image' ||
-      asset.managedAsset.collection !== 'assets' ||
-      !LOWERCASE_SHA256.test(asset.sha256)
-    ) {
-      return fail('invalid_reference');
-    }
-    previousPosition = position;
-    if (reference.kind === 'background') backgroundCount += 1;
-    return { assetId: asset.id, sha256: asset.sha256 };
-  });
-  if (backgroundCount !== 1) return fail('invalid_reference');
-  return inputs;
-};
+): boolean => hasInFlightItem(project, { kind: 'reference', referenceId: projectReferenceId }, 'reference_image');
 
 const createChoiceTemplate = (
   project: StudioProjectV2,
   choice: StudioPrepareGenerationChoiceV2,
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>,
+  resolveRoute: StudioCompositionRouteLookupV2
 ): StudioGenerationRequestTemplate => {
-  const location = locations.get(choice.shotId);
+  const shotId = choiceShotId(choice);
+  const location = locations.get(shotId);
   const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
-  const shot = ownValue(project.shots, choice.shotId);
+  const shot = ownValue(project.shots, shotId);
   if (location === undefined || beat === undefined || shot === undefined) return fail('inactive_shot');
-  const referenceInputs =
-    choice.purpose !== 'seed_still'
-      ? []
-      : choice.referenceAssetId === null
-        ? approvedProjectReferenceInputs(project, shot.id)
-        : fail('invalid_reference');
+  const routeId = choice.purpose === 'video_take' ? project.videoRouteId : project.imageRouteId;
+  if (routeId === null) return fail('missing_route');
+  const authority = resolveRoute(routeId, choice.purpose);
+  const resolution =
+    choice.purpose === 'video_take'
+      ? { ok: true as const, referenceInputs: [] }
+      : resolveStudioReferenceBindingV2({
+          project,
+          shotId,
+          maxConditioningImages: authority.maxConditioningImages,
+        });
+  if (resolution.ok === false) {
+    return fail('invalid_reference', {
+      kind: 'reference_binding',
+      shotId: resolution.shotId,
+      reason: resolution.reason,
+    });
+  }
   try {
-    return createStudioGenerationRequestTemplate({
-      purpose: choice.purpose,
+    const source = {
+      kind: 'shot' as const,
+      beatId: beat.id,
+      story: beat.story,
+      shotId: shot.id,
+      shootingScript: shot.shootingScript,
+    };
+    const composition = composeStudioGenerationV2({
+      projectRevision: project.revision,
       brief: project.brief,
       rules: project.rules,
-      look: beat.look,
-      line: shot.line,
+      source,
+      purpose: choice.purpose,
+      referenceInputs: resolution.referenceInputs,
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
+      route: authority.provider,
+      boardStyle: null,
+      instructionProfile: deriveStudioInstructionProfileV2(authority.provider, choice.purpose, source),
+    });
+    return createStudioGenerationRequestTemplate({
+      composition,
       durationSeconds: shot.durationSeconds,
-      referenceInputs,
     });
   } catch {
     return fail('invalid_prepare_request');
@@ -619,7 +605,7 @@ const createChoiceTemplate = (
 const currentConditioningInput = (
   project: StudioProjectV2,
   shotId: string,
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>
 ): StudioConditioningInputSnapshot | null => {
   const location = locations.get(shotId);
   const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
@@ -667,19 +653,75 @@ const currentConditioningInput = (
     : null;
 };
 
+/**
+ * Performs every ordinary-prepare check that depends only on persisted project authority. This
+ * runs before provider discovery so malformed intent, missing base routes, and missing reviewed
+ * first frames cannot observe live adapter work.
+ */
+export const preflightStudioSubmissionPreparationV2 = (input: {
+  project: StudioProjectV2;
+  request: unknown;
+}): StudioPrepareSubmissionRequestV2 => {
+  let request = parsePrepareRequest(input.request, input.project);
+  const locations = activeFilmShotLocations(input.project);
+  if (request.boardPromotion !== undefined || request.continuityChange !== undefined) return request;
+  validateChoiceOrderAndIdentity(request, locations);
+  const choices = [...request.baseChoices, ...request.cascadeChoices];
+  const boardChoiceCount = choices.filter((choice) => choice.purpose === 'board_still').length;
+  if (boardChoiceCount > 0) {
+    if (boardChoiceCount !== choices.length || request.cascadeChoices.length > 0 || input.project.boardStyle === null) {
+      return fail('invalid_prepare_request');
+    }
+    if (input.project.imageRouteId === null || !SAFE_ID.test(input.project.imageRouteId)) return fail('missing_route');
+    return request;
+  }
+  validateIndependentBaseAnchors(input.project, request.baseChoices, locations);
+  request = canonicalizeExactCascade(input.project, request, locations);
+  validateChoiceOrderAndIdentity(request, locations);
+
+  const earlierPairs = new Set<string>();
+  for (const choice of [...request.baseChoices, ...request.cascadeChoices]) {
+    const shotId = choiceShotId(choice);
+    const location = locations.get(shotId);
+    const beat = location === undefined ? undefined : ownValue(input.project.beats, location.beatId);
+    if (location === undefined || beat === undefined) return fail('inactive_shot');
+    if (request.baseChoices.includes(choice)) {
+      const routeId = choice.purpose === 'seed_still' ? input.project.imageRouteId : input.project.videoRouteId;
+      if (routeId === null || !SAFE_ID.test(routeId)) return fail('missing_route');
+      if (choice.purpose === 'video_take') {
+        const predecessorId = location.shotIndex === 0 ? undefined : beat.shotOrder[location.shotIndex - 1];
+        const hasAuthorizedSeed = earlierPairs.has(`shot:${shotId}\0seed_still`);
+        const hasAuthorizedPredecessor =
+          predecessorId !== undefined && earlierPairs.has(`shot:${predecessorId}\0video_take`);
+        if (
+          !hasAuthorizedSeed &&
+          !hasAuthorizedPredecessor &&
+          currentConditioningInput(input.project, shotId, locations) === null
+        ) {
+          return fail('missing_conditioning');
+        }
+      }
+    }
+    earlierPairs.add(choicePairKey(choice));
+  }
+  return request;
+};
+
 const deriveUnpricedItems = (
   project: StudioProjectV2,
   choices: readonly StudioPrepareGenerationChoiceV2[],
-  locations: ReadonlyMap<string, DerivationShotLocation>,
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>,
+  resolveRoute: StudioCompositionRouteLookupV2,
   initialDependencies: ReadonlyMap<string, StudioAuthorizedConditioningDependency> = new Map()
 ): StudioUnpricedQuotedGenerationV2[] => {
   const earlierItemIds = new Map<string, string>();
   const result: StudioUnpricedQuotedGenerationV2[] = [];
   for (const choice of choices) {
     if (choice.purpose === 'board_still') return fail('invalid_prepare_request');
+    const shotId = choiceShotId(choice);
     const routeId = choice.purpose === 'seed_still' ? project.imageRouteId : project.videoRouteId;
     if (routeId === null || !SAFE_ID.test(routeId)) fail('missing_route');
-    const template = createChoiceTemplate(project, choice, locations);
+    const template = createChoiceTemplate(project, choice, locations, resolveRoute);
     let requestPlan: StudioGenerationRequestPlan;
     if (choice.purpose === 'seed_still') {
       requestPlan = createStudioResolvedGenerationRequestPlan({
@@ -688,23 +730,23 @@ const deriveUnpricedItems = (
         conditioningInput: null,
       });
     } else {
-      const initialDependency = initialDependencies.get(choice.shotId);
-      const sameShotSeedId = earlierItemIds.get(`${choice.shotId}\0seed_still`);
-      const location = locations.get(choice.shotId);
+      const initialDependency = initialDependencies.get(shotId);
+      const sameShotSeedId = earlierItemIds.get(`shot:${shotId}\0seed_still`);
+      const location = locations.get(shotId);
       const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
       if (location === undefined || beat === undefined) return fail('inactive_shot');
       const predecessorId = location.shotIndex === 0 ? undefined : beat.shotOrder[location.shotIndex - 1];
       const predecessorItemId =
-        predecessorId === undefined ? undefined : earlierItemIds.get(`${predecessorId}\0video_take`);
+        predecessorId === undefined ? undefined : earlierItemIds.get(`shot:${predecessorId}\0video_take`);
       if (initialDependency !== undefined) {
         requestPlan = createStudioDeferredGenerationRequestPlan({ template, dependency: initialDependency });
       } else if (sameShotSeedId !== undefined) {
-        if (location.shotIndex !== 0 && ownValue(project.shots, choice.shotId)?.chainBreak !== 'hard_cut') {
+        if (location.shotIndex !== 0 && ownValue(project.shots, shotId)?.chainBreak !== 'hard_cut') {
           return fail('invalid_dependency');
         }
         requestPlan = createStudioDeferredGenerationRequestPlan({
           template,
-          dependency: { kind: 'authorized_seed', upstreamItemId: sameShotSeedId, shotId: choice.shotId },
+          dependency: { kind: 'authorized_seed', upstreamItemId: sameShotSeedId, shotId },
         });
       } else if (predecessorItemId !== undefined) {
         requestPlan = createStudioDeferredGenerationRequestPlan({
@@ -716,7 +758,7 @@ const deriveUnpricedItems = (
           },
         });
       } else {
-        const conditioningInput = currentConditioningInput(project, choice.shotId, locations);
+        const conditioningInput = currentConditioningInput(project, shotId, locations);
         if (conditioningInput === null) return fail('missing_conditioning');
         requestPlan = createStudioResolvedGenerationRequestPlan({
           purpose: 'video_take',
@@ -726,7 +768,7 @@ const deriveUnpricedItems = (
       }
     }
     result.push({
-      shotId: choice.shotId,
+      target: { kind: 'shot', shotId },
       purpose: choice.purpose,
       routeId,
       generationCount: 1,
@@ -737,7 +779,7 @@ const deriveUnpricedItems = (
       createStudioQuotedGenerationId({
         projectId: project.id,
         projectRevision: project.revision,
-        shotId: choice.shotId,
+        target: { kind: 'shot', shotId },
         purpose: choice.purpose,
       })
     );
@@ -748,35 +790,62 @@ const deriveUnpricedItems = (
 const deriveBoardUnpricedItems = (
   project: StudioProjectV2,
   choices: readonly StudioPrepareGenerationChoiceV2[],
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>,
+  resolveRoute: StudioCompositionRouteLookupV2
 ): StudioUnpricedQuotedGenerationV2[] => {
   const routeId = project.imageRouteId;
   if (routeId === null || !SAFE_ID.test(routeId)) fail('missing_route');
   if (project.boardStyle === null) fail('invalid_prepare_request');
+  const authority = resolveRoute(routeId, 'board_still');
   return choices.map((choice) => {
-    const location = locations.get(choice.shotId);
+    const shotId = choiceShotId(choice);
+    const location = locations.get(shotId);
     const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
-    const shot = ownValue(project.shots, choice.shotId);
+    const shot = ownValue(project.shots, shotId);
     if (choice.purpose !== 'board_still' || location === undefined || beat === undefined || shot === undefined) {
       return fail(location === undefined || shot === undefined ? 'inactive_shot' : 'invalid_prepare_request');
     }
+    const resolution = resolveStudioReferenceBindingV2({
+      project,
+      shotId,
+      maxConditioningImages: authority.maxConditioningImages,
+    });
+    if (resolution.ok === false) {
+      return fail('invalid_reference', {
+        kind: 'reference_binding',
+        shotId: resolution.shotId,
+        reason: resolution.reason,
+      });
+    }
     let requestPlan: StudioGenerationRequestPlan;
     try {
+      const source = {
+        kind: 'shot' as const,
+        beatId: beat.id,
+        story: beat.story,
+        shotId: shot.id,
+        shootingScript: shot.shootingScript,
+      };
       requestPlan = createStudioBoardGenerationRequestPlan({
-        brief: project.brief,
-        rules: project.rules,
-        action: beat.action,
-        look: beat.look,
-        line: shot.line,
-        style: project.boardStyle,
-        aspectRatio: project.aspectRatio,
-        resolution: project.resolution,
+        composition: composeStudioGenerationV2({
+          projectRevision: project.revision,
+          brief: project.brief,
+          rules: project.rules,
+          source,
+          purpose: 'board_still',
+          referenceInputs: resolution.referenceInputs,
+          aspectRatio: project.aspectRatio,
+          resolution: project.resolution,
+          route: authority.provider,
+          boardStyle: project.boardStyle,
+          instructionProfile: deriveStudioInstructionProfileV2(authority.provider, 'board_still', source),
+        }),
       });
     } catch {
       return fail('invalid_prepare_request');
     }
     return {
-      shotId: choice.shotId,
+      target: { kind: 'shot', shotId },
       purpose: 'board_still',
       routeId,
       generationCount: 1,
@@ -788,7 +857,8 @@ const deriveBoardUnpricedItems = (
 const deriveContinuitySubmissionQuoteGraphV2 = (
   project: StudioProjectV2,
   request: StudioPrepareSubmissionRequestV2,
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>,
+  resolveRoute: StudioCompositionRouteLookupV2
 ): StudioDerivedSubmissionQuoteGraphV2 => {
   const change = request.continuityChange;
   if (change === undefined) return fail('invalid_prepare_request');
@@ -815,8 +885,8 @@ const deriveContinuitySubmissionQuoteGraphV2 = (
   }
   if (
     affectedShotIds.length === 0 ||
-    affectedShotIds.some((shotId) => hasInFlightItem(project, shotId, 'video_take')) ||
-    hasInFlightItem(project, change.shotId, 'seed_still')
+    affectedShotIds.some((shotId) => hasInFlightItem(project, { kind: 'shot', shotId }, 'video_take')) ||
+    hasInFlightItem(project, { kind: 'shot', shotId: change.shotId }, 'seed_still')
   ) {
     return fail('in_flight');
   }
@@ -828,16 +898,14 @@ const deriveContinuitySubmissionQuoteGraphV2 = (
   const choices: StudioPrepareGenerationChoiceV2[] = [];
   if (requiresSeedGeneration) {
     choices.push({
-      shotId: change.shotId,
+      target: { kind: 'shot', shotId: change.shotId },
       purpose: 'seed_still',
-      referenceAssetId: null,
     });
   }
   choices.push(
     ...affectedShotIds.map<StudioPrepareGenerationChoiceV2>((shotId) => ({
-      shotId,
+      target: { kind: 'shot', shotId },
       purpose: 'video_take',
-      referenceAssetId: null,
     }))
   );
 
@@ -872,7 +940,7 @@ const deriveContinuitySubmissionQuoteGraphV2 = (
 
   return {
     request,
-    baseItems: deriveUnpricedItems(candidate, choices, locations, initialDependencies),
+    baseItems: deriveUnpricedItems(candidate, choices, locations, resolveRoute, initialDependencies),
     cascadeItems: null,
   };
 };
@@ -880,7 +948,8 @@ const deriveContinuitySubmissionQuoteGraphV2 = (
 const deriveBoardPromotionSubmissionQuoteGraphV2 = (
   project: StudioProjectV2,
   request: StudioPrepareSubmissionRequestV2,
-  locations: ReadonlyMap<string, DerivationShotLocation>
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>,
+  resolveRoute: StudioCompositionRouteLookupV2
 ): StudioDerivedSubmissionQuoteGraphV2 => {
   const promotion = request.boardPromotion;
   if (promotion === undefined) return fail('invalid_prepare_request');
@@ -912,13 +981,12 @@ const deriveBoardPromotionSubmissionQuoteGraphV2 = (
   if (candidateHead === undefined) return fail('invalid_prepare_request');
   candidateHead.seedStillId = promotion.boardAssetId;
   const choices = selectedShotIds.map<StudioPrepareGenerationChoiceV2>((shotId) => ({
-    shotId,
+    target: { kind: 'shot', shotId },
     purpose: 'video_take',
-    referenceAssetId: null,
   }));
   return {
     request,
-    baseItems: deriveUnpricedItems(candidate, choices, locations),
+    baseItems: deriveUnpricedItems(candidate, choices, locations, resolveRoute),
     cascadeItems: null,
   };
 };
@@ -927,6 +995,7 @@ export type StudioSubmissionQuoteCoreDerivationInputV2 = {
   project: StudioProjectV2;
   request: unknown;
   rateCard: StudioRateCardV2;
+  resolveRoute: StudioCompositionRouteLookupV2;
 };
 
 export type StudioSubmissionQuoteGraphDerivationInputV2 = Omit<StudioSubmissionQuoteCoreDerivationInputV2, 'rateCard'>;
@@ -949,8 +1018,54 @@ export type StudioDerivedSubmissionQuoteCoresV2 = {
 export const deriveStudioProjectReferenceSubmissionQuoteGraphV2 = (input: {
   project: StudioProjectV2;
   request: StudioPrepareProjectReferencesRequestV2;
+  resolveRoute: StudioCompositionRouteLookupV2;
   originReferenceHandoffId?: string | null;
 }): StudioDerivedSubmissionQuoteGraphV2 => {
+  const { project, request } = input;
+  if (
+    input.originReferenceHandoffId !== undefined &&
+    input.originReferenceHandoffId !== null &&
+    !SAFE_ID.test(input.originReferenceHandoffId)
+  ) {
+    return fail('invalid_prepare_request');
+  }
+  preflightStudioProjectReferencePreparationV2({ project, request });
+  const route = input.resolveRoute(project.imageRouteId!, 'reference_image');
+  const baseItems = request.referenceIds.map<StudioUnpricedQuotedGenerationV2>((referenceId) => {
+    const reference = ownValue(project.references, referenceId)!;
+    let requestPlan: StudioGenerationRequestPlan;
+    try {
+      requestPlan = createStudioReferenceGenerationRequestPlan({
+        project,
+        reference,
+        route: route.provider,
+      });
+    } catch {
+      return fail('invalid_prepare_request');
+    }
+    return {
+      target: { kind: 'reference', referenceId: reference.id },
+      purpose: 'reference_image',
+      routeId: project.imageRouteId!,
+      generationCount: 1,
+      requestPlan,
+    };
+  });
+  return {
+    request: structuredClone(request),
+    baseItems,
+    cascadeItems: null,
+    ...(input.originReferenceHandoffId === undefined
+      ? {}
+      : { originReferenceHandoffId: input.originReferenceHandoffId }),
+  };
+};
+
+/** Rejects reference intent and ordering errors before provider discovery or pricing. */
+export const preflightStudioProjectReferencePreparationV2 = (input: {
+  project: StudioProjectV2;
+  request: StudioPrepareProjectReferencesRequestV2;
+}): void => {
   const { project, request } = input;
   if (
     !isExactOwnDataRecord(request, new Set(['projectId', 'expectedRevision', 'referenceIds'])) ||
@@ -965,7 +1080,6 @@ export const deriveStudioProjectReferenceSubmissionQuoteGraphV2 = (input: {
     return fail('invalid_prepare_request');
   }
   if (project.imageRouteId === null || !SAFE_ID.test(project.imageRouteId)) return fail('missing_route');
-  const locations = derivationShotLocations(project);
   let previousReferencePosition = -1;
   for (const referenceId of request.referenceIds) {
     const position = project.referenceOrder.indexOf(referenceId);
@@ -976,131 +1090,53 @@ export const deriveStudioProjectReferenceSubmissionQuoteGraphV2 = (input: {
     .map((referenceId) => ownValue(project.references, referenceId))
     .filter((reference) => reference?.kind === 'character')
     .every((reference) => reference?.approvedAssetId !== null);
-  const baseItems = request.referenceIds.map<StudioUnpricedQuotedGenerationV2>((referenceId) => {
+  for (const referenceId of request.referenceIds) {
     const reference = ownValue(project.references, referenceId);
     if (reference === undefined || (reference.kind === 'background' && !charactersApproved)) {
       return fail('invalid_reference');
     }
-    const candidateJob =
-      reference.candidateJobId === null ? undefined : ownValue(project.jobs, reference.candidateJobId);
-    if (
-      reference.candidateJobId !== null &&
-      (candidateJob?.id !== reference.candidateJobId ||
-        candidateJob.projectId !== project.id ||
-        candidateJob.projectReferenceId !== reference.id ||
-        candidateJob.purpose !== 'seed_still' ||
-        !ownValue(project.shots, candidateJob.shotId)?.jobIds.includes(candidateJob.id))
-    ) {
-      return fail('invalid_reference');
-    }
-    const candidateAnchor = candidateJob === undefined ? undefined : locations.get(candidateJob.shotId);
-    if (
-      candidateJob !== undefined &&
-      candidateAnchor === undefined &&
-      isPaidProjectReferenceRetryCandidate(candidateJob, reference.id)
-    ) {
-      return fail('inactive_shot');
-    }
-    const assignedAnchor = [...locations.entries()].find(([shotId]) =>
-      ownValue(project.shots, shotId)?.referenceIds.includes(reference.id)
-    );
-    const anchor =
-      candidateJob === undefined || candidateAnchor === undefined
-        ? (assignedAnchor ?? [...locations.entries()][0])
-        : ([candidateJob.shotId, candidateAnchor] as const);
-    if (anchor === undefined) return fail('inactive_shot');
-    const shot = ownValue(project.shots, anchor[0]);
-    if (shot === undefined || hasInFlightProjectReferenceItem(project, reference.id)) return fail('in_flight');
-    const instruction = [
-      reference.kind === 'character' ? 'CHARACTER REFERENCE SHEET' : 'BACKGROUND REFERENCE SHEET',
-      `SUBJECT\n${reference.label}`,
-      `DIRECTION\n${reference.prompt}`,
-      reference.kind === 'character'
-        ? 'Create one coherent character sheet in a single image with several useful views of the same identity.'
-        : 'Create one coherent recurring-location reference in a single image, without characters or text.',
-    ].join('\n\n');
-    const template = createStudioGenerationRequestTemplate({
-      purpose: 'seed_still',
-      brief: project.brief,
-      rules: project.rules,
-      look: '',
-      line: instruction,
-      aspectRatio: project.aspectRatio,
-      resolution: project.resolution,
-      durationSeconds: shot.durationSeconds,
-      referenceInputs: [],
-    });
-    return {
-      shotId: shot.id,
-      projectReferenceId: reference.id,
-      purpose: 'seed_still',
-      routeId: project.imageRouteId!,
-      generationCount: 1,
-      requestPlan: createStudioResolvedGenerationRequestPlan({
-        purpose: 'seed_still',
-        template,
-        conditioningInput: null,
-      }),
-    };
-  });
-  if (input.originReferenceHandoffId !== undefined && input.originReferenceHandoffId !== null) {
-    if (!SAFE_ID.test(input.originReferenceHandoffId)) return fail('invalid_prepare_request');
+    if (hasInFlightProjectReferenceItem(project, reference.id)) return fail('in_flight');
   }
-  return {
-    request: structuredClone(request),
-    baseItems,
-    cascadeItems: null,
-    ...(input.originReferenceHandoffId === undefined
-      ? {}
-      : { originReferenceHandoffId: input.originReferenceHandoffId }),
-  };
 };
 
 /** Validates the exact request graph before any live route or rate dependency is consulted. */
 export const deriveStudioSubmissionQuoteGraphV2 = (
   input: StudioSubmissionQuoteGraphDerivationInputV2
 ): StudioDerivedSubmissionQuoteGraphV2 => {
-  let request = parsePrepareRequest(input.request, input.project);
-  const locations = derivationShotLocations(input.project);
+  let request = preflightStudioSubmissionPreparationV2({ project: input.project, request: input.request });
+  const locations = activeFilmShotLocations(input.project);
   if (request.boardPromotion !== undefined) {
-    return deriveBoardPromotionSubmissionQuoteGraphV2(input.project, request, locations);
+    return deriveBoardPromotionSubmissionQuoteGraphV2(input.project, request, locations, input.resolveRoute);
   }
   if (request.continuityChange !== undefined) {
-    return deriveContinuitySubmissionQuoteGraphV2(input.project, request, locations);
+    return deriveContinuitySubmissionQuoteGraphV2(input.project, request, locations, input.resolveRoute);
   }
   validateChoiceOrderAndIdentity(request, locations);
   const choices = [...request.baseChoices, ...request.cascadeChoices];
   const boardChoiceCount = choices.filter((choice) => choice.purpose === 'board_still').length;
   if (boardChoiceCount > 0) {
-    if (
-      boardChoiceCount !== choices.length ||
-      request.originReferenceHandoffId !== null ||
-      request.cascadeChoices.length > 0
-    ) {
+    if (boardChoiceCount !== choices.length || request.cascadeChoices.length > 0) {
       return fail('invalid_prepare_request');
     }
     return {
       request,
-      baseItems: deriveBoardUnpricedItems(input.project, request.baseChoices, locations),
+      baseItems: deriveBoardUnpricedItems(input.project, request.baseChoices, locations, input.resolveRoute),
       cascadeItems: null,
     };
   }
-  if (request.originReferenceHandoffId === null) {
-    validateIndependentBaseAnchors(input.project, request.baseChoices, locations);
-    request = canonicalizeExactCascade(input.project, request, locations);
-    validateChoiceOrderAndIdentity(request, locations);
-  } else {
-    validateReferenceHandoffChoices(request);
-  }
+  validateIndependentBaseAnchors(input.project, request.baseChoices, locations);
+  request = canonicalizeExactCascade(input.project, request, locations);
+  validateChoiceOrderAndIdentity(request, locations);
 
-  const baseItems = deriveUnpricedItems(input.project, request.baseChoices, locations);
+  const baseItems = deriveUnpricedItems(input.project, request.baseChoices, locations, input.resolveRoute);
   let cascadeItems: StudioUnpricedQuotedGenerationV2[] | null = null;
   if (request.cascadeChoices.length > 0) {
     try {
       const combinedItems = deriveUnpricedItems(
         input.project,
         [...request.baseChoices, ...request.cascadeChoices],
-        locations
+        locations,
+        input.resolveRoute
       );
       cascadeItems = combinedItems.slice(request.baseChoices.length);
     } catch (error) {
@@ -1186,13 +1222,16 @@ const validateDependency = (
   project: StudioSubmissionQuoteEstimateInputV2['project']
 ): void => {
   if (item.requestPlan.kind !== 'after_take_selection') return;
+  if (item.target.kind !== 'shot') return fail('invalid_dependency');
+  if (item.purpose !== 'video_take') return fail('invalid_dependency');
+  const shotId = item.target.shotId;
   const dependency = item.requestPlan.dependency;
-  const location = locations.get(item.shotId);
+  const location = locations.get(shotId);
   if (location === undefined) fail('inactive_shot');
 
   if (dependency.kind === 'existing_predecessor') {
     const predecessor = locations.get(dependency.predecessorShotId);
-    const shot = Object.hasOwn(project.shots, item.shotId) ? project.shots[item.shotId] : undefined;
+    const shot = Object.hasOwn(project.shots, shotId) ? project.shots[shotId] : undefined;
     const fullProject = project as StudioProjectV2;
     if (
       !Object.hasOwn(project, 'assets') ||
@@ -1227,20 +1266,26 @@ const validateDependency = (
   const upstream = combined[upstreamIndex]!;
 
   if (dependency.kind === 'authorized_seed') {
-    if (dependency.shotId !== item.shotId || upstream.shotId !== item.shotId || upstream.purpose !== 'seed_still') {
+    if (
+      dependency.shotId !== shotId ||
+      upstream.target.kind !== 'shot' ||
+      upstream.target.shotId !== shotId ||
+      upstream.purpose !== 'seed_still'
+    ) {
       fail('invalid_dependency');
     }
     return;
   }
 
   const predecessor = locations.get(dependency.predecessorShotId);
-  const shot = Object.hasOwn(project.shots, item.shotId) ? project.shots[item.shotId] : undefined;
+  const shot = Object.hasOwn(project.shots, shotId) ? project.shots[shotId] : undefined;
   if (
     predecessor === undefined ||
     predecessor.beatId !== location.beatId ||
     predecessor.shotIndex + 1 !== location.shotIndex ||
     shot?.chainBreak !== 'none' ||
-    upstream.shotId !== dependency.predecessorShotId ||
+    upstream.target.kind !== 'shot' ||
+    upstream.target.shotId !== dependency.predecessorShotId ||
     upstream.purpose !== 'video_take'
   ) {
     fail('invalid_dependency');
@@ -1273,35 +1318,44 @@ export const createStudioSubmissionQuoteCoreV2 = (
   const items: StudioQuotedGeneration[] = [];
 
   for (const draft of drafts) {
+    if (draft === null || typeof draft !== 'object' || !isGenerationTarget(draft.target)) {
+      return fail('invalid_quote');
+    }
+    let targetExists = false;
+    if (draft.target.kind === 'shot') {
+      targetExists = locations.has(draft.target.shotId);
+      if (!SAFE_ID.test(draft.target.shotId) || draft.purpose === 'reference_image') {
+        return fail(targetExists ? 'invalid_quote' : 'inactive_shot');
+      }
+    } else if (draft.target.kind === 'reference') {
+      targetExists = ownValue(project.references, draft.target.referenceId)?.id === draft.target.referenceId;
+      if (!SAFE_ID.test(draft.target.referenceId) || draft.purpose !== 'reference_image') {
+        return fail('invalid_reference');
+      }
+    } else {
+      return fail('invalid_quote');
+    }
     if (
-      !SAFE_ID.test(draft.shotId) ||
       !SAFE_ID.test(draft.routeId) ||
-      (draft.purpose !== 'seed_still' && draft.purpose !== 'board_still' && draft.purpose !== 'video_take') ||
-      draft.generationCount !== 1 ||
-      !locations.has(draft.shotId)
+      (draft.purpose !== 'seed_still' &&
+        draft.purpose !== 'board_still' &&
+        draft.purpose !== 'video_take' &&
+        draft.purpose !== 'reference_image') ||
+      draft.generationCount !== 1
     ) {
-      return fail(locations.has(draft.shotId) ? 'invalid_quote' : 'inactive_shot');
+      return fail('invalid_quote');
     }
-    if (
-      draft.projectReferenceId !== undefined &&
-      (!SAFE_ID.test(draft.projectReferenceId) ||
-        draft.purpose !== 'seed_still' ||
-        !ownValue(project.references, draft.projectReferenceId))
-    ) {
-      fail('invalid_reference');
+    if (!targetExists) {
+      return fail(draft.target.kind === 'shot' ? 'inactive_shot' : 'invalid_reference');
     }
-    const pairKey = `${draft.shotId}\0${draft.purpose}\0${draft.projectReferenceId ?? ''}`;
+    const pairKey = `${studioGenerationTargetKey(draft.target)}\0${draft.purpose}`;
     if (pairKeys.has(pairKey)) fail('duplicate_shot_purpose');
     pairKeys.add(pairKey);
-    shotIds.add(draft.shotId);
-    if (shotIds.size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) fail('invalid_quote');
-    if (
-      draft.projectReferenceId === undefined
-        ? hasInFlightItem(project, draft.shotId, draft.purpose)
-        : hasInFlightProjectReferenceItem(project, draft.projectReferenceId)
-    ) {
-      fail('in_flight');
+    if (draft.target.kind === 'shot') {
+      shotIds.add(draft.target.shotId);
+      if (shotIds.size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) fail('invalid_quote');
     }
+    if (hasInFlightItem(project, draft.target, draft.purpose)) fail('in_flight');
 
     let rate;
     try {
@@ -1313,16 +1367,28 @@ export const createStudioSubmissionQuoteCoreV2 = (
     currencies.add(rate.currency);
     if (currencies.size > 1) fail('mixed_currency');
     const requestPlan = cloneRequestPlan(draft.purpose, draft.requestPlan);
+    const composition =
+      requestPlan.kind === 'resolved' ? requestPlan.snapshot.composition : requestPlan.template.composition;
+    const sourceMatchesTarget =
+      draft.target.kind === 'shot'
+        ? composition.inputs.source.kind === 'shot' && composition.inputs.source.shotId === draft.target.shotId
+        : composition.inputs.source.kind === 'project_reference' &&
+          composition.inputs.source.referenceId === draft.target.referenceId;
+    if (
+      !sourceMatchesTarget ||
+      composition.inputs.purpose !== draft.purpose ||
+      composition.inputs.projectRevision !== project.revision
+    ) {
+      fail('invalid_quote');
+    }
     const item: StudioQuotedGeneration = {
       id: createStudioQuotedGenerationId({
         projectId: project.id,
         projectRevision: project.revision,
-        shotId: draft.shotId,
+        target: draft.target,
         purpose: draft.purpose,
-        projectReferenceId: draft.projectReferenceId ?? null,
       }),
-      shotId: draft.shotId,
-      ...(draft.projectReferenceId === undefined ? {} : { projectReferenceId: draft.projectReferenceId }),
+      target: structuredClone(draft.target),
       purpose: draft.purpose,
       routeId: draft.routeId,
       generationCount: draft.generationCount,
@@ -1410,11 +1476,16 @@ export type StudioRendererRouteLookupV2 = (
   purpose: StudioQuotedGeneration['purpose']
 ) => StudioRendererMediaModelRef;
 
+export type StudioRendererReferenceLookupV2 = (
+  referenceId: string
+) => { kind: StudioReferenceKindV2; label: string } | null;
+
 const rendererDurationSeconds = (item: StudioQuotedGeneration): number | null => {
   const purpose = item.purpose;
   switch (purpose) {
     case 'seed_still':
     case 'board_still':
+    case 'reference_image':
       return null;
     case 'video_take':
       return item.requestPlan.kind === 'resolved'
@@ -1430,22 +1501,53 @@ const rendererDurationSeconds = (item: StudioQuotedGeneration): number | null =>
 
 const projectRendererItem = (
   item: StudioQuotedGeneration,
-  resolveRoute: StudioRendererRouteLookupV2
+  resolveRoute: StudioRendererRouteLookupV2,
+  resolveReference: StudioRendererReferenceLookupV2
 ): StudioRendererQuotedGenerationV2 => {
   const amounts = calculateStudioQuotedGenerationAmounts(item);
   if (amounts === null) return fail('unsafe_total');
   const route = resolveRoute(item.routeId, item.purpose);
   if (route.choiceId !== item.routeId) fail('invalid_quote');
   const durationSeconds = rendererDurationSeconds(item);
+  const composition =
+    item.requestPlan.kind === 'resolved'
+      ? item.requestPlan.snapshot.composition
+      : item.requestPlan.template.composition;
+  const rendererReference = (referenceId: string, expectedKind?: StudioReferenceKindV2) => {
+    const semantic = resolveReference(referenceId);
+    if (
+      semantic === null ||
+      (expectedKind !== undefined && semantic.kind !== expectedKind) ||
+      semantic.label.length < 1 ||
+      semantic.label.length > STUDIO_MAX_REFERENCE_LABEL_LENGTH ||
+      semantic.label !== semantic.label.trim()
+    ) {
+      return fail('invalid_quote');
+    }
+    return { referenceId, label: semantic.label, kind: semantic.kind };
+  };
+  const referenceInputs = composition.inputs.referenceInputs.map((reference) => {
+    const semantic = rendererReference(reference.referenceId, reference.kind);
+    return {
+      referenceId: reference.referenceId,
+      label: semantic.label,
+      kind: reference.kind,
+      assetId: reference.assetId,
+    };
+  });
   return {
-    shotId: item.shotId,
-    ...(item.projectReferenceId === undefined ? {} : { projectReferenceId: item.projectReferenceId }),
+    target: structuredClone(item.target),
+    referenceTarget: item.target.kind === 'reference' ? rendererReference(item.target.referenceId) : null,
     purpose: item.purpose,
     route: { ...route },
     generationCount: item.generationCount,
     durationSeconds,
     oneGenerationMinorUnits: amounts.oneGenerationMinorUnits,
     requestedTotalMinorUnits: amounts.requestedTotalMinorUnits,
+    composition: {
+      prompt: composition.prompt,
+      inputs: { ...structuredClone(composition.inputs), referenceInputs },
+    },
   };
 };
 
@@ -1453,15 +1555,16 @@ const projectRendererItem = (
 export const toStudioRendererSubmissionQuoteV2 = (
   quote: StudioSubmissionQuote,
   policy: StudioSpendPolicy | null,
-  resolveRoute: StudioRendererRouteLookupV2
+  resolveRoute: StudioRendererRouteLookupV2,
+  resolveReference: StudioRendererReferenceLookupV2 = () => null
 ): StudioRendererSubmissionQuoteV2 => ({
   id: quote.id,
   projectId: quote.projectId,
   projectRevision: quote.projectRevision,
   expiresAt: quote.expiresAt,
   currency: quote.currency,
-  baseItems: quote.baseItems.map((item) => projectRendererItem(item, resolveRoute)),
-  cascadeItems: quote.cascadeItems.map((item) => projectRendererItem(item, resolveRoute)),
+  baseItems: quote.baseItems.map((item) => projectRendererItem(item, resolveRoute, resolveReference)),
+  cascadeItems: quote.cascadeItems.map((item) => projectRendererItem(item, resolveRoute, resolveReference)),
   lowerMinorUnits: quote.lowerMinorUnits,
   upperMinorUnits: quote.upperMinorUnits,
   budget: evaluateStudioBudgetV2(quote, policy).verdict,

@@ -8,7 +8,6 @@ export { createEmptyStudioProjectV2 } from './factories';
 export * from './exports';
 export * from './generation';
 export * from './pricing';
-export * from './references';
 export {
   deriveStudioDirtyShotsV2,
   deriveStudioInboundShotReferencesV2,
@@ -16,7 +15,6 @@ export {
   type StudioInboundShotReferenceKindV2,
   type StudioInboundShotReferenceV2,
 } from './chain';
-export { createStudioLineHistoryId } from './mutations/identity';
 export {
   advanceStudioWaitingBindingsV2,
   terminalizeStudioUnboundDependenciesV2,

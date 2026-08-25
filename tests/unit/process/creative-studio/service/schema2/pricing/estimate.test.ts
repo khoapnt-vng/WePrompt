@@ -10,25 +10,32 @@ import { describe, expect, it } from 'vitest';
 import {
   STUDIO_MAX_SHOTS_PER_BEAT,
   type StudioAssetV2,
+  type StudioGenerationReferenceInputSnapshot,
   type StudioGenerationRequestPlan,
+  type StudioJobPurpose,
+  type StudioMediaModelRef,
+  type StudioPrepareGenerationChoiceV2,
   type StudioPrepareSubmissionRequestV2,
   type StudioProjectV2,
   type StudioQuotedGeneration,
 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/factories';
 import {
+  composeStudioGenerationV2,
   createStudioDeferredGenerationRequestPlan,
   createStudioBoardGenerationRequestPlanForShot,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
   createStudioResolvedGenerationRequestPlan,
+  deriveStudioInstructionProfileV2,
+  studioGenerationCompositionDigestV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
   createStudioRateCardV2,
   createStudioSubmissionQuoteCoreV2,
-  deriveStudioProjectReferenceSubmissionQuoteGraphV2,
-  deriveStudioSubmissionQuoteCoresV2,
-  deriveStudioSubmissionQuoteGraphV2,
+  deriveStudioProjectReferenceSubmissionQuoteGraphV2 as deriveStudioProjectReferenceSubmissionQuoteGraphV2Impl,
+  deriveStudioSubmissionQuoteCoresV2 as deriveStudioSubmissionQuoteCoresV2Impl,
+  deriveStudioSubmissionQuoteGraphV2 as deriveStudioSubmissionQuoteGraphV2Impl,
   evaluateStudioBudgetV2,
   priceStudioSubmissionQuoteGraphV2,
   studioSubmissionQuoteCoresEqual,
@@ -53,26 +60,53 @@ const videoRate = {
   rateMinorUnits: 7,
 } as const;
 
-const template = {
-  prompt: 'A precise cinematic frame',
-  aspectRatio: '16:9',
-  resolution: '1080p',
-  durationSeconds: 8,
-  referenceInputs: [],
-} as const;
+const imageProvider: StudioMediaModelRef = {
+  providerId: 'provider_image',
+  adapterId: 'weprompt-image-v1',
+  model: 'image-model',
+};
+const videoProvider: StudioMediaModelRef = {
+  providerId: 'provider_video',
+  adapterId: 'openrouter-video-v1',
+  model: 'video-model',
+};
+const resolveRoute = (routeId: string, purpose: StudioJobPurpose) => {
+  if (routeId === imageRate.routeId && purpose !== 'video_take') {
+    return { provider: imageProvider, maxConditioningImages: 24 };
+  }
+  if (routeId === videoRate.routeId && purpose === 'video_take') {
+    return { provider: videoProvider, maxConditioningImages: 0 };
+  }
+  throw new Error('missing test route');
+};
+
+const deriveStudioSubmissionQuoteCoresV2 = (
+  input: Omit<Parameters<typeof deriveStudioSubmissionQuoteCoresV2Impl>[0], 'resolveRoute'> &
+    Partial<Pick<Parameters<typeof deriveStudioSubmissionQuoteCoresV2Impl>[0], 'resolveRoute'>>
+) => deriveStudioSubmissionQuoteCoresV2Impl({ ...input, resolveRoute: input.resolveRoute ?? resolveRoute });
+
+const deriveStudioSubmissionQuoteGraphV2 = (
+  input: Omit<Parameters<typeof deriveStudioSubmissionQuoteGraphV2Impl>[0], 'resolveRoute'> &
+    Partial<Pick<Parameters<typeof deriveStudioSubmissionQuoteGraphV2Impl>[0], 'resolveRoute'>>
+) => deriveStudioSubmissionQuoteGraphV2Impl({ ...input, resolveRoute: input.resolveRoute ?? resolveRoute });
+
+const deriveStudioProjectReferenceSubmissionQuoteGraphV2 = (
+  input: Omit<Parameters<typeof deriveStudioProjectReferenceSubmissionQuoteGraphV2Impl>[0], 'resolveRoute'> &
+    Partial<Pick<Parameters<typeof deriveStudioProjectReferenceSubmissionQuoteGraphV2Impl>[0], 'resolveRoute'>>
+) =>
+  deriveStudioProjectReferenceSubmissionQuoteGraphV2Impl({
+    ...input,
+    resolveRoute: input.resolveRoute ?? resolveRoute,
+  });
 
 const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   id,
-  line: `Line for ${id}`,
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Shooting script for ${id}`,
   durationSeconds: 8,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
-  referenceIds: [],
+  referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -90,12 +124,9 @@ const makeProject = (shotIds = ['shot_1', 'shot_2']): StudioSubmissionQuoteEstim
     beat_1: {
       id: 'beat_1',
       title: 'Opening',
-      action: 'Move through the space',
-      look: 'Clean daylight',
-      actionRevision: 1,
+      story: 'Move through the clean daylight space.',
       targetSeconds: null,
       shotOrder: [...shotIds],
-      lineHistory: [],
     },
   },
   shots: Object.fromEntries(shotIds.map((shotId) => [shotId, makeShot(shotId)])),
@@ -103,18 +134,65 @@ const makeProject = (shotIds = ['shot_1', 'shot_2']): StudioSubmissionQuoteEstim
   jobs: {},
 });
 
-const resolvedSeed = (): StudioGenerationRequestPlan =>
-  createStudioResolvedGenerationRequestPlan({ purpose: 'seed_still', template, conditioningInput: null });
+const compositionFor = (
+  shotId: string,
+  purpose: Exclude<StudioJobPurpose, 'reference_image'>,
+  referenceInputs: readonly StudioGenerationReferenceInputSnapshot[] = []
+) => {
+  const route = purpose === 'video_take' ? videoProvider : imageProvider;
+  const source = {
+    kind: 'shot' as const,
+    beatId: 'beat_1',
+    story: 'Move through the clean daylight space.',
+    shotId,
+    shootingScript: `Shooting script for ${shotId}`,
+  };
+  return composeStudioGenerationV2({
+    projectRevision: 7,
+    brief: 'A precise cinematic frame.',
+    rules: [],
+    source,
+    purpose,
+    referenceInputs: [...referenceInputs],
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route,
+    boardStyle: purpose === 'board_still' ? 'grey_tone' : null,
+    instructionProfile: deriveStudioInstructionProfileV2(route, purpose, source),
+  });
+};
 
-const resolvedVideo = (): StudioGenerationRequestPlan =>
+const templateFor = (shotId: string, purpose: Exclude<StudioJobPurpose, 'reference_image'>) => {
+  const composition = compositionFor(shotId, purpose);
+  return {
+    composition,
+    aspectRatio: composition.inputs.aspectRatio,
+    resolution: composition.inputs.resolution,
+    durationSeconds: purpose === 'board_still' ? 4 : 8,
+    referenceInputs: composition.inputs.referenceInputs,
+  };
+};
+
+const resolvedSeed = (shotId = 'shot_1'): StudioGenerationRequestPlan =>
+  createStudioResolvedGenerationRequestPlan({
+    purpose: 'seed_still',
+    template: templateFor(shotId, 'seed_still'),
+    conditioningInput: null,
+  });
+
+const resolvedVideo = (shotId = 'shot_1'): StudioGenerationRequestPlan =>
   createStudioResolvedGenerationRequestPlan({
     purpose: 'video_take',
-    template,
+    template: templateFor(shotId, 'video_take'),
     conditioningInput: { kind: 'seed_still', assetId: 'take_seed' },
   });
 
-const resolvedBoard = (): StudioGenerationRequestPlan =>
-  createStudioResolvedGenerationRequestPlan({ purpose: 'board_still', template, conditioningInput: null });
+const resolvedBoard = (shotId = 'shot_1'): StudioGenerationRequestPlan =>
+  createStudioResolvedGenerationRequestPlan({
+    purpose: 'board_still',
+    template: templateFor(shotId, 'board_still'),
+    conditioningInput: null,
+  });
 
 const draft = (
   shotId: string,
@@ -122,7 +200,7 @@ const draft = (
   generationCount: number,
   requestPlan: StudioGenerationRequestPlan
 ): StudioUnpricedQuotedGenerationV2 => ({
-  shotId,
+  target: { kind: 'shot', shotId },
   purpose,
   routeId: purpose === 'video_take' ? videoRate.routeId : imageRate.routeId,
   generationCount,
@@ -133,13 +211,13 @@ const makeInput = (): StudioSubmissionQuoteEstimateInputV2 => {
   const seedId = createStudioQuotedGenerationId({
     projectId: 'project_1',
     projectRevision: 7,
-    shotId: 'shot_1',
+    target: { kind: 'shot', shotId: 'shot_1' },
     purpose: 'seed_still',
   });
   const upstreamVideoId = createStudioQuotedGenerationId({
     projectId: 'project_1',
     projectRevision: 7,
-    shotId: 'shot_1',
+    target: { kind: 'shot', shotId: 'shot_1' },
     purpose: 'video_take',
   });
   return {
@@ -153,7 +231,7 @@ const makeInput = (): StudioSubmissionQuoteEstimateInputV2 => {
         'video_take',
         1,
         createStudioDeferredGenerationRequestPlan({
-          template,
+          template: templateFor('shot_1', 'video_take'),
           dependency: { kind: 'authorized_seed', upstreamItemId: seedId, shotId: 'shot_1' },
         })
       ),
@@ -162,7 +240,7 @@ const makeInput = (): StudioSubmissionQuoteEstimateInputV2 => {
         'video_take',
         1,
         createStudioDeferredGenerationRequestPlan({
-          template,
+          template: templateFor('shot_2', 'video_take'),
           dependency: {
             kind: 'authorized_predecessor',
             upstreamItemId: upstreamVideoId,
@@ -177,7 +255,12 @@ const makeInput = (): StudioSubmissionQuoteEstimateInputV2 => {
 const addDerivationAsset = (
   project: StudioProjectV2,
   asset: Pick<StudioAssetV2, 'id' | 'shotId' | 'mediaKind' | 'managedAsset'> &
-    Partial<Pick<StudioAssetV2, 'durationSeconds' | 'briefReferenceRole' | 'briefReferenceLabel'>>
+    Partial<
+      Pick<
+        StudioAssetV2,
+        'durationSeconds' | 'projectReferenceId' | 'generationReferenceAssetIds' | 'producerJobId' | 'compositionDigest'
+      >
+    >
 ): StudioAssetV2 => {
   const result: StudioAssetV2 = {
     id: asset.id,
@@ -189,9 +272,11 @@ const addDerivationAsset = (
     byteSize: 10,
     sha256: 'a'.repeat(64),
     ...(asset.durationSeconds === undefined ? {} : { durationSeconds: asset.durationSeconds }),
-    ...(asset.briefReferenceRole === undefined ? {} : { briefReferenceRole: asset.briefReferenceRole }),
-    ...(asset.briefReferenceLabel === undefined ? {} : { briefReferenceLabel: asset.briefReferenceLabel }),
     createdAt: '2026-08-18T00:00:00.000Z',
+    projectReferenceId: asset.projectReferenceId ?? null,
+    generationReferenceAssetIds: asset.generationReferenceAssetIds ?? [],
+    producerJobId: asset.producerJobId ?? null,
+    compositionDigest: asset.compositionDigest ?? null,
   };
   project.assets[result.id] = result;
   if (result.shotId !== null) project.shots[result.shotId]!.assetIds.push(result.id);
@@ -204,9 +289,9 @@ const makePendingCharacterReference = (id: string, label: string): StudioProject
   label,
   prompt: `A stable character sheet for ${label}.`,
   candidateAssetId: null,
-  candidateJobId: null,
   approvedAssetId: null,
   supersededAssetIds: [],
+  jobIds: [],
   createdAt: '2026-08-18T00:00:00.000Z',
   updatedAt: '2026-08-18T00:00:00.000Z',
 });
@@ -214,7 +299,7 @@ const makePendingCharacterReference = (id: string, label: string): StudioProject
 const makeDerivationProject = (): StudioProjectV2 => {
   const project = createEmptyStudioProjectV2(
     {
-      name: 'Quote derivation',
+      name: 'Quote composition',
       brief: 'A quiet journey through a changing space.',
       aspectRatio: '16:9',
       targetDurationSeconds: 24,
@@ -230,20 +315,19 @@ const makeDerivationProject = (): StudioProjectV2 => {
   project.beats.beat_1 = {
     id: 'beat_1',
     title: 'Opening',
-    action: 'Move through the space',
-    look: 'Clean daylight',
-    actionRevision: 1,
+    story: 'Move through the clean daylight space.',
     targetSeconds: null,
     shotOrder: ['shot_1', 'shot_2', 'shot_3'],
-    lineHistory: [],
   };
   for (const shotId of project.beats.beat_1.shotOrder) project.shots[shotId] = makeShot(shotId);
   const backgroundAsset = addDerivationAsset(project, {
     id: 'approved_background',
-    shotId: 'shot_1',
+    shotId: null,
     mediaKind: 'image',
     managedAsset: { collection: 'assets', fileName: 'approved_background.png' },
+    projectReferenceId: 'reference_background',
   });
+  project.referencePlanStatus = 'planned';
   project.referenceOrder = ['reference_background'];
   project.references.reference_background = {
     id: 'reference_background',
@@ -251,14 +335,18 @@ const makeDerivationProject = (): StudioProjectV2 => {
     label: 'Recurring space',
     prompt: 'The same clean daylight atrium.',
     candidateAssetId: null,
-    candidateJobId: null,
     approvedAssetId: backgroundAsset.id,
     supersededAssetIds: [],
+    jobIds: [],
     createdAt: '2026-08-18T00:00:00.000Z',
     updatedAt: '2026-08-18T00:00:00.000Z',
   };
   for (const shotId of project.beats.beat_1.shotOrder) {
-    project.shots[shotId]!.referenceIds = ['reference_background'];
+    project.shots[shotId]!.referenceBinding = {
+      status: 'ready',
+      characterReferenceIds: [],
+      backgroundReferenceId: 'reference_background',
+    };
   }
   const seed = addDerivationAsset(project, {
     id: 'seed_1',
@@ -285,17 +373,17 @@ const makeBoardDerivationProject = (shotCount = 3): StudioProjectV2 => {
       {
         id: beatId,
         title: beatIndex === 0 ? 'Opening' : `Beat ${beatIndex + 1}`,
-        action: beatIndex === 0 ? 'Move through the space' : `Action ${beatIndex + 1}`,
-        look: beatIndex === 0 ? 'Clean daylight' : `Look ${beatIndex + 1}`,
-        actionRevision: 1,
+        story: beatIndex === 0 ? 'Move through the clean daylight space.' : `Story ${beatIndex + 1}`,
         targetSeconds: null,
         shotOrder: shotIds.slice(beatIndex * STUDIO_MAX_SHOTS_PER_BEAT, (beatIndex + 1) * STUDIO_MAX_SHOTS_PER_BEAT),
-        lineHistory: [],
       },
     ])
   );
   project.shots = Object.fromEntries(shotIds.map((shotId) => [shotId, makeShot(shotId)]));
   project.assets = {};
+  project.referencePlanStatus = 'planned';
+  project.referenceOrder = [];
+  project.references = {};
   return project;
 };
 
@@ -304,7 +392,13 @@ const addCurrentBoardPanel = (project: StudioProjectV2, shotId: string, assetId 
   const beat = Object.values(project.beats).find((candidate) => candidate.shotOrder.includes(shotId));
   const shot = project.shots[shotId];
   if (beat === undefined || shot === undefined) throw new Error('Board fixture requires one active Shot');
-  const requestPlan = createStudioBoardGenerationRequestPlanForShot({ project, beat, shot });
+  const requestPlan = createStudioBoardGenerationRequestPlanForShot({
+    project,
+    beat,
+    shot,
+    route: imageProvider,
+    referenceInputs: [],
+  });
   if (requestPlan === null || requestPlan.kind !== 'resolved') throw new Error('Board fixture request must resolve');
   const asset = addDerivationAsset(project, {
     id: assetId,
@@ -316,9 +410,9 @@ const addCurrentBoardPanel = (project: StudioProjectV2, shotId: string, assetId 
   project.jobs[jobId] = {
     id: jobId,
     projectId: project.id,
-    shotId,
+    target: { kind: 'shot', shotId },
     status: 'succeeded',
-    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
+    provider: imageProvider,
     idempotencyKey: `idem_${assetId}`,
     providerJobId: `remote_${assetId}`,
     remoteStartedAt: '2026-08-18T00:00:00.000Z',
@@ -334,6 +428,7 @@ const addCurrentBoardPanel = (project: StudioProjectV2, shotId: string, assetId 
     purpose: 'board_still',
     authorizationId: `auth_${assetId}`,
     authorizationItemId: `item_${assetId}`,
+    composition: requestPlan.snapshot.composition,
     requestPlan,
     requestSnapshot: requestPlan.snapshot,
     spendReceipt: {
@@ -351,6 +446,9 @@ const addCurrentBoardPanel = (project: StudioProjectV2, shotId: string, assetId 
     },
     outputAssetIdsByRole: { primary: asset.id, poster: null },
   };
+  asset.producerJobId = jobId;
+  asset.compositionDigest = studioGenerationCompositionDigestV2(requestPlan.snapshot.composition);
+  asset.generationReferenceAssetIds = requestPlan.snapshot.referenceInputs.map((reference) => reference.assetId);
   shot.jobIds.push(jobId);
   shot.boardAssetId = asset.id;
   return asset;
@@ -381,12 +479,10 @@ const prepareRequest = (
 
 const choice = (
   shotId: string,
-  purpose: StudioQuotedGeneration['purpose'],
-  referenceAssetId: string | null = null
+  purpose: StudioPrepareGenerationChoiceV2['purpose']
 ): StudioPrepareSubmissionRequestV2['baseChoices'][number] => ({
-  shotId,
+  target: { kind: 'shot', shotId },
   purpose,
-  referenceAssetId,
 });
 
 const deriveFirstSeedQuote = (project: StudioProjectV2) =>
@@ -439,9 +535,24 @@ describe('schema-2 Studio estimates', () => {
       upperMinorUnits: 75,
       cascadeItems: [],
       baseItems: [
-        { shotId: 'shot_1', purpose: 'board_still', routeId: 'image_route', rateUnit: 'generation' },
-        { shotId: 'shot_2', purpose: 'board_still', routeId: 'image_route', rateUnit: 'generation' },
-        { shotId: 'shot_3', purpose: 'board_still', routeId: 'image_route', rateUnit: 'generation' },
+        {
+          target: { kind: 'shot', shotId: 'shot_1' },
+          purpose: 'board_still',
+          routeId: 'image_route',
+          rateUnit: 'generation',
+        },
+        {
+          target: { kind: 'shot', shotId: 'shot_2' },
+          purpose: 'board_still',
+          routeId: 'image_route',
+          rateUnit: 'generation',
+        },
+        {
+          target: { kind: 'shot', shotId: 'shot_3' },
+          purpose: 'board_still',
+          routeId: 'image_route',
+          rateUnit: 'generation',
+        },
       ],
     });
     const firstPlan = options.baseOnly.baseItems[0]!.requestPlan;
@@ -455,9 +566,11 @@ describe('schema-2 Studio estimates', () => {
         }),
       })
     );
-    expect(firstPlan.kind === 'resolved' ? firstPlan.snapshot.prompt : '').toContain('ACTION\nMove through the space');
-    expect(firstPlan.kind === 'resolved' ? firstPlan.snapshot.prompt : '').toContain(
-      'BOARD DRAWING\nRestrained grey-tone storyboard drawing'
+    expect(firstPlan.kind === 'resolved' ? firstPlan.snapshot.composition.prompt : '').toContain(
+      'STORY\nMove through the clean daylight space.'
+    );
+    expect(firstPlan.kind === 'resolved' ? firstPlan.snapshot.composition.prompt : '').toContain(
+      'BOARD STYLE\nUse a restrained grey-tone storyboard drawing'
     );
   });
 
@@ -491,7 +604,14 @@ describe('schema-2 Studio estimates', () => {
       prepareRequest([choice('shot_1', 'board_still')], [choice('shot_2', 'board_still')]),
       'invalid_prepare_request',
     ],
-    ['renderer reference', prepareRequest([choice('shot_1', 'board_still', 'reference_1')], []), 'invalid_reference'],
+    [
+      'renderer reference',
+      {
+        ...prepareRequest([choice('shot_1', 'board_still')], []),
+        baseChoices: [{ ...choice('shot_1', 'board_still'), referenceAssetId: 'reference_1' }],
+      },
+      'invalid_prepare_request',
+    ],
     [
       'out-of-order rows',
       prepareRequest([choice('shot_2', 'board_still'), choice('shot_1', 'board_still')], []),
@@ -533,7 +653,7 @@ describe('schema-2 Studio estimates', () => {
     );
     project.boardStyle = 'grey_tone';
     project.jobs.job_board = {
-      shotId: 'shot_1',
+      target: { kind: 'shot', shotId: 'shot_1' },
       purpose: 'board_still',
       status: 'running',
     } as StudioProjectV2['jobs'][string];
@@ -558,7 +678,12 @@ describe('schema-2 Studio estimates', () => {
 
     expect(options.withCascade).toBeNull();
     expect(options.baseOnly.cascadeItems).toEqual([]);
-    expect(options.baseOnly.baseItems.map(({ shotId, purpose }) => [shotId, purpose])).toEqual([
+    expect(
+      options.baseOnly.baseItems.map(({ target, purpose }) => [
+        target.kind === 'shot' ? target.shotId : target.referenceId,
+        purpose,
+      ])
+    ).toEqual([
       ['shot_1', 'video_take'],
       ['shot_2', 'video_take'],
     ]);
@@ -611,7 +736,7 @@ describe('schema-2 Studio estimates', () => {
     ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
     const stale = structuredClone(project);
-    stale.shots.shot_1!.line = 'Changed after Board generation';
+    stale.shots.shot_1!.shootingScript = 'Changed after Board generation';
     expect(() =>
       deriveStudioSubmissionQuoteGraphV2({ project: stale, request: boardPromotionRequest('shot_1', panel.id) })
     ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
@@ -702,7 +827,7 @@ describe('schema-2 Studio estimates', () => {
     expect(options.withCascade).toBeNull();
     expect(options.baseOnly.baseItems).toEqual([
       expect.objectContaining({
-        shotId: 'shot_2',
+        target: { kind: 'shot', shotId: 'shot_2' },
         purpose: 'video_take',
         generationCount: 1,
         requestPlan: expect.objectContaining({
@@ -711,7 +836,7 @@ describe('schema-2 Studio estimates', () => {
         }),
       }),
       expect.objectContaining({
-        shotId: 'shot_3',
+        target: { kind: 'shot', shotId: 'shot_3' },
         purpose: 'video_take',
         generationCount: 1,
         requestPlan: expect.objectContaining({
@@ -731,21 +856,12 @@ describe('schema-2 Studio estimates', () => {
     const project = makeDerivationProject();
     const historicalReferenceOutput = addDerivationAsset(project, {
       id: 'historical_reference_output',
-      shotId: 'shot_2',
+      shotId: null,
       mediaKind: 'image',
       managedAsset: { collection: 'assets', fileName: 'historical_reference_output.png' },
-    });
-    const jobId = 'historical_reference_job';
-    project.jobs[jobId] = {
-      id: jobId,
-      projectId: project.id,
-      shotId: 'shot_2',
-      status: 'succeeded',
-      purpose: 'seed_still',
       projectReferenceId: 'reference_background',
-      outputAssetIds: [historicalReferenceOutput.id],
-    } as StudioProjectV2['jobs'][string];
-    project.shots.shot_2!.jobIds.push(jobId);
+    });
+    expect(historicalReferenceOutput.projectReferenceId).toBe('reference_background');
 
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
@@ -754,7 +870,11 @@ describe('schema-2 Studio estimates', () => {
     });
 
     expect(
-      options.baseOnly.baseItems.map(({ shotId, purpose, generationCount }) => [shotId, purpose, generationCount])
+      options.baseOnly.baseItems.map(({ target, purpose, generationCount }) => [
+        target.kind === 'shot' ? target.shotId : target.referenceId,
+        purpose,
+        generationCount,
+      ])
     ).toEqual([
       ['shot_2', 'seed_still', 1],
       ['shot_2', 'video_take', 1],
@@ -773,7 +893,11 @@ describe('schema-2 Studio estimates', () => {
 
     expect(options.withCascade).toBeNull();
     expect(
-      options.baseOnly.baseItems.map(({ shotId, purpose, generationCount }) => [shotId, purpose, generationCount])
+      options.baseOnly.baseItems.map(({ target, purpose, generationCount }) => [
+        target.kind === 'shot' ? target.shotId : target.referenceId,
+        purpose,
+        generationCount,
+      ])
     ).toEqual([
       ['shot_2', 'seed_still', 1],
       ['shot_2', 'video_take', 1],
@@ -808,7 +932,11 @@ describe('schema-2 Studio estimates', () => {
 
     expect(options.withCascade).toBeNull();
     expect(
-      options.baseOnly.baseItems.map(({ shotId, purpose, generationCount }) => [shotId, purpose, generationCount])
+      options.baseOnly.baseItems.map(({ target, purpose, generationCount }) => [
+        target.kind === 'shot' ? target.shotId : target.referenceId,
+        purpose,
+        generationCount,
+      ])
     ).toEqual([
       ['shot_2', 'video_take', 1],
       ['shot_3', 'video_take', 1],
@@ -862,7 +990,7 @@ describe('schema-2 Studio estimates', () => {
   it('refuses an in-flight mandatory continuity row instead of truncating its paid graph', () => {
     const project = makeDerivationProject();
     project.jobs.active_downstream = {
-      shotId: 'shot_3',
+      target: { kind: 'shot', shotId: 'shot_3' },
       purpose: 'video_take',
       status: 'running',
     } as StudioProjectV2['jobs'][string];
@@ -891,7 +1019,12 @@ describe('schema-2 Studio estimates', () => {
     expect(options.request).toEqual(request);
     expect(options.withCascade?.baseItems).toEqual(options.baseOnly.baseItems);
     expect(options.baseOnly.cascadeItems).toEqual([]);
-    expect(options.withCascade?.cascadeItems.map(({ shotId, requestPlan }) => [shotId, requestPlan])).toEqual([
+    expect(
+      options.withCascade?.cascadeItems.map(({ target, requestPlan }) => [
+        target.kind === 'shot' ? target.shotId : target.referenceId,
+        requestPlan,
+      ])
+    ).toEqual([
       [
         'shot_2',
         expect.objectContaining({
@@ -902,7 +1035,7 @@ describe('schema-2 Studio estimates', () => {
             upstreamItemId: createStudioQuotedGenerationId({
               projectId: project.id,
               projectRevision: project.revision,
-              shotId: 'shot_1',
+              target: { kind: 'shot', shotId: 'shot_1' },
               purpose: 'video_take',
             }),
           },
@@ -918,7 +1051,7 @@ describe('schema-2 Studio estimates', () => {
             upstreamItemId: createStudioQuotedGenerationId({
               projectId: project.id,
               projectRevision: project.revision,
-              shotId: 'shot_2',
+              target: { kind: 'shot', shotId: 'shot_2' },
               purpose: 'video_take',
             }),
           },
@@ -969,7 +1102,12 @@ describe('schema-2 Studio estimates', () => {
       choice('shot_2', 'video_take'),
       choice('shot_3', 'video_take'),
     ]);
-    expect(options.withCascade?.cascadeItems.map(({ shotId, generationCount }) => [shotId, generationCount])).toEqual([
+    expect(
+      options.withCascade?.cascadeItems.map(({ target, generationCount }) => [
+        target.kind === 'shot' ? target.shotId : target.referenceId,
+        generationCount,
+      ])
+    ).toEqual([
       ['shot_1', 1],
       ['shot_2', 1],
       ['shot_3', 1],
@@ -990,7 +1128,7 @@ describe('schema-2 Studio estimates', () => {
     });
     project.shots.shot_4!.seedStillId = hardCutSeed.id;
     project.jobs.external_job = {
-      shotId: 'shot_3',
+      target: { kind: 'shot', shotId: 'shot_3' },
       purpose: 'video_take',
       status: 'queued_remote',
     } as StudioProjectV2['jobs'][string];
@@ -1056,52 +1194,6 @@ describe('schema-2 Studio estimates', () => {
     ).toThrow(expect.objectContaining({ code: 'missing_route' }));
   });
 
-  it('derives an exact seed-only handoff quote for arbitrary ordered active shots without video authority', () => {
-    const project = makeDerivationProject();
-    const request: StudioPrepareSubmissionRequestV2 = {
-      ...prepareRequest([choice('shot_2', 'seed_still'), choice('shot_3', 'seed_still')], []),
-      originReferenceHandoffId: 'handoff_1',
-    };
-
-    const options = deriveStudioSubmissionQuoteCoresV2({
-      project,
-      request,
-      rateCard: createStudioRateCardV2([imageRate]),
-    });
-
-    expect(options.request).toEqual(request);
-    expect(options.withCascade).toBeNull();
-    expect(options.baseOnly).toMatchObject({
-      originReferenceHandoffId: 'handoff_1',
-      lowerMinorUnits: 50,
-      upperMinorUnits: 50,
-      cascadeItems: [],
-      baseItems: [
-        { shotId: 'shot_2', purpose: 'seed_still', routeId: 'image_route', generationCount: 1 },
-        { shotId: 'shot_3', purpose: 'seed_still', routeId: 'image_route', generationCount: 1 },
-      ],
-    });
-    expect(options.baseOnly.baseItems.every((item) => item.requestPlan.kind === 'resolved')).toBe(true);
-    expect(JSON.stringify(options)).not.toContain('video_route');
-  });
-
-  it.each([
-    ['video purpose', [choice('shot_2', 'video_take')], []],
-    ['reference asset', [choice('shot_2', 'seed_still', 'brief_ref')], []],
-    ['cascade row', [choice('shot_2', 'seed_still')], [choice('shot_2', 'video_take')]],
-  ])('rejects a reference handoff with %s', (_label, baseChoices, cascadeChoices) => {
-    expect(() =>
-      deriveStudioSubmissionQuoteCoresV2({
-        project: makeDerivationProject(),
-        request: {
-          ...prepareRequest(baseChoices, cascadeChoices),
-          originReferenceHandoffId: 'handoff_1',
-        },
-        rateCard: createStudioRateCardV2([imageRate, videoRate]),
-      })
-    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
-  });
-
   it('resolves the exact current predecessor frame when no earlier option item supplies it', () => {
     const project = makeDerivationProject();
     const take = addDerivationAsset(project, {
@@ -1160,17 +1252,20 @@ describe('schema-2 Studio estimates', () => {
 
   it('freezes multiple approved characters and exactly one background in canonical reference order', () => {
     const project = makeDerivationProject();
+    project.boardStyle = 'grey_tone';
     const characterA = addDerivationAsset(project, {
       id: 'approved_character_a',
-      shotId: 'shot_1',
+      shotId: null,
       mediaKind: 'image',
       managedAsset: { collection: 'assets', fileName: 'approved_character_a.png' },
+      projectReferenceId: 'reference_character_a',
     });
     const characterB = addDerivationAsset(project, {
       id: 'approved_character_b',
-      shotId: 'shot_1',
+      shotId: null,
       mediaKind: 'image',
       managedAsset: { collection: 'assets', fileName: 'approved_character_b.png' },
+      projectReferenceId: 'reference_character_b',
     });
     const background = project.references.reference_background!;
     project.referenceOrder = ['reference_character_a', 'reference_character_b', background.id];
@@ -1181,9 +1276,9 @@ describe('schema-2 Studio estimates', () => {
         label: 'Ming',
         prompt: 'A precise character sheet for Ming.',
         candidateAssetId: null,
-        candidateJobId: null,
         approvedAssetId: characterA.id,
         supersededAssetIds: [],
+        jobIds: [],
         createdAt: '2026-08-18T00:00:00.000Z',
         updatedAt: '2026-08-18T00:00:00.000Z',
       },
@@ -1193,22 +1288,23 @@ describe('schema-2 Studio estimates', () => {
         label: 'Mei',
         prompt: 'A precise character sheet for Mei.',
         candidateAssetId: null,
-        candidateJobId: null,
         approvedAssetId: characterB.id,
         supersededAssetIds: [],
+        jobIds: [],
         createdAt: '2026-08-18T00:00:00.000Z',
         updatedAt: '2026-08-18T00:00:00.000Z',
       },
       [background.id]: background,
     };
-    project.shots.shot_1!.referenceIds = [...project.referenceOrder];
+    project.shots.shot_1!.referenceBinding = {
+      status: 'ready',
+      characterReferenceIds: ['reference_character_a', 'reference_character_b'],
+      backgroundReferenceId: background.id,
+    };
 
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
-      request: prepareRequest(
-        [choice('shot_1', 'seed_still')],
-        [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-      ),
+      request: prepareRequest([choice('shot_1', 'board_still')], []),
       rateCard: createStudioRateCardV2([imageRate, videoRate]),
     });
 
@@ -1217,15 +1313,55 @@ describe('schema-2 Studio estimates', () => {
         kind: 'resolved',
         snapshot: expect.objectContaining({
           referenceInputs: [
-            { assetId: characterA.id, sha256: characterA.sha256 },
-            { assetId: characterB.id, sha256: characterB.sha256 },
-            { assetId: background.approvedAssetId, sha256: project.assets[background.approvedAssetId!]!.sha256 },
+            {
+              referenceId: 'reference_character_a',
+              kind: 'character',
+              assetId: characterA.id,
+              sha256: characterA.sha256,
+            },
+            {
+              referenceId: 'reference_character_b',
+              kind: 'character',
+              assetId: characterB.id,
+              sha256: characterB.sha256,
+            },
+            {
+              referenceId: background.id,
+              kind: 'background',
+              assetId: background.approvedAssetId,
+              sha256: project.assets[background.approvedAssetId!]!.sha256,
+            },
           ],
         }),
       })
     );
 
-    project.shots.shot_1!.referenceIds = ['reference_character_a', 'reference_character_b'];
+    const rendererQuote = toStudioRendererSubmissionQuoteV2(
+      { ...options.baseOnly, id: 'quote_bound_board', expiresAt: '2026-08-18T00:05:00.000Z' },
+      null,
+      (routeId) => ({ choiceId: routeId, providerId: 'image-provider', model: 'image-model' }),
+      (referenceId) => {
+        const reference = project.references[referenceId];
+        return reference === undefined ? null : { kind: reference.kind, label: reference.label };
+      }
+    );
+    expect(rendererQuote.baseItems[0]?.referenceTarget).toBeNull();
+    expect(rendererQuote.baseItems[0]?.composition.inputs.referenceInputs).toEqual([
+      { referenceId: 'reference_character_a', kind: 'character', label: 'Ming', assetId: characterA.id },
+      { referenceId: 'reference_character_b', kind: 'character', label: 'Mei', assetId: characterB.id },
+      {
+        referenceId: background.id,
+        kind: 'background',
+        label: 'Recurring space',
+        assetId: background.approvedAssetId,
+      },
+    ]);
+    const serializedRendererQuote = JSON.stringify(rendererQuote);
+    expect(serializedRendererQuote).not.toContain('sha256');
+    expect(serializedRendererQuote).not.toContain(characterA.sha256);
+    expect(serializedRendererQuote).not.toContain('requestPlan');
+
+    project.shots.shot_1!.referenceBinding.backgroundReferenceId = 'reference_character_a';
     expect(() =>
       deriveStudioSubmissionQuoteCoresV2({
         project,
@@ -1237,17 +1373,18 @@ describe('schema-2 Studio estimates', () => {
 
   it('fails closed for malformed, ambiguous, missing, or unapproved Shot reference composition', () => {
     const unknown = makeDerivationProject();
-    unknown.shots.shot_1!.referenceIds = ['reference_unknown'];
+    unknown.shots.shot_1!.referenceBinding.backgroundReferenceId = 'reference_unknown';
 
     const duplicate = makeDerivationProject();
-    duplicate.shots.shot_1!.referenceIds = ['reference_background', 'reference_background'];
+    duplicate.shots.shot_1!.referenceBinding.characterReferenceIds = ['reference_background'];
 
     const ambiguousBackground = makeDerivationProject();
     const secondBackgroundAsset = addDerivationAsset(ambiguousBackground, {
       id: 'approved_background_2',
-      shotId: 'shot_1',
+      shotId: null,
       mediaKind: 'image',
       managedAsset: { collection: 'assets', fileName: 'approved_background_2.png' },
+      projectReferenceId: 'reference_background_2',
     });
     ambiguousBackground.referenceOrder.push('reference_background_2');
     ambiguousBackground.references.reference_background_2 = {
@@ -1256,21 +1393,25 @@ describe('schema-2 Studio estimates', () => {
       label: 'Second recurring space',
       prompt: 'A different location that makes the Shot ambiguous.',
       candidateAssetId: null,
-      candidateJobId: null,
       approvedAssetId: secondBackgroundAsset.id,
       supersededAssetIds: [],
+      jobIds: [],
       createdAt: '2026-08-18T00:00:00.000Z',
       updatedAt: '2026-08-18T00:00:00.000Z',
     };
-    ambiguousBackground.shots.shot_1!.referenceIds = [...ambiguousBackground.referenceOrder];
+    ambiguousBackground.shots.shot_1!.referenceBinding.characterReferenceIds = ['reference_background_2'];
 
     const missing = makeDerivationProject();
-    missing.shots.shot_1!.referenceIds = [];
+    missing.shots.shot_1!.referenceBinding = {
+      status: 'unassigned',
+      characterReferenceIds: [],
+      backgroundReferenceId: null,
+    };
 
     const unapprovedCharacter = makeDerivationProject();
     unapprovedCharacter.referenceOrder.unshift('reference_character');
     unapprovedCharacter.references.reference_character = makePendingCharacterReference('reference_character', 'Ming');
-    unapprovedCharacter.shots.shot_1!.referenceIds = ['reference_character', 'reference_background'];
+    unapprovedCharacter.shots.shot_1!.referenceBinding.characterReferenceIds = ['reference_character'];
 
     const unapprovedBackground = makeDerivationProject();
     unapprovedBackground.references.reference_background!.approvedAssetId = null;
@@ -1287,7 +1428,7 @@ describe('schema-2 Studio estimates', () => {
     }
   });
 
-  it('keeps two reference candidates sharing one proxy Shot distinct and gates backgrounds on character approval', () => {
+  it('keeps two direct semantic reference targets distinct and gates backgrounds on character approval', () => {
     const project = makeDerivationProject();
     const background = project.references.reference_background!;
     project.referenceOrder = ['reference_ming', 'reference_mei', background.id];
@@ -1296,7 +1437,6 @@ describe('schema-2 Studio estimates', () => {
       reference_mei: makePendingCharacterReference('reference_mei', 'Mei'),
       [background.id]: background,
     };
-    project.shots.shot_1!.referenceIds = [...project.referenceOrder];
 
     const graph = deriveStudioProjectReferenceSubmissionQuoteGraphV2({
       project,
@@ -1311,19 +1451,27 @@ describe('schema-2 Studio estimates', () => {
       graph,
       rateCard: createStudioRateCardV2([imageRate]),
     }).baseOnly;
-    expect(quote.baseItems.map((item) => [item.shotId, item.projectReferenceId])).toEqual([
-      ['shot_1', 'reference_ming'],
-      ['shot_1', 'reference_mei'],
+    expect(quote.baseItems.map((item) => [item.target, item.purpose])).toEqual([
+      [{ kind: 'reference', referenceId: 'reference_ming' }, 'reference_image'],
+      [{ kind: 'reference', referenceId: 'reference_mei' }, 'reference_image'],
     ]);
     expect(new Set(quote.baseItems.map((item) => item.id)).size).toBe(2);
     const rendererQuote = toStudioRendererSubmissionQuoteV2(
       { ...quote, id: 'quote_reference_characters', expiresAt: '2026-08-18T00:05:00.000Z' },
       null,
-      (routeId) => ({ choiceId: routeId, providerId: 'image-provider', model: 'image-model' })
+      (routeId) => ({ choiceId: routeId, providerId: 'image-provider', model: 'image-model' }),
+      (referenceId) => {
+        const reference = project.references[referenceId];
+        return reference === undefined ? null : { kind: reference.kind, label: reference.label };
+      }
     );
-    expect(rendererQuote.baseItems.map((item) => [item.shotId, item.projectReferenceId])).toEqual([
-      ['shot_1', 'reference_ming'],
-      ['shot_1', 'reference_mei'],
+    expect(rendererQuote.baseItems.map((item) => [item.target, item.purpose])).toEqual([
+      [{ kind: 'reference', referenceId: 'reference_ming' }, 'reference_image'],
+      [{ kind: 'reference', referenceId: 'reference_mei' }, 'reference_image'],
+    ]);
+    expect(rendererQuote.baseItems.map((item) => item.referenceTarget)).toEqual([
+      { referenceId: 'reference_ming', kind: 'character', label: 'Ming' },
+      { referenceId: 'reference_mei', kind: 'character', label: 'Mei' },
     ]);
 
     expect(() =>
@@ -1338,21 +1486,18 @@ describe('schema-2 Studio estimates', () => {
     ).toThrow(expect.objectContaining({ code: 'invalid_reference' }));
   });
 
-  it('regenerates an unassigned approved reference on its active terminal candidate owner', () => {
+  it('regenerates an approved reference after its prior direct job reached a terminal state', () => {
     const project = makeDerivationProject();
     const reference = project.references.reference_background!;
-    const candidateJobId = 'job_terminal_reference_background';
-    project.jobs[candidateJobId] = {
-      id: candidateJobId,
+    const terminalJobId = 'job_terminal_reference_background';
+    project.jobs[terminalJobId] = {
+      id: terminalJobId,
       projectId: project.id,
-      shotId: 'shot_2',
+      target: { kind: 'reference', referenceId: reference.id },
       status: 'succeeded',
-      purpose: 'seed_still',
-      projectReferenceId: reference.id,
+      purpose: 'reference_image',
     } as StudioProjectV2['jobs'][string];
-    project.shots.shot_2!.jobIds.push(candidateJobId);
-    reference.candidateJobId = candidateJobId;
-    for (const shot of Object.values(project.shots)) shot.referenceIds = [];
+    reference.jobIds.push(terminalJobId);
 
     const graph = deriveStudioProjectReferenceSubmissionQuoteGraphV2({
       project,
@@ -1365,32 +1510,29 @@ describe('schema-2 Studio estimates', () => {
 
     expect(graph.baseItems).toEqual([
       expect.objectContaining({
-        shotId: 'shot_2',
-        purpose: 'seed_still',
-        projectReferenceId: reference.id,
+        target: { kind: 'reference', referenceId: reference.id },
+        purpose: 'reference_image',
       }),
     ]);
   });
 
-  it('requires restoring a failed project-reference proxy Shot before a paid retry', () => {
+  it('allows a failed direct-reference retry after an unrelated Shot is parked', () => {
     const project = makeDerivationProject();
     const reference = project.references.reference_background!;
-    const candidateJobId = 'job_failed_reference_background';
-    project.jobs[candidateJobId] = {
-      id: candidateJobId,
+    const failedJobId = 'job_failed_reference_background';
+    project.jobs[failedJobId] = {
+      id: failedJobId,
       projectId: project.id,
-      shotId: 'shot_2',
+      target: { kind: 'reference', referenceId: reference.id },
       status: 'failed',
       error: { code: 'timeout', messageKey: 'timeout' },
-      purpose: 'seed_still',
-      projectReferenceId: reference.id,
+      purpose: 'reference_image',
     } as StudioProjectV2['jobs'][string];
-    project.shots.shot_2!.jobIds.push(candidateJobId);
-    reference.candidateJobId = candidateJobId;
+    reference.jobIds.push(failedJobId);
     project.beats.beat_1!.shotOrder = ['shot_1', 'shot_3'];
     project.bin.push({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_2', reason: 'lifted' });
 
-    expect(() =>
+    expect(
       deriveStudioProjectReferenceSubmissionQuoteGraphV2({
         project,
         request: {
@@ -1398,23 +1540,27 @@ describe('schema-2 Studio estimates', () => {
           expectedRevision: project.revision,
           referenceIds: [reference.id],
         },
-      })
-    ).toThrow(expect.objectContaining({ code: 'inactive_shot' }));
+      }).baseItems
+    ).toEqual([
+      expect.objectContaining({
+        target: { kind: 'reference', referenceId: reference.id },
+        purpose: 'reference_image',
+      }),
+    ]);
   });
 
-  it('blocks a project-reference quote while that reference has live work on any proxy Shot', () => {
+  it('blocks a project-reference quote while that semantic reference has live direct work', () => {
     const project = makeDerivationProject();
     const reference = project.references.reference_background!;
     const liveJobId = 'job_live_reference_background';
     project.jobs[liveJobId] = {
       id: liveJobId,
       projectId: project.id,
-      shotId: 'shot_3',
+      target: { kind: 'reference', referenceId: reference.id },
       status: 'running',
-      purpose: 'seed_still',
-      projectReferenceId: reference.id,
+      purpose: 'reference_image',
     } as StudioProjectV2['jobs'][string];
-    project.shots.shot_3!.jobIds.push(liveJobId);
+    reference.jobIds.push(liveJobId);
 
     expect(() =>
       deriveStudioProjectReferenceSubmissionQuoteGraphV2({
@@ -1477,11 +1623,15 @@ describe('schema-2 Studio estimates', () => {
       request: prepareRequest([choice('shot_1', 'video_take')], [choice('shot_2', 'video_take')]),
       rateCard,
     });
-    expect(hardCutOptions.withCascade?.cascadeItems.map(({ shotId }) => shotId)).toEqual(['shot_2']);
+    expect(
+      hardCutOptions.withCascade?.cascadeItems.map(({ target }) =>
+        target.kind === 'shot' ? target.shotId : target.referenceId
+      )
+    ).toEqual(['shot_2']);
 
     const inFlight = makeDerivationProject();
     inFlight.jobs.external_job = {
-      shotId: 'shot_2',
+      target: { kind: 'shot', shotId: 'shot_2' },
       purpose: 'video_take',
       status: 'queued_remote',
     } as StudioProjectV2['jobs'][string];
@@ -1517,11 +1667,11 @@ describe('schema-2 Studio estimates', () => {
     expect(() =>
       derive(
         prepareRequest(
-          [choice('shot_1', 'video_take', 'brief_ref')],
+          [{ ...choice('shot_1', 'video_take'), referenceAssetId: 'brief_ref' } as never],
           [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
         )
       )
-    ).toThrow(expect.objectContaining({ code: 'invalid_reference' }));
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
     project.shots.shot_1!.seedStillId = null;
     project.shots.shot_1!.assetIds = [];
@@ -1654,7 +1804,7 @@ describe('schema-2 Studio estimates', () => {
       'seed_still',
       1,
       createStudioDeferredGenerationRequestPlan({
-        template,
+        template: templateFor('shot_1', 'video_take'),
         dependency: { kind: 'authorized_seed', upstreamItemId: 'upstream_item', shotId: 'shot_1' },
       })
     );
@@ -1676,11 +1826,11 @@ describe('schema-2 Studio estimates', () => {
     };
 
     const mixed = boardInput();
-    mixed.baseItems.push(draft('shot_2', 'seed_still', 1, resolvedSeed()));
+    mixed.baseItems.push(draft('shot_2', 'seed_still', 1, resolvedSeed('shot_2')));
     expectInvalidQuote(mixed);
 
     const cascaded = boardInput();
-    cascaded.cascadeItems.push(draft('shot_2', 'board_still', 1, resolvedBoard()));
+    cascaded.cascadeItems.push(draft('shot_2', 'board_still', 1, resolvedBoard('shot_2')));
     expectInvalidQuote(cascaded);
 
     const handedOff = boardInput();
@@ -1697,7 +1847,7 @@ describe('schema-2 Studio estimates', () => {
       createStudioQuotedGenerationId({
         projectId: 'project_1',
         projectRevision: 7,
-        shotId: 'shot_1',
+        target: { kind: 'shot', shotId: 'shot_1' },
         purpose: 'seed_still',
       })
     );
@@ -1718,14 +1868,15 @@ describe('schema-2 Studio estimates', () => {
     );
 
     const inactive = makeInput();
-    inactive.baseItems[0] = draft('shot_parked', 'seed_still', 1, resolvedSeed());
+    inactive.baseItems[0] = draft('shot_parked', 'seed_still', 1, resolvedSeed('shot_parked'));
     expect(() => createStudioSubmissionQuoteCoreV2(inactive)).toThrow(
       expect.objectContaining({ code: 'inactive_shot' })
     );
 
     const inFlight = makeInput();
     inFlight.project.jobs.job_1 = {
-      shotId: 'shot_1',
+      target: { kind: 'shot', shotId: 'shot_1' },
+      referenceTarget: null,
       purpose: 'seed_still',
       status: 'queued_local',
     } as StudioProjectV2['jobs'][string];
@@ -1741,7 +1892,7 @@ describe('schema-2 Studio estimates', () => {
     const futureId = createStudioQuotedGenerationId({
       projectId: 'project_1',
       projectRevision: 7,
-      shotId: 'shot_2',
+      target: { kind: 'shot', shotId: 'shot_2' },
       purpose: 'video_take',
     });
     future.cascadeItems[0] = draft(
@@ -1749,7 +1900,7 @@ describe('schema-2 Studio estimates', () => {
       'video_take',
       1,
       createStudioDeferredGenerationRequestPlan({
-        template,
+        template: templateFor('shot_1', 'video_take'),
         dependency: { kind: 'authorized_seed', upstreamItemId: futureId, shotId: 'shot_1' },
       })
     );
@@ -1770,17 +1921,17 @@ describe('schema-2 Studio estimates', () => {
       project: makeProject(shotIds),
       originReferenceHandoffId: null,
       rateCard: createStudioRateCardV2([videoRate]),
-      baseItems: shotIds.map((shotId) => draft(shotId, 'video_take', 1, resolvedVideo())),
+      baseItems: shotIds.map((shotId) => draft(shotId, 'video_take', 1, resolvedVideo(shotId))),
       cascadeItems: [],
     };
 
     input.baseItems.length = 24;
     expect(createStudioSubmissionQuoteCoreV2(input).baseItems).toHaveLength(24);
-    input.baseItems.push(draft('shot_25', 'video_take', 1, resolvedVideo()));
+    input.baseItems.push(draft('shot_25', 'video_take', 1, resolvedVideo('shot_25')));
     expect(() => createStudioSubmissionQuoteCoreV2(input)).toThrow(expect.objectContaining({ code: 'invalid_quote' }));
   });
 
-  it('fails closed on unsafe line arithmetic', () => {
+  it('fails closed on unsafe pricing arithmetic', () => {
     const input = makeInput();
     input.rateCard = createStudioRateCardV2([imageRate, { ...videoRate, rateMinorUnits: Number.MAX_SAFE_INTEGER }]);
 
@@ -1836,13 +1987,15 @@ describe('schema-2 Studio estimates', () => {
       budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 500 },
     });
     expect(projected.baseItems[0]).toEqual({
-      shotId: 'shot_1',
+      target: { kind: 'shot', shotId: 'shot_1' },
+      referenceTarget: null,
       purpose: 'seed_still',
       route: { choiceId: 'image_route', providerId: 'image-provider', model: 'image-model' },
       generationCount: 1,
       durationSeconds: null,
       oneGenerationMinorUnits: 25,
       requestedTotalMinorUnits: 25,
+      composition: compositionFor('shot_1', 'seed_still'),
     });
     const serialized = JSON.stringify(projected);
     expect(serialized).not.toContain('requestPlan');

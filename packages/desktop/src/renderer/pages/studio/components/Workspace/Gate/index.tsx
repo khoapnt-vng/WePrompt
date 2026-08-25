@@ -22,14 +22,10 @@ import {
   selectedSpendGateQuote,
   spendGateBoardPromotion,
   spendGateContinuityChange,
-  spendGateDraftIdentity,
   spendGateProjectReferenceIds,
   spendGateReducer,
   spendGateRouteIssue,
   summarizeQuote,
-  validSpendGateBackgroundChoices,
-  type SpendGateBackgroundChoice,
-  type SpendGateBackgroundChoicePlan,
   type SpendGateDraft,
   type SpendGateBoardPromotion,
   type SpendGateBoardPromotionImpact,
@@ -39,14 +35,13 @@ import {
 } from '../spendGate';
 import styles from './SpendGateModal.module.css';
 
+// The spend gate can open from inside the Beat panel modal. Arco gives sibling modals the same
+// default layer, so a retained Beat panel can otherwise intercept the gate at compact viewports.
+const SPEND_GATE_MASK_Z_INDEX = 1100;
+const SPEND_GATE_WRAPPER_Z_INDEX = SPEND_GATE_MASK_Z_INDEX + 1;
+
 export type UseSpendGateInput = {
   onConfirmed: (result: StudioConfirmSubmissionResultV2) => void | Promise<void>;
-  deriveBackgroundChoicePlan?: (draft: SpendGateDraft) => SpendGateBackgroundChoicePlan | null;
-  onAssignBackgroundChoices?: (input: {
-    draft: SpendGateDraft;
-    plan: SpendGateBackgroundChoicePlan;
-    choices: readonly SpendGateBackgroundChoice[];
-  }) => Promise<SpendGateDraft | null>;
   onPromoteOnly?: (input: {
     projectId: string;
     expectedRevision: number;
@@ -59,76 +54,45 @@ export type UseSpendGateResult = {
   open: (draft: SpendGateDraft, boardPromotionImpact?: SpendGateBoardPromotionImpact) => void;
   close: () => void;
   promoteOnly: () => Promise<void>;
-  assignBackgroundChoices: (choices: readonly SpendGateBackgroundChoice[]) => Promise<void>;
   prepare: () => Promise<void>;
   selectOption: (option: SpendGateSelectedOption) => void;
   confirm: () => Promise<void>;
 };
 
 /** Owns one reviewed submission attempt. Opening and closing never call native paid seams. */
-export const useSpendGate = ({
-  onConfirmed,
-  deriveBackgroundChoicePlan,
-  onAssignBackgroundChoices,
-  onPromoteOnly,
-}: UseSpendGateInput): UseSpendGateResult => {
+export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput): UseSpendGateResult => {
   const [state, dispatch] = useReducer(spendGateReducer, undefined, initialSpendGateState);
   const stateRef = useRef(state);
   const gateGenerationRef = useRef(0);
   const prepareOperationRef = useRef(0);
   const confirmOperationRef = useRef(0);
   const preparingRef = useRef(false);
-  const assigningBackgroundsRef = useRef(false);
-  const backgroundAssignmentOperationRef = useRef(0);
   const promotingRef = useRef(false);
   const confirmingRef = useRef(false);
   const terminalSuccessRef = useRef(false);
   stateRef.current = state;
 
-  const open = useCallback(
-    (draft: SpendGateDraft, boardPromotionImpact?: SpendGateBoardPromotionImpact) => {
-      if (
-        promotingRef.current ||
-        assigningBackgroundsRef.current ||
-        confirmingRef.current ||
-        terminalSuccessRef.current ||
-        stateRef.current.phase === 'quote_in_use'
-      ) {
-        return;
-      }
-      gateGenerationRef.current += 1;
-      preparingRef.current = false;
-      confirmingRef.current = false;
-      terminalSuccessRef.current = false;
-      let backgroundChoicePlan: SpendGateBackgroundChoicePlan | null = null;
-      try {
-        backgroundChoicePlan = deriveBackgroundChoicePlan?.(draft) ?? null;
-      } catch {
-        backgroundChoicePlan = {
-          status: 'invalid',
-          identity: JSON.stringify(['invalid', spendGateDraftIdentity(draft)]),
-          projectId: draft.projectId,
-          expectedRevision: draft.expectedRevision,
-          shotIds: [],
-          approvedBackgrounds: [],
-        };
-      }
-      dispatch({
-        type: 'open',
-        draft,
-        ...(boardPromotionImpact === undefined ? {} : { boardPromotionImpact }),
-        backgroundChoicePlan,
-      });
-    },
-    [deriveBackgroundChoicePlan]
-  );
-  const close = useCallback(() => {
+  const open = useCallback((draft: SpendGateDraft, boardPromotionImpact?: SpendGateBoardPromotionImpact) => {
     if (
       promotingRef.current ||
-      assigningBackgroundsRef.current ||
       confirmingRef.current ||
+      terminalSuccessRef.current ||
       stateRef.current.phase === 'quote_in_use'
     ) {
+      return;
+    }
+    gateGenerationRef.current += 1;
+    preparingRef.current = false;
+    confirmingRef.current = false;
+    terminalSuccessRef.current = false;
+    dispatch({
+      type: 'open',
+      draft,
+      ...(boardPromotionImpact === undefined ? {} : { boardPromotionImpact }),
+    });
+  }, []);
+  const close = useCallback(() => {
+    if (promotingRef.current || confirmingRef.current || stateRef.current.phase === 'quote_in_use') {
       return;
     }
     gateGenerationRef.current += 1;
@@ -137,63 +101,6 @@ export const useSpendGate = ({
     dispatch({ type: 'close' });
   }, []);
 
-  const assignBackgroundChoices = useCallback(
-    async (choices: readonly SpendGateBackgroundChoice[]): Promise<void> => {
-      const current = stateRef.current;
-      const plan = current.backgroundChoicePlan;
-      const draft = current.draft;
-      if (
-        current.phase !== 'choices' ||
-        draft === null ||
-        plan === null ||
-        onAssignBackgroundChoices === undefined ||
-        assigningBackgroundsRef.current ||
-        promotingRef.current ||
-        preparingRef.current ||
-        confirmingRef.current ||
-        !validSpendGateBackgroundChoices(plan, choices)
-      ) {
-        return;
-      }
-      assigningBackgroundsRef.current = true;
-      const generation = gateGenerationRef.current;
-      const operation = ++backgroundAssignmentOperationRef.current;
-      const originalIdentity = spendGateDraftIdentity(draft);
-      dispatch({ type: 'background_assignment_started' });
-      try {
-        const updatedDraft = await onAssignBackgroundChoices({ draft, plan, choices });
-        if (
-          gateGenerationRef.current !== generation ||
-          backgroundAssignmentOperationRef.current !== operation ||
-          updatedDraft === null ||
-          updatedDraft.projectId !== draft.projectId ||
-          updatedDraft.expectedRevision !== draft.expectedRevision + 1 ||
-          spendGateDraftIdentity({ ...updatedDraft, expectedRevision: draft.expectedRevision }) !== originalIdentity
-        ) {
-          dispatch({ type: 'background_assignment_failed' });
-          return;
-        }
-        let nextPlan: SpendGateBackgroundChoicePlan | null;
-        try {
-          nextPlan = deriveBackgroundChoicePlan?.(updatedDraft) ?? null;
-        } catch {
-          nextPlan = plan;
-        }
-        if (nextPlan !== null) {
-          dispatch({ type: 'background_assignment_failed' });
-          return;
-        }
-        dispatch({ type: 'background_assignment_succeeded', draft: updatedDraft, backgroundChoicePlan: null });
-      } catch {
-        if (gateGenerationRef.current === generation && backgroundAssignmentOperationRef.current === operation) {
-          dispatch({ type: 'background_assignment_failed' });
-        }
-      } finally {
-        if (backgroundAssignmentOperationRef.current === operation) assigningBackgroundsRef.current = false;
-      }
-    },
-    [deriveBackgroundChoicePlan, onAssignBackgroundChoices]
-  );
   const selectOption = useCallback((option: SpendGateSelectedOption) => {
     if (stateRef.current.phase === 'review') dispatch({ type: 'select_option', option });
   }, []);
@@ -244,7 +151,6 @@ export const useSpendGate = ({
     const promotion = spendGateBoardPromotion(current.draft);
     if (
       current.draft === null ||
-      current.backgroundChoicePlan !== null ||
       promotingRef.current ||
       preparingRef.current ||
       confirmingRef.current ||
@@ -262,7 +168,7 @@ export const useSpendGate = ({
     const operation = ++prepareOperationRef.current;
     const draft = current.draft;
     dispatch({ type: 'prepare_started' });
-    const fail = (error: { code: string; reason?: unknown }): void => {
+    const fail = (error: { code: string; reason?: unknown; details?: unknown }): void => {
       dispatch({ type: 'prepare_failed', error });
       void (async (): Promise<void> => {
         try {
@@ -348,15 +254,15 @@ export const useSpendGate = ({
     }
   }, [onConfirmed]);
 
-  return { state, open, close, promoteOnly, assignBackgroundChoices, prepare, selectOption, confirm };
+  return { state, open, close, promoteOnly, prepare, selectOption, confirm };
 };
 
 export type SpendGateModalProps = Pick<
   UseSpendGateResult,
-  'state' | 'close' | 'promoteOnly' | 'assignBackgroundChoices' | 'prepare' | 'selectOption' | 'confirm'
+  'state' | 'close' | 'promoteOnly' | 'prepare' | 'selectOption' | 'confirm'
 > & {
   onEditRoutes: (issue: SpendGateRouteIssue) => void;
-  onReviewBackgroundReferences?: () => void;
+  onReviewShotBinding: (shotId: string) => void;
   projectReferences?: readonly Pick<StudioProjectReferenceV2, 'id' | 'kind' | 'label'>[];
 };
 
@@ -399,12 +305,11 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   state,
   close,
   promoteOnly,
-  assignBackgroundChoices,
   prepare,
   selectOption,
   confirm,
   onEditRoutes,
-  onReviewBackgroundReferences,
+  onReviewShotBinding,
   projectReferences = [],
 }) => {
   const { t, i18n } = useTranslation();
@@ -412,7 +317,6 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   // breakdown is a long list on a real film, so it starts closed and stays one click away.
   const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null);
   const [boardPromotionChoice, setBoardPromotionChoice] = useState<BoardPromotionChoice>('promote_only');
-  const [backgroundSelections, setBackgroundSelections] = useState<Record<string, string>>({});
   const breakdownId = useId();
   const quote = selectedSpendGateQuote(state);
   const summary = useMemo(() => (quote === null ? null : summarizeQuote(quote)), [quote]);
@@ -425,21 +329,6 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   const continuityChange = spendGateContinuityChange(state.draft);
   const continuityIntent = continuityChange === null ? null : continuityChange.hardCut ? 'sever' : 'rejoin';
   const boardPromotion = spendGateBoardPromotion(state.draft);
-  const backgroundChoicePlan = state.backgroundChoicePlan;
-  const backgroundChoiceIdentity = backgroundChoicePlan?.identity ?? null;
-  useEffect(() => setBackgroundSelections({}), [backgroundChoiceIdentity]);
-  const backgroundChoices = useMemo(
-    () =>
-      backgroundChoicePlan?.status === 'choices'
-        ? backgroundChoicePlan.shotIds.flatMap((shotId) => {
-            const referenceId = backgroundSelections[shotId];
-            return referenceId === undefined ? [] : [{ shotId, referenceId }];
-          })
-        : [],
-    [backgroundChoicePlan, backgroundSelections]
-  );
-  const backgroundChoicesComplete =
-    backgroundChoicePlan?.status === 'choices' && backgroundChoices.length === backgroundChoicePlan.shotIds.length;
   const projectReferenceIds = spendGateProjectReferenceIds(state.draft);
   const projectReferenceById = useMemo(
     () => new Map(projectReferences.map((reference) => [reference.id, reference])),
@@ -498,15 +387,8 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
       formatMinorUnits(minorUnits, currency, i18n.resolvedLanguage ?? i18n.language),
     [i18n.language, i18n.resolvedLanguage]
   );
-  const messageKey =
-    state.phase === 'choices' && state.errorCode === 'background_assignment_failed'
-      ? 'conversation.creativeStudio.workspace.gate.backgroundChoice.failed'
-      : errorMessageKey(state);
-  const canClose =
-    state.phase !== 'promoting' &&
-    state.phase !== 'assigning_backgrounds' &&
-    state.phase !== 'confirming' &&
-    state.phase !== 'quote_in_use';
+  const messageKey = errorMessageKey(state);
+  const canClose = state.phase !== 'promoting' && state.phase !== 'confirming' && state.phase !== 'quote_in_use';
   const titleKey =
     projectReferenceIds !== null
       ? 'conversation.creativeStudio.workspace.views.references'
@@ -552,10 +434,12 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
     <Modal
       visible={visible}
       footer={null}
+      maskStyle={{ zIndex: SPEND_GATE_MASK_Z_INDEX }}
       maskClosable={false}
       closable={canClose}
       unmountOnExit={false}
       title={t(titleKey)}
+      wrapStyle={{ zIndex: SPEND_GATE_WRAPPER_Z_INDEX }}
       onCancel={canClose ? closeGate : undefined}
     >
       <div
@@ -624,60 +508,9 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                   <p>{t('conversation.creativeStudio.workspace.gate.promotion.paidUnavailable')}</p>
                 ) : null}
               </>
-            ) : backgroundChoicePlan === null ? (
+            ) : (
               <p>{t('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')}</p>
-            ) : null}
-            {backgroundChoicePlan?.status === 'choices' ? (
-              <section className={styles.backgroundChoices} data-background-choice-plan={backgroundChoicePlan.identity}>
-                <header>
-                  <h3>{t('conversation.creativeStudio.workspace.gate.backgroundChoice.title')}</h3>
-                  <p>{t('conversation.creativeStudio.workspace.gate.backgroundChoice.description')}</p>
-                </header>
-                {backgroundChoicePlan.shotIds.map((shotId) => (
-                  <fieldset className={styles.backgroundChoice} data-background-choice-shot-id={shotId} key={shotId}>
-                    <legend>
-                      {t('conversation.creativeStudio.workspace.gate.backgroundChoice.shotLabel', { shotId })}
-                    </legend>
-                    <Radio.Group
-                      aria-label={t('conversation.creativeStudio.workspace.gate.backgroundChoice.shotLabel', {
-                        shotId,
-                      })}
-                      className={styles.backgroundOptions}
-                      onChange={(referenceId) => {
-                        if (
-                          state.phase === 'choices' &&
-                          backgroundChoicePlan.approvedBackgrounds.some(
-                            (background) => background.referenceId === referenceId
-                          )
-                        ) {
-                          setBackgroundSelections((current) => ({ ...current, [shotId]: referenceId }));
-                        }
-                      }}
-                      value={backgroundSelections[shotId]}
-                    >
-                      {backgroundChoicePlan.approvedBackgrounds.map((background) => (
-                        <Radio key={background.referenceId} value={background.referenceId}>
-                          <bdi dir='auto'>{background.label}</bdi>
-                        </Radio>
-                      ))}
-                    </Radio.Group>
-                  </fieldset>
-                ))}
-                {backgroundChoicesComplete ? null : (
-                  <p role='status'>{t('conversation.creativeStudio.workspace.gate.backgroundChoice.incomplete')}</p>
-                )}
-              </section>
-            ) : backgroundChoicePlan?.status === 'no_approved_backgrounds' ? (
-              <section className={styles.backgroundChoices} data-background-choice-empty>
-                <h3>{t('conversation.creativeStudio.workspace.gate.backgroundChoice.noneTitle')}</h3>
-                <p>{t('conversation.creativeStudio.workspace.gate.backgroundChoice.noneBody')}</p>
-              </section>
-            ) : backgroundChoicePlan?.status === 'invalid' ? (
-              <Alert
-                type='warning'
-                content={t('conversation.creativeStudio.workspace.gate.backgroundChoice.invalid')}
-              />
-            ) : null}
+            )}
             {projectReferenceIds !== null ? (
               <p data-project-reference-scope>
                 {t('conversation.creativeStudio.workspace.referenceWorkflow.generationScope')}:{' '}
@@ -690,7 +523,9 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               <p>
                 {t('conversation.creativeStudio.workspace.gate.requestedShots', {
                   count: new Set(
-                    [...state.draft.baseChoices, ...state.draft.cascadeChoices].map((choice) => choice.shotId)
+                    [...state.draft.baseChoices, ...state.draft.cascadeChoices].flatMap((choice) =>
+                      choice.target.kind === 'shot' ? [choice.target.shotId] : []
+                    )
                   ).size,
                 })}
               </p>
@@ -717,13 +552,6 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
           <div className={styles.loading}>
             <Spin />
             <span>{t('conversation.creativeStudio.workspace.gate.preparing')}</span>
-          </div>
-        ) : null}
-
-        {state.phase === 'assigning_backgrounds' ? (
-          <div className={styles.loading} data-background-choice-assigning>
-            <Spin />
-            <span>{t('conversation.creativeStudio.workspace.gate.backgroundChoice.assigning')}</span>
           </div>
         ) : null}
 
@@ -817,27 +645,24 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                 )}
                 <ol className={styles.rows}>
                   {summary.rows.map((row, index) => {
-                    const projectReference =
-                      row.projectReferenceId === undefined
-                        ? undefined
-                        : projectReferenceById.get(row.projectReferenceId);
                     const rowIdentity =
-                      projectReference !== undefined
+                      row.referenceTarget !== null
                         ? `${t(
-                            projectReference.kind === 'character'
+                            row.referenceTarget.kind === 'character'
                               ? 'conversation.creativeStudio.workspace.referenceWorkflow.characters.title'
                               : 'conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.title'
-                          )} — ${projectReference.label}`
-                        : projectReferenceIds === null
-                          ? row.shotId
+                          )} — ${row.referenceTarget.label}`
+                        : row.target.kind === 'shot'
+                          ? row.target.shotId
                           : t('conversation.creativeStudio.workspace.views.references');
+                    const targetId = row.target.kind === 'shot' ? row.target.shotId : row.target.referenceId;
                     return (
                       <li
                         data-generation-purpose={row.purpose}
-                        data-project-reference-id={row.projectReferenceId}
+                        data-project-reference-id={row.target.kind === 'reference' ? row.target.referenceId : undefined}
                         data-quote-group={requiredChange ? 'required' : row.group}
-                        data-shot-id={row.shotId}
-                        key={`${row.group}:${row.shotId}:${row.purpose}:${index}`}
+                        data-shot-id={row.target.kind === 'shot' ? row.target.shotId : undefined}
+                        key={`${row.group}:${row.target.kind}:${targetId}:${row.purpose}:${index}`}
                       >
                         <span>
                           {mixedGroups
@@ -866,6 +691,70 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                             })}
                           </bdi>
                         ) : null}
+                        <dl className={styles.technicalReadout}>
+                          <dt>{t('conversation.creativeStudio.workspace.gate.readout.prompt')}</dt>
+                          <dd>
+                            <pre dir='auto'>{row.composition.prompt}</pre>
+                          </dd>
+                          <dt>{t('conversation.creativeStudio.workspace.gate.readout.rendersAs')}</dt>
+                          <dd>
+                            <bdi dir='auto'>
+                              {row.composition.inputs.route.providerId} · {row.composition.inputs.route.adapterId} ·{' '}
+                              {row.composition.inputs.route.model} · {row.composition.inputs.instructionProfile}
+                            </bdi>
+                          </dd>
+                          <dt>{t('conversation.creativeStudio.workspace.gate.readout.sourceRevision')}</dt>
+                          <dd>{row.composition.inputs.projectRevision}</dd>
+                          <dt>{t('conversation.creativeStudio.workspace.gate.readout.source')}</dt>
+                          <dd>
+                            <bdi dir='auto'>
+                              {row.composition.inputs.source.kind === 'shot'
+                                ? `${row.composition.inputs.source.beatId} · ${row.composition.inputs.source.shotId}`
+                                : `${row.composition.inputs.source.referenceKind} · ${row.composition.inputs.source.referenceId}`}
+                            </bdi>
+                          </dd>
+                          {row.composition.inputs.source.kind === 'shot' ? (
+                            <>
+                              <dt>{t('conversation.creativeStudio.workspace.gate.readout.story')}</dt>
+                              <dd>
+                                <bdi dir='auto'>{row.composition.inputs.source.story}</bdi>
+                              </dd>
+                              <dt>{t('conversation.creativeStudio.workspace.gate.readout.shootingScript')}</dt>
+                              <dd>
+                                <bdi dir='auto'>{row.composition.inputs.source.shootingScript}</bdi>
+                              </dd>
+                            </>
+                          ) : (
+                            <>
+                              <dt>{t('conversation.creativeStudio.workspace.gate.readout.referencePrompt')}</dt>
+                              <dd>
+                                <bdi dir='auto'>{row.composition.inputs.source.prompt}</bdi>
+                              </dd>
+                            </>
+                          )}
+                          <dt>{t('conversation.creativeStudio.workspace.gate.readout.references')}</dt>
+                          <dd>
+                            {row.composition.inputs.referenceInputs.length === 0 ? (
+                              t('conversation.creativeStudio.workspace.gate.readout.noReferences')
+                            ) : (
+                              <ol>
+                                {row.composition.inputs.referenceInputs.map((reference) => (
+                                  <li key={`${reference.referenceId}:${reference.assetId}`}>
+                                    <bdi dir='auto'>
+                                      {reference.label}
+                                      {' · '}
+                                      {t('conversation.creativeStudio.workspace.gate.readout.referenceFact', {
+                                        kind: reference.kind,
+                                        referenceId: reference.referenceId,
+                                        assetId: reference.assetId,
+                                      })}
+                                    </bdi>
+                                  </li>
+                                ))}
+                              </ol>
+                            )}
+                          </dd>
+                        </dl>
                       </li>
                     );
                   })}
@@ -899,6 +788,18 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
         ) : null}
 
         <div className={styles.actions}>
+          {state.phase === 'error' && state.pricingRefusalDetails !== null ? (
+            <Button
+              type='primary'
+              onClick={() => {
+                const { shotId } = state.pricingRefusalDetails!;
+                closeGate();
+                onReviewShotBinding(shotId);
+              }}
+            >
+              {t('conversation.creativeStudio.workspace.gate.reviewShotBinding')}
+            </Button>
+          ) : null}
           {state.phase === 'error' && state.routeIssue !== null ? (
             <Button
               type='primary'
@@ -927,31 +828,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               {t('conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction')}
             </Button>
           ) : null}
-          {state.phase === 'choices' && backgroundChoicePlan?.status === 'choices' ? (
-            <Button
-              type='primary'
-              disabled={!backgroundChoicesComplete}
-              onClick={() => void assignBackgroundChoices(backgroundChoices)}
-            >
-              {t('conversation.creativeStudio.workspace.gate.backgroundChoice.assign')}
-            </Button>
-          ) : null}
-          {state.phase === 'choices' &&
-          backgroundChoicePlan !== null &&
-          backgroundChoicePlan.status !== 'choices' &&
-          onReviewBackgroundReferences !== undefined ? (
-            <Button
-              type='primary'
-              onClick={() => {
-                closeGate();
-                onReviewBackgroundReferences();
-              }}
-            >
-              {t('conversation.creativeStudio.workspace.gate.backgroundChoice.reviewReferences')}
-            </Button>
-          ) : null}
           {boardPromotion === null &&
-          backgroundChoicePlan === null &&
           (state.phase === 'choices' || state.phase === 'refresh_required' || state.phase === 'quote_cache_full') ? (
             <Button
               type='primary'

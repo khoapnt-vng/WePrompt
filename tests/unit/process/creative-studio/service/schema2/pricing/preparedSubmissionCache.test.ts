@@ -20,6 +20,10 @@ import {
   type StudioSubmissionQuote,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  composeStudioGenerationV2,
+  deriveStudioInstructionProfileV2,
+} from '@/process/services/creative-studio/service/schema2/generation/composition';
+import {
   StudioPreparedSubmissionCacheV2,
   type StudioPreparedSubmissionCacheAdmissionV2,
   type StudioPreparedSubmissionClaimV2,
@@ -37,40 +41,97 @@ type AdmissionOptions = {
   prompt?: string;
 };
 
-const makeQuote = (projectId: string, quoteId: string, prompt: string): StudioSubmissionQuote => ({
-  id: quoteId,
-  projectId,
-  projectRevision: 7,
-  originReferenceHandoffId: null,
-  rateCardDigest: RATE_CARD_DIGEST,
-  currency: 'USD',
-  baseItems: [
-    {
-      id: `item_${quoteId}`,
-      shotId: 'shot_1',
-      purpose: 'seed_still',
-      routeId: 'route_image',
-      generationCount: 1,
-      requestPlan: {
-        kind: 'resolved',
-        snapshot: {
-          prompt,
-          aspectRatio: '16:9',
-          resolution: '1080p',
-          durationSeconds: 8,
-          referenceInputs: [],
-          conditioningInput: null,
+const imageRoute = { providerId: 'provider_1', adapterId: 'weprompt-image-v1' as const, model: 'image-model' };
+const videoRoute = {
+  providerId: 'provider_1',
+  adapterId: 'byteplus-seedance-v1' as const,
+  model: 'video-model',
+};
+
+const shotComposition = (shotId: string, purpose: 'seed_still' | 'video_take') => {
+  const route = purpose === 'video_take' ? videoRoute : imageRoute;
+  const source = {
+    kind: 'shot' as const,
+    beatId: 'beat_1',
+    story: 'A precise visual story.',
+    shotId,
+    shootingScript: purpose === 'video_take' ? 'Continue the action.' : 'Hold on the opening frame.',
+  };
+  return composeStudioGenerationV2({
+    projectRevision: 7,
+    brief: 'A precise image',
+    rules: [],
+    source,
+    purpose,
+    referenceInputs: [],
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route,
+    boardStyle: null,
+    instructionProfile: deriveStudioInstructionProfileV2(route, purpose, source),
+  });
+};
+
+const referenceComposition = (referenceId: string) => {
+  const source = {
+    kind: 'project_reference' as const,
+    referenceId,
+    referenceKind: 'character' as const,
+    prompt: 'A precise recurring character.',
+  };
+  return composeStudioGenerationV2({
+    projectRevision: 7,
+    brief: 'A precise image',
+    rules: [],
+    source,
+    purpose: 'reference_image',
+    referenceInputs: [],
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route: imageRoute,
+    boardStyle: null,
+    instructionProfile: deriveStudioInstructionProfileV2(imageRoute, 'reference_image', source),
+  });
+};
+
+const makeQuote = (projectId: string, quoteId: string, prompt: string): StudioSubmissionQuote => {
+  const composition = shotComposition('shot_1', 'seed_still');
+  composition.prompt = prompt;
+  return {
+    id: quoteId,
+    projectId,
+    projectRevision: 7,
+    originReferenceHandoffId: null,
+    rateCardDigest: RATE_CARD_DIGEST,
+    currency: 'USD',
+    baseItems: [
+      {
+        id: `item_${quoteId}`,
+        target: { kind: 'shot', shotId: 'shot_1' },
+        purpose: 'seed_still',
+        routeId: 'route_image',
+        generationCount: 1,
+        requestPlan: {
+          kind: 'resolved',
+          snapshot: {
+            composition,
+            aspectRatio: '16:9',
+            resolution: '1080p',
+            durationSeconds: 8,
+            referenceInputs: [],
+            conditioningInput: null,
+          },
         },
+        rateUnit: 'generation',
+        rateMinorUnits: 25,
       },
-      rateUnit: 'generation',
-      rateMinorUnits: 25,
-    },
-  ],
-  cascadeItems: [],
-  lowerMinorUnits: 25,
-  upperMinorUnits: 25,
-  expiresAt: EXPIRES_AT,
-});
+    ],
+    cascadeItems: [],
+    lowerMinorUnits: 25,
+    upperMinorUnits: 25,
+    expiresAt: EXPIRES_AT,
+  };
+};
 
 const makeAdmission = (options: AdmissionOptions = {}): StudioPreparedSubmissionCacheAdmissionV2 => {
   const projectId = options.projectId ?? 'project_1';
@@ -84,14 +145,14 @@ const makeAdmission = (options: AdmissionOptions = {}): StudioPreparedSubmission
       cascadeItems: [
         {
           id: `item_${options.withCascadeQuoteId}`,
-          shotId: 'shot_2',
+          target: { kind: 'shot', shotId: 'shot_2' },
           purpose: 'video_take',
           routeId: 'route_video',
           generationCount: 1,
           requestPlan: {
             kind: 'after_take_selection',
             template: {
-              prompt: 'Continue the action',
+              composition: shotComposition('shot_2', 'video_take'),
               aspectRatio: '16:9',
               resolution: '1080p',
               durationSeconds: 8,
@@ -114,8 +175,8 @@ const makeAdmission = (options: AdmissionOptions = {}): StudioPreparedSubmission
     projectId,
     expectedRevision: 7,
     originReferenceHandoffId: null,
-    baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
-    cascadeChoices: withCascade === null ? [] : [{ shotId: 'shot_2', purpose: 'video_take', referenceAssetId: null }],
+    baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+    cascadeChoices: withCascade === null ? [] : [{ target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' }],
   };
   const quoteForBindings = withCascade ?? baseOnly;
   const providerBindings: StudioSpendAuthorization['providerBindings'] = [
@@ -125,8 +186,8 @@ const makeAdmission = (options: AdmissionOptions = {}): StudioPreparedSubmission
     itemId: item.id,
     provider: {
       providerId: 'provider_1',
-      adapterId: item.purpose === 'seed_still' ? 'weprompt-image-v1' : 'byteplus-seedance-v1',
-      model: item.purpose === 'seed_still' ? 'image-model' : 'video-model',
+      adapterId: item.purpose === 'video_take' ? 'byteplus-seedance-v1' : 'weprompt-image-v1',
+      model: item.purpose === 'video_take' ? 'video-model' : 'image-model',
     },
   }));
   const cancellationPolicies = [...quoteForBindings.baseItems, ...quoteForBindings.cascadeItems].map((item) => ({
@@ -147,7 +208,21 @@ const makeProjectReferenceAdmission = (
     referenceIds: ['reference_character'],
   };
   admission.options.baseOnly.originReferenceHandoffId = originReferenceHandoffId;
-  admission.options.baseOnly.baseItems[0]!.projectReferenceId = 'reference_character';
+  const item = admission.options.baseOnly.baseItems[0]!;
+  const composition = referenceComposition('reference_character');
+  item.target = { kind: 'reference', referenceId: 'reference_character' };
+  item.purpose = 'reference_image';
+  item.requestPlan = {
+    kind: 'resolved',
+    snapshot: {
+      composition,
+      aspectRatio: composition.inputs.aspectRatio,
+      resolution: composition.inputs.resolution,
+      durationSeconds: 4,
+      referenceInputs: [],
+      conditioningInput: null,
+    },
+  };
   return admission;
 };
 
@@ -172,7 +247,7 @@ const makeSizedAdmission = (
   if (padding < 0) throw new Error('test session target is smaller than its structural overhead');
   const plan = admission.options.baseOnly.baseItems[0]!.requestPlan;
   if (plan.kind !== 'resolved') throw new Error('test base item must be resolved');
-  plan.snapshot.prompt = 'x'.repeat(padding);
+  plan.snapshot.composition.prompt = 'x'.repeat(padding);
   expect(serializedSessionBytes(admission)).toBe(byteSize);
   return admission;
 };
@@ -198,14 +273,22 @@ describe('StudioPreparedSubmissionCacheV2', () => {
     });
     expect(claim.quote).toMatchObject({
       originReferenceHandoffId: 'handoff_1',
-      baseItems: [{ projectReferenceId: 'reference_character', purpose: 'seed_still' }],
+      baseItems: [
+        {
+          target: { kind: 'reference', referenceId: 'reference_character' },
+          purpose: 'reference_image',
+        },
+      ],
       cascadeItems: [],
     });
   });
 
   it('refuses project-reference sessions whose item scope or handoff identity is not exact', () => {
     const wrongItem = makeProjectReferenceAdmission();
-    wrongItem.options.baseOnly.baseItems[0]!.projectReferenceId = 'reference_other';
+    wrongItem.options.baseOnly.baseItems[0]!.target = {
+      kind: 'reference',
+      referenceId: 'reference_other',
+    };
     const unsafeHandoff = makeProjectReferenceAdmission('../handoff');
 
     for (const admission of [wrongItem, unsafeHandoff]) {
@@ -303,7 +386,7 @@ describe('StudioPreparedSubmissionCacheV2', () => {
     const admission = makeSizedAdmission(STUDIO_MAX_PREPARED_QUOTE_SESSION_BYTES - 1);
     const plan = admission.options.baseOnly.baseItems[0]!.requestPlan;
     if (plan.kind !== 'resolved') throw new Error('test base item must be resolved');
-    plan.snapshot.prompt = `${plan.snapshot.prompt}é`;
+    plan.snapshot.composition.prompt = `${plan.snapshot.composition.prompt}é`;
     expect(serializedSessionBytes(admission)).toBe(STUDIO_MAX_PREPARED_QUOTE_SESSION_BYTES + 1);
     const cache = new StudioPreparedSubmissionCacheV2({ now: () => PREPARED_AT_MS });
     expectCacheCode(() => cache.admit(admission), 'quote_too_large');
@@ -416,10 +499,8 @@ describe('StudioPreparedSubmissionCacheV2', () => {
   it('retains an exact cascade request when its sibling is unavailable and permits option-scoped rate digests', () => {
     const unavailable = makeAdmission();
     unavailable.request.cascadeChoices.push({
-      shotId: 'shot_2',
+      target: { kind: 'shot', shotId: 'shot_2' },
       purpose: 'video_take',
-      generationCount: 1,
-      referenceAssetId: null,
     });
     const baseCache = new StudioPreparedSubmissionCacheV2({ now: () => PREPARED_AT_MS });
     baseCache.admit(unavailable);

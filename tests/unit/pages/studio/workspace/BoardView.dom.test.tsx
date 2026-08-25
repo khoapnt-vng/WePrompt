@@ -233,14 +233,9 @@ import { BoardView, type BoardActions } from '@/renderer/pages/studio/components
 
 const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}): WorkspaceShotProjection => ({
   id,
-  line: `Line ${id}`,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Shooting script ${id}`,
   durationSeconds: 4,
   chainBreak: 'none',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
   currentPicture: null,
@@ -269,10 +264,7 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
 const makeBeat = (id: string, overrides: Partial<WorkspaceBeatProjection> = {}): WorkspaceBeatProjection => ({
   id,
   title: `Beat ${id.toUpperCase()}`,
-  action: `Action ${id}`,
-  look: `Look ${id}`,
-  actionRevision: 1,
-  lineHistory: [],
+  story: `Story ${id}`,
   targetSeconds: 8,
   actualSeconds: 8,
   displayState: 'ready',

@@ -253,21 +253,14 @@ const VALID_PAYLOADS = {
     expectedRevision: 1,
     referenceIds: ['reference_character'],
   },
-  'creative-studio.approve-project-reference': {
-    projectId: 'project_1',
-    expectedRevision: 1,
-    referenceId: 'reference_character',
-    candidateAssetId: 'asset_candidate',
-  },
   'creative-studio.prepare-submission': {
     projectId: 'project_1',
     expectedRevision: 1,
     originReferenceHandoffId: null,
     baseChoices: [
       {
-        shotId: 'shot_1',
+        target: { kind: 'shot', shotId: 'shot_1' },
         purpose: 'video_take',
-        referenceAssetId: null,
       },
     ],
     cascadeChoices: [],
@@ -354,16 +347,6 @@ const VALID_PAYLOADS = {
     dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
     width: 1280,
     height: 720,
-  },
-  'creative-studio.choose-and-import-reference': {
-    projectId: 'project_1',
-    briefReferenceRole: 'cast',
-    expectedRevision: 1,
-  },
-  'creative-studio.detach-brief-reference': {
-    projectId: 'project_1',
-    assetId: 'asset_1',
-    expectedRevision: 1,
   },
   'creative-studio.import-seed-still': { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1' },
   'creative-studio.import-bed-audio': { projectId: 'project_1', expectedRevision: 1 },
@@ -1054,14 +1037,6 @@ const INVALID_PAYLOADS = [
     },
   ],
   [
-    'creative-studio.approve-project-reference',
-    'renderer supplied approval history',
-    {
-      ...VALID_PAYLOADS['creative-studio.approve-project-reference'],
-      supersededAssetIds: ['asset_previous'],
-    },
-  ],
-  [
     'creative-studio.prepare-submission',
     'empty base choices',
     { ...VALID_PAYLOADS['creative-studio.prepare-submission'], baseChoices: [] },
@@ -1152,16 +1127,6 @@ const INVALID_PAYLOADS = [
     },
   ],
   [
-    'creative-studio.choose-and-import-reference',
-    'missing Brief reference role',
-    { projectId: 'project_1', expectedRevision: 1 },
-  ],
-  [
-    'creative-studio.choose-and-import-reference',
-    'attempted source path',
-    { projectId: 'project_1', briefReferenceRole: 'cast', expectedRevision: 1, sourcePath: '/tmp/reference.png' },
-  ],
-  [
     'creative-studio.import-seed-still',
     'renderer supplied source path',
     { projectId: 'project_1', shotId: 'shot_1', expectedRevision: 1, sourcePath: '/tmp/reference.png' },
@@ -1222,11 +1187,6 @@ const INVALID_PAYLOADS = [
       artifactId: 'export_1',
       fileName: 'managed-export',
     },
-  ],
-  [
-    'creative-studio.detach-brief-reference',
-    'asset traversal',
-    { projectId: 'project_1', assetId: '../asset_1', expectedRevision: 1 },
   ],
   [
     'creative-studio.persist-captured-poster',
@@ -1369,9 +1329,23 @@ describe('native bridge payload schemas', () => {
   const authoringOperations = [
     { kind: 'set_brief', brief: 'A launch story' },
     {
+      kind: 'set_reference_plan',
+      references: [
+        { kind: 'character', label: 'Ming', prompt: 'Ming in a navy jacket.' },
+        { kind: 'background', label: 'Dai pai dong', prompt: 'A neon food stall.' },
+      ],
+    },
+    { kind: 'approve_reference', referenceId: 'ming', candidateAssetId: 'asset_ming_candidate' },
+    {
+      kind: 'set_shot_reference_binding',
+      shotId: 'shot_1',
+      characterReferenceIds: ['ming'],
+      backgroundReferenceId: 'dai_pai_dong',
+    },
+    {
       kind: 'add_beat',
       beatId: 'beat_1',
-      beat: { title: 'Opening', action: 'Reveal', look: 'Warm', targetSeconds: 6 },
+      beat: { title: 'Opening', story: 'Ming sees Mei across the dai-pai-dong.', targetSeconds: 6 },
       beforeBeatId: null,
     },
     { kind: 'edit_beat', beatId: 'beat_1', changes: { title: 'New opening' } },
@@ -1379,25 +1353,22 @@ describe('native bridge payload schemas', () => {
     {
       kind: 'add_binned_beat',
       beatId: 'beat_2',
-      beat: { title: 'Alternate', action: '', look: '', targetSeconds: null },
+      beat: { title: 'Alternate', story: '', targetSeconds: null },
     },
     {
       kind: 'add_shot',
       beatId: 'beat_1',
       shotId: 'shot_1',
-      shot: { line: 'Reveal', narration: '', onScreenText: '', durationSeconds: 4 },
+      shot: { shootingScript: 'Wide reveal of Ming at the food stall.', durationSeconds: 4 },
       beforeShotId: null,
     },
-    { kind: 'edit_shot', shotId: 'shot_1', changes: { line: 'Updated reveal' } },
+    { kind: 'edit_shot', shotId: 'shot_1', changes: { shootingScript: 'Updated reveal' } },
     { kind: 'delete_shot', shotId: 'shot_1' },
     { kind: 'reorder_shots', beatId: 'beat_1', shotOrder: ['shot_1'] },
     { kind: 'set_hard_cut', shotId: 'shot_1', hardCut: true },
     { kind: 'set_seed_still', shotId: 'shot_1', assetId: null },
-    { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_background' },
     { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_1' },
     { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: null, trimOutSeconds: null },
-    { kind: 'redetach_line', shotId: 'shot_1', line: 'Detached' },
-    { kind: 'restore_line', shotId: 'shot_1', historyEntryId: 'history_1' },
     { kind: 'set_routes', imageRouteId: null, videoRouteId: null },
     { kind: 'set_spend_policy', policy: null },
   ] as const;
@@ -1410,6 +1381,9 @@ describe('native bridge payload schemas', () => {
     { kind: 'park_shot', shotId: 'shot_1' },
     { kind: 'restore_shot', shotId: 'shot_1', beforeShotId: null },
     { kind: 'apply_coverage', beatId: 'beat_1', shots: [], fixedShots: [] },
+    { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_background' },
+    { kind: 'redetach_line', shotId: 'shot_1', line: 'x' },
+    { kind: 'restore_line', shotId: 'shot_1', historyEntryId: 'history_1' },
     { kind: 'rederive_line', shotId: 'shot_1', line: 'x' },
     { kind: 'park_take', shotId: 'shot_1', assetId: 'asset_1' },
     { kind: 'add_alternate_take', shotId: 'shot_1', assetId: 'asset_1' },
@@ -1426,22 +1400,19 @@ describe('native bridge payload schemas', () => {
     expect(parseNativeBridgePayload('creative-studio.apply-authoring-batch', payload)).toEqual(payload);
   });
 
-  it.each([
-    { kind: 'set_shot_background_reference', shotId: '../shot', referenceId: 'reference_background' },
-    { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: '../reference' },
-    { kind: 'set_shot_background_reference', shotId: 'shot_1' },
-    {
-      kind: 'set_shot_background_reference',
-      shotId: 'shot_1',
-      referenceId: 'reference_background',
-      extra: true,
-    },
-  ])('rejects malformed Shot background-reference authoring %#', (operation) => {
+  it('rejects a Director-supplied semantic reference id', () => {
     expect(() =>
       parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
         projectId: 'project_1',
         expectedRevision: 1,
-        operations: [operation],
+        operations: [
+          {
+            kind: 'set_reference_plan',
+            references: [
+              { id: 'director_owned_id', kind: 'character', label: 'Ming', prompt: 'Ming in a navy jacket.' },
+            ],
+          },
+        ],
       })
     ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
@@ -1643,14 +1614,13 @@ describe('native bridge payload schemas', () => {
 
   it('accepts only bounded dense prepare choices with exact renderer-owned keys', () => {
     const makeChoice = (index: number, purpose: 'seed_still' | 'video_take') => ({
-      shotId: `shot_${index}`,
+      target: { kind: 'shot' as const, shotId: `shot_${index}` },
       purpose,
-      referenceAssetId: purpose === 'seed_still' ? `asset_${index}` : null,
     });
     const maximum = {
       projectId: 'project_1',
       expectedRevision: 1,
-      originReferenceHandoffId: 'handoff_1',
+      originReferenceHandoffId: null,
       baseChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST }, (_, index) =>
         makeChoice(index, 'seed_still')
       ),
@@ -1682,9 +1652,8 @@ describe('native bridge payload schemas', () => {
 
   it('admits only an isolated bounded Board batch with no renderer reference authority', () => {
     const boardChoice = (index: number) => ({
-      shotId: `shot_${index}`,
-      purpose: 'board_still',
-      referenceAssetId: null,
+      target: { kind: 'shot' as const, shotId: `shot_${index}` },
+      purpose: 'board_still' as const,
     });
     const boardBatch = {
       projectId: 'project_1',
@@ -1699,7 +1668,10 @@ describe('native bridge payload schemas', () => {
       { ...boardBatch, baseChoices: [...boardBatch.baseChoices, boardChoice(boardBatch.baseChoices.length)] },
       {
         ...boardBatch,
-        baseChoices: [boardChoice(0), { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
+        baseChoices: [
+          boardChoice(0),
+          { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const },
+        ],
       },
       { ...boardBatch, baseChoices: [boardChoice(0)], cascadeChoices: [boardChoice(1)] },
       { ...boardBatch, originReferenceHandoffId: 'handoff_1' },
@@ -1760,7 +1732,6 @@ describe('native bridge payload schemas', () => {
 
   it.each([
     ['creative-studio.prepare-project-references', VALID_PAYLOADS['creative-studio.prepare-project-references']],
-    ['creative-studio.approve-project-reference', VALID_PAYLOADS['creative-studio.approve-project-reference']],
     ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
     ['creative-studio.retry-job-download', VALID_PAYLOADS['creative-studio.retry-job-download']],
     [
@@ -1778,7 +1749,6 @@ describe('native bridge payload schemas', () => {
 
   it.each([
     ['creative-studio.prepare-project-references', VALID_PAYLOADS['creative-studio.prepare-project-references']],
-    ['creative-studio.approve-project-reference', VALID_PAYLOADS['creative-studio.approve-project-reference']],
     ['creative-studio.prepare-submission', VALID_PAYLOADS['creative-studio.prepare-submission']],
     ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
     ['creative-studio.retry-job-download', VALID_PAYLOADS['creative-studio.retry-job-download']],
@@ -1795,14 +1765,18 @@ describe('native bridge payload schemas', () => {
   });
 
   it('accepts every reviewed reference-decision intent and no receipt authority', () => {
-    for (const outcome of [
-      { kind: 'rejected' as const },
-      { kind: 'generation_gate' as const },
-      { kind: 'imported_reference' as const, assetId: 'asset_1' },
-    ]) {
+    for (const outcome of [{ kind: 'rejected' as const }, { kind: 'generation_gate' as const }]) {
       const payload = { projectId: 'project_1', requestId: 'request_1', expectedRevision: 2, outcome };
       expect(parseNativeBridgePayload('creative-studio.decide-reference-request', payload)).toEqual(payload);
     }
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.decide-reference-request', {
+        projectId: 'project_1',
+        requestId: 'request_1',
+        expectedRevision: 2,
+        outcome: { kind: 'imported_reference', assetId: 'asset_1' },
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
   it('bounds project-reference preparation at the shared project limit', () => {
@@ -1877,7 +1851,6 @@ describe('native bridge payload schemas', () => {
       'creative-studio.decide-reference-request',
       'creative-studio.list-reference-generation-handoffs',
       'creative-studio.prepare-project-references',
-      'creative-studio.approve-project-reference',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
       'creative-studio.cancel-job',
@@ -1916,7 +1889,6 @@ describe('native bridge payload schemas', () => {
       'creative-studio.get-director-session-authority',
       'creative-studio.bind-director-conversation',
       'creative-studio.prepare-project-references',
-      'creative-studio.approve-project-reference',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
       'creative-studio.cancel-job',
@@ -1942,9 +1914,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(50);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(50);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(50);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(47);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);
@@ -2190,35 +2162,6 @@ describe('native bridge payload schemas', () => {
       vi.doUnmock('@/common/types/project/creativeStudioTypes');
       vi.resetModules();
     }
-  });
-
-  it.each(['cast', 'look'] as const)('accepts %s as a classified Brief-reference import role', (role) => {
-    expect(
-      parseNativeBridgePayload('creative-studio.choose-and-import-reference' as NativeBridgeProviderKey, {
-        projectId: 'project_1',
-        briefReferenceRole: role,
-        expectedRevision: 1,
-      })
-    ).toEqual({ projectId: 'project_1', briefReferenceRole: role, expectedRevision: 1 });
-  });
-
-  it('keeps Brief import and seed-still import as disjoint exact payloads', () => {
-    expect(() =>
-      parseNativeBridgePayload('creative-studio.choose-and-import-reference', {
-        projectId: 'project_1',
-        briefReferenceRole: 'cast',
-        expectedRevision: 1,
-        shotId: 'shot_1',
-      })
-    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
-    expect(() =>
-      parseNativeBridgePayload('creative-studio.import-seed-still', {
-        projectId: 'project_1',
-        shotId: 'shot_1',
-        expectedRevision: 1,
-        briefReferenceRole: 'cast',
-      })
-    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
   it('accepts only the three exact Task 13 export shapes and keeps main-owned names absent', () => {

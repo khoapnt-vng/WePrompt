@@ -15,14 +15,19 @@ describe('createStudioQuotedGenerationId', () => {
       createStudioQuotedGenerationId({
         projectId: 'project_1',
         projectRevision: 7,
-        shotId: 'shot_1',
+        target: { kind: 'shot', shotId: 'shot_1' },
         purpose: 'video_take',
       })
-    ).toBe('item_46549f5822c48d16941795e360a3cb1ecb580f0528d6131d7405a71c5a67e42f');
+    ).toBe('item_4ce18f1fe50f45c89e006a4ea5159289a83e10aae0441c03dc6d0e159a1f74de');
   });
 
   it('keeps sibling quote options on the same deterministic item identity', () => {
-    const input = { projectId: 'project_1', projectRevision: 7, shotId: 'shot_1', purpose: 'seed_still' } as const;
+    const input = {
+      projectId: 'project_1',
+      projectRevision: 7,
+      target: { kind: 'shot', shotId: 'shot_1' },
+      purpose: 'seed_still',
+    } as const;
 
     expect(createStudioQuotedGenerationId(input)).toBe(createStudioQuotedGenerationId({ ...input }));
   });
@@ -32,33 +37,77 @@ describe('createStudioQuotedGenerationId', () => {
       createStudioQuotedGenerationId({
         projectId: 'project_1',
         projectRevision: 7,
-        shotId: 'shot_1',
+        target: { kind: 'shot', shotId: 'shot_1' },
         purpose: 'board_still',
       })
-    ).toBe('item_70b23caff1d33a7951aac019540ebc609d97ac3f6008631fc9a5a77036a313fb');
+    ).toBe('item_3591305b656e0aabcac0ed7ed1938a20a4ed148c43c8885303dfa45f3aac9fe7');
   });
 
-  it('keeps two project references sharing one proxy Shot in separate item namespaces', () => {
+  it('keeps two semantic references in separate item namespaces', () => {
     const base = {
       projectId: 'project_1',
       projectRevision: 7,
-      shotId: 'shot_1',
-      purpose: 'seed_still' as const,
+      purpose: 'reference_image' as const,
     };
-    expect(createStudioQuotedGenerationId({ ...base, projectReferenceId: 'reference_ming' })).not.toBe(
-      createStudioQuotedGenerationId({ ...base, projectReferenceId: 'reference_mei' })
+    expect(
+      createStudioQuotedGenerationId({
+        ...base,
+        target: { kind: 'reference', referenceId: 'reference_ming' },
+      })
+    ).not.toBe(
+      createStudioQuotedGenerationId({
+        ...base,
+        target: { kind: 'reference', referenceId: 'reference_mei' },
+      })
     );
   });
 
   it.each([
-    [{ projectId: '../project', projectRevision: 7, shotId: 'shot_1', purpose: 'video_take' }, TypeError],
-    [{ projectId: 'project_1', projectRevision: 0, shotId: 'shot_1', purpose: 'video_take' }, RangeError],
     [
-      { projectId: 'project_1', projectRevision: Number.MAX_SAFE_INTEGER + 1, shotId: 'shot_1', purpose: 'video_take' },
+      {
+        projectId: '../project',
+        projectRevision: 7,
+        target: { kind: 'shot', shotId: 'shot_1' },
+        purpose: 'video_take',
+      },
+      TypeError,
+    ],
+    [
+      {
+        projectId: 'project_1',
+        projectRevision: 0,
+        target: { kind: 'shot', shotId: 'shot_1' },
+        purpose: 'video_take',
+      },
       RangeError,
     ],
-    [{ projectId: 'project_1', projectRevision: 7, shotId: 'shot/1', purpose: 'video_take' }, TypeError],
-    [{ projectId: 'project_1', projectRevision: 7, shotId: 'shot_1', purpose: 'unknown' }, TypeError],
+    [
+      {
+        projectId: 'project_1',
+        projectRevision: Number.MAX_SAFE_INTEGER + 1,
+        target: { kind: 'shot', shotId: 'shot_1' },
+        purpose: 'video_take',
+      },
+      RangeError,
+    ],
+    [
+      {
+        projectId: 'project_1',
+        projectRevision: 7,
+        target: { kind: 'shot', shotId: 'shot/1' },
+        purpose: 'video_take',
+      },
+      TypeError,
+    ],
+    [
+      {
+        projectId: 'project_1',
+        projectRevision: 7,
+        target: { kind: 'shot', shotId: 'shot_1' },
+        purpose: 'unknown',
+      },
+      TypeError,
+    ],
   ] as const)('rejects invalid quote identity input %#', (input, errorType) => {
     expect(() => createStudioQuotedGenerationId(input as never)).toThrow(errorType);
   });

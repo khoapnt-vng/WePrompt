@@ -47,6 +47,7 @@ export const createEmptyStudioProjectV2 = (
     beatOrder: [],
     beats: {},
     shots: {},
+    referencePlanStatus: 'unplanned',
     referenceOrder: [],
     references: {},
     bin: [],

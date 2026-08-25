@@ -109,6 +109,30 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/cannot approve or reject your own proposal/i);
   });
 
+  it('spells out the ordered app-owned approved-reference workflow', () => {
+    const orderedSteps = [
+      'Call read_storyboard at the agreed revision',
+      'set_reference_plan through studio_apply_edits',
+      'Request character reference images first',
+      'approve character candidates',
+      'request background reference images',
+      'approve background candidates',
+      'Call read_storyboard again',
+      'set_shot_reference_binding through studio_apply_edits',
+    ];
+    let previous = -1;
+    for (const step of orderedSteps) {
+      const index = DIRECTOR_PRESET_RULES.indexOf(step);
+      expect(index, step).toBeGreaterThan(previous);
+      previous = index;
+    }
+    expect(DIRECTOR_PRESET_RULES).toMatch(/do not invent\s+reference IDs/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/app owns them/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/request only records work for human review; it does not\s+generate media/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/approve_reference is\s+human-only and renderer-only/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/once for\s+each active Shot/i);
+  });
+
   it('answers in the language the person writes in, since the rules themselves are English', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/language/i);
   });

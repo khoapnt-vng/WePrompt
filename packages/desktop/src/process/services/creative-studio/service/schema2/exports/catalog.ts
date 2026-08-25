@@ -13,7 +13,7 @@ import {
   STUDIO_MAX_EXPORT_DIRECTORY_DEPTH,
   STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
   STUDIO_MAX_EXPORTS_PER_SHAPE,
-  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_EXPORT_SCHEMA_VERSION_V2,
   type StudioCopyExportResultV2,
   type StudioExportArtifactV2,
   type StudioExportArtifactRequestV2,
@@ -382,7 +382,7 @@ const validateArtifact = (
   if (
     !isDataRecord(value) ||
     !hasExactKeys(value, ARTIFACT_KEYS) ||
-    value.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
+    value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V2 ||
     typeof value.id !== 'string' ||
     !SAFE_ID.test(value.id) ||
     value.projectId !== context.projectId ||
@@ -418,7 +418,7 @@ export const validateStudioExportCatalogV2 = (
     !isSafePositiveInteger(context.currentProjectRevision) ||
     !isDataRecord(value) ||
     !hasExactKeys(value, CATALOG_KEYS) ||
-    value.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
+    value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V2 ||
     value.projectId !== context.projectId ||
     !isSafePositiveInteger(value.revision) ||
     !isDenseDataArray(value.artifacts) ||
@@ -452,7 +452,7 @@ export const validateStudioExportCatalogV2 = (
 /** Returns the absent-catalog logical state without performing I/O. */
 export const createLogicalStudioExportCatalogV2 = (projectId: string): StudioExportCatalogV2 => {
   if (!SAFE_ID.test(projectId)) return fail('invalid_catalog');
-  return { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, projectId, revision: 1, artifacts: [] };
+  return { schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2, projectId, revision: 1, artifacts: [] };
 };
 
 /** Exact-key parses canonical catalog bytes; absent bytes remain a non-writing logical catalog. */
@@ -533,7 +533,7 @@ export const publishStudioExportArtifactInCatalogV2 = (
   const artifacts = ordered.filter((artifact) => retainedIds.has(artifact.id));
   const evictedArtifacts = ordered.filter((artifact) => !retainedIds.has(artifact.id));
   const next: StudioExportCatalogV2 = {
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
     projectId: catalog.projectId,
     revision: catalog.revision + 1,
     artifacts,
@@ -2336,7 +2336,7 @@ export const createStudioExportCatalogStoreV2 = (
           const manifestBytes = serializeStudioExportManifestV2(entries);
           const manifest = parseStudioExportManifestV2(manifestBytes);
           const artifact: StudioExportArtifactV2 = {
-            schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+            schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
             id: plan.artifactId,
             projectId: authority.project.id,
             sourceRevision: authority.project.revision,

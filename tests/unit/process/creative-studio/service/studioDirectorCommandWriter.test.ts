@@ -13,9 +13,10 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
-  STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
   type StudioDirectorCommandSlotLeaseV2,
@@ -34,13 +35,6 @@ import { createStudioProjectManifestV2 } from '@process/services/creative-studio
 const PROJECT_ID = 'project_1';
 const START_MS = Date.parse('2026-08-17T01:02:03.000Z');
 
-const shotInputV2 = (line: string) => ({
-  line,
-  narration: '',
-  onScreenText: '',
-  durationSeconds: 5,
-});
-
 const bindMethods = <T extends object>(target: T, overrides: Partial<Record<keyof T, unknown>> = {}): T =>
   new Proxy(target, {
     get(current, property, receiver) {
@@ -51,7 +45,7 @@ const bindMethods = <T extends object>(target: T, overrides: Partial<Record<keyo
   });
 
 const pendingProposalV2 = (id: string) => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   id,
   projectId: PROJECT_ID,
   status: 'pending' as const,
@@ -86,22 +80,19 @@ describe('Studio Director subprocess command writer', () => {
     await mkdir(path.join(projectDir, 'proposals', 'decisions'));
     await mkdir(proposalSlotsDir);
     await mkdir(path.join(projectDir, 'proposals', 'commits'));
-    await writeFile(
-      path.join(projectDir, 'project.json'),
-      JSON.stringify(
-        createEmptyStudioProjectV2(
-          {
-            name: 'Writer fixture',
-            brief: '',
-            aspectRatio: '16:9',
-            targetDurationSeconds: 30,
-            resolution: '1080p',
-          },
-          PROJECT_ID,
-          new Date(START_MS).toISOString()
-        )
-      )
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Writer fixture',
+        brief: '',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 30,
+        resolution: '1080p',
+      },
+      PROJECT_ID,
+      new Date(START_MS).toISOString()
     );
+    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(createStudioProjectManifestV2(project)));
+    await writeFile(path.join(projectDir, 'brief.md'), project.brief);
   });
 
   afterEach(async () => {
@@ -159,7 +150,7 @@ describe('Studio Director subprocess command writer', () => {
 
   const invalidPendingRecordV2 = (commandId: string, kind: InvalidPendingKindV2): Record<string, unknown> => {
     const base = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId,
       projectId: PROJECT_ID,
       expectedRevision: 7,
@@ -170,7 +161,7 @@ describe('Studio Director subprocess command writer', () => {
     };
     if (kind === 'malformed_recovered_revision') return { ...base, policy: 'manual_review' };
     if (kind === 'malformed_null_revision') return { ...base, expectedRevision: 'invalid' };
-    return { ...base, schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1 };
+    return { ...base, schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 + 1 };
   };
 
   const validPendingRecordV2 = (commandId: string): Record<string, unknown> => ({
@@ -190,13 +181,13 @@ describe('Studio Director subprocess command writer', () => {
     const reservedAt = new Date(START_MS).toISOString();
     const deadlineAt = new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString();
     const slot: StudioDirectorCommandSlotV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: input.slotCommandId ?? input.commandId,
       reservedAt,
       deadlineAt: input.slotDeadlineAt ?? deadlineAt,
     };
     const receipt: StudioDirectorCommandReceiptV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: input.commandId,
       projectId: PROJECT_ID,
       expectedRevision: input.receiptExpectedRevision,
@@ -213,7 +204,7 @@ describe('Studio Director subprocess command writer', () => {
     await writeFile(path.join(receiptsDir, `${input.commandId}.json`), JSON.stringify(receipt));
     if (input.leaseCommandId !== undefined) {
       const lease: StudioDirectorCommandSlotLeaseV2 = {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
         leaseId: `main_lease_${input.commandId}`,
         owner: 'main',
         commandId: input.leaseCommandId,
@@ -276,7 +267,7 @@ describe('Studio Director subprocess command writer', () => {
     ).resolves.toEqual({ status: 'unconfirmed', commandId: 'command_brief_file' });
   });
 
-  it('preserves caller-authored schema-2 beat and shot identities in canonical operation order', async () => {
+  it('preserves a semantic reference draft without accepting a caller-authored identity', async () => {
     const createId = vi.fn<() => string>().mockReturnValueOnce('command_v2').mockReturnValueOnce('lease_v2');
     let currentMs = START_MS;
     const writer = createStudioDirectorCommandWriterV2(
@@ -295,17 +286,14 @@ describe('Studio Director subprocess command writer', () => {
         expectedRevision: 7,
         operations: [
           {
-            kind: 'add_beat',
-            beatId: 'section_new',
-            beat: { title: 'Opening', action: '', look: 'A warm visual language', targetSeconds: null },
-            beforeBeatId: null,
-          },
-          {
-            kind: 'add_shot',
-            beatId: 'section_existing',
-            shotId: 'clip_added',
-            shot: shotInputV2('A close detail'),
-            beforeShotId: null,
+            kind: 'set_reference_plan',
+            references: [
+              {
+                kind: 'character',
+                label: 'Ming',
+                prompt: 'A consistent character reference for Ming.',
+              },
+            ],
           },
         ],
       })
@@ -315,13 +303,21 @@ describe('Studio Director subprocess command writer', () => {
       await readFile(path.join(pendingDir, 'command_v2.json'), 'utf8')
     ) as StudioDirectorCommandRecordV2;
     expect(command).toMatchObject({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'command_v2',
       projectId: PROJECT_ID,
       expectedRevision: 7,
       operations: [
-        { kind: 'add_beat', beatId: 'section_new' },
-        { kind: 'add_shot', beatId: 'section_existing', shotId: 'clip_added' },
+        {
+          kind: 'set_reference_plan',
+          references: [
+            {
+              kind: 'character',
+              label: 'Ming',
+              prompt: 'A consistent character reference for Ming.',
+            },
+          ],
+        },
       ],
     });
     expect(createId.mock.calls).toHaveLength(2);
@@ -551,15 +547,29 @@ describe('Studio Director subprocess command writer', () => {
     await expect(readdir(slotsDir)).resolves.toEqual(['0.slot', '0.slot.lease']);
   });
 
-  it('preserves every non-minting schema-2 operation without paid side effects', async () => {
+  it('preserves every direct schema-5 operation envelope without paid side effects', async () => {
     const writer = writerWithIdsV2(['command_v2_ops', 'lease_v2_ops']);
     const input: StudioApplyEditsInputV2 = {
       expectedRevision: 9,
       operations: [
         { kind: 'set_brief', brief: 'Free edits only' },
-        { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Opening' } },
+        {
+          kind: 'set_reference_plan',
+          references: [
+            {
+              kind: 'character',
+              label: 'Ming',
+              prompt: 'A consistent character reference for Ming.',
+            },
+          ],
+        },
+        {
+          kind: 'set_shot_reference_binding',
+          shotId: 'clip_1',
+          characterReferenceIds: [],
+          backgroundReferenceId: null,
+        },
         { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
-        { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'Closer' } },
         { kind: 'delete_shot', shotId: 'clip_old' },
         { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
         { kind: 'reorder_bin', bin: [{ kind: 'beat', beatId: 'section_3', reason: 'alternate' }] },
@@ -577,7 +587,7 @@ describe('Studio Director subprocess command writer', () => {
     const writer = writerWithIdsV2(['command_v2_receipt', 'lease_v2_receipt']);
     await writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Schema two' }] });
     const receipt: StudioDirectorCommandReceiptV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'command_v2_receipt',
       projectId: PROJECT_ID,
       expectedRevision: 7,
@@ -606,7 +616,7 @@ describe('Studio Director subprocess command writer', () => {
       const receipt: StudioDirectorCommandReceiptV2 =
         status === 'applied'
           ? {
-              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
               commandId,
               projectId: PROJECT_ID,
               expectedRevision: 8,
@@ -617,7 +627,7 @@ describe('Studio Director subprocess command writer', () => {
               createdShotIds: [],
             }
           : {
-              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
               commandId,
               projectId: PROJECT_ID,
               expectedRevision: 8,
@@ -651,7 +661,7 @@ describe('Studio Director subprocess command writer', () => {
   it('keeps an absent-pending valid receipt as receipt-first terminal authority', async () => {
     const commandId = 'command_v2_receipt_first';
     const receipt: StudioDirectorCommandReceiptV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId,
       projectId: PROJECT_ID,
       expectedRevision: 11,
@@ -677,7 +687,7 @@ describe('Studio Director subprocess command writer', () => {
         await writeFile(
           receiptFile,
           JSON.stringify({
-            schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+            schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
             commandId,
             projectId: PROJECT_ID,
             expectedRevision: 8,
@@ -926,29 +936,33 @@ describe('Studio Director subprocess command writer', () => {
     await expect(readFile(pendingFile, 'utf8')).resolves.toBe(legacyPending);
   });
 
-  it('classifies a V1 project manifest before reading or mutating schema-2 command sidecars', async () => {
-    const manifestFile = path.join(projectDir, 'project.json');
-    const legacyManifest = JSON.stringify({ schemaVersion: 1, id: PROJECT_ID });
-    await writeFile(manifestFile, legacyManifest);
-    const ids = ['command_v1_manifest', 'lease_v1_manifest'];
-    const createId = vi.fn(() => ids.shift() ?? 'unused');
-    const writer = createStudioDirectorCommandWriterV2(
-      { projectId: PROJECT_ID, projectDir },
-      { createId, now: () => START_MS }
-    );
+  it.each([1, 2, 3, 4])(
+    'classifies a schema-%i project manifest before reading or mutating current command sidecars',
+    async (schemaVersion) => {
+      const manifestFile = path.join(projectDir, 'project.json');
+      const legacyManifest = JSON.stringify({ schemaVersion, id: PROJECT_ID });
+      await writeFile(manifestFile, legacyManifest);
+      const commandId = `command_prior_manifest_${schemaVersion}`;
+      const ids = [commandId, `lease_prior_manifest_${schemaVersion}`];
+      const createId = vi.fn(() => ids.shift() ?? 'unused');
+      const writer = createStudioDirectorCommandWriterV2(
+        { projectId: PROJECT_ID, projectDir },
+        { createId, now: () => START_MS }
+      );
 
-    await expect(
-      writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'No V2 residue' }] })
-    ).resolves.toEqual({ status: 'unsupported_prototype_schema', commandId: 'command_v1_manifest' });
-    await expect(writer.getStatus({ commandId: 'legacy_status' })).resolves.toEqual({
-      status: 'unsupported_prototype_schema',
-      commandId: 'legacy_status',
-    });
-    await expect(readFile(manifestFile, 'utf8')).resolves.toBe(legacyManifest);
-    await expect(readdir(pendingDir)).resolves.toEqual([]);
-    await expect(readdir(slotsDir)).resolves.toEqual([]);
-    await expect(readdir(receiptsDir)).resolves.toEqual([]);
-  });
+      await expect(
+        writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'No V2 residue' }] })
+      ).resolves.toEqual({ status: 'unsupported_prototype_schema', commandId });
+      await expect(writer.getStatus({ commandId: 'legacy_status' })).resolves.toEqual({
+        status: 'unsupported_prototype_schema',
+        commandId: 'legacy_status',
+      });
+      await expect(readFile(manifestFile, 'utf8')).resolves.toBe(legacyManifest);
+      await expect(readdir(pendingDir)).resolves.toEqual([]);
+      await expect(readdir(slotsDir)).resolves.toEqual([]);
+      await expect(readdir(receiptsDir)).resolves.toEqual([]);
+    }
+  );
 
   it.each(['pending', 'receipt', 'lease'] as const)(
     'preflights an exact V1 %s before publishing a schema-2 lease or slot',
@@ -1122,7 +1136,7 @@ describe('Studio Director subprocess command writer', () => {
     const pendingFile = path.join(canonicalPending, 'command_cleanup_slot_race.json');
     const slotFile = path.join(canonicalSlots, '0.slot');
     const replacement = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'replacement_cleanup_command',
       reservedAt: '2026-08-17T01:02:03.000Z',
       deadlineAt: '2026-08-17T01:02:18.000Z',
@@ -1315,7 +1329,7 @@ describe('Studio Director subprocess command writer', () => {
     const pendingFile = path.join(canonicalPending, 'command_pending_slot_race.json');
     const slotFile = path.join(canonicalSlots, '0.slot');
     const replacement = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'replacement_command',
       reservedAt: '2026-08-17T01:02:03.000Z',
       deadlineAt: '2026-08-17T01:02:18.000Z',
@@ -1423,7 +1437,7 @@ describe('Studio Director subprocess command writer', () => {
   it('treats an exact schema-2 lease as pending for status and busy for apply', async () => {
     const leaseFile = path.join(slotsDir, '0.slot.lease');
     const lease = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       leaseId: 'existing_lease',
       owner: 'writer',
       commandId: 'existing_command',
@@ -1449,7 +1463,7 @@ describe('Studio Director subprocess command writer', () => {
     const leaseFile = path.join(slotsDir, '0.slot.lease');
     const manifestFile = path.join(projectDir, 'project.json');
     const leaseBytes = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       leaseId: 'main_maintenance_lease',
       owner: 'main',
       commandId: null,
@@ -1483,7 +1497,11 @@ describe('Studio Director subprocess command writer', () => {
       }),
       status: 'unsupported_prototype_schema',
     },
-    { label: 'invalid V2', bytes: '{"schemaVersion":2}', status: 'storage_error' },
+    {
+      label: 'invalid V2',
+      bytes: JSON.stringify({ schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 }),
+      status: 'storage_error',
+    },
   ])('classifies a late $label slot installed after lease acquisition', async ({ bytes, status }) => {
     const slotFile = path.join(await nodeFs.realpath(slotsDir), '0.slot');
     let installed = false;
@@ -1511,7 +1529,7 @@ describe('Studio Director subprocess command writer', () => {
     {
       label: 'valid V2',
       bytes: JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
         commandId: 'temp_race_v2_command',
         reservedAt: '2026-08-17T01:02:03.000Z',
         deadlineAt: '2026-08-17T01:02:18.000Z',
@@ -1530,7 +1548,7 @@ describe('Studio Director subprocess command writer', () => {
     },
     {
       label: 'invalid V2',
-      bytes: '{"schemaVersion":2}',
+      bytes: JSON.stringify({ schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 }),
       expected: { status: 'storage_error', commandId: 'command_temp_slot_race' },
     },
   ])('classifies a $label slot raced in during V2 slot temp sync', async ({ bytes, expected }) => {
@@ -1608,7 +1626,7 @@ describe('Studio Director subprocess command writer', () => {
     {
       label: 'valid V2',
       bytes: JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
         leaseId: 'late_v2_lease',
         owner: 'writer',
         commandId: 'late_v2_command',
@@ -1638,7 +1656,7 @@ describe('Studio Director subprocess command writer', () => {
     {
       label: 'main V2 without command authority',
       bytes: JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
         leaseId: 'late_main_lease',
         owner: 'main',
         commandId: null,
@@ -1652,7 +1670,7 @@ describe('Studio Director subprocess command writer', () => {
     },
     {
       label: 'invalid V2',
-      bytes: '{"schemaVersion":2}',
+      bytes: JSON.stringify({ schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 }),
       status: 'storage_error',
       commandId: 'command_late_lease',
     },
@@ -1684,7 +1702,7 @@ describe('Studio Director subprocess command writer', () => {
     const leaseFile = path.join(canonicalSlots, '0.slot.lease');
     const slotFile = path.join(canonicalSlots, '0.slot');
     const replacement = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'other_command',
       reservedAt: '2026-08-17T01:02:03.000Z',
       deadlineAt: '2026-08-17T01:02:18.000Z',
@@ -1717,7 +1735,7 @@ describe('Studio Director subprocess command writer', () => {
     const canonicalSlots = await nodeFs.realpath(slotsDir);
     const leaseFile = path.join(canonicalSlots, '0.slot.lease');
     const replacement = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       leaseId: 'replacement_release_lease',
       owner: 'writer',
       commandId: 'replacement_release_command',
@@ -1753,7 +1771,7 @@ describe('Studio Director subprocess command writer', () => {
   it('cleans its exact slot when an invalid V2 pending record wins the final-name race', async () => {
     const commandId = 'command_invalid_pending_race';
     const pendingFile = path.join(await nodeFs.realpath(pendingDir), `${commandId}.json`);
-    const invalidPending = '{"schemaVersion":2}';
+    const invalidPending = JSON.stringify({ schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 });
     let installed = false;
     const fs = bindMethods(nodeFs, {
       link: async (source: string, destination: string) => {
@@ -1789,7 +1807,14 @@ describe('Studio Director subprocess command writer', () => {
   });
 
   it.each([
-    { label: 'malformed V2', manifest: '{"schemaVersion":2}' },
+    {
+      label: 'malformed current schema',
+      manifest: JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION }),
+    },
+    {
+      label: 'future project schema',
+      manifest: JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1, id: PROJECT_ID }),
+    },
     { label: 'invalid JSON', manifest: '{' },
     {
       label: 'wrong-id V2',
@@ -2124,7 +2149,11 @@ describe('Studio Director subprocess command writer', () => {
   });
 
   it.each([
-    { label: 'malformed V2', bytes: '{"schemaVersion":2}', expected: 'storage' },
+    {
+      label: 'malformed V2',
+      bytes: JSON.stringify({ schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2 }),
+      expected: 'storage',
+    },
     {
       label: 'V1',
       bytes: JSON.stringify({
@@ -2142,7 +2171,7 @@ describe('Studio Director subprocess command writer', () => {
       writePendingRecordV2({
         pendingDir: proposalPendingDir,
         recordId: 'proposal_new',
-        record: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_new' },
+        record: { schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2, id: 'proposal_new' },
         slotRecordKey: 'proposalId',
         capacityMessage: 'full',
         tooLargeMessage: 'too large',
@@ -2177,7 +2206,7 @@ describe('Studio Director subprocess command writer', () => {
       writePendingRecordV2({
         pendingDir: proposalPendingDir,
         recordId: 'proposal_raced',
-        record: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_raced' },
+        record: { schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2, id: 'proposal_raced' },
         slotRecordKey: 'proposalId',
         capacityMessage: 'full',
         tooLargeMessage: 'too large',
@@ -2195,7 +2224,7 @@ describe('Studio Director subprocess command writer', () => {
     const canonicalPending = await nodeFs.realpath(proposalPendingDir);
     const ownSlot = path.join(canonicalSlots, '0.slot');
     const finalFile = path.join(canonicalPending, 'proposal_winner.json');
-    const record = { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_winner' };
+    const record = { schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2, id: 'proposal_winner' };
     const serialized = JSON.stringify(record);
     let installed = false;
     const fs = bindMethods(nodeFs, {
@@ -2229,9 +2258,9 @@ describe('Studio Director subprocess command writer', () => {
     const canonicalPending = await nodeFs.realpath(proposalPendingDir);
     const ownSlot = path.join(canonicalSlots, '0.slot');
     const finalFile = path.join(canonicalPending, 'proposal_cleanup_race.json');
-    const record = { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_cleanup_race' };
+    const record = { schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2, id: 'proposal_cleanup_race' };
     const replacement = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       proposalId: 'replacement_proposal',
       reservedAt: '2026-08-17T01:02:03.000Z',
     });
@@ -2284,7 +2313,7 @@ describe('Studio Director subprocess command writer', () => {
       writePendingRecordV2({
         pendingDir: proposalPendingDir,
         recordId: 'proposal_committed',
-        record: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_committed' },
+        record: { schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2, id: 'proposal_committed' },
         slotRecordKey: 'proposalId',
         capacityMessage: 'full',
         tooLargeMessage: 'too large',
@@ -2400,7 +2429,7 @@ describe('Studio Director subprocess command writer', () => {
       writePendingRecordV2({
         pendingDir: proposalPendingDir,
         recordId: 'proposal_replaced',
-        record: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, id: 'proposal_replaced' },
+        record: { schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2, id: 'proposal_replaced' },
         slotRecordKey: 'proposalId',
         capacityMessage: 'full',
         tooLargeMessage: 'too large',
@@ -2428,7 +2457,7 @@ describe('Studio Director subprocess command writer', () => {
           {
             kind: 'add_beat',
             beatId: '../unsafe',
-            beat: { title: 'Opening', action: '', look: '', targetSeconds: null },
+            beat: { title: 'Opening', story: '', targetSeconds: null },
             beforeBeatId: null,
           },
         ],
@@ -2480,12 +2509,18 @@ describe('Studio Director subprocess command writer', () => {
       status: 'not_found',
       commandId: 'missing_v2',
     });
-    await writeFile(path.join(receiptsDir, 'invalid_receipt.json'), '{"schemaVersion":2}');
+    await writeFile(
+      path.join(receiptsDir, 'invalid_receipt.json'),
+      JSON.stringify({ schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 })
+    );
     await expect(reader.getStatus({ commandId: 'invalid_receipt' })).resolves.toEqual({
       status: 'storage_error',
       commandId: 'invalid_receipt',
     });
-    await writeFile(path.join(pendingDir, 'invalid_pending.json'), '{"schemaVersion":2}');
+    await writeFile(
+      path.join(pendingDir, 'invalid_pending.json'),
+      JSON.stringify({ schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 })
+    );
     await expect(reader.getStatus({ commandId: 'invalid_pending' })).resolves.toEqual({
       status: 'storage_error',
       commandId: 'invalid_pending',
@@ -2515,7 +2550,10 @@ describe('Studio Director subprocess command writer', () => {
     ).resolves.toEqual({ status: 'busy', commandId: 'command_v2_first' });
 
     await rm(path.join(slotsDir, '0.slot'));
-    await writeFile(path.join(slotsDir, '0.slot'), '{"schemaVersion":2}');
+    await writeFile(
+      path.join(slotsDir, '0.slot'),
+      JSON.stringify({ schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 })
+    );
     const invalid = writerWithIdsV2(['command_v2_invalid_slot']);
     await expect(
       invalid.apply({ expectedRevision: 8, operations: [{ kind: 'set_brief', brief: 'Invalid slot' }] })
@@ -2539,7 +2577,7 @@ describe('Studio Director subprocess command writer', () => {
     const receiptFile = path.join(receiptsDir, `${commandId}.json`);
     const guardFile = `${receiptFile}.unconfirmed`;
     const receipt: StudioDirectorCommandReceiptV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId,
       projectId: PROJECT_ID,
       expectedRevision: 7,
@@ -2594,7 +2632,7 @@ describe('Studio Director subprocess command writer', () => {
       updatedAt: new Date(START_MS + 1_000).toISOString(),
     };
     const receipt: StudioDirectorCommandReceiptV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId,
       projectId: PROJECT_ID,
       expectedRevision: initialProject.revision,
@@ -2652,12 +2690,21 @@ describe('Studio Director subprocess command writer', () => {
   });
 
   it.each([
+    ...[1, 2, 3, 4].map((schemaVersion) => ({
+      label: `schema-${schemaVersion}`,
+      manifest: JSON.stringify({ schemaVersion }),
+      expectedStatus: 'unsupported_prototype_schema' as const,
+    })),
     {
-      label: 'schema-1',
-      manifest: '{"schemaVersion":1}',
-      expectedStatus: 'unsupported_prototype_schema',
+      label: 'malformed current schema',
+      manifest: JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION }),
+      expectedStatus: 'storage_error',
     },
-    { label: 'malformed schema-2', manifest: '{"schemaVersion":2}', expectedStatus: 'storage_error' },
+    {
+      label: 'future project schema',
+      manifest: JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1, id: PROJECT_ID }),
+      expectedStatus: 'storage_error',
+    },
     { label: 'missing', manifest: null, expectedStatus: 'storage_error' },
   ] as const)(
     'keeps a stable $label manifest fail-closed during receipt publication',
@@ -2733,7 +2780,7 @@ describe('Studio Director subprocess command writer', () => {
     {
       label: 'valid',
       receipt: {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
         commandId: 'command_v2_polled_valid',
         projectId: PROJECT_ID,
         expectedRevision: 7,
@@ -2761,7 +2808,7 @@ describe('Studio Director subprocess command writer', () => {
     },
     {
       label: 'invalid',
-      receipt: { schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION },
+      receipt: { schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 },
       expected: { status: 'storage_error' },
     },
   ])('stops polling on a $label exact-name receipt', async ({ label, receipt, expected }) => {

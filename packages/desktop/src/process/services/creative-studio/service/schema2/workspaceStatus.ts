@@ -22,11 +22,8 @@ import {
   type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioDirtyShotsV2, deriveStudioInboundShotReferencesV2 } from './chain';
-import {
-  createStudioBoardGenerationRequestPlanForShot,
-  createStudioFrameExtractionId,
-  isStudioGenerationRequestCurrent,
-} from './generation';
+import { createStudioFrameExtractionId } from './generation';
+import { studioBoardPanelFreshnessV2 } from './generation/boardPanel';
 import type { StudioVerifiedConditioningFrameV2 } from './lifecycle';
 
 const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
@@ -97,6 +94,7 @@ const isCanonicalDependencyAssetForPurpose = (
     case 'video_take':
       return asset.mediaKind === 'video';
     case 'board_still':
+    case 'reference_image':
       return false;
   }
 };
@@ -118,10 +116,13 @@ const primaryAssetIdsForItem = (
 ): string[] => {
   const result: string[] = [];
   const seen = new Set<string>();
-  const shot = ownValue(project.shots, item.shotId);
+  if (item.target.kind !== 'shot') return result;
+  const shot = ownValue(project.shots, item.target.shotId);
   if (shot === undefined) return result;
   for (const job of jobsForItem(project, authorizationId, item.id)) {
-    if (job.shotId !== item.shotId || job.purpose !== item.purpose) continue;
+    if (job.target.kind !== 'shot' || job.target.shotId !== item.target.shotId || job.purpose !== item.purpose) {
+      continue;
+    }
     const assetId = job.status === 'succeeded' ? job.outputAssetIdsByRole.primary : null;
     if (assetId === null || seen.has(assetId)) continue;
     const asset = ownValue(project.assets, assetId);
@@ -146,8 +147,8 @@ const latestVideoItemsByShot = (
   const result = new Map<string, AuthorizationItem>();
   for (const authorization of project.spendAuthorizations) {
     for (const item of authorizationItems(authorization)) {
-      if (item.purpose === 'video_take' && activeShotIds.has(item.shotId)) {
-        result.set(item.shotId, { authorization, item });
+      if (item.purpose === 'video_take' && item.target.kind === 'shot' && activeShotIds.has(item.target.shotId)) {
+        result.set(item.target.shotId, { authorization, item });
       }
     }
   }
@@ -169,7 +170,11 @@ const projectCurrentVideoJobs = (
           ? []
           : jobsForItem(project, latest.authorization.id, latest.item.id)
               .filter(
-                (job) => job.projectId === project.id && job.shotId === location.shotId && job.purpose === 'video_take'
+                (job) =>
+                  job.projectId === project.id &&
+                  job.target.kind === 'shot' &&
+                  job.target.shotId === location.shotId &&
+                  job.purpose === 'video_take'
               )
               .map((job) => job.id),
     };
@@ -180,7 +185,13 @@ const latestBoardJob = (project: StudioProjectV2, shot: StudioShot): StudioJobV2
   for (let index = shot.jobIds.length - 1; index >= 0; index -= 1) {
     const jobId = shot.jobIds[index]!;
     const job = ownValue(project.jobs, jobId);
-    if (job?.id === jobId && job.projectId === project.id && job.shotId === shot.id && job.purpose === 'board_still') {
+    if (
+      job?.id === jobId &&
+      job.projectId === project.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
+      job.purpose === 'board_still'
+    ) {
       return job;
     }
   }
@@ -193,7 +204,8 @@ const boardProducer = (project: StudioProjectV2, shot: StudioShot): StudioJobV2 
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.purpose === 'board_still' &&
       job.status === 'succeeded' &&
       job.outputAssetIdsByRole.primary === shot.boardAssetId &&
@@ -202,20 +214,6 @@ const boardProducer = (project: StudioProjectV2, shot: StudioShot): StudioJobV2 
       : [];
   });
   return producers.length === 1 ? producers[0]! : null;
-};
-
-const currentBoardRequest = (
-  project: StudioProjectV2,
-  location: ActiveShotLocation
-): StudioJobV2['requestSnapshot'] => {
-  const beat = ownValue(project.beats, location.beatId);
-  const shot = ownValue(project.shots, location.shotId);
-  if (beat === undefined || shot === undefined || project.boardStyle === null) return null;
-  try {
-    return createStudioBoardGenerationRequestPlanForShot({ project, beat, shot })?.snapshot ?? null;
-  } catch {
-    return null;
-  }
 };
 
 const projectBoardPanels = (
@@ -244,25 +242,12 @@ const projectBoardPanels = (
       };
     }
     const producer = boardProducer(project, shot);
-    const currentRequest = currentBoardRequest(project, location);
+    const beat = ownValue(project.beats, location.beatId);
     const staleCauses: StudioRendererBoardPanelStatusV2['staleCauses'] = [];
-    if (
-      producer?.requestSnapshot === null ||
-      producer === null ||
-      currentRequest === null ||
-      !isStudioGenerationRequestCurrent(producer.requestSnapshot, currentRequest)
-    ) {
-      staleCauses.push('request_out_of_date');
-    }
-    if (
-      producer?.spendReceipt === null ||
-      producer === null ||
-      project.imageRouteId === null ||
-      producer.spendReceipt.purpose !== 'board_still' ||
-      producer.spendReceipt.routeId !== project.imageRouteId
-    ) {
-      staleCauses.push('route_out_of_date');
-    }
+    const freshness =
+      producer === null || beat === undefined ? null : studioBoardPanelFreshnessV2(project, beat, shot, producer);
+    if (freshness?.requestCurrent !== true) staleCauses.push('request_out_of_date');
+    if (freshness?.routeCurrent !== true) staleCauses.push('route_out_of_date');
     return {
       shotId: shot.id,
       assetId: shot.boardAssetId,
@@ -478,7 +463,12 @@ const hasCurrentNonterminalDependencyOwner = (
   endpointSeconds: number
 ): boolean =>
   Object.values(project.jobs).some((job) => {
-    if (job.shotId !== dependentShotId || job.purpose !== 'video_take' || !NONTERMINAL_JOB_STATUSES.has(job.status)) {
+    if (
+      job.target.kind !== 'shot' ||
+      job.target.shotId !== dependentShotId ||
+      job.purpose !== 'video_take' ||
+      !NONTERMINAL_JOB_STATUSES.has(job.status)
+    ) {
       return false;
     }
     if (job.requestPlan.kind === 'after_take_selection') {

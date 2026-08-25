@@ -18,20 +18,27 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import { describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_EXPORT_SCHEMA_VERSION_V2,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   STUDIO_PREPARED_QUOTE_TTL_SECONDS,
   STUDIO_PROPOSAL_V2_PENDING_TTL_MS,
   STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
   STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS,
+  STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   type CreateStudioProjectInputV2,
   type StudioAssetV2,
   type StudioExportCatalogV2,
+  type StudioGenerationRequestPlan,
   type StudioJobV2,
   type StudioMutationOperationV2,
   type StudioProjectV2,
+  type StudioPrepareGenerationChoiceV2,
   type StudioProposalRecordV2,
   type StudioReferenceRequestV2,
+  type StudioQuotedGeneration,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
@@ -49,11 +56,16 @@ import {
 import {
   applyStudioMutationBatchV2,
   calculateStudioQuoteTotals,
+  composeStudioGenerationV2,
   createStudioBoardGenerationRequestPlanForShot,
   createEmptyStudioProjectV2,
   createStudioFrameExtractionId,
+  createStudioGenerationRequestTemplate,
   createStudioQuotedGenerationId,
   createStudioRateCardV2,
+  createStudioResolvedGenerationRequestPlan,
+  deriveStudioInstructionProfileV2,
+  studioGenerationCompositionDigestV2,
   validateStudioMutationOperationV2,
   validateStudioProjectV2,
 } from '@process/services/creative-studio/service/schema2';
@@ -79,6 +91,7 @@ import {
   createProposeStoryboardHandlerV2,
   createReadStoryboardHandlerV2,
   createRequestReferenceImagesHandlerV2,
+  parseStudioServerEnv,
   registerStudioToolsV2,
   studioApplyEditsInputSchemaV2,
   studioProposeStoryboardInputSchemaV2,
@@ -108,6 +121,11 @@ const createStudioMcpProtocolHarnessV2 = async (
 const SERVICE_REFERENCE_AUTHORIZATION_ID = 'authorization_reference_background';
 const SERVICE_REFERENCE_JOB_ID = 'job_reference_background';
 
+const shotChoiceV2 = (
+  shotId: string,
+  purpose: 'seed_still' | 'board_still' | 'video_take'
+): StudioPrepareGenerationChoiceV2 => ({ target: { kind: 'shot', shotId }, purpose });
+
 const makeSchema2ServiceProject = (): StudioProjectV2 => {
   const input: CreateStudioProjectInputV2 = {
     name: 'Schema 2 launch',
@@ -121,57 +139,43 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
   const result = applyStudioMutationBatchV2(
     empty,
     {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
       projectId: empty.id,
       expectedRevision: empty.revision,
       operations: [
         {
           kind: 'add_beat',
           beatId: 'section_1',
-          beat: { title: 'Opening', action: '', look: 'Warm sunrise over a quiet city', targetSeconds: null },
+          beat: {
+            title: 'Opening',
+            story: 'Warm sunrise over a quiet city introduces the launch.',
+            targetSeconds: null,
+          },
           beforeBeatId: null,
         },
         {
           kind: 'add_shot',
           beatId: 'section_1',
           shotId: 'clip_1',
-          shot: {
-            line: 'A wide establishing shot',
-            narration: '',
-            onScreenText: '',
-            durationSeconds: 5,
-          },
+          shot: { shootingScript: 'A wide establishing shot.', durationSeconds: 5 },
           beforeShotId: null,
         },
         {
           kind: 'add_beat',
           beatId: 'section_2',
-          beat: { title: 'Close', action: '', look: 'Soft evening light over the skyline', targetSeconds: null },
+          beat: {
+            title: 'Close',
+            story: 'Soft evening light over the skyline closes the launch.',
+            targetSeconds: null,
+          },
           beforeBeatId: null,
         },
         {
           kind: 'add_shot',
           beatId: 'section_2',
           shotId: 'clip_2',
-          shot: {
-            line: 'A slow closing composition',
-            narration: '',
-            onScreenText: '',
-            durationSeconds: 5,
-          },
+          shot: { shootingScript: 'A slow closing composition.', durationSeconds: 5 },
           beforeShotId: null,
-        },
-        {
-          kind: 'set_project_references',
-          references: [
-            {
-              id: 'ref_background',
-              kind: 'background',
-              label: 'City skyline',
-              prompt: 'Warm city skyline from sunrise through evening.',
-              shotIds: ['clip_1', 'clip_2'],
-            },
-          ],
         },
       ],
     },
@@ -179,48 +183,87 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
   );
   const project = { ...result.project, revision: empty.revision + 1, updatedAt: capturedAt };
   const referenceId = 'ref_background';
+  project.referencePlanStatus = 'planned';
+  project.referenceOrder = [referenceId];
+  project.references = {
+    [referenceId]: {
+      id: referenceId,
+      kind: 'background',
+      label: 'City skyline',
+      prompt: 'Warm city skyline from sunrise through evening.',
+      candidateAssetId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: capturedAt,
+      updatedAt: capturedAt,
+    },
+  };
   const assetId = 'asset_reference_background';
   const authorizationId = SERVICE_REFERENCE_AUTHORIZATION_ID;
   const jobId = SERVICE_REFERENCE_JOB_ID;
-  const requestPlan = {
-    kind: 'resolved' as const,
+  const provider = { providerId: 'provider_fixture', adapterId: 'weprompt-image-v1', model: 'image-model' } as const;
+  const source = {
+    kind: 'project_reference' as const,
+    referenceId,
+    referenceKind: project.references[referenceId]!.kind,
+    prompt: project.references[referenceId]!.prompt,
+  };
+  const composition = composeStudioGenerationV2({
+    projectRevision: 1,
+    brief: project.brief,
+    rules: project.rules,
+    source,
+    purpose: 'reference_image',
+    referenceInputs: [],
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+    route: provider,
+    boardStyle: null,
+    instructionProfile: deriveStudioInstructionProfileV2(provider, 'reference_image', source),
+  });
+  const requestPlan: StudioGenerationRequestPlan = {
+    kind: 'resolved',
     snapshot: {
-      prompt: 'BACKGROUND REFERENCE SHEET\n\nSUBJECT\nCity skyline',
+      composition,
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
-      durationSeconds: project.shots.clip_1!.durationSeconds,
+      durationSeconds: 4,
       referenceInputs: [],
       conditioningInput: null,
     },
   };
+  const target = { kind: 'reference' as const, referenceId };
   const item: StudioQuotedGeneration = {
     id: createStudioQuotedGenerationId({
       projectId: project.id,
       projectRevision: 1,
-      shotId: 'clip_1',
-      purpose: 'seed_still',
-      projectReferenceId: referenceId,
+      target,
+      purpose: 'reference_image',
     }),
-    shotId: 'clip_1',
-    projectReferenceId: referenceId,
-    purpose: 'seed_still',
+    target,
+    purpose: 'reference_image',
     routeId: 'image_route_fixture',
     generationCount: 1,
     requestPlan,
     rateUnit: 'generation',
     rateMinorUnits: 1,
   };
-  const provider = { providerId: 'provider_fixture', adapterId: 'weprompt-image-v1', model: 'image-model' } as const;
+  const totals = calculateStudioQuoteTotals([item])!;
+  const compositionDigest = studioGenerationCompositionDigestV2(composition);
   project.assets[assetId] = {
     id: assetId,
     projectId: project.id,
-    shotId: 'clip_1',
+    shotId: null,
     mediaKind: 'image',
     mimeType: 'image/png',
     managedAsset: { collection: 'assets', fileName: 'asset_reference_background.png' },
     byteSize: 1,
     sha256: 'a'.repeat(64),
-    referenceAssetIds: [],
+    projectReferenceId: referenceId,
+    generationReferenceAssetIds: [],
+    producerJobId: jobId,
+    compositionDigest,
     createdAt: capturedAt,
   };
   project.spendAuthorizations.push({
@@ -232,8 +275,8 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
     currency: 'USD',
     baseItems: [item],
     cascadeItems: [],
-    lowerMinorUnits: 1,
-    upperMinorUnits: 1,
+    lowerMinorUnits: totals.lowerMinorUnits,
+    upperMinorUnits: totals.upperMinorUnits,
     expiresAt: '2026-08-17T00:05:00.000Z',
     confirmedAt: capturedAt,
     providerBindings: [{ itemId: item.id, provider }],
@@ -242,25 +285,24 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
   project.jobs[jobId] = {
     id: jobId,
     projectId: project.id,
-    shotId: 'clip_1',
-    projectReferenceId: referenceId,
+    target,
     status: 'succeeded',
     provider,
     idempotencyKey: 'idempotency_reference_background',
     providerJobId: 'remote_reference_background',
     remoteStartedAt: capturedAt,
     cancellationPolicy: 'none',
-    outputAssetIds: [assetId],
-    purpose: 'seed_still',
+    purpose: 'reference_image',
     authorizationId,
     authorizationItemId: item.id,
+    composition,
     requestPlan,
     requestSnapshot: requestPlan.snapshot,
     spendReceipt: {
       authorizationId,
       itemId: item.id,
       jobId,
-      purpose: 'seed_still',
+      purpose: 'reference_image',
       routeId: item.routeId,
       currency: 'USD',
       rateUnit: 'generation',
@@ -269,6 +311,7 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
       generationCount: 1,
       totalMinorUnits: 1,
     },
+    outputAssetIds: [assetId],
     outputAssetIdsByRole: { primary: assetId, poster: null },
     error: null,
     retryOfJobId: null,
@@ -278,11 +321,17 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
     createdAt: capturedAt,
     updatedAt: capturedAt,
   };
-  project.shots.clip_1!.assetIds.push(assetId);
-  project.shots.clip_1!.jobIds.push(jobId);
-  project.references[referenceId]!.candidateAssetId = assetId;
-  project.references[referenceId]!.candidateJobId = jobId;
+  project.references[referenceId]!.candidateAssetId = null;
   project.references[referenceId]!.approvedAssetId = assetId;
+  project.references[referenceId]!.jobIds.push(jobId);
+  project.references[referenceId]!.updatedAt = capturedAt;
+  for (const shot of Object.values(project.shots)) {
+    shot.referenceBinding = {
+      status: 'ready',
+      characterReferenceIds: [],
+      backgroundReferenceId: referenceId,
+    };
+  }
   return project;
 };
 
@@ -337,50 +386,120 @@ describe('CreativeStudioServiceV2', () => {
     },
   };
 
-  const makeSchema2Job = (project: StudioProjectV2, overrides: Partial<StudioJobV2> = {}): StudioJobV2 => ({
-    id: 'job_1',
-    projectId: project.id,
-    shotId: 'clip_1',
-    status: 'failed',
-    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'image-model' },
-    idempotencyKey: 'idempotency_secret',
-    providerJobId: null,
-    remoteStartedAt: null,
-    cancellationPolicy: 'none',
-    outputAssetIds: [],
-    error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
-    retryOfJobId: null,
-    retryReason: null,
-    duplicateChargeAcknowledged: false,
-    duplicateChargeAcknowledgedAt: null,
-    createdAt: '2026-08-17T00:00:00.000Z',
-    updatedAt: '2026-08-17T00:00:01.000Z',
-    purpose: 'seed_still',
-    authorizationId: 'authorization_1',
-    authorizationItemId: 'item_1',
-    requestPlan: {
-      kind: 'resolved',
-      snapshot: {
-        prompt: 'A warm city launch still',
-        aspectRatio: '16:9',
-        resolution: '1080p',
-        durationSeconds: 5,
-        referenceInputs: [],
-        conditioningInput: null,
-      },
-    },
-    requestSnapshot: {
-      prompt: 'A warm city launch still',
-      aspectRatio: '16:9',
-      resolution: '1080p',
-      durationSeconds: 5,
-      referenceInputs: [],
-      conditioningInput: null,
-    },
-    spendReceipt: null,
-    outputAssetIdsByRole: { primary: null, poster: null },
-    ...overrides,
-  });
+  const makeSchema2Job = (project: StudioProjectV2, overrides: Partial<StudioJobV2> = {}): StudioJobV2 => {
+    const target = overrides.target ?? { kind: 'shot' as const, shotId: 'clip_1' };
+    const purpose = overrides.purpose ?? 'seed_still';
+    const provider =
+      overrides.provider ??
+      (purpose === 'video_take'
+        ? { providerId: 'provider_1', adapterId: 'openrouter-video-v1' as const, model: 'video-model' }
+        : { providerId: 'provider_1', adapterId: 'weprompt-image-v1' as const, model: 'image-model' });
+    const referenceInputs =
+      target.kind === 'shot' && purpose !== 'video_take'
+        ? [
+            ...project.shots[target.shotId]!.referenceBinding.characterReferenceIds,
+            ...(project.shots[target.shotId]!.referenceBinding.backgroundReferenceId === null
+              ? []
+              : [project.shots[target.shotId]!.referenceBinding.backgroundReferenceId]),
+          ].map((referenceId) => {
+            const reference = project.references[referenceId]!;
+            const asset = project.assets[reference.approvedAssetId!]!;
+            return { referenceId, kind: reference.kind, assetId: asset.id, sha256: asset.sha256 };
+          })
+        : [];
+    const source =
+      target.kind === 'reference'
+        ? {
+            kind: 'project_reference' as const,
+            referenceId: target.referenceId,
+            referenceKind: project.references[target.referenceId]!.kind,
+            prompt: project.references[target.referenceId]!.prompt,
+          }
+        : (() => {
+            const beat = Object.values(project.beats).find((candidate) => candidate.shotOrder.includes(target.shotId))!;
+            return {
+              kind: 'shot' as const,
+              beatId: beat.id,
+              story: beat.story,
+              shotId: target.shotId,
+              shootingScript: project.shots[target.shotId]!.shootingScript,
+            };
+          })();
+    const derivedComposition = composeStudioGenerationV2({
+      projectRevision: project.revision,
+      brief: project.brief,
+      rules: project.rules,
+      source,
+      purpose,
+      referenceInputs,
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      route: provider,
+      boardStyle: purpose === 'board_still' ? (project.boardStyle ?? 'sketch') : null,
+      instructionProfile: deriveStudioInstructionProfileV2(provider, purpose, source),
+    });
+    const composition =
+      overrides.composition ??
+      (overrides.requestPlan === undefined
+        ? derivedComposition
+        : overrides.requestPlan.kind === 'resolved'
+          ? overrides.requestPlan.snapshot.composition
+          : overrides.requestPlan.template.composition);
+    const requestPlan =
+      overrides.requestPlan ??
+      createStudioResolvedGenerationRequestPlan({
+        purpose,
+        template: createStudioGenerationRequestTemplate({
+          composition,
+          durationSeconds:
+            purpose === 'board_still' || target.kind === 'reference'
+              ? 4
+              : Number.isInteger(project.shots[target.shotId]!.durationSeconds) &&
+                  project.shots[target.shotId]!.durationSeconds >= 4 &&
+                  project.shots[target.shotId]!.durationSeconds <= 15
+                ? project.shots[target.shotId]!.durationSeconds
+                : 5,
+        }),
+        conditioningInput:
+          purpose === 'video_take'
+            ? { kind: 'seed_still', assetId: project.shots[target.kind === 'shot' ? target.shotId : '']!.seedStillId! }
+            : null,
+      });
+    const requestSnapshot =
+      overrides.requestSnapshot !== undefined
+        ? overrides.requestSnapshot
+        : requestPlan.kind === 'resolved'
+          ? requestPlan.snapshot
+          : null;
+    return {
+      id: 'job_1',
+      projectId: project.id,
+      status: 'failed',
+      idempotencyKey: 'idempotency_secret',
+      providerJobId: null,
+      remoteStartedAt: null,
+      cancellationPolicy: 'none',
+      outputAssetIds: [],
+      error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      createdAt: '2026-08-17T00:00:00.000Z',
+      updatedAt: '2026-08-17T00:00:01.000Z',
+      authorizationId: 'authorization_1',
+      authorizationItemId: 'item_1',
+      spendReceipt: null,
+      outputAssetIdsByRole: { primary: null, poster: null },
+      ...overrides,
+      target,
+      provider,
+      purpose,
+      composition,
+      requestPlan,
+      requestSnapshot,
+    };
+  };
 
   const makeHarness = (
     project = makeSchema2ServiceProject(),
@@ -445,7 +564,7 @@ describe('CreativeStudioServiceV2', () => {
       return { project: structuredClone(current), dispatch: structuredClone(built.dispatch) };
     });
     const proposal = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       id: 'proposal_service_1',
       projectId: current.id,
       status: 'pending' as const,
@@ -473,7 +592,7 @@ describe('CreativeStudioServiceV2', () => {
       decidedAt: committedAt,
     }));
     const referenceRequest: StudioReferenceRequestV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       id: 'reference_request_service_1',
       projectId: current.id,
       referenceIds: ['ref_background'],
@@ -501,7 +620,7 @@ describe('CreativeStudioServiceV2', () => {
       return {
         request: structuredClone(referenceRequest),
         decision: {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId: referenceRequest.id,
           projectId: current.id,
           decidedAt: committedAt,
@@ -511,7 +630,7 @@ describe('CreativeStudioServiceV2', () => {
       };
     });
     const referenceGenerationDecision = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: referenceRequest.id,
       projectId: current.id,
       decidedAt: committedAt,
@@ -544,7 +663,7 @@ describe('CreativeStudioServiceV2', () => {
         throw new Error('completed Studio fixture handoff');
       }
       referenceGenerationReceipt ??= {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         handoffId: input.handoffId,
         requestId: referenceRequest.id,
         completedAt: committedAt,
@@ -567,7 +686,7 @@ describe('CreativeStudioServiceV2', () => {
         );
         if (authorization === undefined) throw new Error('missing Studio fixture authorization');
         referenceGenerationReceipt = {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           handoffId: input.handoffId,
           requestId: referenceRequest.id,
           completedAt: authorization.confirmedAt,
@@ -670,10 +789,6 @@ describe('CreativeStudioServiceV2', () => {
       sha256: 'a'.repeat(64),
       createdAt: '2026-08-17T00:00:00.000Z',
     };
-    const importReferenceFromPathV2 = vi.fn(async () => ({
-      asset: structuredClone(referenceAsset),
-      project: structuredClone(current),
-    }));
     const bedAsset: StudioAssetV2 = {
       id: 'bed_service_1',
       projectId: current.id,
@@ -701,7 +816,6 @@ describe('CreativeStudioServiceV2', () => {
         input.assertActive?.();
         return structuredClone(current);
       });
-    const detachBriefReferenceV2 = vi.fn(async () => structuredClone(current));
     const persistCapturedPosterV2 = vi.fn(async () => structuredClone(referenceAsset));
     const extractConditioningFrameV2 = vi.fn(async () => ({ status: 'failed' as const }));
     const verifyConditioningFrameV2 = options.verifyConditioningFrameV2 ?? vi.fn(async () => null);
@@ -772,19 +886,19 @@ describe('CreativeStudioServiceV2', () => {
     );
     const defaultExportCatalogStore = {
       list: vi.fn(async () => ({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
         projectId: current.id,
         revision: 1,
         artifacts: [],
       })),
       create: vi.fn(async () => ({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
         projectId: current.id,
         revision: 1,
         artifacts: [],
       })),
       repair: vi.fn(async () => ({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
         projectId: current.id,
         revision: 1,
         artifacts: [],
@@ -820,10 +934,8 @@ describe('CreativeStudioServiceV2', () => {
         ? {}
         : {
             mediaStore: {
-              importReferenceFromPathV2,
               importBedAudioFromPathV2,
               detachBedAudioV2,
-              detachBriefReferenceV2,
               persistCapturedPosterV2,
               extractConditioningFrameV2,
               verifyConditioningFrameV2,
@@ -843,10 +955,8 @@ describe('CreativeStudioServiceV2', () => {
       cancelJobV2,
       retryJobV2,
       retryDownloadV2,
-      importReferenceFromPathV2,
       importBedAudioFromPathV2,
       detachBedAudioV2,
-      detachBriefReferenceV2,
       persistCapturedPosterV2,
       extractConditioningFrameV2,
       verifyConditioningFrameV2,
@@ -932,7 +1042,27 @@ describe('CreativeStudioServiceV2', () => {
     project.boardStyle = 'grey_tone';
     const shot = project.shots.clip_1!;
     const beat = project.beats.section_1!;
-    const requestPlan = createStudioBoardGenerationRequestPlanForShot({ project, beat, shot });
+    const approvedReference = project.references.ref_background!;
+    const approvedAsset = project.assets[approvedReference.approvedAssetId!]!;
+    const boardProvider = {
+      providerId: imageRoute.providerId,
+      adapterId: imageRoute.adapterId,
+      model: imageRoute.model,
+    };
+    const requestPlan = createStudioBoardGenerationRequestPlanForShot({
+      project,
+      beat,
+      shot,
+      route: boardProvider,
+      referenceInputs: [
+        {
+          referenceId: approvedReference.id,
+          kind: approvedReference.kind,
+          assetId: approvedAsset.id,
+          sha256: approvedAsset.sha256,
+        },
+      ],
+    });
     if (requestPlan === null) throw new Error('Board promotion fixture request must resolve');
     const board: StudioAssetV2 = {
       id: 'board_promote_1',
@@ -943,6 +1073,10 @@ describe('CreativeStudioServiceV2', () => {
       managedAsset: { collection: 'boardStills', fileName: 'board_promote_1.png' },
       byteSize: 20,
       sha256: 'b'.repeat(64),
+      projectReferenceId: null,
+      generationReferenceAssetIds: [approvedAsset.id],
+      producerJobId: 'job_board_promote_1',
+      compositionDigest: studioGenerationCompositionDigestV2(requestPlan.snapshot.composition),
       createdAt: '2026-08-17T00:00:01.000Z',
     };
     project.assets[board.id] = board;
@@ -950,7 +1084,8 @@ describe('CreativeStudioServiceV2', () => {
     shot.boardAssetId = board.id;
     project.jobs.job_board_promote_1 = makeSchema2Job(project, {
       id: 'job_board_promote_1',
-      shotId: shot.id,
+      target: { kind: 'shot', shotId: shot.id },
+      provider: boardProvider,
       status: 'succeeded',
       purpose: 'board_still',
       providerJobId: 'remote_board_promote_1',
@@ -1039,20 +1174,6 @@ describe('CreativeStudioServiceV2', () => {
           extra: true,
         } as never),
       () =>
-        harness.service.importReferenceFromPath({
-          projectId: 'project_v2',
-          shotId: '../clip',
-          expectedRevision: 1,
-          sourcePath: '/tmp/reference.png',
-        }),
-      () =>
-        harness.service.importReferenceFromPath({
-          projectId: 'project_v2',
-          briefReferenceRole: 'organisation',
-          expectedRevision: 1,
-          sourcePath: '/tmp/reference.png',
-        } as never),
-      () =>
         harness.service.persistCapturedPoster({
           projectId: 'project_v2',
           shotId: 'clip_1',
@@ -1084,7 +1205,6 @@ describe('CreativeStudioServiceV2', () => {
       await expect(attempt()).rejects.toMatchObject({ code: 'invalid_payload' });
     }
     expect(harness.submitShots).not.toHaveBeenCalled();
-    expect(harness.importReferenceFromPathV2).not.toHaveBeenCalled();
     expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
   });
 
@@ -1178,12 +1298,12 @@ describe('CreativeStudioServiceV2', () => {
 
   it('serializes exact export authority and returns only the renderer-safe catalog', async () => {
     const rawCatalog: StudioExportCatalogV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: 'project_v2',
       revision: 2,
       artifacts: [
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
           id: 'export_service_1',
           projectId: 'project_v2',
           sourceRevision: 2,
@@ -1291,11 +1411,8 @@ describe('CreativeStudioServiceV2', () => {
     project.name = 'Schema\r\n2 launch';
     project.brief = 'First brief line\rSecond brief line';
     project.beats.section_1!.title = 'Opening\r\nBeat';
-    project.beats.section_1!.action = 'Move\rthrough the city';
-    project.beats.section_1!.look = 'Warm\r\nlight';
-    project.shots.clip_1!.line = 'A wide\rcomposition';
-    project.shots.clip_1!.narration = 'A voice\r\narrives';
-    project.shots.clip_1!.onScreenText = 'WELCOME\rHOME';
+    project.beats.section_1!.story = 'Move\rthrough the city in warm\r\nlight.';
+    project.shots.clip_1!.shootingScript = 'Camera: A wide\rcomposition.\r\nDialogue: We have arrived.';
     const harness = makeHarness(project, { createExportId: () => 'export_script_lf' });
 
     await harness.service.createExport({
@@ -1309,7 +1426,8 @@ describe('CreativeStudioServiceV2', () => {
     const script = Buffer.from((plan.files[0] as { bytes: Uint8Array }).bytes).toString('utf8');
     expect(script).not.toContain('\r');
     expect(script).toContain('# Schema\n2 launch\n\nFirst brief line\nSecond brief line');
-    expect(script).toContain('Narration: A voice\narrives\n\nOn-screen text: WELCOME\nHOME');
+    expect(script).toContain('Story\n\nMove\nthrough the city in warm\nlight.');
+    expect(script).toContain('Shooting script\n\nCamera: A wide\ncomposition.\nDialogue: We have arrived.');
   });
 
   it('builds still and editor exports through the held project authority without re-entering media lookup', async () => {
@@ -1336,7 +1454,7 @@ describe('CreativeStudioServiceV2', () => {
         for await (const _chunk of await file.openVerifiedStream()) void _chunk;
       }
       return {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
         projectId: project.id,
         revision: plan.expectedCatalogRevision + 1,
         artifacts: [],
@@ -1393,6 +1511,10 @@ describe('CreativeStudioServiceV2', () => {
         managedAsset: { collection: 'imports', fileName: 'seed_alpha.png' },
         byteSize: 2,
         sha256: '1'.repeat(64),
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
         createdAt: '2026-08-17T00:00:10.000Z',
       },
       {
@@ -1404,6 +1526,10 @@ describe('CreativeStudioServiceV2', () => {
         managedAsset: { collection: 'imports', fileName: 'seed_beta.png' },
         byteSize: 3,
         sha256: '2'.repeat(64),
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
         createdAt: '2026-08-17T00:00:11.000Z',
       },
       {
@@ -1415,6 +1541,10 @@ describe('CreativeStudioServiceV2', () => {
         managedAsset: { collection: 'imports', fileName: 'seed_gamma.png' },
         byteSize: 4,
         sha256: '3'.repeat(64),
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
         createdAt: '2026-08-17T00:00:11.000Z',
       },
     ];
@@ -1745,7 +1875,9 @@ describe('CreativeStudioServiceV2', () => {
   it('projects schema-2 proposal lifecycle results without exposing persisted project authority', async () => {
     const harness = makeHarness();
 
-    await expect(harness.service.listProposals({ projectId: 'project_v2' })).resolves.toEqual([harness.proposal]);
+    await expect(harness.service.listProposals({ projectId: 'project_v2' })).resolves.toEqual([
+      expect.objectContaining(harness.proposal),
+    ]);
     await expect(
       harness.service.acceptProposal({ projectId: 'project_v2', proposalId: harness.proposal.id })
     ).resolves.toMatchObject({
@@ -1794,7 +1926,7 @@ describe('CreativeStudioServiceV2', () => {
     const project = makeSchema2ServiceProject();
     project.spendAuthorizations[0]!.originReferenceHandoffId = 'handoff_1';
     const decision = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: 'reference_request_1',
       projectId: 'project_v2',
       decidedAt: '2026-08-17T00:00:01.000Z',
@@ -1810,14 +1942,14 @@ describe('CreativeStudioServiceV2', () => {
       requestId: 'reference_request_1',
       referenceIds: ['ref_background'],
       decidedAt: decision.decidedAt,
-      status: 'open',
+      status: 'awaiting_spend',
       completedAt: null,
-      progress: { queued: 0, running: 0, succeeded: 0, failed: 0 },
-      candidateAssetIds: [],
-      retryReferenceIds: [],
+      counts: { queued: 0, running: 0, succeeded: 0, failed: 0 },
+      resultAssetIds: [],
+      failedReferenceIds: [],
     });
     const receipt = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       handoffId: 'handoff_1',
       requestId: 'reference_request_1',
       completedAt: '2026-08-17T00:00:02.000Z',
@@ -1829,16 +1961,15 @@ describe('CreativeStudioServiceV2', () => {
       requestId: 'reference_request_1',
       referenceIds: ['ref_background'],
       decidedAt: decision.decidedAt,
-      status: 'confirmed',
-      completedAt: '2026-08-17T00:00:02.000Z',
-      progress: { queued: 0, running: 0, succeeded: 1, failed: 0 },
-      candidateAssetIds: ['asset_reference_background'],
-      retryReferenceIds: [],
+      status: 'succeeded',
+      completedAt: '2026-08-17T00:00:00.000Z',
+      counts: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+      resultAssetIds: ['asset_reference_background'],
+      failedReferenceIds: [],
     });
     expect(JSON.stringify(confirmed)).not.toContain(SERVICE_REFERENCE_AUTHORIZATION_ID);
 
     const laterCandidate = structuredClone(project);
-    laterCandidate.references.ref_background!.candidateJobId = 'job_from_later_regeneration';
     laterCandidate.references.ref_background!.candidateAssetId = null;
     expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, laterCandidate)).toEqual(confirmed);
 
@@ -1851,12 +1982,12 @@ describe('CreativeStudioServiceV2', () => {
     failed.jobs[SERVICE_REFERENCE_JOB_ID]!.outputAssetIds = [];
     failed.jobs[SERVICE_REFERENCE_JOB_ID]!.outputAssetIdsByRole.primary = null;
     expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, failed)).toMatchObject({
-      progress: { queued: 0, running: 0, succeeded: 0, failed: 1 },
-      candidateAssetIds: [],
-      retryReferenceIds: ['ref_background'],
+      counts: { queued: 0, running: 0, succeeded: 0, failed: 1 },
+      resultAssetIds: [],
+      failedReferenceIds: ['ref_background'],
     });
 
-    for (const [status, error, retryReferenceIds] of [
+    for (const [status, error, failedReferenceIds] of [
       ['needs_attention', { code: 'submission_unknown', messageKey: 'submissionUnknown' }, []],
       ['cancelled', null, ['ref_background']],
       ['failed', { code: 'download_failed', messageKey: 'downloadFailed' }, []],
@@ -1868,8 +1999,8 @@ describe('CreativeStudioServiceV2', () => {
       terminal.jobs[SERVICE_REFERENCE_JOB_ID]!.outputAssetIds = [];
       terminal.jobs[SERVICE_REFERENCE_JOB_ID]!.outputAssetIdsByRole.primary = null;
       expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, terminal)).toMatchObject({
-        progress: { queued: 0, running: 0, succeeded: 0, failed: 1 },
-        retryReferenceIds,
+        counts: { queued: 0, running: 0, succeeded: 0, failed: 1 },
+        failedReferenceIds,
       });
     }
 
@@ -1879,6 +2010,7 @@ describe('CreativeStudioServiceV2', () => {
       ...structuredClone(retried.assets.asset_reference_background!),
       id: retryAssetId,
       managedAsset: { collection: 'assets', fileName: `${retryAssetId}.png` },
+      producerJobId: 'job_reference_background_retry',
     };
     retried.jobs.job_reference_background_retry = {
       ...structuredClone(retried.jobs[SERVICE_REFERENCE_JOB_ID]!),
@@ -1893,14 +2025,12 @@ describe('CreativeStudioServiceV2', () => {
       retryOfJobId: SERVICE_REFERENCE_JOB_ID,
       retryReason: 'provider_failure',
     };
-    retried.shots.clip_1!.jobIds.push('job_reference_background_retry');
-    retried.shots.clip_1!.assetIds.push(retryAssetId);
-    retried.references.ref_background!.candidateJobId = 'job_reference_background_retry';
+    retried.references.ref_background!.jobIds.push('job_reference_background_retry');
     retried.references.ref_background!.candidateAssetId = retryAssetId;
     expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, retried)).toMatchObject({
-      progress: { queued: 0, running: 0, succeeded: 1, failed: 0 },
-      candidateAssetIds: [retryAssetId],
-      retryReferenceIds: [],
+      counts: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+      resultAssetIds: [retryAssetId],
+      failedReferenceIds: [],
     });
 
     const pollDeadlineRetried = structuredClone(retried);
@@ -1912,9 +2042,9 @@ describe('CreativeStudioServiceV2', () => {
     pollDeadlineRetried.jobs.job_reference_background_retry!.duplicateChargeAcknowledged = true;
     pollDeadlineRetried.jobs.job_reference_background_retry!.duplicateChargeAcknowledgedAt = '2026-08-17T00:00:02.000Z';
     expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, pollDeadlineRetried)).toMatchObject({
-      progress: { queued: 0, running: 0, succeeded: 1, failed: 0 },
-      candidateAssetIds: [retryAssetId],
-      retryReferenceIds: [],
+      counts: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+      resultAssetIds: [retryAssetId],
+      failedReferenceIds: [],
     });
     expect(() => projectStudioReferenceGenerationHandoffV2(decision, receipt)).toThrowError(
       expect.objectContaining({ code: 'storage_error' })
@@ -1924,7 +2054,7 @@ describe('CreativeStudioServiceV2', () => {
       projectStudioReferenceGenerationHandoffV2(
         { ...decision, outcome: { kind: 'rejected' } },
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           handoffId: 'handoff_1',
           requestId: 'reference_request_1',
           completedAt: '2026-08-17T00:00:02.000Z',
@@ -1934,7 +2064,7 @@ describe('CreativeStudioServiceV2', () => {
     ).toThrowError(expect.objectContaining({ code: 'storage_error' }));
     expect(() =>
       projectStudioReferenceGenerationHandoffV2(decision, {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         handoffId: 'other_handoff',
         requestId: 'reference_request_1',
         completedAt: '2026-08-17T00:00:02.000Z',
@@ -1988,7 +2118,7 @@ describe('CreativeStudioServiceV2', () => {
         },
         decision: laterDecision,
         receipt: {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           handoffId: 'handoff_service_2',
           requestId: laterDecision.requestId,
           completedAt: '2026-08-17T00:00:04.000Z',
@@ -2017,22 +2147,22 @@ describe('CreativeStudioServiceV2', () => {
         requestId: harness.referenceRequest.id,
         referenceIds: ['ref_background'],
         decidedAt: decided.decidedAt,
-        status: 'open',
+        status: 'awaiting_spend',
         completedAt: null,
-        progress: { queued: 0, running: 0, succeeded: 0, failed: 0 },
-        candidateAssetIds: [],
-        retryReferenceIds: [],
+        counts: { queued: 0, running: 0, succeeded: 0, failed: 0 },
+        resultAssetIds: [],
+        failedReferenceIds: [],
       },
       {
         handoffId: 'handoff_service_2',
         requestId: laterDecision.requestId,
         referenceIds: ['ref_background'],
         decidedAt: laterDecision.decidedAt,
-        status: 'confirmed',
-        completedAt: '2026-08-17T00:00:04.000Z',
-        progress: { queued: 0, running: 0, succeeded: 1, failed: 0 },
-        candidateAssetIds: ['asset_reference_background'],
-        retryReferenceIds: [],
+        status: 'succeeded',
+        completedAt: '2026-08-17T00:00:00.000Z',
+        counts: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+        resultAssetIds: ['asset_reference_background'],
+        failedReferenceIds: [],
       },
     ]);
     expect(JSON.stringify(handoffs)).not.toContain(SERVICE_REFERENCE_AUTHORIZATION_ID);
@@ -2046,7 +2176,7 @@ describe('CreativeStudioServiceV2', () => {
       {
         request: structuredClone(harness.referenceRequest),
         decision: {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId: harness.referenceRequest.id,
           projectId: project.id,
           decidedAt: '2026-08-17T00:00:02.000Z',
@@ -2070,7 +2200,7 @@ describe('CreativeStudioServiceV2', () => {
       baseOnly: {
         projectId: project.id,
         projectRevision: project.revision,
-        baseItems: [{ shotId: 'clip_1' }],
+        baseItems: [{ target: { kind: 'reference', referenceId: 'ref_background' } }],
       },
       withCascade: null,
     });
@@ -2089,9 +2219,8 @@ describe('CreativeStudioServiceV2', () => {
         originReferenceHandoffId: 'handoff_service_1',
         baseItems: [
           expect.objectContaining({
-            shotId: 'clip_1',
-            projectReferenceId: 'ref_background',
-            purpose: 'seed_still',
+            target: { kind: 'reference', referenceId: 'ref_background' },
+            purpose: 'reference_image',
             generationCount: 1,
           }),
         ],
@@ -2100,7 +2229,12 @@ describe('CreativeStudioServiceV2', () => {
     );
     expect(
       Object.values(harness.getProject().jobs).filter((job) => job.authorizationId === prepared.baseOnly.id)
-    ).toEqual([expect.objectContaining({ purpose: 'seed_still', projectReferenceId: 'ref_background' })]);
+    ).toEqual([
+      expect.objectContaining({
+        target: { kind: 'reference', referenceId: 'ref_background' },
+        purpose: 'reference_image',
+      }),
+    ]);
     expect(harness.submitShots).toHaveBeenCalledTimes(1);
     await expect(
       harness.service.confirmSubmission({
@@ -2114,7 +2248,9 @@ describe('CreativeStudioServiceV2', () => {
   it('regenerates an approved reference after every shot stops using it', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
-    for (const shot of Object.values(project.shots)) shot.referenceIds = [];
+    for (const shot of Object.values(project.shots)) {
+      shot.referenceBinding = { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null };
+    }
     expect(validateStudioProjectV2(project)).toBe(true);
 
     const harness = makeHarness(project);
@@ -2126,8 +2262,8 @@ describe('CreativeStudioServiceV2', () => {
 
     expect(prepared.baseOnly.baseItems).toEqual([
       expect.objectContaining({
-        shotId: 'clip_1',
-        purpose: 'seed_still',
+        target: { kind: 'reference', referenceId: 'ref_background' },
+        purpose: 'reference_image',
       }),
     ]);
     await expect(
@@ -2145,25 +2281,23 @@ describe('CreativeStudioServiceV2', () => {
         id: prepared.baseOnly.id,
         baseItems: [
           expect.objectContaining({
-            shotId: 'clip_1',
-            projectReferenceId: 'ref_background',
-            purpose: 'seed_still',
+            target: { kind: 'reference', referenceId: 'ref_background' },
+            purpose: 'reference_image',
           }),
         ],
       })
     );
     expect(regenerated).toMatchObject({
-      shotId: 'clip_1',
-      projectReferenceId: 'ref_background',
-      purpose: 'seed_still',
+      target: { kind: 'reference', referenceId: 'ref_background' },
+      purpose: 'reference_image',
     });
     expect(committed.references.ref_background).toMatchObject({
-      candidateJobId: regenerated.id,
       candidateAssetId: null,
       approvedAssetId: 'asset_reference_background',
+      jobIds: expect.arrayContaining([regenerated.id]),
     });
-    expect(committed.shots.clip_1!.referenceIds).toEqual([]);
-    expect(committed.shots.clip_2!.referenceIds).toEqual([]);
+    expect(committed.shots.clip_1!.referenceBinding.status).toBe('unassigned');
+    expect(committed.shots.clip_2!.referenceBinding.status).toBe('unassigned');
     expect(validateStudioProjectV2(committed)).toBe(true);
     expect(harness.submitShots).toHaveBeenCalledTimes(1);
   });
@@ -2203,6 +2337,9 @@ describe('CreativeStudioServiceV2', () => {
       project.shots.clip_1!.assetIds = project.shots.clip_1!.assetIds.filter((assetId) => assetId !== oldAssetId);
       project.references.ref_background!.candidateAssetId = null;
       project.references.ref_background!.approvedAssetId = null;
+      for (const shot of Object.values(project.shots)) {
+        shot.referenceBinding = { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null };
+      }
 
       const harness = makeHarness(project);
       const prepared = await harness.service.prepareProjectReferences({
@@ -2219,15 +2356,15 @@ describe('CreativeStudioServiceV2', () => {
       const committed = harness.getProject();
       const retry = Object.values(committed.jobs).find((job) => job.authorizationId === prepared.baseOnly.id)!;
       expect(retry).toMatchObject({
-        projectReferenceId: 'ref_background',
+        target: { kind: 'reference', referenceId: 'ref_background' },
         retryOfJobId: SERVICE_REFERENCE_JOB_ID,
         retryReason: expectedRetryReason,
         duplicateChargeAcknowledged: expectedDuplicateChargeAcknowledged,
         duplicateChargeAcknowledgedAt: expectedDuplicateChargeAcknowledged ? '2026-08-17T00:00:02.000Z' : null,
       });
       expect(committed.references.ref_background).toMatchObject({
-        candidateJobId: retry.id,
         candidateAssetId: null,
+        jobIds: expect.arrayContaining([retry.id]),
       });
       expect(validateStudioProjectV2(committed)).toBe(true);
     }
@@ -2264,7 +2401,7 @@ describe('CreativeStudioServiceV2', () => {
     const openEntry = {
       request: structuredClone(harness.referenceRequest),
       decision: {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: harness.referenceRequest.id,
         projectId: project.id,
         decidedAt: '2026-08-17T00:00:02.000Z',
@@ -2336,8 +2473,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still' as const, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take' as const, referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     };
 
     await expect(
@@ -2368,7 +2505,7 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+        baseChoices: [shotChoiceV2('clip_1', 'video_take')],
         cascadeChoices: [],
       })
     ).rejects.toMatchObject({ name: 'StudioPricingErrorV2', code: 'missing_conditioning' });
@@ -2387,10 +2524,7 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [
-        { shotId: 'clip_1', purpose: 'board_still', referenceAssetId: null },
-        { shotId: 'clip_2', purpose: 'board_still', referenceAssetId: null },
-      ],
+      baseChoices: [shotChoiceV2('clip_1', 'board_still'), shotChoiceV2('clip_2', 'board_still')],
       cascadeChoices: [],
     });
     expect(prepared.withCascade).toBeNull();
@@ -2410,7 +2544,7 @@ describe('CreativeStudioServiceV2', () => {
       snapshot: {
         workspaceStatus: {
           boardPanels: boardJobs.map((job) => ({
-            shotId: job.shotId,
+            shotId: job.target.kind === 'shot' ? job.target.shotId : null,
             assetId: null,
             producerJobId: null,
             latestJobId: job.id,
@@ -2437,19 +2571,23 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
       cascadeChoices: [],
     });
 
     expect(admit).toHaveBeenCalledWith(
       expect.objectContaining({
         request: expect.objectContaining({
-          cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+          cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
         }),
       })
     );
     expect(prepared.withCascade?.cascadeItems).toEqual([
-      expect.objectContaining({ shotId: 'clip_1', purpose: 'video_take', generationCount: 1 }),
+      expect.objectContaining({
+        target: { kind: 'shot', shotId: 'clip_1' },
+        purpose: 'video_take',
+        generationCount: 1,
+      }),
     ]);
     await expect(
       harness.service.confirmSubmission({
@@ -2478,8 +2616,8 @@ describe('CreativeStudioServiceV2', () => {
           projectId: project.id,
           expectedRevision: project.revision,
           originReferenceHandoffId: null,
-          baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-          cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+          baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+          cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
         })
       ).rejects.toMatchObject({ code });
 
@@ -2532,8 +2670,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     cacheNow += STUDIO_PREPARED_QUOTE_TTL_SECONDS * 1_000;
 
@@ -2569,8 +2707,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
 
     expect(prepared.baseOnly.id).toMatch(/^quote_[a-f0-9]{32}$/);
@@ -2613,22 +2751,12 @@ describe('CreativeStudioServiceV2', () => {
   it('keeps video generation ready while a Board redraw is nonterminal', async () => {
     const project = makeSchema2ServiceProject();
     project.boardStyle = 'grey_tone';
-    const boardSnapshot = {
-      prompt: 'A grey-tone storyboard panel for the city launch',
-      aspectRatio: '16:9' as const,
-      resolution: '1080p' as const,
-      durationSeconds: 4,
-      referenceInputs: [],
-      conditioningInput: null,
-    };
     project.jobs.board_job = makeSchema2Job(project, {
       id: 'board_job',
       purpose: 'board_still',
       status: 'running',
       providerJobId: 'remote_board_job',
       error: null,
-      requestPlan: { kind: 'resolved', snapshot: boardSnapshot },
-      requestSnapshot: boardSnapshot,
     });
     project.shots.clip_1.jobIds = ['board_job'];
     const harness = makeHarness(project);
@@ -2651,21 +2779,22 @@ describe('CreativeStudioServiceV2', () => {
 
   it('keeps Shot generation ready while project-reference jobs run or fail', async () => {
     const project = makeSchema2ServiceProject();
-    const shot = project.shots.clip_1!;
     project.jobs.reference_pending = makeSchema2Job(project, {
       id: 'reference_pending',
-      projectReferenceId: 'ref_background',
+      target: { kind: 'reference', referenceId: 'ref_background' },
+      purpose: 'reference_image',
       status: 'running',
       providerJobId: 'remote_reference_pending',
       error: null,
     });
     project.jobs.reference_failed = makeSchema2Job(project, {
       id: 'reference_failed',
-      projectReferenceId: 'ref_background',
+      target: { kind: 'reference', referenceId: 'ref_background' },
+      purpose: 'reference_image',
       status: 'failed',
       error: { code: 'provider_unavailable', messageKey: 'providerUnavailable' },
     });
-    shot.jobIds.push('reference_pending', 'reference_failed');
+    project.references.ref_background!.jobIds.push('reference_pending', 'reference_failed');
     const harness = makeHarness(project);
 
     const readiness = await harness.service.getGenerationReadiness({
@@ -2680,7 +2809,7 @@ describe('CreativeStudioServiceV2', () => {
   it('reports exact authored and durable blockers without treating optional copy as required', async () => {
     const project = makeSchema2ServiceProject();
     project.beats.section_1.title = '';
-    project.shots.clip_2.line = '';
+    project.shots.clip_2.shootingScript = '';
     const harness = makeHarness(project);
 
     const result = await harness.service.getGenerationReadiness({
@@ -2688,10 +2817,10 @@ describe('CreativeStudioServiceV2', () => {
       beatIds: ['section_1', 'section_2'],
     });
 
-    expect(result.payableShotIds).toEqual([]);
+    expect(result.payableShotIds).toEqual(['clip_2']);
     expect(result.shots.map(({ shotId, issues }) => ({ shotId, issues }))).toEqual([
       { shotId: 'clip_1', issues: ['missing_beat_title'] },
-      { shotId: 'clip_2', issues: ['missing_line'] },
+      { shotId: 'clip_2', issues: [] },
     ]);
   });
 
@@ -3423,7 +3552,7 @@ describe('CreativeStudioServiceV2', () => {
     });
     await harness.service.applyMutations(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: project.revision,
         operations: [{ kind: 'set_brief', brief: 'Updated' }],
@@ -3431,17 +3560,6 @@ describe('CreativeStudioServiceV2', () => {
       { mutationId: 'service_free_batch', capturedAt: '2026-08-17T00:00:02.000Z' }
     );
     await harness.service.getGenerationReadiness({ projectId: project.id, beatIds: ['section_1'] });
-    await harness.service.importReferenceFromPath({
-      projectId: project.id,
-      shotId: 'clip_1',
-      expectedRevision: project.revision,
-      sourcePath: '/chosen/reference.png',
-    });
-    await harness.service.detachBriefReference({
-      projectId: project.id,
-      assetId: 'reference_1',
-      expectedRevision: project.revision,
-    });
     await harness.service.persistCapturedPoster({
       projectId: project.id,
       shotId: 'clip_1',
@@ -3459,28 +3577,6 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.cancelJobV2).not.toHaveBeenCalled();
     expect(harness.retryJobV2).not.toHaveBeenCalled();
     expect(harness.retryDownloadV2).not.toHaveBeenCalled();
-  });
-
-  it('attaches a reference through the shot-owned media seam and returns a renderer projection', async () => {
-    const project = makeSchema2ServiceProject();
-    const harness = makeHarness(project);
-
-    const result = await harness.service.importReferenceFromPath({
-      projectId: project.id,
-      shotId: 'clip_1',
-      expectedRevision: project.revision,
-      sourcePath: '/chosen/reference.png',
-    });
-
-    expect(harness.importReferenceFromPathV2).toHaveBeenCalledWith({
-      projectId: project.id,
-      shotId: 'clip_1',
-      expectedRevision: project.revision,
-      sourcePath: '/chosen/reference.png',
-      returnProject: true,
-    });
-    expect(result.asset).toMatchObject({ id: 'reference_1', shotId: 'clip_1' });
-    expect(harness.onProjectUpdated).toHaveBeenCalledWith(project.id);
   });
 
   it('decodes a bounded PNG before forwarding a captured poster to V2 media storage', async () => {
@@ -3532,7 +3628,7 @@ describe('CreativeStudioServiceV2', () => {
     for (const job of [cancelled, retried, downloaded]) {
       expect(job).toMatchObject({
         id: projectedJob.id,
-        shotId: 'clip_1',
+        target: { kind: 'shot', shotId: 'clip_1' },
         purpose: 'seed_still',
         progress: 0.5,
         canRetry: false,
@@ -3598,9 +3694,8 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.retryJobV2).not.toHaveBeenCalled();
   });
 
-  it('derives visual, duration, active-job, and latest-failure blockers', async () => {
+  it('derives duration, active-job, and latest-failure blockers', async () => {
     const project = makeSchema2ServiceProject();
-    project.beats.section_1.look = '   ';
     project.shots.clip_1.durationSeconds = 3;
     project.assets.take_1 = {
       id: 'take_1',
@@ -3613,6 +3708,10 @@ describe('CreativeStudioServiceV2', () => {
       sha256: 'b'.repeat(64),
       durationSeconds: 10,
       createdAt: project.createdAt,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
     };
     project.shots.clip_1.assetIds = ['take_1'];
     project.jobs.active_job = makeSchema2Job(project, {
@@ -3623,7 +3722,7 @@ describe('CreativeStudioServiceV2', () => {
     });
     project.jobs.failed_job = makeSchema2Job(project, {
       id: 'failed_job',
-      shotId: 'clip_2',
+      target: { kind: 'shot', shotId: 'clip_2' },
       error: { code: 'timeout', messageKey: 'timeout' },
     });
     project.shots.clip_1.jobIds = ['active_job'];
@@ -3640,7 +3739,7 @@ describe('CreativeStudioServiceV2', () => {
         shotId: 'clip_1',
         beatId: 'section_1',
         ready: false,
-        issues: ['missing_look', 'invalid_shot_duration', 'active_job'],
+        issues: ['invalid_shot_duration', 'active_job'],
       },
       {
         shotId: 'clip_2',
@@ -3777,21 +3876,6 @@ describe('CreativeStudioServiceV2', () => {
     const png = Buffer.from('89504e470d0a1a0a', 'hex');
 
     await expect(
-      harness.service.importReferenceFromPath({
-        projectId: project.id,
-        shotId: 'clip_1',
-        expectedRevision: project.revision,
-        sourcePath: '/chosen/reference.png',
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-    await expect(
-      harness.service.detachBriefReference({
-        projectId: project.id,
-        assetId: 'reference_1',
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-    await expect(
       harness.service.persistCapturedPoster({
         projectId: project.id,
         shotId: 'clip_1',
@@ -3838,8 +3922,8 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision + 1,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+        baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+        cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
       })
     ).rejects.toMatchObject({ code: 'stale_project' });
     expect(harness.loadRateCard).not.toHaveBeenCalled();
@@ -3867,7 +3951,9 @@ describe('CreativeStudioServiceV2', () => {
     });
     expect(harness.getProject()).toEqual(project);
     expect(prepared.withCascade).toBeNull();
-    expect(prepared.baseOnly.baseItems.map(({ shotId, purpose }) => [shotId, purpose])).toEqual([
+    expect(
+      prepared.baseOnly.baseItems.map(({ target, purpose }) => [target.kind === 'shot' ? target.shotId : null, purpose])
+    ).toEqual([
       ['clip_1', 'video_take'],
       ['clip_2', 'video_take'],
     ]);
@@ -3899,7 +3985,7 @@ describe('CreativeStudioServiceV2', () => {
     );
     expect(replacementJobs).toEqual([
       expect.objectContaining({
-        shotId: 'clip_1',
+        target: { kind: 'shot', shotId: 'clip_1' },
         purpose: 'video_take',
         status: 'queued_local',
         requestSnapshot: expect.objectContaining({
@@ -3907,7 +3993,7 @@ describe('CreativeStudioServiceV2', () => {
         }),
       }),
       expect.objectContaining({
-        shotId: 'clip_2',
+        target: { kind: 'shot', shotId: 'clip_2' },
         purpose: 'video_take',
         status: 'waiting_for_conditioning',
         requestPlan: expect.objectContaining({
@@ -3965,7 +4051,7 @@ describe('CreativeStudioServiceV2', () => {
 
     expect(prepared.withCascade).toBeNull();
     expect(prepared.baseOnly).toMatchObject({
-      baseItems: [{ shotId: 'clip_2', purpose: 'video_take', generationCount: 1 }],
+      baseItems: [{ target: { kind: 'shot', shotId: 'clip_2' }, purpose: 'video_take', generationCount: 1 }],
       cascadeItems: [],
     });
     harness.extractConditioningFrameV2.mockRejectedValueOnce(new Error('fixture decoder failure'));
@@ -3998,7 +4084,7 @@ describe('CreativeStudioServiceV2', () => {
     ).toHaveLength(1);
     expect(Object.values(committed.jobs).filter((job) => job.id !== SERVICE_REFERENCE_JOB_ID)).toEqual([
       expect.objectContaining({
-        shotId: 'clip_2',
+        target: { kind: 'shot', shotId: 'clip_2' },
         status: 'waiting_for_conditioning',
         requestPlan: {
           kind: 'after_take_selection',
@@ -4095,8 +4181,11 @@ describe('CreativeStudioServiceV2', () => {
       managedAsset: { collection: 'conditioningFrames', fileName: 'frame_rejoin_1.png' },
       byteSize: 15,
       sha256: 'f'.repeat(64),
-      referenceAssetIds: [],
       createdAt: '2026-08-17T00:00:02.000Z',
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
     };
     const ready = harness.getProject();
     ready.assets[frameAsset.id] = frameAsset;
@@ -4222,10 +4311,15 @@ describe('CreativeStudioServiceV2', () => {
         managedAsset: { collection: 'imports', fileName: 'seed_sever_2.png' },
         byteSize: 20,
         sha256: 'e'.repeat(64),
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
         createdAt: '2026-08-17T00:00:01.000Z',
       };
       project.assets[seed.id] = seed;
       project.shots.clip_2!.assetIds.push(seed.id);
+      project.shots.clip_2!.seedStillId = seed.id;
     }
     const harness = makeHarness(project);
     const beforePrepare = harness.getProject();
@@ -4404,8 +4498,8 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+        baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+        cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
       })
     ).rejects.toMatchObject({ code: 'invalid_route' });
     expect(harness.loadRateCard).not.toHaveBeenCalled();
@@ -4435,13 +4529,13 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
+        baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
         cascadeChoices: [],
       })
-    ).rejects.toMatchObject({ code: 'invalid_route' });
+    ).rejects.toMatchObject({ code: 'invalid_reference' });
 
     expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(1);
-    expect(harness.loadRateCard).toHaveBeenCalledTimes(1);
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
     expect(admit).not.toHaveBeenCalled();
     expect(harness.getProject()).toEqual(before);
     expect(harness.submitShots).not.toHaveBeenCalled();
@@ -4466,8 +4560,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
 
     expect(prepared.baseOnly).toMatchObject({
@@ -4484,7 +4578,7 @@ describe('CreativeStudioServiceV2', () => {
       })
     ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
     expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(2);
-    expect(harness.getProject().spendAuthorizations[0]).toMatchObject({
+    expect(harness.getProject().spendAuthorizations.find(({ id }) => id === prepared.baseOnly.id)).toMatchObject({
       baseItems: [{ purpose: 'seed_still' }],
       cascadeItems: [],
     });
@@ -4506,8 +4600,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     expect(prepared.withCascade).toBeNull();
 
@@ -4531,8 +4625,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     expect(prepared.withCascade).not.toBeNull();
     harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
@@ -4559,8 +4653,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     harness.loadRateCard.mockResolvedValueOnce(
       createStudioRateCardV2([
@@ -4601,8 +4695,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     harness.loadRateCard.mockResolvedValueOnce(
       createStudioRateCardV2([
@@ -4641,8 +4735,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     harness.loadRateCard.mockResolvedValueOnce(
       createStudioRateCardV2([
@@ -4684,8 +4778,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
 
     expect(prepared.baseOnly).toMatchObject({
@@ -4706,13 +4800,15 @@ describe('CreativeStudioServiceV2', () => {
     });
     const rendererItem = prepared.withCascade!.cascadeItems[0]!;
     expect(Object.keys(rendererItem).toSorted()).toEqual([
+      'composition',
       'durationSeconds',
       'generationCount',
       'oneGenerationMinorUnits',
       'purpose',
+      'referenceTarget',
       'requestedTotalMinorUnits',
       'route',
-      'shotId',
+      'target',
     ]);
     expect(rendererItem).not.toHaveProperty('requestPlan');
     expect(rendererItem).not.toHaveProperty('authorizationItemId');
@@ -4771,26 +4867,30 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     const baseRow = {
-      shotId: 'clip_1',
+      target: { kind: 'shot' as const, shotId: 'clip_1' },
+      referenceTarget: null,
       purpose: 'seed_still' as const,
       route: { choiceId: imageRoute.choiceId, providerId: 'provider_1', model: 'image-model' },
       generationCount: 1,
       durationSeconds: null,
       oneGenerationMinorUnits: 3,
       requestedTotalMinorUnits: 3,
+      composition: prepared.baseOnly.baseItems[0]!.composition,
     };
     const cascadeRow = {
-      shotId: 'clip_1',
+      target: { kind: 'shot' as const, shotId: 'clip_1' },
+      referenceTarget: null,
       purpose: 'video_take' as const,
       route: { choiceId: videoRoute.choiceId, providerId: 'provider_1', model: 'video-model' },
       generationCount: 1,
       durationSeconds: 5,
       oneGenerationMinorUnits: 25,
       requestedTotalMinorUnits: 25,
+      composition: prepared.withCascade!.cascadeItems[0]!.composition,
     };
     const budget = { kind: 'within_cap' as const, policyCurrency: 'USD', maxPerBatchMinorUnits: 112 };
 
@@ -4837,7 +4937,7 @@ describe('CreativeStudioServiceV2', () => {
         upperMinorUnits: prepared.withCascade!.upperMinorUnits,
         baseItems: [
           expect.objectContaining({
-            shotId: baseRow.shotId,
+            target: baseRow.target,
             purpose: baseRow.purpose,
             routeId: baseRow.route.choiceId,
             generationCount: baseRow.generationCount,
@@ -4847,7 +4947,7 @@ describe('CreativeStudioServiceV2', () => {
         ],
         cascadeItems: [
           expect.objectContaining({
-            shotId: cascadeRow.shotId,
+            target: cascadeRow.target,
             purpose: cascadeRow.purpose,
             routeId: cascadeRow.route.choiceId,
             generationCount: cascadeRow.generationCount,
@@ -4871,8 +4971,8 @@ describe('CreativeStudioServiceV2', () => {
         projectId: project.id,
         expectedRevision: project.revision,
         originReferenceHandoffId: 'handoff_not_enabled_yet',
-        baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-        cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+        baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+        cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
       })
     ).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
@@ -4881,8 +4981,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     expect(prepared.baseOnly.budget).toEqual({
       kind: 'over_cap',
@@ -4919,8 +5019,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
       routes: [{ ...structuredClone(imageRoute), cancellationPolicy: 'queued_only' }],
@@ -4963,8 +5063,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     await harness.service.confirmSubmission({
       projectId: project.id,
@@ -4985,8 +5085,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: terminal.id,
       expectedRevision: terminal.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     await harness.service.confirmSubmission({
       projectId: terminal.id,
@@ -5013,8 +5113,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     await harness.service.confirmSubmission({
       projectId: project.id,
@@ -5031,8 +5131,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: ambiguous.id,
       expectedRevision: ambiguous.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     await harness.service.confirmSubmission({
       projectId: ambiguous.id,
@@ -5068,8 +5168,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     await harness.service.confirmSubmission({
       projectId: project.id,
@@ -5079,7 +5179,7 @@ describe('CreativeStudioServiceV2', () => {
 
     const paid = harness.getProject();
     const seedJob = Object.values(paid.jobs).find(
-      (job) => job.purpose === 'seed_still' && job.projectReferenceId === undefined
+      (job) => job.purpose === 'seed_still' && job.target.kind === 'shot' && job.target.shotId === 'clip_1'
     )!;
     const seedAsset: StudioAssetV2 = {
       id: 'seed_generated',
@@ -5090,7 +5190,10 @@ describe('CreativeStudioServiceV2', () => {
       managedAsset: { collection: 'assets', fileName: 'seed_generated.png' },
       byteSize: 8,
       sha256: 'c'.repeat(64),
-      referenceAssetIds: ['asset_reference_background'],
+      projectReferenceId: null,
+      generationReferenceAssetIds: ['asset_reference_background'],
+      producerJobId: seedJob.id,
+      compositionDigest: studioGenerationCompositionDigestV2(seedJob.composition),
       createdAt: '2026-08-17T00:00:02.000Z',
     };
     paid.assets[seedAsset.id] = seedAsset;
@@ -5104,6 +5207,10 @@ describe('CreativeStudioServiceV2', () => {
       managedAsset: { collection: 'imports', fileName: 'seed_unrelated_import.png' },
       byteSize: 8,
       sha256: 'd'.repeat(64),
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
       createdAt: '2026-08-17T00:00:02.000Z',
     };
     paid.assets[unrelatedSeedAsset.id] = unrelatedSeedAsset;
@@ -5132,7 +5239,7 @@ describe('CreativeStudioServiceV2', () => {
     await expect(
       harness.service.applyMutations(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: paid.id,
           expectedRevision: paid.revision,
           operations: [{ kind: 'set_seed_still', shotId: 'clip_1', assetId: unrelatedSeedAsset.id }],
@@ -5146,7 +5253,7 @@ describe('CreativeStudioServiceV2', () => {
 
     await harness.service.applyMutations(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: paid.id,
         expectedRevision: paid.revision,
         operations: [{ kind: 'set_seed_still', shotId: 'clip_1', assetId: seedAsset.id }],
@@ -5176,8 +5283,8 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'clip_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'clip_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_1', 'video_take')],
     });
     await harness.service.confirmSubmission({
       projectId: project.id,
@@ -5391,15 +5498,12 @@ describe('CreativeStudioServiceV2', () => {
 
 const editableBeatV2 = () => ({
   title: 'Opening',
-  action: 'Introduce the product',
-  look: 'Warm sunrise over a quiet city',
+  story: 'Warm sunrise over a quiet city introduces the product.',
   targetSeconds: null,
 });
 
 const editableShotV2 = () => ({
-  line: 'A wide establishing shot',
-  narration: '',
-  onScreenText: '',
+  shootingScript: 'A wide establishing shot.',
   durationSeconds: 5,
 });
 
@@ -5411,17 +5515,16 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
     rules: [{ id: 'rule_1', text: 'Avoid competitor logos.', predicate: { kind: 'forbidden_terms', terms: ['logo'] } }],
   },
   {
-    kind: 'set_project_references',
+    kind: 'set_reference_plan',
     references: [
       {
-        id: 'ref_ming',
         kind: 'character',
         label: 'Ming',
         prompt: 'Character turnaround sheet for Ming.',
-        shotIds: ['clip_1'],
       },
     ],
   },
+  { kind: 'approve_reference', referenceId: 'ref_ming', candidateAssetId: 'asset_ming' },
   { kind: 'add_beat', beatId: 'section_new', beat: editableBeatV2(), beforeBeatId: null },
   { kind: 'edit_beat', beatId: 'section_1', changes: { targetSeconds: 12 } },
   { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
@@ -5429,7 +5532,7 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
   { kind: 'restore_beat', beatId: 'section_1', beforeBeatId: null },
   { kind: 'add_binned_beat', beatId: 'section_binned', beat: editableBeatV2() },
   { kind: 'add_shot', beatId: 'section_1', shotId: 'clip_new', shot: editableShotV2(), beforeShotId: null },
-  { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'A tighter opening' } },
+  { kind: 'edit_shot', shotId: 'clip_1', changes: { shootingScript: 'A tighter opening.' } },
   { kind: 'delete_shot', shotId: 'clip_2' },
   { kind: 'park_shot', shotId: 'clip_1' },
   { kind: 'restore_shot', shotId: 'clip_1', beforeShotId: null },
@@ -5440,23 +5543,23 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
     shots: [
       {
         shotId: 'clip_coverage',
-        line: 'A proposed coverage row',
-        narration: '',
-        onScreenText: '',
+        shootingScript: 'A proposed coverage row.',
         durationSeconds: 5,
         chainBreak: 'none',
       },
     ],
-    fixedShots: [{ shotId: 'clip_fixed', reasons: ['owned_asset', 'video_asset', 'on_screen_text'] }],
+    fixedShots: [{ shotId: 'clip_fixed', reasons: ['owned_asset', 'video_asset', 'shooting_script'] }],
   },
   { kind: 'set_hard_cut', shotId: 'clip_1', hardCut: true },
   { kind: 'set_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
-  { kind: 'set_shot_background_reference', shotId: 'clip_1', referenceId: 'ref_background' },
+  {
+    kind: 'set_shot_reference_binding',
+    shotId: 'clip_1',
+    characterReferenceIds: ['ref_ming'],
+    backgroundReferenceId: 'ref_background',
+  },
   { kind: 'promote_board_panel', shotId: 'clip_1', boardAssetId: 'asset_board' },
   { kind: 'trim_shot', shotId: 'clip_1', trimInSeconds: 0, trimOutSeconds: 4.5 },
-  { kind: 'redetach_line', shotId: 'clip_1', line: 'A human-authored line' },
-  { kind: 'rederive_line', shotId: 'clip_1', line: 'A reviewed derived line' },
-  { kind: 'restore_line', shotId: 'clip_1', historyEntryId: 'history_1' },
   {
     kind: 'reorder_bin',
     bin: [
@@ -5476,24 +5579,39 @@ const capturePendingProjectAuthorityV2 = async (projectRoot: string) => {
   return { canonicalRoot, rootIdentity: { dev: stats.dev, ino: stats.ino } };
 };
 
+const writeStudioProjectFilesV2 = async (projectDir: string, project: StudioProjectV2): Promise<void> => {
+  await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(createStudioProjectManifestV2(project)));
+  await writeFile(path.join(projectDir, 'brief.md'), project.brief);
+};
+
 const REFERENCE_WRITER_PROJECT_ID_V2 = 'project_v2';
 const REFERENCE_WRITER_NOW_MS_V2 = Date.parse('2026-08-19T12:00:00.000Z');
+const REFERENCE_WRITER_LOCK_NAME_V2 = '.reference-requests.writer.lock';
+const REFERENCE_WRITER_RECLAIM_NAME_V2 = '.reference-requests.writer.lock.reclaim';
+
+const referenceWriterLeaseV2 = (overrides: Record<string, unknown> = {}) => ({
+  schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
+  token: 'reference_writer_lease',
+  pid: 2_147_483_647,
+  acquiredAt: '2020-01-01T00:00:00.000Z',
+  ...overrides,
+});
 
 const referenceRequestRecordV2 = (
   requestId: string,
-  shotId: string,
+  referenceId: string,
   createdAtMs: number
 ): StudioReferenceRequestV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   id: requestId,
   projectId: REFERENCE_WRITER_PROJECT_ID_V2,
-  referenceIds: [shotId],
+  referenceIds: [referenceId],
   status: 'pending',
   createdAt: new Date(createdAtMs).toISOString(),
 });
 
 const proposalRecordV2 = (proposalId: string, createdAtMs: number): StudioProposalRecordV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   id: proposalId,
   projectId: REFERENCE_WRITER_PROJECT_ID_V2,
   status: 'pending',
@@ -5553,7 +5671,7 @@ const referenceDecisionV2 = (
   requestId: string,
   outcome: { kind: 'rejected' } | { kind: 'generation_gate'; handoffId: string; referenceIds: string[] }
 ) => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   requestId,
   projectId: REFERENCE_WRITER_PROJECT_ID_V2,
   decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2 + 1_000).toISOString(),
@@ -5561,7 +5679,7 @@ const referenceDecisionV2 = (
 });
 
 const referenceReceiptV2 = (requestId: string, handoffId: string) => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   handoffId,
   requestId,
   completedAt: new Date(REFERENCE_WRITER_NOW_MS_V2 + 2_000).toISOString(),
@@ -5606,6 +5724,10 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
     managedAsset: { collection: 'imports', fileName: 'seed_clip_1.png' },
     byteSize: 1,
     sha256: 'c'.repeat(64),
+    projectReferenceId: null,
+    generationReferenceAssetIds: [],
+    producerJobId: null,
+    compositionDigest: null,
     createdAt: '2026-08-17T00:00:00.000Z',
   };
   project.assets[seed.id] = seed;
@@ -5617,6 +5739,8 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
     adapterId: 'openrouter-video-v1',
     model: 'model_1',
   } as const;
+  const beat = Object.values(project.beats).find((candidate) => candidate.shotOrder.includes(shot.id))!;
+  const target = { kind: 'shot' as const, shotId: shot.id };
   let created = 0;
   while (created < count) {
     const ordinal = created + 1;
@@ -5625,23 +5749,37 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
     const itemId = createStudioQuotedGenerationId({
       projectId: project.id,
       projectRevision,
-      shotId: shot.id,
+      target,
       purpose: 'video_take',
     });
-    const requestPlan = {
-      kind: 'resolved' as const,
-      snapshot: {
-        prompt: `Video batch ${authorizationOrdinal}`,
-        aspectRatio: project.aspectRatio,
-        resolution: project.resolution,
-        durationSeconds: shot.durationSeconds,
-        referenceInputs: [],
-        conditioningInput: { kind: 'seed_still' as const, assetId: seed.id },
-      },
+    const source = {
+      kind: 'shot' as const,
+      beatId: beat.id,
+      story: beat.story,
+      shotId: shot.id,
+      shootingScript: shot.shootingScript,
     };
+    const composition = composeStudioGenerationV2({
+      projectRevision,
+      brief: project.brief,
+      rules: project.rules,
+      source,
+      purpose: 'video_take',
+      referenceInputs: [],
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      route: provider,
+      boardStyle: null,
+      instructionProfile: deriveStudioInstructionProfileV2(provider, 'video_take', source),
+    });
+    const requestPlan = createStudioResolvedGenerationRequestPlan({
+      purpose: 'video_take',
+      template: createStudioGenerationRequestTemplate({ composition, durationSeconds: shot.durationSeconds }),
+      conditioningInput: { kind: 'seed_still', assetId: seed.id },
+    });
     const item = {
       id: itemId,
-      shotId: shot.id,
+      target,
       purpose: 'video_take' as const,
       routeId: 'video_route',
       generationCount: 1,
@@ -5670,6 +5808,7 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
     });
     const assetId = `take_${String(ordinal).padStart(2, '0')}`;
     const createdAt = `2026-08-17T00:00:${String(ordinal + 1).padStart(2, '0')}.000Z`;
+    const jobId = `job_mcp_${ordinal}`;
     const asset: StudioAssetV2 = {
       id: assetId,
       projectId: project.id,
@@ -5679,15 +5818,17 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
       managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
       byteSize: 1,
       sha256: 'a'.repeat(64),
-      referenceAssetIds: [],
       durationSeconds: shot.durationSeconds,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: jobId,
+      compositionDigest: studioGenerationCompositionDigestV2(composition),
       createdAt,
     };
-    const jobId = `job_mcp_${ordinal}`;
     const job: StudioJobV2 = {
       id: jobId,
       projectId: project.id,
-      shotId: shot.id,
+      target,
       status: 'succeeded',
       provider,
       idempotencyKey,
@@ -5698,6 +5839,7 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
       purpose: 'video_take',
       authorizationId,
       authorizationItemId: itemId,
+      composition,
       requestPlan,
       requestSnapshot: requestPlan.snapshot,
       spendReceipt: {
@@ -5735,6 +5877,37 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
 };
 
 describe('Studio MCP schema-2 server', () => {
+  it('parses explicit and defaulted sidecar paths without coupling route-catalog state to project schema', () => {
+    const required = {
+      [STUDIO_ENV.projectId]: 'project_1',
+      [STUDIO_ENV.projectDir]: '/studio/project_1',
+      [STUDIO_ENV.pendingDir]: '/studio/project_1/director/pending',
+    };
+    const serializedRouteCatalog = JSON.stringify({ image: { status: 'ready' }, video: { status: 'missing' } });
+
+    expect(
+      parseStudioServerEnv({
+        ...required,
+        [STUDIO_ENV.referencePendingDir]: '/studio/project_1/references/pending',
+        [STUDIO_ENV.routeCatalog]: serializedRouteCatalog,
+      })
+    ).toEqual({
+      projectId: 'project_1',
+      projectDir: '/studio/project_1',
+      pendingDir: '/studio/project_1/director/pending',
+      referencePendingDir: '/studio/project_1/references/pending',
+      routeCatalog: JSON.parse(serializedRouteCatalog),
+    });
+    expect(parseStudioServerEnv(required)).toEqual({
+      projectId: 'project_1',
+      projectDir: '/studio/project_1',
+      pendingDir: '/studio/project_1/director/pending',
+      referencePendingDir: '/studio/project_1/reference-requests/pending',
+      routeCatalog: null,
+    });
+    expect(parseStudioServerEnv({})).toBeNull();
+  });
+
   it('reports route-catalog absence without exposing a partial catalog', async () => {
     await expect(createListRoutesHandler(null)({})).resolves.toEqual({
       content: [{ type: 'text', text: 'Creative Studio route catalog is unavailable.' }],
@@ -5913,9 +6086,6 @@ describe('Studio MCP schema-2 server', () => {
       const proposalOperationVariants = (proposalOperationItems?.items?.anyOf ??
         proposalOperationItems?.items?.oneOf) as typeof operationVariants;
       const advertisedValidator = new AjvJsonSchemaValidator().getValidator(applySchema as never);
-      const canonicalExample = (applyEdits?.description ?? '').match(
-        /(\{"expectedRevision":8,"operations":\[[^]*\]\})\./
-      )?.[1];
 
       expect(tools.map(({ name }) => name).toSorted()).toEqual([
         'propose_brief_rule',
@@ -5935,7 +6105,7 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(30);
+      expect(operationKinds).toHaveLength(28);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds
@@ -5958,7 +6128,7 @@ describe('Studio MCP schema-2 server', () => {
         operations: [
           { kind: 'set_brief', brief: '...' },
           { kind: 'edit_beat', beatId: 'beat_1', changes: { title: '...' } },
-          { kind: 'edit_shot', shotId: 'shot_1', changes: { line: '...' } },
+          { kind: 'edit_shot', shotId: 'shot_1', changes: { shootingScript: '...' } },
           { kind: 'reorder_beats', beatOrder: ['beat_2', 'beat_1'] },
         ],
       };
@@ -5992,8 +6162,6 @@ describe('Studio MCP schema-2 server', () => {
           ],
         })
       ).toMatchObject({ valid: false });
-      expect(canonicalExample).toBeDefined();
-      expect(JSON.parse(canonicalExample ?? '{}')).toEqual(canonicalBatch);
       expect(applyEdits?.description).toMatch(/never starts paid generation/i);
 
       const referenceSchema = tools.find((tool) => tool.name === 'studio_request_reference_images')?.inputSchema;
@@ -6143,8 +6311,8 @@ describe('Studio MCP schema-2 server', () => {
       expect(applyTool?.description).toMatch(/rejected atomically at capability preflight/i);
       expect(applyTool?.description).toMatch(/no operation reaches command evaluation or is applied/i);
       expect(applyTool?.description).toMatch(/zero-based index/i);
-      expect(applyTool?.description).toMatch(/whole subset to propose_storyboard/i);
-      expect(applyTool?.description).toMatch(/only when it is independently valid/i);
+      expect(applyTool?.description).toMatch(/whole proposal-eligible subset to propose_storyboard/i);
+      expect(applyTool?.description).toMatch(/only when the direct subset is independently valid/i);
     } finally {
       await harness.close();
       await rm(projectDir, { recursive: true, force: true });
@@ -6205,6 +6373,15 @@ describe('Studio MCP schema-2 server', () => {
       {
         expectedRevision: 7,
         operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: { durationSeconds: 16 } }],
+      },
+      {
+        expectedRevision: 7,
+        operations: [
+          {
+            kind: 'set_reference_plan',
+            references: [{ id: 'director_owned_id', kind: 'character', label: 'Ming', prompt: 'A character study.' }],
+          },
+        ],
       },
       {
         expectedRevision: 7,
@@ -6322,7 +6499,7 @@ describe('Studio MCP schema-2 server', () => {
     expect(
       studioProposeStoryboardInputSchemaV2.safeParse({
         base_revision: 7,
-        operations: [{ kind: 'rederive_line', shotId: 'clip_1', line: '' }],
+        operations: [{ kind: 'retired_authoring_operation', shotId: 'clip_1' }],
       }).success
     ).toBe(false);
     for (const referenceIds of [
@@ -6353,7 +6530,7 @@ describe('Studio MCP schema-2 server', () => {
           name: 'studio_apply_edits',
           arguments: {
             expectedRevision: 7,
-            operations: [{ kind: 'rederive_line', shotId: 'clip_1', line: 'Proposal only' }],
+            operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: { shootingScript: 'Proposal only' } }],
           },
         },
         {
@@ -6444,7 +6621,7 @@ describe('Studio MCP schema-2 server', () => {
           expectedRevision: 7,
           operations: [
             { kind: 'set_brief', brief: 'Direct work must remain identifiable' },
-            { kind: 'rederive_line', shotId: 'clip_1', line: 'Proposal only' },
+            { kind: 'edit_shot', shotId: 'clip_1', changes: { shootingScript: 'Proposal only' } },
             { kind: 'set_rules', rules: [] },
             { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Also direct' } },
           ],
@@ -6462,7 +6639,7 @@ describe('Studio MCP schema-2 server', () => {
         rejectedOperations: [
           {
             index: 1,
-            kind: 'rederive_line',
+            kind: 'edit_shot',
             disposition: 'proposal',
             reason: 'requires_user_review',
           },
@@ -6472,11 +6649,17 @@ describe('Studio MCP schema-2 server', () => {
             disposition: 'operation_not_permitted',
             reason: 'unavailable_to_director',
           },
+          {
+            index: 3,
+            kind: 'edit_beat',
+            disposition: 'proposal',
+            reason: 'requires_user_review',
+          },
         ],
-        directCapableOperationIndexes: [0, 3],
+        directCapableOperationIndexes: [0],
         guidance: {
           proposal:
-            'After omitting unavailable operations, submit the full ordered direct-and-proposal-capable subset to propose_storyboard when it still expresses the intended atomic change.',
+            'After omitting unavailable and reference-direct operations, submit the full ordered proposal-eligible subset to propose_storyboard when it still expresses the intended atomic change.',
           unavailable:
             'Omit unavailable operations or ask the user to perform them manually in Creative Studio when supported.',
           direct:
@@ -6529,28 +6712,9 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('projects validated Beat/Shot state with only the canonical picture pointer', async () => {
+  it('projects validated Story, Shooting script, semantic references, and exact Shot bindings', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
     const project = makeSchema2ServiceProject();
-    addGeneratedVideosForMcpV2(project, 25);
-    const briefReferences: StudioAssetV2[] = [
-      ['cast_b', 'cast', 'Second cast'],
-      ['cast_a', 'cast', 'First cast'],
-      ['look_a', 'look', 'Golden look'],
-    ].map(([id, role, label]) => ({
-      id: id!,
-      projectId: project.id,
-      shotId: null,
-      mediaKind: 'image',
-      mimeType: 'image/png',
-      managedAsset: { collection: 'imports', fileName: `${id}.png` },
-      byteSize: 1,
-      sha256: 'b'.repeat(64),
-      briefReferenceRole: role as 'cast' | 'look',
-      briefReferenceLabel: label!,
-      createdAt: '2026-08-17T00:00:00.000Z',
-    }));
-    for (const asset of briefReferences) project.assets[asset.id] = asset;
     project.rules = [
       {
         id: 'rule_context',
@@ -6567,7 +6731,7 @@ describe('Studio MCP schema-2 server', () => {
         createdAt: '2026-08-17T00:00:01.000Z',
       },
     ];
-    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+    await writeStudioProjectFilesV2(projectDir, project);
 
     const result = await createReadStoryboardHandlerV2({
       projectId: project.id,
@@ -6578,24 +6742,49 @@ describe('Studio MCP schema-2 server', () => {
     const view = JSON.parse(result.content[0].text) as {
       beatOrder: string[];
       beats: Record<string, { shotOrder: string[] }>;
-      shots: Record<string, { hasVideo: boolean; videoAssetId: string | null }>;
+      referencePlanStatus: string;
+      references: Array<Record<string, unknown>>;
+      shots: Record<
+        string,
+        {
+          shootingScript: string;
+          hasVideo: boolean;
+          videoAssetId: string | null;
+          referenceBinding: unknown;
+        }
+      >;
       bin: unknown[];
-      briefReferences: unknown[];
       rules: unknown[];
     };
 
     expect(result.isError).toBeUndefined();
     expect(view.beatOrder).toEqual(['section_1', 'section_2']);
     expect(view.beats.section_1.shotOrder).toEqual(['clip_1']);
-    expect(view.shots.clip_1).toMatchObject({ hasVideo: true, videoAssetId: 'take_25' });
+    expect(view.shots.clip_1).toMatchObject({
+      shootingScript: 'A wide establishing shot.',
+      hasVideo: false,
+      videoAssetId: null,
+      referenceBinding: {
+        status: 'ready',
+        characterReferenceIds: [],
+        backgroundReferenceId: 'ref_background',
+      },
+    });
     expect(view.shots.clip_1).not.toHaveProperty('selectedTakeId');
     expect(view.shots.clip_1).not.toHaveProperty('availableTakeIds');
     expect(view.bin).toEqual([]);
-    expect(view.briefReferences).toEqual([
-      { id: 'cast_a', label: 'First cast', role: 'cast' },
-      { id: 'cast_b', label: 'Second cast', role: 'cast' },
-      { id: 'look_a', label: 'Golden look', role: 'look' },
+    expect(view.referencePlanStatus).toBe('planned');
+    expect(view.references).toEqual([
+      {
+        id: 'ref_background',
+        kind: 'background',
+        label: 'City skyline',
+        prompt: 'Warm city skyline from sunrise through evening.',
+        approvalStatus: 'approved',
+        approvedAssetId: 'asset_reference_background',
+      },
     ]);
+    expect(JSON.stringify(view.references)).not.toMatch(/sha256|provider|superseded|candidateAssetId/u);
     expect(view.rules).toEqual([
       { scope: 'project', text: 'Keep the tone optimistic.', enforced: false },
       {
@@ -6616,7 +6805,7 @@ describe('Studio MCP schema-2 server', () => {
       const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-board-style-'));
       const project = makeSchema2ServiceProject();
       project.boardStyle = boardStyle;
-      await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+      await writeStudioProjectFilesV2(projectDir, project);
 
       try {
         const result = await createReadStoryboardHandlerV2({
@@ -6691,7 +6880,7 @@ describe('Studio MCP schema-2 server', () => {
     const added = applyStudioMutationBatchV2(
       empty,
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: empty.id,
         expectedRevision: empty.revision,
         operations: Array.from({ length: 24 }, (_, index) => {
@@ -6701,8 +6890,7 @@ describe('Studio MCP schema-2 server', () => {
             beatId: `section_${ordinal}`,
             beat: {
               title: `Section ${ordinal}`,
-              action: '',
-              look: `Visual ${ordinal}`,
+              story: `Visual story ${ordinal}`,
               targetSeconds: null,
             },
             beforeBeatId: null,
@@ -6716,7 +6904,7 @@ describe('Studio MCP schema-2 server', () => {
     const parked = applyStudioMutationBatchV2(
       project,
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: project.revision,
         operations: [{ kind: 'park_beat', beatId: 'section_24' }],
@@ -6724,7 +6912,7 @@ describe('Studio MCP schema-2 server', () => {
       { mutationId: 'capacity_park_beat', capturedAt: parkedAt }
     ).project;
     project = { ...parked, revision: project.revision + 1, updatedAt: parkedAt };
-    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+    await writeStudioProjectFilesV2(projectDir, project);
 
     try {
       const result = await createReadStoryboardHandlerV2({
@@ -6746,7 +6934,7 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it.each([1, 2] as const)(
+  it.each([1, 2, 3, 4] as const)(
     'rejects a schema-%d manifest as unsupported before proposal or reference sidecar IO',
     async (schemaVersion) => {
       const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-legacy-'));
@@ -6778,6 +6966,41 @@ describe('Studio MCP schema-2 server', () => {
     }
   );
 
+  it('rejects a future project schema as invalid rather than misclassifying it as a prototype', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-future-'));
+    const futureManifest = {
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1,
+      id: 'project_future_schema',
+      revision: 7,
+    };
+    const manifestBytes = JSON.stringify(futureManifest);
+    await writeFile(path.join(projectDir, 'project.json'), manifestBytes);
+    const config = {
+      projectId: futureManifest.id,
+      projectDir,
+      pendingDir: path.join(projectDir, 'proposals', 'pending'),
+      referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+    };
+
+    try {
+      const outcomes = await Promise.all([
+        createReadStoryboardHandlerV2(config)({}),
+        createProposeStoryboardHandlerV2(config)({
+          base_revision: futureManifest.revision,
+          operations: [{ kind: 'set_brief', brief: 'Must not cross a future schema boundary' }],
+        }),
+        createRequestReferenceImagesHandlerV2(config)({ referenceIds: ['ref_ming'] }),
+      ]);
+
+      expect(outcomes.every((result) => result.isError === true)).toBe(true);
+      expect(outcomes.every((result) => result.content[0].text.includes('unsupported_prototype_schema'))).toBe(false);
+      await expect(readFile(path.join(projectDir, 'project.json'), 'utf8')).resolves.toBe(manifestBytes);
+      await expect(readdir(projectDir)).resolves.toEqual(['project.json']);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it.each(['proposal', 'reference'] as const)(
     'rejects a %s queue rooted in another project without changing the foreign project',
     async (requestKind) => {
@@ -6790,7 +7013,7 @@ describe('Studio MCP schema-2 server', () => {
       const foreignReferencePendingDir = path.join(foreignProjectDir, 'reference-requests', 'pending');
       const foreignReferenceSlotsDir = path.join(foreignProjectDir, 'reference-requests', 'slots');
       await mkdir(projectDir);
-      await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+      await writeStudioProjectFilesV2(projectDir, project);
       await mkdir(foreignPendingDir, { recursive: true });
       await mkdir(foreignProposalSlotsDir);
       await mkdir(foreignReferencePendingDir, { recursive: true });
@@ -6858,13 +7081,13 @@ describe('Studio MCP schema-2 server', () => {
           familyName
         );
         const recordId = `${marker}_${requestKind}`;
-        await writeFile(path.join(root, 'project.json'), JSON.stringify(project));
+        await writeStudioProjectFilesV2(root, project);
         await writeFile(
           path.join(familyPendingDir, `${recordId}.json`),
           JSON.stringify(
             requestKind === 'proposal'
               ? {
-                  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                  schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
                   id: recordId,
                   projectId: project.id,
                   status: 'pending',
@@ -6874,10 +7097,10 @@ describe('Studio MCP schema-2 server', () => {
                   decidedAt: null,
                 }
               : {
-                  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                  schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
                   id: recordId,
                   projectId: project.id,
-                  referenceIds: ['clip_2'],
+                  referenceIds: ['ref_background'],
                   status: 'pending',
                   createdAt,
                 }
@@ -6886,7 +7109,8 @@ describe('Studio MCP schema-2 server', () => {
         await writeFile(
           path.join(familySlotsDir, '49.slot'),
           JSON.stringify({
-            schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+            schemaVersion:
+              requestKind === 'proposal' ? STUDIO_PROPOSAL_SCHEMA_VERSION_V2 : STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
             [requestKind === 'proposal' ? 'proposalId' : 'requestId']: recordId,
             reservedAt: createdAt,
           })
@@ -7029,7 +7253,7 @@ describe('Studio MCP schema-2 server', () => {
     const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
     await createSidecarFamilyV2(projectDir, 'proposals');
     await createSidecarFamilyV2(projectDir, 'reference-requests');
-    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+    await writeStudioProjectFilesV2(projectDir, project);
     const config = { projectId: 'other_project', projectDir, pendingDir, referencePendingDir };
 
     await expect(createReadStoryboardHandlerV2(config)({})).resolves.toMatchObject({ isError: true });
@@ -7064,9 +7288,9 @@ describe('Studio MCP schema-2 server', () => {
       payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'A validated proposal' }] },
       projectAuthority,
     });
-    expect(record.schemaVersion).toBe(STUDIO_PROJECT_SCHEMA_VERSION);
+    expect(record.schemaVersion).toBe(STUDIO_PROPOSAL_SCHEMA_VERSION_V2);
     expect(JSON.parse(await readFile(path.join(slotsDir, '0.slot'), 'utf8'))).toMatchObject({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       proposalId: 'proposal_valid',
     });
     const beforePending = await readdir(pendingDir);
@@ -7127,9 +7351,9 @@ describe('Studio MCP schema-2 server', () => {
       referenceIds,
       projectAuthority,
     });
-    expect(record).toMatchObject({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, referenceIds });
+    expect(record).toMatchObject({ schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION, referenceIds });
     expect(JSON.parse(await readFile(path.join(slotsDir, '0.slot'), 'utf8'))).toMatchObject({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: 'request_valid',
     });
     const beforePending = await readdir(pendingDir);
@@ -7187,7 +7411,7 @@ describe('Studio MCP schema-2 server', () => {
     await writeFile(
       path.join(slotsDir, '1.slot'),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: 'raced',
         reservedAt: record.createdAt,
       })
@@ -7248,6 +7472,238 @@ describe('Studio MCP schema-2 server', () => {
       referenceRequestWriter.listPendingReferenceRequestIdsV2(pendingDir, 'project_v2', mismatchedDirectoryFs)
     ).resolves.toEqual(new Set());
     await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('serializes overlapping reference reservations across distinct writer queue keys', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    try {
+      const alternatePendingDir = `${path.dirname(fixture.pendingDir)}${path.sep}.${path.sep}pending`;
+      const outcomes = await Promise.allSettled([
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_cross_process_a',
+          referenceIds: ['ref_shared', 'ref_first'],
+          projectAuthority: fixture.projectAuthority,
+        }),
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: alternatePendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_cross_process_b',
+          referenceIds: ['ref_shared', 'ref_second'],
+          projectAuthority: fixture.projectAuthority,
+        }),
+      ]);
+
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      const rejection = outcomes.find((outcome) => outcome.status === 'rejected');
+      expect(rejection).toMatchObject({
+        status: 'rejected',
+        reason: expect.objectContaining({ code: 'storage', message: expect.stringMatching(/already have pending/i) }),
+      });
+      expect((await readdir(fixture.pendingDir)).filter((name) => name.endsWith('.json'))).toHaveLength(1);
+      expect((await readdir(fixture.slotsDir)).filter((name) => /^(?:0|[1-9]\d*)\.slot$/.test(name))).toHaveLength(1);
+      expect((await readdir(path.dirname(fixture.pendingDir))).toSorted()).toEqual([
+        'decisions',
+        'pending',
+        'receipts',
+        'slots',
+      ]);
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('retries when a competing reference-writer lease disappears during identity verification', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const lockFile = path.join(fixture.projectAuthority.canonicalRoot, REFERENCE_WRITER_LOCK_NAME_V2);
+    let lockStatReads = 0;
+    const racedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'lstat') {
+          return async (file: Parameters<typeof nodeFs.lstat>[0], ...args: unknown[]) => {
+            if (String(file) === lockFile) {
+              lockStatReads += 1;
+              if (lockStatReads === 2) {
+                await nodeFs.rm(lockFile);
+                throw Object.assign(new Error('simulated completed lease release'), { code: 'ENOENT' });
+              }
+            }
+            return Reflect.apply(nodeFs.lstat, nodeFs, [file, ...args]);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      await writeFile(
+        lockFile,
+        JSON.stringify(
+          referenceWriterLeaseV2({ pid: process.pid, acquiredAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString() })
+        )
+      );
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_after_raced_release',
+          referenceIds: ['ref_after_raced_release'],
+          fs: racedFs,
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).resolves.toMatchObject({ status: 'pending' });
+      expect(lockStatReads).toBeGreaterThanOrEqual(2);
+      await expect(nodeFs.lstat(lockFile)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed on every malformed cross-process writer lease shape', async () => {
+    const malformedLeases = [
+      'not-json',
+      JSON.stringify([]),
+      JSON.stringify({ ...referenceWriterLeaseV2(), extra: true }),
+      JSON.stringify(referenceWriterLeaseV2({ schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION + 1 })),
+      JSON.stringify(referenceWriterLeaseV2({ token: '../unsafe' })),
+      JSON.stringify(referenceWriterLeaseV2({ pid: 0 })),
+      JSON.stringify(referenceWriterLeaseV2({ acquiredAt: 'not-a-date' })),
+    ];
+
+    for (const [index, leaseBytes] of malformedLeases.entries()) {
+      // Each malformed publication gets an isolated authority root.
+      // eslint-disable-next-line no-await-in-loop
+      const fixture = await createReferenceWriterQueueV2();
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await writeFile(path.join(fixture.projectAuthority.canonicalRoot, REFERENCE_WRITER_LOCK_NAME_V2), leaseBytes);
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          referenceRequestWriter.writeReferenceRequestRecordV2({
+            pendingDir: fixture.pendingDir,
+            projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+            requestId: `request_malformed_lease_${index}`,
+            referenceIds: [`ref_malformed_lease_${index}`],
+            projectAuthority: fixture.projectAuthority,
+          })
+        ).rejects.toMatchObject({ code: 'storage', message: expect.stringMatching(/malformed/i) });
+        // eslint-disable-next-line no-await-in-loop
+        await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+        // eslint-disable-next-line no-await-in-loop
+        await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+      } finally {
+        // eslint-disable-next-line no-await-in-loop
+        await rm(fixture.projectDir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('reclaims stale dead writer and reclaim leases before publishing', async () => {
+    for (const leaseName of [REFERENCE_WRITER_LOCK_NAME_V2, REFERENCE_WRITER_RECLAIM_NAME_V2]) {
+      // Exercise both interrupted ownership phases independently.
+      // eslint-disable-next-line no-await-in-loop
+      const fixture = await createReferenceWriterQueueV2();
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await writeFile(
+          path.join(fixture.projectAuthority.canonicalRoot, leaseName),
+          JSON.stringify(referenceWriterLeaseV2())
+        );
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          referenceRequestWriter.writeReferenceRequestRecordV2({
+            pendingDir: fixture.pendingDir,
+            projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+            requestId: `request_after_${leaseName.endsWith('reclaim') ? 'reclaim' : 'lock'}_recovery`,
+            referenceIds: [`ref_after_${leaseName.endsWith('reclaim') ? 'reclaim' : 'lock'}_recovery`],
+            projectAuthority: fixture.projectAuthority,
+          })
+        ).resolves.toMatchObject({ status: 'pending' });
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          nodeFs.lstat(path.join(fixture.projectAuthority.canonicalRoot, REFERENCE_WRITER_LOCK_NAME_V2))
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+        // eslint-disable-next-line no-await-in-loop
+        await expect(
+          nodeFs.lstat(path.join(fixture.projectAuthority.canonicalRoot, REFERENCE_WRITER_RECLAIM_NAME_V2))
+        ).rejects.toMatchObject({ code: 'ENOENT' });
+      } finally {
+        // eslint-disable-next-line no-await-in-loop
+        await rm(fixture.projectDir, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('does not steal a stale lease from a live writer', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const now = Date.now();
+    const clock = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(now)
+      .mockReturnValue(now + 5_001);
+    try {
+      await writeFile(
+        path.join(fixture.projectAuthority.canonicalRoot, REFERENCE_WRITER_LOCK_NAME_V2),
+        JSON.stringify(referenceWriterLeaseV2({ pid: process.pid }))
+      );
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_live_writer',
+          referenceIds: ['ref_live_writer'],
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'storage', message: expect.stringMatching(/busy/i) });
+      await expect(readdir(fixture.pendingDir)).resolves.toEqual([]);
+      await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
+    } finally {
+      clock.mockRestore();
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reports a successful publication whose writer lease cannot be released', async () => {
+    const fixture = await createReferenceWriterQueueV2();
+    const lockFile = path.join(fixture.projectAuthority.canonicalRoot, REFERENCE_WRITER_LOCK_NAME_V2);
+    const reclaimFile = path.join(fixture.projectAuthority.canonicalRoot, REFERENCE_WRITER_RECLAIM_NAME_V2);
+    const releaseFailureFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property === 'link') {
+          return async (
+            existingPath: Parameters<typeof nodeFs.link>[0],
+            newPath: Parameters<typeof nodeFs.link>[1]
+          ) => {
+            if (String(existingPath) === lockFile && String(newPath) === reclaimFile) {
+              throw Object.assign(new Error('simulated release failure'), { code: 'EPERM' });
+            }
+            return nodeFs.link(existingPath, newPath);
+          };
+        }
+        const value = Reflect.get(target, property, receiver) as unknown;
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+    try {
+      await expect(
+        referenceRequestWriter.writeReferenceRequestRecordV2({
+          pendingDir: fixture.pendingDir,
+          projectId: REFERENCE_WRITER_PROJECT_ID_V2,
+          requestId: 'request_release_failure',
+          referenceIds: ['ref_release_failure'],
+          fs: releaseFailureFs,
+          projectAuthority: fixture.projectAuthority,
+        })
+      ).rejects.toMatchObject({ code: 'storage', message: expect.stringMatching(/could not be released/i) });
+      expect((await readdir(fixture.pendingDir)).filter((name) => name === 'request_release_failure.json')).toEqual([
+        'request_release_failure.json',
+      ]);
+      await expect(readdir(fixture.slotsDir)).resolves.toContain('0.slot');
+      await expect(nodeFs.lstat(lockFile)).resolves.toMatchObject({ isFile: expect.any(Function) });
+    } finally {
+      await rm(fixture.projectDir, { recursive: true, force: true });
+    }
   });
 
   it('fails closed on invalid reference clocks and identities without touching an absent queue', async () => {
@@ -7328,7 +7784,7 @@ describe('Studio MCP schema-2 server', () => {
       const oversized = referenceRequestRecordV2('request_oversized', 'shot_oversized', REFERENCE_WRITER_NOW_MS_V2);
       const expiredBytes = JSON.stringify(expired);
       const expiredSlotBytes = JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: expired.id,
         reservedAt: expired.createdAt,
       });
@@ -7343,7 +7799,7 @@ describe('Studio MCP schema-2 server', () => {
       await writeFile(
         path.join(fixture.slotsDir, '1.slot'),
         JSON.stringify({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId: current.id,
           reservedAt: current.createdAt,
         })
@@ -7376,7 +7832,7 @@ describe('Studio MCP schema-2 server', () => {
         projectAuthority: duplicateFixture.projectAuthority,
       });
       const duplicateSlot = JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: record.id,
         reservedAt: record.createdAt,
       });
@@ -7460,7 +7916,7 @@ describe('Studio MCP schema-2 server', () => {
             writeFile(
               path.join(fixture.slotsDir, `${index}.slot`),
               JSON.stringify({
-                schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
                 requestId,
                 reservedAt,
               })
@@ -7478,7 +7934,7 @@ describe('Studio MCP schema-2 server', () => {
           pendingDir: fixture.pendingDir,
           projectId: REFERENCE_WRITER_PROJECT_ID_V2,
           requestId: 'request_over_capacity',
-          referenceIds: ['shot_1'],
+          referenceIds: ['reference_over_capacity'],
           projectAuthority: fixture.projectAuthority,
         })
       ).rejects.toMatchObject({ code: 'capacity' });
@@ -7501,7 +7957,7 @@ describe('Studio MCP schema-2 server', () => {
         pendingBytes: null,
         slotName: `${STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT}.slot`,
         slotBytes: JSON.stringify({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId: 'request_out_of_range',
           reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
         }),
@@ -7511,7 +7967,7 @@ describe('Studio MCP schema-2 server', () => {
         pendingBytes: null,
         slotName: '0.slot',
         slotBytes: JSON.stringify({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId: 'request_orphan_slot',
           reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
         }),
@@ -7563,7 +8019,7 @@ describe('Studio MCP schema-2 server', () => {
     const fixture = await createReferenceWriterQueueV2();
     const requestId = 'request_duplicate_slot';
     const slotBytes = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId,
       reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
     });
@@ -7606,7 +8062,7 @@ describe('Studio MCP schema-2 server', () => {
       await writeFile(
         path.join(fixture.slotsDir, '0.slot'),
         JSON.stringify({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId,
           reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
         })
@@ -7640,7 +8096,7 @@ describe('Studio MCP schema-2 server', () => {
       await writeFile(
         slotFile,
         JSON.stringify({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId,
           reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
         })
@@ -7676,7 +8132,7 @@ describe('Studio MCP schema-2 server', () => {
       );
     };
     const slotBytes = (requestId: string): string =>
-      JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, requestId, reservedAt });
+      JSON.stringify({ schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION, requestId, reservedAt });
     const writeNext = (requestId: string, shotId: string, recordFs: typeof nodeFs = nodeFs) =>
       referenceRequestWriter.writeReferenceRequestRecordV2({
         pendingDir: fixture.pendingDir,
@@ -7805,7 +8261,7 @@ describe('Studio MCP schema-2 server', () => {
       await writeFile(
         slotFile,
         JSON.stringify({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId,
           reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
         })
@@ -7856,7 +8312,7 @@ describe('Studio MCP schema-2 server', () => {
       await writeFile(
         slotFile,
         JSON.stringify({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
           requestId,
           reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
         })
@@ -7918,9 +8374,9 @@ describe('Studio MCP schema-2 server', () => {
       label: 'Ming',
       prompt: 'Character turnaround sheet for Ming.',
       candidateAssetId: null,
-      candidateJobId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
+      jobIds: [],
       createdAt: '2026-08-17T00:00:00.000Z',
       updatedAt: '2026-08-17T00:00:00.000Z',
     };
@@ -7930,15 +8386,13 @@ describe('Studio MCP schema-2 server', () => {
       label: 'Mei',
       prompt: 'Character turnaround sheet for Mei.',
       candidateAssetId: null,
-      candidateJobId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
+      jobIds: [],
       createdAt: '2026-08-17T00:00:00.000Z',
       updatedAt: '2026-08-17T00:00:00.000Z',
     };
-    project.shots.clip_1!.referenceIds = ['ref_ming', 'ref_background'];
-    project.shots.clip_2!.referenceIds = ['ref_mei', 'ref_background'];
-    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+    await writeStudioProjectFilesV2(projectDir, project);
     const config = { projectId: project.id, projectDir, pendingDir, referencePendingDir };
 
     await expect(createReadStoryboardHandlerV2(null)({})).resolves.toMatchObject({ isError: true });
@@ -8007,15 +8461,76 @@ describe('Studio MCP schema-2 server', () => {
     await expect(createRequestReferenceImagesHandlerV2(null)({ referenceIds: ['ref_ming'] })).resolves.toMatchObject({
       isError: true,
     });
-    const queued = await referenceHandler({ referenceIds: ['ref_ming', 'ref_mei'] });
-    expect(queued.content[0].text).toMatch(/Queued 2 of 2.*Nothing was generated/i);
+    const queued = await referenceHandler({ referenceIds: ['ref_ming'] });
+    expect(queued.content[0].text).toMatch(/Queued 1 reference image request\(s\).*Nothing was generated/i);
+    const mixedPending = await referenceHandler({ referenceIds: ['ref_ming', 'ref_mei'] });
+    expect(mixedPending).toMatchObject({ isError: true });
+    expect(mixedPending.content[0].text).toMatch(/already have pending requests: ref_ming/i);
+    expect((await readdir(referencePendingDir)).filter((name) => name.endsWith('.json'))).toHaveLength(1);
+    const queuedSecond = await referenceHandler({ referenceIds: ['ref_mei'] });
+    expect(queuedSecond.content[0].text).toMatch(/Queued 1 reference image request\(s\).*Nothing was generated/i);
     const repeated = await referenceHandler({ referenceIds: ['ref_ming', 'ref_mei'] });
-    expect(repeated.content[0].text).toMatch(/Queued 0 of 2.*Already queued: ref_ming, ref_mei/i);
+    expect(repeated).toMatchObject({ isError: true });
+    expect(repeated.content[0].text).toMatch(/already have pending requests: ref_ming, ref_mei/i);
     const referenceEntries = await readdir(referencePendingDir);
-    expect(referenceEntries.filter((name) => name.endsWith('.json'))).toHaveLength(1);
-    expect(referenceEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
-    expect(referenceEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(1);
+    expect(referenceEntries.filter((name) => name.endsWith('.json'))).toHaveLength(2);
+    expect(referenceEntries.filter((name) => name.endsWith('.tmp'))).toHaveLength(2);
+    expect(referenceEntries.filter((name) => name.endsWith('.ready'))).toHaveLength(2);
     await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('rejects a mixed running and runnable reference request atomically', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-running-reference-'));
+    try {
+      const pendingDir = path.join(projectDir, 'proposals', 'pending');
+      const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
+      await createSidecarFamilyV2(projectDir, 'proposals');
+      await createSidecarFamilyV2(projectDir, 'reference-requests');
+      const project = makeSchema2ServiceProject();
+      const runningReference = project.references.ref_background!;
+      const runningJob = project.jobs[SERVICE_REFERENCE_JOB_ID]!;
+      runningReference.approvedAssetId = null;
+      runningJob.status = 'running';
+      runningJob.outputAssetIds = [];
+      runningJob.outputAssetIdsByRole = { primary: null, poster: null };
+      runningJob.spendReceipt = null;
+      delete project.assets.asset_reference_background;
+      for (const shot of Object.values(project.shots)) {
+        shot.referenceBinding = {
+          status: 'ready',
+          characterReferenceIds: [],
+          backgroundReferenceId: null,
+        };
+      }
+      project.referenceOrder.push('ref_background_other');
+      project.references.ref_background_other = {
+        id: 'ref_background_other',
+        kind: 'background',
+        label: 'Other background',
+        prompt: 'A second approved workflow location.',
+        candidateAssetId: null,
+        approvedAssetId: null,
+        supersededAssetIds: [],
+        jobIds: [],
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+      };
+      expect(validateStudioProjectV2(project)).toBe(true);
+      await writeStudioProjectFilesV2(projectDir, project);
+
+      const result = await createRequestReferenceImagesHandlerV2({
+        projectId: project.id,
+        projectDir,
+        pendingDir,
+        referencePendingDir,
+      })({ referenceIds: ['ref_background', 'ref_background_other'] });
+
+      expect(result).toMatchObject({ isError: true });
+      expect(result.content[0].text).toMatch(/generation in progress: ref_background/i);
+      expect((await readdir(referencePendingDir)).filter((name) => name.endsWith('.json'))).toEqual([]);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
   });
 
   it('refuses a new proposed rule when the durable project already holds the rule cap', async () => {
@@ -8031,7 +8546,7 @@ describe('Studio MCP schema-2 server', () => {
       predicate: null,
       createdAt: '2026-08-17T00:00:00.000Z',
     }));
-    await writeFile(path.join(projectDir, 'project.json'), JSON.stringify(project));
+    await writeStudioProjectFilesV2(projectDir, project);
 
     try {
       const result = await createProposeBriefRuleHandlerV2({
@@ -8094,7 +8609,7 @@ describe('Studio MCP schema-2 server', () => {
     await writeFile(
       path.join(fixture.slotsDir, '0.slot'),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: occupiedId,
         reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
       })
@@ -8312,7 +8827,7 @@ describe('Studio MCP schema-2 server', () => {
     [
       'malformed schema-2',
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: 'different_request',
         projectId: REFERENCE_WRITER_PROJECT_ID_V2,
         decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
@@ -8347,7 +8862,7 @@ describe('Studio MCP schema-2 server', () => {
     await writeFile(
       decisionFile,
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId,
         projectId: REFERENCE_WRITER_PROJECT_ID_V2,
         decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2 + 1_000).toISOString(),
@@ -8381,7 +8896,7 @@ describe('Studio MCP schema-2 server', () => {
     await writeFile(
       path.join(path.dirname(fixture.pendingDir), 'decisions', `${proposalId}.json`),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId,
         status,
         decidedAt: new Date(decidedAtMs).toISOString(),
@@ -8419,7 +8934,7 @@ describe('Studio MCP schema-2 server', () => {
       const decision =
         variant === 'predating rejection'
           ? {
-              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+              schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
               requestId,
               projectId: REFERENCE_WRITER_PROJECT_ID_V2,
               decidedAt: new Date(REFERENCE_WRITER_NOW_MS_V2 - 1).toISOString(),
@@ -8427,7 +8942,7 @@ describe('Studio MCP schema-2 server', () => {
             }
           : variant === 'early expiry'
             ? {
-                schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
                 requestId,
                 projectId: REFERENCE_WRITER_PROJECT_ID_V2,
                 decidedAt: new Date(
@@ -8727,7 +9242,7 @@ describe('Studio MCP schema-2 server', () => {
     const fixture = await createPendingQueueFixtureV2();
     const slotFile = path.join(fixture.slotsDir, '0.slot');
     const replacement = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: 'other_request',
       reservedAt: '2026-08-17T00:00:00.000Z',
     });
@@ -8759,7 +9274,7 @@ describe('Studio MCP schema-2 server', () => {
     const slotFile = path.join(await nodeFs.realpath(fixture.slotsDir), '0.slot');
     const finalFile = path.join(await nodeFs.realpath(fixture.pendingDir), `${recordId}.json`);
     const replacement = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: 'other_request',
       reservedAt: '2026-08-17T00:00:00.000Z',
     });
@@ -8909,7 +9424,7 @@ describe('Studio MCP schema-2 server', () => {
     const slotFile = path.join(canonicalSlots, '0.slot');
     const finalFile = path.join(canonicalPending, `${recordId}.json`);
     const replacement = JSON.stringify({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: 'other_request',
       reservedAt: '2026-08-17T00:00:00.000Z',
     });
@@ -8931,7 +9446,7 @@ describe('Studio MCP schema-2 server', () => {
             await nodeFs.link(existingPath, newPath);
             if (!installedFinal && String(newPath) === slotFile) {
               installedFinal = true;
-              await writeFile(finalFile, JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION }));
+              await writeFile(finalFile, JSON.stringify({ schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION }));
             }
           };
         }
@@ -8987,7 +9502,7 @@ describe('Studio MCP schema-2 server', () => {
     [
       'malformed schema-2 request slot',
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: 'unsafe/request',
         reservedAt: '2026-08-17T00:00:00.000Z',
       }),
@@ -9024,7 +9539,7 @@ describe('Studio MCP schema-2 server', () => {
     await writeFile(
       path.join(fixture.slotsDir, '0.slot'),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId,
         reservedAt: new Date(REFERENCE_WRITER_NOW_MS_V2).toISOString(),
       })
@@ -9048,7 +9563,7 @@ describe('Studio MCP schema-2 server', () => {
     [
       'malformed schema-2',
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: 'unsafe/late',
         reservedAt: '2026-08-17T00:00:00.000Z',
       }),

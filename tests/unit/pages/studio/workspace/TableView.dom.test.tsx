@@ -11,7 +11,6 @@ import type {
   WorkspaceBoardPanelProjection,
   WorkspaceShotProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
-import { tableFoldsLook } from '@/renderer/pages/studio/components/Workspace/Views/Table/lookFold';
 
 const tableCss = readFileSync(
   join(process.cwd(), 'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Table/Table.module.css'),
@@ -26,13 +25,10 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.columns.position': '#',
         'conversation.creativeStudio.workspace.table.columns.panel': 'Panel',
         'conversation.creativeStudio.workspace.table.columns.beat': 'Beat',
-        'conversation.creativeStudio.workspace.table.columns.action': 'Action',
-        'conversation.creativeStudio.workspace.table.columns.look': 'Look',
-        'conversation.creativeStudio.workspace.table.columns.actionLook': 'Action · Look',
+        'conversation.creativeStudio.workspace.table.columns.story': 'Story',
         'conversation.creativeStudio.workspace.table.columns.shots': 'Shots',
         'conversation.creativeStudio.workspace.table.columns.length': 'Length',
         'conversation.creativeStudio.workspace.table.columns.state': 'State',
-        'conversation.creativeStudio.workspace.table.lookMissing': 'No look written yet',
         'conversation.creativeStudio.workspace.table.targetPending': 'No target',
         'conversation.creativeStudio.workspace.table.actualPending': 'No actual',
         'conversation.creativeStudio.workspace.table.empty': 'No beats yet',
@@ -120,14 +116,9 @@ import { TableView, type TableBoardActions } from '@/renderer/pages/studio/compo
 
 const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}): WorkspaceShotProjection => ({
   id,
-  line: id,
-  narration: '',
-  onScreenText: '',
+  shootingScript: id,
   durationSeconds: 4,
   chainBreak: 'none',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
   currentPicture: null,
@@ -156,10 +147,7 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
 const makeBeat = (id: string, overrides: Partial<WorkspaceBeatProjection> = {}): WorkspaceBeatProjection => ({
   id,
   title: `Beat ${id}`,
-  action: `Action ${id}`,
-  look: `Look ${id}`,
-  actionRevision: 1,
-  lineHistory: [],
+  story: `Story ${id}`,
   targetSeconds: 8,
   actualSeconds: 8,
   displayState: 'ready',
@@ -208,6 +196,7 @@ const tableBoardProps = (beats: readonly WorkspaceBeatProjection[], onOpenBeat =
   projectId: 'project_1',
   boardStyle: 'grey_tone' as const,
   boardPanels: beats.flatMap((beat) => beat.shots.map((shot) => makeBoardPanel(shot.id))),
+  imageRouteReady: true,
   pending: false,
   gateLocked: false,
   onOpenBeat,
@@ -226,9 +215,9 @@ describe('TableView', () => {
     window.sessionStorage.clear();
   });
 
-  it('renders the eight columns and one semantic data row per Beat in film order', () => {
+  it('renders the seven columns and one semantic data row per Beat in film order', () => {
     const beats = [
-      makeBeat('opening', { title: 'Opening', look: '', shots: [makeShot('shot_1'), makeShot('shot_2')] }),
+      makeBeat('opening', { title: 'Opening', story: '', shots: [makeShot('shot_1'), makeShot('shot_2')] }),
       makeBeat('close', { title: 'Close' }),
     ];
     render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
@@ -239,16 +228,16 @@ describe('TableView', () => {
       within(rows[0]!)
         .getAllByRole('columnheader')
         .map((cell) => cell.textContent)
-    ).toEqual(['#', 'Panel', 'Beat', 'Action', 'Look', 'Shots', 'Length', 'State']);
+    ).toEqual(['#', 'Panel', 'Beat', 'Story', 'Shots', 'Length', 'State']);
     expect(
       within(rows[0]!)
         .getAllByRole('columnheader')
         .map((cell) => cell.dataset.gridColumnName)
-    ).toEqual(['position', 'panel', 'beat', 'action', 'look', 'shots', 'length', 'state']);
+    ).toEqual(['position', 'panel', 'beat', 'story', 'shots', 'length', 'state']);
     expect(rows.slice(1).map((row) => cellAt(row, 2).textContent)).toEqual(['Opening', 'Close']);
-    expect(rows.slice(1).every((row) => within(row).getAllByRole('gridcell').length === 8)).toBe(true);
+    expect(rows.slice(1).every((row) => within(row).getAllByRole('gridcell').length === 7)).toBe(true);
     expect(rowForBeat('opening')).toHaveTextContent('2 shots');
-    expect(rowForBeat('opening')).toHaveTextContent('No look written yet');
+    expect(cellAt(rowForBeat('opening'), 3)).toHaveTextContent('');
   });
 
   it('keeps an empty grid named and headed without inventing a data row', () => {
@@ -573,7 +562,7 @@ describe('TableView', () => {
     expect(actions.setStyle).toHaveBeenCalledWith('line_art');
   });
 
-  it('fails Board generation controls closed when style or exact panel status is unavailable', () => {
+  it('fails Board generation controls closed when style, route, or exact panel status is unavailable', () => {
     const beats = [makeBeat('opening', { title: 'Opening' })];
     const actions = makeTableBoardActions();
     const { rerender } = render(
@@ -589,6 +578,19 @@ describe('TableView', () => {
 
     expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
     expect(screen.getByText('Choose a Board style before drawing.')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Grey tone' })).toBeEnabled();
+
+    rerender(
+      <TableView
+        {...tableBoardProps(beats)}
+        actions={actions}
+        beats={beats}
+        imageRouteReady={false}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
     expect(screen.getByRole('radio', { name: 'Grey tone' })).toBeEnabled();
 
     rerender(
@@ -926,12 +928,12 @@ describe('TableView', () => {
     await user.keyboard('{ArrowLeft}{ArrowRight}');
     expect(cellAt(rows[0]!, 1)).toHaveFocus();
     await user.keyboard('{End}');
-    expect(cellAt(rows[0]!, 7)).toHaveFocus();
+    expect(cellAt(rows[0]!, 6)).toHaveFocus();
     await user.keyboard('{ArrowRight}');
-    expect(cellAt(rows[0]!, 7)).toHaveFocus();
-    fireEvent.keyDown(cellAt(rows[0]!, 7), { key: 'End', ctrlKey: true });
-    expect(cellAt(rows[1]!, 7)).toHaveFocus();
-    fireEvent.keyDown(cellAt(rows[1]!, 7), { key: 'Home', metaKey: true });
+    expect(cellAt(rows[0]!, 6)).toHaveFocus();
+    fireEvent.keyDown(cellAt(rows[0]!, 6), { key: 'End', ctrlKey: true });
+    expect(cellAt(rows[1]!, 6)).toHaveFocus();
+    fireEvent.keyDown(cellAt(rows[1]!, 6), { key: 'Home', metaKey: true });
     expect(first).toHaveFocus();
   });
 
@@ -972,9 +974,9 @@ describe('TableView', () => {
       makeBeat('empty', { shots: [], actualSeconds: null, displayState: 'no_coverage' }),
     ];
     window.sessionStorage.setItem(
-      'aionui:creative-studio:v2:workspace-drafts:project_1',
+      'aionui:creative-studio:v3:workspace-drafts:project_1',
       JSON.stringify({
-        version: 2,
+        version: 3,
         projectId: 'project_1',
         sourceRevision: 3,
         entries: {},
@@ -1047,7 +1049,7 @@ describe('TableView', () => {
   it('renders one rounded actual fact for a covered Beat even when it also has a target', () => {
     const beats = [makeBeat('equal', { targetSeconds: 9, actualSeconds: 9.52 })];
     render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
-    const length = cellAt(rowForBeat('equal'), 6);
+    const length = cellAt(rowForBeat('equal'), 5);
     const facts = length.querySelectorAll<HTMLElement>('[data-duration-kind]');
     expect(facts).toHaveLength(1);
     const actual = facts[0];
@@ -1081,11 +1083,11 @@ describe('TableView', () => {
       }),
     ];
     render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
-    const pending = cellAt(rowForBeat('duration_pending'), 6);
-    const uncovered = cellAt(rowForBeat('no_coverage'), 6);
-    const coveredPending = cellAt(rowForBeat('covered_pending'), 6);
-    const covered = cellAt(rowForBeat('covered'), 6);
-    const maxTarget = cellAt(rowForBeat('max_target'), 6);
+    const pending = cellAt(rowForBeat('duration_pending'), 5);
+    const uncovered = cellAt(rowForBeat('no_coverage'), 5);
+    const coveredPending = cellAt(rowForBeat('covered_pending'), 5);
+    const covered = cellAt(rowForBeat('covered'), 5);
+    const maxTarget = cellAt(rowForBeat('max_target'), 5);
 
     expect(pending).toHaveTextContent('No target');
     expect(pending.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
@@ -1124,193 +1126,19 @@ describe('TableView', () => {
     render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
 
     for (const [state, label] of states) {
-      const stateCell = cellAt(rowForBeat(state), 7);
+      const stateCell = cellAt(rowForBeat(state), 6);
       expect(stateCell).toHaveTextContent(label);
       expect(stateCell.querySelector('[data-state]')).toHaveAttribute('data-state', state);
     }
   });
 });
 
-describe('the Look fold threshold', () => {
-  it('folds the Look at 956px of column width and below', () => {
-    // The designer's ruling: one threshold, one change. 780px is the Table's real target, so the
-    // folded form is the common case rather than a degraded one.
-    expect(tableFoldsLook(780)).toBe(true);
-    expect(tableFoldsLook(956)).toBe(true);
-  });
-
-  it('keeps the Look a column above the threshold', () => {
-    expect(tableFoldsLook(957)).toBe(false);
-    expect(tableFoldsLook(1158)).toBe(false);
-  });
-
-  it('does not fold on an unmeasured width', () => {
-    // Before the first measurement the width is zero. Folding on that would render the folded form
-    // and then unfold it on almost every desktop window, which is a visible reflow on every mount.
-    expect(tableFoldsLook(0)).toBe(false);
-    expect(tableFoldsLook(Number.NaN)).toBe(false);
-    expect(tableFoldsLook(-40)).toBe(false);
-  });
-});
-
 describe('the Table layout contract', () => {
-  it('keeps the 956px floor only on the unfolded grid and addresses columns semantically', () => {
-    expect(tableCss).toMatch(/\.grid\s*{[^}]*min-inline-size:\s*956px/s);
-    expect(tableCss).toMatch(/\.gridFolded\s*{[^}]*min-inline-size:\s*0/s);
+  it('keeps one seven-column grid and addresses columns semantically', () => {
+    expect(tableCss).toMatch(/\.grid\s*{[^}]*min-inline-size:\s*0/s);
     expect(tableCss).not.toContain('nth-child');
     const durationRule = tableCss.match(/\.durationFact\s*{([^}]*)}/s)?.[1] ?? '';
     expect(durationRule).not.toContain('overflow: hidden');
     expect(durationRule).not.toContain('text-overflow: ellipsis');
-  });
-});
-
-describe('folding the Look at the Table target width', () => {
-  let resizeCallback: ResizeObserverCallback | null = null;
-  let measuredWidth = 0;
-
-  class FoldResizeObserver implements ResizeObserver {
-    constructor(callback: ResizeObserverCallback) {
-      resizeCallback = callback;
-    }
-    disconnect = vi.fn();
-    observe = vi.fn();
-    unobserve = vi.fn();
-  }
-
-  const renderAtWidth = (width: number) => {
-    measuredWidth = width;
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(
-      () =>
-        ({
-          bottom: 0,
-          height: 200,
-          left: 0,
-          right: measuredWidth,
-          toJSON: () => ({}),
-          top: 0,
-          width: measuredWidth,
-          x: 0,
-          y: 0,
-        }) as DOMRect
-    );
-    vi.stubGlobal('ResizeObserver', FoldResizeObserver);
-    const beats = [makeBeat('beat_1')];
-    render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
-    act(() => {
-      resizeCallback?.([{ contentRect: { width } } as ResizeObserverEntry], {} as ResizeObserver);
-    });
-  };
-
-  const resizeToWidth = (width: number): void => {
-    measuredWidth = width;
-    act(() => {
-      resizeCallback?.([{ contentRect: { width: width - 2 } } as ResizeObserverEntry], {} as ResizeObserver);
-    });
-  };
-
-  beforeEach(() => {
-    resizeCallback = null;
-    vi.restoreAllMocks();
-  });
-
-  it('keeps the Look a column when the Table has room for one', () => {
-    renderAtWidth(1158);
-
-    const rows = within(screen.getByRole('grid', { name: 'Beat table' })).getAllByRole('row');
-    expect(
-      within(rows[0]!)
-        .getAllByRole('columnheader')
-        .map((cell) => cell.textContent)
-    ).toEqual(['#', 'Panel', 'Beat', 'Action', 'Look', 'Shots', 'Length', 'State']);
-    expect(within(rows[1]!).getAllByRole('gridcell')).toHaveLength(8);
-  });
-
-  it('folds the Look into the Action cell at the 780px target', () => {
-    renderAtWidth(780);
-
-    const rows = within(screen.getByRole('grid', { name: 'Beat table' })).getAllByRole('row');
-    expect(
-      within(rows[0]!)
-        .getAllByRole('columnheader')
-        .map((cell) => cell.textContent)
-    ).toEqual(['#', 'Panel', 'Beat', 'Action · Look', 'Shots', 'Length', 'State']);
-    expect(
-      within(rows[0]!)
-        .getAllByRole('columnheader')
-        .map((cell) => cell.dataset.gridColumnName)
-    ).toEqual(['position', 'panel', 'beat', 'action', 'shots', 'length', 'state']);
-    const grid = screen.getByRole('grid', { name: 'Beat table' });
-    expect(grid).toHaveAttribute('data-look-folded', 'true');
-    const fixedColumns = Array.from(grid.querySelectorAll<HTMLTableColElement>('col[data-fixed-inline-size]'));
-    expect(fixedColumns.map((column) => column.dataset.gridColumnName)).toEqual([
-      'position',
-      'panel',
-      'beat',
-      'shots',
-      'length',
-      'state',
-    ]);
-    const fixedWidth = fixedColumns.reduce((total, column) => total + Number(column.dataset.fixedInlineSize), 0);
-    expect(fixedWidth).toBe(502);
-    expect(780 - fixedWidth).toBe(278);
-    expect(document.querySelector('[data-studio-table-scroll]')).not.toBeNull();
-
-    // The six fixed columns keep their places; only the Look leaves.
-    const cells = within(rows[1]!).getAllByRole('gridcell');
-    expect(cells).toHaveLength(7);
-    // The Look now lives inside the Action cell rather than beside it, and is marked as folded.
-    expect(cells[3]?.textContent).toContain('Action beat_1');
-    expect(cells[3]?.textContent).toContain('Look beat_1');
-    expect(cells[3]?.querySelector('[data-look-folded]')).not.toBeNull();
-    // And it is not also still a column of its own.
-    expect(within(rows[0]!).queryByText('Look')).toBeNull();
-  });
-
-  it('keeps the grid own column count honest when folded', () => {
-    renderAtWidth(780);
-    expect(screen.getByRole('grid', { name: 'Beat table' })).toHaveAttribute('aria-colcount', '7');
-  });
-
-  it('uses the same rendered border box for the initial and observer fold measurements', () => {
-    renderAtWidth(957);
-    const grid = screen.getByRole('grid', { name: 'Beat table' });
-
-    act(() => {
-      resizeCallback?.([{ contentRect: { width: 955 } } as ResizeObserverEntry], {} as ResizeObserver);
-    });
-    expect(grid).toHaveAttribute('data-look-folded', 'false');
-
-    resizeToWidth(956);
-    expect(grid).toHaveAttribute('data-look-folded', 'true');
-  });
-
-  it('keeps the focused State cell and roving tab stop stable when the Look folds away', () => {
-    renderAtWidth(1158);
-    const stateCell = rowForBeat('beat_1').querySelector<HTMLElement>('[data-grid-column-name="state"]');
-    if (stateCell === null) throw new Error('Missing State cell before the Look fold');
-    act(() => stateCell.focus());
-
-    resizeToWidth(780);
-
-    const foldedStateCell = rowForBeat('beat_1').querySelector<HTMLElement>('[data-grid-column-name="state"]');
-    expect(foldedStateCell).toBe(stateCell);
-    expect(foldedStateCell).toHaveFocus();
-    expect(foldedStateCell).toHaveAttribute('tabindex', '0');
-    expect(
-      screen.getByRole('grid', { name: 'Beat table' }).querySelectorAll('[role="gridcell"][tabindex="0"]')
-    ).toHaveLength(1);
-  });
-
-  it('moves focus from the removed Look cell to the folded Action cell', () => {
-    renderAtWidth(1158);
-    const lookCell = rowForBeat('beat_1').querySelector<HTMLElement>('[data-grid-column-name="look"]');
-    if (lookCell === null) throw new Error('Missing Look cell before the fold');
-    act(() => lookCell.focus());
-
-    resizeToWidth(780);
-
-    const actionCell = rowForBeat('beat_1').querySelector<HTMLElement>('[data-grid-column-name="action"]');
-    expect(actionCell).toHaveFocus();
-    expect(actionCell).toHaveAttribute('tabindex', '0');
   });
 });

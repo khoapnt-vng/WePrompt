@@ -8,6 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import {
+  isUnsupportedStudioPrototypeSchemaVersion,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
@@ -46,7 +47,7 @@ import {
   resolveCompleteDirectorySet,
 } from '@process/services/creative-studio/service/recordIo';
 
-/** Exact reducer variants; entity identities are Director-authored and survive publication unchanged. */
+/** Exact Director-capable reducer variants; Main mints new semantic-reference identities during reduction. */
 export type StudioDirectorToolOperationV2 = StudioDirectorOperationV2;
 
 export type StudioApplyEditsInputV2 = {
@@ -224,16 +225,16 @@ const captureProjectAuthorityV2 = async (
     const value = parseJson(record.bytes);
     if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
       const descriptor = Object.getOwnPropertyDescriptor(value, 'schemaVersion');
-      if (descriptor !== undefined && 'value' in descriptor && descriptor.value === 1) {
+      if (
+        descriptor !== undefined &&
+        'value' in descriptor &&
+        isUnsupportedStudioPrototypeSchemaVersion(descriptor.value)
+      ) {
         return { status: 'unsupported_prototype_schema' };
       }
     }
     const decoded = decodeStudioProjectManifestV2(value, briefRecord?.bytes ?? null);
-    if (
-      decoded === null ||
-      (decoded.kind === 'brief_file' && !decoded.synchronized) ||
-      decoded.project.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION
-    )
+    if (decoded === null || !decoded.synchronized || decoded.project.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION)
       return { status: 'invalid' };
     if (decoded.project.id !== config.projectId) return { status: 'invalid' };
     return {

@@ -4,9 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { createHash } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
 import {
   isValidProviderJobId,
+  STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION,
   STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
@@ -14,13 +16,14 @@ import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_PROMPT_LENGTH,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
-  STUDIO_MAX_LINE_HISTORY_PER_BEAT,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_REFERENCE_LABEL_LENGTH,
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
+  STUDIO_MAX_STORY_LENGTH,
   STUDIO_MAX_UNDO_ENTRIES,
   STUDIO_MAX_UNDO_LABEL_LENGTH,
   STUDIO_MAX_UNDO_PATCHES_PER_ENTRY,
@@ -29,20 +32,23 @@ import {
   type StudioAssetV2,
   type StudioBeat,
   type StudioBinItem,
+  type StudioGenerationCompositionInputSnapshotV2,
+  type StudioGenerationCompositionV2,
+  type StudioGenerationReferenceInputSnapshot,
   type StudioGenerationRequestPlan,
   type StudioJobV2,
   type StudioJobPurpose,
   type StudioProjectReferenceV2,
   type StudioProjectV2,
   type StudioProviderAdapterId,
+  type StudioProviderRef,
+  type StudioQuotedGeneration,
   type StudioShot,
   type StudioSubmissionQuote,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   STUDIO_MANAGED_ASSET_COLLECTIONS_V2,
-  STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
   isCanonicalStudioBedAudioAssetV2,
-  isStudioBriefReferenceLabel,
   isStudioReferenceImageMimeType,
 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import { STUDIO_RULE_LIMITS, hasRuleToken } from '@/common/types/project/creativeStudioRules';
@@ -51,6 +57,10 @@ import {
   calculateStudioQuotedGenerationAmounts,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
+  recomposeStudioGenerationV2,
+  studioGenerationCompositionMatchesAuthorityV2,
+  studioGenerationCompositionsEqualV2,
+  studioGenerationTargetKey,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from './generation';
 import { studioBoardAuthorizationScopeIsValidV2 } from './pricing/authorization';
@@ -94,7 +104,12 @@ const JOB_ERROR_CODES = new Set([
   'dependency_failed',
 ]);
 const TERMINAL_JOB_STATUSES = new Set(['succeeded', 'failed', 'cancelled']);
-const PURPOSES: ReadonlySet<string> = new Set<StudioJobPurpose>(['seed_still', 'board_still', 'video_take']);
+const PURPOSES: ReadonlySet<string> = new Set<StudioJobPurpose>([
+  'seed_still',
+  'board_still',
+  'video_take',
+  'reference_image',
+]);
 const RATE_UNITS = new Set(['generation', 'second']);
 const FRAME_STATUSES = new Set(['pending', 'extracting', 'ready', 'failed']);
 const FRAME_ERROR_CODES = new Set(['decode_failed', 'source_missing', 'storage_error']);
@@ -105,8 +120,7 @@ const FIXED_SHOT_REASONS = [
   'seed_still',
   'conditioning_frame',
   'conditioning_input',
-  'narration',
-  'on_screen_text',
+  'shooting_script',
 ] as const;
 
 const PROJECT_REQUIRED_KEYS = new Set([
@@ -123,6 +137,7 @@ const PROJECT_REQUIRED_KEYS = new Set([
   'beatOrder',
   'beats',
   'shots',
+  'referencePlanStatus',
   'referenceOrder',
   'references',
   'bin',
@@ -139,29 +154,15 @@ const PROJECT_REQUIRED_KEYS = new Set([
   'updatedAt',
 ]);
 const PROJECT_OPTIONAL_KEYS = new Set(['forgeProjectId', 'briefConversationId']);
-const BEAT_KEYS = new Set([
-  'id',
-  'title',
-  'action',
-  'look',
-  'actionRevision',
-  'targetSeconds',
-  'shotOrder',
-  'lineHistory',
-]);
-const LINE_HISTORY_KEYS = new Set(['id', 'shotOrdinal', 'text', 'capturedAt']);
+const BEAT_KEYS = new Set(['id', 'title', 'story', 'targetSeconds', 'shotOrder']);
 const SHOT_KEYS = new Set([
   'id',
-  'line',
-  'derivation',
-  'derivedFromActionRevision',
-  'narration',
-  'onScreenText',
+  'shootingScript',
   'durationSeconds',
   'trimInSeconds',
   'trimOutSeconds',
   'chainBreak',
-  'referenceIds',
+  'referenceBinding',
   'seedStillId',
   'boardAssetId',
   'supersededBoardAssetIds',
@@ -179,22 +180,18 @@ const ASSET_REQUIRED_KEYS = new Set([
   'managedAsset',
   'byteSize',
   'sha256',
+  'projectReferenceId',
+  'generationReferenceAssetIds',
+  'producerJobId',
+  'compositionDigest',
   'createdAt',
 ]);
-const ASSET_OPTIONAL_KEYS = new Set([
-  'width',
-  'height',
-  'durationSeconds',
-  'briefReferenceRole',
-  'briefReferenceLabel',
-  'sourceLook',
-  'referenceAssetIds',
-]);
+const ASSET_OPTIONAL_KEYS = new Set(['width', 'height', 'durationSeconds']);
 const MANAGED_ASSET_KEYS = new Set(['collection', 'fileName']);
 const JOB_REQUIRED_KEYS = new Set([
   'id',
   'projectId',
-  'shotId',
+  'target',
   'status',
   'provider',
   'idempotencyKey',
@@ -204,6 +201,7 @@ const JOB_REQUIRED_KEYS = new Set([
   'purpose',
   'authorizationId',
   'authorizationItemId',
+  'composition',
   'requestPlan',
   'requestSnapshot',
   'spendReceipt',
@@ -216,7 +214,7 @@ const JOB_REQUIRED_KEYS = new Set([
   'createdAt',
   'updatedAt',
 ]);
-const JOB_OPTIONAL_KEYS = new Set(['remoteStartedAt', 'progress', 'projectReferenceId']);
+const JOB_OPTIONAL_KEYS = new Set(['remoteStartedAt', 'progress']);
 const PROVIDER_KEYS = new Set(['providerId', 'adapterId', 'model']);
 const JOB_ERROR_KEYS = new Set(['code', 'messageKey']);
 const OUTPUT_ROLE_KEYS = new Set(['primary', 'poster']);
@@ -228,9 +226,9 @@ const PROJECT_REFERENCE_KEYS = new Set([
   'label',
   'prompt',
   'candidateAssetId',
-  'candidateJobId',
   'approvedAssetId',
   'supersededAssetIds',
+  'jobIds',
   'createdAt',
   'updatedAt',
 ]);
@@ -255,7 +253,7 @@ const AUTHORIZATION_KEYS = new Set([
 ]);
 const QUOTED_ITEM_REQUIRED_KEYS = new Set([
   'id',
-  'shotId',
+  'target',
   'purpose',
   'routeId',
   'generationCount',
@@ -263,21 +261,46 @@ const QUOTED_ITEM_REQUIRED_KEYS = new Set([
   'rateUnit',
   'rateMinorUnits',
 ]);
-const QUOTED_ITEM_OPTIONAL_KEYS = new Set(['projectReferenceId']);
 const PROVIDER_BINDING_KEYS = new Set(['itemId', 'provider']);
 const IDEMPOTENCY_ENTRY_KEYS = new Set(['itemId', 'key']);
 const REQUEST_PLAN_RESOLVED_KEYS = new Set(['kind', 'snapshot']);
 const REQUEST_PLAN_DEFERRED_KEYS = new Set(['kind', 'template', 'dependency']);
 const REQUEST_SNAPSHOT_KEYS = new Set([
-  'prompt',
+  'composition',
   'aspectRatio',
   'resolution',
   'durationSeconds',
   'referenceInputs',
   'conditioningInput',
 ]);
-const REQUEST_TEMPLATE_KEYS = new Set(['prompt', 'aspectRatio', 'resolution', 'durationSeconds', 'referenceInputs']);
-const REFERENCE_INPUT_KEYS = new Set(['assetId', 'sha256']);
+const REQUEST_TEMPLATE_KEYS = new Set([
+  'composition',
+  'aspectRatio',
+  'resolution',
+  'durationSeconds',
+  'referenceInputs',
+]);
+const REFERENCE_INPUT_KEYS = new Set(['referenceId', 'kind', 'assetId', 'sha256']);
+const GENERATION_TARGET_SHOT_KEYS = new Set(['kind', 'shotId']);
+const GENERATION_TARGET_REFERENCE_KEYS = new Set(['kind', 'referenceId']);
+const COMPOSITION_KEYS = new Set(['inputs', 'prompt']);
+const COMPOSITION_INPUT_KEYS = new Set([
+  'schemaVersion',
+  'projectRevision',
+  'brief',
+  'rules',
+  'source',
+  'purpose',
+  'referenceInputs',
+  'aspectRatio',
+  'resolution',
+  'route',
+  'boardStyle',
+  'instructionProfile',
+]);
+const COMPOSITION_SHOT_SOURCE_KEYS = new Set(['kind', 'beatId', 'story', 'shotId', 'shootingScript']);
+const COMPOSITION_REFERENCE_SOURCE_KEYS = new Set(['kind', 'referenceId', 'referenceKind', 'prompt']);
+const REFERENCE_BINDING_KEYS = new Set(['status', 'characterReferenceIds', 'backgroundReferenceId']);
 const CONDITIONING_SEED_KEYS = new Set(['kind', 'assetId']);
 const CONDITIONING_PREDECESSOR_KEYS = new Set([
   'kind',
@@ -313,6 +336,7 @@ const RECEIPT_KEYS = new Set([
 ]);
 const UNDO_ENTRY_KEYS = new Set(['id', 'sourceRevision', 'label', 'patches']);
 const PROJECT_PATCH_KEYS = new Set(['kind', 'before', 'afterDigest']);
+const REFERENCE_CATALOG_PATCH_BEFORE_KEYS = new Set(['referencePlanStatus', 'referenceOrder', 'references']);
 const PROJECT_PATCH_BEFORE_KEYS = new Set([
   'name',
   'aspectRatio',
@@ -322,8 +346,6 @@ const PROJECT_PATCH_BEFORE_KEYS = new Set([
   'brief',
   'rules',
   'beatOrder',
-  'referenceOrder',
-  'references',
   'imageRouteId',
   'videoRouteId',
   'spendPolicy',
@@ -333,7 +355,7 @@ const BEAT_PATCH_KEYS = new Set(['kind', 'beatId', 'before', 'afterDigest']);
 const SHOT_PATCH_KEYS = new Set(['kind', 'shotId', 'before', 'beforeBeatId', 'beforeIndex', 'afterDigest']);
 const BIN_PATCH_KEYS = new Set(['kind', 'before', 'afterDigest']);
 const SHOT_BEFORE_KEYS = new Set([...SHOT_KEYS].filter((key) => key !== 'assetIds' && key !== 'jobIds'));
-const PROPOSED_SHOT_KEYS = new Set(['shotId', 'line', 'narration', 'onScreenText', 'durationSeconds', 'chainBreak']);
+const PROPOSED_SHOT_KEYS = new Set(['shotId', 'shootingScript', 'durationSeconds', 'chainBreak']);
 const FIXED_SHOT_REVIEW_KEYS = new Set(['shotId', 'reasons']);
 
 const INVALID_DATA_SNAPSHOT = Symbol('invalid-data-snapshot');
@@ -585,25 +607,8 @@ const isNullableRouteId = isNullableSafeId;
 const isNullableTrim = (value: unknown): value is number | null =>
   value === null || (isFiniteNonNegative(value) && value <= Number.MAX_SAFE_INTEGER);
 
-const validateLineHistory = (value: unknown): boolean => {
-  if (!isDenseArray(value, STUDIO_MAX_LINE_HISTORY_PER_BEAT)) return false;
-  const ids = new Set<string>();
-  return arrayEvery(value, (entry) => {
-    if (
-      !isRecord(entry) ||
-      !hasExactKeys(entry, LINE_HISTORY_KEYS) ||
-      !isSafeId(entry.id) ||
-      ids.has(entry.id) ||
-      !isIntegerInRange(entry.shotOrdinal, 1, STUDIO_MAX_SHOTS_PER_BEAT) ||
-      !isStringWithin(entry.text, 8 * 1024) ||
-      !isCanonicalTimestamp(entry.capturedAt)
-    ) {
-      return false;
-    }
-    ids.add(entry.id);
-    return true;
-  });
-};
+const compositionDigest = (value: unknown): string =>
+  createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 
 const validateBeat = (beatId: string, value: unknown): value is StudioBeat =>
   isRecord(value) &&
@@ -611,12 +616,18 @@ const validateBeat = (beatId: string, value: unknown): value is StudioBeat =>
   value.id === beatId &&
   isSafeId(beatId) &&
   isStringWithin(value.title, 256) &&
-  isStringWithin(value.action, 4 * 1024) &&
-  isStringWithin(value.look, 8 * 1024) &&
-  isIntegerInRange(value.actionRevision, 1, Number.MAX_SAFE_INTEGER) &&
+  isStringWithin(value.story, STUDIO_MAX_STORY_LENGTH) &&
   (value.targetSeconds === null || isIntegerInRange(value.targetSeconds, 1, 1440)) &&
-  isUniqueSafeIdArray(value.shotOrder, STUDIO_MAX_SHOTS_PER_BEAT) &&
-  validateLineHistory(value.lineHistory);
+  isUniqueSafeIdArray(value.shotOrder, STUDIO_MAX_SHOTS_PER_BEAT);
+
+const validateReferenceBinding = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, REFERENCE_BINDING_KEYS) &&
+  (value.status === 'unassigned' || value.status === 'ready') &&
+  isUniqueSafeIdArray(value.characterReferenceIds, STUDIO_MAX_PROJECT_REFERENCES) &&
+  isNullableSafeId(value.backgroundReferenceId) &&
+  (value.status === 'ready' ||
+    ((value.characterReferenceIds as string[]).length === 0 && value.backgroundReferenceId === null));
 
 const validateShotRecord = (
   shotId: string,
@@ -628,19 +639,12 @@ const validateShotRecord = (
   hasExactKeys(value, keySet) &&
   value.id === shotId &&
   isSafeId(shotId) &&
-  isStringWithin(value.line, 8 * 1024) &&
-  (value.derivation === 'derived' || value.derivation === 'detached') &&
-  (value.derivedFromActionRevision === null ||
-    isIntegerInRange(value.derivedFromActionRevision, 1, Number.MAX_SAFE_INTEGER)) &&
-  ((value.derivation === 'derived' && value.derivedFromActionRevision !== null) ||
-    (value.derivation === 'detached' && value.derivedFromActionRevision === null)) &&
-  isStringWithin(value.narration, 4 * 1024) &&
-  isStringWithin(value.onScreenText, 1024) &&
+  isStringWithin(value.shootingScript, STUDIO_MAX_SHOOTING_SCRIPT_LENGTH) &&
   isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS) &&
   isNullableTrim(value.trimInSeconds) &&
   isNullableTrim(value.trimOutSeconds) &&
   (value.chainBreak === 'none' || value.chainBreak === 'hard_cut') &&
-  isUniqueSafeIdArray(value.referenceIds, STUDIO_MAX_PROJECT_REFERENCES) &&
+  validateReferenceBinding(value.referenceBinding) &&
   isNullableSafeId(value.seedStillId) &&
   isNullableSafeId(value.boardAssetId) &&
   isUniqueSafeIdArray(value.supersededBoardAssetIds) &&
@@ -662,9 +666,11 @@ const validateProjectReference = (referenceId: string, value: unknown): boolean 
   isNonEmptyStringWithin(value.prompt, STUDIO_MAX_REFERENCE_PROMPT_LENGTH) &&
   value.prompt === (value.prompt as string).trim() &&
   isNullableSafeId(value.candidateAssetId) &&
-  isNullableSafeId(value.candidateJobId) &&
   isNullableSafeId(value.approvedAssetId) &&
-  isUniqueSafeIdArray(value.supersededAssetIds, STUDIO_MAX_PROJECT_REFERENCES) &&
+  isUniqueSafeIdArray(value.supersededAssetIds) &&
+  isUniqueSafeIdArray(value.jobIds) &&
+  (value.candidateAssetId === null || value.candidateAssetId !== value.approvedAssetId) &&
+  !value.supersededAssetIds.includes(value.candidateAssetId) &&
   !value.supersededAssetIds.includes(value.approvedAssetId) &&
   isCanonicalTimestamp(value.createdAt) &&
   isCanonicalTimestamp(value.updatedAt) &&
@@ -674,9 +680,7 @@ const validateProposedShotSnapshot = (value: unknown): boolean =>
   isRecord(value) &&
   hasExactKeys(value, PROPOSED_SHOT_KEYS) &&
   isSafeId(value.shotId) &&
-  isStringWithin(value.line, 8 * 1024) &&
-  isStringWithin(value.narration, 4 * 1024) &&
-  isStringWithin(value.onScreenText, 1024) &&
+  isStringWithin(value.shootingScript, STUDIO_MAX_SHOOTING_SCRIPT_LENGTH) &&
   isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS) &&
   (value.chainBreak === 'none' || value.chainBreak === 'hard_cut');
 
@@ -749,28 +753,25 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
     (value.height !== undefined && !isIntegerInRange(value.height, 1, Number.MAX_SAFE_INTEGER)) ||
     (value.mediaKind === 'image' && value.durationSeconds !== undefined) ||
     (value.mediaKind !== 'image' && !isFinitePositive(value.durationSeconds)) ||
-    (value.referenceAssetIds !== undefined &&
-      !isUniqueSafeIdArray(value.referenceAssetIds, STUDIO_MAX_PROJECT_REFERENCES)) ||
+    !isNullableSafeId(value.projectReferenceId) ||
+    !isUniqueSafeIdArray(value.generationReferenceAssetIds, STUDIO_MAX_PROJECT_REFERENCES) ||
+    !isNullableSafeId(value.producerJobId) ||
+    (value.compositionDigest !== null && !isLowercaseDigest(value.compositionDigest)) ||
     !isCanonicalTimestamp(value.createdAt)
   ) {
     return false;
   }
-  const hasRole = value.briefReferenceRole !== undefined;
-  const hasLabel = value.briefReferenceLabel !== undefined;
-  if (hasRole !== hasLabel) return false;
   if (value.shotId === null && value.mediaKind === 'image') {
     if (
-      !hasRole ||
-      (value.briefReferenceRole !== 'cast' && value.briefReferenceRole !== 'look') ||
-      !isStudioBriefReferenceLabel(value.briefReferenceLabel) ||
+      !isSafeId(value.projectReferenceId) ||
       !isStudioReferenceImageMimeType(value.mimeType) ||
-      value.managedAsset.collection !== 'imports'
+      value.managedAsset.collection !== 'assets'
     ) {
       return false;
     }
   } else if (value.shotId === null && value.mediaKind === 'audio') {
     if (!isCanonicalStudioBedAudioAssetV2(value as StudioAssetV2)) return false;
-  } else if (value.shotId === null || hasRole || value.mediaKind === 'audio') {
+  } else if (value.shotId === null || value.mediaKind === 'audio') {
     return false;
   }
   if (
@@ -780,7 +781,7 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
   ) {
     return false;
   }
-  return value.sourceLook === undefined || isStringWithin(value.sourceLook, 8 * 1024);
+  return value.shotId === null || value.projectReferenceId === null;
 };
 
 const validateProvider = (value: unknown): boolean =>
@@ -800,20 +801,122 @@ const providersEqual = (left: unknown, right: unknown): boolean =>
 
 const validateReferenceInputs = (value: unknown): boolean => {
   if (!isDenseArray(value, STUDIO_MAX_PROJECT_REFERENCES)) return false;
+  const referenceIds = new Set<string>();
   const assetIds = new Set<string>();
   return arrayEvery(value, (input) => {
     if (
       !isRecord(input) ||
       !hasExactKeys(input, REFERENCE_INPUT_KEYS) ||
+      !isSafeId(input.referenceId) ||
+      referenceIds.has(input.referenceId) ||
+      (input.kind !== 'character' && input.kind !== 'background') ||
       !isSafeId(input.assetId) ||
       assetIds.has(input.assetId) ||
       !isLowercaseDigest(input.sha256)
     ) {
       return false;
     }
+    referenceIds.add(input.referenceId);
     assetIds.add(input.assetId);
     return true;
   });
+};
+
+const referencesEqual = (left: unknown, right: unknown): boolean =>
+  Array.isArray(left) &&
+  Array.isArray(right) &&
+  left.length === right.length &&
+  left.every(
+    (reference, index) =>
+      isRecord(reference) &&
+      isRecord(right[index]) &&
+      reference.referenceId === right[index].referenceId &&
+      reference.kind === right[index].kind &&
+      reference.assetId === right[index].assetId &&
+      reference.sha256 === right[index].sha256
+  );
+
+const validateGenerationTarget = (value: unknown): boolean =>
+  isRecord(value) &&
+  ((value.kind === 'shot' && hasExactKeys(value, GENERATION_TARGET_SHOT_KEYS) && isSafeId(value.shotId)) ||
+    (value.kind === 'reference' &&
+      hasExactKeys(value, GENERATION_TARGET_REFERENCE_KEYS) &&
+      isSafeId(value.referenceId)));
+
+const validateCompositionSource = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  if (value.kind === 'shot') {
+    return (
+      hasExactKeys(value, COMPOSITION_SHOT_SOURCE_KEYS) &&
+      isSafeId(value.beatId) &&
+      isStringWithin(value.story, STUDIO_MAX_STORY_LENGTH) &&
+      isSafeId(value.shotId) &&
+      isStringWithin(value.shootingScript, STUDIO_MAX_SHOOTING_SCRIPT_LENGTH)
+    );
+  }
+  return (
+    value.kind === 'project_reference' &&
+    hasExactKeys(value, COMPOSITION_REFERENCE_SOURCE_KEYS) &&
+    isSafeId(value.referenceId) &&
+    (value.referenceKind === 'character' || value.referenceKind === 'background') &&
+    isNonEmptyStringWithin(value.prompt, STUDIO_MAX_REFERENCE_PROMPT_LENGTH)
+  );
+};
+
+const expectedInstructionProfile = (
+  route: StudioProviderRef,
+  purpose: StudioJobPurpose,
+  source: StudioGenerationCompositionInputSnapshotV2['source']
+): string => {
+  if (purpose === 'board_still') return `${route.adapterId}.board-still.v1`;
+  if (purpose === 'seed_still') return `${route.adapterId}.seed-still.v1`;
+  if (purpose === 'video_take') return `${route.adapterId}.video-take.v1`;
+  return source.kind === 'project_reference' && source.referenceKind === 'character'
+    ? `${route.adapterId}.reference-character.v1`
+    : `${route.adapterId}.reference-background.v1`;
+};
+
+const validateComposition = (value: unknown): boolean => {
+  if (!isRecord(value) || !hasExactKeys(value, COMPOSITION_KEYS) || !isRecord(value.inputs)) return false;
+  const inputs = value.inputs;
+  if (
+    !(
+      hasExactKeys(inputs, COMPOSITION_INPUT_KEYS) &&
+      inputs.schemaVersion === STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION &&
+      isIntegerInRange(inputs.projectRevision, 1, Number.MAX_SAFE_INTEGER) &&
+      isStringWithin(inputs.brief, 16 * 1024) &&
+      validateRules(inputs.rules) &&
+      validateCompositionSource(inputs.source) &&
+      typeof inputs.purpose === 'string' &&
+      PURPOSES.has(inputs.purpose) &&
+      validateReferenceInputs(inputs.referenceInputs) &&
+      typeof inputs.aspectRatio === 'string' &&
+      ASPECT_RATIOS.has(inputs.aspectRatio) &&
+      typeof inputs.resolution === 'string' &&
+      RESOLUTIONS.has(inputs.resolution) &&
+      validateProvider(inputs.route) &&
+      (inputs.boardStyle === null || (typeof inputs.boardStyle === 'string' && BOARD_STYLES.has(inputs.boardStyle))) &&
+      typeof inputs.instructionProfile === 'string' &&
+      isNonEmptyStringWithin(value.prompt, STUDIO_MAX_GENERATION_PROMPT_LENGTH)
+    )
+  ) {
+    return false;
+  }
+  const source = inputs.source as StudioGenerationCompositionInputSnapshotV2['source'];
+  const purpose = inputs.purpose as StudioJobPurpose;
+  const route = inputs.route as StudioProviderRef;
+  const semanticShapeIsValid =
+    (purpose === 'reference_image') === (source.kind === 'project_reference') &&
+    (purpose === 'board_still') === (inputs.boardStyle !== null) &&
+    (purpose !== 'video_take' || (inputs.referenceInputs as unknown[]).length === 0) &&
+    inputs.instructionProfile === expectedInstructionProfile(route, purpose, source);
+  if (!semanticShapeIsValid) return false;
+  try {
+    const composition = value as unknown as StudioGenerationCompositionV2;
+    return studioGenerationCompositionsEqualV2(composition, recomposeStudioGenerationV2(composition));
+  } catch {
+    return false;
+  }
 };
 
 const validateConditioningInput = (value: unknown): boolean => {
@@ -833,13 +936,18 @@ const validateConditioningInput = (value: unknown): boolean => {
 };
 
 const validateRequestFields = (value: Record<string, unknown>): boolean =>
-  isNonEmptyStringWithin(value.prompt, STUDIO_MAX_GENERATION_PROMPT_LENGTH) &&
+  validateComposition(value.composition) &&
   typeof value.aspectRatio === 'string' &&
   ASPECT_RATIOS.has(value.aspectRatio) &&
   typeof value.resolution === 'string' &&
   RESOLUTIONS.has(value.resolution) &&
   isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS) &&
-  validateReferenceInputs(value.referenceInputs);
+  validateReferenceInputs(value.referenceInputs) &&
+  isRecord(value.composition) &&
+  isRecord(value.composition.inputs) &&
+  value.composition.inputs.aspectRatio === value.aspectRatio &&
+  value.composition.inputs.resolution === value.resolution &&
+  referencesEqual(value.composition.inputs.referenceInputs, value.referenceInputs);
 
 const validateRequestSnapshot = (value: unknown): boolean =>
   isRecord(value) &&
@@ -884,17 +992,11 @@ const validateRequestPlan = (value: unknown): boolean => {
   );
 };
 
-const referencesEqual = (left: unknown, right: unknown): boolean =>
-  Array.isArray(left) &&
-  Array.isArray(right) &&
-  left.length === right.length &&
-  left.every(
-    (reference, index) =>
-      isRecord(reference) &&
-      isRecord(right[index]) &&
-      reference.assetId === right[index].assetId &&
-      reference.sha256 === right[index].sha256
-  );
+const requestPlanCompositionEquals = (plan: unknown, composition: unknown): boolean => {
+  if (!isRecord(plan)) return false;
+  const request = plan.kind === 'resolved' ? plan.snapshot : plan.template;
+  return isRecord(request) && JSON.stringify(request.composition) === JSON.stringify(composition);
+};
 
 const conditioningInputsEqual = (left: unknown, right: unknown): boolean => {
   if (left === null || right === null) return left === right;
@@ -911,7 +1013,7 @@ const conditioningInputsEqual = (left: unknown, right: unknown): boolean => {
 const requestNonConditioningFieldsEqual = (left: unknown, right: unknown): boolean =>
   isRecord(left) &&
   isRecord(right) &&
-  left.prompt === right.prompt &&
+  JSON.stringify(left.composition) === JSON.stringify(right.composition) &&
   left.aspectRatio === right.aspectRatio &&
   left.resolution === right.resolution &&
   left.durationSeconds === right.durationSeconds &&
@@ -989,7 +1091,7 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
     value.id === jobId &&
     isSafeId(jobId) &&
     value.projectId === projectId &&
-    isSafeId(value.shotId) &&
+    validateGenerationTarget(value.target) &&
     typeof value.status === 'string' &&
     JOB_STATUSES.has(value.status) &&
     validateProvider(value.provider) &&
@@ -1004,10 +1106,12 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
     isUniqueSafeIdArray(value.outputAssetIds) &&
     typeof value.purpose === 'string' &&
     PURPOSES.has(value.purpose) &&
-    (value.projectReferenceId === undefined || isSafeId(value.projectReferenceId)) &&
+    (value.purpose === 'reference_image') === (isRecord(value.target) && value.target.kind === 'reference') &&
     isSafeId(value.authorizationId) &&
     isSafeId(value.authorizationItemId) &&
+    validateComposition(value.composition) &&
     validateRequestPlan(value.requestPlan) &&
+    requestPlanCompositionEquals(value.requestPlan, value.composition) &&
     (value.requestSnapshot === null || validateRequestSnapshot(value.requestSnapshot)) &&
     (value.spendReceipt === null || validateReceipt(value.spendReceipt)) &&
     outputRolesAreValid &&
@@ -1106,10 +1210,9 @@ const validateSpendPolicy = (value: unknown): boolean =>
 const validateQuotedItem = (value: unknown, projectId: string, projectRevision: number): boolean => {
   if (
     !isRecord(value) ||
-    !hasKeys(value, QUOTED_ITEM_REQUIRED_KEYS, QUOTED_ITEM_OPTIONAL_KEYS) ||
+    !hasExactKeys(value, QUOTED_ITEM_REQUIRED_KEYS) ||
     !isSafeId(value.id) ||
-    !isSafeId(value.shotId) ||
-    (value.projectReferenceId !== undefined && !isSafeId(value.projectReferenceId)) ||
+    !validateGenerationTarget(value.target) ||
     typeof value.purpose !== 'string' ||
     !PURPOSES.has(value.purpose) ||
     !isSafeId(value.routeId) ||
@@ -1122,8 +1225,9 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
     return false;
   }
   const plan = value.requestPlan as Record<string, unknown>;
-  if (value.projectReferenceId !== undefined && value.purpose !== 'seed_still') return false;
-  if (value.purpose === 'seed_still') {
+  const target = value.target as StudioQuotedGeneration['target'];
+  if ((value.purpose === 'reference_image') !== (target.kind === 'reference')) return false;
+  if (value.purpose === 'seed_still' || value.purpose === 'reference_image') {
     if (
       value.rateUnit !== 'generation' ||
       plan.kind !== 'resolved' ||
@@ -1139,7 +1243,6 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
       !isRecord(plan.snapshot) ||
       plan.snapshot.durationSeconds !== STUDIO_BOARD_REQUEST_DURATION_SECONDS ||
       !Array.isArray(plan.snapshot.referenceInputs) ||
-      plan.snapshot.referenceInputs.length !== 0 ||
       plan.snapshot.conditioningInput !== null
     ) {
       return false;
@@ -1158,14 +1261,27 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
   ) {
     return false;
   }
+  const request = plan.kind === 'resolved' ? plan.snapshot : plan.template;
+  if (!isRecord(request) || !isRecord(request.composition) || !isRecord(request.composition.inputs)) return false;
+  const compositionInputs = request.composition.inputs;
+  const source = compositionInputs.source;
+  if (
+    compositionInputs.projectRevision !== projectRevision ||
+    compositionInputs.purpose !== value.purpose ||
+    !isRecord(source) ||
+    (target.kind === 'shot'
+      ? source.kind !== 'shot' || source.shotId !== target.shotId
+      : source.kind !== 'project_reference' || source.referenceId !== target.referenceId)
+  ) {
+    return false;
+  }
   return (
     value.id ===
       createStudioQuotedGenerationId({
         projectId,
         projectRevision,
-        shotId: value.shotId as string,
+        target,
         purpose: value.purpose as StudioJobPurpose,
-        projectReferenceId: typeof value.projectReferenceId === 'string' ? value.projectReferenceId : null,
       }) &&
     calculateStudioQuotedGenerationAmounts(value as Parameters<typeof calculateStudioQuotedGenerationAmounts>[0]) !==
       null
@@ -1204,13 +1320,12 @@ const validateAuthorizationShape = (value: unknown, projectId: string, currentRe
     if (!validateQuotedItem(item, projectId, value.projectRevision as number)) return false;
     const quoted = item as Record<string, unknown>;
     const itemId = quoted.id as string;
-    const generationAuthorityKey = `${quoted.shotId as string}\0${quoted.purpose as string}\0${
-      typeof quoted.projectReferenceId === 'string' ? quoted.projectReferenceId : ''
-    }`;
+    const target = quoted.target as StudioQuotedGeneration['target'];
+    const generationAuthorityKey = `${studioGenerationTargetKey(target)}\0${quoted.purpose as string}`;
     if (itemIds.has(itemId) || generationAuthorityKeys.has(generationAuthorityKey)) return false;
     itemIds.add(itemId);
     generationAuthorityKeys.add(generationAuthorityKey);
-    shotIds.add(quoted.shotId as string);
+    if (target.kind === 'shot') shotIds.add(target.shotId);
     if (shotIds.size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) return false;
   }
   if (!studioBoardAuthorizationScopeIsValidV2(value as unknown as StudioSubmissionQuote)) return false;
@@ -1227,11 +1342,22 @@ const validateAuthorizationShape = (value: unknown, projectId: string, currentRe
   }
   for (let index = 0; index < items.length; index += 1) {
     const binding = value.providerBindings[index];
+    const item = items[index] as StudioQuotedGeneration;
+    const composition =
+      item.requestPlan.kind === 'resolved'
+        ? item.requestPlan.snapshot.composition
+        : item.requestPlan.template.composition;
     if (
       !isRecord(binding) ||
       !hasExactKeys(binding, PROVIDER_BINDING_KEYS) ||
       binding.itemId !== (items[index] as Record<string, unknown>).id ||
-      !validateProvider(binding.provider)
+      !validateProvider(binding.provider) ||
+      !studioGenerationCompositionMatchesAuthorityV2(composition, {
+        projectRevision: value.projectRevision as number,
+        target: item.target,
+        purpose: item.purpose,
+        provider: binding.provider as StudioProviderRef,
+      })
     ) {
       return false;
     }
@@ -1321,7 +1447,6 @@ const validateProjectPatchBefore = (value: unknown): boolean =>
   isStringWithin(value.brief, 16 * 1024) &&
   validateRules(value.rules) &&
   isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS) &&
-  validateProjectPatchReferences(value.referenceOrder, value.references) &&
   isNullableRouteId(value.imageRouteId) &&
   isNullableRouteId(value.videoRouteId) &&
   validateSpendPolicy(value.spendPolicy) &&
@@ -1331,6 +1456,22 @@ const validateUndoPatch = (value: unknown): boolean => {
   if (!isRecord(value) || !isLowercaseDigest(value.afterDigest)) return false;
   if (value.kind === 'project_fields') {
     return hasExactKeys(value, PROJECT_PATCH_KEYS) && validateProjectPatchBefore(value.before);
+  }
+  if (value.kind === 'reference_catalog') {
+    if (
+      !hasExactKeys(value, PROJECT_PATCH_KEYS) ||
+      !isRecord(value.before) ||
+      !hasExactKeys(value.before, REFERENCE_CATALOG_PATCH_BEFORE_KEYS) ||
+      (value.before.referencePlanStatus !== 'unplanned' && value.before.referencePlanStatus !== 'planned') ||
+      !validateProjectPatchReferences(value.before.referenceOrder, value.before.references)
+    ) {
+      return false;
+    }
+    return (
+      value.before.referencePlanStatus === 'planned' ||
+      ((value.before.referenceOrder as unknown[]).length === 0 &&
+        Object.keys(value.before.references as Record<string, unknown>).length === 0)
+    );
   }
   if (value.kind === 'beat_fields') {
     return (
@@ -1371,6 +1512,7 @@ const validateUndoHistory = (value: unknown, currentRevision: number): boolean =
     }
     entryIds.add(entry.id);
     let hasProjectPatch = false;
+    let hasReferenceCatalogPatch = false;
     let hasBinPatch = false;
     const beatIds = new Set<string>();
     const shotIds = new Set<string>();
@@ -1380,6 +1522,9 @@ const validateUndoHistory = (value: unknown, currentRevision: number): boolean =
       if (patch.kind === 'project_fields') {
         if (hasProjectPatch) return false;
         hasProjectPatch = true;
+      } else if (patch.kind === 'reference_catalog') {
+        if (hasReferenceCatalogPatch) return false;
+        hasReferenceCatalogPatch = true;
       } else if (patch.kind === 'bin') {
         if (hasBinPatch) return false;
         hasBinPatch = true;
@@ -1405,28 +1550,17 @@ const hasNoOutput = (job: StudioJobV2): boolean =>
   job.outputAssetIdsByRole.primary === null &&
   job.outputAssetIdsByRole.poster === null;
 
-const isClassifiedBriefImage = (asset: StudioAssetV2): boolean =>
-  asset.shotId === null &&
-  asset.mediaKind === 'image' &&
-  asset.managedAsset.collection === 'imports' &&
-  asset.briefReferenceRole !== undefined &&
-  asset.briefReferenceLabel !== undefined;
-
 const isCanonicalImageTake = (asset: StudioAssetV2 | undefined, shotId: string): asset is StudioAssetV2 =>
   asset !== undefined &&
   asset.shotId === shotId &&
   asset.mediaKind === 'image' &&
-  (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
-  asset.briefReferenceRole === undefined &&
-  asset.briefReferenceLabel === undefined;
+  (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports');
 
 const isCanonicalBoardStill = (asset: StudioAssetV2 | undefined, shotId: string): asset is StudioAssetV2 =>
   asset !== undefined &&
   asset.shotId === shotId &&
   asset.mediaKind === 'image' &&
-  asset.managedAsset.collection === 'boardStills' &&
-  asset.briefReferenceRole === undefined &&
-  asset.briefReferenceLabel === undefined;
+  asset.managedAsset.collection === 'boardStills';
 
 const isCanonicalVideoTake = (asset: StudioAssetV2 | undefined, shotId: string): asset is StudioAssetV2 =>
   asset !== undefined &&
@@ -1435,7 +1569,7 @@ const isCanonicalVideoTake = (asset: StudioAssetV2 | undefined, shotId: string):
   asset.managedAsset.collection === 'assets' &&
   asset.durationSeconds !== undefined;
 
-const requestReferences = (job: StudioJobV2): { assetId: string; sha256: string }[] => {
+const requestReferences = (job: StudioJobV2): StudioGenerationReferenceInputSnapshot[] => {
   const request = job.requestPlan.kind === 'resolved' ? job.requestPlan.snapshot : job.requestPlan.template;
   return request.referenceInputs;
 };
@@ -1496,6 +1630,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     !isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS) ||
     !isRecord(value.beats) ||
     !isRecord(value.shots) ||
+    (value.referencePlanStatus !== 'unplanned' && value.referencePlanStatus !== 'planned') ||
     !isUniqueSafeIdArray(value.referenceOrder, STUDIO_MAX_PROJECT_REFERENCES) ||
     !isRecord(value.references) ||
     !validateBinStructure(value.bin) ||
@@ -1525,6 +1660,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     !beatIds.every((beatId) => validateBeat(beatId, project.beats[beatId])) ||
     !shotIds.every((shotId) => validateShot(shotId, project.shots[shotId])) ||
     !referenceIds.every((referenceId) => validateProjectReference(referenceId, project.references[referenceId])) ||
+    (project.referencePlanStatus === 'unplanned' && referenceIds.length !== 0) ||
     project.referenceOrder.length !== referenceIds.length ||
     !arrayEvery(project.referenceOrder, (referenceId) => Object.hasOwn(project.references, referenceId)) ||
     !arrayEvery(project.beatOrder, (beatId) => Object.hasOwn(project.beats, beatId))
@@ -1575,16 +1711,27 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     if (reference.kind === 'background') sawBackgroundReference = true;
   }
   for (const shot of Object.values(project.shots)) {
-    let backgroundCount = 0;
-    let previousReferencePosition = -1;
-    for (const referenceId of shot.referenceIds) {
+    const bindingReferenceIds = [
+      ...shot.referenceBinding.characterReferenceIds,
+      ...(shot.referenceBinding.backgroundReferenceId === null ? [] : [shot.referenceBinding.backgroundReferenceId]),
+    ];
+    for (const referenceId of bindingReferenceIds) {
       const reference = ownValue(project.references, referenceId);
-      const position = project.referenceOrder.indexOf(referenceId);
-      if (reference === undefined || position <= previousReferencePosition) return false;
-      previousReferencePosition = position;
-      if (reference.kind === 'background') backgroundCount += 1;
+      if (reference === undefined) return false;
+      if (
+        shot.referenceBinding.characterReferenceIds.includes(referenceId)
+          ? reference.kind !== 'character'
+          : reference.kind !== 'background'
+      ) {
+        return false;
+      }
     }
-    if (backgroundCount > 1) return false;
+    if (
+      shot.referenceBinding.status === 'ready' &&
+      bindingReferenceIds.some((referenceId) => project.references[referenceId]?.approvedAssetId === null)
+    ) {
+      return false;
+    }
   }
 
   const inactiveShotIds = new Set<string>(binnedShotOwnerIds.keys());
@@ -1593,7 +1740,6 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const shot = ownValue(project.shots, shotId);
     if (beat === undefined || shot === undefined) return false;
     if (binnedBeatIds.has(beatId)) inactiveShotIds.add(shotId);
-    if (shot.derivation === 'derived' && shot.derivedFromActionRevision! > beat.actionRevision) return false;
   }
   for (const beat of Object.values(project.beats)) {
     for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
@@ -1615,13 +1761,18 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
 
   const shotAssetIdsByShotId = new Map<string, ReadonlySet<string>>();
   const shotJobPositionsByShotId = new Map<string, ReadonlyMap<string, number>>();
+  const referenceJobPositionsByReferenceId = new Map<string, ReadonlyMap<string, number>>();
   for (const shot of Object.values(project.shots)) {
     shotAssetIdsByShotId.set(shot.id, new Set(arrayMap(shot.assetIds, (assetId) => assetId)));
     shotJobPositionsByShotId.set(shot.id, new Map(arrayMap(shot.jobIds, (jobId, index) => [jobId, index] as const)));
   }
+  for (const reference of Object.values(project.references)) {
+    referenceJobPositionsByReferenceId.set(
+      reference.id,
+      new Map(arrayMap(reference.jobIds, (jobId, index) => [jobId, index] as const))
+    );
+  }
 
-  const projectReferenceCount = Object.values(project.assets).filter(isClassifiedBriefImage).length;
-  if (projectReferenceCount > STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) return false;
   for (const asset of Object.values(project.assets)) {
     if (asset.shotId !== null) {
       const shot = ownValue(project.shots, asset.shotId);
@@ -1636,22 +1787,42 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
   }
   for (const job of Object.values(project.jobs)) {
-    const shot = ownValue(project.shots, job.shotId);
-    if (shot === undefined || !shotJobPositionsByShotId.get(shot.id)?.has(job.id)) return false;
-    if (
-      !arrayEvery(job.outputAssetIds, (assetId) => {
-        const asset = ownValue(project.assets, assetId);
-        return asset?.shotId === shot.id && shotAssetIdsByShotId.get(shot.id)?.has(assetId) === true;
-      })
-    ) {
-      return false;
+    if (job.target.kind === 'shot') {
+      const shot = ownValue(project.shots, job.target.shotId);
+      if (shot === undefined || !shotJobPositionsByShotId.get(shot.id)?.has(job.id)) return false;
+      if (
+        !arrayEvery(job.outputAssetIds, (assetId) => {
+          const asset = ownValue(project.assets, assetId);
+          return asset?.shotId === shot.id && shotAssetIdsByShotId.get(shot.id)?.has(assetId) === true;
+        })
+      ) {
+        return false;
+      }
+    } else {
+      const reference = ownValue(project.references, job.target.referenceId);
+      if (reference === undefined || !reference.jobIds.includes(job.id)) return false;
+      if (
+        !arrayEvery(job.outputAssetIds, (assetId) => {
+          const asset = ownValue(project.assets, assetId);
+          return asset?.shotId === null && asset.projectReferenceId === reference.id;
+        })
+      ) {
+        return false;
+      }
     }
   }
 
   const outputProducerByAssetId = new Map<string, StudioJobV2>();
   for (const shot of Object.values(project.shots)) {
     if (!arrayEvery(shot.assetIds, (assetId) => ownValue(project.assets, assetId)?.shotId === shot.id)) return false;
-    if (!arrayEvery(shot.jobIds, (jobId) => ownValue(project.jobs, jobId)?.shotId === shot.id)) return false;
+    if (
+      !arrayEvery(shot.jobIds, (jobId) => {
+        const job = ownValue(project.jobs, jobId);
+        return job?.target.kind === 'shot' && job.target.shotId === shot.id;
+      })
+    ) {
+      return false;
+    }
   }
 
   if (
@@ -1691,9 +1862,17 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         job.purpose === 'board_still'
           ? output?.managedAsset.collection === 'boardStills'
           : output?.managedAsset.collection === 'assets' || output?.managedAsset.collection === 'thumbnails';
+      const expectedShotId = job.target.kind === 'shot' ? job.target.shotId : null;
+      const expectedProjectReferenceId = job.target.kind === 'reference' ? job.target.referenceId : null;
+      const expectedReferenceAssetIds = requestReferences(job).map((reference) => reference.assetId);
       if (
         output === undefined ||
-        output.shotId !== job.shotId ||
+        output.shotId !== expectedShotId ||
+        output.projectReferenceId !== expectedProjectReferenceId ||
+        output.producerJobId !== job.id ||
+        output.compositionDigest !== compositionDigest(job.composition) ||
+        output.generationReferenceAssetIds.length !== expectedReferenceAssetIds.length ||
+        output.generationReferenceAssetIds.some((assetId, index) => assetId !== expectedReferenceAssetIds[index]) ||
         !outputCollectionIsValid ||
         outputProducerByAssetId.has(outputAssetId)
       ) {
@@ -1705,15 +1884,22 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     if (primaryId !== null) {
       if (!job.outputAssetIds.includes(primaryId)) return false;
       const primary = ownValue(project.assets, primaryId);
+      const targetShotId = job.target.kind === 'shot' ? job.target.shotId : null;
       if (
         primary === undefined ||
         (job.purpose === 'seed_still' &&
           (primary.managedAsset.collection !== 'assets' || primary.mediaKind !== 'image')) ||
-        (job.purpose === 'board_still' && !isCanonicalBoardStill(primary, job.shotId)) ||
+        (job.purpose === 'board_still' && (targetShotId === null || !isCanonicalBoardStill(primary, targetShotId))) ||
         (job.purpose === 'video_take' &&
           (primary.managedAsset.collection !== 'assets' ||
             primary.mediaKind !== 'video' ||
-            primary.durationSeconds === undefined))
+            primary.durationSeconds === undefined)) ||
+        (job.purpose === 'reference_image' &&
+          (job.target.kind !== 'reference' ||
+            primary.shotId !== null ||
+            primary.projectReferenceId !== job.target.referenceId ||
+            primary.mediaKind !== 'image' ||
+            primary.managedAsset.collection !== 'assets'))
       ) {
         return false;
       }
@@ -1801,7 +1987,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     return (
       producer?.status === 'succeeded' &&
       producer.purpose === purpose &&
-      producer.projectReferenceId === undefined &&
+      producer.target.kind === 'shot' &&
+      producer.target.shotId === shotId &&
       producer.outputAssetIdsByRole.primary === asset.id
     );
   };
@@ -1913,20 +2100,27 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   if (retryGraphHasCycle(project.jobs)) return false;
+  const retriedPredecessorIds = new Set<string>();
   for (const job of Object.values(project.jobs)) {
     if (job.retryOfJobId === null) continue;
+    if (retriedPredecessorIds.has(job.retryOfJobId)) return false;
+    retriedPredecessorIds.add(job.retryOfJobId);
     const predecessor = ownValue(project.jobs, job.retryOfJobId);
-    const owner = ownValue(project.shots, job.shotId);
-    if (predecessor === undefined || owner === undefined || predecessor.shotId !== job.shotId) return false;
-    const ownerJobPositions = shotJobPositionsByShotId.get(owner.id);
+    if (
+      predecessor === undefined ||
+      studioGenerationTargetKey(predecessor.target) !== studioGenerationTargetKey(job.target)
+    ) {
+      return false;
+    }
+    const ownerJobPositions =
+      job.target.kind === 'shot'
+        ? shotJobPositionsByShotId.get(job.target.shotId)
+        : referenceJobPositionsByReferenceId.get(job.target.referenceId);
     const predecessorIndex = ownerJobPositions?.get(predecessor.id);
     const retryIndex = ownerJobPositions?.get(job.id);
     if (predecessorIndex === undefined || retryIndex === undefined || predecessorIndex >= retryIndex) return false;
-    if (predecessor.purpose !== job.purpose || predecessor.projectReferenceId !== job.projectReferenceId) {
-      return false;
-    }
-    const isExactProjectReferenceRetry =
-      job.projectReferenceId !== undefined && predecessor.projectReferenceId === job.projectReferenceId;
+    if (predecessor.purpose !== job.purpose) return false;
+    const isExactProjectReferenceRetry = job.target.kind === 'reference';
     const isProjectReferencePollDeadline =
       isExactProjectReferenceRetry && predecessor.status === 'failed' && predecessor.error?.code === 'poll_deadline';
     if (job.retryReason === 'submission_unknown') {
@@ -1983,16 +2177,18 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const itemPositions = new Map<string, number>();
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
       const item = items[itemIndex]!;
-      if (!Object.hasOwn(project.shots, item.shotId) || itemLinks.has(item.id)) return false;
-      if (item.projectReferenceId !== undefined) {
-        const targetReference = ownValue(project.references, item.projectReferenceId);
+      if (itemLinks.has(item.id)) return false;
+      if (item.target.kind === 'reference') {
+        const targetReference = ownValue(project.references, item.target.referenceId);
         if (
-          item.purpose !== 'seed_still' ||
+          item.purpose !== 'reference_image' ||
           targetReference === undefined ||
           (item.requestPlan.kind === 'resolved' && item.requestPlan.snapshot.referenceInputs.length !== 0)
         ) {
           return false;
         }
+      } else if (!Object.hasOwn(project.shots, item.target.shotId) || item.purpose === 'reference_image') {
+        return false;
       }
       itemPositions.set(item.id, itemIndex);
       const idempotencyKey = authorization.idempotencyKeys[itemIndex]!.key;
@@ -2016,16 +2212,20 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       if (dependency.kind === 'authorized_seed') {
         if (
           upstream.purpose !== 'seed_still' ||
-          upstream.shotId !== dependency.shotId ||
-          item.shotId !== dependency.shotId
+          upstream.target.kind !== 'shot' ||
+          upstream.target.shotId !== dependency.shotId ||
+          item.target.kind !== 'shot' ||
+          item.target.shotId !== dependency.shotId
         ) {
           return false;
         }
       } else {
         if (
           upstream.purpose !== 'video_take' ||
-          upstream.shotId !== dependency.predecessorShotId ||
-          shotOwners.get(upstream.shotId) !== shotOwners.get(item.shotId)
+          upstream.target.kind !== 'shot' ||
+          upstream.target.shotId !== dependency.predecessorShotId ||
+          item.target.kind !== 'shot' ||
+          shotOwners.get(upstream.target.shotId) !== shotOwners.get(item.target.shotId)
         ) {
           return false;
         }
@@ -2040,19 +2240,15 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     if (
       link === undefined ||
       link.authorization.id !== job.authorizationId ||
-      link.item.shotId !== job.shotId ||
+      studioGenerationTargetKey(link.item.target) !== studioGenerationTargetKey(job.target) ||
       link.item.purpose !== job.purpose ||
-      link.item.projectReferenceId !== job.projectReferenceId ||
       !requestPlansEqual(link.item.requestPlan, job.requestPlan) ||
       !providersEqual(link.provider, job.provider) ||
       link.idempotencyKey !== job.idempotencyKey
     ) {
       return false;
     }
-    if (
-      job.projectReferenceId !== undefined &&
-      (!Object.hasOwn(project.references, job.projectReferenceId) || job.purpose !== 'seed_still')
-    ) {
+    if (job.target.kind === 'reference' && !Object.hasOwn(project.references, job.target.referenceId)) {
       return false;
     }
     const logicalEntry = `${job.authorizationId}\0${job.authorizationItemId}`;
@@ -2089,7 +2285,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       if (
         isWaiting &&
         plan.dependency.kind === 'existing_predecessor' &&
-        !isCurrentExistingPredecessor(plan.dependency, job.shotId)
+        (job.target.kind !== 'shot' || !isCurrentExistingPredecessor(plan.dependency, job.target.shotId))
       ) {
         return false;
       }
@@ -2101,27 +2297,28 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       const output = ownValue(project.assets, outputAssetId);
       if (
         output === undefined ||
-        output.referenceAssetIds === undefined ||
-        output.referenceAssetIds.length !== producedReferenceAssetIds.length ||
-        output.referenceAssetIds.some((assetId, index) => assetId !== producedReferenceAssetIds[index])
+        output.generationReferenceAssetIds.length !== producedReferenceAssetIds.length ||
+        output.generationReferenceAssetIds.some((assetId, index) => assetId !== producedReferenceAssetIds[index])
       ) {
         return false;
       }
     }
     for (const reference of references) {
       const source = ownValue(project.assets, reference.assetId);
-      const projectReferenceAuthority = project.referenceOrder.some((referenceId) => {
-        const projectReference = ownValue(project.references, referenceId);
-        return isTerminalJob(job)
-          ? projectReference?.approvedAssetId === reference.assetId ||
-              projectReference?.supersededAssetIds.includes(reference.assetId) === true
-          : projectReference?.approvedAssetId === reference.assetId;
-      });
-      if (isTerminalJob(job) && !projectReferenceAuthority) continue;
+      const projectReference = ownValue(project.references, reference.referenceId);
+      const projectReferenceAuthority =
+        projectReference?.approvedAssetId === reference.assetId ||
+        projectReference?.supersededAssetIds.includes(reference.assetId) === true;
+      if (!projectReferenceAuthority) return false;
       if (
+        projectReference?.kind !== reference.kind ||
         source === undefined ||
-        source.sha256 !== reference.sha256 ||
-        (!isClassifiedBriefImage(source) && !projectReferenceAuthority)
+        source.projectId !== project.id ||
+        source.shotId !== null ||
+        source.mediaKind !== 'image' ||
+        source.managedAsset.collection !== 'assets' ||
+        source.projectReferenceId !== reference.referenceId ||
+        source.sha256 !== reference.sha256
       ) {
         return false;
       }
@@ -2163,7 +2360,10 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         }
       }
       if (conditioning?.kind === 'seed_still') {
-        if (!isCanonicalSeedSelection(ownValue(project.assets, conditioning.assetId), job.shotId)) {
+        if (
+          job.target.kind !== 'shot' ||
+          !isCanonicalSeedSelection(ownValue(project.assets, conditioning.assetId), job.target.shotId)
+        ) {
           return false;
         }
       } else if (conditioning?.kind === 'predecessor_frame') {
@@ -2182,7 +2382,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
           extraction.endpointSeconds !== conditioning.endpointSeconds ||
           extraction.frameAssetId !== conditioning.frameAssetId ||
           ((plan.kind !== 'after_take_selection' || plan.dependency.kind !== 'existing_predecessor') &&
-            shotOwners.get(conditioning.predecessorShotId) !== shotOwners.get(job.shotId))
+            (job.target.kind !== 'shot' ||
+              shotOwners.get(conditioning.predecessorShotId) !== shotOwners.get(job.target.shotId)))
         ) {
           return false;
         }
@@ -2252,9 +2453,9 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
 
   const liveProjectReferenceIds = new Set<string>();
   for (const job of Object.values(project.jobs)) {
-    if (job.projectReferenceId === undefined || isTerminalJob(job)) continue;
-    if (liveProjectReferenceIds.has(job.projectReferenceId)) return false;
-    liveProjectReferenceIds.add(job.projectReferenceId);
+    if (job.target.kind !== 'reference' || isTerminalJob(job)) continue;
+    if (liveProjectReferenceIds.has(job.target.referenceId)) return false;
+    liveProjectReferenceIds.add(job.target.referenceId);
   }
 
   for (const link of itemLinks.values()) {
@@ -2263,9 +2464,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     for (const otherLink of itemLinks.values()) {
       if (otherLink.item.id === link.item.id) continue;
       if (
-        otherLink.item.shotId !== link.item.shotId ||
-        otherLink.item.purpose !== link.item.purpose ||
-        otherLink.item.projectReferenceId !== link.item.projectReferenceId
+        studioGenerationTargetKey(otherLink.item.target) !== studioGenerationTargetKey(link.item.target) ||
+        otherLink.item.purpose !== link.item.purpose
       ) {
         continue;
       }
@@ -2283,10 +2483,11 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const upstreamHasCanonicalPrimary = upstreamJobs.some(
       (upstreamJob) =>
         upstreamJob.status === 'succeeded' &&
+        upstreamJob.target.kind === 'shot' &&
         upstreamJob.outputAssetIdsByRole.primary !== null &&
         isCanonicalPrimary(
           ownValue(project.assets, upstreamJob.outputAssetIdsByRole.primary),
-          upstreamJob.shotId,
+          upstreamJob.target.shotId,
           upstreamJob.purpose
         )
     );
@@ -2306,26 +2507,39 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const producer = outputProducerByAssetId.get(assetId);
     return (
       producer?.status === 'succeeded' &&
-      producer.purpose === 'seed_still' &&
-      producer.projectReferenceId === referenceId &&
+      producer.purpose === 'reference_image' &&
+      producer.target.kind === 'reference' &&
+      producer.target.referenceId === referenceId &&
       producer.outputAssetIdsByRole.primary === assetId
     );
   };
   for (const referenceId of project.referenceOrder) {
     const reference = ownValue(project.references, referenceId)!;
-    const candidateJob =
-      reference.candidateJobId === null ? undefined : ownValue(project.jobs, reference.candidateJobId);
+    let previousCreatedAt = '';
+    for (const jobId of reference.jobIds) {
+      const job = ownValue(project.jobs, jobId);
+      if (
+        job === undefined ||
+        job.target.kind !== 'reference' ||
+        job.target.referenceId !== referenceId ||
+        job.purpose !== 'reference_image' ||
+        job.createdAt < previousCreatedAt
+      ) {
+        return false;
+      }
+      previousCreatedAt = job.createdAt;
+    }
     if (
-      (reference.candidateJobId === null) !== (candidateJob === undefined) ||
-      (candidateJob !== undefined &&
-        (candidateJob.projectReferenceId !== referenceId || candidateJob.purpose !== 'seed_still'))
+      Object.values(project.jobs).some(
+        (job) =>
+          job.target.kind === 'reference' &&
+          job.target.referenceId === referenceId &&
+          !reference.jobIds.includes(job.id)
+      )
     ) {
       return false;
     }
-    const expectedCandidateAssetId =
-      candidateJob?.status === 'succeeded' ? candidateJob.outputAssetIdsByRole.primary : null;
     if (
-      reference.candidateAssetId !== expectedCandidateAssetId ||
       (reference.candidateAssetId !== null && !isReferenceOutput(referenceId, reference.candidateAssetId)) ||
       (reference.approvedAssetId !== null && !isReferenceOutput(referenceId, reference.approvedAssetId)) ||
       reference.supersededAssetIds.some((assetId) => !isReferenceOutput(referenceId, assetId))
@@ -2366,7 +2580,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
           }
         } else {
           const upstream = itemLinks.get(dependency.upstreamItemId)?.item;
-          if (upstream?.shotId === shotId) return false;
+          if (upstream?.target.kind === 'shot' && upstream.target.shotId === shotId) return false;
         }
       }
     }

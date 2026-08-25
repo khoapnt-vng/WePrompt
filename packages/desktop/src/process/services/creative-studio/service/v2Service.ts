@@ -14,10 +14,8 @@ import {
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   type CreateStudioProjectInputV2,
-  type StudioApproveProjectReferenceRequestV2,
   type StudioAssetV2,
   type StudioBindDirectorConversationRequestV2,
-  type StudioBriefReferenceRole,
   type StudioCancellationPolicy,
   type StudioCascadeBarrierActionRequestV2,
   type StudioConnectionBinding,
@@ -32,7 +30,6 @@ import {
   type StudioCopyExportResultV2,
   type StudioCreateExportRequestV2,
   type StudioDetachBedAudioRequestV2,
-  type StudioDetachBriefReferenceRequest,
   type StudioDismissReferenceGenerationHandoffRequestV2,
   type StudioDismissReferenceGenerationHandoffResultV2,
   type StudioDirectorSessionAuthorityV2,
@@ -64,6 +61,7 @@ import {
   type StudioRendererExportCatalogV2,
   type StudioRendererJobV2,
   type StudioRendererPreparedSubmissionOptionsV2,
+  type StudioRendererProposalV2,
   type StudioRendererProjectCommitResultV2,
   type StudioRendererProjectV2,
   type StudioRendererReferenceGenerationHandoffV2,
@@ -115,10 +113,13 @@ import {
   deriveStudioSubmissionQuoteGraphV2,
   evaluateStudioBudgetV2,
   priceStudioSubmissionQuoteGraphV2,
+  preflightStudioProjectReferencePreparationV2,
+  preflightStudioSubmissionPreparationV2,
   StudioPricingErrorV2,
   StudioRateCardErrorV2,
   studioSubmissionQuoteCoresEqual,
   toStudioRendererSubmissionQuoteV2,
+  type StudioCompositionRouteLookupV2,
   type StudioRateCardV2,
 } from './schema2/pricing';
 import {
@@ -137,7 +138,6 @@ import {
 } from './schema2/pricing/preparedSubmissionCache';
 import {
   applyStudioMutationBatchV2,
-  approveStudioProjectReferenceV2,
   advanceStudioWaitingBindingsV2,
   createStudioFrameExtractionId,
   deriveStudioInboundShotReferencesV2,
@@ -146,13 +146,14 @@ import {
   projectStudioWorkspaceStatusV2,
   resolveStudioCanonicalBoardAssetV2,
   resolveStudioCurrentBoardPanelAuthorityV2,
-  StudioProjectReferenceApprovalErrorV2,
+  studioGenerationTargetKey,
   terminalizeStudioUnboundDependenciesV2,
   type StudioMutationApplyResultV2,
   type StudioVerifiedConditioningFrameV2,
   type StudioWaitingBindingAdvanceV2,
 } from './schema2';
 import { CreativeStudioServiceError } from './projectMutations';
+import { deriveStudioProposalReviewV2 } from './schema2/mutations/proposalReview';
 
 export type { StudioRouteCatalogV2 } from '@/common/types/project/creativeStudioTypes';
 
@@ -211,8 +212,6 @@ const CAPTURED_POSTER_MAX_BASE64_LENGTH = Math.ceil(CAPTURED_POSTER_MAX_BYTES / 
 
 export type StudioShotReadinessIssueV2 =
   | 'missing_beat_title'
-  | 'missing_look'
-  | 'missing_line'
   | 'invalid_shot_duration'
   | 'active_job'
   | 'latest_job_failed';
@@ -252,10 +251,9 @@ export type CreativeStudioServiceV2 = {
     input: StudioMutationBatchV2,
     context: StudioMutationReducerContextV2
   ): Promise<StudioMutationBatchResultV2>;
-  importReferenceFromPath(input: {
+  importSeedStillFromPath(input: {
     projectId: string;
-    shotId?: string;
-    briefReferenceRole?: StudioBriefReferenceRole;
+    shotId: string;
     expectedRevision: number;
     sourcePath: string;
   }): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }>;
@@ -265,7 +263,6 @@ export type CreativeStudioServiceV2 = {
     sourcePath: string;
   }): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }>;
   detachBedAudio(input: StudioDetachBedAudioRequestV2): Promise<StudioRendererProjectV2>;
-  detachBriefReference(input: StudioDetachBriefReferenceRequest): Promise<StudioRendererProjectV2>;
   createExport(input: StudioCreateExportRequestV2): Promise<StudioRendererExportCatalogV2>;
   listExports(input: StudioListExportsRequestV2): Promise<StudioRendererExportCatalogV2>;
   copyExport(
@@ -287,7 +284,7 @@ export type CreativeStudioServiceV2 = {
   listRoutes(input?: { projectId?: string }): Promise<StudioRouteCatalogV2>;
   getGenerationReadiness(input: { projectId: string; beatIds: string[] }): Promise<StudioGenerationReadinessV2>;
   getProjectWorkspace(input: { projectId: string }): Promise<StudioProjectWorkspaceLoadResultV2>;
-  listProposals(input: { projectId: string }): Promise<StudioProposalV2[]>;
+  listProposals(input: { projectId: string }): Promise<StudioRendererProposalV2[]>;
   acceptProposal(input: { projectId: string; proposalId: string }): Promise<{
     proposal: StudioProposalV2;
     project: StudioRendererProjectV2;
@@ -303,7 +300,6 @@ export type CreativeStudioServiceV2 = {
   prepareProjectReferences(
     input: StudioPrepareProjectReferencesRequestV2
   ): Promise<StudioRendererPreparedSubmissionOptionsV2>;
-  approveProjectReference(input: StudioApproveProjectReferenceRequestV2): Promise<StudioRendererProjectV2>;
   prepareSubmission(input: StudioPrepareSubmissionRequestV2): Promise<StudioRendererPreparedSubmissionOptionsV2>;
   confirmSubmission(input: StudioConfirmSubmissionRequestV2): Promise<StudioConfirmSubmissionResultV2>;
   retryConditioningFrame(input: StudioCascadeBarrierActionRequestV2): Promise<StudioRendererWorkspaceStatusV2>;
@@ -702,7 +698,8 @@ const canonicalVideoPosterAssetV2 = (
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.status === 'succeeded' &&
       job.purpose === 'video_take' &&
       job.outputAssetIdsByRole.primary === selectedTake.id &&
@@ -723,17 +720,10 @@ const canonicalVideoPosterAssetV2 = (
 
 const eligibleSeedAssetV2 = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
   const asset = ownedShotAssetV2(project, shot, assetId);
-  const isProjectReference = shot.jobIds.some(
-    (jobId) =>
-      ownValue(project.jobs, jobId)?.projectReferenceId !== undefined &&
-      ownValue(project.jobs, jobId)?.outputAssetIds.includes(assetId) === true
-  );
   return asset !== null &&
     asset.mediaKind === 'image' &&
     (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
-    asset.briefReferenceRole === undefined &&
-    asset.briefReferenceLabel === undefined &&
-    !isProjectReference
+    asset.projectReferenceId === null
     ? asset
     : null;
 };
@@ -800,13 +790,11 @@ const composeStudioScriptV2 = (project: StudioProjectV2): Uint8Array => {
   project.beatOrder.forEach((beatId, beatIndex) => {
     const beat = ownValue(project.beats, beatId);
     if (beat === undefined) return;
-    lines.push(`## Beat ${beatIndex + 1}: ${beat.title}`, '', `Action: ${beat.action}`, `Look: ${beat.look}`, '');
+    lines.push(`## Beat ${beatIndex + 1}: ${beat.title}`, '', 'Story', '', beat.story, '');
     beat.shotOrder.forEach((shotId, shotIndex) => {
       const shot = ownValue(project.shots, shotId);
       if (shot === undefined) return;
-      lines.push(`### Shot ${shotIndex + 1}`, '', shot.line);
-      if (shot.narration.length > 0) lines.push('', `Narration: ${shot.narration}`);
-      if (shot.onScreenText.length > 0) lines.push('', `On-screen text: ${shot.onScreenText}`);
+      lines.push(`### Shot ${shotIndex + 1}`, '', 'Shooting script', '', shot.shootingScript);
       lines.push('');
     });
   });
@@ -952,6 +940,7 @@ const generationMediaKindForPurpose = (purpose: StudioJobPurpose): StudioMediaKi
   switch (purpose) {
     case 'seed_still':
     case 'board_still':
+    case 'reference_image':
       return 'image';
     case 'video_take':
       return 'video';
@@ -1028,6 +1017,22 @@ const rendererRouteLookup =
     return toMediaChoice(route, kind);
   };
 
+const compositionRouteLookup =
+  (generation: StudioGenerationRouteCatalog, project: StudioProjectV2): StudioCompositionRouteLookupV2 =>
+  (routeId, purpose) => {
+    const kind = generationMediaKindForPurpose(purpose);
+    const matches = generation.routes.filter((route) => route.choiceId === routeId && route.kind === kind);
+    const route = matches.length === 1 ? matches[0]! : null;
+    if (route === null) throw new StudioPricingErrorV2('missing_route');
+    if (!routeSupportsProject(route, project)) {
+      throw new CreativeStudioServiceError('invalid_route');
+    }
+    return {
+      provider: { providerId: route.providerId, adapterId: route.adapterId, model: route.model },
+      maxConditioningImages: route.constraints.maxConditioningImages,
+    };
+  };
+
 const requestedKind = (job: StudioJobV2): StudioMediaKind => generationMediaKindForPurpose(job.purpose);
 
 const toRendererSpendReceipt = (job: StudioJobV2): StudioRendererJobV2['spendReceipt'] => {
@@ -1047,27 +1052,31 @@ const toRendererSpendReceipt = (job: StudioJobV2): StudioRendererJobV2['spendRec
 
 const canRetryRendererJob = (project: StudioProjectV2 | undefined, job: StudioJobV2): boolean => {
   if (project === undefined || !canRetryJobV2(job)) return false;
-  const shot = ownValue(project.shots, job.shotId);
-  if (job.projectId !== project.id || shot === undefined || shot.id !== job.shotId || !shot.jobIds.includes(job.id)) {
-    return false;
-  }
-  const shotJobs = shot.jobIds.flatMap((jobId) => {
+  const owner =
+    job.target.kind === 'shot'
+      ? ownValue(project.shots, job.target.shotId)
+      : ownValue(project.references, job.target.referenceId);
+  if (job.projectId !== project.id || owner === undefined || !owner.jobIds.includes(job.id)) return false;
+  const targetKey = studioGenerationTargetKey(job.target);
+  const targetJobs = owner.jobIds.flatMap((jobId) => {
     const candidate = ownValue(project.jobs, jobId);
-    return candidate?.projectId === project.id && candidate.shotId === shot.id ? [candidate] : [];
+    return candidate?.projectId === project.id && studioGenerationTargetKey(candidate.target) === targetKey
+      ? [candidate]
+      : [];
   });
-  return !shotJobs.some((candidate) => candidate.retryOfJobId === job.id);
+  return !targetJobs.some((candidate) => candidate.retryOfJobId === job.id);
 };
 
 const toRendererJob = (job: StudioJobV2, project?: StudioProjectV2): StudioRendererJobV2 => ({
   id: job.id,
   projectId: job.projectId,
-  shotId: job.shotId,
+  target: structuredClone(job.target),
   status: job.status,
   purpose: job.purpose,
   provider: toMediaChoice(job.provider, requestedKind(job)),
   outputAssetIds: [...job.outputAssetIds],
   outputAssetIdsByRole: { ...job.outputAssetIdsByRole },
-  ...(job.projectReferenceId === undefined ? {} : { projectReferenceId: job.projectReferenceId }),
+  composition: structuredClone(job.composition),
   error: job.error === null ? null : { ...job.error },
   canCancel: canCancelJobV2(job),
   canRetry: canRetryRendererJob(project, job),
@@ -1112,13 +1121,8 @@ const isPaidGenerationRetryPredecessorV2 = (job: StudioJobV2): boolean =>
   job.error.code !== 'dependency_failed';
 
 /** Resolves paid lineage without extending project-reference recovery rules to ordinary Shot work. */
-const paidGenerationRetryReasonV2 = (
-  job: StudioJobV2,
-  projectReferenceId: string | undefined
-): Exclude<StudioJobV2['retryReason'], null> | null => {
-  const isExactProjectReferenceCandidate =
-    projectReferenceId !== undefined && job.projectReferenceId === projectReferenceId;
-  if (isExactProjectReferenceCandidate) {
+const paidGenerationRetryReasonV2 = (job: StudioJobV2): Exclude<StudioJobV2['retryReason'], null> | null => {
+  if (job.target.kind === 'reference') {
     if (job.status === 'cancelled') return 'provider_failure';
     if (job.status === 'failed' && job.error?.code === 'poll_deadline') return 'submission_unknown';
   }
@@ -1145,9 +1149,10 @@ export const projectStudioReferenceGenerationHandoffV2 = (
     throw new CreativeStudioStoreError('storage_error', 'Studio reference handoff receipt authority mismatch');
   }
   const referenceIds = [...decision.outcome.referenceIds];
-  const progress = { queued: 0, running: 0, succeeded: 0, failed: 0 };
-  const candidateAssetIds: string[] = [];
-  const retryReferenceIds: string[] = [];
+  const counts = { queued: 0, running: 0, succeeded: 0, failed: 0 };
+  const resultAssetIds: string[] = [];
+  const failedReferenceIds: string[] = [];
+  const terminalUpdatedAts: string[] = [];
   if (receipt?.result.kind === 'confirmed') {
     if (project === undefined) {
       throw new CreativeStudioStoreError(
@@ -1174,7 +1179,10 @@ export const projectStudioReferenceGenerationHandoffV2 = (
       items.length !== referenceIds.length ||
       items.some(
         (item, index) =>
-          item.projectReferenceId !== referenceIds[index] || item.purpose !== 'seed_still' || item.generationCount !== 1
+          item.target.kind !== 'reference' ||
+          item.target.referenceId !== referenceIds[index] ||
+          item.purpose !== 'reference_image' ||
+          item.generationCount !== 1
       )
     ) {
       throw new CreativeStudioStoreError('storage_error', 'Confirmed Studio reference handoff scope mismatch');
@@ -1189,8 +1197,9 @@ export const projectStudioReferenceGenerationHandoffV2 = (
       if (
         reference === undefined ||
         jobs.length !== 1 ||
-        jobs[0]!.projectReferenceId !== reference.id ||
-        jobs[0]!.purpose !== 'seed_still'
+        jobs[0]!.target.kind !== 'reference' ||
+        jobs[0]!.target.referenceId !== reference.id ||
+        jobs[0]!.purpose !== 'reference_image'
       ) {
         throw new CreativeStudioStoreError(
           'storage_error',
@@ -1204,9 +1213,9 @@ export const projectStudioReferenceGenerationHandoffV2 = (
         if (retries.length === 0) break;
         if (
           retries.length !== 1 ||
-          retries[0]!.projectReferenceId !== reference.id ||
-          retries[0]!.purpose !== 'seed_still' ||
-          retries[0]!.shotId !== job.shotId ||
+          retries[0]!.target.kind !== 'reference' ||
+          retries[0]!.target.referenceId !== reference.id ||
+          retries[0]!.purpose !== 'reference_image' ||
           visitedJobIds.has(retries[0]!.id)
         ) {
           throw new CreativeStudioStoreError('storage_error', 'Confirmed Studio reference handoff retry mismatch');
@@ -1219,39 +1228,57 @@ export const projectStudioReferenceGenerationHandoffV2 = (
         if (
           primaryAssetId === null ||
           !job.outputAssetIds.includes(primaryAssetId) ||
-          ownValue(project.assets, primaryAssetId) === undefined
+          ownValue(project.assets, primaryAssetId)?.projectReferenceId !== reference.id
         ) {
           throw new CreativeStudioStoreError('storage_error', 'Confirmed Studio reference handoff output mismatch');
         }
-        progress.succeeded += 1;
-        candidateAssetIds.push(primaryAssetId);
+        counts.succeeded += 1;
+        resultAssetIds.push(primaryAssetId);
+        terminalUpdatedAts.push(job.updatedAt);
       } else if (job.status === 'running') {
-        progress.running += 1;
+        counts.running += 1;
       } else if (
         job.status === 'waiting_for_conditioning' ||
         job.status === 'queued_local' ||
         job.status === 'submitting' ||
         job.status === 'queued_remote'
       ) {
-        progress.queued += 1;
+        counts.queued += 1;
       } else {
-        progress.failed += 1;
-        if (reference.candidateJobId === job.id && paidGenerationRetryReasonV2(job, referenceId) !== null) {
-          retryReferenceIds.push(referenceId);
-        }
+        counts.failed += 1;
+        terminalUpdatedAts.push(job.updatedAt);
+        if (paidGenerationRetryReasonV2(job) !== null) failedReferenceIds.push(referenceId);
       }
     }
   }
+  const status: StudioRendererReferenceGenerationHandoffV2['status'] =
+    receipt === null
+      ? 'awaiting_spend'
+      : receipt.result.kind === 'dismissed'
+        ? 'dismissed'
+        : counts.queued > 0 || counts.running > 0
+          ? 'running'
+          : counts.succeeded === referenceIds.length
+            ? 'succeeded'
+            : counts.succeeded > 0
+              ? 'partially_failed'
+              : 'failed';
+  const completedAt =
+    status === 'dismissed'
+      ? (receipt?.completedAt ?? null)
+      : status === 'succeeded' || status === 'partially_failed' || status === 'failed'
+        ? (terminalUpdatedAts.toSorted().at(-1) ?? null)
+        : null;
   return {
     handoffId: decision.outcome.handoffId,
     requestId: decision.requestId,
     referenceIds,
     decidedAt: decision.decidedAt,
-    status: receipt === null ? 'open' : receipt.result.kind,
-    completedAt: receipt?.completedAt ?? null,
-    progress,
-    candidateAssetIds,
-    retryReferenceIds,
+    status,
+    counts,
+    resultAssetIds,
+    failedReferenceIds,
+    completedAt,
   };
 };
 
@@ -1277,15 +1304,13 @@ const readinessForShot = (
   const shot = ownValue(project.shots, shotId)!;
   const issues: StudioShotReadinessIssueV2[] = [];
   if (beat.title.trim().length === 0) issues.push('missing_beat_title');
-  if (beat.look.trim().length === 0) issues.push('missing_look');
-  if (shot.line.trim().length === 0) issues.push('missing_line');
   if (!shotDurationIsValid(shot)) issues.push('invalid_shot_duration');
   const jobs = shot.jobIds.flatMap((jobId) => {
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
-      job.projectReferenceId === undefined &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.purpose !== 'board_still'
       ? [job]
       : [];
@@ -1584,20 +1609,24 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     options: { baseOnly: StudioSubmissionQuote; withCascade: StudioSubmissionQuote | null }
   ): StudioRendererPreparedSubmissionOptionsV2 => {
     const lookup = rendererRouteLookup(generation, project);
+    const resolveReference = (referenceId: string) => {
+      const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
+      return reference?.id === referenceId ? { kind: reference.kind, label: reference.label } : null;
+    };
     return {
-      baseOnly: toStudioRendererSubmissionQuoteV2(options.baseOnly, project.spendPolicy, lookup),
+      baseOnly: toStudioRendererSubmissionQuoteV2(options.baseOnly, project.spendPolicy, lookup, resolveReference),
       withCascade:
         options.withCascade === null
           ? null
-          : toStudioRendererSubmissionQuoteV2(options.withCascade, project.spendPolicy, lookup),
+          : toStudioRendererSubmissionQuoteV2(options.withCascade, project.spendPolicy, lookup, resolveReference),
     };
   };
 
   const prepareQuoteGraph = async (
     project: StudioProjectV2,
-    graph: ReturnType<typeof deriveStudioSubmissionQuoteGraphV2>
+    graph: ReturnType<typeof deriveStudioSubmissionQuoteGraphV2>,
+    generation: StudioGenerationRouteCatalog
   ): Promise<StudioRendererPreparedSubmissionOptionsV2> => {
-    const generation = await listGenerationRoutes();
     const rateCard = await loadRateCard(generation);
     let derived;
     try {
@@ -1750,11 +1779,15 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       ) {
         throw invalid('Invalid Studio continuity confirmation');
       }
-      const targetVideo = quote.baseItems.find((item) => item.shotId === shot.id && item.purpose === 'video_take');
+      const targetVideo = quote.baseItems.find(
+        (item) => item.target.kind === 'shot' && item.target.shotId === shot.id && item.purpose === 'video_take'
+      );
       if (targetVideo === undefined) throw invalid('Invalid Studio continuity target');
       if (continuityChange.hardCut) {
         if (continuityChange.requiresSeedGeneration) {
-          const seedItem = quote.baseItems.find((item) => item.shotId === shot.id && item.purpose === 'seed_still');
+          const seedItem = quote.baseItems.find(
+            (item) => item.target.kind === 'shot' && item.target.shotId === shot.id && item.purpose === 'seed_still'
+          );
           if (
             seedItem === undefined ||
             targetVideo.requestPlan.kind !== 'after_take_selection' ||
@@ -1794,12 +1827,17 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         selectedTakeShotIds.length === 0 ||
         quote.baseItems.length !== selectedTakeShotIds.length ||
         quote.baseItems.some(
-          (item, index) => item.purpose !== 'video_take' || item.shotId !== selectedTakeShotIds[index]
+          (item, index) =>
+            item.purpose !== 'video_take' ||
+            item.target.kind !== 'shot' ||
+            item.target.shotId !== selectedTakeShotIds[index]
         )
       ) {
         throw invalid('Invalid Studio Board promotion confirmation');
       }
-      const promotedHeadVideo = quote.baseItems.find((item) => item.shotId === promotedShot.id);
+      const promotedHeadVideo = quote.baseItems.find(
+        (item) => item.target.kind === 'shot' && item.target.shotId === promotedShot.id
+      );
       if (promotedHeadVideo !== undefined) {
         const conditioning =
           promotedHeadVideo.requestPlan.kind === 'resolved'
@@ -1815,22 +1853,25 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     for (const item of items) {
       const provider = bindingByItem.get(item.id);
       const cancellationPolicy = policies.get(item.id);
-      const shot = ownValue(project.shots, item.shotId);
-      if (provider === undefined || cancellationPolicy === undefined || shot === undefined) {
+      const owner =
+        item.target.kind === 'shot'
+          ? ownValue(project.shots, item.target.shotId)
+          : ownValue(project.references, item.target.referenceId);
+      if (provider === undefined || cancellationPolicy === undefined || owner === undefined) {
         throw invalid('Invalid Studio confirmation binding');
       }
-      const retryPredecessors = [...shot.jobIds].reverse().flatMap((jobId) => {
+      const targetKey = studioGenerationTargetKey(item.target);
+      const retryPredecessors = [...owner.jobIds].reverse().flatMap((jobId) => {
         const candidate = ownValue(project.jobs, jobId);
         if (
           candidate === undefined ||
-          candidate.shotId !== shot.id ||
+          studioGenerationTargetKey(candidate.target) !== targetKey ||
           candidate.purpose !== item.purpose ||
-          candidate.projectReferenceId !== item.projectReferenceId ||
           alreadyRetriedJobIds.has(candidate.id)
         ) {
           return [];
         }
-        const retryReason = paidGenerationRetryReasonV2(candidate, item.projectReferenceId);
+        const retryReason = paidGenerationRetryReasonV2(candidate);
         return retryReason === null ? [] : [{ job: candidate, retryReason }];
       });
       if (item.generationCount !== 1) throw invalid('Invalid Studio generation count');
@@ -1850,6 +1891,9 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         idempotencyKeys.push({ itemId: item.id, key: idempotencyKey });
         const requestSnapshot =
           item.requestPlan.kind === 'resolved' ? structuredClone(item.requestPlan.snapshot) : null;
+        if (item.target.kind === 'reference' && requestSnapshot === null) {
+          throw invalid('Invalid deferred Studio reference generation');
+        }
         const resolved = requestSnapshot !== null;
         const retryPredecessor = retryPredecessors[0];
         const retryReason = retryPredecessor?.retryReason ?? null;
@@ -1857,7 +1901,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         const job: StudioJobV2 = {
           id: jobId,
           projectId: project.id,
-          shotId: shot.id,
+          target: structuredClone(item.target),
           status: resolved ? 'queued_local' : 'waiting_for_conditioning',
           provider: { ...provider },
           idempotencyKey,
@@ -1865,9 +1909,13 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           cancellationPolicy,
           outputAssetIds: [],
           purpose: item.purpose,
-          ...(item.projectReferenceId === undefined ? {} : { projectReferenceId: item.projectReferenceId }),
           authorizationId: quote.id,
           authorizationItemId: item.id,
+          composition: structuredClone(
+            item.requestPlan.kind === 'resolved'
+              ? item.requestPlan.snapshot.composition
+              : item.requestPlan.template.composition
+          ),
           requestPlan: structuredClone(item.requestPlan),
           requestSnapshot,
           spendReceipt: null,
@@ -1893,25 +1941,30 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     });
     project.spendAuthorizations.push(authorization);
     for (const job of pendingJobs) {
-      const shot = ownValue(project.shots, job.shotId);
-      if (shot === undefined || shot.jobIds.includes(job.id)) throw invalid('Invalid Studio job ownership');
-      if (job.projectReferenceId !== undefined) {
-        const reference = ownValue(project.references, job.projectReferenceId);
-        if (reference === undefined || job.purpose !== 'seed_still') {
+      const owner =
+        job.target.kind === 'shot'
+          ? ownValue(project.shots, job.target.shotId)
+          : ownValue(project.references, job.target.referenceId);
+      if (owner === undefined || owner.jobIds.includes(job.id)) throw invalid('Invalid Studio job ownership');
+      if (job.target.kind === 'reference') {
+        if (job.purpose !== 'reference_image') {
           throw invalid('Invalid Studio project-reference job ownership');
         }
-        reference.candidateJobId = job.id;
-        reference.candidateAssetId = null;
+        const reference = ownValue(project.references, job.target.referenceId);
+        if (reference === undefined) throw invalid('Invalid Studio project-reference job ownership');
         reference.updatedAt = confirmedAt;
+      } else if (job.purpose === 'reference_image') {
+        throw invalid('Invalid Studio Shot job ownership');
       }
       defineOwn(project.jobs, job.id, job);
-      shot.jobIds.push(job.id);
+      owner.jobIds.push(job.id);
     }
     const extractionIds: string[] = [];
     const bindingItemIds: string[] = [];
     if (continuityChange?.hardCut === false) {
       const targetVideo = quote.baseItems.find(
-        (item) => item.shotId === continuityChange.shotId && item.purpose === 'video_take'
+        (item) =>
+          item.target.kind === 'shot' && item.target.shotId === continuityChange.shotId && item.purpose === 'video_take'
       );
       const dependency =
         targetVideo?.requestPlan.kind === 'after_take_selection' ? targetVideo.requestPlan.dependency : null;
@@ -2024,7 +2077,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       Object.values(project.jobs)
         .filter((job) => {
           if (
-            job.shotId !== dependentShotId ||
+            job.target.kind !== 'shot' ||
+            job.target.shotId !== dependentShotId ||
             job.status !== 'waiting_for_conditioning' ||
             job.requestSnapshot !== null ||
             job.requestPlan.kind !== 'after_take_selection'
@@ -2067,7 +2121,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
         const item = items[itemIndex]!;
         if (
-          item.shotId === dependentShotId &&
+          item.target.kind === 'shot' &&
+          item.target.shotId === dependentShotId &&
           item.purpose === 'video_take' &&
           item.requestPlan.kind === 'after_take_selection'
         ) {
@@ -2335,24 +2390,17 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       };
     },
 
-    async importReferenceFromPath(input): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }> {
+    async importSeedStillFromPath(input): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }> {
       assertSafeId(input.projectId, 'project id');
       assertRevision(input.expectedRevision);
-      if (input.shotId !== undefined) assertSafeId(input.shotId, 'shot id');
-      if (
-        (input.briefReferenceRole !== undefined &&
-          input.briefReferenceRole !== 'cast' &&
-          input.briefReferenceRole !== 'look') ||
-        (input.shotId !== undefined && input.briefReferenceRole !== undefined) ||
-        typeof input.sourcePath !== 'string' ||
-        input.sourcePath.length === 0
-      ) {
-        throw invalid('Invalid Studio reference attachment');
+      assertSafeId(input.shotId, 'shot id');
+      if (typeof input.sourcePath !== 'string' || input.sourcePath.length === 0) {
+        throw invalid('Invalid Studio seed-still attachment');
       }
       if (deps.mediaStore === undefined) {
         throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
       }
-      const imported = await deps.mediaStore.importReferenceFromPathV2({ ...input, returnProject: true });
+      const imported = await deps.mediaStore.importSeedStillFromPathV2({ ...input, returnProject: true });
       deps.onProjectUpdated(input.projectId);
       return { asset: structuredClone(imported.asset), project: toRendererProject(imported.project) };
     },
@@ -2515,18 +2563,6 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
     },
 
-    async detachBriefReference(input): Promise<StudioRendererProjectV2> {
-      assertSafeId(input.projectId, 'project id');
-      assertSafeId(input.assetId, 'asset id');
-      assertRevision(input.expectedRevision);
-      if (deps.mediaStore === undefined) {
-        throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
-      }
-      const project = await deps.mediaStore.detachBriefReferenceV2(input);
-      deps.onProjectUpdated(input.projectId);
-      return toRendererProject(project);
-    },
-
     async persistCapturedPoster(input): Promise<StudioAssetV2> {
       assertSafeId(input.projectId, 'project id');
       assertSafeId(input.shotId, 'shot id');
@@ -2669,10 +2705,17 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
     },
 
-    async listProposals(input): Promise<StudioProposalV2[]> {
+    async listProposals(input): Promise<StudioRendererProposalV2[]> {
       if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio proposal request');
       assertSafeId(input.projectId, 'project id');
-      return structuredClone(await deps.store.listProposalsV2(input.projectId));
+      const [project, proposals] = await Promise.all([
+        loadSupported(input.projectId),
+        deps.store.listProposalsV2(input.projectId),
+      ]);
+      return proposals.map((proposal) => ({
+        ...structuredClone(proposal),
+        review: deriveStudioProposalReviewV2(project, proposal),
+      }));
     },
 
     async acceptProposal(input): Promise<{
@@ -2727,12 +2770,6 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       if (input.outcome.kind === 'rejected' || input.outcome.kind === 'generation_gate') {
         if (!hasExactKeys(input.outcome, ['kind'])) throw invalid('Invalid Studio reference decision');
         outcome = { kind: input.outcome.kind };
-      } else if (
-        input.outcome.kind === 'imported_reference' &&
-        hasExactKeys(input.outcome, ['kind', 'assetId']) &&
-        isSafeId(input.outcome.assetId)
-      ) {
-        outcome = { kind: 'imported_reference', assetId: input.outcome.assetId };
       } else {
         throw invalid('Invalid Studio reference decision');
       }
@@ -2834,57 +2871,25 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         throw invalid('Studio reference handoff is already authorized');
       }
 
+      try {
+        preflightStudioProjectReferencePreparationV2({ project, request: input });
+      } catch (error) {
+        return rethrowPricingFailure(error);
+      }
+
       let graph;
+      const generation = await listGenerationRoutes();
       try {
         graph = deriveStudioProjectReferenceSubmissionQuoteGraphV2({
           project,
           request: input,
+          resolveRoute: compositionRouteLookup(generation, project),
           originReferenceHandoffId,
         });
       } catch (error) {
         return rethrowPricingFailure(error);
       }
-      return prepareQuoteGraph(project, graph);
-    },
-
-    async approveProjectReference(input): Promise<StudioRendererProjectV2> {
-      assertServiceActive();
-      if (
-        !isRecord(input) ||
-        !hasExactKeys(input, ['projectId', 'expectedRevision', 'referenceId', 'candidateAssetId'])
-      ) {
-        throw invalid('Invalid Studio project-reference approval');
-      }
-      assertSafeId(input.projectId, 'project id');
-      assertRevision(input.expectedRevision);
-      assertSafeId(input.referenceId, 'project reference id');
-      assertSafeId(input.candidateAssetId, 'candidate asset id');
-      const approvedAt = readNow().toISOString();
-      const committed = await deps.store.updateProjectV2(
-        input.projectId,
-        (current) => {
-          try {
-            return approveStudioProjectReferenceV2({
-              project: current,
-              referenceId: input.referenceId,
-              candidateAssetId: input.candidateAssetId,
-              approvedAt,
-            });
-          } catch (error) {
-            if (!(error instanceof StudioProjectReferenceApprovalErrorV2)) throw error;
-            if (error.code === 'approved_asset_busy') {
-              throw new CreativeStudioStoreError(
-                'busy',
-                'The current approved reference is bound to nonterminal generation work'
-              );
-            }
-            throw invalid('Invalid Studio project-reference approval authority');
-          }
-        },
-        input.expectedRevision,
-        `approve_project_reference:${input.referenceId}`
-      );
-      return notify(committed);
+      return prepareQuoteGraph(project, graph, generation);
     },
 
     async prepareSubmission(input): Promise<StudioRendererPreparedSubmissionOptionsV2> {
@@ -2900,13 +2905,23 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       if (project.id !== projectId || project.revision !== input.expectedRevision) {
         throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
       }
-      let graph;
       try {
-        graph = deriveStudioSubmissionQuoteGraphV2({ project, request: input });
+        preflightStudioSubmissionPreparationV2({ project, request: input });
       } catch (error) {
         return rethrowPricingFailure(error);
       }
-      return prepareQuoteGraph(project, graph);
+      let graph;
+      const generation = await listGenerationRoutes();
+      try {
+        graph = deriveStudioSubmissionQuoteGraphV2({
+          project,
+          request: input,
+          resolveRoute: compositionRouteLookup(generation, project),
+        });
+      } catch (error) {
+        return rethrowPricingFailure(error);
+      }
+      return prepareQuoteGraph(project, graph, generation);
     },
 
     async confirmSubmission(input): Promise<StudioConfirmSubmissionResultV2> {
@@ -2931,22 +2946,25 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
             if (!evaluateStudioBudgetV2(quoteCore(claim.quote), mutableProject.spendPolicy).allowed) {
               throw invalid('Studio spend policy refused the quote');
             }
+            const generation = await listGenerationRoutes();
+            const resolveRoute = compositionRouteLookup(generation, mutableProject);
             let graph;
             try {
               graph = Object.hasOwn(claim.session.request, 'referenceIds')
                 ? deriveStudioProjectReferenceSubmissionQuoteGraphV2({
                     project: mutableProject,
                     request: claim.session.request as StudioPrepareProjectReferencesRequestV2,
+                    resolveRoute,
                     originReferenceHandoffId: claim.quote.originReferenceHandoffId,
                   })
                 : deriveStudioSubmissionQuoteGraphV2({
                     project: mutableProject,
                     request: claim.session.request,
+                    resolveRoute,
                   });
             } catch (error) {
               return rethrowPricingFailure(error);
             }
-            const generation = await listGenerationRoutes();
             const rateCard = await loadRateCard(generation);
             let derived;
             try {

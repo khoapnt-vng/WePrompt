@@ -140,14 +140,9 @@ import {
 
 const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}): WorkspaceShotProjection => ({
   id,
-  line: `Line ${id}`,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Shooting script ${id}`,
   durationSeconds: 4,
   chainBreak: 'none',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
   currentPicture: null,
@@ -181,10 +176,7 @@ const makeBeat = (
 ): WorkspaceBeatProjection => ({
   id,
   title,
-  action: `Action ${id}`,
-  look: `Look ${id}`,
-  actionRevision: 1,
-  lineHistory: [],
+  story: `Story ${id}`,
   targetSeconds: 8,
   actualSeconds: null,
   displayState: shots.length === 0 ? 'no_coverage' : 'draft',
@@ -208,11 +200,11 @@ const eligibility = (
 });
 
 const makeProjection = (): WorkspaceProjection => {
-  const activeShot = makeShot('active_shot', { line: 'Active owner shot' });
+  const activeShot = makeShot('active_shot', { shootingScript: 'Active owner shot' });
   const activeOwner = makeBeat('active_owner', 'Active owner', [activeShot]);
   const activeSecond = makeBeat('active_second', 'Second active Beat', [makeShot('second_shot')]);
   const ownerAnchorA = makeShot('owner_anchor_a', {
-    line: 'Owner anchor A',
+    shootingScript: 'Owner anchor A',
     coverAssetId: 'cover_beat',
     segmentState: { kind: 'status_pending' },
   });
@@ -228,7 +220,7 @@ const makeProjection = (): WorkspaceProjection => {
   };
   const binnedShot: WorkspaceBinnedShotProjection = {
     ...makeShot('shot_parked', {
-      line: 'Lifted retained shot',
+      shootingScript: 'Lifted retained shot',
       coverAssetId: 'cover_shot',
       dirtyCauses: ['continuity_stale'],
       segmentState: { kind: 'status_pending' },

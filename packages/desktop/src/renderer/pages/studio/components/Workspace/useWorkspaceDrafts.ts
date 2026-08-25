@@ -6,6 +6,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import { STUDIO_MAX_SHOOTING_SCRIPT_LENGTH, STUDIO_MAX_STORY_LENGTH } from '@/common/types/project/creativeStudioTypes';
+
 export type WorkspaceDraftValue = string | number | boolean | null;
 
 const GENERATION_AFFECTING_DRAFT_KEYS = new Set([
@@ -33,7 +35,7 @@ export type WorkspaceSelection = {
 };
 
 type PersistedWorkspaceDrafts = {
-  version: 2;
+  version: 3;
   projectId: string;
   sourceRevision: number;
   entries: Record<string, WorkspaceDraftEntry>;
@@ -69,10 +71,11 @@ export type UseWorkspaceDraftsResult = {
   clearSelection: () => void;
 };
 
-// 24 Beats × 3 fields + 192 Shots × 4 fields + shared settings fit with bounded headroom.
+// Field count and serialized bytes independently bound the renderer-owned draft sidecar.
 const MAX_DRAFT_FIELDS = 1_024;
 const MAX_FIELD_KEY_LENGTH = 512;
-const MAX_STRING_VALUE_LENGTH = 8_192;
+const DEFAULT_MAX_STRING_VALUE_LENGTH = 8_192;
+const MAX_BRIEF_DRAFT_LENGTH = 16 * 1_024;
 const MAX_SELECTION = 256;
 const MAX_PERSISTED_DRAFT_LENGTH = 1_048_576;
 const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
@@ -80,7 +83,8 @@ const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 // that opaque scalar from an older session: it can exceed the scalar bound, conflict invisibly, and
 // overwrite rules added by the Director after the draft was captured.
 const RETIRED_DRAFT_KEYS = new Set(['brief.rules']);
-const WORKSPACE_DRAFT_STORAGE_PREFIX = 'aionui:creative-studio:v2:workspace-drafts:';
+const WORKSPACE_DRAFT_STORAGE_PREFIX = 'aionui:creative-studio:v3:workspace-drafts:';
+const RETIRED_WORKSPACE_DRAFT_STORAGE_PREFIX = 'aionui:creative-studio:v2:workspace-drafts:';
 
 type VolatileWorkspaceDrafts = {
   drafts: PersistedWorkspaceDrafts | null;
@@ -96,6 +100,7 @@ const emptyEntries = (): Record<string, WorkspaceDraftEntry> =>
   Object.create(null) as Record<string, WorkspaceDraftEntry>;
 
 const storageKey = (projectId: string): string => `${WORKSPACE_DRAFT_STORAGE_PREFIX}${projectId}`;
+const retiredStorageKey = (projectId: string): string => `${RETIRED_WORKSPACE_DRAFT_STORAGE_PREFIX}${projectId}`;
 
 const resolveStorage = (storage?: Storage): Storage | null => {
   if (storage !== undefined) return storage;
@@ -106,14 +111,21 @@ const resolveStorage = (storage?: Storage): Storage | null => {
   }
 };
 
-const validValue = (value: unknown): value is WorkspaceDraftValue =>
+const maxStringValueLength = (key: string): number => {
+  if (key.startsWith('shot.') && key.endsWith('.shootingScript')) return STUDIO_MAX_SHOOTING_SCRIPT_LENGTH;
+  if (key.startsWith('beat.') && key.endsWith('.story')) return STUDIO_MAX_STORY_LENGTH;
+  if (key === 'brief.text') return MAX_BRIEF_DRAFT_LENGTH;
+  return DEFAULT_MAX_STRING_VALUE_LENGTH;
+};
+
+const validValue = (key: string, value: unknown): value is WorkspaceDraftValue =>
   value === null ||
   typeof value === 'boolean' ||
   (typeof value === 'number' &&
     Number.isFinite(value) &&
     Math.abs(value) <= Number.MAX_SAFE_INTEGER &&
     !Object.is(value, -0)) ||
-  (typeof value === 'string' && value.length <= MAX_STRING_VALUE_LENGTH);
+  (typeof value === 'string' && value.length <= maxStringValueLength(key));
 
 const matchesCanonicalValueKind = (
   key: string,
@@ -135,7 +147,7 @@ const fitsPersistedDraftBound = (drafts: PersistedWorkspaceDrafts): boolean => {
 };
 
 const emptyDrafts = (projectId: string, sourceRevision: number): PersistedWorkspaceDrafts => ({
-  version: 2,
+  version: 3,
   projectId,
   sourceRevision,
   entries: emptyEntries(),
@@ -172,6 +184,7 @@ const readDrafts = (
       decoded = cloneDrafts(volatile.drafts);
     } else {
       if (target === null) return emptyDrafts(projectId, projectRevision);
+      target.removeItem(retiredStorageKey(projectId));
       const bytes = target.getItem(storageKey(projectId));
       if (bytes === null) {
         if (storage === undefined) volatileWorkspaceDrafts.delete(projectId);
@@ -182,7 +195,7 @@ const readDrafts = (
       storageBacked = true;
     }
     if (
-      decoded.version !== 2 ||
+      decoded.version !== 3 ||
       decoded.projectId !== projectId ||
       !Number.isSafeInteger(decoded.sourceRevision) ||
       typeof decoded.entries !== 'object' ||
@@ -197,8 +210,8 @@ const readDrafts = (
         !validKey(key) ||
         typeof candidate !== 'object' ||
         candidate === null ||
-        !validValue(candidate.baseValue) ||
-        !validValue(candidate.value)
+        !validValue(key, candidate.baseValue) ||
+        !validValue(key, candidate.value)
       ) {
         continue;
       }
@@ -218,7 +231,7 @@ const readDrafts = (
     const requestedBeatId = decoded.selection?.selectedBeatId;
     const requestedAnchor = decoded.selection?.anchorShotId;
     const result: PersistedWorkspaceDrafts = {
-      version: 2,
+      version: 3,
       projectId,
       sourceRevision: decoded.sourceRevision,
       entries,
@@ -289,6 +302,10 @@ export const countStoredWorkspaceDrafts = (excludedProjectId: string | null = nu
       window.sessionStorage.key(index)
     );
     for (const key of keys) {
+      if (key !== null && key.startsWith(RETIRED_WORKSPACE_DRAFT_STORAGE_PREFIX)) {
+        window.sessionStorage.removeItem(key);
+        continue;
+      }
       if (key === null || !key.startsWith(WORKSPACE_DRAFT_STORAGE_PREFIX)) continue;
       const projectId = key.slice(WORKSPACE_DRAFT_STORAGE_PREFIX.length);
       if (projectId.length === 0 || storageKey(projectId) !== key) continue;
@@ -319,7 +336,7 @@ export const countStoredWorkspaceDrafts = (excludedProjectId: string | null = nu
         if (bytes.length > MAX_PERSISTED_DRAFT_LENGTH) throw new Error('oversized workspace draft');
         const decoded = JSON.parse(bytes) as Partial<PersistedWorkspaceDrafts>;
         if (
-          decoded.version !== 2 ||
+          decoded.version !== 3 ||
           decoded.projectId !== projectId ||
           !Number.isSafeInteger(decoded.sourceRevision) ||
           typeof decoded.entries !== 'object' ||
@@ -337,8 +354,8 @@ export const countStoredWorkspaceDrafts = (excludedProjectId: string | null = nu
             validKey(key) &&
             typeof candidate === 'object' &&
             candidate !== null &&
-            validValue(candidate.baseValue) &&
-            validValue(candidate.value)
+            validValue(key, candidate.baseValue) &&
+            validValue(key, candidate.value)
           ) {
             entries[key] = { baseValue: candidate.baseValue, value: candidate.value };
           }
@@ -346,7 +363,7 @@ export const countStoredWorkspaceDrafts = (excludedProjectId: string | null = nu
         const selectedBeatId = decoded.selection.selectedBeatId;
         const anchorShotId = decoded.selection.anchorShotId;
         const persisted: PersistedWorkspaceDrafts = {
-          version: 2,
+          version: 3,
           projectId,
           sourceRevision: decoded.sourceRevision,
           entries,
@@ -386,6 +403,7 @@ export const purgeStoredWorkspaceDrafts = (projectId: string): void => {
   volatileWorkspaceDrafts.set(projectId, { drafts: null, storageBacked: false });
   try {
     window.sessionStorage.removeItem(storageKey(projectId));
+    window.sessionStorage.removeItem(retiredStorageKey(projectId));
     volatileWorkspaceDrafts.delete(projectId);
   } catch {
     // The volatile tombstone prevents a stale envelope from resurfacing in this renderer session.
@@ -546,7 +564,7 @@ export const useWorkspaceDrafts = ({
 
   const setValue = useCallback(
     (key: string, value: WorkspaceDraftValue): void => {
-      if (!enabled || !validKey(key) || !validValue(value) || !Object.hasOwn(canonicalValues, key)) return;
+      if (!enabled || !validKey(key) || !validValue(key, value) || !Object.hasOwn(canonicalValues, key)) return;
       const canonical = canonicalValues[key]!;
       if (!matchesCanonicalValueKind(key, value, canonical)) return;
       setDrafts((current) => {
@@ -580,7 +598,7 @@ export const useWorkspaceDrafts = ({
 
   const resetIfValue = useCallback(
     (key: string, expectedValue: WorkspaceDraftValue): void => {
-      if (!validKey(key) || !validValue(expectedValue)) return;
+      if (!validKey(key) || !validValue(key, expectedValue)) return;
       const current = draftsRef.current;
       const entry = Object.hasOwn(current.entries, key) ? current.entries[key] : undefined;
       if (entry === undefined || entry.value !== expectedValue) return;

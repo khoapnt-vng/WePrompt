@@ -16,7 +16,10 @@ import type {
   StudioDirectorOperationV2,
   StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+} from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandServiceV2,
   StudioDirectorCommandApplyErrorV2,
@@ -27,7 +30,6 @@ import {
   createCreativeStudioStore,
   type CreativeStudioStore,
 } from '@process/services/creative-studio/store';
-import { createStudioLineHistoryId } from '@process/services/creative-studio/service/schema2/mutations/identity';
 
 const NOW = '2026-08-17T00:00:00.000Z';
 const NOW_MS = Date.parse(NOW);
@@ -42,9 +44,7 @@ const makeInputV2 = (): CreateStudioProjectInputV2 => ({
 });
 
 const emptyShotV2 = () => ({
-  line: '',
-  narration: '',
-  onScreenText: '',
+  shootingScript: '',
   durationSeconds: 5,
 });
 
@@ -53,7 +53,7 @@ const makeCommandV2 = (
   operations: StudioDirectorOperationV2[],
   overrides: Partial<StudioDirectorCommandRecordV2> = {}
 ): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   commandId: 'command_v2',
   projectId: project.id,
   expectedRevision: project.revision,
@@ -85,18 +85,53 @@ describe('Studio Director schema-2 command service', () => {
   });
 
   it('delegates the ordered batch inside one correlated schema-2 store callback', async () => {
-    const operations: StudioDirectorOperationV2[] = [
+    const seeded = await store.applyMutationBatchV2(
       {
-        kind: 'add_beat',
-        beatId: 'section_1',
-        beat: { title: 'Opening', action: '', look: 'Cinematic light', targetSeconds: null },
-        beforeBeatId: null,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+        projectId: project.id,
+        expectedRevision: project.revision,
+        operations: [
+          {
+            kind: 'add_beat',
+            beatId: 'section_1',
+            beat: { title: 'Opening', story: 'A clear story beat.', targetSeconds: null },
+            beforeBeatId: null,
+          },
+          {
+            kind: 'add_beat',
+            beatId: 'section_2',
+            beat: { title: 'Closing', story: 'The story resolves.', targetSeconds: null },
+            beforeBeatId: null,
+          },
+          {
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shotId: 'clip_1',
+            shot: { shootingScript: 'Wide establishing view.', durationSeconds: 5 },
+            beforeShotId: null,
+          },
+          {
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shotId: 'clip_2',
+            shot: { shootingScript: 'Close product reveal.', durationSeconds: 5 },
+            beforeShotId: null,
+          },
+        ],
       },
-      { kind: 'add_shot', beatId: 'section_1', shotId: 'clip_1', shot: emptyShotV2(), beforeShotId: null },
-      { kind: 'add_shot', beatId: 'section_1', shotId: 'clip_2', shot: emptyShotV2(), beforeShotId: null },
-      { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A clear story beat' } },
-      { kind: 'edit_shot', shotId: 'clip_2', changes: { line: 'Close product reveal' } },
-      { kind: 'edit_shot', shotId: 'clip_2', changes: { line: 'Final product reveal' } },
+      { mutationId: 'seed_project', capturedAt: NOW }
+    );
+    project = seeded.project;
+    const operations: StudioDirectorOperationV2[] = [
+      { kind: 'set_brief', brief: 'A quieter launch story.' },
+      { kind: 'set_reference_plan', references: [] },
+      {
+        kind: 'set_shot_reference_binding',
+        shotId: 'clip_1',
+        characterReferenceIds: [],
+        backgroundReferenceId: null,
+      },
+      { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
       { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
     ];
     const command = makeCommandV2(project, operations);
@@ -107,34 +142,36 @@ describe('Studio Director schema-2 command service', () => {
 
     expect(result).toMatchObject({
       appliedRevision: project.revision + 1,
-      createdBeatIds: ['section_1'],
-      createdShotIds: ['clip_1', 'clip_2'],
+      createdBeatIds: [],
+      createdShotIds: [],
       project: {
         revision: project.revision + 1,
-        beatOrder: ['section_1'],
+        brief: 'A quieter launch story.',
+        referencePlanStatus: 'planned',
+        beatOrder: ['section_2', 'section_1'],
         beats: {
           section_1: {
-            action: 'A clear story beat',
+            story: 'A clear story beat.',
             shotOrder: ['clip_2', 'clip_1'],
-            lineHistory: [
-              {
-                id: createStudioLineHistoryId(command.commandId, 5, 'clip_2', 0),
-                shotOrdinal: 2,
-                text: 'Close product reveal',
-                capturedAt: command.createdAt,
-              },
-            ],
           },
         },
-        shots: { clip_2: { line: 'Final product reveal' } },
-        undoHistory: [
-          {
-            id: command.commandId,
-            sourceRevision: project.revision + 1,
-            label: 'mutation_batch',
+        shots: {
+          clip_1: {
+            shootingScript: 'Wide establishing view.',
+            referenceBinding: {
+              status: 'ready',
+              characterReferenceIds: [],
+              backgroundReferenceId: null,
+            },
           },
-        ],
+          clip_2: { shootingScript: 'Close product reveal.' },
+        },
       },
+    });
+    expect(result.project.undoHistory.at(-1)).toMatchObject({
+      id: command.commandId,
+      sourceRevision: project.revision + 1,
+      label: 'mutation_batch',
     });
     expect(updateProjectV2).toHaveBeenCalledOnce();
     expect(updateProjectV2.mock.calls[0]?.slice(0, 2)).toEqual([project.id, expect.any(Function)]);
@@ -193,7 +230,7 @@ describe('Studio Director schema-2 command service', () => {
       {
         kind: 'add_beat',
         beatId: 'section_1',
-        beat: { title: 'Opening', action: '', look: 'Cinematic light', targetSeconds: null },
+        beat: { title: 'Opening', story: 'A clear story beat.', targetSeconds: null },
         beforeBeatId: null,
       },
       {

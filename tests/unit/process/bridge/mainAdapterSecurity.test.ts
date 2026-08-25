@@ -140,7 +140,7 @@ describe('main adapter IPC security boundary', () => {
         projectId: 'project_1',
         expectedRevision: 3,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
+        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
         cascadeChoices: [],
       },
     ],

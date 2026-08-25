@@ -113,7 +113,6 @@ import {
   WorkspaceProjectMenu,
   boardPromotionGatePlan,
   continuityGateDraft,
-  deriveSpendGateBackgroundChoicePlan,
   formatMinorUnits,
   handoffGateDraft,
   initialSpendGateState,
@@ -124,7 +123,6 @@ import {
   selectionGateDraft,
   spendGateReducer,
   spendGateRouteIssue,
-  validSpendGateBackgroundChoices,
   useWorkspaceDrafts,
   useSpendGate,
   type BeatPanelActions,
@@ -132,6 +130,7 @@ import {
   type CutActions,
   type SpendGateBoardPromotionImpact,
   type SpendGateDraft,
+  type TableBoardActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
 } from '@/renderer/pages/studio/components/Workspace';
@@ -151,6 +150,10 @@ const makeAsset = (
   managedAsset: { collection, fileName: `${id}.bin` },
   byteSize: 10,
   sha256: 'a'.repeat(64),
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
   ...(mediaKind === 'video' ? { durationSeconds: 4 } : {}),
   createdAt: '2026-08-19T00:00:00.000Z',
 });
@@ -159,7 +162,7 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
   ({
     id,
     projectId: 'project_1',
-    shotId,
+    target: { kind: 'shot', shotId },
     status: 'succeeded',
     provider: { choiceId: 'route_video', providerId: 'provider_safe', model: 'model_safe' },
     outputAssetIds: [],
@@ -173,6 +176,23 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
     duplicateChargeAcknowledged: false,
     duplicateChargeAcknowledgedAt: null,
     purpose: 'video_take',
+    composition: {
+      inputs: {
+        schemaVersion: 1,
+        projectRevision: 3,
+        brief: 'A launch film.',
+        rules: [],
+        source: { kind: 'shot', beatId: 'beat_1', story: 'Open', shotId, shootingScript: shotId },
+        purpose: 'video_take',
+        referenceInputs: [],
+        aspectRatio: '16:9',
+        resolution: '720p',
+        route: { providerId: 'provider_safe', adapterId: 'openrouter-video-v1', model: 'model_safe' },
+        boardStyle: null,
+        instructionProfile: 'openrouter-video-v1.video-take.v1',
+      },
+      prompt: `Video prompt for ${shotId}`,
+    },
     spendReceipt: null,
     createdAt: '2026-08-19T00:00:00.000Z',
     updatedAt: '2026-08-19T00:00:00.000Z',
@@ -187,6 +207,7 @@ const makeProject = (): StudioRendererProjectV2 =>
     name: 'Launch film',
     brief: 'A launch film.',
     rules: [],
+    briefConversationId: null,
     aspectRatio: '16:9',
     targetDurationSeconds: 12,
     resolution: '720p',
@@ -196,22 +217,16 @@ const makeProject = (): StudioRendererProjectV2 =>
       beat_1: {
         id: 'beat_1',
         title: 'Opening',
-        action: 'Open',
-        look: 'Bright',
-        actionRevision: 1,
+        story: 'Open',
         targetSeconds: 8,
         shotOrder: ['shot_1', 'shot_2'],
-        lineHistory: [],
       },
       beat_2: {
         id: 'beat_2',
         title: 'Close',
-        action: 'Close',
-        look: 'Warm',
-        actionRevision: 1,
+        story: 'Close',
         targetSeconds: 4,
         shotOrder: ['shot_3'],
-        lineHistory: [],
       },
     },
     shots: Object.fromEntries(
@@ -223,16 +238,12 @@ const makeProject = (): StudioRendererProjectV2 =>
         id,
         {
           id,
-          line: id,
-          derivation: 'derived',
-          derivedFromActionRevision: 1,
-          narration: '',
-          onScreenText: '',
+          shootingScript: id,
           durationSeconds: 4,
           trimInSeconds: null,
           trimOutSeconds: null,
           chainBreak,
-          referenceIds: [],
+          referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
           seedStillId: null,
           boardAssetId: null,
           supersededBoardAssetIds: [],
@@ -243,9 +254,10 @@ const makeProject = (): StudioRendererProjectV2 =>
         },
       ])
     ),
-    bin: [],
+    referencePlanStatus: 'planned',
     referenceOrder: [],
     references: {},
+    bin: [],
     bedAssetId: null,
     spendPolicy: null,
     imageRouteId: 'route_image',
@@ -273,7 +285,7 @@ const makeBoardProject = (shotCount: number): StudioRendererProjectV2 => {
       project.shots[shotId] = {
         ...templateShot,
         id: shotId,
-        line: `Panel ${shotNumber}`,
+        shootingScript: `Panel ${shotNumber}`,
         chainBreak: 'hard_cut',
         seedStillId: null,
         boardAssetId: null,
@@ -288,12 +300,9 @@ const makeBoardProject = (shotCount: number): StudioRendererProjectV2 => {
     project.beats[beatId] = {
       id: beatId,
       title: `Board Beat ${beatNumber}`,
-      action: `Action ${beatNumber}`,
-      look: `Look ${beatNumber}`,
-      actionRevision: 1,
+      story: `Story ${beatNumber}`,
       targetSeconds: shotIds.length * 4,
       shotOrder: shotIds,
-      lineHistory: [],
     };
   }
   return project;
@@ -335,39 +344,60 @@ const addCurrentVideoTake = (project: StudioRendererProjectV2, shotId: string): 
   return assetId;
 };
 
-const addApprovedBackground = (
-  project: StudioRendererProjectV2,
-  referenceId = 'reference_background',
-  label = 'City park'
-): string => {
-  const assetId = `asset_${referenceId}`;
-  const jobId = `job_${referenceId}`;
-  const owner = project.shots.shot_3!;
-  project.referenceOrder.push(referenceId);
-  project.references[referenceId] = {
-    id: referenceId,
-    kind: 'background',
-    label,
-    prompt: label,
-    candidateAssetId: assetId,
-    candidateJobId: jobId,
-    approvedAssetId: assetId,
-    supersededAssetIds: [],
-    createdAt: '2026-08-19T00:00:00.000Z',
-    updatedAt: '2026-08-19T00:00:00.000Z',
+const shotComposition = (
+  shotId: string,
+  purpose: 'seed_still' | 'board_still' | 'video_take',
+  providerId: string,
+  model: string
+) => {
+  const adapterId = purpose === 'video_take' ? ('openrouter-video-v1' as const) : ('weprompt-image-v1' as const);
+  return {
+    inputs: {
+      schemaVersion: 1 as const,
+      projectRevision: 3,
+      brief: 'A launch film.',
+      rules: [],
+      source: {
+        kind: 'shot' as const,
+        beatId: shotId === 'shot_3' ? 'beat_2' : 'beat_1',
+        story: shotId === 'shot_3' ? 'Close' : 'Open',
+        shotId,
+        shootingScript: shotId,
+      },
+      purpose,
+      referenceInputs: [],
+      aspectRatio: '16:9' as const,
+      resolution: '720p' as const,
+      route: { providerId, adapterId, model },
+      boardStyle: purpose === 'board_still' ? ('grey_tone' as const) : null,
+      instructionProfile: `${adapterId}.${purpose.replaceAll('_', '-')}.v1`,
+    },
+    prompt: `Exact ${purpose} prompt for ${shotId}`,
   };
-  project.assets[assetId] = makeAsset(assetId, owner.id, 'image', 'assets');
-  project.jobs[jobId] = makeJob(jobId, owner.id, {
-    purpose: 'seed_still',
-    provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
-    projectReferenceId: referenceId,
-    outputAssetIds: [assetId],
-    outputAssetIdsByRole: { primary: assetId, poster: null },
-  });
-  owner.assetIds.push(assetId);
-  owner.jobIds.push(jobId);
-  return referenceId;
 };
+
+const referenceComposition = (referenceId: string) => ({
+  inputs: {
+    schemaVersion: 1 as const,
+    projectRevision: 3,
+    brief: 'A launch film.',
+    rules: [],
+    source: {
+      kind: 'project_reference' as const,
+      referenceId,
+      referenceKind: 'character' as const,
+      prompt: 'Ming in a red jacket.',
+    },
+    purpose: 'reference_image' as const,
+    referenceInputs: [],
+    aspectRatio: '16:9' as const,
+    resolution: '720p' as const,
+    route: { providerId: 'safe_provider', adapterId: 'weprompt-image-v1' as const, model: 'safe_model' },
+    boardStyle: null,
+    instructionProfile: 'weprompt-image-v1.reference-character.v1',
+  },
+  prompt: `Exact reference prompt for ${referenceId}`,
+});
 
 const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => ({
   id,
@@ -377,25 +407,29 @@ const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => 
   currency: 'USD',
   baseItems: [
     {
-      shotId: 'shot_1',
+      target: { kind: 'shot', shotId: 'shot_1' },
+      referenceTarget: null,
       purpose: 'seed_still',
       route: { choiceId: 'image_choice', providerId: 'safe_provider', model: 'safe_model' },
       generationCount: 1,
       durationSeconds: null,
       oneGenerationMinorUnits: 125,
       requestedTotalMinorUnits: 125,
+      composition: shotComposition('shot_1', 'seed_still', 'safe_provider', 'safe_model'),
     },
   ],
   cascadeItems: cascade
     ? [
         {
-          shotId: 'shot_1',
+          target: { kind: 'shot', shotId: 'shot_1' },
+          referenceTarget: null,
           purpose: 'video_take',
           route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
           generationCount: 1,
           durationSeconds: 4,
           oneGenerationMinorUnits: 400,
           requestedTotalMinorUnits: 400,
+          composition: shotComposition('shot_1', 'video_take', 'safe_video', 'video_model'),
         },
       ]
     : [],
@@ -415,7 +449,11 @@ const referenceOptions = (): StudioRendererPreparedSubmissionOptionsV2 => ({
     baseItems: [
       {
         ...quote('quote_reference').baseItems[0]!,
-        projectReferenceId: 'reference_ming',
+        target: { kind: 'reference', referenceId: 'reference_ming' },
+        referenceTarget: { referenceId: 'reference_ming', kind: 'character', label: 'Ming' },
+        purpose: 'reference_image',
+        durationSeconds: null,
+        composition: referenceComposition('reference_ming'),
       },
     ],
   },
@@ -430,22 +468,26 @@ const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
   currency: 'USD',
   baseItems: [
     {
-      shotId: 'shot_2',
+      target: { kind: 'shot', shotId: 'shot_2' },
+      referenceTarget: null,
       purpose: 'seed_still',
       route: { choiceId: 'image_choice', providerId: 'safe_provider', model: 'safe_model' },
       generationCount: 1,
       durationSeconds: null,
       oneGenerationMinorUnits: 125,
       requestedTotalMinorUnits: 125,
+      composition: shotComposition('shot_2', 'seed_still', 'safe_provider', 'safe_model'),
     },
     {
-      shotId: 'shot_2',
+      target: { kind: 'shot', shotId: 'shot_2' },
+      referenceTarget: null,
       purpose: 'video_take',
       route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
       generationCount: 1,
       durationSeconds: 4,
       oneGenerationMinorUnits: 400,
       requestedTotalMinorUnits: 400,
+      composition: shotComposition('shot_2', 'video_take', 'safe_video', 'video_model'),
     },
   ],
   cascadeItems: [],
@@ -461,13 +503,15 @@ const promotionQuote = (): StudioRendererSubmissionQuoteV2 => ({
   expiresAt: '2026-08-19T01:00:00.000Z',
   currency: 'USD',
   baseItems: ['shot_1', 'shot_2'].map((shotId) => ({
-    shotId,
+    target: { kind: 'shot' as const, shotId },
+    referenceTarget: null,
     purpose: 'video_take' as const,
     route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
     generationCount: 1,
     durationSeconds: 4,
     oneGenerationMinorUnits: 400,
     requestedTotalMinorUnits: 400,
+    composition: shotComposition(shotId, 'video_take', 'safe_video', 'video_model'),
   })),
   cascadeItems: [],
   lowerMinorUnits: 800,
@@ -487,8 +531,8 @@ const draft = {
   projectId: 'project_1',
   expectedRevision: 3,
   originReferenceHandoffId: null,
-  baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still' as const, referenceAssetId: null }],
-  cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take' as const, referenceAssetId: null }],
+  baseChoices: [{ target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const }],
+  cascadeChoices: [{ target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'video_take' as const }],
 };
 
 const promotionDraft: SpendGateDraft = {
@@ -508,8 +552,6 @@ const Harness: React.FC<{
   reenterOnConfirmed?: boolean;
   rejectOnConfirmed?: boolean;
   projectReferences?: React.ComponentProps<typeof SpendGateModal>['projectReferences'];
-  backgroundProject?: StudioRendererProjectV2;
-  onAssignBackgroundChoices?: NonNullable<Parameters<typeof useSpendGate>[0]['onAssignBackgroundChoices']>;
 }> = ({
   gateDraft = draft,
   boardPromotionImpact,
@@ -518,8 +560,6 @@ const Harness: React.FC<{
   reenterOnConfirmed = false,
   rejectOnConfirmed = false,
   projectReferences,
-  backgroundProject,
-  onAssignBackgroundChoices,
 }) => {
   const gateRef = useRef<ReturnType<typeof useSpendGate> | null>(null);
   const gate = useSpendGate({
@@ -527,11 +567,6 @@ const Harness: React.FC<{
       if (reenterOnConfirmed) await gateRef.current?.confirm();
       if (rejectOnConfirmed) throw new Error('refresh failed');
     },
-    deriveBackgroundChoicePlan:
-      backgroundProject === undefined
-        ? undefined
-        : (candidateDraft) => deriveSpendGateBackgroundChoicePlan(backgroundProject, candidateDraft),
-    onAssignBackgroundChoices,
     onPromoteOnly,
   });
   gateRef.current = gate;
@@ -540,7 +575,12 @@ const Harness: React.FC<{
       <button onClick={() => gate.open(gateDraft, boardPromotionImpact)}>Open review</button>
       <button onClick={() => void gate.prepare()}>Invoke prepare directly</button>
       <button onClick={() => void gate.confirm()}>Invoke confirm directly</button>
-      <SpendGateModal {...gate} onEditRoutes={onEditRoutes} projectReferences={projectReferences} />
+      <SpendGateModal
+        {...gate}
+        onEditRoutes={onEditRoutes}
+        onReviewShotBinding={vi.fn()}
+        projectReferences={projectReferences}
+      />
     </>
   );
 };
@@ -591,8 +631,6 @@ const beatPanelActions = (): BeatPanelActions => ({
   setSeedStill: vi.fn(async () => true),
   trimShot: vi.fn(async () => true),
   reorderShots: vi.fn(async () => true),
-  redetachLine: vi.fn(async () => true),
-  restoreLine: vi.fn(async () => true),
   importSeedStill: vi.fn(async () => 'cancelled'),
   parkShot: vi.fn(async () => true),
   parkBeat: vi.fn(async () => true),
@@ -602,8 +640,20 @@ const beatPanelActions = (): BeatPanelActions => ({
   cancelGenerationJob: vi.fn(async () => true),
   retryConditioning: vi.fn(async () => true),
   cancelWaiting: vi.fn(async () => true),
-  requestReviewedRederive: vi.fn(),
   requestResplit: vi.fn(),
+});
+
+const tableBoardActions = (): TableBoardActions => ({
+  setStyle: vi.fn(),
+  drawNext: vi.fn(),
+  drawBeat: vi.fn(),
+  redrawShot: vi.fn(),
+  redrawBeat: vi.fn(),
+  promotePanel: vi.fn(),
+  stop: vi.fn(),
+  retryJob: vi.fn(),
+  retryDownload: vi.fn(),
+  cancelJob: vi.fn(),
 });
 
 const boardActions = (): BoardActions => ({
@@ -639,7 +689,12 @@ const readyWorkspaceStatus = (source: number | StudioRendererProjectV2 = 3): Stu
             shotId,
             jobIds: (source.shots[shotId]?.jobIds ?? []).filter((jobId) => {
               const job = source.jobs[jobId];
-              return job?.id === jobId && job.shotId === shotId && job.purpose === 'video_take';
+              return (
+                job?.id === jobId &&
+                job.target.kind === 'shot' &&
+                job.target.shotId === shotId &&
+                job.purpose === 'video_take'
+              );
             }),
           }))
         );
@@ -753,15 +808,12 @@ const ControlsHarness: React.FC<{
   for (const beatId of project.beatOrder) {
     const beat = project.beats[beatId];
     if (beat === undefined) continue;
-    canonicalValues[`beat.${beatId}.action`] = beat.action;
-    canonicalValues[`beat.${beatId}.look`] = beat.look;
+    canonicalValues[`beat.${beatId}.story`] = beat.story;
     canonicalValues[`beat.${beatId}.targetSeconds`] = beat.targetSeconds;
     for (const shotId of beat.shotOrder) {
       const shot = project.shots[shotId];
       if (shot === undefined) continue;
-      canonicalValues[`shot.${shotId}.line`] = shot.line;
-      canonicalValues[`shot.${shotId}.narration`] = shot.narration;
-      canonicalValues[`shot.${shotId}.onScreenText`] = shot.onScreenText;
+      canonicalValues[`shot.${shotId}.shootingScript`] = shot.shootingScript;
       canonicalValues[`shot.${shotId}.durationSeconds`] = shot.durationSeconds;
     }
   }
@@ -792,13 +844,14 @@ const ControlsHarness: React.FC<{
         drafts={drafts}
         pending={pending}
         gateLocked={gateLocked}
+        imageRouteReady
         errorMessageKey={null}
         exportErrorMessageKey={null}
         mutations={mutations}
+        tableBoardActions={tableBoardActions()}
         boardActions={boardActions()}
         cutActions={cutActions()}
         beatPanelActions={beatActions}
-        beatPanelBriefReferenceOptions={[]}
         beatPanelReviewGraphs={[]}
         beatPanelReviewBlockedMessageKey={null}
       />
@@ -944,97 +997,6 @@ describe('the largest legal render batch', () => {
   });
 });
 
-describe('generation-time background choice planning', () => {
-  it('asks once for a missing seed-still Shot and accepts exactly one canonical choice', () => {
-    const project = makeProject();
-    const backgroundId = addApprovedBackground(project);
-    const plan = deriveSpendGateBackgroundChoicePlan(project, draft);
-
-    expect(plan).toMatchObject({
-      status: 'choices',
-      projectId: 'project_1',
-      expectedRevision: 3,
-      shotIds: ['shot_1'],
-      approvedBackgrounds: [{ referenceId: backgroundId, label: 'City park' }],
-    });
-    expect(validSpendGateBackgroundChoices(plan!, [{ shotId: 'shot_1', referenceId: backgroundId }])).toBe(true);
-    expect(
-      validSpendGateBackgroundChoices(plan!, [
-        { shotId: 'shot_1', referenceId: backgroundId },
-        { shotId: 'shot_1', referenceId: backgroundId },
-      ])
-    ).toBe(false);
-    expect(
-      validSpendGateBackgroundChoices(plan!, [
-        { shotId: 'shot_1', referenceId: backgroundId, unexpected: true } as never,
-      ])
-    ).toBe(false);
-  });
-
-  it('derives every distinct missing seed Shot in draft order', () => {
-    const project = makeProject();
-    addApprovedBackground(project);
-    const multiple: SpendGateDraft = {
-      projectId: project.id,
-      expectedRevision: project.revision,
-      originReferenceHandoffId: null,
-      baseChoices: [
-        { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null },
-        { shotId: 'shot_3', purpose: 'seed_still', referenceAssetId: null },
-      ],
-      cascadeChoices: [],
-    };
-
-    expect(deriveSpendGateBackgroundChoicePlan(project, multiple)?.shotIds).toEqual(['shot_1', 'shot_3']);
-  });
-
-  it('blocks paid preparation when no canonical approved background exists', () => {
-    const plan = deriveSpendGateBackgroundChoicePlan(makeProject(), draft);
-
-    expect(plan).toMatchObject({ status: 'no_approved_backgrounds', shotIds: ['shot_1'], approvedBackgrounds: [] });
-  });
-
-  it('bypasses the chooser when the Shot already has one exact approved background', () => {
-    const project = makeProject();
-    const backgroundId = addApprovedBackground(project);
-    project.shots.shot_1!.referenceIds = [backgroundId];
-
-    expect(deriveSpendGateBackgroundChoicePlan(project, draft)).toBeNull();
-  });
-
-  it('fails closed on stale authority and duplicate seed choices', () => {
-    const project = makeProject();
-    addApprovedBackground(project);
-    const stale = { ...draft, expectedRevision: 2 };
-    const duplicate = {
-      ...draft,
-      baseChoices: [...draft.baseChoices, ...draft.baseChoices],
-    };
-
-    expect(deriveSpendGateBackgroundChoicePlan(project, stale)?.status).toBe('invalid');
-    expect(deriveSpendGateBackgroundChoicePlan(project, duplicate)?.status).toBe('invalid');
-  });
-
-  it('treats a hard-cut continuity seed as an implicit background requirement', () => {
-    const project = makeProject();
-    addApprovedBackground(project);
-    const continuityDraft: SpendGateDraft = {
-      projectId: project.id,
-      expectedRevision: project.revision,
-      originReferenceHandoffId: null,
-      baseChoices: [],
-      cascadeChoices: [],
-      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
-    };
-
-    expect(deriveSpendGateBackgroundChoicePlan(project, continuityDraft)).toMatchObject({
-      status: 'choices',
-      shotIds: ['shot_2'],
-      approvedBackgrounds: [{ referenceId: 'reference_background', label: 'City park' }],
-    });
-  });
-});
-
 describe('spend gate draft graph', () => {
   it('fails closed until both revision-matched status snapshots are ready', () => {
     const project = makeProject();
@@ -1055,10 +1017,10 @@ describe('spend gate draft graph', () => {
     const projection = readyProjection(project);
 
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toMatchObject({
-      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
       cascadeChoices: [
-        { shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null },
-        { shotId: 'shot_2', purpose: 'video_take', referenceAssetId: null },
+        { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
+        { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
       ],
     });
   });
@@ -1068,7 +1030,7 @@ describe('spend gate draft graph', () => {
     const projection = readyProjection(project);
 
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_2'] })?.baseChoices).toEqual([
-      { shotId: 'shot_2', purpose: 'video_take', referenceAssetId: null },
+      { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
     ]);
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1', 'shot_2'] })).toBeNull();
   });
@@ -1082,7 +1044,7 @@ describe('spend gate draft graph', () => {
     project.shots.shot_2!.jobIds.push('job_2');
     let projection = readyProjection(project);
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toMatchObject({
-      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take' }],
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
       cascadeChoices: [],
     });
 
@@ -1102,22 +1064,24 @@ describe('spend gate draft graph', () => {
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toBeNull();
   });
 
-  it('accepts one reference per seed choice, rejects legacy count authority, and refuses terminal handoff reopening', () => {
+  it('rejects renderer reference ids and legacy count authority, and refuses terminal handoff reopening', () => {
     const project = makeProject();
     const projection = readyProjection(project);
     const defaults = selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })!;
-    const customized = selectionGateDraft({
-      project,
-      projection,
-      orderedShotIds: ['shot_1'],
-      baseChoices: [{ ...defaults.baseChoices[0]!, referenceAssetId: 'brief_ref' }],
-      cascadeChoices: defaults.cascadeChoices,
-    });
-    expect(customized?.baseChoices[0]).toEqual({
-      shotId: 'shot_1',
-      purpose: 'seed_still',
-      referenceAssetId: 'brief_ref',
-    });
+    expect(
+      selectionGateDraft({
+        project,
+        projection,
+        orderedShotIds: ['shot_1'],
+        baseChoices: [
+          {
+            ...defaults.baseChoices[0]!,
+            referenceInputs: [{ referenceId: 'forged_reference', assetId: 'forged_asset' }],
+          } as never,
+        ],
+        cascadeChoices: defaults.cascadeChoices,
+      })
+    ).toBeNull();
     expect(
       selectionGateDraft({
         project,
@@ -1132,7 +1096,7 @@ describe('spend gate draft graph', () => {
         project,
         projection,
         orderedShotIds: ['shot_1'],
-        baseChoices: [{ ...defaults.baseChoices[0]!, shotId: 'shot_3' }],
+        baseChoices: [{ ...defaults.baseChoices[0]!, target: { kind: 'shot', shotId: 'shot_3' } }],
         cascadeChoices: defaults.cascadeChoices,
       })
     ).toBeNull();
@@ -1141,10 +1105,13 @@ describe('spend gate draft graph', () => {
       handoffGateDraft(project, projection, {
         handoffId: 'handoff_1',
         requestId: 'request_1',
-        shotIds: ['shot_1'],
+        referenceIds: ['reference_ming'],
         decidedAt: '2026-08-19T00:00:00.000Z',
-        status: 'confirmed',
+        status: 'succeeded',
         completedAt: '2026-08-19T00:01:00.000Z',
+        counts: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+        resultAssetIds: ['asset_ming'],
+        failedReferenceIds: [],
       })
     ).toBeNull();
   });
@@ -1253,9 +1220,8 @@ describe('Board spend gate draft', () => {
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
       baseChoices: Array.from({ length: 24 }, (_, index) => ({
-        shotId: `board_shot_${String(index + 1).padStart(2, '0')}`,
+        target: { kind: 'shot', shotId: `board_shot_${String(index + 1).padStart(2, '0')}` },
         purpose: 'board_still',
-        referenceAssetId: null,
       })),
       cascadeChoices: [],
     });
@@ -1278,9 +1244,8 @@ describe('Board spend gate draft', () => {
     };
     expect(boardGateDraft({ project, projection: afterCompletion })?.baseChoices).toEqual(
       Array.from({ length: 6 }, (_, index) => ({
-        shotId: `board_shot_${String(index + 25).padStart(2, '0')}`,
+        target: { kind: 'shot', shotId: `board_shot_${String(index + 25).padStart(2, '0')}` },
         purpose: 'board_still',
-        referenceAssetId: null,
       }))
     );
   });
@@ -1308,9 +1273,8 @@ describe('Board spend gate draft', () => {
 
     expect(boardGateDraft({ project, projection: exactProjection })?.baseChoices).toEqual(
       [6, 7, 8].map((shotNumber) => ({
-        shotId: `board_shot_${String(shotNumber).padStart(2, '0')}`,
+        target: { kind: 'shot', shotId: `board_shot_${String(shotNumber).padStart(2, '0')}` },
         purpose: 'board_still',
-        referenceAssetId: null,
       }))
     );
   });
@@ -1335,7 +1299,7 @@ describe('Board spend gate draft', () => {
     };
 
     expect(boardGateDraft({ project, projection: failedDownloadProjection })?.baseChoices).toEqual([
-      { shotId: 'board_shot_02', purpose: 'board_still', referenceAssetId: null },
+      { target: { kind: 'shot', shotId: 'board_shot_02' }, purpose: 'board_still' },
     ]);
     expect(
       boardSelectionGateDraft({
@@ -1421,9 +1385,8 @@ describe('Board spend gate draft', () => {
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
       baseChoices: [1, 2, 3].map((shotNumber) => ({
-        shotId: `board_shot_0${shotNumber}`,
+        target: { kind: 'shot', shotId: `board_shot_0${shotNumber}` },
         purpose: 'board_still',
-        referenceAssetId: null,
       })),
       cascadeChoices: [],
     });
@@ -1511,9 +1474,9 @@ describe('WorkspaceControls', () => {
 
   it('resets only settings while preserving a Brief draft', async () => {
     window.sessionStorage.setItem(
-      'aionui:creative-studio:v2:workspace-drafts:project_1',
+      'aionui:creative-studio:v3:workspace-drafts:project_1',
       JSON.stringify({
-        version: 2,
+        version: 3,
         projectId: 'project_1',
         sourceRevision: 3,
         entries: {
@@ -1533,7 +1496,7 @@ describe('WorkspaceControls', () => {
     expect(within(settings).getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
       'Launch film'
     );
-    expect(window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1')).toContain(
+    expect(window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_1')).toContain(
       'Changed brief'
     );
   });
@@ -1665,9 +1628,9 @@ describe('WorkspaceControls', () => {
 
   it('saves unlocked settings while preserving a pre-lock request-shape draft', async () => {
     window.sessionStorage.setItem(
-      'aionui:creative-studio:v2:workspace-drafts:project_1',
+      'aionui:creative-studio:v3:workspace-drafts:project_1',
       JSON.stringify({
-        version: 2,
+        version: 3,
         projectId: 'project_1',
         sourceRevision: 3,
         entries: {
@@ -1695,7 +1658,7 @@ describe('WorkspaceControls', () => {
     await waitFor(() => expect(mutations.editProject).toHaveBeenCalledWith({ name: 'Renamed while locked' }));
     await waitFor(() => {
       const persisted = JSON.parse(
-        window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1') ?? '{}'
+        window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_1') ?? '{}'
       ) as { entries?: Record<string, unknown> };
       expect(persisted.entries).not.toHaveProperty('settings.name');
       expect(persisted.entries).toHaveProperty('settings.aspectRatio');
@@ -1719,13 +1682,13 @@ describe('WorkspaceControls', () => {
 
   it('keeps structural undo disabled while an authored Shot draft is unsaved', () => {
     window.sessionStorage.setItem(
-      'aionui:creative-studio:v2:workspace-drafts:project_1',
+      'aionui:creative-studio:v3:workspace-drafts:project_1',
       JSON.stringify({
-        version: 2,
+        version: 3,
         projectId: 'project_1',
         sourceRevision: 3,
         entries: {
-          'shot.shot_1.line': { baseValue: 'shot_1', value: 'Unsaved replacement' },
+          'shot.shot_1.shootingScript': { baseValue: 'shot_1', value: 'Unsaved replacement' },
         },
         selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
       })
@@ -2015,70 +1978,15 @@ describe('SpendGateModal', () => {
   it('does no native work on open/close and invokes prepare only from the explicit action', async () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const gate = await screen.findByTestId('studio-spend-gate');
+    expect(gate.closest('.arco-modal-wrapper')).toHaveStyle({ zIndex: '1101' });
+    expect(document.querySelector('.arco-modal-mask')).toHaveStyle({ zIndex: '1100' });
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
-  });
-
-  it('rejects even a programmatic prepare while a background choice plan is unresolved', async () => {
-    const project = makeProject();
-    addApprovedBackground(project);
-    render(<Harness backgroundProject={project} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-
-    expect(await screen.findByText('conversation.creativeStudio.workspace.gate.backgroundChoice.title')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Invoke prepare directly' }));
-
-    expect(mocks.prepare).not.toHaveBeenCalled();
-    expect(mocks.prepareReferences).not.toHaveBeenCalled();
-  });
-
-  it('blocks programmatic preparation for an unresolved hard-cut background', async () => {
-    const project = makeProject();
-    addApprovedBackground(project);
-    const continuityDraft: SpendGateDraft = {
-      projectId: project.id,
-      expectedRevision: project.revision,
-      originReferenceHandoffId: null,
-      baseChoices: [],
-      cascadeChoices: [],
-      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
-    };
-    render(<Harness backgroundProject={project} gateDraft={continuityDraft} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Invoke prepare directly' }));
-
-    expect(await screen.findByText('conversation.creativeStudio.workspace.gate.backgroundChoice.title')).toBeVisible();
-    expect(mocks.prepare).not.toHaveBeenCalled();
-    expect(mocks.prepareReferences).not.toHaveBeenCalled();
-  });
-
-  it('rejects a background-assignment callback that widens the draft by two revisions', async () => {
-    const project = makeProject();
-    addApprovedBackground(project);
-    const onAssignBackgroundChoices = vi.fn(async ({ draft: currentDraft }) => ({
-      ...currentDraft,
-      expectedRevision: currentDraft.expectedRevision + 2,
-    }));
-    render(<Harness backgroundProject={project} onAssignBackgroundChoices={onAssignBackgroundChoices} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    const modal = await screen.findByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('radio', { name: 'City park' }));
-    fireEvent.click(
-      within(modal).getByRole('button', {
-        name: 'conversation.creativeStudio.workspace.gate.backgroundChoice.assign',
-      })
-    );
-
-    expect(
-      await within(modal).findByText('conversation.creativeStudio.workspace.gate.backgroundChoice.failed')
-    ).toBeVisible();
-    expect(onAssignBackgroundChoices).toHaveBeenCalledTimes(1);
-    expect(mocks.prepare).not.toHaveBeenCalled();
   });
 
   it('prepares project references through their dedicated seam and names reference scope instead of proxy Shots', async () => {
@@ -2329,7 +2237,11 @@ describe('SpendGateModal', () => {
 
   it('names one exact shared route once with its human-readable model', async () => {
     const sharedQuote = quote('quote_shared');
-    sharedQuote.baseItems.push({ ...sharedQuote.baseItems[0]!, shotId: 'shot_2' });
+    sharedQuote.baseItems.push({
+      ...sharedQuote.baseItems[0]!,
+      target: { kind: 'shot', shotId: 'shot_2' },
+      composition: shotComposition('shot_2', 'seed_still', 'safe_provider', 'safe_model'),
+    });
     sharedQuote.lowerMinorUnits = 250;
     sharedQuote.upperMinorUnits = 250;
     const modal = await openPreparedGate({ baseOnly: sharedQuote, withCascade: null });
@@ -2348,8 +2260,9 @@ describe('SpendGateModal', () => {
     const secondRoute = { ...mixedRouteQuote.baseItems[0]!.route, [field]: value };
     mixedRouteQuote.baseItems.push({
       ...mixedRouteQuote.baseItems[0]!,
-      shotId: 'shot_2',
+      target: { kind: 'shot', shotId: 'shot_2' },
       route: secondRoute,
+      composition: shotComposition('shot_2', 'seed_still', secondRoute.providerId, secondRoute.model),
     });
     mixedRouteQuote.lowerMinorUnits = 250;
     mixedRouteQuote.upperMinorUnits = 250;
@@ -2377,7 +2290,11 @@ describe('SpendGateModal', () => {
 
   it('omits homogeneous group and purpose labels from each compact row', async () => {
     const homogeneousQuote = quote('quote_homogeneous');
-    homogeneousQuote.baseItems.push({ ...homogeneousQuote.baseItems[0]!, shotId: 'shot_2' });
+    homogeneousQuote.baseItems.push({
+      ...homogeneousQuote.baseItems[0]!,
+      target: { kind: 'shot', shotId: 'shot_2' },
+      composition: shotComposition('shot_2', 'seed_still', 'safe_provider', 'safe_model'),
+    });
     homogeneousQuote.lowerMinorUnits = 250;
     homogeneousQuote.upperMinorUnits = 250;
     const modal = await openPreparedGate({ baseOnly: homogeneousQuote, withCascade: null });
@@ -2389,9 +2306,7 @@ describe('SpendGateModal', () => {
 
   it('shows only the group label when groups vary but purposes do not', async () => {
     const mixedGroupQuote = quote('quote_mixed_group', true);
-    mixedGroupQuote.baseItems = [
-      { ...mixedGroupQuote.cascadeItems[0]!, shotId: 'shot_1', requestedTotalMinorUnits: 400 },
-    ];
+    mixedGroupQuote.baseItems = [{ ...mixedGroupQuote.cascadeItems[0]!, requestedTotalMinorUnits: 400 }];
     mixedGroupQuote.lowerMinorUnits = 800;
     mixedGroupQuote.upperMinorUnits = 800;
     const modal = await openPreparedGate({ baseOnly: mixedGroupQuote, withCascade: null });
@@ -2485,7 +2400,7 @@ describe('SpendGateModal', () => {
         name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
       })
     );
-    expect(within(modal).getByText(/safe_video/)).toHaveTextContent('video_choice');
+    expect(within(modal).getByText('safe_video · video_model · video_choice')).toBeVisible();
     expect(within(modal).getByText('conversation.creativeStudio.workspace.gate.rateCardSource')).toBeVisible();
     expect(within(modal).getByText(/budgetPolicy/)).toHaveTextContent('$10.00');
 
@@ -2536,7 +2451,7 @@ describe('SpendGateModal', () => {
         name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
       })
     );
-    expect(within(modal).getByText(/safe_video/)).toBeVisible();
+    expect(within(modal).getByText('safe_video · video_model · video_choice')).toBeVisible();
     const requiredRows = within(modal).getAllByRole('listitem');
     expect(requiredRows[0]).toHaveAttribute('data-quote-group', 'required');
     // The panel already states that all listed work is required, so the row does not repeat it;
@@ -2682,7 +2597,7 @@ describe('SpendGateModal', () => {
       })
     );
     expect(await within(modal).findByText('conversation.creativeStudio.errors.quoteInUse')).toBeVisible();
-    expect(within(modal).getByText(/safe_video/)).toHaveTextContent('video_choice');
+    expect(within(modal).getByText('safe_video · video_model · video_choice')).toBeVisible();
     for (const option of within(modal).getAllByRole('radio')) expect(option).toBeDisabled();
     expect(
       within(modal).getByRole('button', { name: /conversation\.creativeStudio\.workspace\.gate\.confirm/ })
@@ -2691,7 +2606,7 @@ describe('SpendGateModal', () => {
       within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' })
     ).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    expect(within(modal).getByText(/safe_video/)).toHaveTextContent('video_choice');
+    expect(within(modal).getByText('safe_video · video_model · video_choice')).toBeVisible();
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
     expect(mocks.confirm).toHaveBeenCalledTimes(1);
   });

@@ -55,6 +55,7 @@ const isCanonicalDependencyPrimary = (
     case 'video_take':
       return asset.mediaKind === 'video' && asset.managedAsset.collection === 'assets';
     case 'board_still':
+    case 'reference_image':
       return false;
   }
 };
@@ -65,6 +66,7 @@ const hasCanonicalPrimary = (
   item: StudioQuotedGeneration
 ): boolean =>
   Object.values(project.jobs).some((job) => {
+    if (item.target.kind !== 'shot') return false;
     if (
       job.authorizationId !== authorizationId ||
       job.authorizationItemId !== item.id ||
@@ -79,8 +81,8 @@ const hasCanonicalPrimary = (
       job.outputAssetIds.filter((assetId) => assetId === primaryId).length === 1 &&
       primary !== undefined &&
       primary.projectId === project.id &&
-      primary.shotId === item.shotId &&
-      ownValue(project.shots, item.shotId)?.assetIds.includes(primary.id) === true &&
+      primary.shotId === item.target.shotId &&
+      ownValue(project.shots, item.target.shotId)?.assetIds.includes(primary.id) === true &&
       isCanonicalDependencyPrimary(item.purpose, primary)
     );
   });
@@ -97,6 +99,7 @@ export const terminalizeStudioUnboundDependenciesV2 = (
     for (const item of items) {
       if (authorizationItemIds !== null && !authorizationItemIds.has(item.id)) continue;
       if (item.requestPlan.kind !== 'after_take_selection') continue;
+      if (item.target.kind !== 'shot') continue;
       const dependency = item.requestPlan.dependency;
       if (dependency.kind === 'existing_predecessor') continue;
       const siblings = Object.values(project.jobs).filter(
@@ -165,6 +168,7 @@ export const advanceStudioWaitingBindingsV2 = (
     for (const item of items) {
       if (authorizationItemIds !== null && !authorizationItemIds.has(item.id)) continue;
       if (item.requestPlan.kind !== 'after_take_selection') continue;
+      if (item.target.kind !== 'shot') continue;
       const siblings = Object.values(project.jobs).filter(
         (job) => job.authorizationId === authorization.id && job.authorizationItemId === item.id
       );
@@ -208,7 +212,8 @@ export const advanceStudioWaitingBindingsV2 = (
               (job) =>
                 job.authorizationId === authorization.id &&
                 job.authorizationItemId === upstreamItem.id &&
-                job.shotId === upstreamShot.id &&
+                job.target.kind === 'shot' &&
+                job.target.shotId === upstreamShot.id &&
                 job.purpose === upstreamItem.purpose &&
                 job.status === 'succeeded' &&
                 job.outputAssetIdsByRole.primary === selectedAssetId &&
@@ -232,12 +237,12 @@ export const advanceStudioWaitingBindingsV2 = (
         let liveBoundary = false;
         for (const beatId of project.beatOrder) {
           const beat = ownValue(project.beats, beatId);
-          const dependentIndex = beat?.shotOrder.indexOf(item.shotId) ?? -1;
+          const dependentIndex = beat?.shotOrder.indexOf(item.target.shotId) ?? -1;
           if (
             beat !== undefined &&
             dependentIndex > 0 &&
             beat.shotOrder[dependentIndex - 1] === dependency.predecessorShotId &&
-            ownValue(project.shots, item.shotId)?.chainBreak === 'none'
+            ownValue(project.shots, item.target.shotId)?.chainBreak === 'none'
           ) {
             liveBoundary = true;
             break;

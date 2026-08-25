@@ -7,9 +7,16 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { STUDIO_MAX_GENERATION_PROMPT_LENGTH } from '@/common/types/project/creativeStudioTypes';
+import type {
+  StudioGenerationReferenceInputSnapshot,
+  StudioJobPurpose,
+  StudioMediaModelRef,
+} from '@/common/types/project/creativeStudioTypes';
 import {
-  composeStudioGenerationPrompt,
+  composeStudioGenerationV2,
+  deriveStudioInstructionProfileV2,
+} from '@/process/services/creative-studio/service/schema2/generation/composition';
+import {
   createStudioDeferredGenerationRequestPlan,
   createStudioGenerationRequestTemplate,
   createStudioResolvedGenerationRequestPlan,
@@ -25,50 +32,58 @@ const rule = {
   createdAt: '2026-08-18T00:00:00.000Z',
 } as const;
 
-const templateInput = () => ({
-  purpose: 'video_take' as const,
-  brief: 'Launch the new camera.',
-  rules: [rule],
-  look: 'Warm studio light.',
-  line: 'The camera rotates into view.',
-  aspectRatio: '16:9' as const,
-  resolution: '1080p' as const,
-  durationSeconds: 8,
-  referenceInputs: [],
-});
+const imageRoute: StudioMediaModelRef = {
+  providerId: 'provider_image',
+  adapterId: 'weprompt-image-v1',
+  model: 'image-model',
+};
+const videoRoute: StudioMediaModelRef = {
+  providerId: 'provider_video',
+  adapterId: 'openrouter-video-v1',
+  model: 'video-model',
+};
+const source = {
+  kind: 'shot' as const,
+  beatId: 'beat_1',
+  story: 'The operator crosses the warm studio.',
+  shotId: 'shot_1',
+  shootingScript: 'Slow orbit as the camera rotates into view.',
+};
+const approvedReference: StudioGenerationReferenceInputSnapshot = {
+  referenceId: 'reference_1',
+  kind: 'character',
+  assetId: 'asset_reference_1',
+  sha256: 'a'.repeat(64),
+};
 
-describe('composeStudioGenerationPrompt', () => {
-  it('freezes Brief, rules, Look, and line in one prompt', () => {
-    expect(composeStudioGenerationPrompt(templateInput())).toBe(
-      [
-        'BRIEF\nLaunch the new camera.',
-        'PROJECT RULES — enforced before any paid render. A visual prompt that breaks an enforced rule is refused before it costs anything.\n1. [project, enforced] Never show a competitor logo (forbidden words: competitor)',
-        'LOOK\nWarm studio light.',
-        'SHOT\nThe camera rotates into view.',
-      ].join('\n\n')
-    );
+const composition = (
+  purpose: Exclude<StudioJobPurpose, 'reference_image'>,
+  referenceInputs: readonly StudioGenerationReferenceInputSnapshot[] = []
+) => {
+  const route = purpose === 'video_take' ? videoRoute : imageRoute;
+  return composeStudioGenerationV2({
+    projectRevision: 7,
+    brief: 'Launch the new camera.',
+    rules: [rule],
+    source,
+    purpose,
+    referenceInputs: [...referenceInputs],
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route,
+    boardStyle: purpose === 'board_still' ? 'grey_tone' : null,
+    instructionProfile: deriveStudioInstructionProfileV2(route, purpose, source),
   });
+};
 
-  it('rejects an empty or oversized provider prompt', () => {
-    expect(() => composeStudioGenerationPrompt({ brief: '', rules: [], look: '', line: '' })).toThrow(RangeError);
-    expect(() =>
-      composeStudioGenerationPrompt({
-        brief: 'x'.repeat(STUDIO_MAX_GENERATION_PROMPT_LENGTH + 1),
-        rules: [],
-        look: '',
-        line: '',
-      })
-    ).toThrow(RangeError);
-  });
-});
+const templateInput = (
+  purpose: Exclude<StudioJobPurpose, 'reference_image'> = 'video_take',
+  referenceInputs: readonly StudioGenerationReferenceInputSnapshot[] = []
+) => ({ composition: composition(purpose, referenceInputs), durationSeconds: purpose === 'video_take' ? 8 : 4 });
 
 describe('generation request plans', () => {
   it('builds a resolved seed request with a frozen Brief reference digest', () => {
-    const template = createStudioGenerationRequestTemplate({
-      ...templateInput(),
-      purpose: 'seed_still',
-      referenceInputs: [{ assetId: 'reference_1', sha256: 'a'.repeat(64) }],
-    });
+    const template = createStudioGenerationRequestTemplate(templateInput('seed_still', [approvedReference]));
 
     expect(
       createStudioResolvedGenerationRequestPlan({ purpose: 'seed_still', template, conditioningInput: null })
@@ -76,7 +91,7 @@ describe('generation request plans', () => {
   });
 
   it('materializes a deferred predecessor plan without changing its template', () => {
-    const template = createStudioGenerationRequestTemplate(templateInput());
+    const template = createStudioGenerationRequestTemplate(templateInput('video_take'));
     const plan = createStudioDeferredGenerationRequestPlan({
       template,
       dependency: {
@@ -107,7 +122,7 @@ describe('generation request plans', () => {
   });
 
   it('materializes an existing predecessor only from the exact quoted Take and trim endpoint', () => {
-    const template = createStudioGenerationRequestTemplate(templateInput());
+    const template = createStudioGenerationRequestTemplate(templateInput('video_take'));
     const plan = createStudioDeferredGenerationRequestPlan({
       template,
       dependency: {
@@ -136,7 +151,7 @@ describe('generation request plans', () => {
   });
 
   it('materializes a deferred same-Shot seed choice into the reviewed image input', () => {
-    const template = createStudioGenerationRequestTemplate(templateInput());
+    const template = createStudioGenerationRequestTemplate(templateInput('video_take'));
     const plan = createStudioDeferredGenerationRequestPlan({
       template,
       dependency: { kind: 'authorized_seed', upstreamItemId: 'item_seed', shotId: 'shot_1' },
@@ -149,7 +164,7 @@ describe('generation request plans', () => {
   });
 
   it('detects any current-request change without treating object identity as authority', () => {
-    const template = createStudioGenerationRequestTemplate(templateInput());
+    const template = createStudioGenerationRequestTemplate(templateInput('video_take'));
     const recorded = createStudioResolvedGenerationRequestPlan({
       purpose: 'video_take',
       template,
@@ -164,16 +179,32 @@ describe('generation request plans', () => {
         conditioningInput: { kind: 'seed_still', assetId: 'seed_2' },
       })
     ).toBe(false);
+    const recomposed = createStudioGenerationRequestTemplate({
+      composition: composeStudioGenerationV2({
+        ...recorded.composition.inputs,
+        schemaVersion: undefined as never,
+        source: { ...source, shootingScript: 'A materially different camera move.' },
+      }),
+      durationSeconds: recorded.durationSeconds,
+    });
+    expect(
+      isStudioGenerationRequestCurrent(recorded, {
+        ...recomposed,
+        conditioningInput: recorded.conditioningInput,
+      })
+    ).toBe(false);
   });
 
-  it('rejects invalid reference and conditioning branches', () => {
+  it('rejects composition/template drift and invalid conditioning branches', () => {
+    const seedTemplate = createStudioGenerationRequestTemplate(templateInput('seed_still', [approvedReference]));
     expect(() =>
-      createStudioGenerationRequestTemplate({
-        ...templateInput(),
-        referenceInputs: [{ assetId: 'reference_1', sha256: 'a'.repeat(64) }],
+      createStudioResolvedGenerationRequestPlan({
+        purpose: 'seed_still',
+        template: { ...seedTemplate, referenceInputs: [] },
+        conditioningInput: null,
       })
-    ).toThrow(TypeError);
-    const template = createStudioGenerationRequestTemplate(templateInput());
+    ).toThrow('template does not match its frozen composition');
+    const template = createStudioGenerationRequestTemplate(templateInput('video_take'));
     expect(() =>
       createStudioResolvedGenerationRequestPlan({ purpose: 'video_take', template, conditioningInput: null })
     ).toThrow(TypeError);

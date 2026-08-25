@@ -7,11 +7,12 @@
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { IProvider } from '@/common/config/storage';
-import type {
-  StudioConnectionBinding,
-  StudioMediaKind,
-  StudioProviderAdapterId,
-  StudioRouteIssue,
+import {
+  STUDIO_MAX_GENERATION_PROMPT_LENGTH,
+  type StudioConnectionBinding,
+  type StudioMediaKind,
+  type StudioProviderAdapterId,
+  type StudioRouteIssue,
 } from '@/common/types/project/creativeStudioTypes';
 import type {
   GenerationProviderAdapter,
@@ -40,12 +41,18 @@ export const STUDIO_E2E_BOUNDARY_SENTINELS = {
 } as const;
 export const STUDIO_E2E_FAKE_FIXTURE_DIRECTORY = '.studio-raw-output-path-sentinel';
 export const STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE = 'provider-call-counts.json';
+export const STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE = 'provider-requests.json';
+export const STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION = 1 as const;
 const STUDIO_E2E_IMAGE_MODEL = 'weprompt-e2e-image';
 const STUDIO_E2E_NEXT_IMAGE_MODEL = 'weprompt-e2e-image-next';
 const STUDIO_E2E_VIDEO_MODEL = 'weprompt-e2e-video';
 const STUDIO_E2E_EXPLICIT_SELECTION_VIDEO_MODEL = 'dreamina-seedance-2-0-260128';
 const FAKE_FIXTURE_DIRECTORY = STUDIO_E2E_FAKE_FIXTURE_DIRECTORY;
 const PROVIDER_CALL_COUNTS_MAX_BYTES = 512;
+const PROVIDER_REQUESTS_MAX_RECORDS = 32;
+const PROVIDER_REQUESTS_MAX_BYTES = 8 * 1024 * 1024;
+const PROVIDER_REQUEST_MAX_INPUTS = 6;
+const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const IMAGE_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==',
   'base64'
@@ -90,6 +97,20 @@ export type StudioE2EFakeProviderCallCounts = {
   submit: number;
   poll: number;
   cancel: number;
+};
+
+export type StudioE2EFakeProviderRequest = {
+  ordinal: number;
+  mediaKind: StudioMediaKind;
+  model: string;
+  prompt: string;
+  conditioningAssetIds: string[];
+  firstFrameAssetId: string | null;
+};
+
+export type StudioE2EFakeProviderRequestLog = {
+  schemaVersion: typeof STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION;
+  requests: StudioE2EFakeProviderRequest[];
 };
 
 export type StudioE2EFakeBundleDeps = {
@@ -177,6 +198,9 @@ export const createStudioE2EFakeBundle = ({
   };
   let providerCallCountWrite = Promise.resolve();
   let providerCallCountWriteOrdinal = 0;
+  const providerRequests: StudioE2EFakeProviderRequest[] = [];
+  let providerRequestWrite = Promise.resolve();
+  let providerRequestWriteOrdinal = 0;
 
   const ensureFixtureDirectory = async (): Promise<void> => {
     await mkdir(fixtureDirectory, { recursive: true });
@@ -211,6 +235,64 @@ export const createStudioE2EFakeBundle = ({
       }
     });
     await providerCallCountWrite;
+  };
+
+  /**
+   * Records only the exact, renderer-safe facts needed by the opted-in E2E dispatch oracle.
+   * Never serialize the provider, callbacks, paths, URLs, credentials, or the arbitrary request.
+   */
+  const recordProviderRequest = async (request: ResolvedStudioGenerationRequest, model: string): Promise<void> => {
+    if (catalogProfile !== 'explicit-selection') return;
+    const conditioningAssetIds = request.conditioningImages?.map(({ assetId }) => assetId) ?? [];
+    const firstFrameAssetId = request.firstFrame?.assetId ?? null;
+    if (
+      request.prompt.length === 0 ||
+      request.prompt.length > STUDIO_MAX_GENERATION_PROMPT_LENGTH ||
+      conditioningAssetIds.length > PROVIDER_REQUEST_MAX_INPUTS ||
+      conditioningAssetIds.some((assetId) => !SAFE_STUDIO_ID.test(assetId)) ||
+      (firstFrameAssetId !== null && !SAFE_STUDIO_ID.test(firstFrameAssetId))
+    ) {
+      throw new StudioE2EFakeAdapterError('unsupported');
+    }
+    const safeRequest = {
+      mediaKind: request.mediaKind,
+      model,
+      prompt: request.prompt,
+      conditioningAssetIds: [...conditioningAssetIds],
+      firstFrameAssetId,
+    };
+    providerRequestWrite = providerRequestWrite.then(async () => {
+      if (providerRequests.length >= PROVIDER_REQUESTS_MAX_RECORDS) {
+        throw new StudioE2EFakeAdapterError('unknown');
+      }
+      const record: StudioE2EFakeProviderRequest = {
+        ordinal: providerRequests.length + 1,
+        ...safeRequest,
+      };
+      const nextLog: StudioE2EFakeProviderRequestLog = {
+        schemaVersion: STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION,
+        requests: [...providerRequests, record],
+      };
+      const snapshot = JSON.stringify(nextLog);
+      if (Buffer.byteLength(snapshot, 'utf8') > PROVIDER_REQUESTS_MAX_BYTES) {
+        throw new StudioE2EFakeAdapterError('unknown');
+      }
+      providerRequestWriteOrdinal += 1;
+      const temporaryFile = path.join(
+        fixtureDirectory,
+        `.${STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE}.${process.pid}.${providerRequestWriteOrdinal}.tmp`
+      );
+      await ensureFixtureDirectory();
+      try {
+        await writeFile(temporaryFile, snapshot, { flag: 'wx' });
+        await rename(temporaryFile, path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE));
+      } catch (error) {
+        await rm(temporaryFile, { force: true });
+        throw error;
+      }
+      providerRequests.push(record);
+    });
+    await providerRequestWrite;
   };
 
   const ensureFixture = async (mediaKind: StudioMediaKind): Promise<ProviderOutput> => {
@@ -270,6 +352,7 @@ export const createStudioE2EFakeBundle = ({
       await recordProviderCall('submit');
       if (!validateRequest(request, provider, catalogProfile, mediaKind).ok)
         throw new StudioE2EFakeAdapterError('unsupported');
+      await recordProviderRequest(request, provider.use_model);
       remoteState.taskCounter += 1;
       const providerJobId = `${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_${remoteState.taskCounter}`;
       remoteState.tasks.set(providerJobId, {
@@ -456,6 +539,7 @@ export const createStudioE2EFakeBundle = ({
     adapters,
     async dispose(): Promise<void> {
       if (ownsRemoteState) remoteState.tasks.clear();
+      await Promise.allSettled([providerCallCountWrite, providerRequestWrite]);
       await rm(fixtureDirectory, { force: true, recursive: true });
     },
   };

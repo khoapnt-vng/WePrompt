@@ -14,7 +14,7 @@ export type BeatPlaybackVideoSegment = {
   kind: 'video';
   shotId: string;
   shotPosition: number;
-  shotLine: string;
+  shootingScript: string;
   assetId: string;
   posterAssetId: string | null;
   sourceDurationSeconds: number;
@@ -29,7 +29,7 @@ export type BeatPlaybackSlateSegment = {
   kind: 'slate';
   shotId: string;
   shotPosition: number;
-  shotLine: string;
+  shootingScript: string;
   durationSeconds: number;
   beatStartSeconds: number;
   beatEndSeconds: number;
@@ -178,7 +178,7 @@ export const buildBeatPlaybackSequence = (
     if (
       !safeId(shot.id) ||
       seenShotIds.has(shot.id) ||
-      typeof shot.line !== 'string' ||
+      typeof shot.shootingScript !== 'string' ||
       boundary === null ||
       boundary.shotId !== shot.id ||
       !Number.isSafeInteger(boundary.startSeconds) ||
@@ -205,7 +205,7 @@ export const buildBeatPlaybackSequence = (
     const common = {
       shotId: shot.id,
       shotPosition: shotIndex + 1,
-      shotLine: shot.line,
+      shootingScript: shot.shootingScript,
       durationSeconds,
       beatStartSeconds: beatCursor,
       beatEndSeconds,

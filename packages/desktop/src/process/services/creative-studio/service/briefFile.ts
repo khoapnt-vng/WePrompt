@@ -23,9 +23,7 @@ export type StudioProjectManifestV2 = Omit<StudioProjectV2, 'brief'> & {
   briefFile: StudioBriefFileMetadataV2;
 };
 
-export type StudioProjectManifestDecodeResultV2 =
-  | { kind: 'legacy'; project: StudioProjectV2; synchronized: boolean }
-  | { kind: 'brief_file'; project: StudioProjectV2; synchronized: boolean };
+export type StudioProjectManifestDecodeResultV2 = { project: StudioProjectV2; synchronized: boolean };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -55,28 +53,17 @@ export const createStudioProjectManifestV2 = (project: StudioProjectV2): StudioP
   };
 };
 
-/**
- * Hydrates either a legacy inline-Brief manifest or the digest-backed manifest. A present file is
- * always the prose authority; `synchronized` reports whether the persisted metadata/cache agrees.
- */
+/** Hydrates the schema-5 manifest. The sidecar is the sole persisted Brief authority. */
 export const decodeStudioProjectManifestV2 = (
   value: unknown,
   briefFileText: string | null
 ): StudioProjectManifestDecodeResultV2 | null => {
-  if (validateStudioProjectV2(value)) {
-    if (briefFileText === null) return { kind: 'legacy', project: structuredClone(value), synchronized: false };
-    const project = { ...structuredClone(value), brief: briefFileText };
-    return validateStudioProjectV2(project)
-      ? { kind: 'legacy', project, synchronized: value.brief === briefFileText }
-      : null;
-  }
   if (!isRecord(value) || Object.hasOwn(value, 'brief') || !isBriefMetadata(value.briefFile)) return null;
   if (briefFileText === null) return null;
   const { briefFile, ...persistedProject } = value;
   const project = { ...persistedProject, brief: briefFileText };
   if (!validateStudioProjectV2(project)) return null;
   return {
-    kind: 'brief_file',
     project,
     synchronized: briefFile.sha256 === studioBriefSha256(briefFileText),
   };

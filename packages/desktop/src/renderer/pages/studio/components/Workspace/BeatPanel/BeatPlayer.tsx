@@ -841,7 +841,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
       ? ''
       : t(`${PREVIEW_ROOT}.${segment.kind === 'video' ? 'videoLabel' : 'slateLabel'}`, {
           position: paddedPosition(segment.shotPosition),
-          line: segment.shotLine,
+          shootingScript: segment.shootingScript,
         });
   const previousJoinAvailable =
     joins.length > 0 &&

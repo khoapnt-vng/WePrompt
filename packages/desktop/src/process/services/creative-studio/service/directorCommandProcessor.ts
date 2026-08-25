@@ -9,8 +9,8 @@ import {
   STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
   STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS,
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
-  STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
   type StudioDirectorCommandRejectionCodeV2,
@@ -78,23 +78,14 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
     expect(command): void {
       const key = stateKey(command.projectId, command.commandId);
       if (expectations.has(key) || terminals.has(key)) return;
-      const createdBeatIds: string[] = [];
-      const createdShotIds: string[] = [];
-      for (const operation of command.operations) {
-        if (operation.kind === 'add_beat') {
-          createdBeatIds.push(operation.beatId);
-        } else if (operation.kind === 'add_shot') {
-          createdShotIds.push(operation.shotId);
-        }
-      }
       expectations.set(
         key,
         Object.freeze({
           projectId: command.projectId,
           commandId: command.commandId,
           expectedRevision: command.expectedRevision,
-          createdBeatIds: Object.freeze(createdBeatIds),
-          createdShotIds: Object.freeze(createdShotIds),
+          createdBeatIds: Object.freeze([]),
+          createdShotIds: Object.freeze([]),
         })
       );
     },
@@ -111,7 +102,7 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
         return;
       }
       materialize({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
         commandId: expected.commandId,
         projectId: expected.projectId,
         expectedRevision: expected.expectedRevision,
@@ -213,7 +204,7 @@ export const createStudioDirectorCommandProcessorV2 = (
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandRejectionCodeV2
   ): StudioDirectorCommandReceiptV2 => ({
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId: command.commandId,
     projectId: command.projectId,
     expectedRevision: command.expectedRevision,
@@ -228,7 +219,7 @@ export const createStudioDirectorCommandProcessorV2 = (
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandExpiryCode
   ): StudioDirectorCommandReceiptV2 => ({
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId: command.commandId,
     projectId: command.projectId,
     expectedRevision: command.expectedRevision,
@@ -243,7 +234,7 @@ export const createStudioDirectorCommandProcessorV2 = (
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandIndeterminateCode
   ): StudioDirectorCommandReceiptV2 => ({
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId: command.commandId,
     projectId: command.projectId,
     expectedRevision: command.expectedRevision,
@@ -297,7 +288,7 @@ export const createStudioDirectorCommandProcessorV2 = (
       }
       if (pending.status === 'invalid') {
         const receipt = materialize({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
           commandId: pending.commandId,
           projectId,
           expectedRevision: pending.expectedRevision,
@@ -358,7 +349,7 @@ export const createStudioDirectorCommandProcessorV2 = (
       try {
         const result = await deps.service.apply(command, latestApplyStartMs, { commitTag: command.commandId });
         terminal = {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
           commandId,
           projectId,
           expectedRevision: command.expectedRevision,

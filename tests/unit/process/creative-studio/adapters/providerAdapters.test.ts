@@ -27,7 +27,10 @@ import {
   createStudioE2EFakeRemoteState,
   STUDIO_E2E_FAKE_FIXTURE_DIRECTORY,
   STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE,
+  STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE,
+  STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION,
   STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL,
+  type StudioE2EFakeProviderRequestLog,
 } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
 
 const REFERENCE_BUDGET_BYTES = 30 * 1024 * 1024;
@@ -575,6 +578,9 @@ describe('Creative Studio provider adapters', () => {
         path.join(lifecycleRoot, STUDIO_E2E_FAKE_FIXTURE_DIRECTORY, STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE)
       )
     ).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(
+      fs.readFile(path.join(lifecycleRoot, STUDIO_E2E_FAKE_FIXTURE_DIRECTORY, STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE))
+    ).rejects.toMatchObject({ code: 'ENOENT' });
 
     await explicitAdapter.validateConnection(
       { model: explicitProvider.use_model },
@@ -603,6 +609,132 @@ describe('Creative Studio provider adapters', () => {
       poll: 3,
       cancel: 1,
     });
+    expect(
+      JSON.parse(await fs.readFile(path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE), 'utf8'))
+    ).toEqual({
+      schemaVersion: STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION,
+      requests: [
+        {
+          ordinal: 1,
+          mediaKind: 'image',
+          model: 'weprompt-e2e-image',
+          prompt: request.prompt,
+          conditioningAssetIds: [],
+          firstFrameAssetId: null,
+        },
+      ],
+    });
+    expect((await fs.readdir(fixtureDirectory)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('records exact ordered provider inputs without serializing process-only request fields', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-request-oracle-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState();
+    const bundle = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'explicit-selection', remoteState });
+    const imageAdapter = bundle.adapters.get('weprompt-image-v1');
+    const videoAdapter = bundle.adapters.get('weprompt-media-gateway-v1');
+    const imageRoute = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const videoRoute = {
+      ...bundle.provider,
+      use_model: 'dreamina-seedance-2-0-260128',
+    } as TProviderWithModel;
+    if (!imageAdapter || !videoAdapter) throw new Error('expected fake provider adapters');
+
+    const secondReference = conditioningInput(2);
+    const firstReference = conditioningInput(1);
+    await imageAdapter.submit(
+      {
+        ...request,
+        prompt: 'Exact board prompt',
+        mediaKind: 'image',
+        conditioningImages: [secondReference, firstReference],
+        conditioningImageLimit: 6,
+        routeConstraints: {
+          aspectRatios: ['16:9'],
+          resolutions: ['720p'],
+          minDurationSeconds: 4,
+          maxDurationSeconds: 15,
+          supportsFirstFrame: true,
+          maxConditioningImages: 6,
+        },
+      },
+      imageRoute,
+      new AbortController().signal
+    );
+    const reviewedFrame = { ...firstFrame(), assetId: 'asset_reviewed_first_frame' };
+    await videoAdapter.submit(
+      { ...request, prompt: 'Exact video prompt', firstFrame: reviewedFrame },
+      videoRoute,
+      new AbortController().signal
+    );
+
+    const fixtureDirectory = path.join(rootDir, STUDIO_E2E_FAKE_FIXTURE_DIRECTORY);
+    const parsed = JSON.parse(
+      await fs.readFile(path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE), 'utf8')
+    ) as StudioE2EFakeProviderRequestLog;
+    expect(parsed).toEqual({
+      schemaVersion: STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION,
+      requests: [
+        {
+          ordinal: 1,
+          mediaKind: 'image',
+          model: 'weprompt-e2e-image',
+          prompt: 'Exact board prompt',
+          conditioningAssetIds: ['asset_2', 'asset_1'],
+          firstFrameAssetId: null,
+        },
+        {
+          ordinal: 2,
+          mediaKind: 'video',
+          model: 'dreamina-seedance-2-0-260128',
+          prompt: 'Exact video prompt',
+          conditioningAssetIds: [],
+          firstFrameAssetId: 'asset_reviewed_first_frame',
+        },
+      ],
+    });
+    const serialized = JSON.stringify(parsed);
+    expect(serialized).not.toContain('routeConstraints');
+    expect(serialized).not.toContain('idempotencyKey');
+    expect(serialized).not.toContain('asDataUrl');
+    expect(serialized).not.toContain('openStream');
+    expect(serialized).not.toContain(bundle.provider.api_key);
+    expect(serialized).not.toContain(bundle.provider.base_url);
+    expect(remoteState.taskCounter).toBe(2);
+    expect((await fs.readdir(fixtureDirectory)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('does not record rejected or unsafe fake-provider requests', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-request-rejection-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState();
+    const bundle = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'explicit-selection', remoteState });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    await expect(
+      adapter.submit({ ...request, mediaKind: 'image', durationSeconds: 0 }, fakeProvider, new AbortController().signal)
+    ).rejects.toMatchObject({ code: 'unsupported' });
+    await expect(
+      adapter.submit(
+        {
+          ...request,
+          mediaKind: 'image',
+          conditioningImages: [{ ...conditioningInput(1), assetId: '../private-input' }],
+          conditioningImageLimit: 6,
+        },
+        fakeProvider,
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({ code: 'unsupported' });
+
+    const fixtureDirectory = path.join(rootDir, STUDIO_E2E_FAKE_FIXTURE_DIRECTORY);
+    await expect(
+      fs.readFile(path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE))
+    ).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(remoteState.taskCounter).toBe(0);
     expect((await fs.readdir(fixtureDirectory)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
   });
 

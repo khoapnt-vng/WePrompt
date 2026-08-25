@@ -18,6 +18,7 @@ import {
   calculateStudioQuoteTotals,
   calculateStudioQuotedGenerationAmounts,
   createStudioQuotedGenerationId,
+  studioGenerationTargetKey,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from '../generation';
 
@@ -86,6 +87,16 @@ const safeModel = (value: string): boolean => {
   return true;
 };
 
+const validGenerationTarget = (value: unknown): boolean => {
+  if (value === null || typeof value !== 'object') return false;
+  const target = value as Record<string, unknown>;
+  return (
+    Reflect.ownKeys(target).length === 2 &&
+    ((target.kind === 'shot' && typeof target.shotId === 'string' && SAFE_ID.test(target.shotId)) ||
+      (target.kind === 'reference' && typeof target.referenceId === 'string' && SAFE_ID.test(target.referenceId)))
+  );
+};
+
 const validProvider = (value: StudioProviderRef): boolean =>
   value !== null &&
   typeof value === 'object' &&
@@ -118,7 +129,6 @@ export const studioBoardAuthorizationScopeIsValidV2 = (quote: StudioBoardAuthori
         (item) =>
           item.requestPlan.kind === 'resolved' &&
           item.requestPlan.snapshot.durationSeconds === STUDIO_BOARD_REQUEST_DURATION_SECONDS &&
-          item.requestPlan.snapshot.referenceInputs.length === 0 &&
           item.requestPlan.snapshot.conditioningInput === null
       ))
   );
@@ -128,13 +138,13 @@ const quotedItemRequestAuthorityIsValid = (item: StudioQuotedGeneration): boolea
   const purpose = item.purpose;
   switch (purpose) {
     case 'seed_still':
+    case 'reference_image':
     case 'video_take':
       return true;
     case 'board_still':
       return (
         item.requestPlan.kind === 'resolved' &&
         item.requestPlan.snapshot.durationSeconds === STUDIO_BOARD_REQUEST_DURATION_SECONDS &&
-        item.requestPlan.snapshot.referenceInputs.length === 0 &&
         item.requestPlan.snapshot.conditioningInput === null
       );
     default: {
@@ -169,24 +179,26 @@ const validateQuote = (quote: StudioSubmissionQuote): StudioQuotedGeneration[] =
   const pairs = new Set<string>();
   for (const item of items) {
     if (
+      item === null ||
+      typeof item !== 'object' ||
+      !validGenerationTarget(item.target) ||
       !SAFE_ID.test(item.id) ||
       item.id !==
         createStudioQuotedGenerationId({
           projectId: quote.projectId,
           projectRevision: quote.projectRevision,
-          shotId: item.shotId,
+          target: item.target,
           purpose: item.purpose,
-          projectReferenceId: item.projectReferenceId ?? null,
         }) ||
       itemIds.has(item.id) ||
-      pairs.has(`${item.shotId}\0${item.purpose}\0${item.projectReferenceId ?? ''}`) ||
+      pairs.has(`${studioGenerationTargetKey(item.target)}\0${item.purpose}`) ||
       !quotedItemRequestAuthorityIsValid(item) ||
       calculateStudioQuotedGenerationAmounts(item) === null
     ) {
       return fail('invalid_authorization');
     }
     itemIds.add(item.id);
-    pairs.add(`${item.shotId}\0${item.purpose}\0${item.projectReferenceId ?? ''}`);
+    pairs.add(`${studioGenerationTargetKey(item.target)}\0${item.purpose}`);
   }
   const totals = calculateStudioQuoteTotals(items);
   if (
@@ -270,6 +282,7 @@ const receiptDurationSeconds = (item: StudioQuotedGeneration): number | null => 
   switch (purpose) {
     case 'seed_still':
     case 'board_still':
+    case 'reference_image':
       return null;
     case 'video_take':
       return item.requestPlan.kind === 'resolved'

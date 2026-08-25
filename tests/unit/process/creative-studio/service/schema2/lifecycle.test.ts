@@ -17,16 +17,44 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   advanceStudioWaitingBindingsV2,
+  composeStudioGenerationV2,
   createStudioFrameExtractionId,
+  studioGenerationCompositionDigestV2,
 } from '@/process/services/creative-studio/service/schema2';
 
 const capturedAt = '2026-08-17T00:00:05.000Z';
 const createdAt = '2026-08-17T00:00:00.000Z';
 
-const resolvedPlan = (purpose: 'seed_still' | 'video_take'): StudioGenerationRequestPlan => ({
+const composition = (shotId: string, purpose: 'seed_still' | 'video_take') =>
+  composeStudioGenerationV2({
+    projectRevision: 6,
+    brief: '',
+    rules: [],
+    source: {
+      kind: 'shot',
+      beatId: 'beat_1',
+      story: '',
+      shotId,
+      shootingScript: `${purpose} shooting script`,
+    },
+    purpose,
+    referenceInputs: [],
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route: {
+      providerId: 'provider_1',
+      adapterId: purpose === 'seed_still' ? 'weprompt-image-v1' : 'openrouter-video-v1',
+      model: 'model_1',
+    },
+    boardStyle: null,
+    instructionProfile:
+      purpose === 'seed_still' ? 'weprompt-image-v1.seed-still.v1' : 'openrouter-video-v1.video-take.v1',
+  });
+
+const resolvedPlan = (purpose: 'seed_still' | 'video_take', shotId = 'shot_1'): StudioGenerationRequestPlan => ({
   kind: 'resolved',
   snapshot: {
-    prompt: `${purpose} prompt`,
+    composition: composition(shotId, purpose),
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
@@ -38,7 +66,7 @@ const resolvedPlan = (purpose: 'seed_still' | 'video_take'): StudioGenerationReq
 const deferredPredecessorPlan = (): StudioGenerationRequestPlan => ({
   kind: 'after_take_selection',
   template: {
-    prompt: 'dependent prompt',
+    composition: composition('shot_2', 'video_take'),
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
@@ -50,7 +78,7 @@ const deferredPredecessorPlan = (): StudioGenerationRequestPlan => ({
 const deferredSeedPlan = (): StudioGenerationRequestPlan => ({
   kind: 'after_take_selection',
   template: {
-    prompt: 'seed-dependent prompt',
+    composition: composition('shot_1', 'video_take'),
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
@@ -63,7 +91,7 @@ const existingPredecessorPlan = (): StudioGenerationRequestPlan =>
   ({
     kind: 'after_take_selection',
     template: {
-      prompt: 'existing predecessor prompt',
+      composition: composition('shot_2', 'video_take'),
       aspectRatio: '16:9',
       resolution: '1080p',
       durationSeconds: 5,
@@ -84,7 +112,7 @@ const item = (
   requestPlan: StudioGenerationRequestPlan
 ): StudioQuotedGeneration => ({
   id,
-  shotId,
+  target: { kind: 'shot', shotId },
   purpose,
   routeId: `${purpose}_route`,
   generationCount: 1,
@@ -102,7 +130,7 @@ const job = (
 ): StudioJobV2 => ({
   id,
   projectId: 'project_1',
-  shotId,
+  target: { kind: 'shot', shotId },
   status: requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
   provider: { providerId: 'provider_1', adapterId: 'openrouter-video-v1', model: 'model_1' },
   idempotencyKey: `key_${id}`,
@@ -112,6 +140,7 @@ const job = (
   purpose: 'video_take',
   authorizationId: 'auth_1',
   authorizationItemId,
+  composition: requestPlan.kind === 'resolved' ? requestPlan.snapshot.composition : requestPlan.template.composition,
   requestPlan,
   requestSnapshot: requestPlan.kind === 'resolved' ? requestPlan.snapshot : null,
   spendReceipt: null,
@@ -142,6 +171,10 @@ const asset = (
   sha256: 'a'.repeat(64),
   ...(mediaKind === 'video' ? { durationSeconds: 10 } : {}),
   createdAt,
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
 });
 
 const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => {
@@ -177,7 +210,8 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
     purpose: upstreamPurpose,
     providerJobId: 'remote_upstream',
   });
-  const dependentJob = job('job_dependent', dependent.shotId, dependent.id, dependentPlan);
+  const dependentShotId = dependent.target.kind === 'shot' ? dependent.target.shotId : 'shot_2';
+  const dependentJob = job('job_dependent', dependentShotId, dependent.id, dependentPlan);
   return {
     schemaVersion: 5,
     revision: 7,
@@ -195,27 +229,20 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
       beat_1: {
         id: 'beat_1',
         title: '',
-        action: '',
-        look: '',
-        actionRevision: 1,
+        story: '',
         targetSeconds: null,
         shotOrder: ['shot_1', 'shot_2'],
-        lineHistory: [],
       },
     },
     shots: {
       shot_1: {
         id: 'shot_1',
-        line: '',
-        derivation: 'derived',
-        derivedFromActionRevision: 1,
-        narration: '',
-        onScreenText: '',
+        shootingScript: 'Seed or first Shot script',
         durationSeconds: 5,
         trimInSeconds: null,
         trimOutSeconds: dependency === 'predecessor' ? 2 : null,
         chainBreak: 'none',
-        referenceIds: [],
+        referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -226,16 +253,12 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
       },
       shot_2: {
         id: 'shot_2',
-        line: '',
-        derivation: 'derived',
-        derivedFromActionRevision: 1,
-        narration: '',
-        onScreenText: '',
+        shootingScript: 'Dependent Shot script',
         durationSeconds: 5,
         trimInSeconds: null,
         trimOutSeconds: null,
         chainBreak: 'none',
-        referenceIds: [],
+        referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -245,6 +268,7 @@ const projectFixture = (dependency: 'seed' | 'predecessor'): StudioProjectV2 => 
         jobIds: dependency === 'predecessor' ? [dependentJob.id] : [],
       },
     },
+    referencePlanStatus: 'planned',
     referenceOrder: [],
     references: {},
     bin: [],
@@ -269,6 +293,9 @@ const installPrimary = (project: StudioProjectV2, mediaKind: 'image' | 'video'):
   const producer = project.jobs.job_upstream!;
   producer.outputAssetIds = [primary.id];
   producer.outputAssetIdsByRole.primary = primary.id;
+  primary.producerJobId = producer.id;
+  primary.compositionDigest = studioGenerationCompositionDigestV2(producer.composition);
+  primary.generationReferenceAssetIds = producer.composition.inputs.referenceInputs.map(({ assetId }) => assetId);
   if (mediaKind === 'image') project.shots.shot_1!.seedStillId = primary.id;
   else project.shots.shot_1!.videoAssetId = primary.id;
   return primary;
@@ -283,6 +310,7 @@ const existingPredecessorProject = (): StudioProjectV2 => {
   const plan = existingPredecessorPlan();
   dependent.requestPlan = structuredClone(plan);
   dependentJob.requestPlan = structuredClone(plan);
+  dependentJob.composition = structuredClone(plan.template.composition);
   authorization.baseItems = [dependent];
   authorization.cascadeItems = [];
   authorization.providerBindings = authorization.providerBindings.filter(({ itemId }) => itemId === dependent.id);
@@ -552,7 +580,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
     const transitivePlan: StudioGenerationRequestPlan = {
       kind: 'after_take_selection',
       template: {
-        prompt: 'transitive prompt',
+        composition: composition('shot_2', 'video_take'),
         aspectRatio: '16:9',
         resolution: '1080p',
         durationSeconds: 5,

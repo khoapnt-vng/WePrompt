@@ -11,7 +11,7 @@ import {
   isStudioPricingRefusalReasonV2,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
-  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
   STUDIO_MAX_EXPORTS_PER_SHAPE,
   STUDIO_VIEWS,
@@ -75,6 +75,7 @@ const toCommandError = (error: unknown): StudioCommandResult<never> => {
       error: {
         code: 'pricing_refused',
         reason: error.code,
+        details: error.details === null ? null : structuredClone(error.details),
         messageKey: errorMessageKeys.pricing_refused,
       },
     };
@@ -680,7 +681,7 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
       .getService()
       .applyMutations(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: input.projectId,
           expectedRevision: input.expectedRevision,
           operations,
@@ -725,9 +726,6 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   );
   ipcBridge.creativeStudio.prepareProjectReferences.provider((input) =>
     runCommand(() => dependencies.getService().prepareProjectReferences(input))
-  );
-  ipcBridge.creativeStudio.approveProjectReference.provider((input) =>
-    runCommand(() => dependencies.getService().approveProjectReference(input))
   );
   ipcBridge.creativeStudio.prepareSubmission.provider((input) =>
     runCommand(() => dependencies.getService().prepareSubmission(input))
@@ -789,27 +787,6 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.persistCapturedPoster.provider((input) =>
     runCommand(() => dependencies.getService().persistCapturedPoster(input))
   );
-  ipcBridge.creativeStudio.chooseAndImportReference.provider((input) =>
-    runCommand(async () => {
-      const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();
-      const picked = await (dependencies.showOpenDialog ?? defaultDependencies.showOpenDialog!)(parentWindow);
-      if (picked.canceled || !picked.filePaths[0]) return { status: 'cancelled' as const };
-      const imported = await dependencies
-        .getService()
-        .importReferenceFromPath({ ...input, sourcePath: picked.filePaths[0] });
-      return {
-        status: 'imported' as const,
-        assetId: imported.asset.id,
-        projectRevision: imported.project.revision,
-      };
-    })
-  );
-  ipcBridge.creativeStudio.detachBriefReference.provider((input) =>
-    runCommand(async () => {
-      const project = await dependencies.getService().detachBriefReference(input);
-      return { status: 'detached' as const, projectRevision: project.revision };
-    })
-  );
   ipcBridge.creativeStudio.importSeedStill.provider((input) =>
     runCommand(async () => {
       const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();
@@ -817,7 +794,7 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
       if (picked.canceled || !picked.filePaths[0]) return { status: 'cancelled' as const };
       const imported = await dependencies
         .getService()
-        .importReferenceFromPath({ ...input, sourcePath: picked.filePaths[0] });
+        .importSeedStillFromPath({ ...input, sourcePath: picked.filePaths[0] });
       return {
         status: 'imported' as const,
         assetId: imported.asset.id,

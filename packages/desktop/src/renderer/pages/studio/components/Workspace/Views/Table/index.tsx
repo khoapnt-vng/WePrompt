@@ -16,10 +16,9 @@ import {
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
 import type { WorkspaceBeatProjection, WorkspaceBoardPanelProjection } from '../../workspaceProjection';
-import { tableFoldsLook } from './lookFold';
 import styles from './Table.module.css';
 
-type TableColumnId = 'position' | 'panel' | 'beat' | 'action' | 'look' | 'shots' | 'length' | 'state';
+type TableColumnId = 'position' | 'panel' | 'beat' | 'story' | 'shots' | 'length' | 'state';
 
 type TableColumn = {
   id: TableColumnId;
@@ -35,23 +34,7 @@ const COLUMNS = [
   },
   { id: 'panel', labelKey: 'conversation.creativeStudio.workspace.table.columns.panel', fixedInlineSize: 96 },
   { id: 'beat', labelKey: 'conversation.creativeStudio.workspace.table.columns.beat', fixedInlineSize: 100 },
-  { id: 'action', labelKey: 'conversation.creativeStudio.workspace.table.columns.action' },
-  { id: 'look', labelKey: 'conversation.creativeStudio.workspace.table.columns.look' },
-  { id: 'shots', labelKey: 'conversation.creativeStudio.workspace.table.columns.shots', fixedInlineSize: 68 },
-  { id: 'length', labelKey: 'conversation.creativeStudio.workspace.table.columns.length', fixedInlineSize: 96 },
-  { id: 'state', labelKey: 'conversation.creativeStudio.workspace.table.columns.state', fixedInlineSize: 96 },
-] as const satisfies readonly TableColumn[];
-
-/** The Look leaves the header and the Action heading names both. Nothing else moves. */
-const FOLDED_COLUMNS = [
-  {
-    id: 'position',
-    labelKey: 'conversation.creativeStudio.workspace.table.columns.position',
-    fixedInlineSize: 46,
-  },
-  { id: 'panel', labelKey: 'conversation.creativeStudio.workspace.table.columns.panel', fixedInlineSize: 96 },
-  { id: 'beat', labelKey: 'conversation.creativeStudio.workspace.table.columns.beat', fixedInlineSize: 100 },
-  { id: 'action', labelKey: 'conversation.creativeStudio.workspace.table.columns.actionLook' },
+  { id: 'story', labelKey: 'conversation.creativeStudio.workspace.table.columns.story' },
   { id: 'shots', labelKey: 'conversation.creativeStudio.workspace.table.columns.shots', fixedInlineSize: 68 },
   { id: 'length', labelKey: 'conversation.creativeStudio.workspace.table.columns.length', fixedInlineSize: 96 },
   { id: 'state', labelKey: 'conversation.creativeStudio.workspace.table.columns.state', fixedInlineSize: 96 },
@@ -259,6 +242,7 @@ export type TableViewProps = {
   beats: readonly WorkspaceBeatProjection[];
   boardStyle: StudioBoardStyleV2 | null;
   boardPanels: readonly WorkspaceBoardPanelProjection[];
+  imageRouteReady: boolean;
   pending: boolean;
   gateLocked: boolean;
   selectedBeatId: string | null;
@@ -273,6 +257,7 @@ export const TableView: React.FC<TableViewProps> = ({
   beats,
   boardStyle,
   boardPanels,
+  imageRouteReady,
   pending,
   gateLocked,
   selectedBeatId,
@@ -288,9 +273,7 @@ export const TableView: React.FC<TableViewProps> = ({
   const cellRefs = useRef<Array<Partial<Record<TableColumnId, HTMLTableCellElement | null>>>>([]);
   const panelButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const pendingFoldFocusRowRef = useRef<number | null>(null);
   const pendingPanelButtonFocusRef = useRef<string | null>(null);
-  const [columnWidthPixels, setColumnWidthPixels] = useState(0);
   const [openBoardBeatId, setOpenBoardBeatId] = useState<string | null>(null);
   const detailIdBase = useId();
   const exactBoardPanels = useMemo(() => exactFilmOrderBoardPanels(beats, boardPanels), [beats, boardPanels]);
@@ -321,46 +304,16 @@ export const TableView: React.FC<TableViewProps> = ({
     };
   }, [exactBoardPanels]);
   const interactionLocked = pending || gateLocked;
-  const generationLocked = interactionLocked || boardStyle === null || boardSummary.statusPending;
+  const generationLocked = interactionLocked || boardStyle === null || boardSummary.statusPending || !imageRouteReady;
   const styleLocked =
     interactionLocked || boardSummary.statusPending || boardSummary.busy > 0 || boardSummary.needsAttention;
   const canDrawNext = !generationLocked && boardSummary.nextBatch > 0;
   const canStop = !interactionLocked && boardSummary.busy > 0;
 
-  // Measured the way the coverage bar's density tiers are: off the rendered width, not the window's.
-  useEffect(() => {
-    const node = scrollRef.current;
-    if (node === null) return;
-    const commitWidth = (width: number): void => {
-      if (!Number.isFinite(width) || width < 0) return;
-      const activeElement = document.activeElement;
-      if (
-        tableFoldsLook(width) &&
-        activeElement instanceof HTMLElement &&
-        activeElement.dataset.gridColumnName === 'look' &&
-        node.contains(activeElement)
-      ) {
-        const activeRow = Number(activeElement.dataset.gridRow);
-        if (Number.isInteger(activeRow) && activeRow >= 0) pendingFoldFocusRowRef.current = activeRow;
-      }
-      setColumnWidthPixels(width);
-    };
-    commitWidth(node.getBoundingClientRect().width);
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      // Match the initial border-box measurement. Mixing it with contentRect moves the fold by the
-      // scroll surface's two borders and makes the threshold depend on which callback ran last.
-      commitWidth(node.getBoundingClientRect().width);
-    });
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
-  const foldsLook = tableFoldsLook(columnWidthPixels);
-  const columns: readonly TableColumn[] = foldsLook ? FOLDED_COLUMNS : COLUMNS;
+  const columns: readonly TableColumn[] = COLUMNS;
   const columnCount = columns.length;
   const focusedRow = Math.min(focusedCell.row, Math.max(0, beats.length - 1));
-  const focusedColumn = columns.some((column) => column.id === focusedCell.column) ? focusedCell.column : 'action';
+  const focusedColumn = columns.some((column) => column.id === focusedCell.column) ? focusedCell.column : 'story';
   const openBoardBeatIndex = beats.findIndex((beat) => beat.id === openBoardBeatId && beat.shots.length > 0);
 
   useEffect(() => {
@@ -368,14 +321,6 @@ export const TableView: React.FC<TableViewProps> = ({
       setOpenBoardBeatId(null);
     }
   }, [beats, openBoardBeatId]);
-
-  useLayoutEffect(() => {
-    if (!foldsLook) return;
-    const pendingRow = pendingFoldFocusRowRef.current;
-    if (pendingRow === null) return;
-    pendingFoldFocusRowRef.current = null;
-    cellRefs.current[pendingRow]?.action?.focus({ preventScroll: true });
-  }, [foldsLook]);
 
   useLayoutEffect(() => {
     if (openBoardBeatId !== null) return;
@@ -532,8 +477,7 @@ export const TableView: React.FC<TableViewProps> = ({
           aria-colcount={columnCount}
           aria-label={t('conversation.creativeStudio.workspace.table.label')}
           aria-rowcount={beats.length + 1 + (openBoardBeatIndex < 0 ? 0 : 1)}
-          className={`${styles.grid} ${foldsLook ? styles.gridFolded : ''}`}
-          data-look-folded={foldsLook}
+          className={styles.grid}
           role='grid'
         >
           <colgroup>
@@ -671,34 +615,9 @@ export const TableView: React.FC<TableViewProps> = ({
                   ),
                 },
                 {
-                  column: 'action',
-                  content: (
-                    <span className={foldsLook ? styles.actionFolded : undefined} dir='auto'>
-                      <span className={foldsLook ? styles.actionLine : undefined}>{beat.action}</span>
-                      {foldsLook ? (
-                        <span
-                          className={`${styles.lookLine} ${beat.look.length === 0 ? styles.lookMissing : ''}`}
-                          data-look-folded
-                          dir='auto'
-                        >
-                          {beat.look || t('conversation.creativeStudio.workspace.table.lookMissing')}
-                        </span>
-                      ) : null}
-                    </span>
-                  ),
+                  column: 'story',
+                  content: <span dir='auto'>{beat.story}</span>,
                 },
-                ...(foldsLook
-                  ? []
-                  : [
-                      {
-                        column: 'look' as const,
-                        content: (
-                          <span className={beat.look.length === 0 ? styles.lookMissing : undefined} dir='auto'>
-                            {beat.look || t('conversation.creativeStudio.workspace.table.lookMissing')}
-                          </span>
-                        ),
-                      },
-                    ]),
                 {
                   column: 'shots',
                   content: (

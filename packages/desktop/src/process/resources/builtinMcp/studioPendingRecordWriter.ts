@@ -7,8 +7,11 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import {
-  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT,
+  STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
   STUDIO_PROPOSAL_V2_PENDING_TTL_MS,
+  STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS,
   STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
@@ -32,10 +35,9 @@ import {
   parseStudioReferenceRequestSlotV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 
-const STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES = 256 * 1024;
-const STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT = 50;
-
 export {
+  STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT,
+  STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
   STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
   STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS,
@@ -521,12 +523,16 @@ const publishOwnedExclusiveRecordV2 = async (input: {
 
 type SidecarSchemaV2 = 'missing' | 'v1' | 'v2' | 'invalid';
 
+const pendingFamilySchemaVersionV2 = (slotRecordKey: WritePendingRecordInputV2<unknown>['slotRecordKey']): number =>
+  slotRecordKey === 'proposalId' ? STUDIO_PROPOSAL_SCHEMA_VERSION_V2 : STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION;
+
 const readSidecarSchemaV2 = async (input: {
   fs: RecordIoFileSystem;
   canonicalRoot: string;
   parent: DirectoryAuthorityV2;
   file: string;
   maxRecordBytes: number;
+  familyKey: WritePendingRecordInputV2<unknown>['slotRecordKey'];
   slotRecordKey?: WritePendingRecordInputV2<unknown>['slotRecordKey'];
 }): Promise<SidecarSchemaV2> => {
   await assertDirectoryAuthorityV2(input.fs, input.parent);
@@ -543,8 +549,16 @@ const readSidecarSchemaV2 = async (input: {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return 'invalid';
     const descriptor = Object.getOwnPropertyDescriptor(value, 'schemaVersion');
     if (descriptor === undefined || !('value' in descriptor)) return 'invalid';
-    if (descriptor.value === 1) return 'v1';
-    if (descriptor.value !== STUDIO_PROJECT_SCHEMA_VERSION) return 'invalid';
+    const currentVersion = pendingFamilySchemaVersionV2(input.familyKey);
+    if (
+      typeof descriptor.value === 'number' &&
+      Number.isSafeInteger(descriptor.value) &&
+      descriptor.value >= 1 &&
+      descriptor.value < currentVersion
+    ) {
+      return 'v1';
+    }
+    if (descriptor.value !== currentVersion) return 'invalid';
     if (input.slotRecordKey === undefined) return 'v2';
     const parsed =
       input.slotRecordKey === 'proposalId'
@@ -1671,7 +1685,7 @@ const reserveSlotV2 = async (input: {
   authorizeBeforeLink?: () => Promise<void>;
 }): Promise<{ file: string; identity: { dev: number; ino: number }; readyFile: string }> => {
   const bytes = JSON.stringify({
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: pendingFamilySchemaVersionV2(input.slotRecordKey),
     [input.slotRecordKey]: input.recordId,
     reservedAt: new Date().toISOString(),
   });
@@ -1701,6 +1715,7 @@ const reserveSlotV2 = async (input: {
           parent: input.directories.slots,
           file,
           maxRecordBytes: input.limits.maxRecordBytes,
+          familyKey: input.slotRecordKey,
           slotRecordKey: input.slotRecordKey,
         });
         if (schema === 'v1' || schema === 'invalid') throwForSidecarSchemaV2(schema);
@@ -2013,6 +2028,7 @@ export const writePendingRecordV2 = async <RecordType>(
         parent: directories.pending,
         file: path.join(directories.pending.path, `${input.recordId}.json`),
         maxRecordBytes: limits.maxRecordBytes,
+        familyKey: input.slotRecordKey,
       }).catch((): SidecarSchemaV2 => 'invalid');
       if (schema === 'v1') throwForSidecarSchemaV2('v1');
       const cleaned = await cleanupReservedSlotV2({

@@ -34,6 +34,7 @@ import { CreativeStudioMediaError, type StudioMediaStore } from './mediaStore';
 import type { StudioProviderResolver } from './providerResolver';
 import { CreativeStudioStoreError, type CreativeStudioStore } from './store';
 import { createStudioSpendReceiptV2 } from './service/schema2/pricing';
+import { studioGenerationCompositionMatchesAuthorityV2 } from './service/schema2/generation';
 import {
   advanceStudioWaitingBindingsV2,
   terminalizeStudioUnboundDependenciesV2,
@@ -170,7 +171,7 @@ export class StudioJobManagerError extends Error {
 
 type ExecutionContextV2 = {
   projectId: string;
-  shotId: string;
+  shotId: string | null;
   mediaKind: StudioMediaKind;
   purpose: StudioJobV2['purpose'];
   jobId: string;
@@ -369,6 +370,7 @@ const jobMediaKindV2 = (job: StudioJobV2): StudioMediaKind => {
   switch (job.purpose) {
     case 'seed_still':
     case 'board_still':
+    case 'reference_image':
       return 'image';
     case 'video_take':
       return 'video';
@@ -383,11 +385,33 @@ const activeBeatForShotV2 = (project: StudioProjectV2, shotId: string): StudioPr
   return null;
 };
 
+const activeOwnerForJobV2 = (
+  project: StudioProjectV2,
+  job: StudioJobV2
+): StudioProjectV2['shots'][string] | StudioProjectV2['references'][string] | null => {
+  if (job.target.kind === 'shot') {
+    const shot = ownValueV2(project.shots, job.target.shotId);
+    return shot !== undefined && activeBeatForShotV2(project, shot.id) !== null && shot.jobIds.includes(job.id)
+      ? shot
+      : null;
+  }
+  const reference = ownValueV2(project.references, job.target.referenceId);
+  return project.referencePlanStatus === 'planned' &&
+    project.referenceOrder.includes(job.target.referenceId) &&
+    reference?.id === job.target.referenceId &&
+    reference.jobIds.includes(job.id)
+    ? reference
+    : null;
+};
+
 const authorizationItemForJobV2 = (project: StudioProjectV2, job: StudioJobV2) => {
   const authorization = project.spendAuthorizations.find((candidate) => candidate.id === job.authorizationId);
   const item = authorization
     ? [...authorization.baseItems, ...authorization.cascadeItems].find(
-        (candidate) => candidate.id === job.authorizationItemId
+        (candidate) =>
+          candidate.id === job.authorizationItemId &&
+          candidate.purpose === job.purpose &&
+          JSON.stringify(candidate.target) === JSON.stringify(job.target)
       )
     : undefined;
   return authorization && item ? { authorization, item } : null;
@@ -689,16 +713,23 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProjectV2,
     job: StudioJobV2
   ): Promise<PreparedSubmissionV2> => {
-    const shot = ownValueV2(project.shots, job.shotId);
+    const owner = activeOwnerForJobV2(project, job);
+    const shotId = job.target.kind === 'shot' ? job.target.shotId : null;
     const snapshot = job.requestSnapshot;
     const authority = authorizationItemForJobV2(project, job);
     if (
-      !shot ||
-      !activeBeatForShotV2(project, shot.id) ||
-      !shot.jobIds.includes(job.id) ||
+      owner === null ||
       job.status !== 'queued_local' ||
       snapshot === null ||
-      authority === null
+      authority === null ||
+      JSON.stringify(job.composition) !== JSON.stringify(snapshot.composition) ||
+      JSON.stringify(snapshot.composition.inputs.referenceInputs) !== JSON.stringify(snapshot.referenceInputs) ||
+      !studioGenerationCompositionMatchesAuthorityV2(snapshot.composition, {
+        projectRevision: authority.authorization.projectRevision,
+        target: job.target,
+        purpose: job.purpose,
+        provider: job.provider,
+      })
     ) {
       throw new StudioJobManagerError('invalid_request');
     }
@@ -731,7 +762,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     }
     const resolvedProvider = providerWithModel(provider, job.provider.model);
     const baseRequest = {
-      prompt: snapshot.prompt,
+      prompt: snapshot.composition.prompt,
       mediaKind,
       aspectRatio: snapshot.aspectRatio,
       resolution: snapshot.resolution,
@@ -740,11 +771,23 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     } as const;
     let firstFrame: ResolvedStudioGenerationRequest['firstFrame'];
     let conditioningImages: Array<Awaited<ReturnType<StudioMediaStore['resolveProviderInputV2']>>>;
+    if (snapshot.referenceInputs.length > route.constraints.maxConditioningImages) {
+      throw new StudioJobManagerError('invalid_route');
+    }
     if (snapshot.referenceInputs.length > 0) {
       conditioningImages = [];
-      for (const referenceInput of snapshot.referenceInputs) {
-        const reference = ownValueV2(project.assets, referenceInput.assetId);
-        if (reference?.sha256 !== referenceInput.sha256) throw new StudioJobManagerError('invalid_request');
+      for (const referenceSnapshot of snapshot.referenceInputs) {
+        const reference = ownValueV2(project.assets, referenceSnapshot.assetId);
+        const semantic = ownValueV2(project.references, referenceSnapshot.referenceId);
+        if (
+          reference?.sha256 !== referenceSnapshot.sha256 ||
+          reference.projectId !== project.id ||
+          reference.mediaKind !== 'image' ||
+          reference.projectReferenceId !== referenceSnapshot.referenceId ||
+          semantic?.kind !== referenceSnapshot.kind
+        ) {
+          throw new StudioJobManagerError('invalid_request');
+        }
         conditioningImages.push(await deps.mediaStore.resolveProviderInputV2(project.id, reference.id));
       }
     }
@@ -774,7 +817,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     }
     return {
       projectId: project.id,
-      shotId: shot.id,
+      shotId,
       mediaKind,
       purpose: job.purpose,
       jobId: job.id,
@@ -788,14 +831,13 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProjectV2,
     job: StudioJobV2
   ): Promise<ExecutionContextV2 | null> => {
-    const shot = ownValueV2(project.shots, job.shotId);
+    const owner = activeOwnerForJobV2(project, job);
     const authority = authorizationItemForJobV2(project, job);
     const binding = authority?.authorization.providerBindings.find(
       (candidate) => candidate.itemId === job.authorizationItemId
     );
     if (
-      !shot ||
-      !shot.jobIds.includes(job.id) ||
+      owner === null ||
       !binding ||
       binding.provider.providerId !== job.provider.providerId ||
       binding.provider.adapterId !== job.provider.adapterId ||
@@ -810,7 +852,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       if (!provider || !adapter || !providerIsAvailable(provider, job.provider.model)) return null;
       return {
         projectId: project.id,
-        shotId: shot.id,
+        shotId: job.target.kind === 'shot' ? job.target.shotId : null,
         mediaKind,
         purpose: job.purpose,
         jobId: job.id,
@@ -826,15 +868,14 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     project: StudioProjectV2,
     job: StudioJobV2
   ): Promise<ExecutionContextV2 | null> => {
-    const shot = ownValueV2(project.shots, job.shotId);
-    if (!shot || !shot.jobIds.includes(job.id)) return null;
+    if (activeOwnerForJobV2(project, job) === null) return null;
     try {
       const provider = (await deps.listProviders()).find((candidate) => candidate.id === job.provider.providerId);
       const adapter = deps.adapters.get(job.provider.adapterId);
       if (!provider || !adapter || !providerCredentialsAreUsable(provider)) return null;
       return {
         projectId: project.id,
-        shotId: shot.id,
+        shotId: job.target.kind === 'shot' ? job.target.shotId : null,
         mediaKind: jobMediaKindV2(job),
         purpose: job.purpose,
         jobId: job.id,
@@ -881,7 +922,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     primaryAssetId: string,
     signal: AbortSignal
   ): Promise<boolean> => {
-    if (context.mediaKind !== 'video') return false;
+    if (context.mediaKind !== 'video' || context.shotId === null) return false;
     const posters = outputs.filter((output) => output.role === 'poster');
     if (posters.length !== 1 || posters[0]!.mediaKind !== 'image') return false;
     const poster = posters[0]!;
@@ -1023,7 +1064,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     signal: AbortSignal
   ): Promise<'continue' | 'terminal'> => {
     if (snapshot.status === 'queued' || snapshot.status === 'running') {
-      await mutateJobV2(context.projectId, context.jobId, (_project, job) => {
+      const current = await mutateJobV2(context.projectId, context.jobId, (_project, job) => {
         if (job.providerJobId !== providerJobId) return false;
         if (job.status === 'cancelled' || TERMINAL_STATUSES.has(job.status)) return false;
         if (job.status !== 'queued_remote' && job.status !== 'running') return false;
@@ -1033,7 +1074,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         else job.progress = snapshot.progress;
         return true;
       });
-      return 'continue';
+      return current.providerJobId === providerJobId &&
+        (current.status === 'queued_remote' || current.status === 'running')
+        ? 'continue'
+        : 'terminal';
     }
     if (snapshot.status === 'succeeded') {
       if (!(await recordBillableCompletionV2(context, providerJobId))) return 'terminal';
@@ -1302,7 +1346,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         job.projectId !== project.id ||
         job.status !== 'queued_local' ||
         job.requestSnapshot === null ||
-        !activeBeatForShotV2(project, job.shotId) ||
+        activeOwnerForJobV2(project, job) === null ||
         authorizationItemForJobV2(project, job) === null
       ) {
         invalidRequest();
@@ -1504,16 +1548,14 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (disposed) throw new StudioJobManagerError('invalid_request');
     const previous = ownValueV2(project.jobs, input.jobId);
     if (!previous) throw new CreativeStudioStoreError('not_found', 'Studio job not found');
-    const shot = ownValueV2(project.shots, previous.shotId);
-    if (!shot || !shot.jobIds.includes(previous.id)) {
-      throw new CreativeStudioStoreError('not_found', 'Studio shot not found');
-    }
-    if (!activeBeatForShotV2(project, shot.id)) throw new StudioJobManagerError('invalid_request');
-    const shotJobs = shot.jobIds.flatMap((jobId) => {
+    const owner = activeOwnerForJobV2(project, previous);
+    if (owner === null) throw new CreativeStudioStoreError('not_found', 'Studio generation target not found');
+    const targetJson = JSON.stringify(previous.target);
+    const targetJobs = owner.jobIds.flatMap((jobId) => {
       const job = ownValueV2(project.jobs, jobId);
-      return job?.projectId === project.id && job.shotId === shot.id ? [job] : [];
+      return job?.projectId === project.id && JSON.stringify(job.target) === targetJson ? [job] : [];
     });
-    if (shotJobs.some((job) => job.retryOfJobId === previous.id)) {
+    if (targetJobs.some((job) => job.retryOfJobId === previous.id)) {
       throw new StudioJobManagerError('busy');
     }
     if (!canRetryJobV2(previous)) {
@@ -1608,22 +1650,18 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (!job || job.status !== 'failed' || job.error?.code !== 'download_failed') {
       throw new StudioJobManagerError('invalid_request');
     }
-    const shot = ownValueV2(project.shots, job.shotId);
-    if (
-      !shot ||
-      job.projectId !== project.id ||
-      !shot.jobIds.includes(job.id) ||
-      activeBeatForShotV2(project, shot.id) === null
-    ) {
+    const owner = activeOwnerForJobV2(project, job);
+    if (owner === null || job.projectId !== project.id) {
       throw new StudioJobManagerError('invalid_request');
     }
-    const shotJobs = shot.jobIds.flatMap((jobId) => {
+    const targetJson = JSON.stringify(job.target);
+    const targetJobs = owner.jobIds.flatMap((jobId) => {
       const candidate = ownValueV2(project.jobs, jobId);
-      return candidate?.projectId === project.id && candidate.shotId === job.shotId ? [candidate] : [];
+      return candidate?.projectId === project.id && JSON.stringify(candidate.target) === targetJson ? [candidate] : [];
     });
     if (
-      shotJobs.some((candidate) => candidate.retryOfJobId === job.id) ||
-      shotJobs.some((candidate) => candidate.id !== job.id && !TERMINAL_STATUSES.has(candidate.status))
+      targetJobs.some((candidate) => candidate.retryOfJobId === job.id) ||
+      targetJobs.some((candidate) => candidate.id !== job.id && !TERMINAL_STATUSES.has(candidate.status))
     ) {
       throw new StudioJobManagerError('busy');
     }

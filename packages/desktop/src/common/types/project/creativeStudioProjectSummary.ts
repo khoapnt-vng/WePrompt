@@ -60,7 +60,8 @@ const canonicalVideoPosterV2 = (
     const job = project.jobs[jobId];
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.status === 'succeeded' &&
       job.purpose === 'video_take' &&
       job.outputAssetIdsByRole.primary === videoAssetId &&

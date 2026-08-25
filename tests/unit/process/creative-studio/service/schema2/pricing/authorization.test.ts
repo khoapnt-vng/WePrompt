@@ -14,8 +14,10 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   calculateStudioQuotedGenerationAmounts,
+  composeStudioGenerationV2,
   createStudioQuotedGenerationId,
   createStudioResolvedGenerationRequestPlan,
+  deriveStudioInstructionProfileV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
   createStudioRateCardV2,
@@ -42,26 +44,25 @@ const videoRate = {
   rateMinorUnits: 7,
 } as const;
 
-const template = {
-  prompt: 'A precise cinematic frame',
-  aspectRatio: '16:9',
-  resolution: '1080p',
-  durationSeconds: 8,
-  referenceInputs: [],
-} as const;
+const imageProvider = {
+  providerId: 'provider_image',
+  adapterId: 'weprompt-image-v1' as const,
+  model: 'image-model',
+};
+const videoProvider = {
+  providerId: 'provider_video',
+  adapterId: 'openrouter-video-v1' as const,
+  model: 'video-model',
+};
 
 const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   id,
-  line: id,
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Shooting script for ${id}`,
   durationSeconds: 8,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
-  referenceIds: [],
+  referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -71,53 +72,96 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   jobIds: [],
 });
 
-const makeQuote = () => {
-  const project = {
-    id: 'project_1',
-    revision: 7,
-    beatOrder: ['beat_1'],
-    beats: {
-      beat_1: {
-        id: 'beat_1',
-        title: 'Opening',
-        action: '',
-        look: '',
-        actionRevision: 1,
-        targetSeconds: null,
-        shotOrder: ['shot_1', 'shot_2'],
-        lineHistory: [],
-      },
+const makeProject = () => ({
+  id: 'project_1',
+  revision: 7,
+  beatOrder: ['beat_1'],
+  beats: {
+    beat_1: {
+      id: 'beat_1',
+      title: 'Opening',
+      story: 'A precise cinematic opening.',
+      targetSeconds: null,
+      shotOrder: ['shot_1', 'shot_2'],
     },
-    shots: { shot_1: makeShot('shot_1'), shot_2: makeShot('shot_2') },
-    references: {},
-    jobs: {},
+  },
+  shots: { shot_1: makeShot('shot_1'), shot_2: makeShot('shot_2') },
+  references: {},
+  jobs: {},
+});
+
+const makeComposition = (
+  shotId: string,
+  purpose: 'seed_still' | 'board_still' | 'video_take',
+  referenceInputs: Array<{
+    referenceId: string;
+    kind: 'character' | 'background';
+    assetId: string;
+    sha256: string;
+  }> = []
+) => {
+  const route = purpose === 'video_take' ? videoProvider : imageProvider;
+  const source = {
+    kind: 'shot' as const,
+    beatId: 'beat_1',
+    story: 'A precise cinematic opening.',
+    shotId,
+    shootingScript: `Shooting script for ${shotId}`,
   };
+  return composeStudioGenerationV2({
+    projectRevision: 7,
+    brief: 'A precise cinematic frame.',
+    rules: [],
+    source,
+    purpose,
+    referenceInputs,
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route,
+    boardStyle: purpose === 'board_still' ? 'grey_tone' : null,
+    instructionProfile: deriveStudioInstructionProfileV2(route, purpose, source),
+  });
+};
+
+const makeResolvedPlan = (
+  shotId: string,
+  purpose: 'seed_still' | 'board_still' | 'video_take',
+  referenceInputs: Parameters<typeof makeComposition>[2] = []
+) => {
+  const composition = makeComposition(shotId, purpose, referenceInputs);
+  return createStudioResolvedGenerationRequestPlan({
+    purpose,
+    template: {
+      composition,
+      aspectRatio: composition.inputs.aspectRatio,
+      resolution: composition.inputs.resolution,
+      durationSeconds: purpose === 'board_still' ? 4 : 8,
+      referenceInputs: composition.inputs.referenceInputs,
+    },
+    conditioningInput: purpose === 'video_take' ? { kind: 'seed_still', assetId: 'seed_asset' } : null,
+  });
+};
+
+const makeQuote = () => {
+  const project = makeProject();
   const core = createStudioSubmissionQuoteCoreV2({
     project,
     originReferenceHandoffId: null,
     rateCard: createStudioRateCardV2([imageRate, videoRate]),
     baseItems: [
       {
-        shotId: 'shot_1',
+        target: { kind: 'shot', shotId: 'shot_1' },
         purpose: 'seed_still',
         routeId: imageRate.routeId,
         generationCount: 1,
-        requestPlan: createStudioResolvedGenerationRequestPlan({
-          purpose: 'seed_still',
-          template,
-          conditioningInput: null,
-        }),
+        requestPlan: makeResolvedPlan('shot_1', 'seed_still'),
       },
       {
-        shotId: 'shot_2',
+        target: { kind: 'shot', shotId: 'shot_2' },
         purpose: 'video_take',
         routeId: videoRate.routeId,
         generationCount: 1,
-        requestPlan: createStudioResolvedGenerationRequestPlan({
-          purpose: 'video_take',
-          template,
-          conditioningInput: { kind: 'seed_still', assetId: 'seed_asset' },
-        }),
+        requestPlan: makeResolvedPlan('shot_2', 'video_take'),
       },
     ],
     cascadeItems: [],
@@ -134,11 +178,11 @@ const makeAuthorizationInput = () => {
     providerBindings: [
       {
         itemId: seed!.id,
-        provider: { providerId: 'provider_image', adapterId: 'weprompt-image-v1' as const, model: 'image-model' },
+        provider: imageProvider,
       },
       {
         itemId: video!.id,
-        provider: { providerId: 'provider_video', adapterId: 'openrouter-video-v1' as const, model: 'video-model' },
+        provider: videoProvider,
       },
     ],
     idempotencyKeys: [
@@ -149,26 +193,9 @@ const makeAuthorizationInput = () => {
 };
 
 const makeBoardAuthorizationInput = () => {
-  const project = {
-    id: 'project_1',
-    revision: 7,
-    beatOrder: ['beat_1'],
-    beats: {
-      beat_1: {
-        id: 'beat_1',
-        title: 'Opening',
-        action: 'Cross the room',
-        look: 'Grey morning',
-        actionRevision: 1,
-        targetSeconds: null,
-        shotOrder: ['shot_1'],
-        lineHistory: [],
-      },
-    },
-    shots: { shot_1: makeShot('shot_1') },
-    references: {},
-    jobs: {},
-  };
+  const project = makeProject();
+  project.beats.beat_1.shotOrder = ['shot_1'];
+  delete project.shots.shot_2;
   const quote = {
     ...createStudioSubmissionQuoteCoreV2({
       project,
@@ -176,18 +203,11 @@ const makeBoardAuthorizationInput = () => {
       rateCard: createStudioRateCardV2([{ ...imageRate, rateMinorUnits: 3 }]),
       baseItems: [
         {
-          shotId: 'shot_1',
+          target: { kind: 'shot', shotId: 'shot_1' },
           purpose: 'board_still' as const,
           routeId: imageRate.routeId,
           generationCount: 1,
-          requestPlan: {
-            kind: 'resolved' as const,
-            snapshot: {
-              ...template,
-              durationSeconds: 4,
-              conditioningInput: null,
-            },
-          },
+          requestPlan: makeResolvedPlan('shot_1', 'board_still'),
         },
       ],
       cascadeItems: [],
@@ -202,7 +222,7 @@ const makeBoardAuthorizationInput = () => {
     providerBindings: [
       {
         itemId: item.id,
-        provider: { providerId: 'provider_image', adapterId: 'weprompt-image-v1' as const, model: 'image-model' },
+        provider: imageProvider,
       },
     ],
     idempotencyKeys: [{ itemId: item.id, key: 'key_board' }],
@@ -223,7 +243,8 @@ const appendAuthorizationItem = (
     itemId: item.id,
     provider: { providerId: 'provider_image', adapterId: 'weprompt-image-v1', model: 'image-model' },
   });
-  input.idempotencyKeys.push({ itemId: item.id, key: `key_${item.shotId}_${item.purpose}` });
+  const targetId = item.target.kind === 'shot' ? item.target.shotId : item.target.referenceId;
+  input.idempotencyKeys.push({ itemId: item.id, key: `key_${targetId}_${item.purpose}` });
 };
 
 const makeMixedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
@@ -236,11 +257,11 @@ const makeMixedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2 => 
 const makeBoardCascadeAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
   const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
   const item = structuredClone(input.quote.baseItems[0]!);
-  item.shotId = 'shot_2';
+  item.target = { kind: 'shot', shotId: 'shot_2' };
   item.id = createStudioQuotedGenerationId({
     projectId: input.quote.projectId,
     projectRevision: input.quote.projectRevision,
-    shotId: item.shotId,
+    target: item.target,
     purpose: item.purpose,
   });
   appendAuthorizationItem(input, item, 'cascade');
@@ -257,11 +278,11 @@ const makeOversizedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2
   const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
   for (let shotNumber = 2; shotNumber <= 25; shotNumber += 1) {
     const item = structuredClone(input.quote.baseItems[0]!);
-    item.shotId = `shot_${shotNumber}`;
+    item.target = { kind: 'shot', shotId: `shot_${shotNumber}` };
     item.id = createStudioQuotedGenerationId({
       projectId: input.quote.projectId,
       projectRevision: input.quote.projectRevision,
-      shotId: item.shotId,
+      target: item.target,
       purpose: item.purpose,
     });
     appendAuthorizationItem(input, item, 'base');
@@ -273,7 +294,16 @@ const makeReferencedBoardAuthorizationInput = (): StudioSpendAuthorizationInputV
   const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
   const plan = input.quote.baseItems[0]!.requestPlan;
   if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
-  plan.snapshot.referenceInputs = [{ assetId: 'reference_1', sha256: 'a'.repeat(64) }];
+  const referenceInputs = [
+    {
+      referenceId: 'reference_1',
+      kind: 'character' as const,
+      assetId: 'asset_reference_1',
+      sha256: 'a'.repeat(64),
+    },
+  ];
+  plan.snapshot.composition = makeComposition('shot_1', 'board_still', referenceInputs);
+  plan.snapshot.referenceInputs = referenceInputs;
   return input;
 };
 
@@ -287,9 +317,11 @@ const makeConditionedBoardAuthorizationInput = (): StudioSpendAuthorizationInput
 
 const makeDeferredBoardAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
   const input: StudioSpendAuthorizationInputV2 = makeBoardAuthorizationInput();
+  const resolved = makeResolvedPlan('shot_1', 'board_still');
+  const { conditioningInput: _conditioningInput, ...template } = resolved.snapshot;
   input.quote.baseItems[0]!.requestPlan = {
     kind: 'after_take_selection',
-    template: { ...template, durationSeconds: 4 },
+    template,
     dependency: { kind: 'authorized_seed', upstreamItemId: 'seed_item_1', shotId: 'shot_1' },
   };
   return input;
@@ -389,6 +421,22 @@ describe('schema-2 Studio spend authorization', () => {
     });
   });
 
+  it('retains the exact approved references frozen into a Board authority', () => {
+    const authorization = createStudioSpendAuthorizationV2(makeReferencedBoardAuthorizationInput());
+    const plan = authorization.baseItems[0]!.requestPlan;
+    expect(plan.kind).toBe('resolved');
+    if (plan.kind !== 'resolved') throw new Error('expected resolved Board authority');
+    expect(plan.snapshot.referenceInputs).toEqual([
+      {
+        referenceId: 'reference_1',
+        kind: 'character',
+        assetId: 'asset_reference_1',
+        sha256: 'a'.repeat(64),
+      },
+    ]);
+    expect(plan.snapshot.composition.inputs.referenceInputs).toEqual(plan.snapshot.referenceInputs);
+  });
+
   it('refuses a Board authority whose image plumbing duration is not canonical', () => {
     const input = makeBoardAuthorizationInput();
     const plan = input.quote.baseItems[0]!.requestPlan;
@@ -405,7 +453,6 @@ describe('schema-2 Studio spend authorization', () => {
     ['a Board cascade row', makeBoardCascadeAuthorizationInput],
     ['a Board reference handoff origin', makeBoardHandoffAuthorizationInput],
     ['more than 24 Board rows', makeOversizedBoardAuthorizationInput],
-    ['a referenced Board request', makeReferencedBoardAuthorizationInput],
     ['a conditioned Board request', makeConditionedBoardAuthorizationInput],
     ['a deferred Board request', makeDeferredBoardAuthorizationInput],
   ] as const)('refuses %s before minting spend authority', (_label, makeInput) => {

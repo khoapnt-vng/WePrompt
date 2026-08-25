@@ -9,11 +9,13 @@ import { promises as nodeFs, type Dir, type Dirent } from 'node:fs';
 import { watch as watchFileSystem } from 'node:fs';
 import path from 'node:path';
 import {
+  isUnsupportedStudioPrototypeSchemaVersion,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
+  STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
@@ -338,18 +340,18 @@ const createStudioDirectorCommandMailboxInternal = (
       typeof value === 'object' &&
       value !== null &&
       !Array.isArray(value) &&
-      (value as { schemaVersion?: unknown }).schemaVersion === 1
+      isUnsupportedStudioPrototypeSchemaVersion((value as { schemaVersion?: unknown }).schemaVersion)
     ) {
       throw new CreativeStudioStoreError(
         'unsupported_prototype_schema',
-        'Studio Director commands do not own schema-1 project bytes'
+        'Studio Director commands do not own prior-schema project bytes'
       );
     }
     if (
       typeof value !== 'object' ||
       value === null ||
       Array.isArray(value) ||
-      (value as { schemaVersion?: unknown }).schemaVersion !== STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 ||
+      (value as { schemaVersion?: unknown }).schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
       (value as { id?: unknown }).id !== authority.projectId
     ) {
       throw new RecordIoError('unsafe_file');

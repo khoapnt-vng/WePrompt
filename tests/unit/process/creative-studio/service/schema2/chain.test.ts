@@ -12,7 +12,10 @@ import {
   type StudioAssetV2,
   type StudioConditioningInputSnapshot,
   type StudioGenerationRequestSnapshot,
+  type StudioGenerationReferenceInputSnapshot,
   type StudioJobV2,
+  type StudioJobPurpose,
+  type StudioMediaModelRef,
   type StudioProjectV2,
   type StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
@@ -25,10 +28,17 @@ import {
 import {
   createStudioFrameExtractionId,
   createStudioGenerationRequestTemplate,
+  composeStudioGenerationV2,
+  deriveStudioInstructionProfileV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 
 const NOW = '2026-08-18T00:00:00.000Z';
 const VIDEO_ROUTE_ID = 'video_route_1';
+const VIDEO_ROUTE = {
+  providerId: 'provider_1',
+  adapterId: 'byteplus-seedance-v1' as const,
+  model: 'video-model',
+};
 
 const makeProject = (): StudioProjectV2 => {
   const project = createEmptyStudioProjectV2(
@@ -48,16 +58,12 @@ const makeProject = (): StudioProjectV2 => {
 
 const makeShot = (shotId: string): StudioShot => ({
   id: shotId,
-  line: `Line for ${shotId}`,
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Shooting script for ${shotId}`,
   durationSeconds: 8,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
-  referenceIds: [],
+  referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -69,7 +75,7 @@ const makeShot = (shotId: string): StudioShot => ({
 
 const makeAsset = (
   project: StudioProjectV2,
-  shotId: string,
+  shotId: string | null,
   assetId: string,
   mediaKind: 'image' | 'video',
   collection: StudioAssetV2['managedAsset']['collection'],
@@ -85,7 +91,42 @@ const makeAsset = (
   sha256: assetId.padEnd(64, 'a').slice(0, 64),
   ...(mediaKind === 'video' ? { durationSeconds: 10 } : {}),
   createdAt,
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
 });
+
+const makeComposition = (
+  project: StudioProjectV2,
+  beatId: string,
+  shot: StudioShot,
+  purpose: Exclude<StudioJobPurpose, 'reference_image'>,
+  route: StudioMediaModelRef,
+  referenceInputs: readonly StudioGenerationReferenceInputSnapshot[] = []
+) => {
+  const beat = project.beats[beatId]!;
+  const source = {
+    kind: 'shot' as const,
+    beatId: beat.id,
+    story: beat.story,
+    shotId: shot.id,
+    shootingScript: shot.shootingScript,
+  };
+  return composeStudioGenerationV2({
+    projectRevision: project.revision,
+    brief: project.brief,
+    rules: project.rules,
+    source,
+    purpose,
+    referenceInputs: [...referenceInputs],
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+    route,
+    boardStyle: purpose === 'board_still' ? project.boardStyle : null,
+    instructionProfile: deriveStudioInstructionProfileV2(route, purpose, source),
+  });
+};
 
 const makeSnapshot = (
   project: StudioProjectV2,
@@ -93,18 +134,11 @@ const makeSnapshot = (
   shot: StudioShot,
   conditioningInput: StudioConditioningInputSnapshot
 ): StudioGenerationRequestSnapshot => {
-  const beat = project.beats[beatId]!;
+  const composition = makeComposition(project, beatId, shot, 'video_take', VIDEO_ROUTE);
   return {
     ...createStudioGenerationRequestTemplate({
-      purpose: 'video_take',
-      brief: project.brief,
-      rules: project.rules,
-      look: beat.look,
-      line: shot.line,
-      aspectRatio: project.aspectRatio,
-      resolution: project.resolution,
+      composition,
       durationSeconds: shot.durationSeconds,
-      referenceInputs: [],
     }),
     conditioningInput,
   };
@@ -119,9 +153,9 @@ const makeJob = (
 ): StudioJobV2 => ({
   id: jobId,
   projectId: project.id,
-  shotId: shot.id,
+  target: { kind: 'shot', shotId: shot.id },
   status: 'succeeded',
-  provider: { providerId: 'provider_1', adapterId: 'byteplus-seedance-v1', model: 'video-model' },
+  provider: snapshot.composition.inputs.route,
   idempotencyKey: `idem_${jobId}`,
   providerJobId: `provider_${jobId}`,
   remoteStartedAt: NOW,
@@ -134,23 +168,24 @@ const makeJob = (
   duplicateChargeAcknowledgedAt: null,
   createdAt: NOW,
   updatedAt: NOW,
-  purpose: 'video_take',
+  purpose: snapshot.composition.inputs.purpose,
   authorizationId: `authorization_${jobId}`,
   authorizationItemId: `item_${jobId}`,
+  composition: snapshot.composition,
   requestPlan: { kind: 'resolved', snapshot },
   requestSnapshot: snapshot,
   spendReceipt: {
     authorizationId: `authorization_${jobId}`,
     itemId: `item_${jobId}`,
     jobId,
-    purpose: 'video_take',
+    purpose: snapshot.composition.inputs.purpose,
     routeId: VIDEO_ROUTE_ID,
     currency: 'USD',
-    rateUnit: 'second',
+    rateUnit: snapshot.composition.inputs.purpose === 'video_take' ? 'second' : 'generation',
     rateMinorUnits: 1,
-    durationSeconds: shot.durationSeconds,
+    durationSeconds: snapshot.composition.inputs.purpose === 'video_take' ? shot.durationSeconds : null,
     generationCount: 1,
-    totalMinorUnits: shot.durationSeconds,
+    totalMinorUnits: snapshot.composition.inputs.purpose === 'video_take' ? shot.durationSeconds : 1,
   },
   outputAssetIdsByRole: { primary: assetId, poster: null },
 });
@@ -160,12 +195,9 @@ const addBeat = (project: StudioProjectV2, beatId: string): void => {
   project.beats[beatId] = {
     id: beatId,
     title: beatId,
-    action: `Action for ${beatId}`,
-    look: `Look for ${beatId}`,
-    actionRevision: 1,
+    story: `Story for ${beatId}`,
     targetSeconds: null,
     shotOrder: [],
-    lineHistory: [],
   };
 };
 
@@ -385,42 +417,29 @@ describe('deriveStudioDirtyShotsV2', () => {
     shot.seedStillId = null;
     const referenceId = 'reference_character';
     project.referenceOrder = [referenceId];
+    project.referencePlanStatus = 'planned';
     project.references[referenceId] = {
       id: referenceId,
       kind: 'character',
       label: 'Ming',
       prompt: 'A stable character sheet for Ming.',
       candidateAssetId: null,
-      candidateJobId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
+      jobIds: [],
       createdAt: NOW,
       updatedAt: NOW,
     };
-    shot.referenceIds = [referenceId];
     const historicalReferenceOutput = makeAsset(
       project,
-      shot.id,
+      null,
       'historical_reference_output',
       'image',
       'assets',
       '2026-08-18T00:00:01.000Z'
     );
+    historicalReferenceOutput.projectReferenceId = referenceId;
     project.assets[historicalReferenceOutput.id] = historicalReferenceOutput;
-    shot.assetIds.push(historicalReferenceOutput.id);
-    const jobId = 'historical_reference_job';
-    project.jobs[jobId] = {
-      id: jobId,
-      projectId: project.id,
-      shotId: shot.id,
-      status: 'succeeded',
-      purpose: 'seed_still',
-      projectReferenceId: referenceId,
-      outputAssetIds: [historicalReferenceOutput.id],
-      outputAssetIdsByRole: { primary: historicalReferenceOutput.id, poster: null },
-      requestSnapshot: null,
-    } as StudioJobV2;
-    shot.jobIds.push(jobId);
 
     expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
   });
@@ -445,27 +464,40 @@ describe('deriveStudioDirtyShotsV2', () => {
     const referenceSha = 'b'.repeat(64);
     project.imageRouteId = 'image_route_1';
     project.assets[seedId] = makeAsset(project, shot.id, seedId, 'image', 'assets');
-    project.assets[referenceId] = {
-      ...makeAsset(project, shot.id, referenceId, 'image', 'imports'),
-      shotId: null,
-      sha256: referenceSha,
-      briefReferenceRole: 'look',
-      briefReferenceLabel: 'Reference look',
+    project.referencePlanStatus = 'planned';
+    project.referenceOrder = [referenceId];
+    project.references[referenceId] = {
+      id: referenceId,
+      kind: 'character',
+      label: 'Reference character',
+      prompt: 'The approved recurring character.',
+      candidateAssetId: null,
+      approvedAssetId: referenceId,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    project.assets[referenceId] = { ...makeAsset(project, null, referenceId, 'image', 'assets'), sha256: referenceSha };
+    project.assets[referenceId]!.projectReferenceId = referenceId;
+    shot.referenceBinding = {
+      status: 'ready',
+      characterReferenceIds: [referenceId],
+      backgroundReferenceId: null,
     };
     shot.seedStillId = seedId;
     shot.assetIds.push(seedId);
 
+    const referenceInputs = [{ referenceId, kind: 'character' as const, assetId: referenceId, sha256: referenceSha }];
+    const imageRoute = {
+      providerId: 'provider_image',
+      adapterId: 'weprompt-image-v1' as const,
+      model: 'image-model',
+    };
     const seedSnapshot: StudioGenerationRequestSnapshot = {
       ...createStudioGenerationRequestTemplate({
-        purpose: 'seed_still',
-        brief: project.brief,
-        rules: project.rules,
-        look: project.beats.beat_1!.look,
-        line: shot.line,
-        aspectRatio: project.aspectRatio,
-        resolution: project.resolution,
+        composition: makeComposition(project, 'beat_1', shot, 'seed_still', imageRoute, referenceInputs),
         durationSeconds: shot.durationSeconds,
-        referenceInputs: [{ assetId: referenceId, sha256: referenceSha }],
       }),
       conditioningInput: null,
     };
@@ -473,6 +505,8 @@ describe('deriveStudioDirtyShotsV2', () => {
     seedJob.purpose = 'seed_still';
     seedJob.requestPlan = { kind: 'resolved', snapshot: seedSnapshot };
     seedJob.requestSnapshot = seedSnapshot;
+    seedJob.provider = imageRoute;
+    seedJob.composition = seedSnapshot.composition;
     seedJob.spendReceipt = {
       ...seedJob.spendReceipt!,
       purpose: 'seed_still',
@@ -561,6 +595,7 @@ describe('deriveStudioInboundShotReferencesV2', () => {
     const target = project.shots.shot_1!;
     const dependent = project.shots.shot_2!;
     const downstreamSnapshot = project.jobs.shot_2_job!.requestSnapshot!;
+    const { conditioningInput: _downstreamConditioning, ...downstreamTemplate } = downstreamSnapshot;
 
     project.jobs.own_running = {
       ...project.jobs.shot_1_job!,
@@ -578,17 +613,11 @@ describe('deriveStudioInboundShotReferencesV2', () => {
     project.jobs.downstream_waiting = {
       ...project.jobs.shot_2_job!,
       id: 'downstream_waiting',
-      shotId: 'shot_3',
+      target: { kind: 'shot', shotId: 'shot_3' },
       status: 'waiting_for_conditioning',
       requestPlan: {
         kind: 'after_take_selection',
-        template: {
-          prompt: downstreamSnapshot.prompt,
-          aspectRatio: downstreamSnapshot.aspectRatio,
-          resolution: downstreamSnapshot.resolution,
-          durationSeconds: downstreamSnapshot.durationSeconds,
-          referenceInputs: downstreamSnapshot.referenceInputs,
-        },
+        template: downstreamTemplate,
         dependency: {
           kind: 'authorized_predecessor',
           upstreamItemId: 'item_upstream',
@@ -643,20 +672,15 @@ describe('deriveStudioInboundShotReferencesV2', () => {
     const project = makeTwoShotProject();
     const target = project.shots.shot_1!;
     const downstream = project.jobs.shot_2_job!;
+    const { conditioningInput: _downstreamConditioning, ...downstreamTemplate } = downstream.requestSnapshot!;
     project.jobs.seed_waiter = {
       ...downstream,
       id: 'seed_waiter',
-      shotId: 'shot_3',
+      target: { kind: 'shot', shotId: 'shot_3' },
       status: 'waiting_for_conditioning',
       requestPlan: {
         kind: 'after_take_selection',
-        template: {
-          prompt: downstream.requestSnapshot!.prompt,
-          aspectRatio: downstream.requestSnapshot!.aspectRatio,
-          resolution: downstream.requestSnapshot!.resolution,
-          durationSeconds: downstream.requestSnapshot!.durationSeconds,
-          referenceInputs: [],
-        },
+        template: downstreamTemplate,
         dependency: {
           kind: 'authorized_seed',
           upstreamItemId: 'seed_item',
@@ -668,7 +692,7 @@ describe('deriveStudioInboundShotReferencesV2', () => {
     project.jobs.seed_bound = {
       ...downstream,
       id: 'seed_bound',
-      shotId: 'shot_4',
+      target: { kind: 'shot', shotId: 'shot_4' },
       status: 'running',
       requestSnapshot: {
         ...downstream.requestSnapshot!,

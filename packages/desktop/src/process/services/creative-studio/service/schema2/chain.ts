@@ -6,6 +6,7 @@
 
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
+  STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_DIRTY_SHOTS_REPORTED,
   type StudioAssetV2,
   type StudioConditioningInputSnapshot,
@@ -17,10 +18,13 @@ import {
 import {
   createStudioFrameExtractionId,
   createStudioGenerationRequestTemplate,
+  composeStudioGenerationV2,
+  deriveStudioInstructionProfileV2,
   isStudioGenerationRequestCurrent,
   studioConditioningInputsEqual,
 } from './generation';
 import { resolveStudioCanonicalBoardAssetV2 } from './generation/boardPanel';
+import { resolveStudioReferenceBindingV2 } from './generation/referenceBinding';
 
 const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
   'queued_local',
@@ -78,20 +82,8 @@ const selectedVideoTake = (project: StudioProjectV2, shot: StudioShot): StudioAs
   return asset?.mediaKind === 'video' && isCanonicalStudioGeneratedTakeV2(asset, project.id, shot) ? asset : null;
 };
 
-const isProjectReferenceAsset = (project: StudioProjectV2, shotId: string, assetId: string): boolean =>
-  Object.values(project.references).some(
-    (reference) =>
-      reference.candidateAssetId === assetId ||
-      reference.approvedAssetId === assetId ||
-      reference.supersededAssetIds.includes(assetId)
-  ) ||
-  Object.values(project.jobs).some(
-    (job) =>
-      job.projectReferenceId !== undefined &&
-      job.projectId === project.id &&
-      job.shotId === shotId &&
-      job.outputAssetIds.includes(assetId)
-  );
+const isProjectReferenceAsset = (project: StudioProjectV2, assetId: string): boolean =>
+  ownValue(project.assets, assetId)?.projectReferenceId !== null;
 
 const eligibleSeed = (project: StudioProjectV2, shot: StudioShot, assetId: string): StudioAssetV2 | null => {
   const asset = ownValue(project.assets, assetId);
@@ -100,7 +92,7 @@ const eligibleSeed = (project: StudioProjectV2, shot: StudioShot, assetId: strin
     asset.shotId === shot.id &&
     asset.mediaKind === 'image' &&
     (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
-    !isProjectReferenceAsset(project, shot.id, asset.id) &&
+    !isProjectReferenceAsset(project, asset.id) &&
     shot.assetIds.includes(asset.id)
     ? asset
     : null;
@@ -134,7 +126,8 @@ const producingJob = (project: StudioProjectV2, shot: StudioShot, assetId: strin
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.status === 'succeeded' &&
       job.outputAssetIdsByRole.primary === assetId &&
       job.outputAssetIds.filter((candidate) => candidate === assetId).length === 1
@@ -144,47 +137,44 @@ const producingJob = (project: StudioProjectV2, shot: StudioShot, assetId: strin
   return jobs.length === 1 ? jobs[0]! : null;
 };
 
-const currentReferenceInputs = (project: StudioProjectV2, shot: StudioShot, job: StudioJobV2) => {
-  if (shot.referenceIds.length > 0) {
-    const references = shot.referenceIds.map((referenceId) => ownValue(project.references, referenceId));
-    if (references.some((reference) => reference?.approvedAssetId === null || reference === undefined)) return [];
-    return references
-      .map((reference) => {
-        const asset = ownValue(project.assets, reference!.approvedAssetId!);
-        return asset === undefined ? null : { assetId: asset.id, sha256: asset.sha256 };
-      })
-      .filter((reference): reference is { assetId: string; sha256: string } => reference !== null);
-  }
-  const recorded = job.requestSnapshot?.referenceInputs ?? [];
-  return recorded.flatMap((reference) => {
-    const asset = ownValue(project.assets, reference.assetId);
-    return asset?.id === reference.assetId &&
-      asset.projectId === project.id &&
-      asset.shotId === null &&
-      asset.mediaKind === 'image' &&
-      asset.managedAsset.collection === 'imports' &&
-      asset.sha256 === reference.sha256 &&
-      (asset.briefReferenceRole === 'cast' || asset.briefReferenceRole === 'look') &&
-      typeof asset.briefReferenceLabel === 'string'
-      ? [{ assetId: asset.id, sha256: asset.sha256 }]
-      : [];
+const currentReferenceInputs = (project: StudioProjectV2, shot: StudioShot) => {
+  const resolution = resolveStudioReferenceBindingV2({
+    project,
+    shotId: shot.id,
+    maxConditioningImages: STUDIO_MAX_PROJECT_REFERENCES,
   });
+  return resolution.ok ? resolution.referenceInputs : null;
 };
 
 const currentRequestTemplate = (project: StudioProjectV2, shot: StudioShot, job: StudioJobV2) => {
   const owner = Object.values(project.beats).find((beat) => beat.shotOrder.includes(shot.id));
   if (owner === undefined) return null;
   try {
-    return createStudioGenerationRequestTemplate({
-      purpose: job.purpose,
+    const source = {
+      kind: 'shot' as const,
+      beatId: owner.id,
+      story: owner.story,
+      shotId: shot.id,
+      shootingScript: shot.shootingScript,
+    };
+    const referenceInputs = job.purpose === 'video_take' ? [] : currentReferenceInputs(project, shot);
+    if (referenceInputs === null) return null;
+    const composition = composeStudioGenerationV2({
+      projectRevision: project.revision,
       brief: project.brief,
       rules: project.rules,
-      look: owner.look,
-      line: shot.line,
+      source,
+      purpose: job.purpose,
+      referenceInputs,
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
+      route: job.provider,
+      boardStyle: job.purpose === 'board_still' ? project.boardStyle : null,
+      instructionProfile: deriveStudioInstructionProfileV2(job.provider, job.purpose, source),
+    });
+    return createStudioGenerationRequestTemplate({
+      composition,
       durationSeconds: shot.durationSeconds,
-      referenceInputs: job.purpose === 'seed_still' ? currentReferenceInputs(project, shot, job) : [],
     });
   } catch {
     return null;
@@ -360,16 +350,17 @@ export const deriveStudioInboundShotReferencesV2 = (
 
   for (const job of Object.values(project.jobs)) {
     if (!NONTERMINAL_JOB_STATUSES.has(job.status)) continue;
-    if (targets.has(job.shotId)) {
-      add(job.shotId, job.shotId, 'own_nonterminal_job');
-      if (job.requestSnapshot !== null) add(job.shotId, job.shotId, 'bound_nonterminal_request');
+    const dependentShotId = job.target.kind === 'shot' ? job.target.shotId : null;
+    if (dependentShotId !== null && targets.has(dependentShotId)) {
+      add(dependentShotId, dependentShotId, 'own_nonterminal_job');
+      if (job.requestSnapshot !== null) add(dependentShotId, dependentShotId, 'bound_nonterminal_request');
     }
     for (const referencedShotId of referencedShotIds(project, job)) {
-      if (!targets.has(referencedShotId) || referencedShotId === job.shotId) continue;
-      add(referencedShotId, job.shotId, 'downstream_nonterminal_job');
+      if (!targets.has(referencedShotId) || referencedShotId === dependentShotId) continue;
+      add(referencedShotId, dependentShotId, 'downstream_nonterminal_job');
       add(
         referencedShotId,
-        job.shotId,
+        dependentShotId,
         job.status === 'waiting_for_conditioning' && job.requestSnapshot === null
           ? 'waiting_authorization_dependency'
           : 'bound_nonterminal_request'

@@ -9,7 +9,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_MAX_EXPORTS_PER_SHAPE,
-  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_VIEWS,
   type StudioMutationBatchResultV2,
   type StudioRendererPreparedSubmissionOptionsV2,
@@ -37,7 +37,6 @@ const providerNames = [
   'decideReferenceRequest',
   'listReferenceGenerationHandoffs',
   'prepareProjectReferences',
-  'approveProjectReference',
   'prepareSubmission',
   'confirmSubmission',
   'cancelJob',
@@ -58,8 +57,6 @@ const providerNames = [
   'reorderBin',
   'deleteProject',
   'persistCapturedPoster',
-  'chooseAndImportReference',
-  'detachBriefReference',
   'importSeedStill',
   'importBedAudio',
   'detachBedAudio',
@@ -94,7 +91,6 @@ const mocks = vi.hoisted(() => ({
       'decideReferenceRequest',
       'listReferenceGenerationHandoffs',
       'prepareProjectReferences',
-      'approveProjectReference',
       'prepareSubmission',
       'confirmSubmission',
       'cancelJob',
@@ -115,8 +111,6 @@ const mocks = vi.hoisted(() => ({
       'reorderBin',
       'deleteProject',
       'persistCapturedPoster',
-      'chooseAndImportReference',
-      'detachBriefReference',
       'importSeedStill',
       'importBedAudio',
       'detachBedAudio',
@@ -258,7 +252,6 @@ const createService = () =>
     decideReferenceRequest: vi.fn(),
     listReferenceGenerationHandoffs: vi.fn(async () => []),
     prepareProjectReferences: vi.fn(async () => preparedSubmission),
-    approveProjectReference: vi.fn(async () => rendererProject),
     prepareSubmission: vi.fn(async () => preparedSubmission),
     confirmSubmission: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8 })),
     cancelJob: vi.fn(),
@@ -286,10 +279,9 @@ const createService = () =>
     cancelWaitingCascade: vi.fn(async () => workspaceStatus),
     deleteProject: vi.fn(async () => true),
     persistCapturedPoster: vi.fn(async () => ({ id: 'poster_1' })),
-    importReferenceFromPath: vi.fn(async () => ({ asset: { id: 'asset_1' }, project: rendererProject })),
+    importSeedStillFromPath: vi.fn(async () => ({ asset: { id: 'asset_1' }, project: rendererProject })),
     importBedAudioFromPath: vi.fn(async () => ({ asset: { id: 'bed_1' }, project: rendererProject })),
     detachBedAudio: vi.fn(async () => rendererProject),
-    detachBriefReference: vi.fn(async () => rendererProject),
     createExport: vi.fn(async () => ({ revision: 2, artifacts: [] })),
     listExports: vi.fn(async () => ({ revision: 1, artifacts: [] })),
     copyExport: vi.fn(async () => ({ status: 'copied' as const })),
@@ -386,7 +378,7 @@ describe('initCreativeStudioBridge', () => {
     });
     expect(service.applyMutations).toHaveBeenCalledExactlyOnceWith(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: input.projectId,
         expectedRevision: input.expectedRevision,
         operations: input.operations,
@@ -488,7 +480,7 @@ describe('initCreativeStudioBridge', () => {
     await registeredHandler(providerName)(input as never);
     expect(service.applyMutations).toHaveBeenCalledExactlyOnceWith(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: input.projectId,
         expectedRevision: input.expectedRevision,
         operations: [operation],
@@ -541,8 +533,8 @@ describe('initCreativeStudioBridge', () => {
       projectId: 'project_1',
       expectedRevision: 7,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still' as const, referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'shot_2', purpose: 'video_take' as const, referenceAssetId: null }],
+      baseChoices: [{ target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const }],
+      cascadeChoices: [{ target: { kind: 'shot' as const, shotId: 'shot_2' }, purpose: 'video_take' as const }],
     };
 
     const result = (await registeredHandler('prepareSubmission')(input as never)) as {
@@ -613,7 +605,7 @@ describe('initCreativeStudioBridge', () => {
     }
   });
 
-  it('routes project-reference preparation and approval through their exact service seams', async () => {
+  it('routes reference preparation through pricing and human approval through the mutation reducer', async () => {
     initCreativeStudioBridge(dependencies);
     const prepareInput = {
       projectId: 'project_1',
@@ -631,12 +623,42 @@ describe('initCreativeStudioBridge', () => {
       ok: true,
       data: preparedSubmission,
     });
-    await expect(registeredHandler('approveProjectReference')(approvalInput as never)).resolves.toEqual({
+    await expect(
+      registeredHandler('applyAuthoringBatch')({
+        projectId: approvalInput.projectId,
+        expectedRevision: approvalInput.expectedRevision,
+        operations: [
+          {
+            kind: 'approve_reference',
+            referenceId: approvalInput.referenceId,
+            candidateAssetId: approvalInput.candidateAssetId,
+          },
+        ],
+      } as never)
+    ).resolves.toEqual({
       ok: true,
-      data: rendererProject,
+      data: {
+        projectId: 'project_1',
+        projectRevision: 7,
+        createdBeatIds: ['beat_2'],
+        createdShotIds: ['shot_3'],
+      },
     });
     expect(service.prepareProjectReferences).toHaveBeenCalledExactlyOnceWith(prepareInput);
-    expect(service.approveProjectReference).toHaveBeenCalledExactlyOnceWith(approvalInput);
+    expect(service.applyMutations).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: approvalInput.projectId,
+        expectedRevision: approvalInput.expectedRevision,
+        operations: [
+          {
+            kind: 'approve_reference',
+            referenceId: approvalInput.referenceId,
+            candidateAssetId: approvalInput.candidateAssetId,
+          },
+        ],
+      }),
+      expect.any(Object)
+    );
   });
 
   it('routes confirm and dismiss through their exact safe service seams', async () => {
@@ -749,7 +771,7 @@ describe('initCreativeStudioBridge', () => {
         projectId: 'project_1',
         expectedRevision: 7,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
+        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
         cascadeChoices: [],
       } as never)
     ).resolves.toEqual({
@@ -769,8 +791,8 @@ describe('initCreativeStudioBridge', () => {
         projectId: 'project_1',
         expectedRevision: 6,
         originReferenceHandoffId: null,
-        baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
-        cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
+        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+        cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
       } as never)
     ).resolves.toEqual({
       ok: false,
@@ -790,7 +812,7 @@ describe('initCreativeStudioBridge', () => {
       projectId: 'project_1',
       expectedRevision: 7,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
       cascadeChoices: [],
     } as never);
 
@@ -799,6 +821,7 @@ describe('initCreativeStudioBridge', () => {
       error: {
         code: 'pricing_refused',
         reason: 'missing_conditioning',
+        details: null,
         messageKey: 'conversation.creativeStudio.errors.pricingRefused',
       },
     });
@@ -819,7 +842,7 @@ describe('initCreativeStudioBridge', () => {
       projectId: 'project_1',
       expectedRevision: 7,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
       cascadeChoices: [],
     } as never);
 
@@ -833,24 +856,15 @@ describe('initCreativeStudioBridge', () => {
     expect(JSON.stringify(result)).not.toContain('private stack');
   });
 
-  it('keeps Brief and seed-still picker imports separate and returns no path or project', async () => {
+  it('imports a seed still through the native picker and returns no path or project', async () => {
     initCreativeStudioBridge(dependencies);
-    const briefInput = { projectId: 'project_1', expectedRevision: 6, briefReferenceRole: 'look' as const };
     const seedInput = { projectId: 'project_1', expectedRevision: 6, shotId: 'shot_1' };
 
-    await expect(registeredHandler('chooseAndImportReference')(briefInput as never)).resolves.toEqual({
-      ok: true,
-      data: { status: 'imported', assetId: 'asset_1', projectRevision: 7 },
-    });
     await expect(registeredHandler('importSeedStill')(seedInput as never)).resolves.toEqual({
       ok: true,
       data: { status: 'imported', assetId: 'asset_1', projectRevision: 7 },
     });
-    expect(service.importReferenceFromPath).toHaveBeenNthCalledWith(1, {
-      ...briefInput,
-      sourcePath: '/private/reference.png',
-    });
-    expect(service.importReferenceFromPath).toHaveBeenNthCalledWith(2, {
+    expect(service.importSeedStillFromPath).toHaveBeenCalledExactlyOnceWith({
       ...seedInput,
       sourcePath: '/private/reference.png',
     });
@@ -866,7 +880,7 @@ describe('initCreativeStudioBridge', () => {
         shotId: 'shot_1',
       } as never)
     ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
-    expect(service.importReferenceFromPath).not.toHaveBeenCalled();
+    expect(service.importSeedStillFromPath).not.toHaveBeenCalled();
   });
 
   it('keeps the bed-audio picker and result free of renderer paths and media authority', async () => {
@@ -943,7 +957,7 @@ describe('initCreativeStudioBridge', () => {
     });
     expect(service.applyMutations).toHaveBeenCalledWith(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: 'project_1',
         expectedRevision: 7,
         operations: [{ kind: 'set_bed', assetId: 'bed_1' }],
@@ -1171,19 +1185,19 @@ describe('initCreativeStudioBridge', () => {
     });
   });
 
-  it('projects Brief detach and maps media_in_use without leaking the media error', async () => {
+  it('projects bed-audio detach and maps media_in_use without leaking the media error', async () => {
     initCreativeStudioBridge(dependencies);
     await expect(
-      registeredHandler('detachBriefReference')({
+      registeredHandler('detachBedAudio')({
         projectId: 'project_1',
         expectedRevision: 6,
         assetId: 'asset_1',
       } as never)
     ).resolves.toEqual({ ok: true, data: { status: 'detached', projectRevision: 7 } });
 
-    vi.mocked(service.detachBriefReference).mockRejectedValueOnce(new CreativeStudioMediaError('media_in_use'));
+    vi.mocked(service.detachBedAudio).mockRejectedValueOnce(new CreativeStudioMediaError('media_in_use'));
     await expect(
-      registeredHandler('detachBriefReference')({
+      registeredHandler('detachBedAudio')({
         projectId: 'project_1',
         expectedRevision: 7,
         assetId: 'asset_1',
@@ -1201,11 +1215,11 @@ describe('initCreativeStudioBridge', () => {
     ['storage_error', 'storage_error', 'storage'],
     ['job_inactive', 'storage_error', 'storage'],
   ] as const)('maps the %s media boundary to the stable %s command code', async (mediaCode, code, messageKeyLeaf) => {
-    vi.mocked(service.detachBriefReference).mockRejectedValueOnce(new CreativeStudioMediaError(mediaCode));
+    vi.mocked(service.detachBedAudio).mockRejectedValueOnce(new CreativeStudioMediaError(mediaCode));
     initCreativeStudioBridge(dependencies);
 
     await expect(
-      registeredHandler('detachBriefReference')({
+      registeredHandler('detachBedAudio')({
         projectId: 'project_1',
         expectedRevision: 7,
         assetId: 'asset_1',

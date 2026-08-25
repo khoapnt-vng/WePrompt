@@ -42,8 +42,10 @@ import {
 } from '@process/services/creative-studio/mediaStore';
 import {
   calculateStudioQuoteTotals,
+  composeStudioGenerationV2,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
+  deriveStudioInstructionProfileV2,
 } from '@process/services/creative-studio/service/schema2/generation';
 import { createStudioSpendReceiptV2 } from '@process/services/creative-studio/service/schema2/pricing';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
@@ -144,23 +146,53 @@ type V2HarnessOptions = {
 const v2Harnesses: V2Harness[] = [];
 
 const makeResolvedPlanV2 = (
-  purpose: StudioJobV2['purpose']
-): Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> => ({
-  kind: 'resolved',
-  snapshot: {
-    prompt:
-      purpose === 'seed_still'
-        ? 'A frozen seed prompt'
-        : purpose === 'board_still'
-          ? 'A frozen board prompt'
-          : 'A frozen video prompt',
-    aspectRatio: '16:9',
-    resolution: '720p',
-    durationSeconds: purpose === 'board_still' ? 4 : 5,
+  project: StudioProjectV2,
+  purpose: StudioJobV2['purpose'],
+  providerBinding: StudioProviderRef
+): Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> => {
+  const beat = project.beats.beat_1!;
+  const shot = project.shots.shot_1!;
+  const reference = project.references.reference_character;
+  const source =
+    purpose === 'reference_image'
+      ? {
+          kind: 'project_reference' as const,
+          referenceId: reference!.id,
+          referenceKind: reference!.kind,
+          prompt: reference!.prompt,
+        }
+      : {
+          kind: 'shot' as const,
+          beatId: beat.id,
+          story: beat.story,
+          shotId: shot.id,
+          shootingScript: shot.shootingScript,
+        };
+  const composition = composeStudioGenerationV2({
+    projectRevision: project.revision,
+    brief: project.brief,
+    rules: project.rules,
+    source,
+    purpose,
     referenceInputs: [],
-    conditioningInput: null,
-  },
-});
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+    route: providerBinding,
+    boardStyle: purpose === 'board_still' ? project.boardStyle : null,
+    instructionProfile: deriveStudioInstructionProfileV2(providerBinding, purpose, source),
+  });
+  return {
+    kind: 'resolved',
+    snapshot: {
+      composition,
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      durationSeconds: purpose === 'board_still' ? 4 : shot.durationSeconds,
+      referenceInputs: [],
+      conditioningInput: null,
+    },
+  };
+};
 
 const createV2Harness = async (
   adapter: GenerationProviderAdapter,
@@ -208,27 +240,20 @@ const createV2Harness = async (
       beat_1: {
         id: 'beat_1',
         title: 'Opening',
-        action: 'Introduce the product',
-        look: 'A luminous paper world',
-        actionRevision: 1,
+        story: 'Introduce the product in a luminous paper world.',
         targetSeconds: null,
         shotOrder: ['shot_1'],
-        lineHistory: [],
       },
     },
     shots: {
       shot_1: {
         id: 'shot_1',
-        line: 'A paper airplane crosses a sunrise',
-        derivation: 'derived',
-        derivedFromActionRevision: 1,
-        narration: '',
-        onScreenText: '',
+        shootingScript: 'A paper airplane crosses a sunrise.',
         durationSeconds: 5,
         trimInSeconds: null,
         trimOutSeconds: null,
         chainBreak: 'none',
-        referenceIds: [],
+        referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -238,6 +263,25 @@ const createV2Harness = async (
         jobIds: [],
       },
     },
+    referencePlanStatus: purpose === 'reference_image' ? 'planned' : 'unplanned',
+    referenceOrder: purpose === 'reference_image' ? ['reference_character'] : [],
+    references:
+      purpose === 'reference_image'
+        ? {
+            reference_character: {
+              id: 'reference_character',
+              kind: 'character',
+              label: 'Ming',
+              prompt: 'Ming, late 20s, short black hair, red rain jacket.',
+              candidateAssetId: null,
+              approvedAssetId: null,
+              supersededAssetIds: [],
+              jobIds: [],
+              createdAt: current.updatedAt,
+              updatedAt: current.updatedAt,
+            },
+          }
+        : {},
     imageRouteId: purpose === 'video_take' ? null : routeId,
     videoRouteId: purpose === 'video_take' ? routeId : null,
   }));
@@ -257,6 +301,10 @@ const createV2Harness = async (
         byteSize: png.length,
         sha256: createHash('sha256').update(png).digest('hex'),
         createdAt: current.updatedAt,
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
       };
       current.shots.shot_1!.assetIds.push('seed_v2');
       current.shots.shot_1!.seedStillId = 'seed_v2';
@@ -269,19 +317,23 @@ const createV2Harness = async (
       ? {
           kind: 'resolved' as const,
           snapshot: {
-            ...makeResolvedPlanV2(purpose).snapshot,
+            ...makeResolvedPlanV2(quotedProject, purpose, providerBinding).snapshot,
             conditioningInput: { kind: 'seed_still' as const, assetId: 'seed_v2' },
           },
         }
-      : makeResolvedPlanV2(purpose));
+      : makeResolvedPlanV2(quotedProject, purpose, providerBinding));
+  const target =
+    purpose === 'reference_image'
+      ? ({ kind: 'reference' as const, referenceId: 'reference_character' } as const)
+      : ({ kind: 'shot' as const, shotId: 'shot_1' } as const);
   const item: StudioQuotedGeneration = {
     id: createStudioQuotedGenerationId({
       projectId: quotedProject.id,
       projectRevision: quotedProject.revision,
-      shotId: 'shot_1',
+      target,
       purpose,
     }),
-    shotId: 'shot_1',
+    target,
     purpose,
     routeId,
     generationCount: 1,
@@ -313,7 +365,7 @@ const createV2Harness = async (
   const job: StudioJobV2 = {
     id: jobId,
     projectId: quotedProject.id,
-    shotId: 'shot_1',
+    target,
     status: requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
     provider: providerBinding,
     idempotencyKey,
@@ -331,6 +383,7 @@ const createV2Harness = async (
     purpose,
     authorizationId: authorization.id,
     authorizationItemId: item.id,
+    composition: requestPlan.kind === 'resolved' ? requestPlan.snapshot.composition : requestPlan.template.composition,
     requestPlan,
     requestSnapshot: requestPlan.kind === 'resolved' ? requestPlan.snapshot : null,
     spendReceipt: null,
@@ -341,7 +394,11 @@ const createV2Harness = async (
   const project = await store.updateProjectV2(quotedProject.id, (current) => {
     current.spendAuthorizations = [authorization];
     current.jobs = Object.fromEntries(jobs.map((job) => [job.id, job]));
-    current.shots.shot_1!.jobIds = jobs.map((job) => job.id);
+    if (target.kind === 'reference') {
+      current.references[target.referenceId]!.jobIds = jobs.map((job) => job.id);
+    } else {
+      current.shots[target.shotId]!.jobIds = jobs.map((job) => job.id);
+    }
     return current;
   });
   const baseMediaStore = createStudioMediaStore({
@@ -772,6 +829,40 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it('rejects consistently tampered prompt authority before route, media, adapter, or provider work', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const adapter = controllableAdapter('weprompt-image-v1', { submit });
+    const listProviders = vi.fn(async () => [provider]);
+    const harness = await createV2Harness(adapter, { listProviders });
+    const corrupted = structuredClone(harness.project);
+    const authorizationItem = corrupted.spendAuthorizations[0]!.baseItems[0]!;
+    const job = corrupted.jobs.job_v2_1!;
+    if (
+      authorizationItem.requestPlan.kind !== 'resolved' ||
+      job.requestPlan.kind !== 'resolved' ||
+      job.requestSnapshot === null
+    ) {
+      throw new Error('tampered authority fixture requires resolved requests');
+    }
+    const tamperedPrompt = `${job.composition.prompt}\nUNAUTHORIZED PROMPT SUFFIX`;
+    authorizationItem.requestPlan.snapshot.composition.prompt = tamperedPrompt;
+    job.requestPlan.snapshot.composition.prompt = tamperedPrompt;
+    job.requestSnapshot.composition.prompt = tamperedPrompt;
+    job.composition.prompt = tamperedPrompt;
+
+    vi.spyOn(harness.store, 'getProjectV2').mockResolvedValue({ status: 'supported', project: corrupted });
+    const listGenerationRoutes = vi.spyOn(harness.providerResolver, 'listGenerationRoutes');
+    const resolveProviderInputV2 = vi.spyOn(harness.mediaStore, 'resolveProviderInputV2');
+    const validateRequest = vi.spyOn(adapter, 'validateRequest');
+
+    await expect(dispatchV2(harness)).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(listGenerationRoutes).not.toHaveBeenCalled();
+    expect(listProviders).not.toHaveBeenCalled();
+    expect(resolveProviderInputV2).not.toHaveBeenCalled();
+    expect(validateRequest).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
   it('handles local, submitting, and remote V2 cancellation without crossing paid receipts', async () => {
     const local = await createV2Harness(controllableAdapter('weprompt-image-v1'));
     const firstCancelled = await local.manager.cancelJobV2({
@@ -1000,7 +1091,10 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       expect.objectContaining({ jobId: 'job_v2_1', generationCount: 1, totalMinorUnits: 3 }),
     ]);
     expect(submit.mock.calls.map(([request]) => request)).toEqual([
-      expect.objectContaining({ prompt: 'A frozen seed prompt', idempotencyKey: 'key_v2_1' }),
+      expect.objectContaining({
+        prompt: harness.jobs[0]!.composition.prompt,
+        idempotencyKey: 'key_v2_1',
+      }),
     ]);
   });
 
@@ -1117,7 +1211,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(JSON.stringify(await rejectedAuth.store.getProjectV2(rejectedAuth.project.id))).not.toContain(
       'private credential detail'
     );
-  });
+  }, 30_000);
 
   it('ignores queued progress regression after a V2 remote job has entered running', async () => {
     const snapshots: ProviderJobSnapshot[] = [
@@ -1234,6 +1328,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       pollGate.resolve(candidate.snapshot);
       // eslint-disable-next-line no-await-in-loop -- Let the late-result guard finish without aborting its controller.
       await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(poll).toHaveBeenCalledOnce();
       // eslint-disable-next-line no-await-in-loop -- The concurrent durable winner remains authoritative.
       await expectV2Job(harness, candidate.expected);
     }
@@ -1495,40 +1590,50 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(submit).not.toHaveBeenCalled();
   });
 
-  it('resolves an immutable V2 Brief reference into bounded conditioning without exposing its path', async () => {
-    const submit = vi.fn(async (request: { conditioningImages?: readonly unknown[] }) => {
-      expect(request.conditioningImages).toHaveLength(1);
-      return { kind: 'complete' as const, outputs: [] };
-    });
-    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
-    const sourcePath = path.join(harness.rootDir, 'private-reference.png');
-    await writeFile(sourcePath, png);
-    const reference = await harness.mediaStore.importReferenceFromPathV2({
-      projectId: harness.project.id,
-      briefReferenceRole: 'cast',
-      sourcePath,
-      expectedRevision: harness.project.revision,
-    });
-    await harness.store.updateProjectV2(harness.project.id, (project) => {
-      const job = project.jobs.job_v2_1!;
-      const snapshot = {
-        ...job.requestSnapshot!,
-        referenceInputs: [{ assetId: reference.id, sha256: reference.sha256 }],
+  it('dispatches a semantic reference directly and retains its canonical candidate provenance', async () => {
+    let outputPath = '';
+    const submit = vi.fn(async (request: { prompt: string; conditioningImages?: readonly unknown[] }) => {
+      expect(request.prompt).toContain('Ming, late 20s, short black hair, red rain jacket.');
+      expect(request.conditioningImages ?? []).toHaveLength(0);
+      return {
+        kind: 'complete' as const,
+        outputs: [
+          {
+            mediaKind: 'image' as const,
+            role: 'primary' as const,
+            source: { kind: 'file' as const, path: outputPath },
+            mimeType: 'image/png' as const,
+          },
+        ],
       };
-      job.requestPlan = { kind: 'resolved', snapshot };
-      job.requestSnapshot = snapshot;
-      project.spendAuthorizations[0]!.baseItems[0]!.requestPlan = job.requestPlan;
-      return project;
     });
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      purpose: 'reference_image',
+    });
+    outputPath = path.join(harness.rootDir, 'provider-reference-character.png');
+    await writeFile(outputPath, png);
 
     await dispatchV2(harness);
-    await expectV2Job(harness, { status: 'failed', error: { code: 'no_output' } });
-    expect(submit).toHaveBeenCalledWith(
-      expect.objectContaining({ conditioningImages: [expect.objectContaining({ assetId: reference.id })] }),
-      expect.anything(),
-      expect.anything()
-    );
-    expect(JSON.stringify(submit.mock.calls)).not.toContain(sourcePath);
+    await expectV2Job(harness, { status: 'succeeded', purpose: 'reference_image' });
+
+    const loaded = await harness.store.getProjectV2(harness.project.id);
+    if (loaded.status !== 'supported') throw new Error('Reference project disappeared');
+    const reference = loaded.project.references.reference_character!;
+    const candidate = loaded.project.assets[reference.candidateAssetId!];
+    expect(reference).toMatchObject({
+      label: 'Ming',
+      candidateAssetId: expect.any(String),
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: ['job_v2_1'],
+    });
+    expect(candidate).toMatchObject({
+      shotId: null,
+      projectReferenceId: reference.id,
+      generationReferenceAssetIds: [],
+      producerJobId: 'job_v2_1',
+      compositionDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
   });
 
   it('refuses adapter normalization that would change the immutable paid request snapshot', async () => {
@@ -1588,7 +1693,10 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(loaded.project.assets[primaryId!]).toMatchObject({
       shotId: 'shot_1',
       mediaKind: 'image',
-      sourceLook: 'A frozen seed prompt',
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: job.id,
+      compositionDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(canCancelJobV2(job)).toBe(false);
   });
@@ -1715,16 +1823,12 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       project.beats.beat_1!.shotOrder.push('shot_2');
       project.shots.shot_2 = {
         id: 'shot_2',
-        line: 'The paper airplane continues through the same light',
-        derivation: 'derived',
-        derivedFromActionRevision: 1,
-        narration: '',
-        onScreenText: '',
+        shootingScript: 'The paper airplane continues through the same light.',
         durationSeconds: 5,
         trimInSeconds: null,
         trimOutSeconds: null,
         chainBreak: 'none',
-        referenceIds: [],
+        referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -1733,10 +1837,34 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         assetIds: [],
         jobIds: ['job_existing_recovery'],
       };
+      const source = {
+        kind: 'shot' as const,
+        beatId: 'beat_1',
+        story: project.beats.beat_1!.story,
+        shotId: 'shot_2',
+        shootingScript: project.shots.shot_2.shootingScript,
+      };
+      const composition = composeStudioGenerationV2({
+        projectRevision: project.revision,
+        brief: project.brief,
+        rules: project.rules,
+        source,
+        purpose: 'video_take',
+        referenceInputs: [],
+        aspectRatio: project.aspectRatio,
+        resolution: project.resolution,
+        route: harness.authorization.providerBindings[0]!.provider,
+        boardStyle: null,
+        instructionProfile: deriveStudioInstructionProfileV2(
+          harness.authorization.providerBindings[0]!.provider,
+          'video_take',
+          source
+        ),
+      });
       const requestPlan: StudioGenerationRequestPlan = {
         kind: 'after_take_selection',
         template: {
-          prompt: 'Continue from the exact predecessor frame',
+          composition,
           aspectRatio: '16:9',
           resolution: '720p',
           durationSeconds: 5,
@@ -1753,10 +1881,10 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         id: createStudioQuotedGenerationId({
           projectId: project.id,
           projectRevision: project.revision,
-          shotId: 'shot_2',
+          target: { kind: 'shot', shotId: 'shot_2' },
           purpose: 'video_take',
         }),
-        shotId: 'shot_2',
+        target: { kind: 'shot', shotId: 'shot_2' },
         purpose: 'video_take',
         routeId: harness.route.choiceId,
         generationCount: 1,
@@ -1784,7 +1912,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       project.jobs.job_existing_recovery = {
         id: 'job_existing_recovery',
         projectId: project.id,
-        shotId: 'shot_2',
+        target: { kind: 'shot', shotId: 'shot_2' },
         status: 'waiting_for_conditioning',
         provider: harness.authorization.providerBindings[0]!.provider,
         idempotencyKey: 'key_existing_recovery',
@@ -1802,6 +1930,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         purpose: 'video_take',
         authorizationId: authorization.id,
         authorizationItemId: item.id,
+        composition,
         requestPlan,
         requestSnapshot: null,
         spendReceipt: null,
@@ -1833,6 +1962,10 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
           byteSize: png.length,
           sha256: frameSha256,
           createdAt: project.updatedAt,
+          projectReferenceId: null,
+          generationReferenceAssetIds: [],
+          producerJobId: null,
+          compositionDigest: null,
         };
         project.shots.shot_1!.assetIds.push(frameAssetId);
         ready = project.frameExtractions[extractionId] = {
@@ -2632,7 +2765,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     });
     await expect(
       harness.manager.retryJobV2({ projectId: parked.id, jobId: 'job_v2_1', expectedRevision: parked.revision })
-    ).rejects.toMatchObject({ code: 'invalid_request' });
+    ).rejects.toMatchObject({ code: 'not_found' });
   });
 
   it('bounds V2 download retry across absent remotes, adapters, and terminal provider results', async () => {

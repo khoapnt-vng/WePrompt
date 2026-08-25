@@ -10,7 +10,7 @@ import {
   STUDIO_MAX_EXPORTS_PER_SHAPE,
 } from '@/common/types/project/creativeStudioTypes';
 import type {
-  StudioProposalV2,
+  StudioRendererProposalV2,
   StudioProjectWorkspaceLoadResultV2,
   StudioReferenceRequestV2,
   StudioRendererChainStatusV2,
@@ -26,7 +26,7 @@ export type StudioProjectLoadState = 'idle' | 'loading' | 'supported' | 'unsuppo
 
 export type UseStudioProjectResult = {
   project: StudioRendererProjectV2 | null;
-  proposals: StudioProposalV2[];
+  proposals: StudioRendererProposalV2[];
   referenceRequests: StudioReferenceRequestV2[];
   referenceGenerationHandoffs: StudioRendererReferenceGenerationHandoffV2[];
   workspaceStatus: StudioRendererWorkspaceStatusV2 | null;
@@ -77,10 +77,7 @@ const uniqueHandoffs = (
 ): StudioRendererReferenceGenerationHandoffV2[] => {
   const unique = new Map<string, StudioRendererReferenceGenerationHandoffV2>();
   for (const handoff of handoffs) {
-    const current = unique.get(handoff.handoffId);
-    if (current === undefined || (current.status === 'open' && handoff.status !== 'open')) {
-      unique.set(handoff.handoffId, handoff);
-    }
+    unique.set(handoff.handoffId, handoff);
   }
   return [...unique.values()].toSorted(
     (left, right) =>
@@ -186,7 +183,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     chainStatus: null,
   });
   const { project, workspaceStatus, chainStatus } = projectWorkspace;
-  const [proposals, setProposals] = useState<StudioProposalV2[]>([]);
+  const [proposals, setProposals] = useState<StudioRendererProposalV2[]>([]);
   const [referenceRequests, setReferenceRequests] = useState<StudioReferenceRequestV2[]>([]);
   const [referenceGenerationHandoffs, setReferenceGenerationHandoffs] = useState<
     StudioRendererReferenceGenerationHandoffV2[]
@@ -436,7 +433,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           setProposalErrorMessageKey(result.error.messageKey);
           return;
         }
-        setProposals((result.data as StudioProposalV2[]).filter((candidate) => candidate.status === 'pending'));
+        setProposals(result.data.filter((candidate) => candidate.status === 'pending'));
         setProposalErrorMessageKey(null);
       } catch {
         if (

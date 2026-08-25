@@ -6,7 +6,7 @@
 
 import { randomUUID } from 'node:crypto';
 import type { StudioProposalPayloadV2, StudioProposalRecordV2 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_PROPOSAL_SCHEMA_VERSION_V2 } from '@/common/types/project/creativeStudioTypes';
 import {
   StudioPendingRecordWriteError,
   type StudioPendingProjectAuthorityV2,
@@ -50,7 +50,7 @@ export const writeProposalRecordV2 = async (input: WriteProposalInputV2): Promis
       projectId: input.projectId,
       proposalId: validationId,
       value: {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         id: validationId,
         projectId: input.projectId,
         status: 'pending',
@@ -73,7 +73,7 @@ export const writeProposalRecordV2 = async (input: WriteProposalInputV2): Promis
     throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 proposal');
   }
   const record: StudioProposalRecordV2 = {
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
     id: validated.proposalId ?? randomUUID(),
     projectId: validated.projectId,
     status: 'pending',

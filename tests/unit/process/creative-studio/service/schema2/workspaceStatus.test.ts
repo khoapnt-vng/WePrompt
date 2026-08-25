@@ -18,8 +18,11 @@ import type {
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  composeStudioGenerationV2,
   createStudioBoardGenerationRequestPlan,
   createStudioFrameExtractionId,
+  deriveStudioInstructionProfileV2,
+  studioGenerationCompositionDigestV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
   projectStudioChainBoundaryVerificationIdsV2,
@@ -32,16 +35,12 @@ const digest = 'a'.repeat(64);
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
-  line: '',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Shooting script for ${id}`,
   durationSeconds: 5,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
-  referenceIds: [],
+  referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -55,12 +54,9 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
 const makeBeat = (id: string, shotOrder: string[] = []): StudioBeat => ({
   id,
   title: '',
-  action: '',
-  look: '',
-  actionRevision: 1,
+  story: '',
   targetSeconds: null,
   shotOrder,
-  lineHistory: [],
 });
 
 const makeProject = (shotOrder = ['shot_1', 'shot_2']): StudioProjectV2 => ({
@@ -78,6 +74,7 @@ const makeProject = (shotOrder = ['shot_1', 'shot_2']): StudioProjectV2 => ({
   beatOrder: ['beat_1'],
   beats: { beat_1: makeBeat('beat_1', shotOrder) },
   shots: Object.fromEntries(shotOrder.map((shotId) => [shotId, makeShot(shotId)])),
+  referencePlanStatus: 'planned',
   referenceOrder: [],
   references: {},
   bin: [],
@@ -110,6 +107,10 @@ const makeAsset = (
   sha256: digest,
   ...(mediaKind === 'video' ? { durationSeconds: 10 } : {}),
   createdAt: timestamp,
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
 });
 
 const addAsset = (
@@ -125,13 +126,50 @@ const addAsset = (
   return asset;
 };
 
+const composition = (
+  project: StudioProjectV2,
+  shotId: string,
+  purpose: 'seed_still' | 'board_still' | 'video_take'
+) => {
+  const beat = Object.values(project.beats).find((candidate) => candidate.shotOrder.includes(shotId));
+  const shot = project.shots[shotId];
+  if (!beat || !shot) throw new Error('Shot composition setup is incomplete');
+  const route = {
+    providerId: 'provider_1',
+    adapterId: purpose === 'video_take' ? ('openrouter-video-v1' as const) : ('weprompt-image-v1' as const),
+    model: 'model_1',
+  };
+  const source = {
+    kind: 'shot' as const,
+    beatId: beat.id,
+    story: beat.story,
+    shotId: shot.id,
+    shootingScript: shot.shootingScript,
+  };
+  return composeStudioGenerationV2({
+    projectRevision: project.revision,
+    brief: project.brief,
+    rules: project.rules,
+    source,
+    purpose,
+    referenceInputs: [],
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+    route,
+    boardStyle: purpose === 'board_still' ? project.boardStyle : null,
+    instructionProfile: deriveStudioInstructionProfileV2(route, purpose, source),
+  });
+};
+
 const resolvedPlan = (
+  project: StudioProjectV2,
+  shotId: string,
   conditioningInput: NonNullable<StudioJobV2['requestSnapshot']>['conditioningInput'] = null,
-  prompt = 'prompt'
+  purpose: 'seed_still' | 'board_still' | 'video_take' = 'video_take'
 ): StudioGenerationRequestPlan => ({
   kind: 'resolved',
   snapshot: {
-    prompt,
+    composition: composition(project, shotId, purpose),
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
@@ -141,12 +179,14 @@ const resolvedPlan = (
 });
 
 const deferredPredecessorPlan = (
+  project: StudioProjectV2,
+  dependentShotId: string,
   upstreamItemId = 'item_upstream',
   predecessorShotId = 'shot_1'
 ): StudioGenerationRequestPlan => ({
   kind: 'after_take_selection',
   template: {
-    prompt: 'dependent prompt',
+    composition: composition(project, dependentShotId, 'video_take'),
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
@@ -155,10 +195,15 @@ const deferredPredecessorPlan = (
   dependency: { kind: 'authorized_predecessor', upstreamItemId, predecessorShotId },
 });
 
-const deferredSeedPlan = (upstreamItemId = 'item_seed', shotId = 'shot_1'): StudioGenerationRequestPlan => ({
+const deferredSeedPlan = (
+  project: StudioProjectV2,
+  dependentShotId: string,
+  upstreamItemId = 'item_seed',
+  shotId = 'shot_1'
+): StudioGenerationRequestPlan => ({
   kind: 'after_take_selection',
   template: {
-    prompt: 'seed-dependent prompt',
+    composition: composition(project, dependentShotId, 'video_take'),
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 5,
@@ -175,7 +220,7 @@ const makeItem = (
   generationCount = 1
 ): StudioQuotedGeneration => ({
   id,
-  shotId,
+  target: { kind: 'shot', shotId },
   purpose,
   routeId: `${purpose}_route`,
   generationCount,
@@ -203,7 +248,10 @@ const makeAuthorization = (
   confirmedAt: timestamp,
   providerBindings: [...baseItems, ...cascadeItems].map((item) => ({
     itemId: item.id,
-    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
+    provider:
+      item.requestPlan.kind === 'resolved'
+        ? item.requestPlan.snapshot.composition.inputs.route
+        : item.requestPlan.template.composition.inputs.route,
   })),
   idempotencyKeys: [...baseItems, ...cascadeItems].map((item) => ({
     itemId: item.id,
@@ -216,36 +264,41 @@ const makeJob = (
   shotId: string,
   requestPlan: StudioGenerationRequestPlan,
   overrides: Partial<StudioJobV2> = {}
-): StudioJobV2 => ({
-  id,
-  projectId: 'project_1',
-  shotId,
-  status: requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
-  provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
-  idempotencyKey: `idem_${id}`,
-  providerJobId: null,
-  cancellationPolicy: 'queued_and_running',
-  outputAssetIds: [],
-  error: null,
-  retryOfJobId: null,
-  retryReason: null,
-  duplicateChargeAcknowledged: false,
-  duplicateChargeAcknowledgedAt: null,
-  createdAt: timestamp,
-  updatedAt: timestamp,
-  purpose: 'video_take',
-  authorizationId: 'auth_1',
-  authorizationItemId: 'item_dependent',
-  requestPlan,
-  requestSnapshot: requestPlan.kind === 'resolved' ? requestPlan.snapshot : null,
-  spendReceipt: null,
-  outputAssetIdsByRole: { primary: null, poster: null },
-  ...overrides,
-});
+): StudioJobV2 => {
+  const frozenComposition =
+    requestPlan.kind === 'resolved' ? requestPlan.snapshot.composition : requestPlan.template.composition;
+  return {
+    id,
+    projectId: 'project_1',
+    target: { kind: 'shot', shotId },
+    status: requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
+    provider: frozenComposition.inputs.route,
+    idempotencyKey: `idem_${id}`,
+    providerJobId: null,
+    cancellationPolicy: 'queued_and_running',
+    outputAssetIds: [],
+    error: null,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    purpose: frozenComposition.inputs.purpose,
+    authorizationId: 'auth_1',
+    authorizationItemId: 'item_dependent',
+    composition: frozenComposition,
+    requestPlan,
+    requestSnapshot: requestPlan.kind === 'resolved' ? requestPlan.snapshot : null,
+    spendReceipt: null,
+    outputAssetIdsByRole: { primary: null, poster: null },
+    ...overrides,
+  };
+};
 
 const addJob = (project: StudioProjectV2, job: StudioJobV2): void => {
   project.jobs[job.id] = job;
-  project.shots[job.shotId]?.jobIds.push(job.id);
+  if (job.target.kind === 'shot') project.shots[job.target.shotId]?.jobIds.push(job.id);
 };
 
 const boardPlan = (project: StudioProjectV2, shotId: string): StudioGenerationRequestPlan => {
@@ -254,14 +307,7 @@ const boardPlan = (project: StudioProjectV2, shotId: string): StudioGenerationRe
   if (beat === undefined || shot === undefined || project.boardStyle === null)
     throw new Error('Board setup is incomplete');
   return createStudioBoardGenerationRequestPlan({
-    brief: project.brief,
-    rules: project.rules,
-    action: beat.action,
-    look: beat.look,
-    line: shot.line,
-    style: project.boardStyle,
-    aspectRatio: project.aspectRatio,
-    resolution: project.resolution,
+    composition: composition(project, shotId, 'board_still'),
   });
 };
 
@@ -290,6 +336,9 @@ const addSucceededBoardPanel = (project: StudioProjectV2, shotId: string, assetI
     },
   });
   addJob(project, job);
+  asset.producerJobId = job.id;
+  asset.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
+  asset.generationReferenceAssetIds = job.composition.inputs.referenceInputs.map(({ assetId }) => assetId);
   const shot = project.shots[shotId]!;
   if (shot.boardAssetId !== null) shot.supersededBoardAssetIds.push(shot.boardAssetId);
   shot.boardAssetId = asset.id;
@@ -302,8 +351,10 @@ const addSucceededPrimary = (
   item: StudioQuotedGeneration,
   assetId: string
 ): StudioJobV2 => {
-  const asset = addAsset(project, item.shotId, assetId, item.purpose === 'seed_still' ? 'image' : 'video', 'assets');
-  const job = makeJob(`job_${assetId}`, item.shotId, item.requestPlan, {
+  if (item.target.kind !== 'shot') throw new Error('expected a Shot generation item');
+  const shotId = item.target.shotId;
+  const asset = addAsset(project, shotId, assetId, item.purpose === 'seed_still' ? 'image' : 'video', 'assets');
+  const job = makeJob(`job_${assetId}`, shotId, item.requestPlan, {
     status: 'succeeded',
     purpose: item.purpose,
     authorizationId,
@@ -313,8 +364,11 @@ const addSucceededPrimary = (
     outputAssetIdsByRole: { primary: asset.id, poster: null },
   });
   addJob(project, job);
+  asset.producerJobId = job.id;
+  asset.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
+  asset.generationReferenceAssetIds = job.composition.inputs.referenceInputs.map(({ assetId }) => assetId);
   if (item.purpose === 'video_take') {
-    const shot = project.shots[item.shotId]!;
+    const shot = project.shots[shotId]!;
     if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
     shot.videoAssetId = asset.id;
   }
@@ -323,8 +377,8 @@ const addSucceededPrimary = (
 
 const makeCascadeProject = () => {
   const project = makeProject(['shot_1', 'shot_2']);
-  const upstream = makeItem('item_upstream', 'shot_1', resolvedPlan(), 'video_take');
-  const dependentPlan = deferredPredecessorPlan(upstream.id, 'shot_1');
+  const upstream = makeItem('item_upstream', 'shot_1', resolvedPlan(project, 'shot_1'), 'video_take');
+  const dependentPlan = deferredPredecessorPlan(project, 'shot_2', upstream.id, 'shot_1');
   const dependent = makeItem('item_dependent', 'shot_2', dependentPlan, 'video_take');
   const authorization = makeAuthorization('auth_1', [upstream], [dependent]);
   project.spendAuthorizations.push(authorization);
@@ -421,7 +475,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
     const project = makeProject(['shot_1']);
     const take = addAsset(project, 'shot_1', 'take_1');
     project.shots.shot_1!.videoAssetId = take.id;
-    const job = makeJob('job_take', 'shot_1', resolvedPlan(null, 'stale prompt'), {
+    const job = makeJob('job_take', 'shot_1', resolvedPlan(project, 'shot_1'), {
       status: 'succeeded',
       authorizationItemId: 'item_take',
       providerJobId: 'remote_take',
@@ -442,6 +496,9 @@ describe('projectStudioWorkspaceStatusV2', () => {
       },
     });
     addJob(project, job);
+    take.producerJobId = job.id;
+    take.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
+    project.shots.shot_1!.shootingScript = 'A changed Shooting Script after the successful take.';
 
     const status = projectStudioWorkspaceStatusV2(project);
 
@@ -464,9 +521,8 @@ describe('projectStudioWorkspaceStatusV2', () => {
     project.brief = 'A paper boat crosses a flooded street.';
     project.boardStyle = 'grey_tone';
     project.imageRouteId = 'route_board';
-    project.beats.beat_1!.action = 'The paper boat drifts past a curb.';
-    project.beats.beat_1!.look = 'Rainy sodium-vapour dusk.';
-    project.shots.shot_1!.line = 'Wide, low angle on the boat.';
+    project.beats.beat_1!.story = 'The paper boat drifts past a curb in rainy sodium-vapour dusk.';
+    project.shots.shot_1!.shootingScript = 'Wide, low angle on the boat.';
     const producer = addSucceededBoardPanel(project, 'shot_1', 'board_1');
 
     expect(projectStudioWorkspaceStatusV2(project).boardPanels).toEqual([
@@ -493,7 +549,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
       staleCauses: [],
     });
 
-    project.beats.beat_1!.action = 'The boat is now lifted from the water.';
+    project.beats.beat_1!.story = 'The boat is now lifted from the water.';
     project.imageRouteId = 'route_board_new';
     expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]!.staleCauses).toEqual([
       'request_out_of_date',
@@ -528,7 +584,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
     const project = makeProject(['shot_1', 'shot_2']);
     addJob(
       project,
-      makeJob('job_own', 'shot_1', resolvedPlan(), {
+      makeJob('job_own', 'shot_1', resolvedPlan(project, 'shot_1'), {
         status: 'running',
         providerJobId: 'remote_own',
       })
@@ -538,7 +594,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
       makeJob(
         'job_downstream',
         'shot_2',
-        resolvedPlan({
+        resolvedPlan(project, 'shot_2', {
           kind: 'predecessor_frame',
           predecessorShotId: 'shot_1',
           takeAssetId: 'take_1',
@@ -548,7 +604,10 @@ describe('projectStudioWorkspaceStatusV2', () => {
         { status: 'running', providerJobId: 'remote_downstream' }
       )
     );
-    addJob(project, makeJob('job_waiting', 'shot_2', deferredPredecessorPlan('item_upstream', 'shot_1')));
+    addJob(
+      project,
+      makeJob('job_waiting', 'shot_2', deferredPredecessorPlan(project, 'shot_2', 'item_upstream', 'shot_1'))
+    );
     project.frameExtractions.frame_pending = {
       id: 'frame_pending',
       shotId: 'shot_1',
@@ -707,8 +766,8 @@ describe('workspace cascade progress', () => {
 
   it('projects choose-seed and suppresses older waiting history when the latest item is runnable', () => {
     const project = makeProject(['shot_1']);
-    const seedItem = makeItem('item_seed', 'shot_1', resolvedPlan(), 'seed_still');
-    const dependentPlan = deferredSeedPlan(seedItem.id, 'shot_1');
+    const seedItem = makeItem('item_seed', 'shot_1', resolvedPlan(project, 'shot_1', null, 'seed_still'), 'seed_still');
+    const dependentPlan = deferredSeedPlan(project, 'shot_1', seedItem.id, 'shot_1');
     const dependent = makeItem('item_seed_dependent', 'shot_1', dependentPlan);
     const oldAuthorization = makeAuthorization('auth_old', [seedItem], [dependent]);
     project.spendAuthorizations.push(oldAuthorization);
@@ -726,7 +785,7 @@ describe('workspace cascade progress', () => {
       eligiblePrimaryAssetIds: ['seed_primary'],
     });
 
-    const latestItem = makeItem('item_latest', 'shot_1', resolvedPlan());
+    const latestItem = makeItem('item_latest', 'shot_1', resolvedPlan(project, 'shot_1'));
     const latestAuthorization = makeAuthorization('auth_latest', [latestItem]);
     project.spendAuthorizations.push(latestAuthorization);
     addJob(
@@ -747,7 +806,7 @@ describe('workspace cascade progress', () => {
       { shotId: 'shot_2', jobIds: ['job_dependent'] },
     ]);
 
-    const latestItem = makeItem('item_latest', 'shot_1', resolvedPlan());
+    const latestItem = makeItem('item_latest', 'shot_1', resolvedPlan(fixture.project, 'shot_1'));
     const latestAuthorization = makeAuthorization('auth_latest', [latestItem]);
     fixture.project.spendAuthorizations.push(latestAuthorization);
     addJob(
@@ -824,7 +883,14 @@ describe('projectStudioChainStatusV2', () => {
     expect(projectStudioChainStatusV2(hardCut.project).conditioningFailures).toEqual([]);
 
     const owned = makeFailedChain();
-    addJob(owned.project, makeJob('job_current_owner', 'shot_2', deferredPredecessorPlan('item_upstream', 'shot_1')));
+    addJob(
+      owned.project,
+      makeJob(
+        'job_current_owner',
+        'shot_2',
+        deferredPredecessorPlan(owned.project, 'shot_2', 'item_upstream', 'shot_1')
+      )
+    );
     expect(projectStudioChainStatusV2(owned.project).conditioningFailures).toEqual([]);
   });
 

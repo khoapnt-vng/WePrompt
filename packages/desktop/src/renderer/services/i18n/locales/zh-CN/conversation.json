@@ -878,36 +878,16 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "项目参考图",
-      "inheritanceDescription": "每张新的参考静帧都会使用此项目中所有启用的角色和视觉风格图片。",
-      "castHeading": "角色",
-      "lookHeading": "视觉风格",
-      "castEmpty": "尚无角色参考图。",
-      "lookEmpty": "尚无视觉风格参考图。",
-      "addCast": "添加角色参考图",
-      "addLook": "添加视觉风格参考图",
-      "activeCount": "{{count}} 张启用的参考图",
-      "activeCount_other": "{{count}} 张启用的参考图",
-      "limitReached": "此项目已有 6 张启用的参考图。请先移除一张再添加。",
-      "removeFromBrief": "从简报中移除",
-      "removeAccessible": "从简报中移除 {{label}}",
-      "previewAccessible": "{{role}}参考图：{{label}}",
-      "engineCapacityNone": "此图像引擎尚未通过参考图验证。请打开“模型设置”并重新验证。",
-      "engineMenuCapacityNone": "无参考图像",
-      "engineCapacityMaximum": "最多 {{count}} 张参考图",
-      "engineCapacityMaximum_other": "最多 {{count}} 张参考图",
-      "capacityMismatch": "你有 {{count}} 张启用的参考图，但此图像引擎仅支持 {{maximum}} 张。在移除参考图或更换、重新验证引擎之前，无法生成新的参考静帧。",
-      "importError": "无法添加参考图，请重试。"
-    },
     "workspace": {
-      "views": { "references": "参考图" },
+      "views": {
+        "references": "参考图"
+      },
       "referenceWorkflow": {
-        "description": "先批准稳定的角色设定图，再批准重复出现的背景。镜头候选会自动使用这些已批准的参考图。",
+        "description": "先批准角色的当前标准图，再批准重复出现背景的当前标准图。生成分镜或首帧之前，请将已批准的参考图明确绑定到每个镜头。",
         "generationScope": "生成范围",
         "characters": {
           "title": "角色",
-          "description": "为每个有名字的角色批准一张身份设定图。",
+          "description": "为每个有名字的角色批准一张当前标准图。",
           "empty": "此故事没有有名字的角色。现在可以审核背景。"
         },
         "backgrounds": {
@@ -931,17 +911,41 @@
         "regenerate": "重新生成",
         "ready": "所有必需的参考图均已批准。可以继续前往表格。",
         "notReady": "批准所有必需的参考图后才能继续。",
-        "continueToTable": "继续前往表格"
+        "continueToTable": "继续前往表格",
+        "approvalProgress": "已批准 {{approved}} / {{total}} 个参考",
+        "bindings": {
+          "title": "Shot 绑定",
+          "description": "选择每个 Shot 的 Board 面板和首帧所使用的确切已批准角色与背景。",
+          "empty": "没有需要绑定的活动 Shot。",
+          "shot": "Shot {{position}}",
+          "unassigned": "此 Shot 尚未作出参考选择。",
+          "invalid": "已保存的绑定不再有效。请选择当前已批准的参考并重新保存。",
+          "capacity": "已选择 {{count}} 个参考，但图像路由最多支持 {{limit}} 个。",
+          "characters": "角色",
+          "background": "背景",
+          "save": "保存绑定"
+        }
       },
-      "references": { "referenceCount": "已为 {{total}} 个项目请求参考图" },
+      "references": {
+        "referenceCount": "已为 {{total}} 个项目请求参考图"
+      },
       "handoffs": {
         "referenceCount": "此交接包含 {{total}} 张参考图",
         "progress": "排队 {{queued}} · 运行 {{running}} · 成功 {{succeeded}} · 失败 {{failed}}",
         "reviewReferences": "审核参考图",
-        "retryFailed": "重试失败的参考图"
+        "retryFailed": "重试失败的参考图",
+        "awaiting_spend": "等待费用审核",
+        "running": "正在生成参考。",
+        "succeeded": "已生成所有请求的参考。",
+        "partially_failed": "部分参考已生成；请单独重试失败的参考。",
+        "failed": "参考生成失败。不会自动重试。",
+        "dismissed": "未花费并已关闭"
       },
       "table": {
-        "columns": { "panel": "分镜" },
+        "columns": {
+          "panel": "分镜",
+          "story": "故事"
+        },
         "board": {
           "label": "导演分镜控制",
           "progress": "已绘制 {{drawn}} / {{total}} 个分镜",
@@ -1039,15 +1043,8 @@
       "proposals": {
         "before": "之前",
         "after": "之后",
-        "placement": "位置",
         "ownerBeat": "所属节拍",
-        "order": "顺序",
-        "beforeItem": "在{{kind}}之前",
-        "technicalDetails": "技术详情",
         "reviewUnavailable": "此提案包含不支持的更改，无法接受。",
-        "referenceKind": "参考类型",
-        "referencePrompt": "参考提示词",
-        "assignedShots": "已分配镜头",
         "chatDecisionBusy": "另一个审核操作仍在进行中。",
         "chatDirty": "请先保存或重置所有工作区草稿，再批准或拒绝导演提案。",
         "chatNoPending": "当前没有待处理的导演提案。",
@@ -1055,8 +1052,40 @@
         "chatStale": "此提案已与当前项目版本不匹配。",
         "chatAccepted": "提案已接受。",
         "chatRejected": "提案已拒绝。",
-        "fixedReason": {
-          "video_asset": "此镜头有当前画面。"
+        "reviewStale": "此审核基于修订版 {{baseRevision}}，但项目当前为修订版 {{currentRevision}}。",
+        "noChanges": "此提案没有语义变更。",
+        "subject": {
+          "project": "项目",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "已添加",
+          "edited": "已编辑",
+          "removed": "已移除",
+          "reordered": "已重新排序"
+        },
+        "placementValue": {
+          "active": "活动",
+          "bin": "Bin",
+          "removed": "已移除"
+        },
+        "field": {
+          "name": "名称",
+          "brief": "Brief",
+          "rules": "规则",
+          "aspectRatio": "宽高比",
+          "resolution": "分辨率",
+          "targetDurationSeconds": "目标时长",
+          "boardStyle": "Board 风格",
+          "title": "标题",
+          "story": "故事",
+          "targetSeconds": "Beat 目标",
+          "shootingScript": "拍摄脚本",
+          "durationSeconds": "时长",
+          "chainBreak": "连续性",
+          "placement": "位置",
+          "order": "顺序"
         }
       },
       "beatPanel": {
@@ -1089,19 +1118,16 @@
           "beatBodyStale": "此节拍中的所有镜头、已创作内容和付费生成素材都会保留。移到废纸篓后，以下内容会变为过时状态：{{shots}}。",
           "confirmBeat": "移到废纸篓"
         },
-        "beatFieldsLabel": "节拍动作、视觉风格和目标时长",
+        "beatFieldsLabel": "Beat 故事与目标",
         "fieldGuidance": {
-          "action": "动作 · 你唯一需要写的内容",
-          "look": "视觉风格 · 每个镜头都沿用它"
+          "story": "故事 · 此 Beat 的叙事目的与推进"
         },
         "fields": {
-          "action": "动作",
-          "look": "视觉风格",
-          "targetSeconds": "目标秒数"
+          "targetSeconds": "目标秒数",
+          "story": "故事",
+          "shootingScript": "拍摄脚本",
+          "shootingScriptFor": "Shot {{index}} 的拍摄脚本"
         },
-        "lookCounter": "{{count}} / {{limit}} 个词",
-        "lookCounter_one": "{{count}} / {{limit}} 个词",
-        "lookCounter_other": "{{count}} / {{limit}} 个词",
         "chain": {
           "hardCutState": "硬切 · 从首帧开始",
           "hardCutUnavailable": "暂时无法更改硬切。必须先审阅所需替换媒体的报价。",
@@ -1111,12 +1137,6 @@
           "reviewRejoinDescription": "重新衔接镜头 {{shot}} 会清除其首帧选择，并使用镜头 {{previous}} 经裁剪后的最后一帧。确认后，免费的帧提取可能会先完成，再将此镜头及其后直到下一个硬切的连续镜头提交给提供商。",
           "segmentHead": "链首 · 从首帧开始",
           "continuous": "承接镜头 {{position}} 的最后一帧"
-        },
-        "derivation": {
-          "derived": "由动作派生",
-          "detached": "已分离 · 你的文字",
-          "attachedLineGuidance": "根据动作编写 · 编辑即分离",
-          "detachedLineGuidance": "你的文字 · 不再跟随动作"
         },
         "coverage": {
           "trimGuidance": "边缘 · 修剪 · 免费",
@@ -1154,8 +1174,8 @@
           "label": "节拍预览",
           "noMedia": "节拍预览不可用",
           "mediaError": "无法预览当前画面。",
-          "videoLabel": "镜头 {{position}} 视频 · {{line}}",
-          "slateLabel": "镜头 {{position}} 规划场记卡 · {{line}}",
+          "videoLabel": "镜头 {{position}} 视频 · {{shootingScript}}",
+          "slateLabel": "镜头 {{position}} 规划场记卡 · {{shootingScript}}",
           "slate": "规划场记卡",
           "slateHold": "保留 {{clock}}",
           "play": "播放节拍",
@@ -1167,31 +1187,23 @@
           "nextJoin": "下一个接点",
           "loopJoin": "循环最近接点",
           "keyboardGuidance": "空格键播放 · 方向键定位 · [ ] 切换接点 · L 循环"
-        }
+        },
+        "directorRequestHint": "请 Creative Director 提供经审核的重新拆分方案。"
       },
       "controls": {
         "briefAndRulesTitle": "简报与规则",
         "undoLabel": {
           "promote_board_panel": "将分镜用作首帧",
-          "set_project_references": "项目参考",
-          "set_shot_background_reference": "镜头背景参考"
+          "set_reference_plan": "参考计划",
+          "approve_reference": "参考批准",
+          "set_shot_reference_binding": "Shot 参考绑定"
         }
       },
       "gate": {
-        "backgroundChoice": {
-          "title": "为每个镜头选择背景",
-          "description": "在计算生成费用前，为每个镜头分配一个已批准的背景。此免费更改会保留角色参考。",
-          "shotLabel": "镜头 {{shotId}} 的背景",
-          "incomplete": "请为列表中的每个镜头选择一个背景。",
-          "assign": "分配背景",
-          "assigning": "正在分配背景…",
-          "noneTitle": "没有可用的已批准背景。",
-          "noneBody": "请先检查参考并批准一个背景，再计算本次生成的费用。",
-          "reviewReferences": "检查参考",
-          "invalid": "这些背景选择已不是最新状态。请检查参考，或关闭此审核后重试。",
-          "failed": "未能保存背景分配。请检查当前项目并重试。"
+        "purpose": {
+          "board_still": "分镜",
+          "reference_image": "参考图像"
         },
-        "purpose": { "board_still": "分镜" },
         "promotion": {
           "title": "将分镜用作首帧",
           "summary": "将 Shot {{shotId}} 的当前导演分镜提升为首帧。此操作不会更改该 Shot 的连续性边界。",
@@ -1221,7 +1233,9 @@
         "hideBreakdown": "隐藏每次生成",
         "showBreakdown": "显示每次生成",
         "routeShared": "全部使用 {{model}}",
-        "group": { "required": "必需" },
+        "group": {
+          "required": "必需"
+        },
         "continuity": {
           "severTitle": "审阅硬切",
           "rejoinTitle": "审阅重新衔接",
@@ -1257,6 +1271,19 @@
             "missingConditioning": "一个视频镜头缺少可用的首帧或前序帧。请添加或选择所需图像。",
             "unsafeTotal": "无法安全表示报价总额。请减少选择；未提交任何内容。"
           }
+        },
+        "reviewShotBinding": "审核 Shot 绑定",
+        "readout": {
+          "prompt": "确切提示词",
+          "rendersAs": "渲染配置",
+          "sourceRevision": "来源修订版",
+          "source": "来源",
+          "story": "故事",
+          "shootingScript": "拍摄脚本",
+          "referencePrompt": "参考描述",
+          "references": "已解析参考",
+          "noReferences": "无直接参考输入",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
         }
       }
     },
@@ -1600,101 +1627,6 @@
       "durationSeconds_other": "{{seconds}} 秒",
       "selected": "已选场景"
     },
-    "inspector": {
-      "title": "场景指导",
-      "sectionsLabel": "场景编辑区",
-      "directionTab": "视觉",
-      "scriptTab": "脚本",
-      "titleLabel": "场景标题",
-      "purposeLabel": "场景目标",
-      "purposePlaceholder": "这个场景要达到什么目的？",
-      "visualPromptLabel": "视觉提示词",
-      "visualPromptPlaceholder": "描述镜头、主体、环境、光线和运动。",
-      "narrationLabel": "旁白",
-      "onScreenTextLabel": "画面文字",
-      "mediaKindLabel": "输出类型",
-      "durationLabel": "场景时长（秒）",
-      "invalidDuration": "请输入 1 到 60 秒之间的整数。",
-      "saving": "正在保存场景...",
-      "saved": "场景已保存",
-      "saveFailed": "无法保存场景。",
-      "unsavedChanges": "未保存的更改已为你保留。"
-    },
-    "draft": {
-      "title": "起草故事板",
-      "body": "WePrompt 将提出场景、旁白、画面文字和时长，供你审核。",
-      "checking": "正在检查所选分镜模型...",
-      "ready": "可以起草",
-      "setupRequired": "请选择并配置分镜模型以使用 AI 起草。",
-      "unavailable": "故事板起草功能当前不可用。",
-      "providerLabel": "分镜提供商",
-      "modelLabel": "分镜模型",
-      "chargeNotice": "起草将使用项目所选的分镜模型，可能产生提供商费用。",
-      "replaceTitle": "替换现有故事板？",
-      "replaceBody": "再次起草仅会在返回有效方案后替换所有当前场景。",
-      "confirm": "起草故事板",
-      "cancel": "取消",
-      "configureModel": "打开模型设置",
-      "manualFallback": "继续手动编辑",
-      "failed": "无法起草故事板。当前场景未被更改。"
-    },
-    "conditioning": {
-      "inputsTitle": "此静帧的输入",
-      "role": {
-        "cast": "角色",
-        "look": "风格"
-      },
-      "maximum": "此引擎最多接受 {{count}} 个简报参考。",
-      "unsupported": "此图像引擎无法使用有效的简报参考。请选择其他图像引擎，或从简报中移除这些参考。",
-      "overflow": "此图像引擎最多接受 {{maximum}} 个简报参考，但当前有 {{count}} 个有效参考。",
-      "malformed": "简报参考已更改或无效。请在生成前刷新审核。",
-      "reviewChanged": "简报参考或图像引擎已更改。请在生成前审核刷新后的输入。",
-      "plateOutOfDate": "所选首帧使用了不同的简报参考、宽高比或分辨率。你仍可渲染此片段。"
-    },
-    "reference": {
-      "generate": "生成参考图",
-      "dialogTitle": "生成参考图像",
-      "promptLabel": "参考图提示词",
-      "reviewTag": "参考图",
-      "excludedSummary": "部分请求的场景尚未就绪，因此不包含在本次批准中：",
-      "excludedNoneReady": "请求的场景均未准备好生成参考图：",
-      "discardExcludedRequests": "丢弃这些请求",
-      "excludedUnavailable": "场景已不可用",
-      "excludedPromptUnusable": "该场景的画面提示词无法描述参考图",
-      "dismissFailed": "无法更新请求队列。审核窗口已关闭，请稍后重试。"
-    },
-    "review": {
-      "generateReadyScenes": "生成 {{count}} 个已就绪场景",
-      "generateReadyScenes_other": "生成 {{count}} 个已就绪场景",
-      "noReadyScenes": "没有可生成的已就绪场景。",
-      "generateScene": "生成场景",
-      "regenerateScene": "生成另一个变体",
-      "title": "审核生成设置",
-      "sceneCount": "已选择 {{count}} 个场景",
-      "videoSeconds": "请求生成 {{seconds}} 秒视频",
-      "selectedDurationFull": "已选时长：{{seconds}} 秒",
-      "selectedDurationFull_other": "已选时长：{{seconds}} 秒",
-      "targetDurationFull": "目标时长：{{seconds}} 秒",
-      "targetDurationFull_other": "目标时长：{{seconds}} 秒",
-      "providerLabel": "服务商",
-      "modelLabel": "模型",
-      "aspectRatio": "宽高比",
-      "resolution": "分辨率",
-      "watermarkOff": "已禁用水印",
-      "audioOff": "静音输出；已禁用音频生成",
-      "missingRoute": "至少有一个场景没有引擎。",
-      "invalidRoute": "至少有一个所选引擎无效。",
-      "durationMismatch": "故事板时长与项目目标不一致。",
-      "chargeNotice": "生成会使用你选择的服务商账户，并可能产生服务商费用。",
-      "confirm": "确认并生成",
-      "cancel": "取消",
-      "disabledMissingRoutes": "有 {{count}} 个镜头没有引擎。关闭此窗口进行设置。",
-      "disabledMissingRoutes_other": "有 {{count}} 个镜头没有引擎。关闭此窗口进行设置。",
-      "setEngines": "关闭并设置引擎",
-      "excludedFirstFrame": "本次渲染不包含 {{count}} 个镜头——此引擎无法从一帧开始。",
-      "excludedFirstFrame_other": "本次渲染不包含 {{count}} 个镜头——此引擎无法从一帧开始。",
-      "audioOn": "此次渲染包含生成的音频；静音引擎（如有）仍将保持静音。"
-    },
     "jobs": {
       "progress": "已完成 {{percent}}%",
       "cancel": "取消任务",
@@ -1874,36 +1806,6 @@
         "actionRemoveReference": "移除参考图",
         "actionShorten": "缩短此镜头"
       }
-    },
-    "brief": {
-      "conversationTitle": "简报对话",
-      "danglingNotice": "此项目的简报对话已不可用。",
-      "danglingStartFresh": "开始新对话",
-      "proposalTitle": "提议的脚本",
-      "proposalMeta": "基于修订版 {{revision}} · {{createdAt}}",
-      "proposalSummary": "新增 {{added}} · 删除 {{removed}} · 修改 {{changed}}",
-      "proposalSceneChange": "镜头 {{position}}：{{fields}}",
-      "proposalFieldSeparator": "、",
-      "proposalNoChanges": "当前脚本无更改",
-      "proposalDiffUnavailable": "更改摘要不可用 — 此提案起草后，脚本已发生变化",
-      "proposalField": {
-        "title": "标题",
-        "purpose": "目标",
-        "visualPrompt": "视觉提示词",
-        "narration": "旁白",
-        "onScreenText": "画面文字",
-        "mediaKind": "输出类型",
-        "durationSeconds": "时长",
-        "referenceAssetId": "参考图"
-      },
-      "proposalAccept": "接受脚本",
-      "proposalReject": "拒绝",
-      "proposalAccepted": "脚本已应用",
-      "proposalRejected": "已拒绝",
-      "proposalExpired": "已过期",
-      "proposalStale": "此提案等待期间脚本已发生变化。请请求重新起草。",
-      "proposalRepropose": "请求重新起草",
-      "proposalFlushRefused": "无法保存你尚未保存的编辑，因此未应用此提案。请修正这些编辑后重试。"
     },
     "shell": {
       "showDirector": "显示创意总监",

@@ -222,7 +222,7 @@ describe('local bridge', () => {
       projectId: 'project_1',
       expectedRevision: 1,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
       cascadeChoices: [],
     });
 
@@ -231,6 +231,7 @@ describe('local bridge', () => {
       error: {
         code: 'pricing_refused',
         reason: 'missing_conditioning',
+        details: null,
         messageKey: 'conversation.creativeStudio.errors.pricingRefused',
       },
     });

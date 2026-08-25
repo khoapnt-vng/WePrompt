@@ -11,7 +11,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   type CreateStudioProjectInputV2,
   type StudioAssetV2,
   type StudioDirectorCommandRecordV2,
@@ -26,10 +27,13 @@ import { createStudioDirectorCommandServiceV2 } from '@process/services/creative
 import {
   applyStudioMutationBatchV2,
   calculateStudioQuoteTotals,
+  composeStudioGenerationV2,
   createEmptyStudioProjectV2,
   createStudioGenerationRequestTemplate,
   createStudioQuotedGenerationId,
+  deriveStudioInstructionProfileV2,
   deriveStudioDirtyShotsV2,
+  studioGenerationCompositionDigestV2,
   validateStudioProjectV2,
 } from '@process/services/creative-studio/service/schema2';
 import { createCreativeStudioStore } from '@process/services/creative-studio/store';
@@ -41,9 +45,7 @@ afterEach(async () => {
 });
 
 const directorShotV2 = () => ({
-  line: 'A clean product composition',
-  narration: '',
-  onScreenText: '',
+  shootingScript: 'A clean product composition',
   durationSeconds: 5,
 });
 
@@ -52,7 +54,7 @@ const directorCommandV2 = (
   commandId: string,
   operations: StudioDirectorOperationV2[]
 ): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   commandId,
   projectId: project.id,
   expectedRevision: project.revision,
@@ -121,61 +123,116 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       return project;
     };
 
-    await apply('command_structure', [
+    project = await store.updateProjectV2(
+      project.id,
+      (openingProject) =>
+        applyStudioMutationBatchV2(
+          openingProject,
+          {
+            schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+            projectId: openingProject.id,
+            expectedRevision: openingProject.revision,
+            operations: [
+              {
+                kind: 'add_beat',
+                beatId: 'section_1',
+                beat: { title: 'Opening', story: 'Warm sunrise.', targetSeconds: null },
+                beforeBeatId: null,
+              },
+              {
+                kind: 'add_shot',
+                beatId: 'section_1',
+                shotId: 'clip_1',
+                shot: directorShotV2(),
+                beforeShotId: null,
+              },
+              {
+                kind: 'add_beat',
+                beatId: 'section_2',
+                beat: { title: 'Close', story: 'Soft evening light.', targetSeconds: null },
+                beforeBeatId: null,
+              },
+              {
+                kind: 'add_shot',
+                beatId: 'section_2',
+                shotId: 'clip_2',
+                shot: directorShotV2(),
+                beforeShotId: null,
+              },
+              {
+                kind: 'add_shot',
+                beatId: 'section_1',
+                shotId: 'clip_3',
+                shot: { shootingScript: '', durationSeconds: 5 },
+                beforeShotId: null,
+              },
+              {
+                kind: 'add_binned_beat',
+                beatId: 'alternate_1',
+                beat: { title: 'Alternate one', story: '', targetSeconds: null },
+              },
+              {
+                kind: 'add_binned_beat',
+                beatId: 'alternate_2',
+                beat: { title: 'Alternate two', story: '', targetSeconds: null },
+              },
+            ],
+          },
+          { mutationId: 'seed_spend_fence_structure', capturedAt: '2026-08-17T00:00:00.000Z' }
+        ).project,
+      project.revision,
+      'seed_spend_fence_structure'
+    );
+
+    await apply('command_set_brief', [{ kind: 'set_brief', brief: 'Director-authored free edits' }]);
+    await apply('command_reorder_beats', [{ kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] }]);
+    await apply('command_reorder_shots', [
+      { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_3', 'clip_1'] },
+    ]);
+    await apply('command_delete_shot', [{ kind: 'delete_shot', shotId: 'clip_3' }]);
+    await apply('command_reorder_bin', [
       {
-        kind: 'add_beat',
-        beatId: 'section_1',
-        beat: { title: 'Opening', action: '', look: 'Warm sunrise', targetSeconds: null },
-        beforeBeatId: null,
-      },
-      {
-        kind: 'add_shot',
-        beatId: 'section_1',
-        shotId: 'clip_1',
-        shot: directorShotV2(),
-        beforeShotId: null,
-      },
-      {
-        kind: 'add_beat',
-        beatId: 'section_2',
-        beat: { title: 'Close', action: '', look: 'Soft evening light', targetSeconds: null },
-        beforeBeatId: null,
-      },
-      {
-        kind: 'add_shot',
-        beatId: 'section_2',
-        shotId: 'clip_2',
-        shot: directorShotV2(),
-        beforeShotId: null,
-      },
-      {
-        kind: 'add_shot',
-        beatId: 'section_1',
-        shotId: 'clip_3',
-        shot: directorShotV2(),
-        beforeShotId: null,
+        kind: 'reorder_bin',
+        bin: [
+          { kind: 'beat', beatId: 'alternate_2', reason: 'alternate' },
+          { kind: 'beat', beatId: 'alternate_1', reason: 'alternate' },
+        ],
       },
     ]);
-
-    await apply('command_all_other_mutations', [
-      { kind: 'set_brief', brief: 'Director-authored free edits' },
-      { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A precise opening beat' } },
-      { kind: 'edit_shot', shotId: 'clip_1', changes: { line: 'A tighter product composition' } },
-      { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
-      { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_3', 'clip_1'] },
-      { kind: 'delete_shot', shotId: 'clip_3' },
+    await apply('command_set_reference_plan', [{ kind: 'set_reference_plan', references: [] }]);
+    await apply('command_set_shot_reference_binding', [
+      {
+        kind: 'set_shot_reference_binding',
+        shotId: 'clip_1',
+        characterReferenceIds: [],
+        backgroundReferenceId: null,
+      },
     ]);
 
     expect(project).toMatchObject({
       brief: 'Director-authored free edits',
       beatOrder: ['section_2', 'section_1'],
       beats: {
-        section_1: { action: 'A precise opening beat', shotOrder: ['clip_1'] },
+        section_1: { story: 'Warm sunrise.', shotOrder: ['clip_1'] },
       },
       shots: {
-        clip_1: { line: 'A tighter product composition', videoAssetId: null, supersededVideoAssetIds: [] },
+        clip_1: {
+          shootingScript: 'A clean product composition',
+          referenceBinding: {
+            status: 'ready',
+            characterReferenceIds: [],
+            backgroundReferenceId: null,
+          },
+          videoAssetId: null,
+          supersededVideoAssetIds: [],
+        },
       },
-      bin: [],
+      referencePlanStatus: 'planned',
+      referenceOrder: [],
+      bin: [
+        { kind: 'beat', beatId: 'alternate_2', reason: 'alternate' },
+        { kind: 'beat', beatId: 'alternate_1', reason: 'alternate' },
+      ],
     });
     expect(project.shots).not.toHaveProperty('clip_3');
     for (const boundary of Object.values(paidBoundaries)) expect(boundary).not.toHaveBeenCalled();
@@ -196,29 +253,23 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       openedAt
     );
     project.videoRouteId = 'video_route_1';
+    project.referencePlanStatus = 'planned';
     project.beatOrder = ['beat_1'];
     project.beats.beat_1 = {
       id: 'beat_1',
       title: 'Opening',
-      action: 'Reveal the product',
-      look: 'Clean daylight on brushed metal',
-      actionRevision: 1,
+      story: 'Reveal the product in clean daylight on brushed metal.',
       targetSeconds: null,
       shotOrder: ['shot_1'],
-      lineHistory: [],
     };
     const shot: StudioShot = {
       id: 'shot_1',
-      line: 'A composed hero shot',
-      derivation: 'derived',
-      derivedFromActionRevision: 1,
-      narration: '',
-      onScreenText: '',
+      shootingScript: 'A composed hero shot.',
       durationSeconds: 8,
       trimInSeconds: null,
       trimOutSeconds: null,
       chainBreak: 'none',
-      referenceIds: [],
+      referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
       seedStillId: 'seed_1',
       boardAssetId: null,
       supersededBoardAssetIds: [],
@@ -238,7 +289,32 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       byteSize: 1,
       sha256: 'a'.repeat(64),
       createdAt: openedAt,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
     };
+    const provider = { providerId: 'provider_1', adapterId: 'byteplus-seedance-v1' as const, model: 'video-model' };
+    const source = {
+      kind: 'shot' as const,
+      beatId: 'beat_1',
+      story: project.beats.beat_1.story,
+      shotId: shot.id,
+      shootingScript: shot.shootingScript,
+    };
+    const composition = composeStudioGenerationV2({
+      projectRevision: project.revision,
+      brief: project.brief,
+      rules: project.rules,
+      source,
+      purpose: 'video_take',
+      referenceInputs: [],
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      route: provider,
+      boardStyle: null,
+      instructionProfile: deriveStudioInstructionProfileV2(provider, 'video_take', source),
+    });
     const take: StudioAssetV2 = {
       id: 'take_1',
       projectId: project.id,
@@ -249,22 +325,18 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       byteSize: 1,
       sha256: 'b'.repeat(64),
       durationSeconds: 10,
-      referenceAssetIds: [],
       createdAt: confirmedAt,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: 'job_1',
+      compositionDigest: studioGenerationCompositionDigestV2(composition),
     };
     project.assets.seed_1 = seed;
     project.assets.take_1 = take;
     const requestSnapshot = {
       ...createStudioGenerationRequestTemplate({
-        purpose: 'video_take',
-        brief: project.brief,
-        rules: project.rules,
-        look: project.beats.beat_1.look,
-        line: shot.line,
-        aspectRatio: project.aspectRatio,
-        resolution: project.resolution,
+        composition,
         durationSeconds: shot.durationSeconds,
-        referenceInputs: [],
       }),
       conditioningInput: { kind: 'seed_still' as const, assetId: seed.id },
     };
@@ -272,10 +344,10 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       id: createStudioQuotedGenerationId({
         projectId: project.id,
         projectRevision: project.revision,
-        shotId: shot.id,
+        target: { kind: 'shot', shotId: shot.id },
         purpose: 'video_take',
       }),
-      shotId: shot.id,
+      target: { kind: 'shot', shotId: shot.id },
       purpose: 'video_take',
       routeId: project.videoRouteId,
       generationCount: 1,
@@ -285,7 +357,6 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
     };
     const totals = calculateStudioQuoteTotals([item]);
     if (totals === null) throw new Error('canonical quote fixture must have finite totals');
-    const provider = { providerId: 'provider_1', adapterId: 'byteplus-seedance-v1', model: 'video-model' };
     const authorization: StudioSpendAuthorization = {
       id: 'authorization_1',
       projectId: project.id,
@@ -305,7 +376,7 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
     const job: StudioJobV2 = {
       id: 'job_1',
       projectId: project.id,
-      shotId: shot.id,
+      target: { kind: 'shot', shotId: shot.id },
       status: 'succeeded',
       provider,
       idempotencyKey: authorization.idempotencyKeys[0]!.key,
@@ -323,6 +394,7 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       purpose: item.purpose,
       authorizationId: authorization.id,
       authorizationItemId: item.id,
+      composition,
       requestPlan: item.requestPlan,
       requestSnapshot,
       spendReceipt: {
@@ -346,16 +418,15 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
     project.updatedAt = confirmedAt;
 
     const operation: StudioDirectorOperationV2 = {
-      kind: 'edit_shot',
-      shotId: shot.id,
-      changes: { line: 'A newly authored request prompt' },
+      kind: 'set_brief',
+      brief: 'A newly authored project Brief.',
     };
     expect(validateStudioProjectV2(project)).toBe(true);
     expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
     const reviewedMutation = applyStudioMutationBatchV2(
       project,
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: project.revision,
         operations: [operation],

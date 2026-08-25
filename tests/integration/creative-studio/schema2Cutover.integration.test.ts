@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   type CreateStudioProjectInputV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { createCreativeStudioStore, type StudioProjectCommitFacts } from '@process/services/creative-studio/store';
@@ -568,6 +569,59 @@ describe('Creative Studio schema-2 storage cutover', () => {
     });
   });
 
+  it.each([2, 3, 4] as const)(
+    'keeps a schema-%d prototype manifest unsupported and byte-identical without compatibility artifacts',
+    async (schemaVersion) => {
+      const rootDir = await mkdtemp(path.join(tmpdir(), `studio-schema-${schemaVersion}-cutover-`));
+      roots.push(rootDir);
+      const projectId = `project_schema_${schemaVersion}`;
+      const projectDir = path.join(rootDir, projectId);
+      const projectFile = path.join(projectDir, 'project.json');
+      const projectBytes = jsonBytes({
+        schemaVersion,
+        id: projectId,
+        marker: `schema-${schemaVersion}-bytes-must-not-change`,
+      });
+      await mkdir(projectDir);
+      await writeFile(projectFile, projectBytes);
+      const before = await nodeFs.lstat(projectFile, { bigint: true });
+      const store = createCreativeStudioStore({ rootDir });
+
+      await expect(store.getProjectV2(projectId)).resolves.toEqual({
+        status: 'unsupported_prototype_schema',
+        projectId,
+      });
+      await expect(store.listProjectsV2()).resolves.toEqual({
+        projects: [],
+        unsupportedProjectIds: [projectId],
+        quarantinedProjectIds: [],
+      });
+      await expect(store.inspectProjectsV2()).resolves.toEqual({
+        supportedProjectIds: [],
+        unsupportedProjectIds: [projectId],
+        quarantinedProjectIds: [],
+      });
+
+      const after = await nodeFs.lstat(projectFile, { bigint: true });
+      expect(await readFile(projectFile, 'utf8')).toBe(projectBytes);
+      expect({
+        dev: after.dev,
+        ino: after.ino,
+        size: after.size,
+        mtimeNs: after.mtimeNs,
+        ctimeNs: after.ctimeNs,
+      }).toEqual({
+        dev: before.dev,
+        ino: before.ino,
+        size: before.size,
+        mtimeNs: before.mtimeNs,
+        ctimeNs: before.ctimeNs,
+      });
+      await expect(readdir(projectDir)).resolves.toEqual(['project.json']);
+      await expect(readdir(rootDir)).resolves.toEqual([projectId]);
+    }
+  );
+
   it('rejects Director binding and authority reads for schema-1 without changing any byte or inode', async () => {
     const fixture = await createCompleteV1Profile();
     const before = await snapshotV1Profile(fixture.rootDir);
@@ -680,7 +734,7 @@ describe('Creative Studio schema-2 storage cutover', () => {
 
     const applied = await restartedStore.applyMutationBatchV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: V2_PROJECT_ID,
         expectedRevision: 1,
         operations: [{ kind: 'set_brief', brief: 'Committed after restart' }],

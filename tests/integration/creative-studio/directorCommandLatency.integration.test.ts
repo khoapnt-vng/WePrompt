@@ -15,6 +15,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   type StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { createStudioDirectorCommandWriterV2 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
@@ -69,13 +70,36 @@ describe('Studio Director schema-2 latency fixture', () => {
       createId: () => 'project_latency_v2',
       onProjectCommitted: tracker.observe,
     });
-    const project: StudioProjectV2 = await store.createProjectV2({
+    const created: StudioProjectV2 = await store.createProjectV2({
       name: 'Latency project V2',
       brief: 'Warmup',
       aspectRatio: '16:9',
       targetDurationSeconds: 5,
       resolution: '720p',
     });
+    const { project } = await store.applyMutationBatchV2(
+      {
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+        projectId: created.id,
+        expectedRevision: created.revision,
+        operations: [
+          {
+            kind: 'add_beat',
+            beatId: 'beat_latency_v2',
+            beat: { title: 'Opening', story: 'A product appears in cinematic light.', targetSeconds: null },
+            beforeBeatId: null,
+          },
+          {
+            kind: 'add_shot',
+            beatId: 'beat_latency_v2',
+            shotId: 'shot_latency_v2',
+            shot: { shootingScript: 'Product reveal', durationSeconds: 5 },
+            beforeShotId: null,
+          },
+        ],
+      },
+      { mutationId: 'seed_latency_v2', capturedAt: new Date(fixtureNowMs).toISOString() }
+    );
     const mailbox = createStudioDirectorCommandMailboxV2({
       rootDir,
       store,
@@ -132,26 +156,7 @@ describe('Studio Director schema-2 latency fixture', () => {
     const pendingFile = path.join(projectDir, 'commands', 'pending', 'command_latency_v2.json');
     const applying = writer.apply({
       expectedRevision: project.revision,
-      operations: [
-        {
-          kind: 'add_beat',
-          beatId: 'beat_latency_v2',
-          beat: { title: 'Opening', action: '', look: 'Cinematic light', targetSeconds: null },
-          beforeBeatId: null,
-        },
-        {
-          kind: 'add_shot',
-          beatId: 'beat_latency_v2',
-          shotId: 'shot_latency_v2',
-          shot: {
-            line: 'Product reveal',
-            narration: '',
-            onScreenText: '',
-            durationSeconds: 5,
-          },
-          beforeShotId: null,
-        },
-      ],
+      operations: [{ kind: 'set_brief', brief: 'Latency project updated by the Director.' }],
     });
     await waitForCondition(
       async () => ((await fileExists(pendingFile)) ? true : null),

@@ -162,6 +162,7 @@
 .beatTitle:global(.arco-btn-text):not(:global(.arco-btn-disabled)):focus-visible {
   position: static;
   border-color: transparent;
+  color: var(--text-primary);
   background-color: transparent;
   box-shadow: none;
 }
@@ -197,7 +198,7 @@
   white-space: normal;
 }
 
-.action,
+.story,
 .blocker,
 .state,
 .binReason,
@@ -210,7 +211,7 @@
   overflow-wrap: anywhere;
 }
 
-.action {
+.story {
   min-block-size: 2.8em;
   color: var(--color-text-2);
   font-size: 14px;

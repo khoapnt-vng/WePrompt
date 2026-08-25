@@ -9,7 +9,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
-  StudioProposalV2,
+  StudioRendererProposalV2,
   StudioReferenceRequestV2,
   StudioRendererProjectV2,
   StudioRendererReferenceGenerationHandoffV2,
@@ -19,7 +19,7 @@ import { DirectorProposalCard } from './DirectorProposalCard';
 
 export type DirectorProposalsProps = {
   project: StudioRendererProjectV2;
-  proposals: readonly StudioProposalV2[];
+  proposals: readonly StudioRendererProposalV2[];
   referenceRequests: readonly StudioReferenceRequestV2[];
   referenceGenerationHandoffs: readonly StudioRendererReferenceGenerationHandoffV2[];
   pendingActionId: string | null;
@@ -38,7 +38,7 @@ export type DirectorProposalsProps = {
   reviewBlockedMessageKey?: string | null;
 };
 
-export const pendingDirectorProposals = (proposals: readonly StudioProposalV2[]): StudioProposalV2[] =>
+export const pendingDirectorProposals = (proposals: readonly StudioRendererProposalV2[]): StudioRendererProposalV2[] =>
   proposals.filter((proposal) => proposal.status === 'pending');
 
 const uniqueHandoffs = (
@@ -46,10 +46,7 @@ const uniqueHandoffs = (
 ): StudioRendererReferenceGenerationHandoffV2[] => {
   const byId = new Map<string, StudioRendererReferenceGenerationHandoffV2>();
   for (const handoff of handoffs) {
-    const current = byId.get(handoff.handoffId);
-    if (current === undefined || (current.status === 'open' && handoff.status !== 'open')) {
-      byId.set(handoff.handoffId, handoff);
-    }
+    byId.set(handoff.handoffId, handoff);
   }
   return [...byId.values()];
 };
@@ -78,6 +75,10 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   const { t } = useTranslation();
   const pendingProposals = pendingDirectorProposals(proposals);
   const handoffs = uniqueHandoffs(referenceGenerationHandoffs);
+  const referenceName = (referenceId: string): string => {
+    const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
+    return reference?.id === referenceId ? reference.label : referenceId;
+  };
   if (
     pendingProposals.length === 0 &&
     referenceRequests.length === 0 &&
@@ -119,6 +120,13 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
               total: request.referenceIds.length,
             })}
           </p>
+          <ul data-reference-request-names>
+            {request.referenceIds.map((referenceId) => (
+              <li key={referenceId}>
+                <bdi dir='auto'>{referenceName(referenceId)}</bdi>
+              </li>
+            ))}
+          </ul>
           <div className='flex gap-8px'>
             <Button
               type='primary'
@@ -144,15 +152,24 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
               total: handoff.referenceIds.length,
             })}
           </p>
+          <ul data-reference-handoff-names>
+            {handoff.referenceIds.map((referenceId) => (
+              <li key={referenceId}>
+                <bdi dir='auto'>{referenceName(referenceId)}</bdi>
+              </li>
+            ))}
+          </ul>
           <p data-reference-handoff-progress>
-            {t('conversation.creativeStudio.workspace.handoffs.progress', handoff.progress)}
+            {t('conversation.creativeStudio.workspace.handoffs.progress', handoff.counts)}
           </p>
-          {handoff.candidateAssetIds.length === 0 ? null : (
+          {handoff.resultAssetIds.length === 0 ? null : (
             <div className='flex flex-wrap gap-8px' data-reference-handoff-thumbnails>
-              {handoff.candidateAssetIds.map((assetId) => {
+              {handoff.resultAssetIds.map((assetId) => {
                 const reference = project.referenceOrder
                   .map((referenceId) => project.references[referenceId])
-                  .find((candidate) => candidate?.candidateAssetId === assetId);
+                  .find(
+                    (candidate) => candidate?.candidateAssetId === assetId || candidate?.approvedAssetId === assetId
+                  );
                 return (
                   <img
                     alt={t('conversation.creativeStudio.workspace.referenceWorkflow.previewAlt', {
@@ -166,7 +183,7 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
               })}
             </div>
           )}
-          {handoff.status === 'open' ? (
+          {handoff.status === 'awaiting_spend' ? (
             <div className='flex gap-8px'>
               <Button
                 type='primary'
@@ -187,12 +204,16 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           ) : (
             <>
               <p>{t(`conversation.creativeStudio.workspace.handoffs.${handoff.status}`)}</p>
-              {handoff.status === 'confirmed' ? (
+              {handoff.status === 'succeeded' ||
+              handoff.status === 'partially_failed' ||
+              handoff.status === 'failed' ? (
                 <div className='flex flex-wrap gap-8px'>
-                  <Button type='primary' onClick={() => onReviewReferences(handoff)}>
-                    {t('conversation.creativeStudio.workspace.handoffs.reviewReferences')}
-                  </Button>
-                  {handoff.retryReferenceIds.length === 0 ? null : (
+                  {handoff.resultAssetIds.length === 0 ? null : (
+                    <Button type='primary' onClick={() => onReviewReferences(handoff)}>
+                      {t('conversation.creativeStudio.workspace.handoffs.reviewReferences')}
+                    </Button>
+                  )}
+                  {handoff.failedReferenceIds.length === 0 ? null : (
                     <Button disabled={gateLocked} onClick={() => onRetryFailedReferences(handoff)}>
                       {t('conversation.creativeStudio.workspace.handoffs.retryFailed')}
                     </Button>

@@ -12,17 +12,19 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
-  type StudioProposalV2,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   type StudioReferenceRequestV2,
   type StudioRendererProjectV2,
+  type StudioRendererProposalV2,
   type StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { Composer } from '@renderer/pages/studio/components/Library/Composer';
 import { DirectorProposals } from '@renderer/pages/studio/components/Shell/DirectorProposals';
 import conversation from '@renderer/services/i18n/locales/en-US/conversation.json';
 
-const proposal: StudioProposalV2 = {
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+const proposal: StudioRendererProposalV2 = {
+  schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   id: 'proposal-1',
   projectId: 'project-1',
   status: 'pending',
@@ -30,9 +32,32 @@ const proposal: StudioProposalV2 = {
   payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'A clearer brief' }] },
   createdAt: '2026-08-19T00:00:00.000Z',
   decidedAt: null,
+  review: {
+    status: 'ready',
+    groups: [
+      {
+        change: 'edited',
+        subject: {
+          kind: 'project',
+          id: 'project-1',
+          title: 'Accessible review project',
+          position: null,
+          ownerBeatId: null,
+          ownerBeatTitle: null,
+        },
+        fields: [
+          {
+            key: 'brief',
+            before: { kind: 'text', value: 'The current brief' },
+            after: { kind: 'text', value: 'A clearer brief' },
+          },
+        ],
+      },
+    ],
+  },
 };
 
-const coverageProposal: StudioProposalV2 = {
+const coverageProposal: StudioRendererProposalV2 = {
   ...proposal,
   id: 'proposal-coverage',
   payload: {
@@ -44,17 +69,13 @@ const coverageProposal: StudioProposalV2 = {
         shots: [
           {
             shotId: 'shot-fixed',
-            line: 'The fixed opening remains in frame.',
-            narration: 'Keep this narration.',
-            onScreenText: 'Keep this title.',
+            shootingScript: 'The fixed opening remains in frame.',
             durationSeconds: 5,
             chainBreak: 'none',
           },
           {
             shotId: 'shot-new',
-            line: 'The paper plane crosses frame.',
-            narration: '',
-            onScreenText: '',
+            shootingScript: 'The paper plane crosses frame.',
             durationSeconds: 5,
             chainBreak: 'none',
           },
@@ -69,19 +90,58 @@ const coverageProposal: StudioProposalV2 = {
               'seed_still',
               'conditioning_frame',
               'conditioning_input',
-              'narration',
-              'on_screen_text',
+              'shooting_script',
             ],
           },
         ],
       },
-      { kind: 'rederive_line', shotId: 'shot-detached', line: 'The reviewed replacement line.' },
+    ],
+  },
+  review: {
+    status: 'ready',
+    groups: [
+      {
+        change: 'edited',
+        subject: {
+          kind: 'beat',
+          id: 'beat-one',
+          title: 'Opening',
+          position: 1,
+          ownerBeatId: null,
+          ownerBeatTitle: null,
+        },
+        fields: [
+          {
+            key: 'story',
+            before: { kind: 'text', value: 'The fixed opening leads into a paper plane.' },
+            after: { kind: 'text', value: 'The fixed opening leads into a paper plane.' },
+          },
+        ],
+      },
+      {
+        change: 'added',
+        subject: {
+          kind: 'shot',
+          id: 'shot-new',
+          title: null,
+          position: 2,
+          ownerBeatId: 'beat-one',
+          ownerBeatTitle: 'Opening',
+        },
+        fields: [
+          {
+            key: 'shootingScript',
+            before: null,
+            after: { kind: 'text', value: 'The paper plane crosses frame.' },
+          },
+        ],
+      },
     ],
   },
 };
 
 const referenceRequest: StudioReferenceRequestV2 = {
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   id: 'reference-1',
   projectId: 'project-1',
   referenceIds: ['reference-1'],
@@ -94,11 +154,11 @@ const handoff: StudioRendererReferenceGenerationHandoffV2 = {
   requestId: 'reference-2',
   referenceIds: ['reference-2'],
   decidedAt: '2026-08-19T00:00:00.000Z',
-  status: 'open',
+  status: 'awaiting_spend',
+  counts: { queued: 1, running: 0, succeeded: 0, failed: 0 },
+  resultAssetIds: [],
+  failedReferenceIds: [],
   completedAt: null,
-  progress: { queued: 1, running: 0, succeeded: 0, failed: 0 },
-  candidateAssetIds: [],
-  retryReferenceIds: [],
 };
 
 const project: StudioRendererProjectV2 = {
@@ -118,37 +178,27 @@ const project: StudioRendererProjectV2 = {
     'beat-one': {
       id: 'beat-one',
       title: 'Opening',
-      action: 'The fixed opening leads into a paper plane.',
-      look: 'Warm daylight.',
-      actionRevision: 1,
+      story: 'The fixed opening leads into a paper plane.',
       targetSeconds: 10,
       shotOrder: ['shot-fixed'],
-      lineHistory: [],
     },
     'beat-two': {
       id: 'beat-two',
       title: 'Continuation',
-      action: 'The story continues.',
-      look: 'Warm daylight.',
-      actionRevision: 1,
+      story: 'The story continues.',
       targetSeconds: 5,
       shotOrder: ['shot-detached'],
-      lineHistory: [],
     },
   },
   shots: {
     'shot-fixed': {
       id: 'shot-fixed',
-      line: 'The fixed opening remains in frame.',
-      derivation: 'detached',
-      derivedFromActionRevision: null,
-      narration: 'Keep this narration.',
-      onScreenText: 'Keep this title.',
+      shootingScript: 'The fixed opening remains in frame.',
       durationSeconds: 5,
       trimInSeconds: null,
       trimOutSeconds: null,
       chainBreak: 'none',
-      referenceIds: [],
+      referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
       seedStillId: 'asset-seed',
       boardAssetId: null,
       supersededBoardAssetIds: [],
@@ -159,16 +209,12 @@ const project: StudioRendererProjectV2 = {
     },
     'shot-detached': {
       id: 'shot-detached',
-      line: 'The old detached line.',
-      derivation: 'detached',
-      derivedFromActionRevision: null,
-      narration: '',
-      onScreenText: '',
+      shootingScript: 'The second shot continues the action.',
       durationSeconds: 5,
       trimInSeconds: null,
       trimOutSeconds: null,
       chainBreak: 'none',
-      referenceIds: [],
+      referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
       seedStillId: null,
       boardAssetId: null,
       supersededBoardAssetIds: [],
@@ -178,6 +224,7 @@ const project: StudioRendererProjectV2 = {
       jobIds: [],
     },
   },
+  referencePlanStatus: 'unplanned',
   referenceOrder: [],
   references: {},
   bin: [],
@@ -246,7 +293,7 @@ describe('Creative Studio workspace accessible copy', () => {
     expect(handoffCard.getByRole('button', { name: 'Dismiss' })).toBeEnabled();
   });
 
-  it('explains every fixed-coverage reason and the exact line replacement before Apply', () => {
+  it('names semantic Story and Shooting Script changes before Apply', () => {
     renderEnglish(
       <DirectorProposals
         project={project}
@@ -265,24 +312,10 @@ describe('Creative Studio workspace accessible copy', () => {
       />
     );
 
-    const review = screen.getByRole('status');
-    expect(review).toHaveTextContent('Fixed Shot 1 · shot-fixed');
-    expect(review).toHaveTextContent('It owns media.');
-    expect(review).toHaveTextContent('It owns generation work.');
-    expect(review).toHaveTextContent('It has a current picture.');
-    expect(review).toHaveTextContent('It has a pinned first frame.');
-    expect(review).toHaveTextContent('It owns a continuity frame.');
-    expect(review).toHaveTextContent('A generation request uses it as conditioning input.');
-    expect(review).toHaveTextContent('It has authored narration.');
-    expect(review).toHaveTextContent('It has authored on-screen text.');
-    const rederivedShotId = screen.getByText('Shot 1 · shot-detached · Owner Beat · Continuation · beat-two', {
-      selector: 'bdi',
-    });
-    expect(rederivedShotId).toBeVisible();
-    expect(rederivedShotId.parentElement).toHaveTextContent(
-      'rederive line · Shot 1 · shot-detached · Owner Beat · Continuation · beat-two'
-    );
-    const replacement = screen.getByText('The reviewed replacement line.');
+    const review = screen.getByTestId('studio-proposal-semantic-review');
+    expect(review).toHaveTextContent('Story');
+    expect(review).toHaveTextContent('Shooting script');
+    const replacement = screen.getByText('The paper plane crosses frame.');
     const apply = screen.getByRole('button', { name: 'Accept proposal' });
     expect(replacement.compareDocumentPosition(apply)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });

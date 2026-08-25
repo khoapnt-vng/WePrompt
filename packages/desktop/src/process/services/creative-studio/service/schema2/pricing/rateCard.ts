@@ -53,6 +53,7 @@ const rateKindForPurpose = (purpose: StudioJobPurpose): StudioRateCardEntryV2['k
   switch (purpose) {
     case 'seed_still':
     case 'board_still':
+    case 'reference_image':
       return 'image';
     case 'video_take':
       return 'video';

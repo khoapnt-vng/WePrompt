@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next';
 import { BeatPanel } from '../BeatPanel';
 import { BoardView, binItemFocusKey } from './Board';
 import { CutView } from './Cut';
-import { ReferencesView, type ReferenceWorkspaceItem } from './References';
+import { ReferencesView, type ReferenceBindingWorkspaceItem, type ReferenceWorkspaceItem } from './References';
 import { TableView } from './Table';
 import type { WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
@@ -24,6 +24,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   drafts,
   pending,
   gateLocked,
+  imageRouteReady,
   errorMessageKey,
   exportErrorMessageKey,
   mutations,
@@ -34,10 +35,11 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   beatPanelReviewGraphs,
   beatPanelReviewBlockedMessageKey,
   referenceActions,
+  referenceMaxConditioningImages = null,
   referencePendingId = null,
   referenceErrorMessageKey = null,
-  focusedReferenceIds = [],
-  focusedReferenceAssetIds = [],
+  referenceFocusIntent = null,
+  onReferenceFocusIntentConsumed,
 }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<{
@@ -56,15 +58,9 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
     const dirtyKeys = new Set(drafts.dirtyKeys);
     return projection.activeBeats.flatMap((beat) => {
       const beatKeys = [
-        `beat.${beat.id}.action`,
-        `beat.${beat.id}.look`,
+        `beat.${beat.id}.story`,
         `beat.${beat.id}.targetSeconds`,
-        ...beat.shots.flatMap((shot) => [
-          `shot.${shot.id}.line`,
-          `shot.${shot.id}.narration`,
-          `shot.${shot.id}.onScreenText`,
-          `shot.${shot.id}.durationSeconds`,
-        ]),
+        ...beat.shots.flatMap((shot) => [`shot.${shot.id}.shootingScript`, `shot.${shot.id}.durationSeconds`]),
       ];
       return beatKeys.some((key) => dirtyKeys.has(key)) ? [beat.id] : [];
     });
@@ -74,20 +70,31 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       project.referenceOrder.flatMap((referenceId) => {
         const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
         if (reference?.id !== referenceId) return [];
+        const candidateAsset =
+          reference.candidateAssetId !== null && Object.hasOwn(project.assets, reference.candidateAssetId)
+            ? project.assets[reference.candidateAssetId]
+            : undefined;
+        const latestReferenceJobId =
+          candidateAsset?.projectReferenceId === reference.id && candidateAsset.producerJobId !== null
+            ? candidateAsset.producerJobId
+            : ([...reference.jobIds]
+                .reverse()
+                .find(
+                  (jobId) => Object.hasOwn(project.jobs, jobId) && project.jobs[jobId]?.target.kind === 'reference'
+                ) ?? null);
         const candidateJob =
-          reference.candidateJobId !== null && Object.hasOwn(project.jobs, reference.candidateJobId)
-            ? project.jobs[reference.candidateJobId]
+          latestReferenceJobId !== null && Object.hasOwn(project.jobs, latestReferenceJobId)
+            ? project.jobs[latestReferenceJobId]
             : undefined;
         const candidateJobValid =
-          candidateJob?.id === reference.candidateJobId &&
+          candidateJob?.id === latestReferenceJobId &&
           candidateJob.projectId === project.id &&
-          candidateJob.projectReferenceId === reference.id &&
-          candidateJob.purpose === 'seed_still' &&
-          Object.hasOwn(project.shots, candidateJob.shotId) &&
-          project.shots[candidateJob.shotId]?.id === candidateJob.shotId &&
-          project.shots[candidateJob.shotId]?.jobIds.includes(candidateJob.id);
+          candidateJob.target.kind === 'reference' &&
+          candidateJob.target.referenceId === reference.id &&
+          candidateJob.purpose === 'reference_image' &&
+          reference.jobIds.includes(candidateJob.id);
         const generationStatus: ReferenceWorkspaceItem['generationStatus'] =
-          reference.candidateJobId === null
+          latestReferenceJobId === null
             ? reference.candidateAssetId === null
               ? 'idle'
               : 'succeeded'
@@ -129,6 +136,51 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   const referencesReady =
     projectReferences.length === project.referenceOrder.length &&
     projectReferences.every((reference) => reference.approvedAssetId !== null);
+  const referenceBindings = useMemo<ReferenceBindingWorkspaceItem[]>(
+    () =>
+      projection.activeBeats.flatMap((beat) =>
+        beat.shots.flatMap((shot, shotIndex) => {
+          const authority = Object.hasOwn(project.shots, shot.id) ? project.shots[shot.id] : undefined;
+          if (authority?.id !== shot.id) return [];
+          const binding = authority.referenceBinding;
+          const referencedCharacters = binding.characterReferenceIds.map((referenceId) =>
+            Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined
+          );
+          const background =
+            binding.backgroundReferenceId === null
+              ? null
+              : Object.hasOwn(project.references, binding.backgroundReferenceId)
+                ? project.references[binding.backgroundReferenceId]
+                : undefined;
+          const bindingValid =
+            binding.status === 'ready' &&
+            new Set(binding.characterReferenceIds).size === binding.characterReferenceIds.length &&
+            referencedCharacters.every(
+              (reference, index) =>
+                reference?.id === binding.characterReferenceIds[index] &&
+                reference.kind === 'character' &&
+                reference.approvedAssetId !== null
+            ) &&
+            (binding.backgroundReferenceId === null ||
+              (background?.id === binding.backgroundReferenceId &&
+                background.kind === 'background' &&
+                background.approvedAssetId !== null));
+          return [
+            {
+              shotId: shot.id,
+              beatId: beat.id,
+              beatTitle: beat.title,
+              shotPosition: shotIndex + 1,
+              shootingScript: shot.shootingScript,
+              status: binding.status === 'unassigned' ? 'unassigned' : bindingValid ? 'ready' : 'invalid',
+              characterReferenceIds: [...binding.characterReferenceIds],
+              backgroundReferenceId: binding.backgroundReferenceId,
+            },
+          ];
+        })
+      ),
+    [project.references, project.shots, projection.activeBeats]
+  );
 
   useEffect(() => {
     if (
@@ -168,10 +220,6 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       if (beatId === null) return false;
       return beatPanelActions.parkShot(shotId, () => completeShotPark(shotId, beatId, expectedProjectId));
     },
-    requestReviewedRederive: (shotId: string): void => {
-      setOpenPanel(null);
-      beatPanelActions.requestReviewedRederive(shotId);
-    },
     requestResplit: (beatId: string): void => {
       setOpenPanel(null);
       beatPanelActions.requestResplit(beatId);
@@ -189,17 +237,20 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
               retryJob: async () => false,
               retryDownload: async () => false,
               cancelJob: async () => false,
+              saveBinding: async () => false,
               continueToTable: () => undefined,
             }
           }
           errorMessageKey={referenceErrorMessageKey}
-          focusedAssetIds={focusedReferenceAssetIds}
-          focusedReferenceIds={focusedReferenceIds}
+          focusIntent={referenceFocusIntent}
           gateLocked={gateLocked || referenceActions === undefined}
+          bindings={referenceBindings}
+          maxConditioningImages={referenceMaxConditioningImages}
           pendingReferenceId={referencePendingId}
           projectId={project.id}
           readyForTable={referencesReady}
           references={projectReferences}
+          onFocusIntentConsumed={onReferenceFocusIntentConsumed}
         />
       ) : null}
       {activeView === 'table' ? (
@@ -209,6 +260,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           boardStyle={project.boardStyle}
           boardPanels={projection.boardPanels}
           gateLocked={gateLocked}
+          imageRouteReady={imageRouteReady}
           onOpenBeat={selectAndOpenBeat}
           onSelectBeat={drafts.selectBeat}
           pending={pending}

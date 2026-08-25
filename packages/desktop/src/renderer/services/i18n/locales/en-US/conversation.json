@@ -713,30 +713,6 @@
   },
   "notFound": "Conversation not found or has been deleted",
   "creativeStudio": {
-    "briefReferences": {
-      "title": "Project references",
-      "inheritanceDescription": "Every new reference still uses all active Cast and Look images in this project.",
-      "castHeading": "Cast",
-      "lookHeading": "Look",
-      "castEmpty": "No cast references yet.",
-      "lookEmpty": "No look references yet.",
-      "addCast": "Add cast reference",
-      "addLook": "Add look reference",
-      "activeCount": "{{count}} active references",
-      "activeCount_one": "{{count}} active reference",
-      "activeCount_other": "{{count}} active references",
-      "limitReached": "This project already has 6 active references. Remove one before adding another.",
-      "removeFromBrief": "Remove from Brief",
-      "removeAccessible": "Remove {{label}} from Brief",
-      "previewAccessible": "{{role}} reference: {{label}}",
-      "engineCapacityNone": "This image engine has not been validated for reference images. Open Model Settings and revalidate it.",
-      "engineMenuCapacityNone": "No reference images",
-      "engineCapacityMaximum": "Up to {{count}} reference images",
-      "engineCapacityMaximum_one": "Up to {{count}} reference image",
-      "engineCapacityMaximum_other": "Up to {{count}} reference images",
-      "capacityMismatch": "You have {{count}} active references, but this image engine supports {{maximum}}. New reference stills are blocked until you remove references or change or revalidate the engine.",
-      "importError": "The reference could not be added. Try again."
-    },
     "rules": {
       "open": "Rules",
       "title": "Rules",
@@ -1092,106 +1068,6 @@
       "durationSeconds_other": "{{seconds}} seconds",
       "selected": "Selected scene"
     },
-    "inspector": {
-      "title": "Scene direction",
-      "sectionsLabel": "Scene editing sections",
-      "directionTab": "Visual",
-      "scriptTab": "Script",
-      "titleLabel": "Scene title",
-      "purposeLabel": "Scene goal",
-      "purposePlaceholder": "What should this scene accomplish?",
-      "visualPromptLabel": "Visual prompt",
-      "visualPromptPlaceholder": "Describe the shot, subject, setting, lighting, and motion.",
-      "narrationLabel": "Narration",
-      "onScreenTextLabel": "On-screen text",
-      "mediaKindLabel": "Output type",
-      "durationLabel": "Scene duration in seconds",
-      "invalidDuration": "Enter a whole number from 1 to 60 seconds.",
-      "saving": "Saving scene...",
-      "saved": "Scene saved",
-      "saveFailed": "The scene could not be saved.",
-      "unsavedChanges": "Your unsaved changes are preserved."
-    },
-    "draft": {
-      "title": "Draft a storyboard",
-      "body": "WePrompt will propose scenes, narration, on-screen text, and timing for your review.",
-      "checking": "Checking the selected Storyboard model...",
-      "ready": "Ready to draft",
-      "setupRequired": "Select and configure a Storyboard model to draft with AI.",
-      "unavailable": "Storyboard drafting is currently unavailable.",
-      "providerLabel": "Storyboard provider",
-      "modelLabel": "Storyboard model",
-      "chargeNotice": "Drafting uses the project-selected Storyboard model and may incur provider charges.",
-      "replaceTitle": "Replace the existing storyboard?",
-      "replaceBody": "Drafting again replaces every current scene only after a valid proposal is returned.",
-      "confirm": "Draft storyboard",
-      "cancel": "Cancel",
-      "configureModel": "Open model settings",
-      "manualFallback": "Continue with manual editing",
-      "failed": "A storyboard could not be drafted. Your current scenes were not changed."
-    },
-    "conditioning": {
-      "inputsTitle": "Inputs for this still",
-      "role": {
-        "cast": "Cast",
-        "look": "Look"
-      },
-      "maximum": "This engine accepts up to {{count}} Brief references.",
-      "unsupported": "This image engine cannot use active Brief references. Choose another image engine or remove them from the Brief.",
-      "overflow": "This image engine accepts at most {{maximum}} Brief references, but {{count}} are active.",
-      "malformed": "Brief references changed or are invalid. Refresh the review before generating.",
-      "reviewChanged": "The Brief references or image engine changed. Review the refreshed inputs before generating.",
-      "plateOutOfDate": "This selected first frame was made with different Brief references, aspect ratio, or resolution. You can still render this clip."
-    },
-    "reference": {
-      "generate": "Generate reference",
-      "dialogTitle": "Generate a reference image",
-      "promptLabel": "Reference prompt",
-      "reviewTag": "Reference",
-      "excludedSummary": "Some requested scenes are not included in this approval because they are not ready:",
-      "excludedNoneReady": "None of the requested scenes are ready for reference generation:",
-      "discardExcludedRequests": "Discard these requests",
-      "excludedUnavailable": "Scene is no longer available",
-      "excludedPromptUnusable": "Scene's visual prompt cannot describe a reference image",
-      "dismissFailed": "The request queue could not be updated. The review was closed; try again later."
-    },
-    "review": {
-      "generateReadyScenes": "Generate {{count}} ready scenes",
-      "generateReadyScenes_one": "Generate {{count}} ready scene",
-      "generateReadyScenes_other": "Generate {{count}} ready scenes",
-      "noReadyScenes": "No scenes are ready to generate.",
-      "generateScene": "Generate scene",
-      "regenerateScene": "Generate another variation",
-      "title": "Review generation",
-      "sceneCount": "{{count}} selected scenes",
-      "videoSeconds": "{{seconds}} requested video seconds",
-      "selectedDurationFull": "Selected duration: {{seconds}} seconds",
-      "selectedDurationFull_one": "Selected duration: {{seconds}} second",
-      "selectedDurationFull_other": "Selected duration: {{seconds}} seconds",
-      "targetDurationFull": "Target duration: {{seconds}} seconds",
-      "targetDurationFull_one": "Target duration: {{seconds}} second",
-      "targetDurationFull_other": "Target duration: {{seconds}} seconds",
-      "providerLabel": "Provider",
-      "modelLabel": "Model",
-      "aspectRatio": "Aspect ratio",
-      "resolution": "Resolution",
-      "watermarkOff": "Watermark disabled",
-      "audioOff": "Silent output; audio generation disabled",
-      "missingRoute": "At least one scene has no engine.",
-      "invalidRoute": "At least one selected engine is invalid.",
-      "durationMismatch": "Storyboard timing does not match the project target.",
-      "chargeNotice": "Generation uses your selected provider account and may incur provider charges.",
-      "confirm": "Confirm and generate",
-      "cancel": "Cancel",
-      "disabledMissingRoutes": "{{count}} shots have no engine. Close this to set one.",
-      "disabledMissingRoutes_one": "{{count}} shot has no engine. Close this to set one.",
-      "disabledMissingRoutes_other": "{{count}} shots have no engine. Close this to set one.",
-      "setEngines": "Close and set engines",
-      "excludedFirstFrame": "{{count}} shots are not in this render — this engine cannot start from a frame.",
-      "excludedFirstFrame_one": "{{count}} shot is not in this render — this engine cannot start from a frame.",
-      "excludedFirstFrame_other": "{{count}} shots are not in this render — this engine cannot start from a frame.",
-      "audioOn": "This render includes generated audio; silent engines, if present, remain silent."
-    },
     "jobs": {
       "progress": "{{percent}}% complete",
       "cancel": "Cancel job",
@@ -1296,7 +1172,7 @@
       "staleProject": "The project changed elsewhere. Refresh it before retrying.",
       "planningUnavailable": "Storyboard drafting is unavailable. You can continue editing manually.",
       "invalidRoute": "The selected generation engine is invalid or unavailable.",
-      "mediaInUse": "This reference is in use by a queued paid request. Finish or cancel that request before detaching it.",
+      "mediaInUse": "This audio is currently selected or in use. Clear it as the bed or wait for the active operation before detaching it.",
       "cancellationRefused": "The provider can no longer cancel this running job.",
       "duplicateChargeAcknowledgementRequired": "Acknowledge the possible duplicate provider charge before retrying.",
       "busy": "This project has active generation work.",
@@ -1383,36 +1259,6 @@
         "actionShorten": "Shorten this shot"
       }
     },
-    "brief": {
-      "conversationTitle": "Brief conversation",
-      "danglingNotice": "This project's brief conversation is no longer available.",
-      "danglingStartFresh": "Start a new conversation",
-      "proposalTitle": "Proposed script",
-      "proposalMeta": "Based on revision {{revision}} · {{createdAt}}",
-      "proposalSummary": "{{added}} added · {{removed}} removed · {{changed}} changed",
-      "proposalSceneChange": "Shot {{position}}: {{fields}}",
-      "proposalFieldSeparator": ", ",
-      "proposalNoChanges": "No change to the current script",
-      "proposalDiffUnavailable": "Change summary unavailable — the script moved on after this proposal was drafted",
-      "proposalField": {
-        "title": "title",
-        "purpose": "goal",
-        "visualPrompt": "visual prompt",
-        "narration": "narration",
-        "onScreenText": "on-screen text",
-        "mediaKind": "output type",
-        "durationSeconds": "duration",
-        "referenceAssetId": "reference image"
-      },
-      "proposalAccept": "Accept script",
-      "proposalReject": "Reject",
-      "proposalAccepted": "Script applied",
-      "proposalRejected": "Rejected",
-      "proposalExpired": "Expired",
-      "proposalStale": "The script changed while this proposal was waiting. Ask for a redraft.",
-      "proposalRepropose": "Ask for a redraft",
-      "proposalFlushRefused": "Your unsaved edits could not be saved, so the proposal was not applied. Fix the edits and try again."
-    },
     "shell": {
       "showDirector": "Show the Creative Director",
       "hideDirector": "Hide the Creative Director",
@@ -1455,11 +1301,11 @@
         "cut": "Cut"
       },
       "referenceWorkflow": {
-        "description": "Approve stable character sheets first, then recurring backgrounds. Shot candidates use these approved references automatically.",
+        "description": "Approve the canonical character images first, then the canonical recurring-background images. Bind the approved references to each Shot before Board or first-frame generation.",
         "generationScope": "Generation scope",
         "characters": {
           "title": "Characters",
-          "description": "Approve one identity sheet for each named character.",
+          "description": "Approve one canonical image for each named character.",
           "empty": "This story has no named characters. Backgrounds can be reviewed now."
         },
         "backgrounds": {
@@ -1483,20 +1329,31 @@
         "regenerate": "Regenerate",
         "ready": "Every required reference is approved. You can continue to the Table.",
         "notReady": "Approve every required reference to continue.",
-        "continueToTable": "Continue to Table"
+        "continueToTable": "Continue to Table",
+        "approvalProgress": "{{approved}} of {{total}} references approved",
+        "bindings": {
+          "title": "Shot bindings",
+          "description": "Choose the exact approved characters and background each Shot uses for its Board panel and first frame.",
+          "empty": "There are no active Shots to bind.",
+          "shot": "Shot {{position}}",
+          "unassigned": "This Shot has no reference decision yet.",
+          "invalid": "This saved binding is no longer valid. Choose current approved references and save it again.",
+          "capacity": "{{count}} references are selected, but the image route supports {{limit}}.",
+          "characters": "Characters",
+          "background": "Background",
+          "save": "Save binding"
+        }
       },
       "table": {
         "label": "Beat table",
         "columns": {
           "position": "#",
           "beat": "Beat",
-          "action": "Action",
-          "look": "Look",
           "shots": "Shots",
           "panel": "Panel",
           "length": "Length",
           "state": "State",
-          "actionLook": "Action · Look"
+          "story": "Story"
         },
         "board": {
           "label": "Director Board controls",
@@ -1537,7 +1394,6 @@
             "cancelled": "Cancelled"
           }
         },
-        "lookMissing": "No look written yet",
         "shotCount": "{{count}} shots",
         "shotCount_one": "{{count}} shot",
         "shotCount_other": "{{count}} shots",
@@ -1776,15 +1632,11 @@
         "previousBeatShort": "Previous",
         "nextBeat": "Next Beat",
         "nextBeatShort": "Next",
-        "beatFieldsLabel": "Beat action, look, and target",
+        "beatFieldsLabel": "Beat story and target",
         "fieldGuidance": {
-          "action": "Action · The one thing you write",
-          "look": "Look · Every Shot inherits it"
+          "story": "Story · The narrative purpose and progression for this Beat"
         },
-        "lookCounter": "{{count}} / {{limit}} words",
-        "lookCounter_one": "{{count}} / {{limit}} words",
-        "lookCounter_other": "{{count}} / {{limit}} words",
-        "directorRequestHint": "Ask the Creative Director for a reviewed re-derive or re-split proposal.",
+        "directorRequestHint": "Ask the Creative Director for a reviewed re-split proposal.",
         "common": {
           "cancel": "Cancel",
           "keepWaiting": "Keep waiting",
@@ -1794,17 +1646,12 @@
           "resetShot": "Reset Shot"
         },
         "fields": {
-          "action": "Action",
-          "look": "Look",
           "targetSeconds": "Beat target (seconds)",
-          "line": "Line",
-          "lineFor": "Line for Shot {{index}}",
-          "narration": "Narration",
-          "narrationFor": "Narration for Shot {{index}}",
-          "onScreenText": "On-screen text",
-          "onScreenTextFor": "On-screen text for Shot {{index}}",
           "duration": "Planned duration (seconds)",
-          "durationFor": "Planned duration for Shot {{index}}"
+          "durationFor": "Planned duration for Shot {{index}}",
+          "story": "Story",
+          "shootingScript": "Shooting script",
+          "shootingScriptFor": "Shooting script for Shot {{index}}"
         },
         "chain": {
           "authorHardCut": "Start with a hard cut",
@@ -1882,18 +1729,6 @@
           "nextShort": "Later",
           "announcement": "Moved Shot from position {{from}} to {{to}} of {{total}}. Downstream continuity may be out of date."
         },
-        "derivation": {
-          "label": "Line derivation for Shot {{index}}",
-          "title": "Line derivation",
-          "derived": "Derived from the action",
-          "detached": "Detached · Yours",
-          "attachedLineGuidance": "Written from the action · Edit to detach",
-          "detachedLineGuidance": "Your words · No longer follows the action",
-          "stale": "The Beat action changed after this line was derived.",
-          "detach": "Detach line",
-          "rederiveReviewed": "Ask Director to re-derive",
-          "restoreHistory": "Restore this line"
-        },
         "seeds": {
           "label": "First frames for Shot {{index}}",
           "title": "First frames",
@@ -1914,8 +1749,6 @@
           "generateSeed": "Review first-frame generation",
           "renderVideo": "Generate again",
           "choiceLabel": "Beat {{beatIndex}}, Shot {{shotIndex}} · {{purpose}}",
-          "referenceForChoice": "Brief reference for {{choice}}",
-          "noReference": "No Brief reference",
           "purpose": {
             "seedStill": "first frame"
           },
@@ -1969,8 +1802,8 @@
           "label": "Beat preview",
           "noMedia": "Beat preview unavailable",
           "mediaError": "The current picture could not be previewed.",
-          "videoLabel": "Shot {{position}} video · {{line}}",
-          "slateLabel": "Shot {{position}} planning slate · {{line}}",
+          "videoLabel": "Shot {{position}} video · {{shootingScript}}",
+          "slateLabel": "Shot {{position}} planning slate · {{shootingScript}}",
           "slate": "Planning slate",
           "slateHold": "Hold {{clock}}",
           "play": "Play Beat",
@@ -2038,21 +1871,13 @@
       "proposals": {
         "title": "Director proposal",
         "revision": "Based on revision {{revision}}",
-        "pinRule": "Pin this project rule",
         "mutationCount": "{{count}} proposed edits",
         "mutationCount_one": "{{count}} proposed edit",
         "mutationCount_other": "{{count}} proposed edits",
         "before": "Before",
         "after": "After",
-        "placement": "Placement",
         "ownerBeat": "Owner Beat",
-        "order": "Order",
-        "beforeItem": "Before {{kind}}",
-        "technicalDetails": "Technical details",
         "reviewUnavailable": "This proposal contains an unsupported change and cannot be accepted.",
-        "referenceKind": "Reference type",
-        "referencePrompt": "Reference prompt",
-        "assignedShots": "Assigned Shots",
         "chatDecisionBusy": "Another reviewed action is still in progress.",
         "chatDirty": "Save or reset every workspace draft before approving or rejecting a Director proposal.",
         "chatNoPending": "There is no pending Director proposal to act on.",
@@ -2060,48 +1885,49 @@
         "chatStale": "This proposal no longer matches the current project revision.",
         "chatAccepted": "Proposal accepted.",
         "chatRejected": "Proposal rejected.",
-        "coverageReviewTitle": "Proposed coverage for Beat",
-        "proposedShots": "Proposed Shots",
-        "proposedShot": "Proposed Shot {{position}}",
-        "proposedDuration": "Planned duration",
-        "proposedDurationValue": "{{seconds}}s",
-        "proposedLine": "Line",
-        "proposedNarration": "Narration",
         "emptyAuthoredField": "None",
-        "proposedOnScreenText": "On-screen text",
-        "proposedChain": "Continuity",
-        "chainBreak": {
-          "hard_cut": "Hard cut",
-          "none": "No hard cut"
-        },
-        "fixedShotsTitle": "Shots kept as authored",
-        "fixedReviewAnnouncement": "{{count}} fixed Shots keep their current coverage.",
-        "fixedReviewAnnouncement_one": "{{count}} fixed Shot keeps its current coverage.",
-        "fixedReviewAnnouncement_other": "{{count}} fixed Shots keep their current coverage.",
-        "noFixedShots": "No existing Shots are fixed by this proposal.",
-        "fixedShot": "Fixed Shot {{position}}",
-        "fixedReason": {
-          "owned_asset": "It owns media.",
-          "owned_job": "It owns generation work.",
-          "seed_still": "It has a pinned first frame.",
-          "conditioning_frame": "It owns a continuity frame.",
-          "conditioning_input": "A generation request uses it as conditioning input.",
-          "narration": "It has authored narration.",
-          "on_screen_text": "It has authored on-screen text.",
-          "video_asset": "It has a current picture."
-        },
-        "rederiveTitle": "Proposed line re-derivation",
-        "rederiveShot": "Shot",
         "saveBeforeApply": "Save or reset workspace drafts before accepting a structural proposal.",
         "accept": "Accept proposal",
-        "reject": "Reject proposal"
+        "reject": "Reject proposal",
+        "reviewStale": "This review was derived from revision {{baseRevision}}, but the project is now revision {{currentRevision}}.",
+        "noChanges": "This proposal makes no semantic change.",
+        "subject": {
+          "project": "Project",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "Added",
+          "edited": "Edited",
+          "removed": "Removed",
+          "reordered": "Reordered"
+        },
+        "placementValue": {
+          "active": "Active",
+          "bin": "Bin",
+          "removed": "Removed"
+        },
+        "field": {
+          "name": "Name",
+          "brief": "Brief",
+          "rules": "Rules",
+          "aspectRatio": "Aspect ratio",
+          "resolution": "Resolution",
+          "targetDurationSeconds": "Target duration",
+          "boardStyle": "Board style",
+          "title": "Title",
+          "story": "Story",
+          "targetSeconds": "Beat target",
+          "shootingScript": "Shooting script",
+          "durationSeconds": "Duration",
+          "chainBreak": "Continuity",
+          "placement": "Placement",
+          "order": "Order"
+        }
       },
       "references": {
         "title": "Reference request",
         "referenceCount": "References requested for {{total}} items",
-        "shotCount": "References requested for {{count}} shots",
-        "shotCount_one": "Reference requested for {{count}} shot",
-        "shotCount_other": "References requested for {{count}} shots",
         "generate": "Review generation",
         "reject": "Reject request"
       },
@@ -2109,16 +1935,16 @@
         "title": "Reference generation handoff",
         "referenceCount": "{{total}} references are in this handoff",
         "progress": "Queued {{queued}} · Running {{running}} · Succeeded {{succeeded}} · Failed {{failed}}",
-        "shotCount": "{{count}} shots are ready for generation review",
-        "shotCount_one": "{{count}} shot is ready for generation review",
-        "shotCount_other": "{{count}} shots are ready for generation review",
-        "awaitingGate": "This reviewed request stays here until the generation gate is available.",
         "review": "Review cost",
         "reviewReferences": "Review references",
         "retryFailed": "Retry failed references",
         "dismiss": "Dismiss",
-        "confirmed": "Confirmed and submitted",
-        "dismissed": "Dismissed without spending"
+        "dismissed": "Dismissed without spending",
+        "awaiting_spend": "Waiting for spend review",
+        "running": "Reference generation is running.",
+        "succeeded": "Every requested reference was generated.",
+        "partially_failed": "Some references were generated; retry the failed references separately.",
+        "failed": "Reference generation failed. Nothing is retried automatically."
       },
       "controls": {
         "settingsTitle": "Project settings",
@@ -2166,8 +1992,6 @@
           "edit_project": "project settings",
           "set_brief": "Brief",
           "set_rules": "project rules",
-          "set_project_references": "project references",
-          "set_shot_background_reference": "Shot background reference",
           "add_beat": "add beat",
           "edit_beat": "edit beat",
           "reorder_beats": "reorder beats",
@@ -2185,15 +2009,15 @@
           "set_seed_still": "choose first frame",
           "promote_board_panel": "Use panel as first frame",
           "trim_shot": "trim shot",
-          "redetach_line": "detach line",
-          "rederive_line": "rederive line",
-          "restore_line": "restore line",
           "reorder_bin": "reorder Bin",
           "set_routes": "generation routes",
           "set_spend_policy": "spend policy",
           "set_bed": "audio bed",
           "mutation_batch": "authoring changes",
-          "unknown": "last authoring change"
+          "unknown": "last authoring change",
+          "set_reference_plan": "reference plan",
+          "approve_reference": "reference approval",
+          "set_shot_reference_binding": "Shot reference binding"
         },
         "dirtyShot": "Shot {{shotId}} needs review: {{causes}}",
         "dirtyCause": {
@@ -2218,19 +2042,6 @@
       },
       "gate": {
         "title": "Review generation",
-        "backgroundChoice": {
-          "title": "Choose a background for each Shot",
-          "description": "Assign one approved background before generation pricing. This free change keeps character references in place.",
-          "shotLabel": "Background for Shot {{shotId}}",
-          "incomplete": "Choose one background for every listed Shot.",
-          "assign": "Assign backgrounds",
-          "assigning": "Assigning backgrounds…",
-          "noneTitle": "No approved backgrounds are available.",
-          "noneBody": "Review References and approve a background before pricing this generation.",
-          "reviewReferences": "Review references",
-          "invalid": "These background choices are no longer current. Review References or close this review and try again.",
-          "failed": "Background assignments were not saved. Review the current project and try again."
-        },
         "reviewBeforeSpend": "Preparing an estimate is free. Only the explicit Confirm action can submit paid work.",
         "requestedShots": "{{count}} shots selected",
         "requestedShots_one": "{{count}} shot selected",
@@ -2293,7 +2104,8 @@
         "purpose": {
           "board_still": "Board panel",
           "seed_still": "First frame",
-          "video_take": "Video"
+          "video_take": "Video",
+          "reference_image": "Reference image"
         },
         "route": "{{provider}} · {{model}} · {{choice}}",
         "routeShared": "All through {{model}}",
@@ -2334,7 +2146,20 @@
         "headline_one": "{{count}} generation · {{cost}}",
         "headline_other": "{{count}} generations · {{cost}}",
         "hideBreakdown": "Hide each generation",
-        "showBreakdown": "Show each generation"
+        "showBreakdown": "Show each generation",
+        "reviewShotBinding": "Review Shot binding",
+        "readout": {
+          "prompt": "Exact prompt",
+          "rendersAs": "Renders as",
+          "sourceRevision": "Source revision",
+          "source": "Source",
+          "story": "Story",
+          "shootingScript": "Shooting script",
+          "referencePrompt": "Reference description",
+          "references": "Resolved references",
+          "noReferences": "No direct reference inputs",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        }
       },
       "review": {
         "title": "Reviewed Director output"

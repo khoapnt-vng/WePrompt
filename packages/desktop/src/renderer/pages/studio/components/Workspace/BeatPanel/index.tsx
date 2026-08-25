@@ -10,7 +10,6 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
-  STUDIO_LOOK_SOFT_WORD_LIMIT,
   type StudioEditableBeatChanges,
   type StudioEditableShotChanges,
   type StudioRendererParkBlockerCodeV2,
@@ -34,14 +33,13 @@ type ModalConfirmationHandle = ReturnType<typeof Modal.confirm>;
 
 export type BeatPanelReviewPreference = {
   purpose: 'seed_still' | 'video_take';
-  referenceAssetId: string | null;
 };
 
 export type BeatPanelReviewChoiceIdentity = Pick<BeatPanelReviewPreference, 'purpose'> & {
   shotId: string;
 };
 
-export type BeatPanelReviewChoice = BeatPanelReviewChoiceIdentity & Pick<BeatPanelReviewPreference, 'referenceAssetId'>;
+export type BeatPanelReviewChoice = BeatPanelReviewChoiceIdentity;
 
 export type BeatPanelReviewGraph = {
   triggerShotId: string;
@@ -59,8 +57,6 @@ export type BeatPanelActions = {
   setSeedStill: (shotId: string, assetId: string | null) => Promise<boolean>;
   trimShot: (shotId: string, trimInSeconds: number | null, trimOutSeconds: number | null) => Promise<boolean>;
   reorderShots: (beatId: string, shotOrder: readonly string[]) => Promise<boolean>;
-  redetachLine: (shotId: string, line: string) => Promise<boolean>;
-  restoreLine: (shotId: string, historyEntryId: string) => Promise<boolean>;
   importSeedStill: (shotId: string) => Promise<BeatPanelImportResult>;
   parkShot: (shotId: string, onCommitted?: () => void) => Promise<boolean>;
   parkBeat: (beatId: string) => Promise<boolean>;
@@ -70,7 +66,6 @@ export type BeatPanelActions = {
   cancelGenerationJob: (jobId: string) => Promise<boolean>;
   retryConditioning: (dependentShotId: string) => Promise<boolean>;
   cancelWaiting: (dependentShotId: string) => Promise<boolean>;
-  requestReviewedRederive: (shotId: string) => void;
   requestResplit: (beatId: string) => void;
 };
 
@@ -92,10 +87,9 @@ export type BeatPanelProps = {
   actions: BeatPanelActions;
 };
 
-const beatDraftKey = (beatId: string, field: 'action' | 'look' | 'targetSeconds'): string => `beat.${beatId}.${field}`;
+const beatDraftKey = (beatId: string, field: 'story' | 'targetSeconds'): string => `beat.${beatId}.${field}`;
 
-const shotDraftKey = (shotId: string, field: 'line' | 'narration' | 'onScreenText' | 'durationSeconds'): string =>
-  `shot.${shotId}.${field}`;
+const shotDraftKey = (shotId: string, field: 'shootingScript' | 'durationSeconds'): string => `shot.${shotId}.${field}`;
 
 const draftString = (drafts: UseWorkspaceDraftsResult, key: string, fallback: string): string => {
   const value = drafts.value(key);
@@ -114,11 +108,6 @@ const draftNumber = (drafts: UseWorkspaceDraftsResult, key: string, fallback: nu
 };
 
 const hasDraft = (drafts: UseWorkspaceDraftsResult, key: string): boolean => Object.hasOwn(drafts.entries, key);
-
-const wordCount = (value: string): number => {
-  const trimmed = value.trim();
-  return trimmed.length === 0 ? 0 : trimmed.split(/\s+/u).length;
-};
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 
@@ -320,7 +309,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const [menuOpen, setMenuOpen] = useState(false);
   const [recoveringJobId, setRecoveringJobId] = useState<string | null>(null);
   const chainChangeDescriptionId = useId();
-  const lineGuidanceId = useId();
   const generationRecoveryId = useId();
   const liftButtonRef = useRef<HTMLButtonElement | null>(null);
   const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
@@ -338,15 +326,11 @@ const ShotCard: React.FC<ShotCardProps> = ({
     shotId: shot.id,
   });
   const shotCardRef = useRef<HTMLElement | null>(null);
-  const lineKey = shotDraftKey(shot.id, 'line');
-  const narrationKey = shotDraftKey(shot.id, 'narration');
-  const onScreenTextKey = shotDraftKey(shot.id, 'onScreenText');
+  const shootingScriptKey = shotDraftKey(shot.id, 'shootingScript');
   const durationKey = shotDraftKey(shot.id, 'durationSeconds');
-  const line = draftString(drafts, lineKey, shot.line);
-  const narration = draftString(drafts, narrationKey, shot.narration);
-  const onScreenText = draftString(drafts, onScreenTextKey, shot.onScreenText);
+  const shootingScript = draftString(drafts, shootingScriptKey, shot.shootingScript);
   const durationSeconds = draftNumber(drafts, durationKey, shot.durationSeconds);
-  const draftKeys = [lineKey, narrationKey, onScreenTextKey, durationKey] as const;
+  const draftKeys = [shootingScriptKey, durationKey] as const;
   const dirty = draftKeys.some((key) => hasDraft(drafts, key));
   const liftEligibility = exactEligibility(projection, {
     subject: 'shot',
@@ -379,9 +363,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
     projectRevision: projection.projectRevision,
     shotId: shot.id,
   };
-  const history = beat.lineHistory;
-  const reviewPreferences =
-    reviewChoices?.map((choice): BeatPanelReviewChoice => ({ ...choice, referenceAssetId: null })) ?? null;
+  const reviewPreferences = reviewChoices?.map((choice): BeatPanelReviewChoice => ({ ...choice })) ?? null;
   const reviewedGenerationBlocked =
     reviewChoices === null ||
     reviewChoices.some((choice) => {
@@ -405,15 +387,11 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const save = async (): Promise<void> => {
     if (!dirty || saving || disabled || drafts.staleRevision) return;
     const submitted = [
-      [lineKey, line],
-      [narrationKey, narration],
-      [onScreenTextKey, onScreenText],
+      [shootingScriptKey, shootingScript],
       [durationKey, durationSeconds],
     ] as const;
-    const changes: Partial<Record<'line' | 'narration' | 'onScreenText' | 'durationSeconds', string | number>> = {};
-    if (line !== shot.line) changes.line = line;
-    if (narration !== shot.narration) changes.narration = narration;
-    if (onScreenText !== shot.onScreenText) changes.onScreenText = onScreenText;
+    const changes: Partial<Record<'shootingScript' | 'durationSeconds', string | number>> = {};
+    if (shootingScript !== shot.shootingScript) changes.shootingScript = shootingScript;
     if (durationSeconds !== shot.durationSeconds) changes.durationSeconds = durationSeconds;
     if (Object.keys(changes).length === 0) {
       submitted.forEach(([key, value]) => draftsRef.current.resetIfValue(key, value));
@@ -599,11 +577,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
       <header className={styles.shotHeader}>
         <div>
           <h3 className={styles.shotTitle}>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
-          <span id={lineGuidanceId} className={styles.lineGuidance} data-line-derivation={shot.derivation}>
-            {t(
-              `${KEY_ROOT}.derivation.${shot.derivation === 'derived' ? 'attachedLineGuidance' : 'detachedLineGuidance'}`
-            )}
-          </span>
           <p className={styles.chainState} data-chain-state={chainState}>
             <bdi dir='auto'>
               {chainState === 'segment_head'
@@ -666,35 +639,14 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </header>
 
       <div className={styles.editorGrid}>
-        <label data-shot-field='line'>
-          <span>{t(`${KEY_ROOT}.fields.line`)}</span>
+        <label data-shot-field='shooting-script'>
+          <span>{t(`${KEY_ROOT}.fields.shootingScript`)}</span>
           <Input.TextArea
-            aria-describedby={lineGuidanceId}
-            aria-label={t(`${KEY_ROOT}.fields.lineFor`, { index: index + 1 })}
+            aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
             autoSize={{ minRows: 3, maxRows: 6 }}
             disabled={disabled}
-            onChange={(value) => drafts.setValue(lineKey, value)}
-            value={line}
-          />
-        </label>
-        <label>
-          <span>{t(`${KEY_ROOT}.fields.narration`)}</span>
-          <Input.TextArea
-            aria-label={t(`${KEY_ROOT}.fields.narrationFor`, { index: index + 1 })}
-            autoSize={{ minRows: 2, maxRows: 6 }}
-            disabled={disabled}
-            onChange={(value) => drafts.setValue(narrationKey, value)}
-            value={narration}
-          />
-        </label>
-        <label>
-          <span>{t(`${KEY_ROOT}.fields.onScreenText`)}</span>
-          <Input.TextArea
-            aria-label={t(`${KEY_ROOT}.fields.onScreenTextFor`, { index: index + 1 })}
-            autoSize={{ minRows: 2, maxRows: 6 }}
-            disabled={disabled}
-            onChange={(value) => drafts.setValue(onScreenTextKey, value)}
-            value={onScreenText}
+            onChange={(value) => drafts.setValue(shootingScriptKey, value)}
+            value={shootingScript}
           />
         </label>
         <label>
@@ -758,44 +710,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
           </p>
         ) : null}
       </div>
-
-      <section aria-label={t(`${KEY_ROOT}.derivation.label`, { index: index + 1 })} className={styles.subsection}>
-        <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.derivation.title`)}</h4>
-        <p data-line-derivation-state={shot.derivation}>
-          {t(`${KEY_ROOT}.derivation.${shot.derivation}`)}
-          {shot.derivationStale ? ` ${t(`${KEY_ROOT}.derivation.stale`)}` : null}
-        </p>
-        <div className={styles.actions}>
-          {shot.derivation === 'derived' ? (
-            <Button
-              disabled={disabled || dirty}
-              onClick={() => void actions.redetachLine(shot.id, shot.line)}
-              size='small'
-            >
-              {t(`${KEY_ROOT}.derivation.detach`)}
-            </Button>
-          ) : null}
-          <Button disabled={disabled} onClick={() => actions.requestReviewedRederive(shot.id)} size='small'>
-            {t(`${KEY_ROOT}.derivation.rederiveReviewed`)}
-          </Button>
-        </div>
-        {history.length > 0 ? (
-          <ol className={styles.historyList}>
-            {history.map((entry) => (
-              <li key={entry.id}>
-                <span dir='auto'>{entry.text}</span>
-                <Button
-                  disabled={disabled || dirty}
-                  onClick={() => void actions.restoreLine(shot.id, entry.id)}
-                  size='small'
-                >
-                  {t(`${KEY_ROOT}.derivation.restoreHistory`)}
-                </Button>
-              </li>
-            ))}
-          </ol>
-        ) : null}
-      </section>
 
       {shot.segmentHead || shot.seedStills.length > 0 ? (
         <section aria-label={t(`${KEY_ROOT}.seeds.label`, { index: index + 1 })} className={styles.subsection}>
@@ -1081,25 +995,19 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
     beatId: string;
     shotId: string | null;
   }>(() => ({ beatId: beat.id, shotId: beat.shots[0]?.id ?? null }));
-  const actionKey = beatDraftKey(beat.id, 'action');
-  const lookKey = beatDraftKey(beat.id, 'look');
+  const storyKey = beatDraftKey(beat.id, 'story');
   const targetKey = beatDraftKey(beat.id, 'targetSeconds');
-  const action = draftString(drafts, actionKey, beat.action);
-  const look = draftString(drafts, lookKey, beat.look);
+  const story = draftString(drafts, storyKey, beat.story);
   const targetSeconds = draftNullableNumber(drafts, targetKey, beat.targetSeconds);
-  const beatDraftKeys = [actionKey, lookKey, targetKey] as const;
+  const beatDraftKeys = [storyKey, targetKey] as const;
   const beatDirty = beatDraftKeys.some((key) => hasDraft(drafts, key));
   const mutationLocked = pending || gateLocked;
   const coverageDraftDirty =
     beatDirty ||
     beat.shots.some((shot) =>
-      (['line', 'narration', 'onScreenText', 'durationSeconds'] as const).some((field) =>
-        hasDraft(drafts, shotDraftKey(shot.id, field))
-      )
+      (['shootingScript', 'durationSeconds'] as const).some((field) => hasDraft(drafts, shotDraftKey(shot.id, field)))
     );
   const coverageDisabled = mutationLocked || drafts.staleRevision || coverageDraftDirty;
-  const lookWords = wordCount(look);
-  const lookWarns = lookWords > STUDIO_LOOK_SOFT_WORD_LIMIT;
   const safeBeatIndex = beatIds[beatIndex] === beat.id ? beatIndex : beatIds.indexOf(beat.id);
   const previousBeatId = safeBeatIndex > 0 ? (beatIds[safeBeatIndex - 1] ?? null) : null;
   const nextBeatId = safeBeatIndex >= 0 ? (beatIds[safeBeatIndex + 1] ?? null) : null;
@@ -1152,13 +1060,11 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const saveBeat = async (): Promise<void> => {
     if (!beatDirty || savingBeat || mutationLocked || drafts.staleRevision) return;
     const submitted = [
-      [actionKey, action],
-      [lookKey, look],
+      [storyKey, story],
       [targetKey, targetSeconds],
     ] as const;
-    const changes: Partial<{ action: string; look: string; targetSeconds: number | null }> = {};
-    if (action !== beat.action) changes.action = action;
-    if (look !== beat.look) changes.look = look;
+    const changes: Partial<{ story: string; targetSeconds: number | null }> = {};
+    if (story !== beat.story) changes.story = story;
     if (targetSeconds !== beat.targetSeconds) changes.targetSeconds = targetSeconds;
     if (Object.keys(changes).length === 0) {
       submitted.forEach(([key, value]) => draftsRef.current.resetIfValue(key, value));
@@ -1368,37 +1274,16 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
         {errorMessageKey === null ? null : <Alert content={t(errorMessageKey)} type='error' />}
 
         <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
-          <label className={styles.beatField} data-beat-field='action'>
+          <label className={styles.beatField} data-beat-field='story'>
             <span className={styles.beatFieldHeading}>
-              <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.action`)}</span>
+              <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
             </span>
             <Input.TextArea
-              aria-label={t(`${KEY_ROOT}.fields.action`)}
+              aria-label={t(`${KEY_ROOT}.fields.story`)}
               autoSize={{ minRows: 3, maxRows: 8 }}
               disabled={mutationLocked}
-              onChange={(value) => drafts.setValue(actionKey, value)}
-              value={action}
-            />
-          </label>
-          <label className={styles.beatField} data-beat-field='look'>
-            <span className={styles.beatFieldHeading}>
-              <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.look`)}</span>
-              <bdi
-                aria-atomic='true'
-                className={`${styles.fieldGuidance} ${lookWarns ? styles.warning : styles.muted}`}
-                data-look-warning={lookWarns}
-                dir='auto'
-                role='status'
-              >
-                {t(`${KEY_ROOT}.lookCounter`, { count: lookWords, limit: STUDIO_LOOK_SOFT_WORD_LIMIT })}
-              </bdi>
-            </span>
-            <Input.TextArea
-              aria-label={t(`${KEY_ROOT}.fields.look`)}
-              autoSize={{ minRows: 3, maxRows: 8 }}
-              disabled={mutationLocked}
-              onChange={(value) => drafts.setValue(lookKey, value)}
-              value={look}
+              onChange={(value) => drafts.setValue(storyKey, value)}
+              value={story}
             />
           </label>
           <div className={styles.beatMetaRow} data-beat-meta-row>

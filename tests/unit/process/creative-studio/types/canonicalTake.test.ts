@@ -13,15 +13,12 @@ import { STUDIO_MANAGED_ASSET_COLLECTIONS_V2 } from '@/common/types/project/crea
 
 const makeShot = (overrides: Partial<StudioShot> = {}): StudioShot => ({
   id: 'clip_1',
-  line: 'A product reveal',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  narration: '',
-  onScreenText: '',
+  shootingScript: 'A product reveal',
   durationSeconds: 4,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
+  referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -42,6 +39,10 @@ const makeAssetV2 = (overrides: Partial<StudioAssetV2> = {}): StudioAssetV2 => (
   byteSize: 1,
   sha256: '1'.repeat(64),
   createdAt: '2026-08-17T00:00:00.000Z',
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
   ...overrides,
 });
 

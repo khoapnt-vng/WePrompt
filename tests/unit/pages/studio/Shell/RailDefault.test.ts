@@ -11,12 +11,7 @@ import {
   railCollapsedForView,
   railPreferenceKey,
 } from '@/renderer/pages/studio/components/Workspace/WorkspaceShell';
-import {
-  defaultStudioView,
-  parseStudioReferenceFocus,
-  resolveStudioEntryView,
-  studioReferenceReviewPath,
-} from '@/renderer/pages/studio/studioPhaseRoute';
+import { defaultStudioView, resolveStudioEntryView } from '@/renderer/pages/studio/studioPhaseRoute';
 
 describe('the rail default follows the view', () => {
   it('opens the rail for References and the Table and shuts it in the Board and the Cut', () => {
@@ -65,18 +60,5 @@ describe('the first project entry respects reference work without stealing later
     const storage = { getItem: () => 'board' } as Pick<Storage, 'getItem'> as Storage;
 
     expect(resolveStudioEntryView('project_1', storage, true)).toBe('board');
-  });
-
-  it('round-trips exact reference handoff focus through a reload-safe URL', () => {
-    const path = studioReferenceReviewPath('project_1', {
-      referenceIds: ['reference_ming', 'reference_ming', 'unsafe/id'],
-      assetIds: ['asset_candidate'],
-    });
-
-    expect(path).toContain('/studio/project_1/references?');
-    expect(parseStudioReferenceFocus(path.slice(path.indexOf('?')))).toEqual({
-      referenceIds: ['reference_ming'],
-      assetIds: ['asset_candidate'],
-    });
   });
 });

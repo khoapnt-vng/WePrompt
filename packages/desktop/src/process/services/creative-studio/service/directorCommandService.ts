@@ -5,7 +5,7 @@
  */
 
 import {
-  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   type StudioDirectorCommandRecordV2,
   type StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -100,7 +100,7 @@ export const createStudioDirectorCommandServiceV2 = (
               const applied = applyStudioMutationBatchV2(
                 openingProject,
                 {
-                  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                  schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
                   projectId: command.projectId,
                   expectedRevision: command.expectedRevision,
                   operations: command.operations,

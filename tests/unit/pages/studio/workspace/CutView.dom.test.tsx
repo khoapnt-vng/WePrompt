@@ -269,8 +269,20 @@ const cut = (overrides: Partial<WorkspaceCutProjection> = {}): WorkspaceCutProje
     fadeOutEndSeconds: 11,
   },
   coverCandidates: [
-    { shotId: 'shot_1', beatId: 'beat_1', beatTitle: 'Opening', line: 'Wide opening', coverAssetId: 'cover_1' },
-    { shotId: 'shot_2', beatId: 'beat_1', beatTitle: 'Opening', line: 'Detail', coverAssetId: null },
+    {
+      shotId: 'shot_1',
+      beatId: 'beat_1',
+      beatTitle: 'Opening',
+      shootingScript: 'Wide opening',
+      coverAssetId: 'cover_1',
+    },
+    {
+      shotId: 'shot_2',
+      beatId: 'beat_1',
+      beatTitle: 'Opening',
+      shootingScript: 'Detail',
+      coverAssetId: null,
+    },
   ],
   ...overrides,
 });
@@ -306,14 +318,9 @@ const playbackShot = (
   const playedDurationSeconds = sourceDurationSeconds - (trimInSeconds ?? 0) - (trimOutSeconds ?? 0);
   return {
     id,
-    line: `Line ${id}`,
-    narration: '',
-    onScreenText: '',
+    shootingScript: `Shooting script ${id}`,
     durationSeconds: Math.max(1, Math.round(playedDurationSeconds)),
     chainBreak: 'none',
-    derivation: 'derived',
-    derivedFromActionRevision: 1,
-    derivationStale: false,
     trimInSeconds,
     trimOutSeconds,
     currentPicture: {
@@ -353,10 +360,7 @@ const playbackBeat = (
 ): WorkspaceBeatProjection => ({
   id,
   title,
-  action: `Action ${id}`,
-  look: `Look ${id}`,
-  actionRevision: 1,
-  lineHistory: [],
+  story: `Story ${id}`,
   targetSeconds,
   actualSeconds:
     shots.length === 0
@@ -433,7 +437,7 @@ describe('the truthful Cut playback sequence', () => {
           beatTitle: 'Opening',
           shotId: 'shot_1',
           shotPosition: 1,
-          shotTitle: 'Line shot_1',
+          shotTitle: 'Shooting script shot_1',
           assetId: 'take_1',
           posterAssetId: 'take_1_poster',
           sourceDurationSeconds: 10,
@@ -450,7 +454,7 @@ describe('the truthful Cut playback sequence', () => {
           beatTitle: 'Opening',
           shotId: 'shot_2',
           shotPosition: 2,
-          shotTitle: 'Line shot_2',
+          shotTitle: 'Shooting script shot_2',
           assetId: 'take_2',
           posterAssetId: 'take_2_poster',
           sourceDurationSeconds: 4,
@@ -476,7 +480,7 @@ describe('the truthful Cut playback sequence', () => {
           beatTitle: 'Close',
           shotId: 'shot_3',
           shotPosition: 1,
-          shotTitle: 'Line shot_3',
+          shotTitle: 'Shooting script shot_3',
           assetId: 'take_3',
           posterAssetId: 'take_3_poster',
           sourceDurationSeconds: 8,
@@ -847,7 +851,7 @@ describe('the truthful Cut player and transport', () => {
     expect(document.querySelector('[data-cut-preview-badge]')).toHaveTextContent('Beat 01 · Opening');
     expect(video).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_1');
     expect(video).toHaveAttribute('poster', 'weprompt-studio://asset/project_1/take_1_poster');
-    expect(video).toHaveAccessibleName('Beat 01 · Opening · Shot 01 · Line shot_1');
+    expect(video).toHaveAccessibleName('Beat 01 · Opening · Shot 01 · Shooting script shot_1');
     expect(video).toHaveAttribute('playsinline');
     expect(video.muted).toBe(true);
     expect(video.controls).toBe(false);

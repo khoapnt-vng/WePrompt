@@ -7,7 +7,7 @@
 import { lstat, mkdtemp, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MUTATION_BATCH_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
 import { writeReferenceRequestRecordV2 } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import {
   createStudioE2EFakeBundle,
@@ -78,10 +78,11 @@ class ControlledPollClock {
 }
 
 describe('Creative Studio generation lifecycle integration', () => {
-  it('persists two project-reference jobs sharing one proxy Shot across a store reload', async () => {
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-shared-reference-proxy-integration-'));
+  it('persists two direct semantic-reference jobs across a store reload', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-direct-reference-integration-'));
     const fake = createStudioE2EFakeBundle({ rootDir });
     let service: ReturnType<typeof createCreativeStudioServiceV2> | null = null;
+    let restartedManager: ReturnType<typeof createStudioJobManager> | null = null;
     try {
       const store = createCreativeStudioStore({ rootDir });
       await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
@@ -95,40 +96,33 @@ describe('Creative Studio generation lifecycle integration', () => {
       if (!imageRoute) throw new Error('Shared-reference lifecycle did not resolve the fake image route');
 
       const created = await store.createProjectV2({
-        name: 'Shared reference proxy film',
-        brief: 'Persist two character sheets anchored to one proxy Shot',
+        name: 'Direct reference film',
+        brief: 'Persist two independently targeted character sheets.',
         aspectRatio: '16:9',
         targetDurationSeconds: 5,
         resolution: '720p',
       });
       const configured = await store.updateProjectV2(created.id, (project) => ({
         ...project,
-        beatOrder: ['section_shared_proxy'],
+        beatOrder: ['section_reunion'],
         beats: {
-          section_shared_proxy: {
-            id: 'section_shared_proxy',
+          section_reunion: {
+            id: 'section_reunion',
             title: 'Cast introduction',
-            action: 'Introduce both recurring characters',
-            look: 'Soft directional daylight',
-            actionRevision: 1,
+            story: 'Ming and Mei meet again in soft directional daylight.',
             targetSeconds: null,
-            shotOrder: ['clip_shared_proxy'],
-            lineHistory: [],
+            shotOrder: ['shot_reunion'],
           },
         },
         shots: {
-          clip_shared_proxy: {
-            id: 'clip_shared_proxy',
-            line: 'Ming and Mei enter the room together',
-            derivation: 'derived',
-            derivedFromActionRevision: 1,
-            narration: '',
-            onScreenText: '',
+          shot_reunion: {
+            id: 'shot_reunion',
+            shootingScript: 'Ming and Mei enter the room together.',
             durationSeconds: 5,
             trimInSeconds: null,
             trimOutSeconds: null,
             chainBreak: 'none',
-            referenceIds: [],
+            referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
             seedStillId: null,
             boardAssetId: null,
             supersededBoardAssetIds: [],
@@ -168,29 +162,24 @@ describe('Creative Studio generation lifecycle integration', () => {
         onProjectUpdated: () => {},
       });
 
-      const referenceIds = ['reference_ming', 'reference_mei'];
       const defined = await service.applyMutations(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: configured.id,
           expectedRevision: configured.revision,
           operations: [
             {
-              kind: 'set_project_references',
+              kind: 'set_reference_plan',
               references: [
                 {
-                  id: referenceIds[0]!,
                   kind: 'character',
                   label: 'Ming',
                   prompt: 'A consistent character sheet for Ming.',
-                  shotIds: ['clip_shared_proxy'],
                 },
                 {
-                  id: referenceIds[1]!,
                   kind: 'character',
                   label: 'Mei',
                   prompt: 'A consistent character sheet for Mei.',
-                  shotIds: ['clip_shared_proxy'],
                 },
               ],
             },
@@ -198,6 +187,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         },
         { mutationId: 'define_shared_reference_proxy', capturedAt: new Date().toISOString() }
       );
+      const referenceIds = defined.project.referenceOrder;
       const prepared = await service.prepareProjectReferences({
         projectId: configured.id,
         expectedRevision: defined.project.revision,
@@ -221,38 +211,78 @@ describe('Creative Studio generation lifecycle integration', () => {
       const authorization = reloaded.project.spendAuthorizations.at(-1);
       expect({
         referenceOrder: reloaded.project.referenceOrder,
-        shotReferenceIds: reloaded.project.shots.clip_shared_proxy.referenceIds,
-        authorizationItems: authorization?.baseItems.map((item) => [
-          item.shotId,
-          item.purpose,
-          item.projectReferenceId,
-        ]),
-        jobs: reloaded.project.shots.clip_shared_proxy.jobIds.map((jobId) => {
-          const job = reloaded.project.jobs[jobId]!;
-          return [job.id, job.status, job.shotId, job.projectReferenceId];
+        shotBinding: reloaded.project.shots.shot_reunion.referenceBinding,
+        shotJobIds: reloaded.project.shots.shot_reunion.jobIds,
+        authorizationItems: authorization?.baseItems.map((item) => [item.target, item.purpose]),
+        referenceJobs: referenceIds.map((referenceId) => {
+          const reference = reloaded.project.references[referenceId]!;
+          const job = reloaded.project.jobs[reference.jobIds[0]!]!;
+          return [reference.jobIds, job.id, job.status, job.target, job.purpose];
         }),
-        candidateJobIds: referenceIds.map((referenceId) => reloaded.project.references[referenceId]!.candidateJobId),
       }).toEqual({
         referenceOrder: referenceIds,
-        shotReferenceIds: referenceIds,
+        shotBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
+        shotJobIds: [],
         authorizationItems: [
-          ['clip_shared_proxy', 'seed_still', referenceIds[0]],
-          ['clip_shared_proxy', 'seed_still', referenceIds[1]],
+          [{ kind: 'reference', referenceId: referenceIds[0] }, 'reference_image'],
+          [{ kind: 'reference', referenceId: referenceIds[1] }, 'reference_image'],
         ],
-        jobs: [
-          ['job_shared_reference_1', 'queued_local', 'clip_shared_proxy', referenceIds[0]],
-          ['job_shared_reference_2', 'queued_local', 'clip_shared_proxy', referenceIds[1]],
+        referenceJobs: [
+          [
+            ['job_shared_reference_1'],
+            'job_shared_reference_1',
+            'queued_local',
+            { kind: 'reference', referenceId: referenceIds[0] },
+            'reference_image',
+          ],
+          [
+            ['job_shared_reference_2'],
+            'job_shared_reference_2',
+            'queued_local',
+            { kind: 'reference', referenceId: referenceIds[1] },
+            'reference_image',
+          ],
         ],
-        candidateJobIds: ['job_shared_reference_1', 'job_shared_reference_2'],
       });
+
+      const restartedMediaStore = createStudioMediaStore({ store: restartedStore });
+      restartedManager = createStudioJobManager({
+        store: restartedStore,
+        mediaStore: restartedMediaStore,
+        providerResolver: createStudioProviderResolver({
+          listProviders: async () => [fake.provider],
+          listConnections: () => restartedStore.listConnections(),
+        }),
+        adapters: fake.adapters,
+        listProviders: async () => [fake.provider],
+        sleep: async () => undefined,
+        jitterMs: (baseMs) => baseMs,
+      });
+      await restartedManager.dispatchAuthorizedJobsV2({
+        projectId: configured.id,
+        jobIds: ['job_shared_reference_1', 'job_shared_reference_2'],
+      });
+      const completedAfterRestart = await waitFor(async () => {
+        const loaded = await restartedStore.getProjectV2(configured.id);
+        if (loaded.status !== 'supported') return null;
+        return ['job_shared_reference_1', 'job_shared_reference_2'].every(
+          (jobId) => loaded.project.jobs[jobId]?.status === 'succeeded'
+        )
+          ? loaded.project
+          : null;
+      });
+      expect(
+        referenceIds.map((referenceId) => completedAfterRestart.references[referenceId]?.candidateAssetId)
+      ).toEqual([expect.any(String), expect.any(String)]);
     } finally {
       service?.dispose();
+      await restartedManager?.dispose().catch((): undefined => undefined);
       await fake.dispose().catch((): undefined => undefined);
       await rm(rootDir, { recursive: true, force: true });
     }
   });
 
-  it('fails a paid handoff retry closed after its cancelled anchor Shot is parked and reloaded', async () => {
+  it('retries a paid direct reference after an unrelated Shot is parked and the project is reloaded', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-parked-reference-retry-integration-'));
     const fake = createStudioE2EFakeBundle({ rootDir });
     let service: ReturnType<typeof createCreativeStudioServiceV2> | null = null;
@@ -282,12 +312,9 @@ describe('Creative Studio generation lifecycle integration', () => {
           section_parked_retry: {
             id: 'section_parked_retry',
             title: 'Reference anchors',
-            action: 'Establish the recurring character before the fallback Shot',
-            look: 'Soft daylight',
-            actionRevision: 1,
+            story: 'Establish the recurring character before the fallback Shot in soft daylight.',
             targetSeconds: null,
             shotOrder: ['clip_reference_anchor', 'clip_reference_fallback'],
-            lineHistory: [],
           },
         },
         shots: Object.fromEntries(
@@ -295,16 +322,16 @@ describe('Creative Studio generation lifecycle integration', () => {
             shotId,
             {
               id: shotId,
-              line: index === 0 ? 'Character reference anchor' : 'Unrelated active fallback Shot',
-              derivation: 'derived' as const,
-              derivedFromActionRevision: 1,
-              narration: '',
-              onScreenText: '',
+              shootingScript: index === 0 ? 'An unrelated establishing Shot.' : 'An active fallback Shot.',
               durationSeconds: 5,
               trimInSeconds: null,
               trimOutSeconds: null,
               chainBreak: 'none' as const,
-              referenceIds: [],
+              referenceBinding: {
+                status: 'unassigned' as const,
+                characterReferenceIds: [],
+                backgroundReferenceId: null,
+              },
               seedStillId: null,
               boardAssetId: null,
               supersededBoardAssetIds: [],
@@ -338,22 +365,19 @@ describe('Creative Studio generation lifecycle integration', () => {
         onProjectUpdated: () => {},
       });
 
-      const referenceId = 'reference_parked_retry';
       const defined = await service.applyMutations(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: configured.id,
           expectedRevision: configured.revision,
           operations: [
             {
-              kind: 'set_project_references',
+              kind: 'set_reference_plan',
               references: [
                 {
-                  id: referenceId,
                   kind: 'character',
                   label: 'Recurring character',
                   prompt: 'One stable character sheet for the recurring character.',
-                  shotIds: ['clip_reference_anchor'],
                 },
               ],
             },
@@ -361,6 +385,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         },
         { mutationId: 'define_parked_reference', capturedAt: new Date().toISOString() }
       );
+      const referenceId = defined.project.referenceOrder[0]!;
       const requestPaths = await store.resolveReferenceRequestPathsV2(configured.id);
       const canonicalRoot = await realpath(requestPaths.projectDir);
       const rootStats = await lstat(canonicalRoot);
@@ -388,9 +413,8 @@ describe('Creative Studio generation lifecycle integration', () => {
       });
       expect(prepared.baseOnly.baseItems).toEqual([
         expect.objectContaining({
-          shotId: 'clip_reference_anchor',
-          projectReferenceId: referenceId,
-          purpose: 'seed_still',
+          target: { kind: 'reference', referenceId },
+          purpose: 'reference_image',
         }),
       ]);
       const confirmed = await service.confirmSubmission({
@@ -425,14 +449,14 @@ describe('Creative Studio generation lifecycle integration', () => {
       await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
         expect.objectContaining({
           handoffId: decision.outcome.handoffId,
-          status: 'confirmed',
-          progress: { queued: 0, running: 0, succeeded: 0, failed: 1 },
-          retryReferenceIds: [referenceId],
+          status: 'failed',
+          counts: { queued: 0, running: 0, succeeded: 0, failed: 1 },
+          failedReferenceIds: [referenceId],
         }),
       ]);
       const parked = await service.applyMutations(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: configured.id,
           expectedRevision: cancelled.revision,
           operations: [{ kind: 'park_shot', shotId: 'clip_reference_anchor' }],
@@ -447,61 +471,341 @@ describe('Creative Studio generation lifecycle integration', () => {
       const reloaded = await restartedStore.getProjectV2(configured.id);
       if (reloaded.status !== 'supported') throw new Error('Parked-reference project did not survive reload');
       const retryDispatch = vi.fn(async () => []);
-      const listGenerationRoutes = vi.fn();
-      const loadRateCard = vi.fn();
-      const createQuoteId = vi.fn(() => 'quote_parked_reference_unexpected');
+      const restartedProviderResolver = createStudioProviderResolver({
+        listProviders: async () => [fake.provider],
+        listConnections: () => restartedStore.listConnections(),
+      });
+      const listGenerationRoutes = vi.spyOn(restartedProviderResolver, 'listGenerationRoutes');
+      const loadRateCard = vi.fn(async () => rateCard);
+      const createQuoteId = vi.fn(() => 'quote_parked_reference_retry');
       const onProjectUpdated = vi.fn();
       service = createCreativeStudioServiceV2({
         store: restartedStore,
-        providerResolver: { listGenerationRoutes } as never,
+        providerResolver: restartedProviderResolver,
         jobManager: { dispatchAuthorizedJobsV2: retryDispatch } as never,
         rateCard: loadRateCard,
         createQuoteId,
-        createJobId: () => 'job_parked_reference_unexpected',
-        createIdempotencyKey: () => 'idempotency_parked_reference_unexpected',
+        createJobId: () => 'job_parked_reference_retry',
+        createIdempotencyKey: () => 'idempotency_parked_reference_retry',
         onProjectUpdated,
       });
       await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
         expect.objectContaining({
           handoffId: decision.outcome.handoffId,
-          status: 'confirmed',
-          retryReferenceIds: [referenceId],
+          status: 'failed',
+          failedReferenceIds: [referenceId],
         }),
       ]);
-      const before = {
-        revision: reloaded.project.revision,
-        authorizations: reloaded.project.spendAuthorizations.map((authorization) => authorization.id),
-        jobs: Object.keys(reloaded.project.jobs),
-        candidateJobId: reloaded.project.references[referenceId]?.candidateJobId,
-      };
-
+      const retryPrepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: reloaded.project.revision,
+        referenceIds: [referenceId],
+      });
+      expect(retryPrepared.baseOnly.baseItems).toEqual([
+        expect.objectContaining({ target: { kind: 'reference', referenceId }, purpose: 'reference_image' }),
+      ]);
       await expect(
-        service.prepareProjectReferences({
+        service.confirmSubmission({
           projectId: configured.id,
+          quoteId: retryPrepared.baseOnly.id,
           expectedRevision: reloaded.project.revision,
-          referenceIds: [referenceId],
         })
-      ).rejects.toMatchObject({ code: 'inactive_shot' });
+      ).resolves.toEqual({ projectId: configured.id, projectRevision: reloaded.project.revision + 1 });
 
       const after = await restartedStore.getProjectV2(configured.id);
-      if (after.status !== 'supported') throw new Error('Refused retry damaged the reloaded project');
-      expect({
-        revision: after.project.revision,
-        authorizations: after.project.spendAuthorizations.map((authorization) => authorization.id),
-        jobs: Object.keys(after.project.jobs),
-        candidateJobId: after.project.references[referenceId]?.candidateJobId,
-      }).toEqual(before);
-      expect(listGenerationRoutes).not.toHaveBeenCalled();
-      expect(loadRateCard).not.toHaveBeenCalled();
-      expect(createQuoteId).not.toHaveBeenCalled();
-      expect(retryDispatch).not.toHaveBeenCalled();
-      expect(onProjectUpdated).not.toHaveBeenCalled();
+      if (after.status !== 'supported') throw new Error('Reference retry damaged the reloaded project');
+      expect(after.project.references[referenceId]?.jobIds).toEqual([
+        'job_parked_reference_initial',
+        'job_parked_reference_retry',
+      ]);
+      expect(after.project.jobs.job_parked_reference_retry).toMatchObject({
+        target: { kind: 'reference', referenceId },
+        purpose: 'reference_image',
+        status: 'queued_local',
+      });
+      expect(after.project.shots.clip_reference_anchor?.jobIds).toEqual([]);
+      expect(after.project.shots.clip_reference_fallback?.jobIds).toEqual([]);
+      expect(listGenerationRoutes).toHaveBeenCalled();
+      expect(loadRateCard).toHaveBeenCalled();
+      expect(createQuoteId).toHaveBeenCalledOnce();
+      expect(retryDispatch).toHaveBeenCalledExactlyOnceWith({
+        projectId: configured.id,
+        jobIds: ['job_parked_reference_retry'],
+      });
+      expect(onProjectUpdated).toHaveBeenCalled();
     } finally {
       service?.dispose();
       await fake.dispose().catch((): undefined => undefined);
       await rm(rootDir, { recursive: true, force: true });
     }
   });
+
+  it('retains two successful references and retries only one failed reference after restart', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-partial-reference-integration-'));
+    const fake = createStudioE2EFakeBundle({ rootDir });
+    let manager: ReturnType<typeof createStudioJobManager> | null = null;
+    let service: ReturnType<typeof createCreativeStudioServiceV2> | null = null;
+    try {
+      const store = createCreativeStudioStore({ rootDir });
+      await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
+      const listProviders = async () => [fake.provider];
+      const providerResolver = createStudioProviderResolver({
+        listProviders,
+        listConnections: () => store.listConnections(),
+      });
+      const imageRoute = (await providerResolver.listGenerationRoutes()).routes.find(
+        (candidate) => candidate.kind === 'image'
+      );
+      if (imageRoute === undefined) throw new Error('Partial-reference lifecycle did not resolve the fake image route');
+      const created = await store.createProjectV2({
+        name: 'Partial reference retry film',
+        brief: 'Generate three recurring character references and retain partial success.',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 12,
+        resolution: '720p',
+      });
+      const configured = await store.updateProjectV2(created.id, (project) => ({
+        ...project,
+        imageRouteId: imageRoute.choiceId,
+      }));
+      const mediaStore = createStudioMediaStore({ store });
+      const baseImageAdapter = fake.adapters.get('weprompt-image-v1');
+      if (baseImageAdapter === undefined || baseImageAdapter.poll === undefined) {
+        throw new Error('Partial-reference fake image adapter was unavailable');
+      }
+      const failedProviderJobId = 'forced_reference_failure';
+      const failingAdapters = new Map(fake.adapters);
+      failingAdapters.set('weprompt-image-v1', {
+        ...baseImageAdapter,
+        async submit(request, provider, signal) {
+          if (request.prompt.includes('FORCE_REFERENCE_FAILURE')) {
+            signal.throwIfAborted();
+            return { kind: 'remote', providerJobId: failedProviderJobId };
+          }
+          return baseImageAdapter.submit(request, provider, signal);
+        },
+        async poll(providerJobId, provider, signal) {
+          if (providerJobId === failedProviderJobId) {
+            signal.throwIfAborted();
+            return { status: 'failed', error: { code: 'unknown' } };
+          }
+          return baseImageAdapter.poll!(providerJobId, provider, signal);
+        },
+      });
+      manager = createStudioJobManager({
+        store,
+        mediaStore,
+        providerResolver,
+        adapters: failingAdapters,
+        listProviders,
+        sleep: async () => undefined,
+        jitterMs: (baseMs) => baseMs,
+      });
+      const rateCard = createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+      ]);
+      let initialJobIndex = 0;
+      service = createCreativeStudioServiceV2({
+        store,
+        mediaStore,
+        providerResolver,
+        jobManager: manager,
+        rateCard: async () => rateCard,
+        createQuoteId: () => 'quote_partial_reference_initial',
+        createJobId: () => `job_partial_reference_${++initialJobIndex}`,
+        createIdempotencyKey: () => `idempotency_partial_reference_${initialJobIndex}`,
+        onProjectUpdated: () => {},
+      });
+      const planned = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          operations: [
+            {
+              kind: 'set_reference_plan',
+              references: [
+                { kind: 'character', label: 'Ming', prompt: 'Stable character sheet for Ming.' },
+                {
+                  kind: 'character',
+                  label: 'Mei',
+                  prompt: 'FORCE_REFERENCE_FAILURE while generating Mei.',
+                },
+                { kind: 'character', label: 'Jun', prompt: 'Stable character sheet for Jun.' },
+              ],
+            },
+          ],
+        },
+        { mutationId: 'plan_partial_references', capturedAt: new Date().toISOString() }
+      );
+      const [mingId, failedReferenceId, junId] = planned.project.referenceOrder;
+      if (mingId === undefined || failedReferenceId === undefined || junId === undefined) {
+        throw new Error('Partial-reference identities were unavailable');
+      }
+      const requestPaths = await store.resolveReferenceRequestPathsV2(configured.id);
+      const canonicalRoot = await realpath(requestPaths.projectDir);
+      const rootStats = await lstat(canonicalRoot);
+      const request = await writeReferenceRequestRecordV2({
+        pendingDir: requestPaths.pendingDir,
+        projectId: configured.id,
+        requestId: 'request_partial_references',
+        referenceIds: [mingId, failedReferenceId, junId],
+        projectAuthority: {
+          canonicalRoot,
+          rootIdentity: { dev: rootStats.dev, ino: rootStats.ino },
+        },
+      });
+      const decision = await service.decideReferenceRequest({
+        projectId: configured.id,
+        requestId: request.id,
+        expectedRevision: planned.project.revision,
+        outcome: { kind: 'generation_gate' },
+      });
+      if (decision.outcome.kind !== 'generation_gate') throw new Error('Expected a partial-reference handoff');
+      const prepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: planned.project.revision,
+        referenceIds: [mingId, failedReferenceId, junId],
+      });
+      await service.confirmSubmission({
+        projectId: configured.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: planned.project.revision,
+      });
+      const partiallyFailed = await waitFor(async () => {
+        const loaded = await store.getProjectV2(configured.id);
+        if (loaded.status !== 'supported') return null;
+        const jobs = ['job_partial_reference_1', 'job_partial_reference_2', 'job_partial_reference_3'].map(
+          (jobId) => loaded.project.jobs[jobId]?.status
+        );
+        return jobs.every((status) => status === 'succeeded' || status === 'failed') ? loaded.project : null;
+      });
+      expect([
+        partiallyFailed.jobs.job_partial_reference_1?.status,
+        partiallyFailed.jobs.job_partial_reference_2?.status,
+        partiallyFailed.jobs.job_partial_reference_3?.status,
+      ]).toEqual(['succeeded', 'failed', 'succeeded']);
+      await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
+        expect.objectContaining({
+          handoffId: decision.outcome.handoffId,
+          status: 'partially_failed',
+          counts: { queued: 0, running: 0, succeeded: 2, failed: 1 },
+          failedReferenceIds: [failedReferenceId],
+        }),
+      ]);
+      const successfulCandidateIds = [
+        partiallyFailed.references[mingId]?.candidateAssetId,
+        partiallyFailed.references[junId]?.candidateAssetId,
+      ];
+      expect(successfulCandidateIds).toEqual([expect.any(String), expect.any(String)]);
+      const successfulCandidateSnapshots = successfulCandidateIds.map((assetId) => {
+        if (assetId === null || assetId === undefined) throw new Error('Successful reference candidate was missing');
+        const asset = partiallyFailed.assets[assetId];
+        if (asset === undefined) throw new Error('Successful reference asset was missing');
+        return { assetId, sha256: asset.sha256, producerJobId: asset.producerJobId };
+      });
+      expect(partiallyFailed.references[failedReferenceId]?.candidateAssetId).toBeNull();
+
+      service.dispose();
+      service = null;
+      await manager.dispose();
+      manager = null;
+
+      const restartedStore = createCreativeStudioStore({ rootDir });
+      const restartedMediaStore = createStudioMediaStore({ store: restartedStore });
+      const restartedProviderResolver = createStudioProviderResolver({
+        listProviders,
+        listConnections: () => restartedStore.listConnections(),
+      });
+      manager = createStudioJobManager({
+        store: restartedStore,
+        mediaStore: restartedMediaStore,
+        providerResolver: restartedProviderResolver,
+        adapters: fake.adapters,
+        listProviders,
+        sleep: async () => undefined,
+        jitterMs: (baseMs) => baseMs,
+      });
+      service = createCreativeStudioServiceV2({
+        store: restartedStore,
+        mediaStore: restartedMediaStore,
+        providerResolver: restartedProviderResolver,
+        jobManager: manager,
+        rateCard: async () => rateCard,
+        createQuoteId: () => 'quote_partial_reference_retry',
+        createJobId: () => 'job_partial_reference_retry',
+        createIdempotencyKey: () => 'idempotency_partial_reference_retry',
+        onProjectUpdated: () => {},
+      });
+      await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
+        expect.objectContaining({
+          handoffId: decision.outcome.handoffId,
+          status: 'partially_failed',
+          failedReferenceIds: [failedReferenceId],
+        }),
+      ]);
+      const reloaded = await restartedStore.getProjectV2(configured.id);
+      if (reloaded.status !== 'supported') throw new Error('Partial-reference project did not survive restart');
+      const retryPrepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: reloaded.project.revision,
+        referenceIds: [failedReferenceId],
+      });
+      expect(retryPrepared.baseOnly.baseItems).toEqual([
+        expect.objectContaining({
+          target: { kind: 'reference', referenceId: failedReferenceId },
+          purpose: 'reference_image',
+        }),
+      ]);
+      await service.confirmSubmission({
+        projectId: configured.id,
+        quoteId: retryPrepared.baseOnly.id,
+        expectedRevision: reloaded.project.revision,
+      });
+      const recovered = await waitFor(async () => {
+        const loaded = await restartedStore.getProjectV2(configured.id);
+        if (loaded.status !== 'supported') return null;
+        return loaded.project.jobs.job_partial_reference_retry?.status === 'succeeded' ? loaded.project : null;
+      });
+      expect(recovered.references[mingId]?.jobIds).toEqual(['job_partial_reference_1']);
+      expect(recovered.references[junId]?.jobIds).toEqual(['job_partial_reference_3']);
+      expect(recovered.references[failedReferenceId]?.jobIds).toEqual([
+        'job_partial_reference_2',
+        'job_partial_reference_retry',
+      ]);
+      expect(
+        [recovered.references[mingId]?.candidateAssetId, recovered.references[junId]?.candidateAssetId].map(
+          (assetId) => {
+            if (assetId === null || assetId === undefined) throw new Error('Recovered reference candidate was missing');
+            const asset = recovered.assets[assetId];
+            if (asset === undefined) throw new Error('Recovered reference asset was missing');
+            return { assetId, sha256: asset.sha256, producerJobId: asset.producerJobId };
+          }
+        )
+      ).toEqual(successfulCandidateSnapshots);
+      expect(recovered.references[failedReferenceId]?.candidateAssetId).toEqual(expect.any(String));
+      expect(recovered.spendAuthorizations).toHaveLength(2);
+      await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
+        expect.objectContaining({
+          handoffId: decision.outcome.handoffId,
+          status: 'succeeded',
+          counts: { queued: 0, running: 0, succeeded: 3, failed: 0 },
+          failedReferenceIds: [],
+        }),
+      ]);
+    } finally {
+      service?.dispose();
+      await manager?.dispose().catch((): undefined => undefined);
+      await fake.dispose().catch((): undefined => undefined);
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  }, 60_000);
 
   it('runs a real V2 paid seed submission through durable authorization, job, and primary ownership', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-generation-integration-'));
@@ -534,22 +838,15 @@ describe('Creative Studio generation lifecycle integration', () => {
           section_lifecycle: {
             id: 'section_lifecycle',
             title: 'Opening',
-            action: 'Introduce the product',
-            look: 'A luminous folded-paper world',
-            actionRevision: 1,
+            story: 'Introduce the product in a luminous folded-paper world.',
             targetSeconds: null,
             shotOrder: ['clip_lifecycle'],
-            lineHistory: [],
           },
         },
         shots: {
           clip_lifecycle: {
             id: 'clip_lifecycle',
-            line: 'A paper aircraft banks across a sunrise',
-            derivation: 'derived',
-            derivedFromActionRevision: 1,
-            narration: '',
-            onScreenText: '',
+            shootingScript: 'A paper aircraft banks across a sunrise.',
             durationSeconds: 5,
             trimInSeconds: null,
             trimOutSeconds: null,
@@ -559,7 +856,7 @@ describe('Creative Studio generation lifecycle integration', () => {
             supersededBoardAssetIds: [],
             videoAssetId: null,
             supersededVideoAssetIds: [],
-            referenceIds: [],
+            referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
             assetIds: [],
             jobIds: [],
           },
@@ -596,6 +893,11 @@ describe('Creative Studio generation lifecycle integration', () => {
       let quoteIndex = 0;
       let jobIndex = 0;
       let idempotencyIndex = 0;
+      const lifecycleJobIds = [
+        'job_v2_lifecycle_reference',
+        'job_v2_lifecycle_reference_replacement',
+        'job_v2_lifecycle',
+      ] as const;
       const service = createCreativeStudioServiceV2({
         store,
         mediaStore,
@@ -603,28 +905,40 @@ describe('Creative Studio generation lifecycle integration', () => {
         jobManager: manager,
         rateCard: async () => rateCard,
         createQuoteId: () => `quote_v2_lifecycle_${++quoteIndex}`,
-        createJobId: () => (++jobIndex === 1 ? 'job_v2_lifecycle_reference' : 'job_v2_lifecycle'),
-        createIdempotencyKey: () =>
-          ++idempotencyIndex === 1 ? 'idempotency_v2_lifecycle_reference' : 'idempotency_v2_lifecycle',
+        createJobId: () => lifecycleJobIds[jobIndex++] ?? `job_v2_lifecycle_extra_${jobIndex}`,
+        createIdempotencyKey: () => `idempotency_v2_lifecycle_${++idempotencyIndex}`,
         onProjectUpdated: () => {},
       });
 
-      const referenceId = 'reference_v2_lifecycle_background';
+      const seedChoice = {
+        target: { kind: 'shot' as const, shotId: 'clip_lifecycle' },
+        purpose: 'seed_still' as const,
+      };
+      const unassignedBefore = await store.getProjectV2(configured.id);
+      await expect(
+        service.prepareSubmission({
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          originReferenceHandoffId: null,
+          baseChoices: [seedChoice],
+          cascadeChoices: [],
+        })
+      ).rejects.toMatchObject({ code: 'invalid_reference' });
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual(unassignedBefore);
+
       const referenceDefined = await service.applyMutations(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: configured.id,
           expectedRevision: configured.revision,
           operations: [
             {
-              kind: 'set_project_references',
+              kind: 'set_reference_plan',
               references: [
                 {
-                  id: referenceId,
                   kind: 'background',
                   label: 'Folded-paper sunrise',
                   prompt: 'A luminous folded-paper sunrise world.',
-                  shotIds: ['clip_lifecycle'],
                 },
               ],
             },
@@ -632,6 +946,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         },
         { mutationId: 'define_v2_lifecycle_reference', capturedAt: new Date().toISOString() }
       );
+      const referenceId = referenceDefined.project.referenceOrder[0]!;
       const referencePrepared = await service.prepareProjectReferences({
         projectId: configured.id,
         expectedRevision: referenceDefined.project.revision,
@@ -644,35 +959,179 @@ describe('Creative Studio generation lifecycle integration', () => {
       });
       for (const delayMs of [2_000, 4_000, 8_000]) (await clock.take(delayMs)).release();
       const referenceCompleted = await waitFor(async () => {
-        const loaded = await store.getProjectV2(configured.id);
-        if (loaded.status !== 'supported') return null;
-        const job = loaded.project.jobs.job_v2_lifecycle_reference;
-        return job?.status === 'succeeded' && job.outputAssetIdsByRole.primary !== null
-          ? { project: loaded.project, assetId: job.outputAssetIdsByRole.primary }
-          : null;
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          if (loaded.status !== 'supported') return null;
+          const job = loaded.project.jobs.job_v2_lifecycle_reference;
+          return job?.status === 'succeeded' && job.outputAssetIdsByRole.primary !== null
+            ? { project: loaded.project, assetId: job.outputAssetIdsByRole.primary }
+            : null;
+        } catch {
+          return null;
+        }
       });
-      const approved = await service.approveProjectReference({
+      const candidateBeforeRejectedBinding = structuredClone(referenceCompleted.project);
+      await expect(
+        service.applyMutations(
+          {
+            schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+            projectId: configured.id,
+            expectedRevision: referenceCompleted.project.revision,
+            operations: [
+              {
+                kind: 'set_shot_reference_binding',
+                shotId: 'clip_lifecycle',
+                characterReferenceIds: [],
+                backgroundReferenceId: referenceId,
+              },
+            ],
+          },
+          { mutationId: 'reject_unapproved_v2_lifecycle_reference', capturedAt: new Date().toISOString() }
+        )
+      ).rejects.toMatchObject({ reasonCode: 'invalid_operation' });
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual({
+        status: 'supported',
+        project: candidateBeforeRejectedBinding,
+      });
+      const approved = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: referenceCompleted.project.revision,
+          operations: [{ kind: 'approve_reference', referenceId, candidateAssetId: referenceCompleted.assetId }],
+        },
+        { mutationId: 'approve_v2_lifecycle_reference', capturedAt: new Date().toISOString() }
+      );
+      const bound = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: approved.project.revision,
+          operations: [
+            {
+              kind: 'set_shot_reference_binding',
+              shotId: 'clip_lifecycle',
+              characterReferenceIds: [],
+              backgroundReferenceId: referenceId,
+            },
+          ],
+        },
+        { mutationId: 'bind_v2_lifecycle_reference', capturedAt: new Date().toISOString() }
+      );
+
+      const replacementPrepared = await service.prepareProjectReferences({
         projectId: configured.id,
-        expectedRevision: referenceCompleted.project.revision,
-        referenceId,
-        candidateAssetId: referenceCompleted.assetId,
+        expectedRevision: bound.project.revision,
+        referenceIds: [referenceId],
       });
+      await service.confirmSubmission({
+        projectId: configured.id,
+        quoteId: replacementPrepared.baseOnly.id,
+        expectedRevision: bound.project.revision,
+      });
+      for (const delayMs of [2_000, 4_000, 8_000]) (await clock.take(delayMs)).release();
+      const replacementCandidate = await waitFor(async () => {
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          if (loaded.status !== 'supported') return null;
+          const job = loaded.project.jobs.job_v2_lifecycle_reference_replacement;
+          const candidateAssetId = loaded.project.references[referenceId]?.candidateAssetId;
+          return job?.status === 'succeeded' && candidateAssetId !== null && candidateAssetId !== undefined
+            ? { project: loaded.project, assetId: candidateAssetId }
+            : null;
+        } catch {
+          return null;
+        }
+      });
+      expect(replacementCandidate.assetId).not.toBe(referenceCompleted.assetId);
+
+      const replacementStaleQuote = await service.prepareSubmission({
+        projectId: configured.id,
+        expectedRevision: replacementCandidate.project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [seedChoice],
+        cascadeChoices: [],
+      });
+      const replacementApproved = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: replacementCandidate.project.revision,
+          operations: [{ kind: 'approve_reference', referenceId, candidateAssetId: replacementCandidate.assetId }],
+        },
+        { mutationId: 'approve_v2_lifecycle_reference_replacement', capturedAt: new Date().toISOString() }
+      );
+      expect(replacementApproved.project.references[referenceId]).toMatchObject({
+        candidateAssetId: null,
+        approvedAssetId: replacementCandidate.assetId,
+        supersededAssetIds: [referenceCompleted.assetId],
+      });
+      const afterReplacementApproval = await store.getProjectV2(configured.id);
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: replacementStaleQuote.baseOnly.id,
+          expectedRevision: replacementStaleQuote.baseOnly.projectRevision,
+        })
+      ).rejects.toBeDefined();
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual(afterReplacementApproval);
+
+      const imageBinding = fake.connections.find(
+        (connection) =>
+          connection.providerId === imageRoute.providerId &&
+          connection.adapterId === imageRoute.adapterId &&
+          connection.model === imageRoute.model
+      );
+      if (imageBinding === undefined) throw new Error('V2 lifecycle image binding was unavailable');
+      await store.saveConnection({
+        ...structuredClone(imageBinding),
+        capabilities: { ...structuredClone(imageBinding.capabilities), maxConditioningImages: 0 },
+      });
+      const beforeCapacityRefusal = await store.getProjectV2(configured.id);
+      await expect(
+        service.prepareSubmission({
+          projectId: configured.id,
+          expectedRevision: replacementApproved.project.revision,
+          originReferenceHandoffId: null,
+          baseChoices: [seedChoice],
+          cascadeChoices: [],
+        })
+      ).rejects.toMatchObject({ code: 'invalid_reference' });
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual(beforeCapacityRefusal);
+      await store.saveConnection(imageBinding);
+
+      const routeStaleQuote = await service.prepareSubmission({
+        projectId: configured.id,
+        expectedRevision: replacementApproved.project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [seedChoice],
+        cascadeChoices: [],
+      });
+      const nextImageBinding = fake.connections.find(
+        (connection) => connection.adapterId === imageBinding.adapterId && connection.model !== imageBinding.model
+      );
+      if (nextImageBinding === undefined) throw new Error('V2 lifecycle replacement image route was unavailable');
+      await store.saveConnection({ ...structuredClone(imageBinding), model: nextImageBinding.model });
+      const beforeRouteRefusal = await store.getProjectV2(configured.id);
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: routeStaleQuote.baseOnly.id,
+          expectedRevision: routeStaleQuote.baseOnly.projectRevision,
+        })
+      ).rejects.toBeDefined();
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual(beforeRouteRefusal);
+      await store.saveConnection(imageBinding);
+
       const prepared = await service.prepareSubmission({
         projectId: configured.id,
-        expectedRevision: approved.revision,
+        expectedRevision: replacementApproved.project.revision,
         originReferenceHandoffId: null,
-        baseChoices: [
-          {
-            shotId: 'clip_lifecycle',
-            purpose: 'seed_still',
-            referenceAssetId: null,
-          },
-        ],
+        baseChoices: [seedChoice],
         cascadeChoices: [
           {
-            shotId: 'clip_lifecycle',
+            target: { kind: 'shot', shotId: 'clip_lifecycle' },
             purpose: 'video_take',
-            referenceAssetId: null,
           },
         ],
       });
@@ -680,9 +1139,12 @@ describe('Creative Studio generation lifecycle integration', () => {
         service.confirmSubmission({
           projectId: configured.id,
           quoteId: prepared.baseOnly.id,
-          expectedRevision: approved.revision,
+          expectedRevision: replacementApproved.project.revision,
         })
-      ).resolves.toEqual({ projectId: configured.id, projectRevision: approved.revision + 1 });
+      ).resolves.toEqual({
+        projectId: configured.id,
+        projectRevision: replacementApproved.project.revision + 1,
+      });
       clock.releaseAll();
 
       const completed = await waitFor(async () => {
@@ -700,7 +1162,7 @@ describe('Creative Studio generation lifecycle integration', () => {
       const primaryAssetId = job.outputAssetIdsByRole.primary;
       const asset = primaryAssetId ? completed.assets[primaryAssetId] : null;
       expect({
-        jobShotId: job.shotId,
+        jobTarget: job.target,
         purpose: job.purpose,
         authorizationId: job.authorizationId,
         authorizationCount: completed.spendAuthorizations.length,
@@ -709,22 +1171,22 @@ describe('Creative Studio generation lifecycle integration', () => {
         receiptAuthorizationId: job.spendReceipt?.authorizationId,
         shotJobIds: shot.jobIds,
         shotAssetIds: shot.assetIds,
-        referenceAssetIds: asset?.referenceAssetIds,
+        generationReferenceAssetIds: asset?.generationReferenceAssetIds,
         videoAssetId: shot.videoAssetId,
         assetShotId: asset?.shotId,
         mediaKind: asset?.mediaKind,
         collection: asset?.managedAsset.collection,
       }).toEqual({
-        jobShotId: 'clip_lifecycle',
+        jobTarget: { kind: 'shot', shotId: 'clip_lifecycle' },
         purpose: 'seed_still',
         authorizationId: prepared.baseOnly.id,
-        authorizationCount: 2,
+        authorizationCount: 3,
         outputAssetIds: [primaryAssetId],
         outputAssetIdsByRole: { primary: primaryAssetId, poster: null },
         receiptAuthorizationId: prepared.baseOnly.id,
-        shotJobIds: ['job_v2_lifecycle_reference', 'job_v2_lifecycle'],
-        shotAssetIds: [referenceCompleted.assetId, primaryAssetId],
-        referenceAssetIds: [referenceCompleted.assetId],
+        shotJobIds: ['job_v2_lifecycle'],
+        shotAssetIds: [primaryAssetId],
+        generationReferenceAssetIds: [replacementCandidate.assetId],
         videoAssetId: null,
         assetShotId: 'clip_lifecycle',
         mediaKind: 'image',
@@ -738,7 +1200,7 @@ describe('Creative Studio generation lifecycle integration', () => {
       await fake.dispose().catch((): undefined => undefined);
       await rm(rootDir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   it('runs a publicly selected Board style through confirmation before one image dispatch and atomic ownership', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-board-generation-integration-'));
@@ -771,22 +1233,15 @@ describe('Creative Studio generation lifecycle integration', () => {
           section_board: {
             id: 'section_board',
             title: 'Opening',
-            action: 'Reveal the product in one deliberate move',
-            look: 'Restrained morning light with deep silhouettes',
-            actionRevision: 1,
+            story: 'Reveal the product in one deliberate move under restrained morning light.',
             targetSeconds: null,
             shotOrder: ['clip_board'],
-            lineHistory: [],
           },
         },
         shots: {
           clip_board: {
             id: 'clip_board',
-            line: 'A wide frame reveals the product on a quiet stage',
-            derivation: 'derived',
-            derivedFromActionRevision: 1,
-            narration: '',
-            onScreenText: '',
+            shootingScript: 'A wide frame reveals the product on a quiet stage.',
             durationSeconds: 5,
             trimInSeconds: null,
             trimOutSeconds: null,
@@ -796,7 +1251,7 @@ describe('Creative Studio generation lifecycle integration', () => {
             supersededBoardAssetIds: [],
             videoAssetId: null,
             supersededVideoAssetIds: [],
-            referenceIds: [],
+            referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
             assetIds: [],
             jobIds: [],
           },
@@ -836,7 +1291,7 @@ describe('Creative Studio generation lifecycle integration', () => {
 
       const styled = await service.applyMutations(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: configured.id,
           expectedRevision: configured.revision,
           operations: [{ kind: 'edit_project', changes: { boardStyle: 'line_art' } }],
@@ -851,9 +1306,8 @@ describe('Creative Studio generation lifecycle integration', () => {
         originReferenceHandoffId: null,
         baseChoices: [
           {
-            shotId: 'clip_board',
+            target: { kind: 'shot', shotId: 'clip_board' },
             purpose: 'board_still',
-            referenceAssetId: null,
           },
         ],
         cascadeChoices: [],
@@ -863,7 +1317,7 @@ describe('Creative Studio generation lifecycle integration', () => {
           projectRevision: styled.project.revision,
           baseItems: [
             {
-              shotId: 'clip_board',
+              target: { kind: 'shot', shotId: 'clip_board' },
               purpose: 'board_still',
               route: { choiceId: imageRoute.choiceId },
               generationCount: 1,

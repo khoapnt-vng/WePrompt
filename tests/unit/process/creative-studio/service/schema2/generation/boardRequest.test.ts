@@ -7,8 +7,15 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type {
+  StudioGenerationReferenceInputSnapshot,
+  StudioMediaModelRef,
+} from '@/common/types/project/creativeStudioTypes';
 import {
-  composeStudioBoardGenerationPrompt,
+  composeStudioGenerationV2,
+  deriveStudioInstructionProfileV2,
+} from '@/process/services/creative-studio/service/schema2/generation/composition';
+import {
   createStudioBoardGenerationRequestPlan,
   createStudioBoardGenerationRequestPlanForShot,
 } from '@/process/services/creative-studio/service/schema2/generation/boardRequest';
@@ -21,81 +28,104 @@ const rule = {
   createdAt: '2026-08-18T00:00:00.000Z',
 } as const;
 
-const input = () => ({
+const route: StudioMediaModelRef = {
+  providerId: 'provider_image',
+  adapterId: 'weprompt-image-v1',
+  model: 'image-model',
+};
+const references: StudioGenerationReferenceInputSnapshot[] = [
+  {
+    referenceId: 'reference_operator',
+    kind: 'character',
+    assetId: 'asset_operator',
+    sha256: 'a'.repeat(64),
+  },
+];
+const project = {
+  revision: 7,
   brief: 'Launch the new camera.',
   rules: [rule],
-  action: 'The operator crosses the studio.',
-  look: 'Warm studio light.',
-  line: 'The camera rotates into view.',
-  style: 'grey_tone' as const,
+  boardStyle: 'grey_tone' as const,
   aspectRatio: '16:9' as const,
   resolution: '1080p' as const,
-});
+};
+const beat = { id: 'beat_1', story: 'The operator crosses the warm studio.' };
+const shot = { id: 'shot_1', shootingScript: 'Slow orbit as the camera rotates into view.' };
+const composition = (style: 'grey_tone' | 'line_art' | 'colour_key' = 'grey_tone') => {
+  const source = {
+    kind: 'shot' as const,
+    beatId: beat.id,
+    story: beat.story,
+    shotId: shot.id,
+    shootingScript: shot.shootingScript,
+  };
+  return composeStudioGenerationV2({
+    projectRevision: project.revision,
+    brief: project.brief,
+    rules: project.rules,
+    source,
+    purpose: 'board_still',
+    referenceInputs: references,
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+    route,
+    boardStyle: style,
+    instructionProfile: deriveStudioInstructionProfileV2(route, 'board_still', source),
+  });
+};
 
 describe('Studio Board generation request', () => {
-  it('freezes Brief, rules, Action, Look, Shot, style, and one-panel output constraints', () => {
-    expect(composeStudioBoardGenerationPrompt(input())).toBe(
-      [
-        'BRIEF\nLaunch the new camera.',
-        'PROJECT RULES — enforced before any paid render. A visual prompt that breaks an enforced rule is refused before it costs anything.\n1. [project, enforced] Never show a competitor logo (forbidden words: competitor)',
-        'ACTION\nThe operator crosses the studio.',
-        'LOOK\nWarm studio light.',
-        'SHOT\nThe camera rotates into view.',
-        'BOARD DRAWING\nRestrained grey-tone storyboard drawing with clear staging and silhouettes. The drawing medium must not alter the authored LOOK.',
-        'OUTPUT\nCreate exactly one production storyboard panel for exactly this Shot. Do not create a grid, contact sheet, split frame, caption, label, border, or UI.',
-      ].join('\n\n')
-    );
+  it('freezes Story, Shooting script, approved references, style, and one-panel output constraints', () => {
+    const prompt = composition().prompt;
+    expect(prompt).toContain('STORY\nThe operator crosses the warm studio.');
+    expect(prompt).toContain('SHOOTING SCRIPT\nSlow orbit as the camera rotates into view.');
+    expect(prompt).toContain('Character reference_operator');
+    expect(prompt).toContain('Use a restrained grey-tone storyboard drawing');
+    expect(prompt).toContain('Create exactly one production storyboard panel for exactly this Shot.');
   });
 
   it.each([
-    ['grey_tone', 'Restrained grey-tone storyboard drawing with clear staging and silhouettes.'],
-    ['line_art', 'Clean line-art storyboard with sparse shading and clear staging and silhouettes.'],
-    ['colour_key', 'Simplified colour-key storyboard with a limited palette and clear staging and silhouettes.'],
-  ] as const)('uses the frozen %s treatment without replacing the authored Look', (style, phrase) => {
-    const prompt = composeStudioBoardGenerationPrompt({ ...input(), style });
+    ['grey_tone', 'Use a restrained grey-tone storyboard drawing with clear staging and silhouettes.'],
+    ['line_art', 'Use clean line-art with sparse shading and clear staging and silhouettes.'],
+    ['colour_key', 'Use a simplified colour-key treatment with a limited palette and clear staging and silhouettes.'],
+  ] as const)('uses the frozen %s treatment without replacing authored Story/script', (style, phrase) => {
+    const prompt = composition(style).prompt;
 
-    expect(prompt).toContain(`BOARD DRAWING\n${phrase} The drawing medium must not alter the authored LOOK.`);
-    expect(prompt).toContain('LOOK\nWarm studio light.');
+    expect(prompt).toContain(`BOARD STYLE\n${phrase}`);
+    expect(prompt).toContain('STORY\nThe operator crosses the warm studio.');
   });
 
   it('creates a resolved image plan with fixed plumbing duration and no conditioning', () => {
-    expect(createStudioBoardGenerationRequestPlan(input())).toEqual({
+    const frozen = composition();
+    expect(createStudioBoardGenerationRequestPlan({ composition: frozen })).toEqual({
       kind: 'resolved',
       snapshot: {
-        prompt: composeStudioBoardGenerationPrompt(input()),
+        composition: frozen,
         aspectRatio: '16:9',
         resolution: '1080p',
         durationSeconds: 4,
-        referenceInputs: [],
+        referenceInputs: references,
         conditioningInput: null,
       },
     });
   });
 
   it('adapts only the persisted Board request facts and ignores unrelated Shot metadata', () => {
-    const project = {
-      brief: 'Launch the new camera.',
-      rules: [rule],
-      boardStyle: 'grey_tone' as const,
-      aspectRatio: '16:9' as const,
-      resolution: '1080p' as const,
-    };
-    const beat = { action: 'The operator crosses the studio.', look: 'Warm studio light.' };
-    const shot = { line: 'The camera rotates into view.' };
-
-    const expected = createStudioBoardGenerationRequestPlan(input());
-    expect(createStudioBoardGenerationRequestPlanForShot({ project, beat, shot })).toEqual(expected);
+    const expected = createStudioBoardGenerationRequestPlan({ composition: composition() });
+    expect(
+      createStudioBoardGenerationRequestPlanForShot({ project, beat, shot, route, referenceInputs: references })
+    ).toEqual(expected);
     expect(
       createStudioBoardGenerationRequestPlanForShot({
         project: { ...project, name: 'Ignored project name' },
-        beat: { ...beat, title: 'Ignored title', actionRevision: 99, targetSeconds: 120 },
+        beat: { ...beat, title: 'Ignored title', targetSeconds: 120 },
         shot: {
           ...shot,
-          narration: 'Ignored narration',
-          onScreenText: 'Ignored title card',
           durationSeconds: 99,
           chainBreak: 'hard_cut',
         },
+        route,
+        referenceInputs: references,
       })
     ).toEqual(expected);
   });
@@ -110,33 +140,32 @@ describe('Studio Board generation request', () => {
           aspectRatio: '16:9',
           resolution: '1080p',
         },
-        beat: { action: 'The operator crosses the studio.', look: 'Warm studio light.' },
-        shot: { line: 'The camera rotates into view.' },
+        beat,
+        shot,
+        route,
+        referenceInputs: references,
       })
     ).toBeNull();
   });
 
-  it('omits blank authored sections while retaining the Board style and one-panel contract', () => {
-    const prompt = composeStudioBoardGenerationPrompt({
-      ...input(),
-      brief: '  ',
-      rules: [],
-      action: '\n',
-      look: '\t',
-      line: '',
+  it('permits blank Story and Shooting script when the Brief remains authored', () => {
+    const plan = createStudioBoardGenerationRequestPlanForShot({
+      project: { ...project, rules: [] },
+      beat: { ...beat, story: '' },
+      shot: { ...shot, shootingScript: '' },
+      route,
+      referenceInputs: [],
     });
 
-    expect(prompt).toBe(
-      [
-        'BOARD DRAWING\nRestrained grey-tone storyboard drawing with clear staging and silhouettes. The drawing medium must not alter the authored LOOK.',
-        'OUTPUT\nCreate exactly one production storyboard panel for exactly this Shot. Do not create a grid, contact sheet, split frame, caption, label, border, or UI.',
-      ].join('\n\n')
-    );
-    expect(prompt).not.toMatch(/^(BRIEF|PROJECT RULES|ACTION|LOOK|SHOT)$/m);
+    expect(plan?.snapshot.composition.prompt).toContain('PROJECT BRIEF\nLaunch the new camera.');
+    expect(plan?.snapshot.composition.prompt).toContain('STORY\n\n\nSHOOTING SCRIPT\n');
   });
 
-  it('rejects an invalid style and an oversized composed prompt', () => {
-    expect(() => composeStudioBoardGenerationPrompt({ ...input(), style: 'unknown' as never })).toThrow(TypeError);
-    expect(() => composeStudioBoardGenerationPrompt({ ...input(), brief: 'x'.repeat(32 * 1024) })).toThrow(RangeError);
+  it('rejects a non-Board composition', () => {
+    expect(() =>
+      createStudioBoardGenerationRequestPlan({
+        composition: { ...composition(), inputs: { ...composition().inputs, purpose: 'seed_still', boardStyle: null } },
+      })
+    ).toThrow('Board requests require a board_still composition');
   });
 });

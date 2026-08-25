@@ -158,14 +158,9 @@ const makeShot = (
   overrides: Partial<WorkspaceShotProjection> = {}
 ): WorkspaceShotProjection => ({
   id,
-  line: `Line ${id}`,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Shooting script ${id}`,
   durationSeconds,
   chainBreak: startSeconds === 0 ? 'hard_cut' : 'none',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
   currentPicture: null,

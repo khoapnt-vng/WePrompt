@@ -646,29 +646,23 @@ describe('Creative Studio schema-2 runtime activation', () => {
     project.revision = 2;
     project.imageRouteId = imageChoiceId;
     project.videoRouteId = null;
+    project.referencePlanStatus = 'planned';
     project.beatOrder = ['beat_1'];
     project.beats.beat_1 = {
       id: 'beat_1',
       title: 'Opening',
-      action: 'Reveal the product',
-      look: 'Soft daylight',
-      actionRevision: 1,
+      story: 'Reveal the product in soft daylight.',
       targetSeconds: null,
       shotOrder: ['shot_1'],
-      lineHistory: [],
     };
     project.shots.shot_1 = {
       id: 'shot_1',
-      line: 'A clean hero frame',
-      derivation: 'derived',
-      derivedFromActionRevision: 1,
-      narration: '',
-      onScreenText: '',
+      shootingScript: 'A clean hero frame.',
       durationSeconds: 5,
       trimInSeconds: null,
       trimOutSeconds: null,
       chainBreak: 'none',
-      referenceIds: ['reference_background'],
+      referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
       seedStillId: null,
       boardAssetId: null,
       supersededBoardAssetIds: [],
@@ -677,32 +671,6 @@ describe('Creative Studio schema-2 runtime activation', () => {
       assetIds: [],
       jobIds: [],
     };
-    project.referenceOrder = ['reference_background'];
-    project.references.reference_background = {
-      id: 'reference_background',
-      kind: 'background',
-      label: 'Reveal space',
-      prompt: 'A soft daylight product reveal environment.',
-      candidateAssetId: null,
-      candidateJobId: null,
-      approvedAssetId: 'asset_reference_background',
-      supersededAssetIds: [],
-      createdAt: '2026-08-19T00:00:00.000Z',
-      updatedAt: '2026-08-19T00:00:00.000Z',
-    };
-    project.assets.asset_reference_background = {
-      id: 'asset_reference_background',
-      projectId: project.id,
-      shotId: 'shot_1',
-      mediaKind: 'image',
-      mimeType: 'image/png',
-      managedAsset: { collection: 'assets', fileName: 'asset_reference_background.png' },
-      byteSize: 1,
-      sha256: 'a'.repeat(64),
-      referenceAssetIds: [],
-      createdAt: '2026-08-19T00:00:00.000Z',
-    };
-    project.shots.shot_1.assetIds.push('asset_reference_background');
     const generationCatalog: StudioGenerationRouteCatalog = {
       routes: [imageRoute],
       diagnostics: [{ status: 'available', route: imageRoute }],
@@ -718,8 +686,8 @@ describe('Creative Studio schema-2 runtime activation', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [{ shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null }],
-      cascadeChoices: [{ shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null }],
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+      cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
     });
 
     expect(prepared.baseOnly).toMatchObject({

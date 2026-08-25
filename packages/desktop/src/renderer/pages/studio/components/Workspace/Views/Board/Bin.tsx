@@ -376,7 +376,7 @@ export const Bin: React.FC<BinProps> = ({
               candidateOwner !== null && (entry.kind === 'beat' || entry.value.beatTitle === candidateOwner.beat.title)
                 ? candidateOwner
                 : null;
-            const title = entry.kind === 'beat' ? entry.value.title : entry.value.line;
+            const title = entry.kind === 'beat' ? entry.value.title : entry.value.shootingScript;
             const coverAssetId = entry.value.coverAssetId;
             const reason = entry.identity.reason;
             const kindLabel = t(`${KEY_ROOT}.kind.${entry.kind}`);
@@ -531,7 +531,7 @@ export const Bin: React.FC<BinProps> = ({
                           const label =
                             entry.kind === 'beat'
                               ? (projection.activeBeats.find((beat) => beat.id === anchorId)?.title ?? anchorId)
-                              : (owner?.beat.shots.find((shot) => shot.id === anchorId)?.line ?? anchorId);
+                              : (owner?.beat.shots.find((shot) => shot.id === anchorId)?.shootingScript ?? anchorId);
                           return (
                             <Select.Option key={anchorId} value={anchorId}>
                               {t(`${KEY_ROOT}.restore.${entry.kind === 'beat' ? 'beforeBeat' : 'beforeShot'}`, {

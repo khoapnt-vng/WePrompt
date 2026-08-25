@@ -6,6 +6,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAssetV2,
   type StudioCascadeProgressV2,
@@ -40,13 +41,17 @@ const makeAsset = (
   sha256: 'a'.repeat(64),
   ...(mediaKind === 'video' || mediaKind === 'audio' ? { durationSeconds } : {}),
   createdAt,
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
 });
 
 const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJobV2> = {}): StudioRendererJobV2 =>
   ({
     id,
     projectId: 'project_1',
-    shotId,
+    target: { kind: 'shot', shotId },
     status: 'succeeded',
     provider: { choiceId: 'route_video', providerId: 'provider_safe', model: 'model_safe' },
     outputAssetIds: [],
@@ -66,18 +71,18 @@ const makeJob = (id: string, shotId: string, overrides: Partial<StudioRendererJo
     ...overrides,
   }) as StudioRendererJobV2;
 
-const makeShot = (id: string, line: string, chainBreak: 'none' | 'hard_cut' = 'hard_cut') => ({
+const makeShot = (id: string, shootingScript: string, chainBreak: 'none' | 'hard_cut' = 'hard_cut') => ({
   id,
-  line,
-  derivation: 'derived' as const,
-  derivedFromActionRevision: 1,
-  narration: '',
-  onScreenText: '',
+  shootingScript,
   durationSeconds: 4,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak,
-  referenceIds: [] as string[],
+  referenceBinding: {
+    status: 'ready' as const,
+    characterReferenceIds: [] as string[],
+    backgroundReferenceId: null,
+  },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [] as string[],
@@ -104,32 +109,23 @@ const makeProject = (): StudioRendererProjectV2 =>
       beat_1: {
         id: 'beat_1',
         title: 'Opening',
-        action: 'Open',
-        look: 'Bright',
-        actionRevision: 1,
+        story: 'Open',
         targetSeconds: 8,
         shotOrder: ['shot_1', 'shot_2'],
-        lineHistory: [],
       },
       beat_2: {
         id: 'beat_2',
         title: 'Close',
-        action: 'Close',
-        look: 'Warm',
-        actionRevision: 1,
+        story: 'Close',
         targetSeconds: 4,
         shotOrder: ['shot_3'],
-        lineHistory: [],
       },
       beat_parked: {
         id: 'beat_parked',
         title: 'Parked beat',
-        action: 'Parked',
-        look: 'Muted',
-        actionRevision: 1,
+        story: 'Parked',
         targetSeconds: null,
         shotOrder: ['shot_parked'],
-        lineHistory: [],
       },
     },
     shots: {
@@ -138,6 +134,7 @@ const makeProject = (): StudioRendererProjectV2 =>
       shot_3: makeShot('shot_3', 'Third'),
       shot_parked: makeShot('shot_parked', 'Parked'),
     },
+    referencePlanStatus: 'unplanned',
     referenceOrder: [],
     references: {},
     bin: [],
@@ -592,25 +589,26 @@ describe('projectWorkspace', () => {
   it('keeps reference outputs and jobs out of Shot seed, activity, and recovery state', () => {
     const project = makeProject();
     const shot = project.shots.shot_1!;
-    const referenceAsset = makeAsset('reference_background', shot.id, 'image', 'assets', '2026-08-19T03:00:00.000Z');
+    const referenceAsset = makeAsset('reference_background', null, 'image', 'assets', '2026-08-19T03:00:00.000Z');
+    referenceAsset.projectReferenceId = 'ref_background';
     project.assets[referenceAsset.id] = referenceAsset;
     shot.assetIds.push(referenceAsset.id);
     shot.seedStillId = referenceAsset.id;
 
     const succeeded = makeJob('job_reference_succeeded', shot.id, {
-      purpose: 'seed_still',
-      projectReferenceId: 'ref_background',
+      purpose: 'reference_image',
+      target: { kind: 'reference', referenceId: 'ref_background' },
       outputAssetIds: [referenceAsset.id],
       outputAssetIdsByRole: { primary: referenceAsset.id, poster: null },
     });
     const running = makeJob('job_reference_running', shot.id, {
-      purpose: 'seed_still',
-      projectReferenceId: 'ref_background',
+      purpose: 'reference_image',
+      target: { kind: 'reference', referenceId: 'ref_background' },
       status: 'running',
     });
     const attention = makeJob('job_reference_attention', shot.id, {
-      purpose: 'seed_still',
-      projectReferenceId: 'ref_background',
+      purpose: 'reference_image',
+      target: { kind: 'reference', referenceId: 'ref_background' },
       status: 'needs_attention',
       error: { code: 'submission_unknown', messageKey: 'submissionUnknown' },
       canRetry: true,
@@ -771,25 +769,17 @@ describe('projectWorkspace', () => {
     expect(shots[1]!.seedStills[0]).toMatchObject({ effectiveSeed: false });
   });
 
-  it('derives line staleness only for derived lines and copies Beat history by value', () => {
+  it('projects Story and Shooting script without retired derivation metadata', () => {
     const project = makeProject();
     project.beatOrder = ['beat_1'];
-    project.beats.beat_1!.actionRevision = 2;
-    project.beats.beat_1!.lineHistory = [
-      { id: 'history_1', shotOrdinal: 1, text: 'Earlier line', capturedAt: '2026-08-19T00:00:00.000Z' },
-    ];
-    project.shots.shot_2!.derivation = 'detached';
+    project.beats.beat_1!.story = 'Ming reaches the night market.';
+    project.shots.shot_2!.shootingScript = 'Wide shot of Ming under the red awning.';
 
     const beat = projectWorkspace(project, null, null).activeBeats[0]!;
 
-    expect(beat.actionRevision).toBe(2);
-    expect(beat.lineHistory).toEqual(project.beats.beat_1!.lineHistory);
-    expect(beat.lineHistory).not.toBe(project.beats.beat_1!.lineHistory);
-    expect(beat.lineHistory[0]).not.toBe(project.beats.beat_1!.lineHistory[0]);
-    expect(beat.shots.map((shot) => [shot.id, shot.derivedFromActionRevision, shot.derivationStale])).toEqual([
-      ['shot_1', 1, true],
-      ['shot_2', 1, false],
-    ]);
+    expect(beat.story).toBe('Ming reaches the night market.');
+    expect(beat.shots[1]!.shootingScript).toBe('Wide shot of Ming under the red awning.');
+    expect(JSON.stringify(beat)).not.toMatch(/actionRevision|lineHistory|derivation/);
   });
 
   it('keeps uncovered duration nullable and distinguishes pending duration from a slate target', () => {
@@ -1063,7 +1053,7 @@ describe('projectWorkspace', () => {
       { assetId: 'audio_old', position: 2 },
     ]);
     expect(cut.coverCandidates).toMatchObject([
-      { shotId: 'shot_1', beatId: 'beat_1', beatTitle: 'Opening', line: 'First' },
+      { shotId: 'shot_1', beatId: 'beat_1', beatTitle: 'Opening', shootingScript: 'First' },
     ]);
     expect(JSON.stringify(cut)).not.toContain('fileName');
     expect(JSON.stringify(cut)).not.toContain('sha256');
@@ -1319,7 +1309,7 @@ describe('projectWorkspace', () => {
     });
   });
 
-  it('fails Cut bed, duration, order, and classification facts closed', () => {
+  it('fails Cut bed, duration, and order facts closed while admitting canonical audio imports', () => {
     const project = makeProject();
     project.beats.beat_1!.shotOrder = [];
     project.beats.beat_1!.targetSeconds = 8;
@@ -1327,14 +1317,12 @@ describe('projectWorkspace', () => {
     project.beats.beat_2!.targetSeconds = 4;
     const shortBed = makeAsset('audio_short', null, 'audio', 'imports', '2026-08-19T02:00:00.000Z', 10);
     const classified = makeAsset('audio_classified', null, 'audio', 'imports', '2026-08-19T03:00:00.000Z', 20);
-    classified.briefReferenceRole = 'look';
-    classified.briefReferenceLabel = 'Not a bed';
     project.assets[shortBed.id] = shortBed;
     project.assets[classified.id] = classified;
     project.bedAssetId = shortBed.id;
 
     let cut = projectWorkspace(project, null, null).cut;
-    expect(cut.audioImports.map((asset) => asset.assetId)).toEqual(['audio_short']);
+    expect(cut.audioImports.map((asset) => asset.assetId)).toEqual(['audio_classified', 'audio_short']);
     expect(cut.bed).toEqual({
       status: 'too_short',
       assetId: 'audio_short',
@@ -1357,7 +1345,7 @@ describe('projectWorkspace', () => {
 });
 
 describe('useWorkspaceDrafts', () => {
-  const storageKey = 'aionui:creative-studio:v2:workspace-drafts:project_1';
+  const storageKey = 'aionui:creative-studio:v3:workspace-drafts:project_1';
 
   beforeEach(() => {
     window.sessionStorage.clear();
@@ -1400,7 +1388,7 @@ describe('useWorkspaceDrafts', () => {
     const first = renderHook(() => useWorkspaceDrafts(input));
     act(() => {
       first.result.current.setValue('name', 'Draft A');
-      first.result.current.setValue('gate.choices', '{"shot_1:seed_still":{"referenceAssetId":"brief_ref"}}');
+      first.result.current.setValue('gate.choices', '{"shot_1:seed_still":{"purpose":"seed_still"}}');
       first.result.current.selectBeat('beat_1');
       first.result.current.selectShot('shot_1', 'replace');
     });
@@ -1448,7 +1436,7 @@ describe('useWorkspaceDrafts', () => {
     window.sessionStorage.setItem(
       storageKey,
       JSON.stringify({
-        version: 2,
+        version: 3,
         projectId: 'project_1',
         sourceRevision: 3,
         entries: { name: { baseValue: 'A', value: 'Draft A' } },
@@ -1487,11 +1475,11 @@ describe('useWorkspaceDrafts', () => {
 
   it('hydrates custom storage before its first enabled write', async () => {
     const projectId = 'project_custom_storage';
-    const customStorageKey = `aionui:creative-studio:v2:workspace-drafts:${projectId}`;
+    const customStorageKey = `aionui:creative-studio:v3:workspace-drafts:${projectId}`;
     window.localStorage.setItem(
       customStorageKey,
       JSON.stringify({
-        version: 2,
+        version: 3,
         projectId,
         sourceRevision: 3,
         entries: { name: { baseValue: 'A', value: 'Stored draft' } },
@@ -1522,7 +1510,7 @@ describe('useWorkspaceDrafts', () => {
 
   it('recovers the last trusted draft when its backing envelope becomes malformed', async () => {
     const projectId = 'project_corrupt_backing';
-    const corruptStorageKey = `aionui:creative-studio:v2:workspace-drafts:${projectId}`;
+    const corruptStorageKey = `aionui:creative-studio:v3:workspace-drafts:${projectId}`;
     const input = {
       projectId,
       projectRevision: 3,
@@ -1655,7 +1643,7 @@ describe('useWorkspaceDrafts', () => {
   });
 
   it('round-trips the 1,024-field project draft cap and refuses the next field', async () => {
-    const keys = Array.from({ length: 1_025 }, (_, index) => `shot.shot_${index}.line`);
+    const keys = Array.from({ length: 1_025 }, (_, index) => `shot.shot_${index}.shootingScript`);
     const canonicalValues = Object.fromEntries(keys.map((key) => [key, 'base']));
     const input = {
       projectId: 'project_1',
@@ -1682,7 +1670,7 @@ describe('useWorkspaceDrafts', () => {
   });
 
   it('refuses an update above the persisted 1 MiB bound and round-trips every accepted field', async () => {
-    const keys = Array.from({ length: 140 }, (_, index) => `shot.shot_${index}.line`);
+    const keys = Array.from({ length: 140 }, (_, index) => `shot.shot_${index}.shootingScript`);
     const canonicalValues = Object.fromEntries(keys.map((key) => [key, '']));
     const input = {
       projectId: 'project_1',
@@ -1710,11 +1698,37 @@ describe('useWorkspaceDrafts', () => {
     expect(acceptedKeys.every((key) => second.result.current.value(key) === maximumValue)).toBe(true);
   });
 
+  it('round-trips a schema-5 maximum-length Shooting script and rejects only an oversized script', async () => {
+    const projectId = 'project_long_script';
+    const shootingScriptKey = 'shot.shot_1.shootingScript';
+    const maximumScript = 'x'.repeat(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH);
+    const input = {
+      projectId,
+      projectRevision: 3,
+      canonicalValues: { [shootingScriptKey]: '' },
+      activeBeatIds: ['beat_1'],
+      activeShotIds: ['shot_1'],
+    };
+    const first = renderHook(() => useWorkspaceDrafts(input));
+    act(() => first.result.current.setValue(shootingScriptKey, maximumScript));
+    expect(first.result.current.value(shootingScriptKey)).toBe(maximumScript);
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem(`aionui:creative-studio:v3:workspace-drafts:${projectId}`)).toContain(
+        maximumScript
+      )
+    );
+
+    first.unmount();
+    const second = renderHook(() => useWorkspaceDrafts(input));
+    expect(second.result.current.value(shootingScriptKey)).toBe(maximumScript);
+    act(() => second.result.current.setValue(shootingScriptKey, `${maximumScript}x`));
+    expect(second.result.current.value(shootingScriptKey)).toBe(maximumScript);
+  });
+
   it('treats every Beat and Shot draft namespace as generation-affecting', () => {
-    expect(hasGenerationAffectingWorkspaceDrafts(['beat.beat_1.action'])).toBe(true);
-    expect(hasGenerationAffectingWorkspaceDrafts(['beat.beat_1.look'])).toBe(true);
+    expect(hasGenerationAffectingWorkspaceDrafts(['beat.beat_1.story'])).toBe(true);
     expect(hasGenerationAffectingWorkspaceDrafts(['shot.shot_1.trimOutSeconds'])).toBe(true);
-    expect(hasGenerationAffectingWorkspaceDrafts(['shot.shot_1.onScreenText'])).toBe(true);
+    expect(hasGenerationAffectingWorkspaceDrafts(['shot.shot_1.shootingScript'])).toBe(true);
     expect(hasGenerationAffectingWorkspaceDrafts(['settings.name', 'gate.choices'])).toBe(false);
   });
 
@@ -1727,7 +1741,7 @@ describe('useWorkspaceDrafts', () => {
       window.sessionStorage.setItem(
         storageKey,
         JSON.stringify({
-          version: 2,
+          version: 3,
           projectId: 'project_1',
           sourceRevision: 3,
           entries: {
@@ -1789,7 +1803,7 @@ describe('useWorkspaceDrafts', () => {
     window.sessionStorage.setItem(
       storageKey,
       JSON.stringify({
-        version: 2,
+        version: 3,
         projectId: 'project_1',
         sourceRevision: 3,
         entries: {

@@ -722,7 +722,7 @@ export const CutView: React.FC<CutViewProps> = ({
               >
                 {stillCandidates.map((candidate) => (
                   <Select.Option key={candidate.shotId} value={candidate.shotId}>
-                    <span dir='auto'>{candidate.line || candidate.shotId}</span>
+                    <span dir='auto'>{candidate.shootingScript || candidate.shotId}</span>
                   </Select.Option>
                 ))}
               </Select>

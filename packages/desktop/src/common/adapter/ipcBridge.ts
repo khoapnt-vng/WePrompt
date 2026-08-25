@@ -102,7 +102,6 @@ import type {
 import type { IProjectKnowledgeListResult } from '../types/project/knowledgeTypes';
 import type {
   CreateStudioProjectInputV2,
-  StudioApproveProjectReferenceRequestV2,
   StudioApplyAuthoringBatchRequestV2,
   StudioAssetV2,
   StudioBindDirectorConversationRequestV2,
@@ -114,7 +113,6 @@ import type {
   StudioCreateExportRequestV2,
   StudioDetachBedAudioRequestV2,
   StudioDetachManagedMediaResultV2,
-  StudioDetachBriefReferenceRequest,
   StudioDirectorSessionAuthorityV2,
   StudioDismissReferenceGenerationHandoffRequestV2,
   StudioDismissReferenceGenerationHandoffResultV2,
@@ -133,6 +131,7 @@ import type {
   StudioProjectLoadResultV2,
   StudioProjectWorkspaceLoadResultV2,
   StudioProposalV2,
+  StudioRendererProposalV2,
   StudioReferenceRequestDecisionV2,
   StudioReferenceRequestV2,
   StudioRendererJobV2,
@@ -1217,11 +1216,7 @@ export type StudioProposalAcceptanceV2 = {
 export type StudioDecideReferenceRequestV2 = StudioProjectRequestV2 & {
   requestId: string;
   expectedRevision: number;
-  outcome: { kind: 'rejected' } | { kind: 'generation_gate' } | { kind: 'imported_reference'; assetId: string };
-};
-export type StudioChooseAndImportBriefReferenceRequestV2 = StudioProjectRequestV2 & {
-  briefReferenceRole: 'cast' | 'look';
-  expectedRevision: number;
+  outcome: { kind: 'rejected' } | { kind: 'generation_gate' };
 };
 export type StudioPersistCapturedPosterRequestV2 = StudioProjectRequestV2 & {
   shotId: string;
@@ -1252,7 +1247,7 @@ export const creativeStudio = {
     StudioCommandResult<StudioRendererProjectCommitResultV2>,
     StudioBindDirectorConversationRequestV2
   >('creative-studio.bind-director-conversation'),
-  listProposals: bridge.buildProvider<StudioCommandResult<StudioProposalV2[]>, StudioProjectRequestV2>(
+  listProposals: bridge.buildProvider<StudioCommandResult<StudioRendererProposalV2[]>, StudioProjectRequestV2>(
     'creative-studio.list-proposals'
   ),
   acceptProposal: bridge.buildProvider<StudioCommandResult<StudioProposalAcceptanceV2>, StudioProposalRequestV2>(
@@ -1276,10 +1271,6 @@ export const creativeStudio = {
     StudioCommandResult<StudioRendererPreparedSubmissionOptionsV2>,
     StudioPrepareProjectReferencesRequestV2
   >('creative-studio.prepare-project-references'),
-  approveProjectReference: bridge.buildProvider<
-    StudioCommandResult<StudioRendererProjectV2>,
-    StudioApproveProjectReferenceRequestV2
-  >('creative-studio.approve-project-reference'),
   prepareSubmission: bridge.buildProvider<
     StudioCommandResult<StudioRendererPreparedSubmissionOptionsV2>,
     StudioPrepareSubmissionRequestV2
@@ -1350,14 +1341,6 @@ export const creativeStudio = {
   persistCapturedPoster: bridge.buildProvider<StudioCommandResult<StudioAssetV2>, StudioPersistCapturedPosterRequestV2>(
     'creative-studio.persist-captured-poster'
   ),
-  chooseAndImportReference: bridge.buildProvider<
-    StudioCommandResult<StudioImportManagedMediaResultV2>,
-    StudioChooseAndImportBriefReferenceRequestV2
-  >('creative-studio.choose-and-import-reference'),
-  detachBriefReference: bridge.buildProvider<
-    StudioCommandResult<StudioDetachManagedMediaResultV2>,
-    StudioDetachBriefReferenceRequest
-  >('creative-studio.detach-brief-reference'),
   importSeedStill: bridge.buildProvider<
     StudioCommandResult<StudioImportManagedMediaResultV2>,
     StudioImportSeedStillRequestV2

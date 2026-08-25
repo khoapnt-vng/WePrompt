@@ -18,8 +18,8 @@ import type {
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
-  STUDIO_PROJECT_SCHEMA_VERSION,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandMailboxV2,
@@ -101,7 +101,7 @@ const makeCommandV2 = (
   commandId: string,
   overrides: Partial<StudioDirectorCommandRecordV2> = {}
 ): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   commandId,
   projectId,
   expectedRevision: 1,
@@ -116,7 +116,7 @@ const makeSlotV2 = (
   commandId: string,
   overrides: Partial<StudioDirectorCommandSlotV2> = {}
 ): StudioDirectorCommandSlotV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   commandId,
   reservedAt: NOW,
   deadlineAt: '2026-08-16T12:00:15.000Z',
@@ -131,7 +131,7 @@ const makeLeaseV2 = (input: {
 }): StudioDirectorCommandSlotLeaseV2 => {
   const acquiredAt = input.acquiredAt ?? NOW;
   return {
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     leaseId: input.leaseId,
     owner: input.owner,
     commandId: input.slot.commandId,
@@ -148,7 +148,7 @@ const makeReceiptV2 = (
   overrides: Partial<StudioDirectorCommandReceiptV2> = {}
 ): StudioDirectorCommandReceiptV2 =>
   ({
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId,
     projectId,
     expectedRevision: 1,
@@ -166,7 +166,7 @@ const makeRejectedReceiptV2 = (input: {
   expectedRevision: number | null;
   reasonCode: 'malformed_record' | 'unsupported_version';
 }): StudioDirectorCommandReceiptV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   commandId: input.commandId,
   projectId: input.projectId,
   expectedRevision: input.expectedRevision,
@@ -607,12 +607,12 @@ describe('Studio Director schema-2 command mailbox', () => {
       }),
     },
     {
-      label: 'legacy schema-3 record',
+      label: 'future schema-6 record',
       expectedRevision: 1,
       reasonCode: 'unsupported_version' as const,
       pending: (boundProjectId: string, commandId: string): unknown => ({
         ...makeCommandV2(boundProjectId, commandId),
-        schemaVersion: 3,
+        schemaVersion: 6,
       }),
     },
   ])('finishes an exactly rejected $label while retaining its receipt', async (testCase) => {
@@ -905,7 +905,7 @@ describe('Studio Director schema-2 command mailbox', () => {
       const receipt: StudioDirectorCommandReceiptV2 =
         status === 'applied'
           ? {
-              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
               commandId: command.commandId,
               projectId,
               expectedRevision: 2,
@@ -916,7 +916,7 @@ describe('Studio Director schema-2 command mailbox', () => {
               createdShotIds: [],
             }
           : {
-              schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
               commandId: command.commandId,
               projectId,
               expectedRevision: 2,
@@ -1090,7 +1090,7 @@ describe('Studio Director schema-2 command mailbox', () => {
     const slotFile = path.join(directories.slots, '0.slot');
     const manifestFile = path.join(canonicalRoot, projectId, 'project.json');
     const replacementManifest = `${manifestFile}.legacy`;
-    const legacyManifest = JSON.stringify({ schemaVersion: 1, id: projectId });
+    const legacyManifest = JSON.stringify({ schemaVersion: 4, id: projectId });
     const pendingBytes = JSON.stringify(command);
     const slotBytes = JSON.stringify(makeSlotV2(command.commandId));
     await nodeFs.writeFile(pendingFile, pendingBytes);

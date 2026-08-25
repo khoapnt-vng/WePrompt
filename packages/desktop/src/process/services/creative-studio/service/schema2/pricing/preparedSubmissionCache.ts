@@ -145,7 +145,10 @@ const validateSession = (session: StudioPreparedSubmissionSessionV2, expectedExp
       (baseOnly.originReferenceHandoffId !== null && !SAFE_ID.test(baseOnly.originReferenceHandoffId)) ||
       baseOnly.baseItems.length !== request.referenceIds.length ||
       baseOnly.baseItems.some(
-        (item, index) => item.projectReferenceId !== request.referenceIds[index] || item.purpose !== 'seed_still'
+        (item, index) =>
+          item.target?.kind !== 'reference' ||
+          item.target?.referenceId !== request.referenceIds[index] ||
+          item.purpose !== 'reference_image'
       ) ||
       withCascade !== null
     ) {

@@ -225,7 +225,7 @@ export const buildCutPlaybackSequence = (projection: WorkspaceProjection): CutPl
     let beatCursor = 0;
     for (let shotIndex = 0; shotIndex < beat.shots.length; shotIndex += 1) {
       const shot = beat.shots[shotIndex]!;
-      if (!safeId(shot.id) || seenShotIds.has(shot.id) || typeof shot.line !== 'string') return null;
+      if (!safeId(shot.id) || seenShotIds.has(shot.id) || typeof shot.shootingScript !== 'string') return null;
       seenShotIds.add(shot.id);
       flattenedShotIds.push(shot.id);
       const picture = exactCurrentPicture(shot);
@@ -248,7 +248,7 @@ export const buildCutPlaybackSequence = (projection: WorkspaceProjection): CutPl
         beatTitle: beat.title,
         shotId: shot.id,
         shotPosition: shotIndex + 1,
-        shotTitle: shot.line.trim() || shot.id,
+        shotTitle: shot.shootingScript.trim() || shot.id,
         ...picture,
         filmStartSeconds,
         filmEndSeconds,

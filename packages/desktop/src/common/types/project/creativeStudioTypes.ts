@@ -39,7 +39,7 @@ export const STUDIO_BOARD_STYLES_V2 = ['grey_tone', 'line_art', 'colour_key'] as
 
 export type StudioBoardStyleV2 = (typeof STUDIO_BOARD_STYLES_V2)[number];
 
-export type StudioJobPurpose = 'seed_still' | 'board_still' | 'video_take';
+export type StudioJobPurpose = 'seed_still' | 'board_still' | 'video_take' | 'reference_image';
 
 export type StudioJobStatus =
   | 'queued_local'
@@ -84,8 +84,6 @@ export type StudioMediaChoiceRef = {
   model: string;
 };
 
-export type StudioBriefReferenceRole = 'cast' | 'look';
-
 export type StudioJobErrorCode =
   | 'invalid_request'
   | 'auth'
@@ -111,19 +109,24 @@ export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown';
 export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_running';
 
 export const STUDIO_PROJECT_SCHEMA_VERSION = 5 as const;
+/** Only zero-user prototype schemas 1–4 are recognized as intentionally unsupported. */
+export const isUnsupportedStudioPrototypeSchemaVersion = (value: unknown): boolean =>
+  Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) < STUDIO_PROJECT_SCHEMA_VERSION;
+/** Mutation transport version; intentionally independent from the persisted project schema. */
+export const STUDIO_MUTATION_BATCH_SCHEMA_VERSION = 5 as const;
 export const STUDIO_MAX_BEATS = 24;
 export const STUDIO_MAX_SHOTS_PER_BEAT = 8;
 export const STUDIO_MAX_SHOTS_PER_PROJECT = 96;
 export const STUDIO_MAX_BIN_BEAT_ITEMS = 24;
 export const STUDIO_MAX_BIN_SHOT_ITEMS = 96;
-export const STUDIO_MAX_LINE_HISTORY_PER_BEAT = 20;
 export const STUDIO_MAX_UNDO_ENTRIES = 20;
 export const STUDIO_MAX_UNDO_PATCHES_PER_ENTRY = 2 + STUDIO_MAX_BEATS + STUDIO_MAX_SHOTS_PER_PROJECT;
 export const STUDIO_MAX_UNDO_LABEL_LENGTH = 256;
 export const STUDIO_MIN_SHOT_SECONDS = 4;
 export const STUDIO_MAX_SHOT_SECONDS = 15;
+export const STUDIO_MAX_STORY_LENGTH = 4 * 1024;
+export const STUDIO_MAX_SHOOTING_SCRIPT_LENGTH = 24 * 1024;
 export const STUDIO_MAX_GENERATION_PROMPT_LENGTH = 32 * 1024;
-export const STUDIO_LOOK_SOFT_WORD_LIMIT = 25;
 export const STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST = 24;
 export const STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST = 2 * STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST;
 export const STUDIO_PREPARED_QUOTE_TTL_SECONDS = 5 * 60;
@@ -136,10 +139,12 @@ export const STUDIO_MAX_EXPORTS_PER_SHAPE = 5;
 export const STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT = STUDIO_MAX_SHOTS_PER_PROJECT + 8;
 export const STUDIO_MAX_EXPORT_DIRECTORY_DEPTH = 4;
 export const STUDIO_BED_FADE_OUT_SECONDS = 2;
-export const STUDIO_MAX_REFERENCE_REQUEST_SHOTS = 24;
-export const STUDIO_MAX_PROJECT_REFERENCES = 48;
-export const STUDIO_MAX_REFERENCE_LABEL_LENGTH = 256;
-export const STUDIO_MAX_REFERENCE_PROMPT_LENGTH = 8 * 1024;
+export const STUDIO_MAX_REFERENCE_REQUEST_ITEMS = 24;
+export const STUDIO_MAX_PROJECT_REFERENCES = 24;
+export const STUDIO_MAX_REFERENCE_LABEL_LENGTH = 120;
+export const STUDIO_MAX_REFERENCE_PROMPT_LENGTH = 4 * 1024;
+export const STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES = 256 * 1024;
+export const STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT = 50;
 export const STUDIO_PROPOSAL_V2_PENDING_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 export const STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT = 50;
@@ -156,7 +161,11 @@ export const isValidProviderJobId = (value: string): boolean =>
 
 export const STUDIO_MAX_DIRTY_DRAFTS_REPORTED = 24;
 /** Durable Beat/Shot Director command schema. */
-export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = STUDIO_PROJECT_SCHEMA_VERSION;
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 5 as const;
+export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 5 as const;
+export const STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION = 5 as const;
+export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
+export const STUDIO_EXPORT_SCHEMA_VERSION_V2 = 5 as const;
 export const STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS = 32;
 export const STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -172,25 +181,23 @@ export type StudioDirectorCommandExpiryCode = 'deadline_elapsed' | 'expired_afte
 
 export type StudioDirectorCommandIndeterminateCode = 'commit_attribution_unknown' | 'indeterminate_after_restart';
 
-/** Schema-2 Director commands expose only the current explicitly supported edit capability. */
+/** Director commands expose only the current explicitly supported direct-edit capability. */
 export type StudioDirectorOperationV2 = Extract<
   StudioMutationOperationV2,
   {
     kind:
       | 'set_brief'
-      | 'add_beat'
-      | 'edit_beat'
       | 'reorder_beats'
-      | 'add_shot'
-      | 'edit_shot'
       | 'delete_shot'
       | 'reorder_shots'
-      | 'reorder_bin';
+      | 'reorder_bin'
+      | 'set_reference_plan'
+      | 'set_shot_reference_binding';
   }
 >;
 
 export type StudioDirectorCommandRecordV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   commandId: string;
   projectId: string;
   expectedRevision: number;
@@ -201,14 +208,14 @@ export type StudioDirectorCommandRecordV2 = {
 };
 
 export type StudioDirectorCommandSlotV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   commandId: string;
   reservedAt: string;
   deadlineAt: string;
 };
 
 export type StudioDirectorCommandSlotLeaseV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   leaseId: string;
   owner: 'writer' | 'main';
   commandId: string | null;
@@ -235,7 +242,7 @@ export type StudioDirectorCommandRejectionCodeV2 =
   | 'validation_failed';
 
 export type StudioDirectorAppliedReceiptV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   commandId: string;
   projectId: string;
   expectedRevision: number;
@@ -247,7 +254,7 @@ export type StudioDirectorAppliedReceiptV2 = {
 };
 
 export type StudioDirectorRejectedReceiptV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   commandId: string;
   projectId: string;
   expectedRevision: number | null;
@@ -258,7 +265,7 @@ export type StudioDirectorRejectedReceiptV2 = {
 };
 
 export type StudioDirectorExpiredReceiptV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   commandId: string;
   projectId: string;
   expectedRevision: number;
@@ -269,7 +276,7 @@ export type StudioDirectorExpiredReceiptV2 = {
 };
 
 export type StudioDirectorIndeterminateReceiptV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   commandId: string;
   projectId: string;
   expectedRevision: number;
@@ -288,34 +295,19 @@ export type StudioDirectorCommandReceiptV2 =
 export type StudioBeat = {
   id: string;
   title: string;
-  action: string;
-  look: string;
-  actionRevision: number;
+  story: string;
   targetSeconds: number | null;
   shotOrder: string[];
-  lineHistory: StudioLineHistoryEntry[];
-};
-
-export type StudioLineHistoryEntry = {
-  id: string;
-  shotOrdinal: number;
-  text: string;
-  capturedAt: string;
 };
 
 export type StudioShot = {
   id: string;
-  line: string;
-  derivation: 'derived' | 'detached';
-  derivedFromActionRevision: number | null;
-  narration: string;
-  onScreenText: string;
+  shootingScript: string;
   durationSeconds: number;
   trimInSeconds: number | null;
   trimOutSeconds: number | null;
   chainBreak: 'none' | 'hard_cut';
-  /** Ordered project-reference identities authored for this Shot. */
-  referenceIds: string[];
+  referenceBinding: StudioShotReferenceBindingV2;
   seedStillId: string | null;
   boardAssetId: string | null;
   supersededBoardAssetIds: string[];
@@ -325,26 +317,29 @@ export type StudioShot = {
   jobIds: string[];
 };
 
-export type StudioProjectReferenceKindV2 = 'character' | 'background';
+export type StudioReferenceKindV2 = 'character' | 'background';
 
-/** Durable candidate/approval authority for one project-level reference sheet. */
-export type StudioProjectReferenceV2 = {
-  id: string;
-  kind: StudioProjectReferenceKindV2;
+export type StudioReferenceDraftV2 = {
+  kind: StudioReferenceKindV2;
   label: string;
   prompt: string;
+};
+
+/** Durable candidate/approval authority for one project-level reference sheet. */
+export type StudioProjectReferenceV2 = StudioReferenceDraftV2 & {
+  id: string;
   candidateAssetId: string | null;
-  candidateJobId: string | null;
   approvedAssetId: string | null;
-  /** Replaced approvals remain attributable and reachable; entries are append-only. */
   supersededAssetIds: string[];
+  jobIds: string[];
   createdAt: string;
   updatedAt: string;
 };
 
-export type StudioProjectReferenceDraftV2 = Pick<StudioProjectReferenceV2, 'id' | 'kind' | 'label' | 'prompt'> & {
-  /** Input-only assignment; the reducer writes the sole durable authority to each Shot.referenceIds. */
-  shotIds: string[];
+export type StudioShotReferenceBindingV2 = {
+  status: 'unassigned' | 'ready';
+  characterReferenceIds: string[];
+  backgroundReferenceId: string | null;
 };
 
 export type StudioBinItem =
@@ -353,9 +348,7 @@ export type StudioBinItem =
 
 export type StudioProposedShot = {
   shotId: string;
-  line: string;
-  narration: string;
-  onScreenText: string;
+  shootingScript: string;
   durationSeconds: number;
   chainBreak: 'none' | 'hard_cut';
 };
@@ -367,8 +360,7 @@ export type StudioFixedShotReasonV2 =
   | 'seed_still'
   | 'conditioning_frame'
   | 'conditioning_input'
-  | 'narration'
-  | 'on_screen_text';
+  | 'shooting_script';
 
 export type StudioFixedShotReviewV2 = {
   shotId: string;
@@ -400,12 +392,58 @@ export type StudioConditioningInputSnapshot =
     };
 
 export type StudioGenerationReferenceInputSnapshot = {
+  referenceId: string;
+  kind: StudioReferenceKindV2;
   assetId: string;
   sha256: string;
 };
 
-export type StudioGenerationRequestSnapshot = {
+export type StudioGenerationTargetV2 = { kind: 'shot'; shotId: string } | { kind: 'reference'; referenceId: string };
+
+export type StudioGenerationCompositionInputSnapshotV2 = {
+  schemaVersion: typeof STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION;
+  projectRevision: number;
+  brief: string;
+  rules: StudioBriefRule[];
+  source:
+    | { kind: 'shot'; beatId: string; story: string; shotId: string; shootingScript: string }
+    | {
+        kind: 'project_reference';
+        referenceId: string;
+        referenceKind: StudioReferenceKindV2;
+        prompt: string;
+      };
+  purpose: StudioJobPurpose;
+  referenceInputs: StudioGenerationReferenceInputSnapshot[];
+  aspectRatio: StudioAspectRatio;
+  resolution: StudioResolution;
+  route: StudioMediaModelRef;
+  boardStyle: StudioBoardStyleV2 | null;
+  instructionProfile: string;
+};
+
+export type StudioGenerationCompositionV2 = {
+  inputs: StudioGenerationCompositionInputSnapshotV2;
   prompt: string;
+};
+
+/** Frozen spend-review reference facts with hashes and approval internals removed. */
+export type StudioRendererReferenceIdentityV2 = {
+  referenceId: string;
+  kind: StudioReferenceKindV2;
+  label: string;
+};
+
+export type StudioRendererGenerationReferenceInputV2 = StudioRendererReferenceIdentityV2 & { assetId: string };
+
+export type StudioRendererGenerationCompositionV2 = Omit<StudioGenerationCompositionV2, 'inputs'> & {
+  inputs: Omit<StudioGenerationCompositionInputSnapshotV2, 'referenceInputs'> & {
+    referenceInputs: StudioRendererGenerationReferenceInputV2[];
+  };
+};
+
+export type StudioGenerationRequestSnapshot = {
+  composition: StudioGenerationCompositionV2;
   aspectRatio: StudioAspectRatio;
   resolution: StudioResolution;
   durationSeconds: number;
@@ -455,9 +493,7 @@ export type StudioSpendPolicy = {
 
 export type StudioQuotedGeneration = {
   id: string;
-  shotId: string;
-  /** Present only when this image job creates a candidate for a project reference. */
-  projectReferenceId?: string;
+  target: StudioGenerationTargetV2;
   purpose: StudioJobPurpose;
   routeId: string;
   generationCount: number;
@@ -484,9 +520,8 @@ export type StudioSubmissionQuote = StudioSubmissionQuoteCore & {
 };
 
 export type StudioPrepareGenerationChoiceV2 = {
-  shotId: string;
-  purpose: StudioJobPurpose;
-  referenceAssetId: string | null;
+  target: Extract<StudioGenerationTargetV2, { kind: 'shot' }>;
+  purpose: Exclude<StudioJobPurpose, 'reference_image'>;
 };
 
 export type StudioPrepareProjectReferencesRequestV2 = {
@@ -499,13 +534,6 @@ export type StudioPrepareProjectReferencesRequestV2 = {
 export type StudioPreparedSubmissionRequestV2 =
   | StudioPrepareSubmissionRequestV2
   | StudioPrepareProjectReferencesRequestV2;
-
-export type StudioApproveProjectReferenceRequestV2 = {
-  projectId: string;
-  expectedRevision: number;
-  referenceId: string;
-  candidateAssetId: string;
-};
 
 export type StudioContinuityChangeV2 = {
   shotId: string;
@@ -535,15 +563,48 @@ export const STUDIO_PRICING_REFUSAL_REASONS_V2 = [
 
 export type StudioPricingRefusalReasonV2 = (typeof STUDIO_PRICING_REFUSAL_REASONS_V2)[number];
 
+export const STUDIO_REFERENCE_BINDING_FAILURE_REASONS_V2 = [
+  'unassigned',
+  'unknown_reference',
+  'wrong_kind',
+  'unapproved_reference',
+  'missing_asset',
+  'capacity_exceeded',
+] as const;
+
+export type StudioReferenceBindingFailureReasonV2 = (typeof STUDIO_REFERENCE_BINDING_FAILURE_REASONS_V2)[number];
+
+export type StudioPricingRefusalDetailsV2 = {
+  kind: 'reference_binding';
+  shotId: string;
+  reason: StudioReferenceBindingFailureReasonV2;
+};
+
 const STUDIO_PRICING_REFUSAL_REASON_SET_V2: ReadonlySet<string> = new Set(STUDIO_PRICING_REFUSAL_REASONS_V2);
+const STUDIO_REFERENCE_BINDING_FAILURE_REASON_SET_V2: ReadonlySet<string> = new Set(
+  STUDIO_REFERENCE_BINDING_FAILURE_REASONS_V2
+);
 
 export const isStudioPricingRefusalReasonV2 = (value: unknown): value is StudioPricingRefusalReasonV2 =>
   typeof value === 'string' && STUDIO_PRICING_REFUSAL_REASON_SET_V2.has(value);
 
+export const isStudioPricingRefusalDetailsV2 = (value: unknown): value is StudioPricingRefusalDetailsV2 => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    Reflect.ownKeys(record).length === 3 &&
+    record.kind === 'reference_binding' &&
+    typeof record.shotId === 'string' &&
+    /^[A-Za-z0-9_-]{1,256}$/.test(record.shotId) &&
+    typeof record.reason === 'string' &&
+    STUDIO_REFERENCE_BINDING_FAILURE_REASON_SET_V2.has(record.reason)
+  );
+};
+
 export type StudioPrepareSubmissionRequestV2 = {
   projectId: string;
   expectedRevision: number;
-  originReferenceHandoffId: string | null;
+  originReferenceHandoffId: null;
   baseChoices: StudioPrepareGenerationChoiceV2[];
   /** Empty asks main to derive the canonical optional continuation with one generation per row. */
   cascadeChoices: StudioPrepareGenerationChoiceV2[];
@@ -576,14 +637,15 @@ export type StudioPreparedSubmissionOptionsV2 = {
 };
 
 export type StudioRendererQuotedGenerationV2 = {
-  shotId: string;
-  projectReferenceId?: string;
+  target: StudioGenerationTargetV2;
+  referenceTarget: StudioRendererReferenceIdentityV2 | null;
   purpose: StudioJobPurpose;
   route: StudioRendererMediaModelRef;
   generationCount: number;
   durationSeconds: number | null;
   oneGenerationMinorUnits: number;
   requestedTotalMinorUnits: number;
+  composition: StudioRendererGenerationCompositionV2;
 };
 
 export type StudioRendererBudgetVerdictV2 =
@@ -611,7 +673,7 @@ export type StudioRendererPreparedSubmissionOptionsV2 = {
 };
 
 export type StudioProposalCommitAttributionV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_PROPOSAL_SCHEMA_VERSION_V2;
   proposalId: string;
   projectId: string;
   baseRevision: number;
@@ -624,19 +686,18 @@ export type StudioProposalCommitAttributionV2 = {
 };
 
 export type StudioReferenceRequestDecisionV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION;
   requestId: string;
   projectId: string;
   decidedAt: string;
   outcome:
     | { kind: 'rejected' }
     | { kind: 'expired' }
-    | { kind: 'imported_reference'; assetId: string; projectRevision: number }
     | { kind: 'generation_gate'; handoffId: string; referenceIds: string[] };
 };
 
 export type StudioReferenceGenerationHandoffReceiptV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION;
   handoffId: string;
   requestId: string;
   completedAt: string;
@@ -648,11 +709,11 @@ export type StudioRendererReferenceGenerationHandoffV2 = {
   requestId: string;
   referenceIds: string[];
   decidedAt: string;
-  status: 'open' | 'dismissed' | 'confirmed';
+  status: 'awaiting_spend' | 'running' | 'succeeded' | 'partially_failed' | 'failed' | 'dismissed';
+  counts: { queued: number; running: number; succeeded: number; failed: number };
+  resultAssetIds: string[];
+  failedReferenceIds: string[];
   completedAt: string | null;
-  progress: { queued: number; running: number; succeeded: number; failed: number };
-  candidateAssetIds: string[];
-  retryReferenceIds: string[];
 };
 
 export type StudioDismissReferenceGenerationHandoffRequestV2 = {
@@ -775,11 +836,11 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'reorder_shots'
       | 'set_hard_cut'
       | 'set_seed_still'
-      | 'set_shot_background_reference'
+      | 'set_reference_plan'
+      | 'approve_reference'
+      | 'set_shot_reference_binding'
       | 'promote_board_panel'
       | 'trim_shot'
-      | 'redetach_line'
-      | 'restore_line'
       | 'set_routes'
       | 'set_spend_policy';
   }
@@ -933,13 +994,11 @@ export type StudioAssetV2 = {
   height?: number;
   durationSeconds?: number;
   createdAt: string;
-  /** Optional Brief classification. Role and label are persisted together or both absent. */
-  briefReferenceRole?: StudioBriefReferenceRole;
-  briefReferenceLabel?: string;
-  /** Beat/Shot look provenance for generated conditioning media. */
-  sourceLook?: string;
+  projectReferenceId: string | null;
   /** Exact approved reference assets used to create this generated output, in provider order. */
-  referenceAssetIds?: string[];
+  generationReferenceAssetIds: string[];
+  producerJobId: string | null;
+  compositionDigest: string | null;
 };
 
 export type StudioExportShapeV2 = 'editor_folder' | 'still' | 'script';
@@ -950,7 +1009,7 @@ export type StudioManagedExportRefV2 = {
 };
 
 export type StudioExportArtifactV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V2;
   id: string;
   projectId: string;
   sourceRevision: number;
@@ -964,7 +1023,7 @@ export type StudioExportArtifactV2 = {
 };
 
 export type StudioExportCatalogV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V2;
   projectId: string;
   revision: number;
   artifacts: StudioExportArtifactV2[];
@@ -1030,7 +1089,7 @@ export type StudioEditorFolderTimelineBeatV2 = {
 };
 
 export type StudioEditorFolderTimelineV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V2;
   projectId: string;
   sourceRevision: number;
   name: string;
@@ -1062,7 +1121,7 @@ export type StudioJobErrorV2 = Omit<StudioJobError, 'code'> & {
 export type StudioJobV2 = {
   id: string;
   projectId: string;
-  shotId: string;
+  target: StudioGenerationTargetV2;
   status: StudioJobStatusV2;
   provider: StudioProviderRef;
   idempotencyKey: string;
@@ -1080,10 +1139,9 @@ export type StudioJobV2 = {
   createdAt: string;
   updatedAt: string;
   purpose: StudioJobPurpose;
-  /** Candidate destination for a project-reference generation, absent for ordinary Shot jobs. */
-  projectReferenceId?: string;
   authorizationId: string;
   authorizationItemId: string;
+  composition: StudioGenerationCompositionV2;
   requestPlan: StudioGenerationRequestPlan;
   requestSnapshot: StudioGenerationRequestSnapshot | null;
   spendReceipt: StudioSpendReceipt | null;
@@ -1141,13 +1199,16 @@ export type StudioUndoPatch =
         brief: string;
         rules: StudioBriefRule[];
         beatOrder: string[];
-        referenceOrder: string[];
-        references: Record<string, StudioProjectReferenceV2>;
         imageRouteId: string | null;
         videoRouteId: string | null;
         spendPolicy: StudioSpendPolicy | null;
         bedAssetId: string | null;
       };
+      afterDigest: string;
+    }
+  | {
+      kind: 'reference_catalog';
+      before: Pick<StudioProjectV2, 'referencePlanStatus' | 'referenceOrder' | 'references'>;
       afterDigest: string;
     }
   | { kind: 'beat_fields'; beatId: string; before: StudioBeat | null; afterDigest: string }
@@ -1173,9 +1234,9 @@ export type StudioMutationReducerContextV2 = {
   capturedAt: string;
 };
 
-export type StudioEditableBeat = Pick<StudioBeat, 'title' | 'action' | 'look' | 'targetSeconds'>;
+export type StudioEditableBeat = Pick<StudioBeat, 'title' | 'story' | 'targetSeconds'>;
 
-export type StudioEditableShot = Pick<StudioShot, 'line' | 'narration' | 'onScreenText' | 'durationSeconds'>;
+export type StudioEditableShot = Pick<StudioShot, 'shootingScript' | 'durationSeconds'>;
 
 export type StudioNonEmptyPartial<T> = {
   [Key in keyof T]-?: Required<Pick<T, Key>> & Partial<Omit<T, Key>>;
@@ -1206,6 +1267,7 @@ export type StudioProjectV2 = {
   beatOrder: string[];
   beats: Record<string, StudioBeat>;
   shots: Record<string, StudioShot>;
+  referencePlanStatus: 'unplanned' | 'planned';
   referenceOrder: string[];
   references: Record<string, StudioProjectReferenceV2>;
   bin: StudioBinItem[];
@@ -1280,8 +1342,14 @@ export type StudioMutationOperationV2 =
   | { kind: 'edit_project'; changes: StudioEditableProjectSettingsChanges }
   | { kind: 'set_brief'; brief: string }
   | { kind: 'set_rules'; rules: StudioBriefRuleDraft[] }
-  | { kind: 'set_project_references'; references: StudioProjectReferenceDraftV2[] }
-  | { kind: 'set_shot_background_reference'; shotId: string; referenceId: string }
+  | { kind: 'set_reference_plan'; references: StudioReferenceDraftV2[] }
+  | { kind: 'approve_reference'; referenceId: string; candidateAssetId: string }
+  | {
+      kind: 'set_shot_reference_binding';
+      shotId: string;
+      characterReferenceIds: string[];
+      backgroundReferenceId: string | null;
+    }
   | {
       kind: 'add_beat';
       beatId: string;
@@ -1310,9 +1378,6 @@ export type StudioMutationOperationV2 =
   | { kind: 'set_seed_still'; shotId: string; assetId: string | null }
   | { kind: 'promote_board_panel'; shotId: string; boardAssetId: string }
   | { kind: 'trim_shot'; shotId: string; trimInSeconds: number | null; trimOutSeconds: number | null }
-  | { kind: 'redetach_line'; shotId: string; line: string }
-  | { kind: 'rederive_line'; shotId: string; line: string }
-  | { kind: 'restore_line'; shotId: string; historyEntryId: string }
   | { kind: 'reorder_bin'; bin: StudioBinItem[] }
   | { kind: 'set_routes'; imageRouteId: string | null; videoRouteId: string | null }
   | { kind: 'set_spend_policy'; policy: StudioSpendPolicy | null }
@@ -1320,7 +1385,7 @@ export type StudioMutationOperationV2 =
   | { kind: 'undo_last'; entryId: string };
 
 export type StudioMutationBatchV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_MUTATION_BATCH_SCHEMA_VERSION;
   projectId: string;
   expectedRevision: number;
   operations: StudioMutationOperationV2[];
@@ -1334,7 +1399,7 @@ export type StudioMutationBatchResultV2 = {
 
 export type StudioProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
 
-/** A reviewed schema-2 proposal delegates its ordered free edits to the shared mutation reducer. */
+/** A reviewed proposal delegates its ordered free edits to the shared mutation reducer. */
 export type StudioMutationBatchProposalPayloadV2 = {
   kind: 'mutation_batch';
   operations: StudioMutationOperationV2[];
@@ -1353,7 +1418,7 @@ export type StudioProposalPayloadV2 = StudioMutationBatchProposalPayloadV2 | Stu
 
 /** Exact immutable record written under proposals/pending. Decisions remain separate append-only records. */
 export type StudioProposalRecordV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_PROPOSAL_SCHEMA_VERSION_V2;
   id: string;
   projectId: string;
   status: 'pending';
@@ -1371,15 +1436,76 @@ export type StudioProposalV2 =
       decidedAt: string;
     });
 
+export type StudioProposalReviewSubjectV2 = {
+  kind: 'project' | 'beat' | 'shot';
+  id: string;
+  title: string | null;
+  position: number | null;
+  ownerBeatId: string | null;
+  ownerBeatTitle: string | null;
+};
+
+export type StudioProposalReviewFieldKeyV2 =
+  | 'name'
+  | 'brief'
+  | 'rules'
+  | 'aspectRatio'
+  | 'resolution'
+  | 'targetDurationSeconds'
+  | 'boardStyle'
+  | 'title'
+  | 'story'
+  | 'targetSeconds'
+  | 'shootingScript'
+  | 'durationSeconds'
+  | 'chainBreak'
+  | 'placement'
+  | 'order';
+
+export type StudioProposalReviewValueV2 =
+  | { kind: 'text'; value: string | null }
+  | { kind: 'number'; value: number | null }
+  | { kind: 'text_list'; values: string[] }
+  | { kind: 'rule_list'; values: { text: string; forbiddenTerms: string[] }[] }
+  | {
+      kind: 'placement';
+      value: 'active' | 'bin' | 'removed';
+      position: number | null;
+      ownerBeatId: string | null;
+      ownerBeatTitle: string | null;
+    };
+
+export type StudioProposalReviewFieldV2 = {
+  key: StudioProposalReviewFieldKeyV2;
+  before: StudioProposalReviewValueV2 | null;
+  after: StudioProposalReviewValueV2 | null;
+};
+
+export type StudioProposalReviewGroupV2 = {
+  change: 'added' | 'edited' | 'removed' | 'reordered';
+  subject: StudioProposalReviewSubjectV2;
+  fields: StudioProposalReviewFieldV2[];
+};
+
+export type StudioProposalReviewV2 =
+  | { status: 'ready'; groups: StudioProposalReviewGroupV2[] }
+  | { status: 'stale'; groups: []; currentRevision: number; baseRevision: number }
+  | { status: 'unavailable'; groups: []; reason: 'reducer_rejected' };
+
+/** Renderer-safe proposal plus a main-derived review of the exact reducer result. */
+export type StudioRendererProposalV2 = StudioProposalV2 & {
+  review: StudioProposalReviewV2;
+};
+
 export type StudioProposalDecisionV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_PROPOSAL_SCHEMA_VERSION_V2;
   proposalId: string;
   status: Exclude<StudioProposalStatus, 'pending'>;
   decidedAt: string;
 };
 
 export type StudioProposalSlotV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_PROPOSAL_SCHEMA_VERSION_V2;
   proposalId: string;
   reservedAt: string;
 };
@@ -1391,9 +1517,9 @@ export type StudioRecordProposalInputV2 = {
   payload: StudioProposalPayloadV2;
 };
 
-/** A durable schema-2 request for reviewed reference generation across ordered active shots. */
+/** A durable request for reviewed generation of ordered semantic project references. */
 export type StudioReferenceRequestV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION;
   id: string;
   projectId: string;
   referenceIds: string[];
@@ -1402,7 +1528,7 @@ export type StudioReferenceRequestV2 = {
 };
 
 export type StudioReferenceRequestSlotV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION;
   requestId: string;
   reservedAt: string;
 };
@@ -1593,6 +1719,7 @@ export type StudioCommandError =
   | {
       code: 'pricing_refused';
       reason: StudioPricingRefusalReasonV2;
+      details: StudioPricingRefusalDetailsV2 | null;
       messageKey: string;
     }
   | {
@@ -1618,12 +1745,6 @@ export type StudioRetryJobRequest = StudioJobRequest & {
 };
 
 export type StudioRetryDownloadRequest = StudioJobRequest;
-
-export type StudioDetachBriefReferenceRequest = {
-  projectId: string;
-  assetId: string;
-  expectedRevision: number;
-};
 
 export type StudioValidateConnectionRequest = {
   providerId: string;

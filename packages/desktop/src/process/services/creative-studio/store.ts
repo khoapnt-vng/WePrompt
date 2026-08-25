@@ -9,18 +9,23 @@ import { watch as watchFileSystem } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
+  isUnsupportedStudioPrototypeSchemaVersion,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT,
+  STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
   STUDIO_PROPOSAL_V2_PENDING_TTL_MS,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
   STUDIO_REFERENCE_REQUEST_V2_PENDING_TTL_MS,
+  STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   type CreateStudioProjectInputV2,
   type StudioCancellationPolicy,
   type StudioConnectionBinding,
   type StudioMutationBatchV2,
-  type StudioMutationOperationV2,
   type StudioMutationReducerContextV2,
   type StudioProjectListResultV2,
   type StudioProjectSummaryV2,
@@ -57,6 +62,7 @@ import {
   validateStudioProjectV2,
   type StudioMutationApplyResultV2,
 } from './service/schema2';
+import { studioProposalOperationsV2 } from './service/schema2/mutations/proposalReview';
 import {
   createStudioProjectManifestV2,
   decodeStudioProjectManifestV2,
@@ -88,6 +94,7 @@ const CONNECTION_BINDING_KEYS = new Set([
 ]);
 const STUDIO_BRIEF_TRANSACTION_FILE_NAME = '.brief-transaction.json';
 const STUDIO_BRIEF_TRANSACTION_SCHEMA_VERSION = 1 as const;
+const STUDIO_PROJECT_DELETION_MARKER_SCHEMA_VERSION = 1 as const;
 // JSON escaping can expand a valid 64 KiB Brief by up to six bytes per source byte.
 const STUDIO_BRIEF_TRANSACTION_MAX_BYTES = 512 * 1024;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -154,13 +161,12 @@ const IDENTITY_BOUND_CLEANUP_PATTERN = /^(.*)\.(0|[1-9]\d*)_(0|[1-9]\d*)_([a-f0-
 const REFERENCE_REQUEST_V2_DIRECTORY_NAMES = ['pending', 'decisions', 'slots', 'receipts'] as const;
 const REFERENCE_DECIDE_INPUT_KEYS = new Set(['projectId', 'requestId', 'expectedRevision', 'outcome']);
 const REFERENCE_REJECTED_INTENT_KEYS = new Set(['kind']);
-const REFERENCE_IMPORTED_INTENT_KEYS = new Set(['kind', 'assetId']);
 const REFERENCE_RECEIPT_INPUT_KEYS = new Set(['projectId', 'handoffId', 'expectedRevision', 'result']);
 const REFERENCE_DISMISSED_RESULT_KEYS = new Set(['kind']);
 const REFERENCE_CONFIRMED_RESULT_KEYS = new Set(['kind', 'authorizationId']);
 
-export const STUDIO_PROPOSAL_MAX_RECORD_BYTES = 256 * 1024;
-export const STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT = 50;
+export const STUDIO_PROPOSAL_MAX_RECORD_BYTES = STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES;
+export const STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT = STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT;
 export const STUDIO_PROPOSAL_PENDING_TTL_MS = STUDIO_PROPOSAL_V2_PENDING_TTL_MS;
 export const STUDIO_PROJECT_V2_MAX_RECORD_BYTES = 64 * 1024 * 1024;
 const STUDIO_PROJECT_SCHEMA_SNIFF_CHUNK_BYTES = 64 * 1024;
@@ -269,10 +275,7 @@ export type StudioProposalAcceptanceResultV2 = {
   applied: boolean;
 };
 
-export type StudioReferenceDecisionIntentV2 =
-  | { kind: 'rejected' }
-  | { kind: 'imported_reference'; assetId: string }
-  | { kind: 'generation_gate' };
+export type StudioReferenceDecisionIntentV2 = { kind: 'rejected' } | { kind: 'generation_gate' };
 
 export type StudioDecideReferenceRequestInputV2 = {
   projectId: string;
@@ -413,8 +416,7 @@ type ProjectFileInspectionV2 =
       bytes: string;
       identity: FileIdentityV2;
       directory: DirectoryAuthorityV2;
-      briefFile: { status: 'missing' } | { status: 'present'; bytes: string; identity: FileIdentityV2 };
-      briefManifestKind: 'legacy' | 'brief_file';
+      briefFile: { status: 'present'; bytes: string; identity: FileIdentityV2 };
       briefSynchronized: boolean;
     }
   | { status: 'unsupported_prototype_schema'; projectId: string }
@@ -439,7 +441,7 @@ type ProjectDeletionNodeProofV2 =
   | { kind: 'file' | 'symbolic_link' | 'other'; identity: ExactFileIdentityV2 };
 
 type ProjectDeletionMarkerV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_PROJECT_DELETION_MARKER_SCHEMA_VERSION;
   projectId: string;
   expectedRevision: number;
   directoryDev: number;
@@ -692,7 +694,7 @@ const validateProposalCommitAttributionV2 = (
 ): value is StudioProposalCommitAttributionV2 =>
   isRecord(value) &&
   hasExactKeys(value, PROPOSAL_COMMIT_ATTRIBUTION_KEYS) &&
-  value.schemaVersion === STUDIO_PROJECT_SCHEMA_VERSION &&
+  value.schemaVersion === STUDIO_PROPOSAL_SCHEMA_VERSION_V2 &&
   value.proposalId === proposalId &&
   value.projectId === projectId &&
   isSafeProposalId(value.proposalId) &&
@@ -734,7 +736,7 @@ const parseIdentityBoundCleanupNameV2 = (
 const validateProjectDeletionMarkerV2 = (value: unknown): value is ProjectDeletionMarkerV2 =>
   isRecord(value) &&
   hasExactKeys(value, PROJECT_DELETION_MARKER_KEYS) &&
-  value.schemaVersion === STUDIO_PROJECT_SCHEMA_VERSION &&
+  value.schemaVersion === STUDIO_PROJECT_DELETION_MARKER_SCHEMA_VERSION &&
   isSafeIdV2(value.projectId) &&
   isIntegerInRange(value.expectedRevision, 1, Number.MAX_SAFE_INTEGER) &&
   isIntegerInRange(value.directoryDev, 0, Number.MAX_SAFE_INTEGER) &&
@@ -994,14 +996,14 @@ type StudioSchemaSniffValueOwner = 'root' | 'nested';
  * Streams an oversized JSON object without retaining its payload. Only a direct root property can
  * classify the record; nested grammar uses a compact packed stack instead of per-depth objects.
  */
-const hasTopLevelSchemaVersionOne = async (
+const hasTopLevelPriorProjectSchemaVersion = async (
   handle: Awaited<ReturnType<typeof nodeFs.open>>,
   maximumBytes: number
 ): Promise<boolean> => {
   const chunk = Buffer.alloc(STUDIO_PROJECT_SCHEMA_SNIFF_CHUNK_BYTES);
   let rootState: StudioSchemaSniffRootState = 'before_root';
   let currentKeyIsSchemaVersion = false;
-  let observedSchemaVersionOne: boolean | null = null;
+  let observedPriorProjectSchemaVersion: boolean | null = null;
   let inString = false;
   let stringRole: StudioSchemaSniffStringRole | null = null;
   let escaped = false;
@@ -1016,15 +1018,16 @@ const hasTopLevelSchemaVersionOne = async (
   let numberNegative = false;
   let numberSignificandDigits = 0;
   let numberFractionDigits = 0;
-  let numberOnePosition = 0;
-  let numberHasOtherNonzeroDigit = false;
+  let numberNonzeroDigitPosition = 0;
+  let numberNonzeroDigitValue = 0;
+  let numberHasMultipleNonzeroDigits = false;
   let numberExponentNegative = false;
   let numberExponentMagnitude = 0;
   let numberCounterOverflow = false;
   let offset = 0;
 
-  const completeRootValue = (schemaVersionOne: boolean): void => {
-    if (currentKeyIsSchemaVersion) observedSchemaVersionOne = schemaVersionOne;
+  const completeRootValue = (priorProjectSchemaVersion: boolean): void => {
+    if (currentKeyIsSchemaVersion) observedPriorProjectSchemaVersion = priorProjectSchemaVersion;
     currentKeyIsSchemaVersion = false;
     rootState = 'comma_or_end';
   };
@@ -1053,8 +1056,8 @@ const hasTopLevelSchemaVersionOne = async (
     nestedContainers.setTop(STUDIO_SCHEMA_STACK_ARRAY_COMMA_OR_END);
   };
 
-  const completeScalarValue = (schemaVersionOne: boolean): void => {
-    if (scalarValueOwner === 'root') completeRootValue(schemaVersionOne);
+  const completeScalarValue = (priorProjectSchemaVersion: boolean): void => {
+    if (scalarValueOwner === 'root') completeRootValue(priorProjectSchemaVersion);
     else if (scalarValueOwner === 'nested') completeNestedValue();
     else rootState = 'invalid';
     scalarValueOwner = null;
@@ -1088,11 +1091,12 @@ const hasTopLevelSchemaVersionOne = async (
       if (numberFractionDigits === Number.MAX_SAFE_INTEGER) numberCounterOverflow = true;
       else numberFractionDigits += 1;
     }
-    if (byte === 0x31) {
-      if (numberOnePosition !== 0) numberHasOtherNonzeroDigit = true;
-      else numberOnePosition = numberSignificandDigits;
-    } else if (byte !== 0x30) {
-      numberHasOtherNonzeroDigit = true;
+    if (byte !== 0x30) {
+      if (numberNonzeroDigitPosition !== 0) numberHasMultipleNonzeroDigits = true;
+      else {
+        numberNonzeroDigitPosition = numberSignificandDigits;
+        numberNonzeroDigitValue = byte - 0x30;
+      }
     }
   };
 
@@ -1110,8 +1114,9 @@ const hasTopLevelSchemaVersionOne = async (
     numberNegative = byte === 0x2d;
     numberSignificandDigits = 0;
     numberFractionDigits = 0;
-    numberOnePosition = 0;
-    numberHasOtherNonzeroDigit = false;
+    numberNonzeroDigitPosition = 0;
+    numberNonzeroDigitValue = 0;
+    numberHasMultipleNonzeroDigits = false;
     numberExponentNegative = false;
     numberExponentMagnitude = 0;
     numberCounterOverflow = false;
@@ -1123,12 +1128,18 @@ const hasTopLevelSchemaVersionOne = async (
     recordSignificandDigit(byte, false);
   };
 
-  const schemaNumberIsOne = (): boolean => {
-    if (numberNegative || numberCounterOverflow || numberOnePosition === 0 || numberHasOtherNonzeroDigit) {
+  const schemaNumberIsPriorProjectSchema = (): boolean => {
+    if (
+      numberNegative ||
+      numberCounterOverflow ||
+      numberNonzeroDigitPosition === 0 ||
+      numberHasMultipleNonzeroDigits ||
+      numberNonzeroDigitValue >= STUDIO_PROJECT_SCHEMA_VERSION
+    ) {
       return false;
     }
     const exponent = numberExponentNegative ? -numberExponentMagnitude : numberExponentMagnitude;
-    return numberSignificandDigits - numberOnePosition - numberFractionDigits + exponent === 0;
+    return numberSignificandDigits - numberNonzeroDigitPosition - numberFractionDigits + exponent === 0;
   };
 
   const numberCanEnd = (): boolean =>
@@ -1323,9 +1334,9 @@ const hasTopLevelSchemaVersionOne = async (
           rootState = 'invalid';
           break;
         }
-        const isSchemaOne = schemaNumberIsOne();
+        const isPriorProjectSchema = schemaNumberIsPriorProjectSchema();
         numberState = null;
-        completeScalarValue(isSchemaOne);
+        completeScalarValue(isPriorProjectSchema);
       }
 
       if (nestedContainers.length > 0) {
@@ -1479,7 +1490,7 @@ const hasTopLevelSchemaVersionOne = async (
     literalExpected === null &&
     numberState === null &&
     scalarValueOwner === null &&
-    observedSchemaVersionOne === true
+    observedPriorProjectSchemaVersion === true
   );
 };
 
@@ -1701,7 +1712,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio file changed during schema inspection');
       }
 
-      const isSchemaOne = await hasTopLevelSchemaVersionOne(handle, openedStats.size);
+      const isPriorProjectSchema = await hasTopLevelPriorProjectSchemaVersion(handle, openedStats.size);
       const [finalHandleStats, finalPathStats, finalParentStats, finalParent] = await Promise.all([
         handle.stat(),
         fs.lstat(file),
@@ -1724,7 +1735,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       ) {
         throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio file changed during schema inspection');
       }
-      return isSchemaOne;
+      return isPriorProjectSchema;
     } catch (error) {
       if (error instanceof CreativeStudioStoreError) throw error;
       throw storageError(error, 'Schema-2 Studio file could not be inspected');
@@ -3521,11 +3532,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
       };
     }
-    if (
-      isRecord(initialParsed) &&
-      Number.isSafeInteger(initialParsed.schemaVersion) &&
-      initialParsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION
-    ) {
+    if (isRecord(initialParsed) && isUnsupportedStudioPrototypeSchemaVersion(initialParsed.schemaVersion)) {
       return { status: 'unsupported_prototype_schema', projectId };
     }
     if (!isRecord(initialParsed) || initialParsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION) {
@@ -3553,11 +3560,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
       };
     }
-    if (
-      isRecord(parsed) &&
-      Number.isSafeInteger(parsed.schemaVersion) &&
-      parsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION
-    ) {
+    if (isRecord(parsed) && isUnsupportedStudioPrototypeSchemaVersion(parsed.schemaVersion)) {
       return { status: 'unsupported_prototype_schema', projectId };
     }
     let briefFile: Extract<ProjectFileInspectionV2, { status: 'supported' }>['briefFile'];
@@ -3568,7 +3571,14 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         file: resolveRootChild(directory.path, STUDIO_BRIEF_FILE_NAME),
         maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
       });
-      briefFile = briefRecord === null ? { status: 'missing' } : { status: 'present', ...briefRecord };
+      if (briefRecord === null) {
+        return {
+          status: 'malformed_v2',
+          projectId,
+          error: new CreativeStudioStoreError('storage_error', 'Schema-5 Studio Brief is missing'),
+        };
+      }
+      briefFile = { status: 'present', ...briefRecord };
     } catch (error) {
       return {
         status: 'malformed_v2',
@@ -3597,7 +3607,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       identity: record.identity,
       directory,
       briefFile,
-      briefManifestKind: decoded.kind,
       briefSynchronized: decoded.synchronized,
     };
   };
@@ -3606,8 +3615,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     root: string,
     snapshot: Extract<ProjectFileInspectionV2, { status: 'supported' }>
   ): Promise<Extract<ProjectFileInspectionV2, { status: 'supported' }>> => {
-    if (snapshot.briefManifestKind === 'brief_file' && snapshot.briefSynchronized) return snapshot;
-    const contentChanged = snapshot.briefFile.status === 'present' && !snapshot.briefSynchronized;
+    if (snapshot.briefSynchronized) return snapshot;
+    const contentChanged = !snapshot.briefSynchronized;
     const project: StudioProjectV2 = contentChanged
       ? { ...snapshot.project, revision: snapshot.project.revision + 1, updatedAt: now() }
       : snapshot.project;
@@ -3625,7 +3634,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       );
     }
     const synchronized = requireSupportedProjectInspectionV2(await inspectProjectFileV2(root, project.id));
-    if (synchronized.briefManifestKind !== 'brief_file' || !synchronized.briefSynchronized) {
+    if (!synchronized.briefSynchronized) {
       throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief synchronization did not settle');
     }
     return synchronized;
@@ -5567,11 +5576,9 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       throw storageError(error, 'Schema-2 Studio Brief authority changed');
     }
     if (
-      (input.snapshot.briefFile.status === 'missing' && currentBrief !== null) ||
-      (input.snapshot.briefFile.status === 'present' &&
-        (currentBrief === null ||
-          currentBrief.bytes !== input.snapshot.briefFile.bytes ||
-          !sameIdentityV2(currentBrief.identity, input.snapshot.briefFile.identity)))
+      currentBrief === null ||
+      currentBrief.bytes !== input.snapshot.briefFile.bytes ||
+      !sameIdentityV2(currentBrief.identity, input.snapshot.briefFile.identity)
     ) {
       throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief authority changed');
     }
@@ -5603,8 +5610,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       schemaVersion: STUDIO_BRIEF_TRANSACTION_SCHEMA_VERSION,
       projectId: input.project.id,
       baseManifestSha256: sha256Utf8(input.snapshot.bytes),
-      baseBriefSha256:
-        input.snapshot.briefFile.status === 'missing' ? null : sha256Utf8(input.snapshot.briefFile.bytes),
+      baseBriefSha256: sha256Utf8(input.snapshot.briefFile.bytes),
       candidateManifestSha256: sha256Utf8(input.projectBytes),
       candidateBrief: input.project.brief,
     };
@@ -5679,11 +5685,9 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
       });
       if (
-        (input.snapshot.briefFile.status === 'missing' && currentBrief !== null) ||
-        (input.snapshot.briefFile.status === 'present' &&
-          (currentBrief === null ||
-            currentBrief.bytes !== input.snapshot.briefFile.bytes ||
-            !sameIdentityV2(currentBrief.identity, input.snapshot.briefFile.identity)))
+        currentBrief === null ||
+        currentBrief.bytes !== input.snapshot.briefFile.bytes ||
+        !sameIdentityV2(currentBrief.identity, input.snapshot.briefFile.identity)
       ) {
         throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio Brief authority changed');
       }
@@ -5897,7 +5901,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       throw new CreativeStudioStoreError('storage_error', 'Studio proposal decision predates its proposal');
     }
     const decision: StudioProposalDecisionV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       proposalId: input.proposal.record.id,
       status: input.status,
       decidedAt: input.decidedAt,
@@ -6274,7 +6278,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     authorizeBeforeLink: (temporary: IdentifiedRecordV2<null>) => Promise<void>;
   }): Promise<IdentifiedRecordV2<StudioReferenceRequestDecisionV2>> => {
     const decision: StudioReferenceRequestDecisionV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: input.request.record.id,
       projectId: input.projectId,
       decidedAt: input.decidedAt,
@@ -6458,8 +6462,9 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         Date.parse(authorization.confirmedAt) < Date.parse(decision.record.decidedAt) ||
         !authorization.baseItems.every(
           (item, index) =>
-            item.purpose === 'seed_still' &&
-            item.projectReferenceId === generationOutcome.referenceIds[index] &&
+            item.purpose === 'reference_image' &&
+            item.target.kind === 'reference' &&
+            item.target.referenceId === generationOutcome.referenceIds[index] &&
             item.generationCount === 1 &&
             item.requestPlan.kind === 'resolved' &&
             item.requestPlan.snapshot.referenceInputs.length === 0
@@ -6501,14 +6506,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         );
       }
     }
-    for (const decision of input.ledger.decisions.values()) {
-      if (
-        decision.record.outcome.kind === 'imported_reference' &&
-        decision.record.outcome.projectRevision > input.project.revision
-      ) {
-        throw new CreativeStudioStoreError('storage_error', 'Studio imported reference decision is from the future');
-      }
-    }
     return missing;
   };
 
@@ -6546,17 +6543,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       if (request === undefined) {
         throw new CreativeStudioStoreError('storage_error', 'Studio reference decision has no immutable request');
       }
-      if (decision.outcome.kind === 'imported_reference') {
-        if (
-          decision.outcome.projectRevision !== input.snapshot.project.revision ||
-          !isActiveClassifiedBriefImageV2(input.snapshot.project, decision.outcome.assetId)
-        ) {
-          throw new CreativeStudioStoreError(
-            'storage_error',
-            'Studio imported reference publication is no longer current'
-          );
-        }
-      } else if (decision.outcome.kind === 'generation_gate') {
+      if (decision.outcome.kind === 'generation_gate') {
         let previous = -1;
         for (const referenceId of request.record.referenceIds) {
           const reference = Object.hasOwn(input.snapshot.project.references, referenceId)
@@ -6602,7 +6589,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         assertPathAbsentV2(path.join(directories.receipts.path, `${repair.handoffId}.json`)),
       ]);
       const receiptRecord: StudioReferenceGenerationHandoffReceiptV2 = {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         handoffId: repair.handoffId,
         requestId: repair.request.record.id,
         completedAt: repair.authorization.confirmedAt,
@@ -7024,28 +7011,10 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
   };
 
-  const isActiveClassifiedBriefImageV2 = (project: StudioProjectV2, assetId: string): boolean => {
-    if (!Object.hasOwn(project.assets, assetId)) return false;
-    const asset = project.assets[assetId];
-    return (
-      asset !== undefined &&
-      asset.id === assetId &&
-      asset.projectId === project.id &&
-      asset.shotId === null &&
-      asset.mediaKind === 'image' &&
-      asset.managedAsset.collection === 'imports' &&
-      (asset.briefReferenceRole === 'cast' || asset.briefReferenceRole === 'look') &&
-      typeof asset.briefReferenceLabel === 'string'
-    );
-  };
-
   const sameReferenceDecisionIntentV2 = (
     decision: StudioReferenceRequestDecisionV2,
     intent: StudioReferenceDecisionIntentV2
-  ): boolean =>
-    decision.outcome.kind === intent.kind &&
-    (intent.kind !== 'imported_reference' ||
-      (decision.outcome.kind === 'imported_reference' && decision.outcome.assetId === intent.assetId));
+  ): boolean => decision.outcome.kind === intent.kind;
 
   const cleanupOrphanReferenceRequestSlotV2 = async (input: {
     root: string;
@@ -7273,15 +7242,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     let outcome: StudioReferenceRequestDecisionV2['outcome'];
     if (intent.kind === 'rejected') {
       outcome = { kind: 'rejected' };
-    } else if (intent.kind === 'imported_reference') {
-      if (!isSafeIdV2(intent.assetId) || !isActiveClassifiedBriefImageV2(input.snapshot.project, intent.assetId)) {
-        throw new CreativeStudioStoreError('invalid_payload', 'Studio reference asset is not an active Brief image');
-      }
-      outcome = {
-        kind: 'imported_reference',
-        assetId: intent.assetId,
-        projectRevision: input.snapshot.project.revision,
-      };
     } else {
       let handoffId: string;
       try {
@@ -7572,7 +7532,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       root: input.root,
       directories: ledger.directories,
       receipt: {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         handoffId,
         requestId: request.record.id,
         completedAt,
@@ -7621,48 +7581,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     ledger = { ...ledger, slots };
     await assertProjectSnapshotCurrentV2({ root: input.root, snapshot: input.snapshot });
     return referenceGenerationHandoffV2(ledger, handoffId)!;
-  };
-
-  const proposalOperationsV2 = (
-    proposal: StudioProposalRecordV2,
-    project: StudioProjectV2
-  ): StudioMutationOperationV2[] => {
-    if (proposal.payload.kind === 'mutation_batch') {
-      if (proposal.payload.operations.some((operation) => operation.kind === 'undo_last')) {
-        throw new CreativeStudioStoreError('invalid_payload', 'Undo is not a reviewable Studio proposal mutation');
-      }
-      return structuredClone(proposal.payload.operations);
-    }
-    let ruleId: string;
-    try {
-      ruleId = createId();
-    } catch (error) {
-      throw storageError(error, 'Studio rule identity could not be generated');
-    }
-    if (!isSafeIdV2(ruleId) || project.rules.some((rule) => rule.id === ruleId)) {
-      throw new CreativeStudioStoreError('invalid_payload', 'Studio rule identity is invalid or already exists');
-    }
-    return [
-      {
-        kind: 'set_rules',
-        rules: [
-          ...project.rules.map((rule) => ({
-            id: rule.id,
-            text: rule.text,
-            predicate:
-              rule.predicate === null ? null : { kind: 'forbidden_terms' as const, terms: [...rule.predicate.terms] },
-          })),
-          {
-            id: ruleId,
-            text: proposal.payload.rule.text,
-            predicate:
-              proposal.payload.rule.predicate === null
-                ? null
-                : { kind: 'forbidden_terms' as const, terms: [...proposal.payload.rule.predicate.terms] },
-          },
-        ],
-      },
-    ];
   };
 
   const publishProposalAttributionV2 = async (input: {
@@ -7737,16 +7655,21 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     if (Date.parse(decidedAt) < Date.parse(proposal.record.createdAt)) {
       throw new CreativeStudioStoreError('storage_error', 'Studio proposal decision predates its proposal');
     }
-    const operations = proposalOperationsV2(proposal.record, input.snapshot.project);
+    let operations;
+    try {
+      operations = studioProposalOperationsV2(input.snapshot.project, proposal.record);
+    } catch {
+      throw new CreativeStudioStoreError('invalid_payload', 'Studio proposal operations are invalid');
+    }
     const applied = applyStudioMutationBatchV2(
       input.snapshot.project,
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: input.projectId,
         expectedRevision: proposal.record.baseRevision,
         operations,
       },
-      { mutationId: proposal.record.id, capturedAt: decidedAt }
+      { mutationId: proposal.record.id, capturedAt: proposal.record.createdAt }
     );
     const candidate: StudioProjectV2 = {
       ...applied.project,
@@ -7759,7 +7682,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     }
     const candidateBytes = serializeProjectV2ForWrite(candidate, 'Schema-2 Studio proposal result');
     const attribution: StudioProposalCommitAttributionV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       proposalId: proposal.record.id,
       projectId: input.projectId,
       baseRevision: proposal.record.baseRevision,
@@ -8082,7 +8005,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     const marker = await createProjectDeletionMarkerV2(
       root,
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROJECT_DELETION_MARKER_SCHEMA_VERSION,
         projectId: current.id,
         expectedRevision,
         directoryDev: inspected.directory.dev,
@@ -8274,17 +8197,42 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
           throw new CreativeStudioStoreError('invalid_payload', 'Studio project already exists');
         }
         const directory = await createProjectDirectoryV2(root, projectId);
+        const directoryAuthority = await captureDirectoryAuthorityV2(directory);
         const file = resolveRootChild(directory, 'project.json');
+        const briefFile = resolveRootChild(directory, STUDIO_BRIEF_FILE_NAME);
         await assertRegularFileOrMissing(file);
-        // Publish the legacy-compatible manifest first so an interruption can always be migrated;
-        // the authoritative Brief and digest-backed manifest then settle under exact file CAS.
-        await writeJsonAtomic(root, file, candidate);
-        const snapshot = requireSupportedProjectInspectionV2(await inspectProjectFileV2(root, projectId));
-        await writeProjectFilesV2({
-          root,
-          snapshot,
-          project: candidate,
-          projectBytes: serializeProjectV2ForWrite(candidate, 'Schema-2 Studio creation project'),
+        await assertRegularFileOrMissing(briefFile);
+        if (Buffer.byteLength(candidate.brief, 'utf8') > STUDIO_BRIEF_FILE_MAX_BYTES) {
+          throw new CreativeStudioStoreError('invalid_payload', 'Schema-5 Studio Brief is too large');
+        }
+        const projectBytes = serializeProjectV2ForWrite(candidate, 'Schema-5 Studio creation project');
+        await writeBytesAtomic(root, briefFile, candidate.brief, async () => {
+          await Promise.all([assertPathAbsentV2(briefFile), assertDirectoryAuthorityV2(directoryAuthority)]);
+        });
+        const publishedBrief = await readBoundedRegularFileWithIdentity({
+          fs,
+          canonicalRoot: root,
+          file: briefFile,
+          maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+        });
+        if (publishedBrief === null || publishedBrief.bytes !== candidate.brief) {
+          throw new CreativeStudioStoreError('storage_error', 'Schema-5 Studio Brief was not published');
+        }
+        await writeBytesAtomic(root, file, projectBytes, async () => {
+          await Promise.all([assertPathAbsentV2(file), assertDirectoryAuthorityV2(directoryAuthority)]);
+          const currentBrief = await readBoundedRegularFileWithIdentity({
+            fs,
+            canonicalRoot: root,
+            file: briefFile,
+            maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+          });
+          if (
+            currentBrief === null ||
+            currentBrief.bytes !== publishedBrief.bytes ||
+            !sameIdentityV2(currentBrief.identity, publishedBrief.identity)
+          ) {
+            throw new CreativeStudioStoreError('storage_error', 'Schema-5 Studio Brief authority changed');
+          }
         });
         return candidate;
       });
@@ -9098,11 +9046,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         !isRecord(input.outcome) ||
         ((input.outcome.kind === 'rejected' || input.outcome.kind === 'generation_gate') &&
           !hasExactKeys(input.outcome, REFERENCE_REJECTED_INTENT_KEYS)) ||
-        (input.outcome.kind === 'imported_reference' &&
-          (!hasExactKeys(input.outcome, REFERENCE_IMPORTED_INTENT_KEYS) || !isSafeIdV2(input.outcome.assetId))) ||
-        (input.outcome.kind !== 'rejected' &&
-          input.outcome.kind !== 'imported_reference' &&
-          input.outcome.kind !== 'generation_gate')
+        (input.outcome.kind !== 'rejected' && input.outcome.kind !== 'generation_gate')
       ) {
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio reference request decision input');
       }

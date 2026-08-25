@@ -215,23 +215,9 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.common.saveBeat': 'Save Beat',
         'conversation.creativeStudio.workspace.beatPanel.common.saveShot': 'Save Shot',
         'conversation.creativeStudio.workspace.beatPanel.coverage.reviewResplit': 'Review re-split',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.derived': 'Derived from the action',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.detached': 'Detached · Yours',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.attachedLineGuidance':
-          'Written from the action · Edit to detach',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.detachedLineGuidance':
-          'Your words · No longer follows the action',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.detach': 'Detach line',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.rederiveReviewed': 'Review re-derive',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.restoreHistory': 'Restore history line',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.stale': 'Stale against Action',
-        'conversation.creativeStudio.workspace.beatPanel.derivation.title': 'Line derivation',
-        'conversation.creativeStudio.workspace.beatPanel.fields.action': 'Action',
         'conversation.creativeStudio.workspace.beatPanel.fields.duration': 'Duration',
-        'conversation.creativeStudio.workspace.beatPanel.fields.line': 'Line',
-        'conversation.creativeStudio.workspace.beatPanel.fields.look': 'Look',
-        'conversation.creativeStudio.workspace.beatPanel.fields.narration': 'Narration',
-        'conversation.creativeStudio.workspace.beatPanel.fields.onScreenText': 'On-screen text',
+        'conversation.creativeStudio.workspace.beatPanel.fields.shootingScript': 'Shooting script',
+        'conversation.creativeStudio.workspace.beatPanel.fields.story': 'Story',
         'conversation.creativeStudio.workspace.beatPanel.fields.targetSeconds': 'Beat target',
         'conversation.creativeStudio.workspace.beatPanel.generation.gateLocked': 'A confirmation is open',
         'conversation.creativeStudio.workspace.beatPanel.generation.generateSeed': 'Review first-frame generation',
@@ -316,8 +302,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.preview.loopJoin': 'Loop nearest join',
         'conversation.creativeStudio.workspace.beatPanel.preview.keyboardGuidance':
           'Space play · Arrows seek · [ ] joins · L loop',
-        'conversation.creativeStudio.workspace.beatPanel.fieldGuidance.action': 'Action · The one thing you write',
-        'conversation.creativeStudio.workspace.beatPanel.fieldGuidance.look': 'Look · Every Shot inherits it',
+        'conversation.creativeStudio.workspace.beatPanel.fieldGuidance.story': 'Story · What happens in this Beat',
       };
       if (key.endsWith('.title') && key.includes('.beatPanel.title')) return `Edit ${String(values?.title)}`;
       if (key.endsWith('.label') && key.includes('.beatPanel.label')) return `Beat panel ${String(values?.title)}`;
@@ -336,15 +321,13 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.chain.reviewRejoinDescription')) {
         return `Rejoining Shot ${String(values?.shot)} clears its first-frame selection and uses Shot ${String(values?.previous)}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.`;
       }
-      if (key.endsWith('.fields.lineFor')) return `Line for Shot ${String(values?.index)}`;
+      if (key.endsWith('.fields.shootingScriptFor')) return `Shooting script for Shot ${String(values?.index)}`;
       if (key.endsWith('For')) return `${key.split('.').at(-1)?.replace('For', '')} Shot ${String(values?.index)}`;
-      if (key.endsWith('.lookCounter')) return `${String(values?.count)} / 25 words`;
       if (key.endsWith('.reorder.previous')) return `Move Shot ${String(values?.index)} up`;
       if (key.endsWith('.reorder.next')) return `Move Shot ${String(values?.index)} down`;
       if (key.endsWith('.reorder.announcement')) {
         return `Moved Shot ${String(values?.from)} to ${String(values?.to)} of ${String(values?.total)}`;
       }
-      if (key.endsWith('.derivation.label')) return `Derivation for Shot ${String(values?.index)}`;
       if (key.endsWith('.seeds.label')) return `First frames for Shot ${String(values?.index)}`;
       if (key.endsWith('.picture.label')) return `Current picture for Shot ${String(values?.index)}`;
       if (key.endsWith('.picture.sourceDuration')) return `${String(values?.seconds)} seconds source`;
@@ -355,10 +338,10 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.seeds.previewAlt')) return `Preview · ${String(values?.label)}`;
       if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
       if (key.endsWith('.preview.videoLabel')) {
-        return `Shot ${String(values?.position)} video · ${String(values?.line)}`;
+        return `Shot ${String(values?.position)} video · ${String(values?.shootingScript)}`;
       }
       if (key.endsWith('.preview.slateLabel')) {
-        return `Shot ${String(values?.position)} planning slate · ${String(values?.line)}`;
+        return `Shot ${String(values?.position)} planning slate · ${String(values?.shootingScript)}`;
       }
       if (key.endsWith('.preview.slateHold')) return `Hold ${String(values?.clock)}`;
       if (key.endsWith('.coverage.seekValue')) {
@@ -448,14 +431,9 @@ const makeShot = (
   overrides: Partial<WorkspaceShotProjection> = {}
 ): WorkspaceShotProjection => ({
   id,
-  line: `Canonical line ${index + 1}`,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Canonical shooting script ${index + 1}`,
   durationSeconds: 8,
   chainBreak: index === 0 ? 'none' : 'none',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  derivationStale: false,
   trimInSeconds: null,
   trimOutSeconds: null,
   currentPicture: null,
@@ -492,10 +470,7 @@ const makeBeat = (
 ): WorkspaceBeatProjection => ({
   id,
   title: 'Opening',
-  action: 'Open the film',
-  look: 'Warm practical light',
-  actionRevision: 1,
-  lineHistory: [],
+  story: 'Open the film',
   targetSeconds: shots.length * 8,
   actualSeconds: shots.length * 8,
   displayState: 'draft',
@@ -579,8 +554,6 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   setSeedStill: vi.fn().mockResolvedValue(true),
   trimShot: vi.fn().mockResolvedValue(true),
   reorderShots: vi.fn().mockResolvedValue(true),
-  redetachLine: vi.fn().mockResolvedValue(true),
-  restoreLine: vi.fn().mockResolvedValue(true),
   importSeedStill: vi.fn().mockResolvedValue('cancelled' as const),
   parkShot: vi.fn().mockResolvedValue(true),
   parkBeat: vi.fn().mockResolvedValue(true),
@@ -590,7 +563,6 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   cancelGenerationJob: vi.fn().mockResolvedValue(true),
   retryConditioning: vi.fn().mockResolvedValue(true),
   cancelWaiting: vi.fn().mockResolvedValue(true),
-  requestReviewedRederive: vi.fn(),
   requestResplit: vi.fn(),
   ...overrides,
 });
@@ -779,7 +751,7 @@ describe('Beat playback sequence', () => {
           kind: 'video',
           shotId: 'shot_1',
           shotPosition: 1,
-          shotLine: 'Canonical line 1',
+          shootingScript: 'Canonical shooting script 1',
           assetId: 'video_1',
           posterAssetId: 'poster_1',
           sourceDurationSeconds: 10,
@@ -793,7 +765,7 @@ describe('Beat playback sequence', () => {
           kind: 'slate',
           shotId: 'shot_2',
           shotPosition: 2,
-          shotLine: 'Canonical line 2',
+          shootingScript: 'Canonical shooting script 2',
           durationSeconds: 6,
           beatStartSeconds: 8,
           beatEndSeconds: 14,
@@ -1637,7 +1609,7 @@ describe('BeatPanel', () => {
     vi.stubGlobal('ResizeObserver', NoopResizeObserver);
   });
 
-  it('states Shot chain and Line provenance without merging authored controls or continuity warnings', () => {
+  it('keeps chain authority and continuity warnings separate from the one Shooting script editor', () => {
     const image = makeSeedStill('asset_private_image', { effectiveSeed: true });
     const beat = makeBeat('beat_private', [
       makeShot('shot_private_1', 0, { seedStills: [image], segmentHead: true }),
@@ -1646,13 +1618,9 @@ describe('BeatPanel', () => {
         dirtyCauses: ['continuity_stale', 'generation_out_of_date'],
         segmentHead: false,
       }),
-      makeShot('shot_private_3', 2, {
-        derivation: 'detached',
-        segmentHead: true,
-      }),
+      makeShot('shot_private_3', 2, { segmentHead: true }),
       makeShot('shot_private_4', 3, {
         chainBreak: 'hard_cut',
-        derivation: 'detached',
         segmentHead: true,
       }),
       makeShot('shot_private_5', 4, {
@@ -1692,23 +1660,11 @@ describe('BeatPanel', () => {
     expect(within(continuation).getByText('Generated work is out of date')).toBeVisible();
 
     inspectShot(container, 'shot_private_1');
-    const derivedGuidance = naturalHead.querySelector<HTMLElement>('[data-line-derivation="derived"]');
-    expect(derivedGuidance).toHaveTextContent('Written from the action · Edit to detach');
-    const derivedLine = within(naturalHead).getByRole('textbox', { name: 'Line for Shot 1' });
-    expect(derivedLine).toHaveAttribute('aria-describedby', derivedGuidance?.id);
-    expect(derivedLine).toHaveAccessibleDescription('Written from the action · Edit to detach');
-    expect(derivedLine).toHaveAttribute('data-min-rows', '3');
-    expect(derivedLine).toHaveAttribute('data-max-rows', '6');
-    expect(derivedGuidance?.closest('header')).toBe(naturalHead.querySelector('header'));
-    expect(within(naturalHead).getByText('Derived from the action')).toBeVisible();
-
-    inspectShot(container, 'shot_private_3');
-    const detachedGuidance = laterNaturalHead.querySelector<HTMLElement>('[data-line-derivation="detached"]');
-    expect(detachedGuidance).toHaveTextContent('Your words · No longer follows the action');
-    const detachedLine = within(laterNaturalHead).getByRole('textbox', { name: 'Line for Shot 3' });
-    expect(detachedLine).toHaveAttribute('aria-describedby', detachedGuidance?.id);
-    expect(detachedLine).toHaveAccessibleDescription('Your words · No longer follows the action');
-    expect(within(laterNaturalHead).getByText('Detached · Yours')).toBeVisible();
+    const shootingScript = within(naturalHead).getByRole('textbox', { name: 'Shooting script for Shot 1' });
+    expect(shootingScript).toHaveValue('Canonical shooting script 1');
+    expect(shootingScript).toHaveAttribute('data-min-rows', '3');
+    expect(shootingScript).toHaveAttribute('data-max-rows', '6');
+    expect(naturalHead.querySelectorAll('textarea')).toHaveLength(1);
 
     inspectShot(container, 'shot_private_4');
     expect(within(authoredHead).getByRole('button', { name: 'Review rejoin…' })).toHaveAttribute(
@@ -1787,9 +1743,15 @@ describe('BeatPanel', () => {
     ]);
     const assertions = [
       panelProps(beat, makeDrafts({}, { staleRevision: true }), makeActions()),
-      panelProps(beat, makeDrafts({ 'shot.shot_continuous.line': 'dirty' }), makeActions(), makeProjection([beat]), {
-        reviewBlockedMessageKey: 'conversation.creativeStudio.workspace.controls.saveBeforeReview',
-      }),
+      panelProps(
+        beat,
+        makeDrafts({ 'shot.shot_continuous.shootingScript': 'dirty' }),
+        makeActions(),
+        makeProjection([beat]),
+        {
+          reviewBlockedMessageKey: 'conversation.creativeStudio.workspace.controls.saveBeforeReview',
+        }
+      ),
       panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), { pending: true }),
       panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), { gateLocked: true }),
     ];
@@ -1804,43 +1766,33 @@ describe('BeatPanel', () => {
     }
   });
 
-  it('keeps Action and Look as adjacent semantic groups above the target and actions band', () => {
+  it('shows one Story field above Beat metadata and no retired prose controls', () => {
     render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
 
     const fields = screen.getByRole('region', { name: 'Beat fields' });
-    const actionField = fields.querySelector<HTMLElement>('[data-beat-field="action"]');
-    const lookField = fields.querySelector<HTMLElement>('[data-beat-field="look"]');
+    const storyField = fields.querySelector<HTMLElement>('[data-beat-field="story"]');
     const targetField = fields.querySelector<HTMLElement>('[data-beat-field="target"]');
     const metaRow = fields.querySelector<HTMLElement>('[data-beat-meta-row]');
     const editorActions = fields.querySelector<HTMLElement>('[data-beat-editor-actions]');
-    if (
-      actionField === null ||
-      lookField === null ||
-      targetField === null ||
-      metaRow === null ||
-      editorActions === null
-    ) {
+    if (storyField === null || targetField === null || metaRow === null || editorActions === null) {
       throw new Error('Beat authoring field hooks are incomplete');
     }
 
-    expect(actionField.tagName).toBe('LABEL');
-    expect(within(actionField).getByRole('textbox', { name: 'Action' })).toBeVisible();
-    expect(within(actionField).getByText('Action · The one thing you write', { exact: true })).toBeVisible();
-    expect(actionField.nextElementSibling).toBe(lookField);
-    expect(lookField.tagName).toBe('LABEL');
-    expect(within(lookField).getByRole('textbox', { name: 'Look' })).toBeVisible();
-    expect(within(lookField).getByText('Look · Every Shot inherits it', { exact: true })).toBeVisible();
-    expect(lookField.nextElementSibling).toBe(metaRow);
+    expect(storyField.tagName).toBe('LABEL');
+    expect(within(storyField).getByRole('textbox', { name: 'Story' })).toBeVisible();
+    expect(within(storyField).getByText('Story · What happens in this Beat', { exact: true })).toBeVisible();
+    expect(storyField.nextElementSibling).toBe(metaRow);
     expect(metaRow).toContainElement(targetField);
     expect(metaRow).toContainElement(editorActions);
     expect(targetField.compareDocumentPosition(editorActions) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(fields.querySelectorAll('textarea')).toHaveLength(1);
   });
 
   it('keeps one beat-scoped Shot inspector visible while preserving mounted drafts across selection', () => {
     const first = makeShot('shot_1', 0);
     const second = makeShot('shot_2', 1);
     const beat = makeBeat('beat_1', [first, second]);
-    const drafts = makeDrafts({ 'shot.shot_1.line': 'Local first-Shot line' });
+    const drafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Local first-Shot shooting script' });
     const actions = makeActions();
     const result = render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
     const inspector = screen.getByRole('region', { name: 'Shots' });
@@ -1852,7 +1804,9 @@ describe('BeatPanel', () => {
     expect(firstCard).not.toHaveAttribute('hidden');
     expect(secondCard).toHaveAttribute('hidden');
     expect(selectors.map((selector) => selector.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
-    expect(within(firstCard).getByRole('textbox', { name: 'Line for Shot 1' })).toHaveValue('Local first-Shot line');
+    expect(within(firstCard).getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
+      'Local first-Shot shooting script'
+    );
 
     fireEvent.click(selectors[1]!);
     expect(inspector).toHaveAttribute('data-inspected-shot-id', 'shot_2');
@@ -1862,7 +1816,9 @@ describe('BeatPanel', () => {
     for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
 
     fireEvent.click(selectors[0]!);
-    expect(within(firstCard).getByRole('textbox', { name: 'Line for Shot 1' })).toHaveValue('Local first-Shot line');
+    expect(within(firstCard).getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
+      'Local first-Shot shooting script'
+    );
 
     fireEvent.click(selectors[1]!);
     const replacement = makeBeat('beat_2', [makeShot('shot_new', 0), makeShot('shot_2', 1)]);
@@ -1980,7 +1936,6 @@ describe('BeatPanel', () => {
     expect(cssRuleBody(css, '.beatMetaRow')).toMatch(/grid-column:\s*1\s*\/\s*-1/);
     expect(cssRuleBody(css, '.fieldGuidance')).toMatch(/text-transform:\s*uppercase/);
     expect(cssRuleBody(css, '.chainState')).toMatch(/text-transform:\s*uppercase/);
-    expect(cssRuleBody(css, '.lineGuidance')).toMatch(/text-transform:\s*uppercase/);
     const mediaStrip = cssRuleBody(css, '.mediaStrip');
     expect(mediaStrip).toMatch(/display:\s*flex/);
     expect(mediaStrip).toMatch(/overflow-x:\s*auto/);
@@ -2012,34 +1967,30 @@ describe('BeatPanel', () => {
     expect(compactRule).toMatch(/grid-template-columns:\s*(?:minmax\(0,\s*1fr\)|1fr)/);
   });
 
-  it('keeps the 25-word Look warning soft and saves only changed Beat fields', async () => {
-    const look = Array.from({ length: 26 }, (_, index) => `word${index + 1}`).join(' ');
+  it('saves only the changed Story field from the Beat editor', async () => {
+    const story = 'Ming spots Mei beneath the dai-pai-dong awning.';
     const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
-    const drafts = makeDrafts({ 'beat.beat_1.look': look });
+    const drafts = makeDrafts({ 'beat.beat_1.story': story });
     const actions = makeActions();
     render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
 
-    expect(screen.getByText('26 / 25 words')).toHaveAttribute('data-look-warning', 'true');
     const save = screen.getByRole('button', { name: 'Save Beat' });
     expect(save).toBeEnabled();
     fireEvent.click(save);
-    await waitFor(() => expect(actions.saveBeat).toHaveBeenCalledWith('beat_1', { look }));
-    expect(drafts.resetIfValue).toHaveBeenCalledWith('beat.beat_1.look', look);
-    expect(drafts.resetIfValue).toHaveBeenCalledWith('beat.beat_1.action', 'Open the film');
+    await waitFor(() => expect(actions.saveBeat).toHaveBeenCalledWith('beat_1', { story }));
+    expect(drafts.resetIfValue).toHaveBeenCalledWith('beat.beat_1.story', story);
     expect(drafts.resetIfValue).toHaveBeenCalledWith('beat.beat_1.targetSeconds', 8);
   });
 
   it('resets only the local Shot draft keys and invokes no semantic mutation', () => {
     const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
-    const drafts = makeDrafts({ 'shot.shot_1.line': 'Local line' });
+    const drafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Local shooting script' });
     const actions = makeActions();
     render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Reset Shot' }));
     expect(drafts.reset.mock.calls.map(([key]) => key)).toEqual([
-      'shot.shot_1.line',
-      'shot.shot_1.narration',
-      'shot.shot_1.onScreenText',
+      'shot.shot_1.shootingScript',
       'shot.shot_1.durationSeconds',
     ]);
     expect(actions.saveShot).not.toHaveBeenCalled();
@@ -2053,24 +2004,34 @@ describe('BeatPanel', () => {
     const saveShot = vi.fn(() => savePromise);
     const actions = makeActions({ saveShot });
     const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
-    const submittedDrafts = makeDrafts({ 'shot.shot_1.line': 'Submitted line' });
-    const newerDrafts = makeDrafts({ 'shot.shot_1.line': 'Newer local line' });
+    const submittedDrafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Submitted shooting script' });
+    const newerDrafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Newer local shooting script' });
     const result = render(<BeatPanel {...panelProps(beat, submittedDrafts, actions)} />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Save Shot' }));
-    expect(saveShot).toHaveBeenCalledWith([{ shotId: 'shot_1', changes: { line: 'Submitted line' } }]);
+    expect(saveShot).toHaveBeenCalledWith([
+      { shotId: 'shot_1', changes: { shootingScript: 'Submitted shooting script' } },
+    ]);
     result.rerender(<BeatPanel {...panelProps(beat, newerDrafts, actions)} />);
     await act(async () => resolveSave?.(true));
 
-    await waitFor(() => expect(newerDrafts.resetIfValue).toHaveBeenCalledWith('shot.shot_1.line', 'Submitted line'));
+    await waitFor(() =>
+      expect(newerDrafts.resetIfValue).toHaveBeenCalledWith('shot.shot_1.shootingScript', 'Submitted shooting script')
+    );
     expect(submittedDrafts.resetIfValue).not.toHaveBeenCalled();
-    expect(newerDrafts.resetIfValue).not.toHaveBeenCalledWith('shot.shot_1.line', 'Newer local line');
+    expect(newerDrafts.resetIfValue).not.toHaveBeenCalledWith(
+      'shot.shot_1.shootingScript',
+      'Newer local shooting script'
+    );
   });
 
   it('blocks stale authored saves and all project/draft controls while a gate owns the project', () => {
     const beat = makeBeat();
     const staleDrafts = makeDrafts(
-      { 'beat.beat_1.look': 'Stale look', 'shot.shot_1.line': 'Stale line' },
+      {
+        'beat.beat_1.story': 'Stale Story',
+        'shot.shot_1.shootingScript': 'Stale Shooting script',
+      },
       { staleRevision: true }
     );
     const actions = makeActions();
@@ -2081,7 +2042,7 @@ describe('BeatPanel', () => {
     stale.rerender(
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { gateLocked: true })} />
     );
-    expect(screen.getByRole('textbox', { name: 'Action' })).toBeDisabled();
+    expect(screen.getByRole('textbox', { name: 'Story' })).toBeDisabled();
     inspectShot(stale.container, 'shot_2');
     expect(
       within(shotCard(stale.container, 'shot_2')).getByRole('button', { name: 'Review hard cut…' })
@@ -2093,48 +2054,16 @@ describe('BeatPanel', () => {
     expect(actions.requestResplit).not.toHaveBeenCalled();
   });
 
-  it('detaches only the canonical line after local edits are saved or reset and restores history non-consumingly', () => {
-    const shot = makeShot('shot_1', 0);
-    const beat = makeBeat('beat_1', [shot], {
-      lineHistory: [{ id: 'history_1', shotOrdinal: 1, text: 'Earlier line', capturedAt: '2026-08-19T00:00:00.000Z' }],
-    });
-    const actions = makeActions();
-    const dirty = render(
-      <BeatPanel {...panelProps(beat, makeDrafts({ 'shot.shot_1.line': 'Unsaved line' }), actions)} />
+  it('exposes exactly one Shooting script editor and no retired prose workflows for a Shot', () => {
+    const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
+    const shot = within(shotCard(container, 'shot_1'));
+
+    expect(shot.getAllByRole('textbox')).toHaveLength(1);
+    expect(shot.getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
+      'Canonical shooting script 1'
     );
-    expect(screen.getByRole('button', { name: 'Detach line' })).toBeDisabled();
-
-    dirty.rerender(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Detach line' }));
-    expect(actions.redetachLine).toHaveBeenCalledWith('shot_1', 'Canonical line 1');
-    fireEvent.click(screen.getByRole('button', { name: 'Restore history line' }));
-    expect(actions.restoreLine).toHaveBeenCalledWith('shot_1', 'history_1');
-    fireEvent.click(screen.getByRole('button', { name: 'Review re-derive' }));
-    expect(actions.requestReviewedRederive).toHaveBeenCalledWith('shot_1');
-  });
-
-  it('restores an out-of-range Beat history entry to the explicitly chosen current Shot', () => {
-    const beat = makeBeat('beat_1', [makeShot('shot_1', 0), makeShot('shot_2', 1)], {
-      lineHistory: [
-        {
-          id: 'history_out_of_range',
-          shotOrdinal: 8,
-          text: 'Preserved before re-split',
-          capturedAt: '2026-08-19T00:00:00.000Z',
-        },
-      ],
-    });
-    const actions = makeActions();
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
-    inspectShot(container, 'shot_2');
-    const targetShot = within(shotCard(container, 'shot_2'));
-
-    expect(targetShot.getByText('Preserved before re-split')).toBeVisible();
-    fireEvent.click(targetShot.getByRole('button', { name: 'Restore history line' }));
-
-    expect(actions.restoreLine).toHaveBeenCalledTimes(1);
-    expect(actions.restoreLine).toHaveBeenCalledWith('shot_2', 'history_out_of_range');
-    expect(targetShot.getByText('Preserved before re-split')).toBeVisible();
+    expect(shot.queryByRole('button', { name: /detach|restore|re-derive/iu })).toBeNull();
   });
 
   it('shows one current picture with Generate again and no Take selection or overflow surface', () => {
@@ -2158,9 +2087,7 @@ describe('BeatPanel', () => {
     expect(shotRegion.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
 
     fireEvent.click(within(picture).getByRole('button', { name: 'Generate again' }));
-    expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [
-      { shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null },
-    ]);
+    expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [{ shotId: 'shot_1', purpose: 'video_take' }]);
   });
 
   it('keeps seed still pinning reachable without any video selection or overflow surface', () => {
@@ -2285,9 +2212,9 @@ describe('BeatPanel', () => {
 
     fireEvent.click(triggerCard.getByRole('button', { name: 'Review first-frame generation' }));
     expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [
-      { shotId: 'shot_1', purpose: 'seed_still', referenceAssetId: null },
-      { shotId: 'shot_1', purpose: 'video_take', referenceAssetId: null },
-      { shotId: 'shot_2', purpose: 'video_take', referenceAssetId: null },
+      { shotId: 'shot_1', purpose: 'seed_still' },
+      { shotId: 'shot_1', purpose: 'video_take' },
+      { shotId: 'shot_2', purpose: 'video_take' },
     ]);
     expect(drafts.setValue).not.toHaveBeenCalledWith('gate.choices', expect.any(String));
   });
@@ -2389,7 +2316,9 @@ describe('BeatPanel', () => {
     expect(actions.parkBeat).not.toHaveBeenCalled();
 
     result.rerender(
-      <BeatPanel {...panelProps(beat, makeDrafts({ 'shot.shot_1.line': 'Unsaved local work' }), actions, projection)} />
+      <BeatPanel
+        {...panelProps(beat, makeDrafts({ 'shot.shot_1.shootingScript': 'Unsaved local work' }), actions, projection)}
+      />
     );
     expect(shotCard(result.container, 'shot_1').querySelector('[data-shot-overflow-trigger]')).toBeDisabled();
     expect(screen.getAllByText('Save or reset local edits first').length).toBeGreaterThan(0);

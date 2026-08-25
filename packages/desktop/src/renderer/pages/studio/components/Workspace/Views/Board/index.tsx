@@ -306,8 +306,8 @@ export const BoardView: React.FC<BoardViewProps> = ({
                   <span dir='auto'>{title}</span>
                   {selected ? <span className={styles.srOnly}>{t(`${KEY_ROOT}.selectedBeat`)}</span> : null}
                 </Button>
-                <p className={styles.action} dir='auto'>
-                  {beat.action}
+                <p className={styles.story} dir='auto'>
+                  {beat.story}
                 </p>
 
                 <div className={styles.facts}>

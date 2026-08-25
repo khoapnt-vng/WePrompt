@@ -19,7 +19,7 @@ import type {
   StudioQuotedGeneration,
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MUTATION_BATCH_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
 import {
   createCreativeStudioStore,
   type CreativeStudioStore,
@@ -27,17 +27,20 @@ import {
 } from '@process/services/creative-studio/store';
 import {
   calculateStudioQuoteTotals,
-  composeStudioBoardGenerationPrompt,
+  composeStudioGenerationV2,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
+  deriveStudioInstructionProfileV2,
 } from '@process/services/creative-studio/service/schema2/generation';
 import { createStudioSpendReceiptV2 } from '@process/services/creative-studio/service/schema2/pricing';
+import { createStudioExportCatalogStoreV2 } from '@process/services/creative-studio/service/schema2/exports/catalog';
 import { StudioConditioningFrameError } from '@process/services/creative-studio/adapters/conditioningFrame';
 import {
   createStudioMediaStore,
   CreativeStudioMediaError,
   getAvailableStudioDiskBytes,
   openVerifiedReadStream,
+  STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION,
 } from '@process/services/creative-studio/mediaStore';
 
 const { createHashSpy, spawnCalls } = vi.hoisted(() => ({
@@ -132,7 +135,7 @@ const makeStoreV2 = async (
     purpose?: StudioJobV2['purpose'];
     addSecondShot?: boolean;
     includeAuthorizedJob?: boolean;
-    briefReference?: boolean;
+    includeSeedAsset?: boolean;
     projectReferenceId?: string;
     adapterId?: StudioJobV2['provider']['adapterId'];
     prompt?: string;
@@ -160,24 +163,18 @@ const makeStoreV2 = async (
       beat_1: {
         id: 'beat_1',
         title: 'Opening',
-        action: '',
-        look: 'A visual language inherited by the shot',
-        actionRevision: 1,
+        story: 'An opening image establishes the film.',
         targetSeconds: null,
         shotOrder: ['shot_1'],
-        lineHistory: [],
       },
       ...(options.addSecondShot
         ? {
             beat_2: {
               id: 'beat_2',
               title: 'Closing',
-              action: '',
-              look: '',
-              actionRevision: 1,
+              story: 'A closing image resolves the film.',
               targetSeconds: null,
               shotOrder: ['shot_2'],
-              lineHistory: [],
             },
           }
         : {}),
@@ -185,16 +182,16 @@ const makeStoreV2 = async (
     shots: {
       shot_1: {
         id: 'shot_1',
-        line: 'A precise opening frame',
-        derivation: 'derived',
-        derivedFromActionRevision: 1,
-        narration: '',
-        onScreenText: '',
+        shootingScript: options.prompt ?? 'A precise opening frame.',
         durationSeconds: 5,
         trimInSeconds: null,
         trimOutSeconds: null,
         chainBreak: 'none',
-        referenceIds: options.projectReferenceId === undefined ? [] : [options.projectReferenceId],
+        referenceBinding: {
+          status: options.purpose === 'board_still' ? 'ready' : 'unassigned',
+          characterReferenceIds: [],
+          backgroundReferenceId: null,
+        },
         seedStillId: null,
         boardAssetId: null,
         supersededBoardAssetIds: [],
@@ -207,16 +204,16 @@ const makeStoreV2 = async (
         ? {
             shot_2: {
               id: 'shot_2',
-              line: 'A separate closing frame',
-              derivation: 'derived' as const,
-              derivedFromActionRevision: 1,
-              narration: '',
-              onScreenText: '',
+              shootingScript: 'A separate closing frame.',
               durationSeconds: 5,
               trimInSeconds: null,
               trimOutSeconds: null,
               chainBreak: 'none' as const,
-              referenceIds: [],
+              referenceBinding: {
+                status: 'unassigned' as const,
+                characterReferenceIds: [],
+                backgroundReferenceId: null,
+              },
               seedStillId: null,
               boardAssetId: null,
               supersededBoardAssetIds: [],
@@ -231,6 +228,7 @@ const makeStoreV2 = async (
     ...(options.projectReferenceId === undefined
       ? {}
       : {
+          referencePlanStatus: 'planned' as const,
           referenceOrder: [options.projectReferenceId],
           references: {
             [options.projectReferenceId]: {
@@ -239,9 +237,9 @@ const makeStoreV2 = async (
               label: 'Ming',
               prompt: 'A careful engineer',
               candidateAssetId: null,
-              candidateJobId: null,
               approvedAssetId: null,
               supersededAssetIds: [],
+              jobIds: [],
               createdAt: current.updatedAt,
               updatedAt: current.updatedAt,
             },
@@ -249,65 +247,83 @@ const makeStoreV2 = async (
         }),
   }));
   let quoteBase = authored;
-  const purpose = options.purpose ?? 'seed_still';
-  if (purpose === 'video_take' || options.briefReference) {
+  const purpose = options.projectReferenceId === undefined ? (options.purpose ?? 'seed_still') : 'reference_image';
+  if (purpose === 'video_take' || options.includeSeedAsset) {
     const importsDirectory = path.join(rootDir, authored.id, 'imports');
     await fs.mkdir(importsDirectory, { recursive: true });
-    if (purpose === 'video_take') await fs.writeFile(path.join(importsDirectory, 'seed_v2.png'), png);
-    if (options.briefReference) await fs.writeFile(path.join(importsDirectory, 'brief_v2.png'), png);
+    await fs.writeFile(path.join(importsDirectory, 'seed_v2.png'), png);
     quoteBase = await store.updateProjectV2(authored.id, (current) => {
-      if (purpose === 'video_take') {
-        current.assets.seed_v2 = {
-          id: 'seed_v2',
-          projectId: current.id,
-          shotId: 'shot_1',
-          mediaKind: 'image',
-          mimeType: 'image/png',
-          managedAsset: { collection: 'imports', fileName: 'seed_v2.png' },
-          byteSize: png.length,
-          sha256: createHash('sha256').update(png).digest('hex'),
-          createdAt: current.updatedAt,
-        };
-        current.shots.shot_1!.assetIds.push('seed_v2');
-        current.shots.shot_1!.seedStillId = 'seed_v2';
-      }
-      if (options.briefReference) {
-        current.assets.brief_v2 = {
-          id: 'brief_v2',
-          projectId: current.id,
-          shotId: null,
-          mediaKind: 'image',
-          mimeType: 'image/png',
-          managedAsset: { collection: 'imports', fileName: 'brief_v2.png' },
-          byteSize: png.length,
-          sha256: createHash('sha256').update(png).digest('hex'),
-          briefReferenceRole: 'cast',
-          briefReferenceLabel: 'Cast reference',
-          createdAt: current.updatedAt,
-        };
-      }
+      current.assets.seed_v2 = {
+        id: 'seed_v2',
+        projectId: current.id,
+        shotId: 'shot_1',
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'seed_v2.png' },
+        byteSize: png.length,
+        sha256: createHash('sha256').update(png).digest('hex'),
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
+        createdAt: current.updatedAt,
+      };
+      current.shots.shot_1!.assetIds.push('seed_v2');
+      current.shots.shot_1!.seedStillId = 'seed_v2';
       return current;
     });
   }
   if (options.includeAuthorizedJob === false) {
     return { rootDir, store, project: quoteBase, authorization: null, item: null };
   }
+  const provider = {
+    providerId: 'provider_1',
+    adapterId:
+      options.adapterId ??
+      (purpose === 'video_take' ? ('weprompt-media-gateway-v1' as const) : ('weprompt-image-v1' as const)),
+    model: purpose === 'video_take' ? 'video-model' : 'image-model',
+  };
+  const target =
+    options.projectReferenceId === undefined
+      ? { kind: 'shot' as const, shotId: 'shot_1' }
+      : { kind: 'reference' as const, referenceId: options.projectReferenceId };
+  const source =
+    target.kind === 'shot'
+      ? {
+          kind: 'shot' as const,
+          beatId: 'beat_1',
+          story: quoteBase.beats.beat_1!.story,
+          shotId: target.shotId,
+          shootingScript: options.prompt ?? quoteBase.shots.shot_1!.shootingScript,
+        }
+      : {
+          kind: 'project_reference' as const,
+          referenceId: target.referenceId,
+          referenceKind: quoteBase.references[target.referenceId]!.kind,
+          prompt: quoteBase.references[target.referenceId]!.prompt,
+        };
+  const referenceInputs: [] = [];
+  const composition = composeStudioGenerationV2({
+    projectRevision: quoteBase.revision,
+    brief: quoteBase.brief,
+    rules: quoteBase.rules,
+    source,
+    purpose,
+    referenceInputs,
+    aspectRatio: quoteBase.aspectRatio,
+    resolution: quoteBase.resolution,
+    route: provider,
+    boardStyle: purpose === 'board_still' ? quoteBase.boardStyle : null,
+    instructionProfile: deriveStudioInstructionProfileV2(provider, purpose, source),
+  });
   const requestPlan: Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> = {
     kind: 'resolved',
     snapshot: {
-      prompt:
-        options.prompt ??
-        (purpose === 'seed_still'
-          ? 'A frozen seed prompt'
-          : purpose === 'board_still'
-            ? 'A frozen board prompt'
-            : 'A frozen video prompt'),
+      composition,
       aspectRatio: quoteBase.aspectRatio,
       resolution: quoteBase.resolution,
       durationSeconds: purpose === 'board_still' ? 4 : 5,
-      referenceInputs: options.briefReference
-        ? [{ assetId: 'brief_v2', sha256: createHash('sha256').update(png).digest('hex') }]
-        : [],
+      referenceInputs,
       conditioningInput: purpose === 'video_take' ? { kind: 'seed_still', assetId: 'seed_v2' } : null,
     },
   };
@@ -315,12 +331,10 @@ const makeStoreV2 = async (
     id: createStudioQuotedGenerationId({
       projectId: quoteBase.id,
       projectRevision: quoteBase.revision,
-      shotId: 'shot_1',
+      target,
       purpose,
-      projectReferenceId: options.projectReferenceId,
     }),
-    shotId: 'shot_1',
-    ...(options.projectReferenceId === undefined ? {} : { projectReferenceId: options.projectReferenceId }),
+    target,
     purpose,
     routeId: purpose === 'video_take' ? 'route_video' : 'route_image',
     generationCount: 1,
@@ -330,13 +344,6 @@ const makeStoreV2 = async (
   };
   const totals = calculateStudioQuoteTotals([item]);
   if (totals === null) throw new Error('invalid quote fixture');
-  const provider = {
-    providerId: 'provider_1',
-    adapterId:
-      options.adapterId ??
-      (purpose === 'video_take' ? ('weprompt-media-gateway-v1' as const) : ('weprompt-image-v1' as const)),
-    model: purpose === 'video_take' ? 'video-model' : 'image-model',
-  };
   const authorization: StudioSpendAuthorization = {
     id: 'authorization_v2',
     projectId: quoteBase.id,
@@ -362,7 +369,7 @@ const makeStoreV2 = async (
     const job: StudioJobV2 = {
       id: 'job_1',
       projectId: current.id,
-      shotId: 'shot_1',
+      target: structuredClone(target),
       status: 'running',
       provider,
       idempotencyKey: 'key_1',
@@ -377,9 +384,9 @@ const makeStoreV2 = async (
       createdAt: current.updatedAt,
       updatedAt: current.updatedAt,
       purpose,
-      ...(options.projectReferenceId === undefined ? {} : { projectReferenceId: options.projectReferenceId }),
       authorizationId: authorization.id,
       authorizationItemId: item.id,
+      composition,
       requestPlan,
       requestSnapshot: requestPlan.snapshot,
       spendReceipt: receipt,
@@ -387,10 +394,8 @@ const makeStoreV2 = async (
     };
     current.spendAuthorizations = [authorization];
     current.jobs.job_1 = job;
-    current.shots.shot_1!.jobIds.push('job_1');
-    if (options.projectReferenceId !== undefined) {
-      current.references[options.projectReferenceId]!.candidateJobId = job.id;
-    }
+    if (target.kind === 'shot') current.shots[target.shotId]!.jobIds.push(job.id);
+    else current.references[target.referenceId]!.jobIds.push(job.id);
     return current;
   });
   return { rootDir, store, project, authorization, item };
@@ -402,18 +407,57 @@ const addBoardRedrawJob = async (store: CreativeStudioStore, projectId: string):
   const requestPlan = loaded.project.jobs.job_1?.requestPlan;
   const provider = loaded.project.jobs.job_1?.provider;
   if (requestPlan?.kind !== 'resolved' || provider === undefined) throw new Error('Board redraw authority missing');
+  const target = { kind: 'shot' as const, shotId: 'shot_1' };
+  const shot = loaded.project.shots.shot_1;
+  const beat = loaded.project.beats.beat_1;
+  if (shot === undefined || beat === undefined || loaded.project.boardStyle === null) {
+    throw new Error('Board redraw source missing');
+  }
+  const composition = composeStudioGenerationV2({
+    projectRevision: loaded.project.revision,
+    brief: loaded.project.brief,
+    rules: loaded.project.rules,
+    source: {
+      kind: 'shot',
+      beatId: beat.id,
+      story: beat.story,
+      shotId: shot.id,
+      shootingScript: shot.shootingScript,
+    },
+    purpose: 'board_still',
+    referenceInputs: structuredClone(requestPlan.snapshot.referenceInputs),
+    aspectRatio: loaded.project.aspectRatio,
+    resolution: loaded.project.resolution,
+    route: provider,
+    boardStyle: loaded.project.boardStyle,
+    instructionProfile: deriveStudioInstructionProfileV2(provider, 'board_still', {
+      kind: 'shot',
+      beatId: beat.id,
+      story: beat.story,
+      shotId: shot.id,
+      shootingScript: shot.shootingScript,
+    }),
+  });
+  const redrawRequestPlan: Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> = {
+    kind: 'resolved',
+    snapshot: {
+      ...structuredClone(requestPlan.snapshot),
+      composition,
+      referenceInputs: structuredClone(composition.inputs.referenceInputs),
+    },
+  };
   const item: StudioQuotedGeneration = {
     id: createStudioQuotedGenerationId({
       projectId,
       projectRevision: loaded.project.revision,
-      shotId: 'shot_1',
+      target,
       purpose: 'board_still',
     }),
-    shotId: 'shot_1',
+    target,
     purpose: 'board_still',
     routeId: 'route_image',
     generationCount: 1,
-    requestPlan: structuredClone(requestPlan),
+    requestPlan: redrawRequestPlan,
     rateUnit: 'generation',
     rateMinorUnits: 3,
   };
@@ -441,7 +485,7 @@ const addBoardRedrawJob = async (store: CreativeStudioStore, projectId: string):
     current.jobs.job_redraw = {
       id: 'job_redraw',
       projectId,
-      shotId: 'shot_1',
+      target,
       status: 'running',
       provider,
       idempotencyKey: 'key_redraw',
@@ -458,8 +502,9 @@ const addBoardRedrawJob = async (store: CreativeStudioStore, projectId: string):
       purpose: 'board_still',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
-      requestPlan: structuredClone(requestPlan),
-      requestSnapshot: structuredClone(requestPlan.snapshot),
+      composition,
+      requestPlan: structuredClone(redrawRequestPlan),
+      requestSnapshot: structuredClone(redrawRequestPlan.snapshot),
       spendReceipt: receipt,
       outputAssetIdsByRole: { primary: null, poster: null },
     };
@@ -665,7 +710,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     const media = createStudioMediaStore({ store: wrappedStore, createId: () => 'classification_asset' });
 
     await expect(
-      media.importReferenceFromPathV2({
+      media.importSeedStillFromPathV2({
         projectId: project.id,
         shotId: 'shot_1',
         sourcePath,
@@ -688,7 +733,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     const media = createStudioMediaStore({ store: wrappedStore, createId: () => 'missing_authority_asset' });
 
     await expect(
-      media.importReferenceFromPathV2({
+      media.importSeedStillFromPathV2({
         projectId: project.id,
         shotId: 'shot_1',
         sourcePath,
@@ -752,7 +797,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
   });
 
   it('refuses provider bytes when durable assets have already consumed the project capacity', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ briefReference: true });
+    const { rootDir, store, project } = await makeStoreV2({ includeSeedAsset: true });
     let consumed = false;
     const media = createStudioMediaStore({ store, limits: { projectMaxBytes: png.length } });
 
@@ -796,7 +841,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
 
     await expect(
-      media.importReferenceFromPathV2({
+      media.importSeedStillFromPathV2({
         projectId: project.id,
         shotId: 'shot_1',
         sourcePath,
@@ -857,111 +902,6 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await expect(fs.readdir(path.join(rootDir, project.id, 'assets'))).resolves.toEqual([]);
   });
 
-  it.each([
-    ['a role without a label', (asset: Record<string, unknown>) => (asset.briefReferenceRole = 'cast')],
-    ['a label without a role', (asset: Record<string, unknown>) => (asset.briefReferenceLabel = 'Cast')],
-    [
-      'an unknown role',
-      (asset: Record<string, unknown>) => {
-        asset.briefReferenceRole = 'organisation';
-        asset.briefReferenceLabel = 'Organisation';
-      },
-    ],
-    [
-      'a blank label',
-      (asset: Record<string, unknown>) => {
-        asset.briefReferenceRole = 'cast';
-        asset.briefReferenceLabel = '   ';
-      },
-    ],
-    [
-      'shot ownership',
-      (asset: Record<string, unknown>) => {
-        asset.briefReferenceRole = 'cast';
-        asset.briefReferenceLabel = 'Cast';
-        asset.shotId = 'shot_1';
-      },
-    ],
-    [
-      'video media',
-      (asset: Record<string, unknown>) => {
-        asset.briefReferenceRole = 'cast';
-        asset.briefReferenceLabel = 'Cast';
-        asset.mediaKind = 'video';
-        asset.mimeType = 'video/mp4';
-      },
-    ],
-    [
-      'a non-reference image MIME',
-      (asset: Record<string, unknown>) => {
-        asset.briefReferenceRole = 'look';
-        asset.briefReferenceLabel = 'Look';
-        asset.mimeType = 'image/gif';
-      },
-    ],
-    [
-      'a non-import collection',
-      (asset: Record<string, unknown>) => {
-        asset.briefReferenceRole = 'look';
-        asset.briefReferenceLabel = 'Look';
-        asset.managedAsset = { collection: 'assets', fileName: 'corrupt.png' };
-      },
-    ],
-  ] as const)(
-    'rolls back staged bytes when CAS revalidation observes %s in durable Brief metadata',
-    async (_label, corrupt) => {
-      const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
-      const sourcePath = path.join(rootDir, 'reference-candidate.png');
-      await fs.writeFile(sourcePath, png);
-      const candidate = structuredClone(project);
-      const corruptAsset: Record<string, unknown> = {
-        id: 'corrupt_reference',
-        projectId: project.id,
-        shotId: null,
-        mediaKind: 'image',
-        mimeType: 'image/png',
-        managedAsset: { collection: 'imports', fileName: 'corrupt.png' },
-        byteSize: png.length,
-        sha256: createHash('sha256').update(png).digest('hex'),
-        createdAt: project.createdAt,
-      };
-      corrupt(corruptAsset);
-      candidate.assets.corrupt_reference = corruptAsset as never;
-      const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
-      if (projectDirectory === null) throw new Error('Missing corrupt-metadata project directory');
-      const withProjectAuthorityV2 = vi.fn(
-        async (
-          _projectId: string,
-          operation: (snapshot: StudioProjectAuthoritySnapshotV2) => Promise<unknown>
-        ): Promise<unknown> =>
-          operation({
-            project: structuredClone(candidate),
-            projectDir: projectDirectory,
-            assertCurrent: async () => undefined,
-            commit: async (update) => update(structuredClone(candidate)),
-          })
-      );
-      const wrappedStore = {
-        ...store,
-        withProjectAuthorityV2,
-      } as CreativeStudioStore;
-      const media = createStudioMediaStore({ store: wrappedStore, createId: () => 'rolled_back_reference' });
-
-      await expect(
-        media.importReferenceFromPathV2({
-          projectId: project.id,
-          briefReferenceRole: 'cast',
-          sourcePath,
-          expectedRevision: project.revision,
-        })
-      ).rejects.toMatchObject({ code: 'invalid_media' });
-
-      await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
-      await expect(fs.readdir(path.join(rootDir, project.id, 'imports'))).resolves.toEqual([]);
-      expect(withProjectAuthorityV2).toHaveBeenCalledOnce();
-    }
-  );
-
   it('commits a seed primary by purpose and role without auto-pinning or selecting it', async () => {
     const { store, project } = await makeStoreV2();
     const media = createStudioMediaStore({ store, createId: () => 'seed_output_1' });
@@ -982,7 +922,10 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       shotId: 'shot_1',
       mediaKind: 'image',
       managedAsset: { collection: 'assets', fileName: 'seed_output_1.png' },
-      sourceLook: 'A frozen seed prompt',
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: 'job_1',
+      compositionDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     expect(asset).not.toHaveProperty('durationSeconds');
     const loaded = await store.getProjectV2(project.id);
@@ -1015,7 +958,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
 
     const asset = await media.persistProviderOutputForJobV2({
       projectId: project.id,
-      shotId: 'shot_1',
+      shotId: null,
       jobId: 'job_1',
       mediaKind: 'image',
       declaredMimeType: 'image/png',
@@ -1026,17 +969,19 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     expect(asset).toMatchObject({
       id: 'reference_candidate_output',
       projectId: project.id,
-      shotId: 'shot_1',
+      shotId: null,
       mediaKind: 'image',
       managedAsset: { collection: 'assets', fileName: 'reference_candidate_output.png' },
-      referenceAssetIds: [],
+      projectReferenceId: 'reference_character',
+      generationReferenceAssetIds: [],
+      producerJobId: 'job_1',
+      compositionDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
       status: 'supported',
       project: {
         references: {
           reference_character: {
-            candidateJobId: 'job_1',
             candidateAssetId: 'reference_candidate_output',
             approvedAssetId: null,
             supersededAssetIds: [],
@@ -1044,16 +989,20 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         },
         shots: {
           shot_1: {
-            referenceIds: ['reference_character'],
+            referenceBinding: {
+              status: 'unassigned',
+              characterReferenceIds: [],
+              backgroundReferenceId: null,
+            },
             seedStillId: null,
             boardAssetId: null,
-            assetIds: ['reference_candidate_output'],
+            assetIds: [],
           },
         },
         jobs: {
           job_1: {
             status: 'succeeded',
-            projectReferenceId: 'reference_character',
+            target: { kind: 'reference', referenceId: 'reference_character' },
             outputAssetIdsByRole: { primary: 'reference_candidate_output', poster: null },
           },
         },
@@ -1061,10 +1010,10 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
   });
 
-  it('commits an exact live project-reference candidate after its proxy Shot changes composition', async () => {
+  it('commits an exact live project-reference candidate after an unrelated Shot changes', async () => {
     const { store, project } = await makeStoreV2({ projectReferenceId: 'reference_character' });
     await store.updateProjectV2(project.id, (current) => {
-      current.shots.shot_1!.referenceIds = [];
+      current.shots.shot_1!.shootingScript = 'An unrelated revised Shooting script.';
       return current;
     });
     const media = createStudioMediaStore({ store, createId: () => 'detached_reference_candidate_output' });
@@ -1072,7 +1021,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        shotId: 'shot_1',
+        shotId: null,
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -1081,35 +1030,35 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       })
     ).resolves.toMatchObject({
       id: 'detached_reference_candidate_output',
-      shotId: 'shot_1',
-      referenceAssetIds: [],
+      shotId: null,
+      projectReferenceId: 'reference_character',
+      generationReferenceAssetIds: [],
     });
     await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
       status: 'supported',
       project: {
         references: {
           reference_character: {
-            candidateJobId: 'job_1',
             candidateAssetId: 'detached_reference_candidate_output',
           },
         },
         shots: {
           shot_1: {
-            referenceIds: [],
-            assetIds: ['detached_reference_candidate_output'],
+            shootingScript: 'An unrelated revised Shooting script.',
+            assetIds: [],
           },
         },
         jobs: {
           job_1: {
             status: 'succeeded',
-            projectReferenceId: 'reference_character',
+            target: { kind: 'reference', referenceId: 'reference_character' },
           },
         },
       },
     });
   });
 
-  it('refuses and cleans a project-reference output when candidate authority changes before commit', async () => {
+  it('refuses and cleans a project-reference output when its generation job becomes terminal before commit', async () => {
     const { rootDir, store, project } = await makeStoreV2({ projectReferenceId: 'reference_character' });
     const staleAuthorityStore = {
       ...store,
@@ -1123,7 +1072,11 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
             commit: (update, expectedRevision, commitTag, authorizeBeforeReplace) =>
               snapshot.commit(
                 (current) => {
-                  current.references.reference_character!.candidateJobId = null;
+                  current.jobs.job_1!.status = 'failed';
+                  current.jobs.job_1!.error = {
+                    code: 'no_output',
+                    messageKey: 'conversation.creativeStudio.jobs.errors.noOutput',
+                  };
                   return update(current);
                 },
                 expectedRevision,
@@ -1141,7 +1094,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await expect(
       media.persistProviderOutputForJobV2({
         projectId: project.id,
-        shotId: 'shot_1',
+        shotId: null,
         jobId: 'job_1',
         mediaKind: 'image',
         declaredMimeType: 'image/png',
@@ -1155,7 +1108,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       project: {
         assets: {},
         references: {
-          reference_character: { candidateJobId: 'job_1', candidateAssetId: null, approvedAssetId: null },
+          reference_character: { candidateAssetId: null, approvedAssetId: null },
         },
         jobs: { job_1: { status: 'running', outputAssetIds: [] } },
       },
@@ -1182,7 +1135,10 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       id: 'board_output_1',
       mediaKind: 'image',
       managedAsset: { collection: 'boardStills', fileName: 'board_output_1.png' },
-      sourceLook: 'A frozen board prompt',
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: 'job_1',
+      compositionDigest: expect.stringMatching(/^[a-f0-9]{64}$/),
     });
     await expect(fs.readFile(path.join(rootDir, project.id, 'boardStills', 'board_output_1.png'))).resolves.toEqual(
       png
@@ -1210,11 +1166,198 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
   });
 
-  it.each([8 * 1024 + 1, 32 * 1024])(
-    'persists a valid %i-character Board prompt through the completed-job lifecycle',
-    async (promptLength) => {
-      const prompt = 'p'.repeat(promptLength);
-      const { store, project } = await makeStoreV2({ purpose: 'board_still', prompt });
+  it('persists concurrent paid outputs under fresh same-project authority without retrying provider work', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still', addSecondShot: true });
+    await store.updateProjectV2(project.id, (current) => {
+      const firstJob = current.jobs.job_1;
+      const secondShot = current.shots.shot_2;
+      const secondBeat = current.beats.beat_2;
+      if (firstJob === undefined || secondShot === undefined || secondBeat === undefined) {
+        throw new Error('Concurrent Board fixture was incomplete');
+      }
+      secondShot.referenceBinding.status = 'ready';
+      const target = { kind: 'shot' as const, shotId: secondShot.id };
+      const composition = composeStudioGenerationV2({
+        projectRevision: current.revision,
+        brief: current.brief,
+        rules: current.rules,
+        source: {
+          kind: 'shot',
+          beatId: secondBeat.id,
+          story: secondBeat.story,
+          shotId: secondShot.id,
+          shootingScript: secondShot.shootingScript,
+        },
+        purpose: 'board_still',
+        referenceInputs: [],
+        aspectRatio: current.aspectRatio,
+        resolution: current.resolution,
+        route: firstJob.provider,
+        boardStyle: current.boardStyle,
+        instructionProfile: deriveStudioInstructionProfileV2(firstJob.provider, 'board_still', {
+          kind: 'shot',
+          beatId: secondBeat.id,
+          story: secondBeat.story,
+          shotId: secondShot.id,
+          shootingScript: secondShot.shootingScript,
+        }),
+      });
+      const requestPlan: Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> = {
+        kind: 'resolved',
+        snapshot: {
+          composition,
+          aspectRatio: current.aspectRatio,
+          resolution: current.resolution,
+          durationSeconds: 4,
+          referenceInputs: [],
+          conditioningInput: null,
+        },
+      };
+      const item: StudioQuotedGeneration = {
+        id: createStudioQuotedGenerationId({
+          projectId: current.id,
+          projectRevision: current.revision,
+          target,
+          purpose: 'board_still',
+        }),
+        target,
+        purpose: 'board_still',
+        routeId: 'route_image',
+        generationCount: 1,
+        requestPlan,
+        rateUnit: 'generation',
+        rateMinorUnits: 3,
+      };
+      const authorization: StudioSpendAuthorization = {
+        id: 'authorization_concurrent',
+        projectId: current.id,
+        projectRevision: current.revision,
+        originReferenceHandoffId: null,
+        rateCardDigest: 'd'.repeat(64),
+        currency: 'USD',
+        baseItems: [item],
+        cascadeItems: [],
+        lowerMinorUnits: 3,
+        upperMinorUnits: 3,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        confirmedAt: '2026-08-17T12:00:02.000Z',
+        providerBindings: [{ itemId: item.id, provider: firstJob.provider }],
+        idempotencyKeys: [{ itemId: item.id, key: 'key_concurrent' }],
+      };
+      const job: StudioJobV2 = {
+        id: 'job_concurrent',
+        projectId: current.id,
+        target,
+        status: 'running',
+        provider: firstJob.provider,
+        idempotencyKey: 'key_concurrent',
+        providerJobId: null,
+        cancellationPolicy: 'none',
+        outputAssetIds: [],
+        purpose: 'board_still',
+        authorizationId: authorization.id,
+        authorizationItemId: item.id,
+        composition,
+        requestPlan,
+        requestSnapshot: requestPlan.snapshot,
+        spendReceipt: createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId: 'job_concurrent' }),
+        outputAssetIdsByRole: { primary: null, poster: null },
+        error: null,
+        retryOfJobId: null,
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        createdAt: current.updatedAt,
+        updatedAt: current.updatedAt,
+      };
+      current.spendAuthorizations.push(authorization);
+      current.jobs[job.id] = job;
+      secondShot.jobIds.push(job.id);
+      return current;
+    });
+    const unlockedGetProjectV2 = vi.fn(async () => {
+      throw new Error('Provider output preparation must use queued project authority');
+    });
+    const unlockedGetVerifiedProjectDirectoryV2 = vi.fn(async () => {
+      throw new Error('Provider output preparation must use queued project authority');
+    });
+    const providerOutputStore = {
+      ...store,
+      getProjectV2: unlockedGetProjectV2,
+      getVerifiedProjectDirectoryV2: unlockedGetVerifiedProjectDirectoryV2,
+    } as CreativeStudioStore;
+    const exportCatalogStore = createStudioExportCatalogStoreV2();
+    const media = createStudioMediaStore({
+      store: providerOutputStore,
+      withManagedMediaAuthority: exportCatalogStore.withManagedMediaAuthority.bind(exportCatalogStore),
+      createId: idSequence('board_output_concurrent_1', 'board_output_concurrent_2'),
+    });
+    let markSlowWriteStarted!: () => void;
+    let releaseSlowWrite!: () => void;
+    const slowWriteStarted = new Promise<void>((resolve) => {
+      markSlowWriteStarted = resolve;
+    });
+    const slowWriteRelease = new Promise<void>((resolve) => {
+      releaseSlowWrite = resolve;
+    });
+    const firstPromise = media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      declaredByteSize: png.length,
+      body: (async function* () {
+        markSlowWriteStarted();
+        await slowWriteRelease;
+        yield png;
+      })(),
+    });
+    await slowWriteStarted;
+    const secondPromise = media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_2',
+      jobId: 'job_concurrent',
+      mediaKind: 'image',
+      declaredMimeType: 'image/png',
+      declaredByteSize: png.length,
+      body: Readable.from([png]),
+    });
+    const [second, first] = await Promise.all([secondPromise.finally(() => releaseSlowWrite()), firstPromise]);
+
+    expect(new Set([first.id, second.id])).toEqual(new Set(['board_output_concurrent_1', 'board_output_concurrent_2']));
+    const loaded = await store.getProjectV2(project.id);
+    if (loaded.status !== 'supported') throw new Error('Concurrent Board result was unavailable');
+    expect(loaded.project.assets[first.id]?.producerJobId).toBe('job_1');
+    expect(loaded.project.assets[second.id]?.producerJobId).toBe('job_concurrent');
+    expect(loaded.project.shots.shot_1).toMatchObject({
+      boardAssetId: first.id,
+      supersededBoardAssetIds: [],
+      assetIds: [first.id],
+    });
+    expect(loaded.project.shots.shot_2).toMatchObject({
+      boardAssetId: second.id,
+      supersededBoardAssetIds: [],
+      assetIds: [second.id],
+    });
+    expect(loaded.project.jobs.job_1).toMatchObject({
+      status: 'succeeded',
+      outputAssetIdsByRole: { primary: first.id },
+    });
+    expect(loaded.project.jobs.job_concurrent).toMatchObject({
+      status: 'succeeded',
+      outputAssetIdsByRole: { primary: second.id },
+    });
+    expect(unlockedGetProjectV2).not.toHaveBeenCalled();
+    expect(unlockedGetVerifiedProjectDirectoryV2).not.toHaveBeenCalled();
+    await expect(fs.readdir(path.join(rootDir, project.id, 'parts'))).resolves.toEqual([]);
+  });
+
+  it.each([8 * 1024 + 1, 20 * 1024])(
+    'persists a valid %i-character Shooting script in the frozen Board composition',
+    async (scriptLength) => {
+      const shootingScript = 'p'.repeat(scriptLength);
+      const { store, project } = await makeStoreV2({ purpose: 'board_still', prompt: shootingScript });
       const media = createStudioMediaStore({ store, createId: () => 'board_output_long_prompt' });
 
       const asset = await media.persistProviderOutputForJobV2({
@@ -1236,7 +1379,12 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
           jobs: {
             job_1: {
               status: 'succeeded',
-              requestSnapshot: { prompt },
+              requestSnapshot: {
+                composition: {
+                  inputs: { source: { kind: 'shot', shootingScript } },
+                  prompt: expect.stringContaining(shootingScript),
+                },
+              },
               outputAssetIdsByRole: { primary: 'board_output_long_prompt', poster: null },
             },
           },
@@ -1567,9 +1715,11 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
   });
 
   it('rejects purpose/media and image-duration mismatches before consuming provider bytes', async () => {
-    const imageFixture = await makeStoreV2();
+    const imageAsVideoFixture = await makeStoreV2();
+    const imageDurationFixture = await makeStoreV2();
     const videoFixture = await makeStoreV2({ purpose: 'video_take' });
-    const imageMedia = createStudioMediaStore({ store: imageFixture.store });
+    const imageAsVideoMedia = createStudioMediaStore({ store: imageAsVideoFixture.store });
+    const imageDurationMedia = createStudioMediaStore({ store: imageDurationFixture.store });
     const videoMedia = createStudioMediaStore({ store: videoFixture.store });
     let consumed = 0;
     const body = async function* (): AsyncGenerator<Buffer> {
@@ -1578,18 +1728,18 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     };
 
     await expect(
-      imageMedia.persistProviderOutputForJobV2({
-        projectId: imageFixture.project.id,
+      imageAsVideoMedia.persistProviderOutputForJobV2({
+        projectId: imageAsVideoFixture.project.id,
         shotId: 'shot_1',
         jobId: 'job_1',
         mediaKind: 'video',
         declaredMimeType: 'video/mp4',
         body: body(),
       })
-    ).rejects.toMatchObject({ code: 'invalid_media' });
+    ).rejects.toMatchObject({ code: 'job_inactive' });
     await expect(
-      imageMedia.persistProviderOutputForJobV2({
-        projectId: imageFixture.project.id,
+      imageDurationMedia.persistProviderOutputForJobV2({
+        projectId: imageDurationFixture.project.id,
         shotId: 'shot_1',
         jobId: 'job_1',
         mediaKind: 'image',
@@ -1607,7 +1757,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         declaredMimeType: 'image/png',
         body: body(),
       })
-    ).rejects.toMatchObject({ code: 'invalid_media' });
+    ).rejects.toMatchObject({ code: 'job_inactive' });
     expect(consumed).toBe(0);
   });
 
@@ -1725,7 +1875,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await fs.writeFile(sourcePath, png);
     const media = createStudioMediaStore({ store, createId: () => 'human_seed_1' });
 
-    const imported = await media.importReferenceFromPathV2({
+    const imported = await media.importSeedStillFromPathV2({
       projectId: project.id,
       shotId: 'shot_1',
       sourcePath,
@@ -1770,7 +1920,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
 
     await expect(
-      media.importReferenceFromPathV2({
+      media.importSeedStillFromPathV2({
         projectId: project.id,
         shotId: 'shot_1',
         sourcePath,
@@ -1816,6 +1966,10 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       byteSize: wav.length,
       sha256: createHash('sha256').update(wav).digest('hex'),
       durationSeconds: 1,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
       createdAt: '2026-08-17T12:05:00.000Z',
     });
     expect(imported.project).toMatchObject({
@@ -1844,7 +1998,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
 
     const undone = await store.applyMutationBatchV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'undo_last', entryId: 'bed_import_mutation_1' }],
@@ -2226,7 +2380,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2342,7 +2496,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2391,7 +2545,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2427,6 +2581,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       await fs.writeFile(sourcePath, wav);
       const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
       if (projectDirectory === null) throw new Error('Ambiguous import project directory missing');
+      const originalProjectManifest = await fs.readFile(path.join(projectDirectory, 'project.json'));
       const injected = createAmbiguousProjectCommitFs(projectDirectory, failure);
       const failingStore = createCreativeStudioStore({
         rootDir,
@@ -2455,7 +2610,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       await expect(fs.readFile(managedPath)).resolves.toEqual(wav);
       await expect(fs.access(intentPath)).resolves.toBeUndefined();
 
-      await fs.writeFile(path.join(projectDirectory, 'project.json'), `${JSON.stringify(project)}\n`, 'utf8');
+      await fs.writeFile(path.join(projectDirectory, 'project.json'), originalProjectManifest);
       const restartedStore = createCreativeStudioStore({
         rootDir,
         now: () => '2026-08-17T12:08:00.000Z',
@@ -2488,7 +2643,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       });
       const cleared = await store.applyMutationBatchV2(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: project.id,
           expectedRevision: imported.project.revision,
           operations: [{ kind: 'set_bed', assetId: null }],
@@ -2500,6 +2655,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       );
       const projectDirectory = await store.getVerifiedProjectDirectoryV2(project.id);
       if (projectDirectory === null) throw new Error('Ambiguous detach project directory missing');
+      const clearedProjectManifest = await fs.readFile(path.join(projectDirectory, 'project.json'));
       const injected = createAmbiguousProjectCommitFs(projectDirectory, failure);
       const failingStore = createCreativeStudioStore({
         rootDir,
@@ -2523,7 +2679,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       await expect(fs.readFile(managedPath)).resolves.toEqual(wav);
       await expect(fs.access(intentPath)).resolves.toBeUndefined();
 
-      await fs.writeFile(path.join(projectDirectory, 'project.json'), `${JSON.stringify(cleared.project)}\n`, 'utf8');
+      await fs.writeFile(path.join(projectDirectory, 'project.json'), clearedProjectManifest);
       const restartedStore = createCreativeStudioStore({
         rootDir,
         now: () => '2026-08-17T12:08:00.000Z',
@@ -2557,7 +2713,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2617,7 +2773,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       fs.writeFile(
         intentPath,
         `${JSON.stringify({
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION,
           kind: 'detach_bed_audio',
           projectId: project.id,
           expectedRevision: imported.project.revision,
@@ -2657,13 +2813,17 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       byteSize: wav.length,
       sha256: createHash('sha256').update(wav).digest('hex'),
       durationSeconds: 1,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
       createdAt: '2026-08-17T12:05:00.000Z',
     } as const;
     const intentPath = path.join(partsDir, 'bed-import-bed_interrupted_import.json');
     await fs.writeFile(
       intentPath,
       `${JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION,
         kind: 'import_bed_audio',
         projectId: project.id,
         expectedRevision: project.revision,
@@ -2698,7 +2858,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     const cleared = await store.applyMutationBatchV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: imported.project.revision,
         operations: [{ kind: 'set_bed', assetId: null }],
@@ -2713,7 +2873,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await fs.writeFile(
       intentPath,
       `${JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION,
         kind: 'detach_bed_audio',
         projectId: project.id,
         expectedRevision: cleared.project.revision,
@@ -2777,7 +2937,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         const media = createStudioMediaStore({ store, createId: () => `inactive_${binKind}_asset` });
 
         await expect(
-          media.importReferenceFromPathV2({
+          media.importSeedStillFromPathV2({
             projectId: project.id,
             shotId: 'shot_1',
             sourcePath,
@@ -2821,7 +2981,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
 
     await expect(
-      media.importReferenceFromPathV2({
+      media.importSeedStillFromPathV2({
         projectId: project.id,
         shotId: 'shot_1',
         sourcePath,
@@ -2836,236 +2996,10 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     expect(loaded.status === 'supported' ? loaded.project : null).toEqual(project);
   });
 
-  it('imports, labels, and safely detaches a V2 Brief reference', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
-    const sourcePath = path.join(rootDir, 'cast portrait.png');
-    await fs.writeFile(sourcePath, png);
-    const media = createStudioMediaStore({ store, createId: () => 'brief_imported' });
-    const asset = await media.importReferenceFromPathV2({
-      projectId: project.id,
-      briefReferenceRole: 'cast',
-      sourcePath,
-      expectedRevision: project.revision,
-    });
-    expect(asset).toMatchObject({
-      id: 'brief_imported',
-      shotId: null,
-      briefReferenceRole: 'cast',
-      briefReferenceLabel: 'cast portrait',
-    });
-    const imported = await store.getProjectV2(project.id);
-    if (imported.status !== 'supported') throw new Error('Brief import fixture missing');
-    const detached = await media.detachBriefReferenceV2({
-      projectId: project.id,
-      assetId: asset.id,
-      expectedRevision: imported.project.revision,
-    });
-    expect(detached.assets).not.toHaveProperty(asset.id);
-    await expect(fs.access(path.join(rootDir, project.id, 'imports', 'brief_imported.png'))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-  });
-
-  it('imports JPEG and WebP V2 references and safely detaches a Look reference', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
-    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]);
-    const webp = Buffer.concat([Buffer.from('RIFF'), Buffer.alloc(4), Buffer.from('WEBP'), Buffer.from([0x00])]);
-    const jpegPath = path.join(rootDir, 'look-reference.jpg');
-    const webpPath = path.join(rootDir, 'cast-reference.webp');
-    await Promise.all([fs.writeFile(jpegPath, jpeg), fs.writeFile(webpPath, webp)]);
-    const media = createStudioMediaStore({
-      store,
-      createId: idSequence('brief_look_jpeg', 'brief_cast_webp'),
-    });
-    const look = await media.importReferenceFromPathV2({
-      projectId: project.id,
-      briefReferenceRole: 'look',
-      sourcePath: jpegPath,
-      expectedRevision: project.revision,
-    });
-    expect(look).toMatchObject({ id: 'brief_look_jpeg', mimeType: 'image/jpeg', briefReferenceRole: 'look' });
-    let loaded = await store.getProjectV2(project.id);
-    if (loaded.status !== 'supported') throw new Error('V2 JPEG fixture missing');
-    const cast = await media.importReferenceFromPathV2({
-      projectId: project.id,
-      briefReferenceRole: 'cast',
-      sourcePath: webpPath,
-      expectedRevision: loaded.project.revision,
-    });
-    expect(cast).toMatchObject({ id: 'brief_cast_webp', mimeType: 'image/webp', briefReferenceRole: 'cast' });
-    loaded = await store.getProjectV2(project.id);
-    if (loaded.status !== 'supported') throw new Error('V2 WebP fixture missing');
-    await expect(
-      media.detachBriefReferenceV2({
-        projectId: project.id,
-        assetId: look.id,
-        expectedRevision: loaded.project.revision,
-      })
-    ).resolves.not.toHaveProperty(`assets.${look.id}`);
-  });
-
-  it('detaches valid V2 Brief metadata after its managed directory is already absent', async () => {
-    const { store, project } = await makeStoreV2({ includeAuthorizedJob: false });
-    const withMissingBytes = await store.updateProjectV2(project.id, (current) => {
-      current.assets.brief_missing_bytes = {
-        id: 'brief_missing_bytes',
-        projectId: current.id,
-        shotId: null,
-        mediaKind: 'image',
-        mimeType: 'image/png',
-        managedAsset: { collection: 'imports', fileName: 'brief_missing_bytes.png' },
-        byteSize: png.length,
-        sha256: createHash('sha256').update(png).digest('hex'),
-        briefReferenceRole: 'cast',
-        briefReferenceLabel: 'Missing bytes',
-        createdAt: current.updatedAt,
-      };
-      return current;
-    });
-    const media = createStudioMediaStore({ store });
-    await expect(
-      media.detachBriefReferenceV2({
-        projectId: project.id,
-        assetId: 'brief_missing_bytes',
-        expectedRevision: withMissingBytes.revision,
-      })
-    ).resolves.not.toHaveProperty('assets.brief_missing_bytes');
-  });
-
-  it('refuses to detach a shot-owned V2 seed through the Brief-reference seam', async () => {
-    const { store, project } = await makeStoreV2({ purpose: 'video_take', includeAuthorizedJob: false });
-    const media = createStudioMediaStore({ store });
-    await expect(
-      media.detachBriefReferenceV2({
-        projectId: project.id,
-        assetId: 'seed_v2',
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'invalid_media' });
-  });
-
-  it('enforces V2 import media, revision, ownership, and Brief-capacity boundaries', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
-    const imagePath = path.join(rootDir, 'reference.png');
-    const videoPath = path.join(rootDir, 'reference.mp4');
-    await fs.writeFile(imagePath, png);
-    await fs.writeFile(videoPath, mp4);
-    let idOrdinal = 0;
-    const media = createStudioMediaStore({ store, createId: () => `import_case_${++idOrdinal}` });
-
-    await expect(
-      media.importReferenceFromPathV2({
-        projectId: project.id,
-        shotId: 'missing_shot',
-        sourcePath: imagePath,
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'not_found' });
-    await expect(
-      media.importReferenceFromPathV2({
-        projectId: project.id,
-        shotId: 'shot_1',
-        sourcePath: imagePath,
-        expectedRevision: project.revision - 1,
-      })
-    ).rejects.toMatchObject({ code: 'stale_project' });
-    await expect(
-      media.importReferenceFromPathV2({
-        projectId: project.id,
-        briefReferenceRole: 'look',
-        sourcePath: videoPath,
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'invalid_media' });
-    await expect(
-      createStudioMediaStore({ store, createId: () => '../unsafe' }).importReferenceFromPathV2({
-        projectId: project.id,
-        shotId: 'shot_1',
-        sourcePath: imagePath,
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    const importedIds: string[] = [];
-    for (let index = 0; index < 6; index += 1) {
-      // eslint-disable-next-line no-await-in-loop -- Capacity must be proven at every committed revision.
-      const loaded = await store.getProjectV2(project.id);
-      if (loaded.status !== 'supported') throw new Error('Brief capacity fixture missing');
-      // eslint-disable-next-line no-await-in-loop -- Imports are intentionally serialized by revision.
-      const imported = await media.importReferenceFromPathV2({
-        projectId: project.id,
-        briefReferenceRole: index % 2 === 0 ? 'cast' : 'look',
-        sourcePath: imagePath,
-        expectedRevision: loaded.project.revision,
-      });
-      importedIds.push(imported.id);
-    }
-    const full = await store.getProjectV2(project.id);
-    if (full.status !== 'supported') throw new Error('Brief capacity fixture missing');
-    await expect(
-      media.importReferenceFromPathV2({
-        projectId: project.id,
-        briefReferenceRole: 'cast',
-        sourcePath: imagePath,
-        expectedRevision: full.project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'invalid_media' });
-    await expect(
-      media.detachBriefReferenceV2({
-        projectId: project.id,
-        assetId: importedIds[0]!,
-        expectedRevision: full.project.revision - 1,
-      })
-    ).rejects.toMatchObject({ code: 'stale_project' });
-    await expect(
-      media.detachBriefReferenceV2({
-        projectId: project.id,
-        assetId: 'missing_asset',
-        expectedRevision: full.project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'not_found' });
-  });
-
-  it('fails closed when a nonterminal immutable request still owns a Brief reference', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ briefReference: true });
-    const media = createStudioMediaStore({ store });
-    const managedPath = path.join(rootDir, project.id, 'imports', 'brief_v2.png');
-
-    await expect(
-      media.detachBriefReferenceV2({
-        projectId: project.id,
-        assetId: 'brief_v2',
-        expectedRevision: project.revision,
-      })
-    ).rejects.toMatchObject({ code: 'media_in_use' });
-    await expect(fs.readFile(managedPath)).resolves.toEqual(png);
-    expect(await store.getProjectV2(project.id)).toEqual({ status: 'supported', project });
-
-    const terminal = await store.updateProjectV2(project.id, (current) => {
-      const job = current.jobs.job_1!;
-      job.status = 'failed';
-      job.error = { code: 'no_output', messageKey: 'conversation.creativeStudio.jobs.errors.noOutput' };
-      return current;
-    });
-    const detached = await media.detachBriefReferenceV2({
-      projectId: project.id,
-      assetId: 'brief_v2',
-      expectedRevision: terminal.revision,
-    });
-    expect(detached.assets).not.toHaveProperty('brief_v2');
-    expect(detached.jobs.job_1!.requestSnapshot?.referenceInputs).toEqual([
-      {
-        assetId: 'brief_v2',
-        sha256: createHash('sha256').update(png).digest('hex'),
-      },
-    ]);
-    await expect(fs.access(managedPath)).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
   it('re-proves V2 provider-input bytes and refuses a same-path replacement', async () => {
-    const { rootDir, store, project } = await makeStoreV2({ briefReference: true });
+    const { rootDir, store, project } = await makeStoreV2({ includeSeedAsset: true });
     const media = createStudioMediaStore({ store });
-    const input = await media.resolveProviderInputV2(project.id, 'brief_v2');
+    const input = await media.resolveProviderInputV2(project.id, 'seed_v2');
     const chunks: Buffer[] = [];
     for await (const chunk of await input.openStream()) chunks.push(Buffer.from(chunk));
     expect(Buffer.concat(chunks)).toEqual(png);
@@ -3073,9 +3007,9 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     await expect(input.asDataUrl(png.length - 1)).rejects.toMatchObject({ code: 'invalid_media' });
     await expect(input.asDataUrl(png.length)).resolves.toBe(`data:image/png;base64,${png.toString('base64')}`);
 
-    const managedPath = path.join(rootDir, project.id, 'imports', 'brief_v2.png');
+    const managedPath = path.join(rootDir, project.id, 'imports', 'seed_v2.png');
     await fs.writeFile(managedPath, Buffer.concat([png, Buffer.from('replacement')]));
-    await expect(media.resolveProviderInputV2(project.id, 'brief_v2')).rejects.toMatchObject({ code: 'invalid_media' });
+    await expect(media.resolveProviderInputV2(project.id, 'seed_v2')).rejects.toMatchObject({ code: 'invalid_media' });
   });
 
   it('rejects hostile V2 provider metadata before allocating or consuming a body', async () => {
@@ -3143,17 +3077,18 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       },
       {
         projectId: project.id,
-        briefReferenceRole: 'organisation',
+        shotId: 'shot_1',
         expectedRevision: project.revision,
         sourcePath,
+        extra: true,
       },
       { projectId: project.id, expectedRevision: project.revision, sourcePath },
       {
         projectId: project.id,
         shotId: 'shot_1',
-        briefReferenceRole: 'cast',
         expectedRevision: project.revision,
         sourcePath,
+        returnProject: 'yes',
       },
       { projectId: project.id, shotId: 'shot_1', expectedRevision: 1.5, sourcePath },
       { projectId: project.id, shotId: 'shot_1', expectedRevision: 0, sourcePath },
@@ -3161,18 +3096,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     ];
     for (const input of importCases) {
       // eslint-disable-next-line no-await-in-loop -- Every hostile envelope must refuse independently.
-      await expect(media.importReferenceFromPathV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
-    }
-
-    const detachCases: Array<Record<string, unknown>> = [
-      { projectId: '../project', assetId: 'asset_1', expectedRevision: 1 },
-      { projectId: project.id, assetId: '../asset', expectedRevision: 1 },
-      { projectId: project.id, assetId: 'asset_1', expectedRevision: 1.5 },
-      { projectId: project.id, assetId: 'asset_1', expectedRevision: 0 },
-    ];
-    for (const input of detachCases) {
-      // eslint-disable-next-line no-await-in-loop -- Every hostile envelope must refuse independently.
-      await expect(media.detachBriefReferenceV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
+      await expect(media.importSeedStillFromPathV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
     }
 
     for (const input of [
@@ -3386,15 +3310,10 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
   });
 
   it('cleans a crash-orphaned Board publication while preserving every manifest-owned Board still', async () => {
-    const prompt = composeStudioBoardGenerationPrompt({
-      brief: '',
-      rules: [],
-      action: '',
-      look: 'A visual language inherited by the shot',
-      line: 'A precise opening frame',
-      style: 'grey_tone',
+    const { rootDir, store, project } = await makeStoreV2({
+      purpose: 'board_still',
+      prompt: 'A precise opening frame in the approved storyboard style.',
     });
-    const { rootDir, store, project } = await makeStoreV2({ purpose: 'board_still', prompt });
     const media = createStudioMediaStore({
       store,
       createId: idSequence('board_output_owned', 'board_output_redraw'),
@@ -3414,7 +3333,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     }));
     const promoted = await store.applyMutationBatchV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: project.id,
         expectedRevision: routed.revision,
         operations: [{ kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_output_owned' }],

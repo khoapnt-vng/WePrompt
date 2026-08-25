@@ -11,17 +11,22 @@ import {
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
-  STUDIO_MAX_LINE_HISTORY_PER_BEAT,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_MAX_STORY_LENGTH,
   STUDIO_MAX_UNDO_ENTRIES,
   STUDIO_MAX_UNDO_PATCHES_PER_ENTRY,
+  STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAssetV2,
   type StudioBeat,
   type StudioConditioningInputSnapshot,
   type StudioFixedShotReasonV2,
+  type StudioGenerationReferenceInputSnapshot,
   type StudioGenerationRequestPlan,
+  type StudioGenerationTargetV2,
   type StudioJobV2,
   type StudioProjectV2,
   type StudioQuotedGeneration,
@@ -30,8 +35,11 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   calculateStudioQuoteTotals,
+  composeStudioGenerationV2,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
+  deriveStudioInstructionProfileV2,
+  studioGenerationCompositionDigestV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
   validateStudioFixedShotReviewV2,
@@ -49,16 +57,12 @@ const provider = { providerId: 'provider_1', adapterId: 'weprompt-image-v1', mod
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
-  line: '',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  narration: '',
-  onScreenText: '',
+  shootingScript: '',
   durationSeconds: 8,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
-  referenceIds: [],
+  referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -72,12 +76,9 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
 const makeBeat = (id: string, shotOrder: string[] = [], overrides: Partial<StudioBeat> = {}): StudioBeat => ({
   id,
   title: '',
-  action: '',
-  look: '',
-  actionRevision: 1,
+  story: '',
   targetSeconds: null,
   shotOrder,
-  lineHistory: [],
   ...overrides,
 });
 
@@ -96,6 +97,7 @@ const makeProject = (projectId = 'project_1'): StudioProjectV2 => ({
   beatOrder: ['beat_1'],
   beats: { beat_1: makeBeat('beat_1', ['shot_1']) },
   shots: { shot_1: makeShot('shot_1') },
+  referencePlanStatus: 'unplanned',
   referenceOrder: [],
   references: {},
   bin: [],
@@ -126,7 +128,10 @@ const makeImageAsset = (
   managedAsset: { collection, fileName: `${id}.png` },
   byteSize: 1,
   sha256: digest,
-  referenceAssetIds: [],
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
   createdAt: timestamp,
   ...overrides,
 });
@@ -140,7 +145,10 @@ const makeVideoAsset = (id: string, shotId: string | null = 'shot_1', durationSe
   managedAsset: { collection: 'assets', fileName: `${id}.mp4` },
   byteSize: 1,
   sha256: digest,
-  referenceAssetIds: [],
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
   durationSeconds,
   createdAt: timestamp,
 });
@@ -154,18 +162,24 @@ const makeAudioAsset = (id: string, shotId: string | null = null): StudioAssetV2
   managedAsset: { collection: 'imports', fileName: `${id}.wav` },
   byteSize: 1,
   sha256: digest,
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
   durationSeconds: 30,
   createdAt: timestamp,
 });
 
-const seedPlan = (referenceInput: { assetId: string; sha256: string } | null = null): StudioGenerationRequestPlan => ({
+const seedPlan = (
+  referenceSnapshot: StudioGenerationReferenceInputSnapshot | null = null
+): StudioGenerationRequestPlan => ({
   kind: 'resolved',
   snapshot: {
-    prompt: 'seed prompt',
+    composition: null as never,
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 8,
-    referenceInputs: referenceInput === null ? [] : [referenceInput],
+    referenceInputs: referenceSnapshot === null ? [] : [referenceSnapshot],
     conditioningInput: null,
   },
 });
@@ -173,7 +187,7 @@ const seedPlan = (referenceInput: { assetId: string; sha256: string } | null = n
 const boardPlan = (): StudioGenerationRequestPlan => ({
   kind: 'resolved',
   snapshot: {
-    prompt: 'board prompt',
+    composition: null as never,
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 4,
@@ -185,7 +199,9 @@ const boardPlan = (): StudioGenerationRequestPlan => ({
 const referencedBoardPlan = (): StudioGenerationRequestPlan => {
   const plan = boardPlan();
   if (plan.kind !== 'resolved') throw new Error('expected resolved Board plan');
-  plan.snapshot.referenceInputs = [{ assetId: 'reference_1', sha256: digest }];
+  plan.snapshot.referenceInputs = [
+    { referenceId: 'ref_character', kind: 'character', assetId: 'reference_1', sha256: digest },
+  ];
   return plan;
 };
 
@@ -199,7 +215,7 @@ const conditionedBoardPlan = (): StudioGenerationRequestPlan => {
 const deferredBoardPlan = (): StudioGenerationRequestPlan => ({
   kind: 'after_take_selection',
   template: {
-    prompt: 'deferred board prompt',
+    composition: null as never,
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 8,
@@ -211,7 +227,7 @@ const deferredBoardPlan = (): StudioGenerationRequestPlan => ({
 const videoPlan = (conditioningInput: StudioConditioningInputSnapshot): StudioGenerationRequestPlan => ({
   kind: 'resolved',
   snapshot: {
-    prompt: 'video prompt',
+    composition: null as never,
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 8,
@@ -223,7 +239,7 @@ const videoPlan = (conditioningInput: StudioConditioningInputSnapshot): StudioGe
 const deferredVideoPlan = (upstreamItemId: string, predecessorShotId: string): StudioGenerationRequestPlan => ({
   kind: 'after_take_selection',
   template: {
-    prompt: 'deferred video prompt',
+    composition: null as never,
     aspectRatio: '16:9',
     resolution: '1080p',
     durationSeconds: 8,
@@ -242,17 +258,53 @@ const makeItem = (
   purpose: StudioQuotedGeneration['purpose'],
   requestPlan: StudioGenerationRequestPlan,
   generationCount = 1,
-  projectId = 'project_1'
-): StudioQuotedGeneration => ({
-  id: createStudioQuotedGenerationId({ projectId, projectRevision, shotId, purpose }),
-  shotId,
-  purpose,
-  routeId: purpose === 'video_take' ? 'video_route' : 'image_route',
-  generationCount,
-  requestPlan,
-  rateUnit: purpose === 'video_take' ? 'second' : 'generation',
-  rateMinorUnits: 2,
-});
+  projectId = 'project_1',
+  targetOverride?: StudioGenerationTargetV2
+): StudioQuotedGeneration => {
+  const target = targetOverride ?? { kind: 'shot' as const, shotId };
+  const referenceInputs =
+    requestPlan.kind === 'resolved' ? requestPlan.snapshot.referenceInputs : requestPlan.template.referenceInputs;
+  const source =
+    target.kind === 'shot'
+      ? {
+          kind: 'shot' as const,
+          beatId: 'beat_1',
+          story: 'Story',
+          shotId: target.shotId,
+          shootingScript: 'Shooting script',
+        }
+      : {
+          kind: 'project_reference' as const,
+          referenceId: target.referenceId,
+          referenceKind: target.referenceId.includes('character') ? ('character' as const) : ('background' as const),
+          prompt: 'Reference description',
+        };
+  const composition = composeStudioGenerationV2({
+    projectRevision,
+    brief: 'Brief',
+    rules: [],
+    source,
+    purpose,
+    referenceInputs,
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route: provider,
+    boardStyle: purpose === 'board_still' ? 'grey_tone' : null,
+    instructionProfile: deriveStudioInstructionProfileV2(provider, purpose, source),
+  });
+  if (requestPlan.kind === 'resolved') requestPlan.snapshot.composition = composition;
+  else requestPlan.template.composition = composition;
+  return {
+    id: createStudioQuotedGenerationId({ projectId, projectRevision, target, purpose }),
+    target,
+    purpose,
+    routeId: purpose === 'video_take' ? 'video_route' : 'image_route',
+    generationCount,
+    requestPlan,
+    rateUnit: purpose === 'video_take' ? 'second' : 'generation',
+    rateMinorUnits: 2,
+  };
+};
 
 const makeAuthorization = (
   id: string,
@@ -289,7 +341,7 @@ const makeJob = (
 ): StudioJobV2 => ({
   id,
   projectId: authorization.projectId,
-  shotId: item.shotId,
+  target: structuredClone(item.target),
   status: item.requestPlan.kind === 'resolved' ? 'queued_local' : 'waiting_for_conditioning',
   provider,
   idempotencyKey: authorization.idempotencyKeys.find((entry) => entry.itemId === item.id)!.key,
@@ -306,6 +358,10 @@ const makeJob = (
   purpose: item.purpose,
   authorizationId: authorization.id,
   authorizationItemId: item.id,
+  composition:
+    item.requestPlan.kind === 'resolved'
+      ? item.requestPlan.snapshot.composition
+      : item.requestPlan.template.composition,
   requestPlan: item.requestPlan,
   requestSnapshot: item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot : null,
   spendReceipt: null,
@@ -322,7 +378,8 @@ const addAuthorizationWithJobs = (
   project.spendAuthorizations.push(authorization);
   for (const job of jobs) {
     project.jobs[job.id] = job;
-    project.shots[job.shotId]!.jobIds.push(job.id);
+    if (job.target.kind === 'shot') project.shots[job.target.shotId]!.jobIds.push(job.id);
+    else project.references[job.target.referenceId]!.jobIds.push(job.id);
   }
 };
 
@@ -351,6 +408,7 @@ const addProjectReferenceRetryLineage = (
   retryOverrides: Partial<StudioJobV2>
 ): { predecessor: StudioJobV2; retry: StudioJobV2 } => {
   const referenceId = 'ref_background';
+  project.referencePlanStatus = 'planned';
   project.referenceOrder = [referenceId];
   project.references[referenceId] = {
     id: referenceId,
@@ -358,23 +416,17 @@ const addProjectReferenceRetryLineage = (
     label: 'City skyline',
     prompt: 'A recurring city skyline.',
     candidateAssetId: null,
-    candidateJobId: null,
     approvedAssetId: null,
     supersededAssetIds: [],
+    jobIds: [],
     createdAt: timestamp,
     updatedAt: timestamp,
   };
-  project.shots.shot_1!.referenceIds = [referenceId];
 
   const predecessorRevision = project.revision;
-  const predecessorItem = makeItem(predecessorRevision, 'shot_1', 'seed_still', seedPlan(), 1, project.id);
-  predecessorItem.projectReferenceId = referenceId;
-  predecessorItem.id = createStudioQuotedGenerationId({
-    projectId: project.id,
-    projectRevision: predecessorRevision,
-    shotId: 'shot_1',
-    purpose: 'seed_still',
-    projectReferenceId: referenceId,
+  const predecessorItem = makeItem(predecessorRevision, 'shot_1', 'reference_image', seedPlan(), 1, project.id, {
+    kind: 'reference',
+    referenceId,
   });
   const predecessorAuthorization = makeAuthorization(
     'auth_reference_predecessor',
@@ -384,29 +436,21 @@ const addProjectReferenceRetryLineage = (
     project.id
   );
   const predecessor = makeJob('job_reference_predecessor', predecessorAuthorization, predecessorItem, {
-    projectReferenceId: referenceId,
     ...predecessorOverrides,
   });
   addAuthorizationWithJobs(project, predecessorAuthorization, [predecessor]);
 
   const retryRevision = project.revision;
-  const retryItem = makeItem(retryRevision, 'shot_1', 'seed_still', seedPlan(), 1, project.id);
-  retryItem.projectReferenceId = referenceId;
-  retryItem.id = createStudioQuotedGenerationId({
-    projectId: project.id,
-    projectRevision: retryRevision,
-    shotId: 'shot_1',
-    purpose: 'seed_still',
-    projectReferenceId: referenceId,
+  const retryItem = makeItem(retryRevision, 'shot_1', 'reference_image', seedPlan(), 1, project.id, {
+    kind: 'reference',
+    referenceId,
   });
   const retryAuthorization = makeAuthorization('auth_reference_retry', retryRevision, [retryItem], [], project.id);
   const retry = makeJob('job_reference_retry', retryAuthorization, retryItem, {
-    projectReferenceId: referenceId,
     retryOfJobId: predecessor.id,
     ...retryOverrides,
   });
   addAuthorizationWithJobs(project, retryAuthorization, [retry]);
-  project.references[referenceId]!.candidateJobId = retry.id;
   return { predecessor, retry };
 };
 
@@ -414,6 +458,70 @@ const addHumanSeed = (project: StudioProjectV2, shotId = 'shot_1', assetId = 'se
   const asset = makeImageAsset(assetId, shotId, 'imports');
   project.assets[assetId] = asset;
   project.shots[shotId]!.assetIds.push(assetId);
+  return asset;
+};
+
+const addApprovedProjectReference = (
+  project: StudioProjectV2,
+  referenceId = 'ref_character',
+  assetId = 'reference_1'
+): StudioAssetV2 => {
+  project.referencePlanStatus = 'planned';
+  if (!project.references[referenceId]) {
+    project.referenceOrder.push(referenceId);
+    project.references[referenceId] = {
+      id: referenceId,
+      kind: referenceId.includes('character') ? 'character' : 'background',
+      label: referenceId.includes('character') ? 'Character' : 'Background',
+      prompt: 'Canonical reference description.',
+      candidateAssetId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+  }
+  const reference = project.references[referenceId]!;
+  const item = makeItem(project.revision, 'shot_1', 'reference_image', seedPlan(), 1, project.id, {
+    kind: 'reference',
+    referenceId,
+  });
+  const authorization = makeAuthorization(`auth_${assetId}`, project.revision, [item], [], project.id);
+  const jobId = `job_${assetId}`;
+  const composition = item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot.composition : null;
+  if (composition === null) throw new Error('expected resolved reference composition');
+  const asset = makeImageAsset(assetId, null, 'assets', {
+    projectId: project.id,
+    projectReferenceId: referenceId,
+    producerJobId: jobId,
+    compositionDigest: studioGenerationCompositionDigestV2(composition),
+  });
+  project.assets[asset.id] = asset;
+  const job = makeJob(jobId, authorization, item, {
+    status: 'succeeded',
+    providerJobId: `remote_${assetId}`,
+    remoteStartedAt: timestamp,
+    outputAssetIds: [asset.id],
+    outputAssetIdsByRole: { primary: asset.id, poster: null },
+    spendReceipt: {
+      authorizationId: authorization.id,
+      itemId: item.id,
+      jobId,
+      purpose: item.purpose,
+      routeId: item.routeId,
+      currency: authorization.currency,
+      rateUnit: item.rateUnit,
+      rateMinorUnits: item.rateMinorUnits,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: item.rateMinorUnits,
+    },
+  });
+  addAuthorizationWithJobs(project, authorization, [job]);
+  if (reference.approvedAssetId !== null) reference.supersededAssetIds.push(reference.approvedAssetId);
+  reference.approvedAssetId = asset.id;
+  reference.candidateAssetId = null;
   return asset;
 };
 
@@ -425,10 +533,14 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId = 'shot_1', asse
   const projectRevision = project.revision;
   const item = makeItem(projectRevision, shotId, 'video_take', videoPlan({ kind: 'seed_still', assetId: seed.id }));
   const authorization = makeAuthorization(`auth_${projectRevision}`, projectRevision, [item]);
+  const jobId = `job_${projectRevision}`;
+  const composition = item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot.composition : null;
+  if (composition === null) throw new Error('expected resolved video composition');
   const asset = makeVideoAsset(assetId, shotId);
+  asset.producerJobId = jobId;
+  asset.compositionDigest = studioGenerationCompositionDigestV2(composition);
   project.assets[asset.id] = asset;
   shot.assetIds.push(asset.id);
-  const jobId = `job_${projectRevision}`;
   const job = makeJob(jobId, authorization, item, {
     status: 'succeeded',
     providerJobId: `remote_${projectRevision}`,
@@ -461,10 +573,16 @@ const addSucceededBoardStill = (project: StudioProjectV2, shotId = 'shot_1', ass
   const projectRevision = project.revision;
   const item = makeItem(projectRevision, shotId, 'board_still', boardPlan(), 1, project.id);
   const authorization = makeAuthorization(`auth_board_${projectRevision}`, projectRevision, [item], [], project.id);
-  const asset = makeImageAsset(assetId, shotId, 'boardStills', { projectId: project.id });
+  const jobId = `job_board_${projectRevision}`;
+  const composition = item.requestPlan.kind === 'resolved' ? item.requestPlan.snapshot.composition : null;
+  if (composition === null) throw new Error('expected resolved Board composition');
+  const asset = makeImageAsset(assetId, shotId, 'boardStills', {
+    projectId: project.id,
+    producerJobId: jobId,
+    compositionDigest: studioGenerationCompositionDigestV2(composition),
+  });
   project.assets[asset.id] = asset;
   shot.assetIds.push(asset.id);
-  const jobId = `job_board_${projectRevision}`;
   const job = makeJob(jobId, authorization, item, {
     status: 'succeeded',
     providerJobId: `remote_board_${projectRevision}`,
@@ -552,6 +670,9 @@ const makeWaitingDependencyProject = (): StudioProjectV2 => {
   const dependent = makeItem(1, 'shot_2', 'video_take', deferredVideoPlan(upstream.id, 'shot_1'));
   const authorization = makeAuthorization('auth_waiting_take', 1, [upstream], [dependent]);
   const asset = makeVideoAsset('take_1');
+  if (upstream.requestPlan.kind !== 'resolved') throw new Error('expected resolved upstream');
+  asset.producerJobId = 'job_upstream';
+  asset.compositionDigest = studioGenerationCompositionDigestV2(upstream.requestPlan.snapshot.composition);
   project.assets[asset.id] = asset;
   project.shots.shot_1!.assetIds.push(asset.id);
   const upstreamJob = makeJob('job_upstream', authorization, upstream, {
@@ -646,27 +767,28 @@ describe('validateStudioProjectV2 exact project and authorship contract', () => 
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
-  it('enforces derived/detached revision combinations against the owner Beat', () => {
+  it('accepts Story and Shooting script at their exact bounds and rejects overflow', () => {
     const project = makeProject();
-    project.beats.beat_1!.actionRevision = 3;
-    project.shots.shot_1!.derivedFromActionRevision = 3;
+    project.beats.beat_1!.story = 's'.repeat(STUDIO_MAX_STORY_LENGTH);
+    project.shots.shot_1!.shootingScript = 'x'.repeat(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH);
     expect(validateStudioProjectV2(project)).toBe(true);
-    project.shots.shot_1!.derivedFromActionRevision = 4;
+    project.beats.beat_1!.story += 's';
     expect(validateStudioProjectV2(project)).toBe(false);
-
-    project.shots.shot_1 = makeShot('shot_1', { derivation: 'detached', derivedFromActionRevision: null });
-    expect(validateStudioProjectV2(project)).toBe(true);
-    project.shots.shot_1!.derivedFromActionRevision = 1;
+    project.beats.beat_1!.story = '';
+    project.shots.shot_1!.shootingScript += 'x';
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
-  it('accepts history ordinal 8 after shrink and rejects 0 and 9', () => {
+  it.each([
+    ['Action', (project: StudioProjectV2) => Object.assign(project.beats.beat_1!, { action: '' })],
+    ['Look', (project: StudioProjectV2) => Object.assign(project.beats.beat_1!, { look: '' })],
+    ['Line', (project: StudioProjectV2) => Object.assign(project.shots.shot_1!, { line: '' })],
+    ['Narration', (project: StudioProjectV2) => Object.assign(project.shots.shot_1!, { narration: '' })],
+    ['on-screen text', (project: StudioProjectV2) => Object.assign(project.shots.shot_1!, { onScreenText: '' })],
+    ['derivation', (project: StudioProjectV2) => Object.assign(project.shots.shot_1!, { derivation: 'derived' })],
+  ])('rejects the retired %s authoring field', (_label, mutate) => {
     const project = makeProject();
-    project.beats.beat_1!.lineHistory = [{ id: 'history_1', shotOrdinal: 8, text: 'old line', capturedAt: timestamp }];
-    expect(validateStudioProjectV2(project)).toBe(true);
-    project.beats.beat_1!.lineHistory[0]!.shotOrdinal = 0;
-    expect(validateStudioProjectV2(project)).toBe(false);
-    project.beats.beat_1!.lineHistory[0]!.shotOrdinal = 9;
+    mutate(project);
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
@@ -755,16 +877,39 @@ describe('validateStudioProjectV2 total ownership and capacities', () => {
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
-  it('enforces line history at 20 and 21 entries', () => {
+  it('enforces the semantic reference catalogue at 24 and 25 entries', () => {
     const project = makeProject();
-    project.beats.beat_1!.lineHistory = Array.from({ length: STUDIO_MAX_LINE_HISTORY_PER_BEAT }, (_, index) => ({
-      id: `history_${index}`,
-      shotOrdinal: 8,
-      text: '',
-      capturedAt: timestamp,
-    }));
+    project.referencePlanStatus = 'planned';
+    for (let index = 1; index <= STUDIO_MAX_PROJECT_REFERENCES; index += 1) {
+      const referenceId = `ref_${index}`;
+      project.referenceOrder.push(referenceId);
+      project.references[referenceId] = {
+        id: referenceId,
+        kind: 'character',
+        label: `Character ${index}`,
+        prompt: `Reference description ${index}`,
+        candidateAssetId: null,
+        approvedAssetId: null,
+        supersededAssetIds: [],
+        jobIds: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+    }
     expect(validateStudioProjectV2(project)).toBe(true);
-    project.beats.beat_1!.lineHistory.push({ id: 'history_21', shotOrdinal: 1, text: '', capturedAt: timestamp });
+    project.referenceOrder.push('ref_25');
+    project.references.ref_25 = {
+      id: 'ref_25',
+      kind: 'background',
+      label: 'Background 25',
+      prompt: 'Reference description 25',
+      candidateAssetId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
@@ -807,15 +952,14 @@ describe('validateStudioProjectV2 total ownership and capacities', () => {
 });
 
 describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
-  it('accepts only canonical project-owned Brief images and bed audio', () => {
+  it('accepts canonical bed audio and rejects unowned project-level visual media', () => {
     const project = makeProject();
-    project.assets.cast_1 = makeImageAsset('cast_1', null, 'imports', {
-      briefReferenceRole: 'cast',
-      briefReferenceLabel: 'Lead',
-    });
     project.assets.bed_1 = makeAudioAsset('bed_1');
     project.bedAssetId = 'bed_1';
     expect(validateStudioProjectV2(project)).toBe(true);
+    project.assets.image_1 = makeImageAsset('image_1', null, 'assets');
+    expect(validateStudioProjectV2(project)).toBe(false);
+    delete project.assets.image_1;
     project.assets.video_1 = makeVideoAsset('video_1', null);
     expect(validateStudioProjectV2(project)).toBe(false);
   });
@@ -919,7 +1063,6 @@ describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
 
   it.each([
     ['deferred', deferredBoardPlan],
-    ['referenced', referencedBoardPlan],
     ['conditioned', conditionedBoardPlan],
   ] as const)('rejects a persisted %s Board request', (_label, makePlan) => {
     const project = makeProject();
@@ -927,6 +1070,23 @@ describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
     addFailedAuthorizationGraph(project, [makeItem(project.revision, 'shot_1', 'board_still', makePlan())]);
 
     expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('rejects a persisted Board request whose frozen reference has no semantic or asset authority', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    addFailedAuthorizationGraph(project, [makeItem(project.revision, 'shot_1', 'board_still', referencedBoardPlan())]);
+
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('accepts a persisted Board request with an exact approved semantic reference and source asset', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    addApprovedProjectReference(project);
+    addFailedAuthorizationGraph(project, [makeItem(project.revision, 'shot_1', 'board_still', referencedBoardPlan())]);
+
+    expect(validateStudioProjectV2(project)).toBe(true);
   });
 
   it('rejects a persisted Board authority with a noncanonical plumbing duration', () => {
@@ -1029,6 +1189,16 @@ describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
 });
 
 describe('validateStudioProjectV2 paid graph and immutable request state', () => {
+  it('validates compositions against their independent protocol version', () => {
+    const project = makeProject();
+    addSucceededVideoTake(project);
+    const compositionInputs = project.jobs.job_1!.composition.inputs;
+    expect(compositionInputs.schemaVersion).toBe(STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION);
+    expect(validateStudioProjectV2(project)).toBe(true);
+    (compositionInputs as { schemaVersion: number }).schemaVersion = STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION + 1;
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
   it('accepts exact authorization/job/receipt binding and rejects ±1 tampering', () => {
     const project = makeProject();
     addSucceededVideoTake(project);
@@ -1138,7 +1308,7 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(true);
   });
 
-  it('decouples project-reference proxy ownership from composition and rejects duplicate live work globally', () => {
+  it('keeps terminal reference history and rejects duplicate live work for one semantic target', () => {
     const terminal = makeProject();
     addProjectReferenceRetryLineage(
       terminal,
@@ -1151,7 +1321,6 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
         duplicateChargeAcknowledgedAt: null,
       }
     );
-    terminal.shots.shot_1!.referenceIds = [];
     expect(validateStudioProjectV2(terminal)).toBe(true);
 
     const nonterminal = makeProject();
@@ -1164,20 +1333,12 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
         duplicateChargeAcknowledgedAt: null,
       }
     );
-    nonterminal.shots.shot_1!.referenceIds = [];
     expect(validateStudioProjectV2(nonterminal)).toBe(true);
 
-    nonterminal.beats.beat_1!.shotOrder.push('shot_2');
-    nonterminal.shots.shot_2 = makeShot('shot_2');
     const duplicateRevision = nonterminal.revision;
-    const duplicateItem = makeItem(duplicateRevision, 'shot_2', 'seed_still', seedPlan(), 1, nonterminal.id);
-    duplicateItem.projectReferenceId = 'ref_background';
-    duplicateItem.id = createStudioQuotedGenerationId({
-      projectId: nonterminal.id,
-      projectRevision: duplicateRevision,
-      shotId: 'shot_2',
-      purpose: 'seed_still',
-      projectReferenceId: 'ref_background',
+    const duplicateItem = makeItem(duplicateRevision, 'shot_1', 'reference_image', seedPlan(), 1, nonterminal.id, {
+      kind: 'reference',
+      referenceId: 'ref_background',
     });
     const duplicateAuthorization = makeAuthorization(
       'auth_duplicate_live_reference',
@@ -1186,11 +1347,47 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
       [],
       nonterminal.id
     );
-    const duplicateJob = makeJob('job_duplicate_live_reference', duplicateAuthorization, duplicateItem, {
-      projectReferenceId: 'ref_background',
-    });
+    const duplicateJob = makeJob('job_duplicate_live_reference', duplicateAuthorization, duplicateItem);
     addAuthorizationWithJobs(nonterminal, duplicateAuthorization, [duplicateJob]);
     expect(validateStudioProjectV2(nonterminal)).toBe(false);
+  });
+
+  it('rejects branching paid retry lineage from one predecessor', () => {
+    const project = makeProject();
+    const { predecessor } = addProjectReferenceRetryLineage(
+      project,
+      { status: 'failed', error: { code: 'timeout', messageKey: 'timeout' } },
+      {
+        status: 'failed',
+        error: { code: 'timeout', messageKey: 'timeout' },
+        retryReason: 'provider_failure',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+      }
+    );
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    const branchRevision = project.revision;
+    const branchItem = makeItem(branchRevision, 'shot_1', 'reference_image', seedPlan(), 1, project.id, {
+      kind: 'reference',
+      referenceId: 'ref_background',
+    });
+    const branchAuthorization = makeAuthorization(
+      'auth_reference_retry_branch',
+      branchRevision,
+      [branchItem],
+      [],
+      project.id
+    );
+    const branch = makeJob('job_reference_retry_branch', branchAuthorization, branchItem, {
+      status: 'failed',
+      error: { code: 'timeout', messageKey: 'timeout' },
+      retryOfJobId: predecessor.id,
+      retryReason: 'provider_failure',
+    });
+    addAuthorizationWithJobs(project, branchAuthorization, [branch]);
+
+    expect(validateStudioProjectV2(project)).toBe(false);
   });
 
   it('keeps failed project-reference downloads on same-job recovery instead of paid lineage', () => {
@@ -1290,24 +1487,103 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
-  it('requires a live exact Brief reference for nonterminal work but permits terminal detached history', () => {
+  it('requires the exact approved semantic reference for live work and retains superseded terminal provenance', () => {
     const project = makeProject();
-    project.assets.reference_1 = makeImageAsset('reference_1', null, 'imports', {
-      briefReferenceRole: 'look',
-      briefReferenceLabel: 'Palette',
-    });
-    const item = makeItem(1, 'shot_1', 'seed_still', seedPlan({ assetId: 'reference_1', sha256: digest }));
-    const authorization = makeAuthorization('auth_ref', 1, [item]);
+    const reference = addApprovedProjectReference(project);
+    project.shots.shot_1!.referenceBinding = {
+      status: 'ready',
+      characterReferenceIds: ['ref_character'],
+      backgroundReferenceId: null,
+    };
+    const item = makeItem(
+      project.revision,
+      'shot_1',
+      'seed_still',
+      seedPlan({
+        referenceId: 'ref_character',
+        kind: 'character',
+        assetId: reference.id,
+        sha256: reference.sha256,
+      })
+    );
+    const authorization = makeAuthorization('auth_ref', project.revision, [item]);
     const job = makeJob('job_ref', authorization, item);
     addAuthorizationWithJobs(project, authorization, [job]);
     expect(validateStudioProjectV2(project)).toBe(true);
-    project.assets.reference_1!.sha256 = 'c'.repeat(64);
+    reference.sha256 = 'c'.repeat(64);
     expect(validateStudioProjectV2(project)).toBe(false);
-    delete project.assets.reference_1;
-    expect(validateStudioProjectV2(project)).toBe(false);
+    reference.sha256 = digest;
+    addApprovedProjectReference(project, 'ref_character', 'reference_2');
+    expect(validateStudioProjectV2(project)).toBe(true);
     job.status = 'failed';
     job.error = { code: 'timeout', messageKey: 'timeout' };
     expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('preserves exact per-Shot character order independently of catalogue order', () => {
+    const project = makeProject();
+    addApprovedProjectReference(project, 'ref_character_ming', 'reference_ming');
+    addApprovedProjectReference(project, 'ref_character_mei', 'reference_mei');
+    project.references.ref_character_ming!.label = 'Ming';
+    project.references.ref_character_mei!.label = 'Mei';
+    expect(project.referenceOrder).toEqual(['ref_character_ming', 'ref_character_mei']);
+
+    project.shots.shot_1!.referenceBinding = {
+      status: 'ready',
+      characterReferenceIds: ['ref_character_mei', 'ref_character_ming'],
+      backgroundReferenceId: null,
+    };
+
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('rejects wrong-kind, cross-semantic, candidate-only, and non-managed frozen reference inputs', () => {
+    const addFrozenReferenceJob = (
+      project: StudioProjectV2,
+      referenceId: string,
+      kind: 'character' | 'background',
+      asset: StudioAssetV2
+    ): void => {
+      project.shots.shot_1!.referenceBinding = {
+        status: 'ready',
+        characterReferenceIds: kind === 'character' ? [referenceId] : [],
+        backgroundReferenceId: kind === 'background' ? referenceId : null,
+      };
+      const item = makeItem(
+        project.revision,
+        'shot_1',
+        'seed_still',
+        seedPlan({ referenceId, kind, assetId: asset.id, sha256: asset.sha256 })
+      );
+      const authorization = makeAuthorization(`auth_frozen_${referenceId}`, project.revision, [item]);
+      addAuthorizationWithJobs(project, authorization, [makeJob(`job_frozen_${referenceId}`, authorization, item)]);
+    };
+
+    const wrongKind = makeProject();
+    const wrongKindAsset = addApprovedProjectReference(wrongKind);
+    addFrozenReferenceJob(wrongKind, 'ref_character', 'background', wrongKindAsset);
+    expect(validateStudioProjectV2(wrongKind)).toBe(false);
+
+    const crossSemantic = makeProject();
+    const firstAsset = addApprovedProjectReference(crossSemantic);
+    addApprovedProjectReference(crossSemantic, 'ref_character_other', 'reference_other');
+    crossSemantic.references.ref_character_other!.label = 'Other character';
+    addFrozenReferenceJob(crossSemantic, 'ref_character_other', 'character', firstAsset);
+    expect(validateStudioProjectV2(crossSemantic)).toBe(false);
+
+    const candidateOnly = makeProject();
+    const candidateAsset = addApprovedProjectReference(candidateOnly, 'ref_character_candidate', 'reference_candidate');
+    const candidateReference = candidateOnly.references.ref_character_candidate!;
+    candidateReference.candidateAssetId = candidateReference.approvedAssetId;
+    candidateReference.approvedAssetId = null;
+    addFrozenReferenceJob(candidateOnly, candidateReference.id, 'character', candidateAsset);
+    expect(validateStudioProjectV2(candidateOnly)).toBe(false);
+
+    const wrongCollection = makeProject();
+    const wrongCollectionAsset = addApprovedProjectReference(wrongCollection);
+    wrongCollectionAsset.managedAsset.collection = 'imports';
+    addFrozenReferenceJob(wrongCollection, 'ref_character', 'character', wrongCollectionAsset);
+    expect(validateStudioProjectV2(wrongCollection)).toBe(false);
   });
 
   it('rejects quoted generation counts other than exactly one', () => {
@@ -1361,7 +1637,7 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     const dependentPlan: StudioGenerationRequestPlan = {
       kind: 'after_take_selection',
       template: {
-        prompt: 'seed-dependent video prompt',
+        composition: null as never,
         aspectRatio: '16:9',
         resolution: '1080p',
         durationSeconds: 8,
@@ -1371,7 +1647,13 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     };
     const dependentItem = makeItem(1, 'shot_1', 'video_take', dependentPlan);
     const authorization = makeAuthorization('auth_seed_dependency', 1, [upstream], [dependentItem]);
-    const generatedSeed = makeImageAsset('seed_generated', 'shot_1', 'assets');
+    const upstreamComposition =
+      upstream.requestPlan.kind === 'resolved' ? upstream.requestPlan.snapshot.composition : null;
+    if (upstreamComposition === null) throw new Error('expected resolved seed composition');
+    const generatedSeed = makeImageAsset('seed_generated', 'shot_1', 'assets', {
+      producerJobId: 'job_seed_upstream',
+      compositionDigest: studioGenerationCompositionDigestV2(upstreamComposition),
+    });
     project.assets[generatedSeed.id] = generatedSeed;
     project.shots.shot_1!.assetIds.push(generatedSeed.id);
     project.shots.shot_1!.seedStillId = generatedSeed.id;
@@ -1431,7 +1713,7 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     const plan = {
       kind: 'after_take_selection' as const,
       template: {
-        prompt: 'existing predecessor video prompt',
+        composition: null as never,
         aspectRatio: '16:9' as const,
         resolution: '1080p' as const,
         durationSeconds: 8,
@@ -1506,54 +1788,47 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(true);
   });
 
-  it('allows distinct project references to share one proxy Shot and purpose in an authorization', () => {
+  it('allows distinct character references to share one reference-image authorization', () => {
     const project = makeProject();
-    const referenceIds = ['ref_character', 'ref_background'] as const;
+    const referenceIds = ['ref_character_ming', 'ref_character_mei'] as const;
+    project.referencePlanStatus = 'planned';
     project.referenceOrder = [...referenceIds];
-    project.references.ref_character = {
-      id: 'ref_character',
+    project.references.ref_character_ming = {
+      id: 'ref_character_ming',
       kind: 'character',
       label: 'Ming',
       prompt: 'Character sheet for Ming.',
       candidateAssetId: null,
-      candidateJobId: 'job_ref_character',
       approvedAssetId: null,
       supersededAssetIds: [],
+      jobIds: [],
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    project.references.ref_background = {
-      id: 'ref_background',
-      kind: 'background',
-      label: 'Courtyard',
-      prompt: 'Recurring courtyard background.',
+    project.references.ref_character_mei = {
+      id: 'ref_character_mei',
+      kind: 'character',
+      label: 'Mei',
+      prompt: 'Character sheet for Mei.',
       candidateAssetId: null,
-      candidateJobId: 'job_ref_background',
       approvedAssetId: null,
       supersededAssetIds: [],
+      jobIds: [],
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    project.shots.shot_1!.referenceIds = [...referenceIds];
 
-    const items = referenceIds.map((projectReferenceId) => {
-      const item = makeItem(project.revision, 'shot_1', 'seed_still', seedPlan());
-      item.projectReferenceId = projectReferenceId;
-      item.id = createStudioQuotedGenerationId({
-        projectId: project.id,
-        projectRevision: project.revision,
-        shotId: item.shotId,
-        purpose: item.purpose,
-        projectReferenceId,
-      });
-      return item;
-    });
-    const authorization = makeAuthorization('auth_shared_reference_proxy', project.revision, items);
-    const jobs = items.map((item) =>
-      makeJob(`job_${item.projectReferenceId!}`, authorization, item, {
-        projectReferenceId: item.projectReferenceId,
+    const items = referenceIds.map((referenceId) =>
+      makeItem(project.revision, 'shot_1', 'reference_image', seedPlan(), 1, project.id, {
+        kind: 'reference',
+        referenceId,
       })
     );
+    const authorization = makeAuthorization('auth_shared_reference_proxy', project.revision, items);
+    const jobs = items.map((item) => {
+      if (item.target.kind !== 'reference') throw new Error('expected reference target');
+      return makeJob(`job_${item.target.referenceId}`, authorization, item);
+    });
     addAuthorizationWithJobs(project, authorization, jobs);
 
     expect(validateStudioProjectV2(project)).toBe(true);
@@ -1795,9 +2070,7 @@ describe('proposal row validators', () => {
   it('validates exact proposed Shot keys and duration bounds', () => {
     const proposed = {
       shotId: 'shot_1',
-      line: '',
-      narration: '',
-      onScreenText: '',
+      shootingScript: '',
       durationSeconds: 8,
       chainBreak: 'none',
     };
@@ -1814,8 +2087,7 @@ describe('proposal row validators', () => {
       'seed_still',
       'conditioning_frame',
       'conditioning_input',
-      'narration',
-      'on_screen_text',
+      'shooting_script',
     ] as const satisfies readonly StudioFixedShotReasonV2[];
     const row = { shotId: 'shot_1', reasons: [...reasons] };
     expect(validateStudioFixedShotReviewV2(row)).toBe(true);

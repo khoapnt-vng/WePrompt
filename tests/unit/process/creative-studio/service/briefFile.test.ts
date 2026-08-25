@@ -9,6 +9,7 @@ import { createEmptyStudioProjectV2 } from '@process/services/creative-studio/se
 import {
   createStudioProjectManifestV2,
   decodeStudioProjectManifestV2,
+  STUDIO_BRIEF_METADATA_SCHEMA_VERSION,
   studioBriefSha256,
 } from '@process/services/creative-studio/service/briefFile';
 
@@ -30,25 +31,19 @@ describe('Creative Studio brief file manifest', () => {
     const manifest = createStudioProjectManifestV2(project());
 
     expect(manifest).not.toHaveProperty('brief');
-    expect(manifest.briefFile).toEqual({ schemaVersion: 1, sha256: studioBriefSha256('The original Brief.') });
+    expect(manifest.briefFile).toEqual({
+      schemaVersion: STUDIO_BRIEF_METADATA_SCHEMA_VERSION,
+      sha256: studioBriefSha256('The original Brief.'),
+    });
     expect(decodeStudioProjectManifestV2(manifest, 'An outside edit.')).toEqual({
-      kind: 'brief_file',
       project: { ...project(), brief: 'An outside edit.' },
       synchronized: false,
     });
   });
 
-  it('accepts an exact legacy manifest for migration and gives a present file authority over its cache', () => {
-    expect(decodeStudioProjectManifestV2(project(), null)).toEqual({
-      kind: 'legacy',
-      project: project(),
-      synchronized: false,
-    });
-    expect(decodeStudioProjectManifestV2(project(), 'An outside edit.')).toMatchObject({
-      kind: 'legacy',
-      project: { brief: 'An outside edit.' },
-      synchronized: false,
-    });
+  it('rejects an inline-Brief project instead of treating it as a migration source', () => {
+    expect(decodeStudioProjectManifestV2(project(), null)).toBeNull();
+    expect(decodeStudioProjectManifestV2(project(), 'An outside edit.')).toBeNull();
   });
 
   it('fails closed on missing current prose, malformed metadata, and an oversized hydrated Brief', () => {

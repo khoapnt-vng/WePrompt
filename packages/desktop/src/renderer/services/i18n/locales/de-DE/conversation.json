@@ -879,38 +879,16 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "Projektreferenzen",
-      "inheritanceDescription": "Jedes neue Referenzstill verwendet alle aktiven Besetzungs- und Look-Bilder dieses Projekts.",
-      "castHeading": "Besetzung",
-      "lookHeading": "Look",
-      "castEmpty": "Noch keine Besetzungsreferenzen.",
-      "lookEmpty": "Noch keine Look-Referenzen.",
-      "addCast": "Besetzungsreferenz hinzufügen",
-      "addLook": "Look-Referenz hinzufügen",
-      "activeCount": "{{count}} aktive Referenzen",
-      "activeCount_one": "{{count}} aktive Referenz",
-      "activeCount_other": "{{count}} aktive Referenzen",
-      "limitReached": "Dieses Projekt hat bereits 6 aktive Referenzen. Entferne eine, bevor du eine weitere hinzufügst.",
-      "removeFromBrief": "Aus dem Brief entfernen",
-      "removeAccessible": "{{label}} aus dem Brief entfernen",
-      "previewAccessible": "{{role}}-Referenz: {{label}}",
-      "engineCapacityNone": "Diese Bild-Engine wurde noch nicht für Referenzbilder validiert. Öffne die Modelleinstellungen und validiere sie erneut.",
-      "engineMenuCapacityNone": "Keine Referenzbilder",
-      "engineCapacityMaximum": "Bis zu {{count}} Referenzbilder",
-      "engineCapacityMaximum_one": "Bis zu {{count}} Referenzbild",
-      "engineCapacityMaximum_other": "Bis zu {{count}} Referenzbilder",
-      "capacityMismatch": "Du hast {{count}} aktive Referenzen, diese Bild-Engine unterstützt jedoch {{maximum}}. Neue Referenzstills bleiben blockiert, bis du Referenzen entfernst oder die Engine wechselst bzw. erneut validierst.",
-      "importError": "Die Referenz konnte nicht hinzugefügt werden. Versuche es erneut."
-    },
     "workspace": {
-      "views": { "references": "Referenzen" },
+      "views": {
+        "references": "Referenzen"
+      },
       "referenceWorkflow": {
-        "description": "Genehmigen Sie zuerst stabile Charakterblätter und danach wiederkehrende Hintergründe. Shot-Kandidaten verwenden diese genehmigten Referenzen automatisch.",
+        "description": "Genehmigen Sie zuerst die kanonischen Charakterbilder und danach die kanonischen Bilder wiederkehrender Hintergründe. Binden Sie die genehmigten Referenzen an jeden Shot, bevor Sie das Board oder das erste Bild generieren.",
         "generationScope": "Generierungsumfang",
         "characters": {
           "title": "Charaktere",
-          "description": "Genehmigen Sie ein Identitätsblatt für jeden benannten Charakter.",
+          "description": "Genehmigen Sie genau ein kanonisches Bild für jeden benannten Charakter.",
           "empty": "Diese Geschichte enthält keine benannten Charaktere. Hintergründe können jetzt geprüft werden."
         },
         "backgrounds": {
@@ -934,17 +912,41 @@
         "regenerate": "Neu erzeugen",
         "ready": "Alle erforderlichen Referenzen sind genehmigt. Sie können mit der Tabelle fortfahren.",
         "notReady": "Genehmigen Sie alle erforderlichen Referenzen, um fortzufahren.",
-        "continueToTable": "Weiter zur Tabelle"
+        "continueToTable": "Weiter zur Tabelle",
+        "approvalProgress": "{{approved}} von {{total}} Referenzen genehmigt",
+        "bindings": {
+          "title": "Shot-Zuordnungen",
+          "description": "Wähle die genehmigten Figuren und den Hintergrund, die jeder Shot für Board-Panel und erstes Bild verwendet.",
+          "empty": "Es gibt keine aktiven Shots zum Zuordnen.",
+          "shot": "Shot {{position}}",
+          "unassigned": "Für diesen Shot wurde noch keine Referenzentscheidung getroffen.",
+          "invalid": "Diese gespeicherte Zuordnung ist nicht mehr gültig. Wähle aktuelle genehmigte Referenzen und speichere erneut.",
+          "capacity": "{{count}} Referenzen sind gewählt, aber die Bildroute unterstützt {{limit}}.",
+          "characters": "Figuren",
+          "background": "Hintergrund",
+          "save": "Zuordnung speichern"
+        }
       },
-      "references": { "referenceCount": "Referenzen für {{total}} Elemente angefordert" },
+      "references": {
+        "referenceCount": "Referenzen für {{total}} Elemente angefordert"
+      },
       "handoffs": {
         "referenceCount": "Diese Übergabe enthält {{total}} Referenzen",
         "progress": "Warteschlange {{queued}} · Läuft {{running}} · Erfolgreich {{succeeded}} · Fehlgeschlagen {{failed}}",
         "reviewReferences": "Referenzen prüfen",
-        "retryFailed": "Fehlgeschlagene Referenzen wiederholen"
+        "retryFailed": "Fehlgeschlagene Referenzen wiederholen",
+        "awaiting_spend": "Wartet auf Kostenprüfung",
+        "running": "Referenzgenerierung läuft.",
+        "succeeded": "Alle angeforderten Referenzen wurden generiert.",
+        "partially_failed": "Einige Referenzen wurden generiert; fehlgeschlagene separat wiederholen.",
+        "failed": "Die Referenzgenerierung ist fehlgeschlagen. Es wird nichts automatisch wiederholt.",
+        "dismissed": "Ohne Ausgaben verworfen"
       },
       "table": {
-        "columns": { "panel": "Panel" },
+        "columns": {
+          "panel": "Panel",
+          "story": "Story"
+        },
         "board": {
           "label": "Director-Board-Steuerung",
           "progress": "{{drawn}} von {{total}} Panels gezeichnet",
@@ -1042,15 +1044,8 @@
       "proposals": {
         "before": "Vorher",
         "after": "Nachher",
-        "placement": "Platzierung",
         "ownerBeat": "Zugehöriger Beat",
-        "order": "Reihenfolge",
-        "beforeItem": "Vor {{kind}}",
-        "technicalDetails": "Technische Details",
         "reviewUnavailable": "Dieser Vorschlag enthält eine nicht unterstützte Änderung und kann nicht angenommen werden.",
-        "referenceKind": "Referenztyp",
-        "referencePrompt": "Referenz-Prompt",
-        "assignedShots": "Zugewiesene Shots",
         "chatDecisionBusy": "Eine andere geprüfte Aktion läuft noch.",
         "chatDirty": "Speichere oder verwerfe alle Arbeitsbereichsentwürfe, bevor du einen Director-Vorschlag annimmst oder ablehnst.",
         "chatNoPending": "Es gibt keinen ausstehenden Regievorschlag.",
@@ -1058,8 +1053,40 @@
         "chatStale": "Dieser Vorschlag entspricht nicht mehr der aktuellen Projektversion.",
         "chatAccepted": "Vorschlag angenommen.",
         "chatRejected": "Vorschlag abgelehnt.",
-        "fixedReason": {
-          "video_asset": "Dieser Shot hat ein aktuelles Bild."
+        "reviewStale": "Diese Prüfung wurde aus Revision {{baseRevision}} abgeleitet; das Projekt hat jetzt Revision {{currentRevision}}.",
+        "noChanges": "Dieser Vorschlag enthält keine semantische Änderung.",
+        "subject": {
+          "project": "Projekt",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "Hinzugefügt",
+          "edited": "Bearbeitet",
+          "removed": "Entfernt",
+          "reordered": "Neu angeordnet"
+        },
+        "placementValue": {
+          "active": "Aktiv",
+          "bin": "Ablage",
+          "removed": "Entfernt"
+        },
+        "field": {
+          "name": "Name",
+          "brief": "Briefing",
+          "rules": "Regeln",
+          "aspectRatio": "Seitenverhältnis",
+          "resolution": "Auflösung",
+          "targetDurationSeconds": "Zieldauer",
+          "boardStyle": "Board-Stil",
+          "title": "Titel",
+          "story": "Story",
+          "targetSeconds": "Beat-Ziel",
+          "shootingScript": "Drehbuch",
+          "durationSeconds": "Dauer",
+          "chainBreak": "Kontinuität",
+          "placement": "Position",
+          "order": "Reihenfolge"
         }
       },
       "beatPanel": {
@@ -1092,19 +1119,16 @@
           "beatBodyStale": "Alle Shots sowie alle erstellten und bezahlten Inhalte bleiben bei diesem Beat. Wenn er in den Papierkorb verschoben wird, werden {{shots}} als veraltet markiert.",
           "confirmBeat": "In den Papierkorb verschieben"
         },
-        "beatFieldsLabel": "Handlung, Look und Zieldauer des Beats",
+        "beatFieldsLabel": "Beat-Story und Ziel",
         "fieldGuidance": {
-          "action": "Handlung · Das Einzige, was du schreibst",
-          "look": "Look · Jede Einstellung übernimmt diesen Look"
+          "story": "Story · Erzählerischer Zweck und Verlauf dieses Beats"
         },
         "fields": {
-          "action": "Handlung",
-          "look": "Look",
-          "targetSeconds": "Zieldauer in Sekunden"
+          "targetSeconds": "Zieldauer in Sekunden",
+          "story": "Story",
+          "shootingScript": "Drehbuch",
+          "shootingScriptFor": "Drehbuch für Shot {{index}}"
         },
-        "lookCounter": "{{count}} / {{limit}} Wörter",
-        "lookCounter_one": "{{count}} / {{limit}} Wörter",
-        "lookCounter_other": "{{count}} / {{limit}} Wörter",
         "chain": {
           "hardCutState": "Harter Schnitt · Beginnt mit dem ersten Bild",
           "hardCutUnavailable": "Änderungen am harten Schnitt sind vorübergehend nicht verfügbar. Zuerst muss die Schätzung für die erforderlichen Ersatzmedien geprüft werden.",
@@ -1114,12 +1138,6 @@
           "reviewRejoinDescription": "Beim Wiederverknüpfen von Shot {{shot}} wird die Auswahl des ersten Bildes gelöscht und das letzte, schnittgenaue Bild von Shot {{previous}} verwendet. Nach der Bestätigung kann die kostenlose Bildextraktion abgeschlossen werden, bevor dieser Shot und die fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt übermittelt werden.",
           "segmentHead": "Kettenanfang · Beginnt mit dem ersten Bild",
           "continuous": "Setzt das letzte Bild von Shot {{position}} fort"
-        },
-        "derivation": {
-          "derived": "Aus der Handlung abgeleitet",
-          "detached": "Abgelöst · Dein Text",
-          "attachedLineGuidance": "Aus der Handlung geschrieben · Zum Ablösen bearbeiten",
-          "detachedLineGuidance": "Deine Worte · Folgen der Handlung nicht mehr"
         },
         "coverage": {
           "trimGuidance": "Kante · Trimmen · Kostenlos",
@@ -1157,8 +1175,8 @@
           "label": "Beat-Vorschau",
           "noMedia": "Beat-Vorschau nicht verfügbar",
           "mediaError": "Das aktuelle Bild konnte nicht angezeigt werden.",
-          "videoLabel": "Video von Shot {{position}} · {{line}}",
-          "slateLabel": "Planungsplatzhalter von Shot {{position}} · {{line}}",
+          "videoLabel": "Video von Shot {{position}} · {{shootingScript}}",
+          "slateLabel": "Planungsplatzhalter von Shot {{position}} · {{shootingScript}}",
           "slate": "Planungsplatzhalter",
           "slateHold": "Dauer {{clock}}",
           "play": "Beat abspielen",
@@ -1170,31 +1188,23 @@
           "nextJoin": "Nächster Schnitt",
           "loopJoin": "Nächstgelegenen Schnitt wiederholen",
           "keyboardGuidance": "Leertaste spielt · Pfeile suchen · [ ] Schnitte · L wiederholt"
-        }
+        },
+        "directorRequestHint": "Bitte den Creative Director um einen geprüften Vorschlag zur Neuaufteilung."
       },
       "controls": {
         "briefAndRulesTitle": "Brief & Regeln",
         "undoLabel": {
           "promote_board_panel": "Panel als erstes Bild verwenden",
-          "set_project_references": "Projektreferenzen",
-          "set_shot_background_reference": "Shot-Hintergrundreferenz"
+          "set_reference_plan": "Referenzplan",
+          "approve_reference": "Referenzgenehmigung",
+          "set_shot_reference_binding": "Shot-Referenzzuordnung"
         }
       },
       "gate": {
-        "backgroundChoice": {
-          "title": "Hintergrund für jeden Shot auswählen",
-          "description": "Weise vor der Preisberechnung jedem Shot einen genehmigten Hintergrund zu. Diese kostenlose Änderung behält die Charakterreferenzen bei.",
-          "shotLabel": "Hintergrund für Shot {{shotId}}",
-          "incomplete": "Wähle für jeden aufgeführten Shot einen Hintergrund aus.",
-          "assign": "Hintergründe zuweisen",
-          "assigning": "Hintergründe werden zugewiesen…",
-          "noneTitle": "Keine genehmigten Hintergründe verfügbar.",
-          "noneBody": "Prüfe die Referenzen und genehmige einen Hintergrund, bevor du den Preis für diese Generierung berechnest.",
-          "reviewReferences": "Referenzen prüfen",
-          "invalid": "Diese Hintergrundauswahl ist nicht mehr aktuell. Prüfe die Referenzen oder schließe diese Prüfung und versuche es erneut.",
-          "failed": "Die Hintergründe wurden nicht zugewiesen. Prüfe das aktuelle Projekt und versuche es erneut."
+        "purpose": {
+          "board_still": "Board-Panel",
+          "reference_image": "Referenzbild"
         },
-        "purpose": { "board_still": "Board-Panel" },
         "promotion": {
           "title": "Panel als erstes Bild verwenden",
           "summary": "Verwende das aktuelle Board-Panel von Shot {{shotId}} als erstes Bild. Die Kontinuitätsgrenze des Shots ändert sich dadurch nicht.",
@@ -1224,7 +1234,9 @@
         "hideBreakdown": "Jede Generierung ausblenden",
         "showBreakdown": "Jede Generierung anzeigen",
         "routeShared": "Alle über {{model}}",
-        "group": { "required": "Erforderlich" },
+        "group": {
+          "required": "Erforderlich"
+        },
         "continuity": {
           "severTitle": "Harten Schnitt prüfen",
           "rejoinTitle": "Wiederverknüpfung prüfen",
@@ -1260,6 +1272,19 @@
             "missingConditioning": "Für eine Videoaufnahme fehlt ein geeignetes erstes Bild oder Vorgängerbild. Fügen Sie das erforderliche Bild hinzu oder wählen Sie es aus.",
             "unsafeTotal": "Die Gesamtsumme der Schätzung konnte nicht sicher dargestellt werden. Reduzieren Sie die Auswahl; es wurde nichts übermittelt."
           }
+        },
+        "reviewShotBinding": "Shot-Zuordnung prüfen",
+        "readout": {
+          "prompt": "Exakter Prompt",
+          "rendersAs": "Wird gerendert als",
+          "sourceRevision": "Quellrevision",
+          "source": "Quelle",
+          "story": "Story",
+          "shootingScript": "Drehbuch",
+          "referencePrompt": "Referenzbeschreibung",
+          "references": "Aufgelöste Referenzen",
+          "noReferences": "Keine direkten Referenzeingaben",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
         }
       }
     },
@@ -1614,106 +1639,6 @@
       "durationSeconds_other": "{{seconds}} Sekunden",
       "selected": "Ausgewählte Szene"
     },
-    "inspector": {
-      "title": "Szenenanweisung",
-      "sectionsLabel": "Bereiche zur Szenenbearbeitung",
-      "directionTab": "Visuell",
-      "scriptTab": "Skript",
-      "titleLabel": "Szenentitel",
-      "purposeLabel": "Szenenziel",
-      "purposePlaceholder": "Was soll diese Szene erreichen?",
-      "visualPromptLabel": "Visueller Prompt",
-      "visualPromptPlaceholder": "Beschreibe Einstellung, Motiv, Umgebung, Licht und Bewegung.",
-      "narrationLabel": "Sprechertext",
-      "onScreenTextLabel": "Bildschirmtext",
-      "mediaKindLabel": "Ausgabetyp",
-      "durationLabel": "Szenendauer in Sekunden",
-      "invalidDuration": "Gib eine ganze Zahl von 1 bis 60 Sekunden ein.",
-      "saving": "Szene wird gespeichert...",
-      "saved": "Szene gespeichert",
-      "saveFailed": "Die Szene konnte nicht gespeichert werden.",
-      "unsavedChanges": "Deine nicht gespeicherten Änderungen bleiben erhalten."
-    },
-    "draft": {
-      "title": "Storyboard entwerfen",
-      "body": "WePrompt schlägt Szenen, Sprechertext, Bildschirmtext und Timing zur Prüfung vor.",
-      "checking": "Ausgewähltes Storyboard-Modell wird geprüft...",
-      "ready": "Bereit zum Entwerfen",
-      "setupRequired": "Wähle und konfiguriere ein Storyboard-Modell für den KI-Entwurf.",
-      "unavailable": "Der Storyboard-Entwurf ist derzeit nicht verfügbar.",
-      "providerLabel": "Storyboard-Anbieter",
-      "modelLabel": "Storyboard-Modell",
-      "chargeNotice": "Der Entwurf nutzt das im Projekt ausgewählte Modell und kann Anbietergebühren verursachen.",
-      "replaceTitle": "Vorhandenes Storyboard ersetzen?",
-      "replaceBody": "Ein neuer Entwurf ersetzt alle aktuellen Szenen erst, nachdem ein gültiger Vorschlag zurückgegeben wurde.",
-      "confirm": "Storyboard entwerfen",
-      "cancel": "Abbrechen",
-      "configureModel": "Modelleinstellungen öffnen",
-      "manualFallback": "Mit manueller Bearbeitung fortfahren",
-      "failed": "Es konnte kein Storyboard entworfen werden. Deine aktuellen Szenen wurden nicht geändert."
-    },
-    "conditioning": {
-      "inputsTitle": "Eingaben für dieses Standbild",
-      "role": {
-        "cast": "Besetzung",
-        "look": "Look"
-      },
-      "maximum": "Diese Engine akzeptiert bis zu {{count}} Briefing-Referenzen.",
-      "unsupported": "Diese Bild-Engine kann keine aktiven Briefing-Referenzen verwenden. Wähle eine andere Bild-Engine oder entferne sie aus dem Briefing.",
-      "overflow": "Diese Bild-Engine akzeptiert höchstens {{maximum}} Briefing-Referenzen, aber {{count}} sind aktiv.",
-      "malformed": "Die Briefing-Referenzen wurden geändert oder sind ungültig. Aktualisiere die Prüfung vor der Generierung.",
-      "reviewChanged": "Die Briefing-Referenzen oder die Bild-Engine wurden geändert. Prüfe die aktualisierten Eingaben vor der Generierung.",
-      "plateOutOfDate": "Dieses ausgewählte erste Bild wurde mit anderen Briefing-Referenzen, einem anderen Seitenverhältnis oder einer anderen Auflösung erstellt. Du kannst den Clip trotzdem rendern."
-    },
-    "reference": {
-      "generate": "Referenz erstellen",
-      "dialogTitle": "Referenzbild erstellen",
-      "promptLabel": "Referenz-Prompt",
-      "reviewTag": "Referenz",
-      "excludedSummary": "Einige angeforderte Szenen sind nicht in dieser Freigabe enthalten, weil sie noch nicht bereit sind:",
-      "excludedNoneReady": "Keine der angeforderten Szenen ist für die Referenzgenerierung bereit:",
-      "discardExcludedRequests": "Diese Anfragen verwerfen",
-      "excludedUnavailable": "Die Szene ist nicht mehr verfügbar",
-      "excludedPromptUnusable": "Der visuelle Prompt der Szene kann kein Referenzbild beschreiben",
-      "dismissFailed": "Die Anforderungswarteschlange konnte nicht aktualisiert werden. Die Prüfung wurde geschlossen; versuchen Sie es später erneut."
-    },
-    "review": {
-      "generateReadyScenes": "{{count}} bereite Szenen generieren",
-      "generateReadyScenes_one": "{{count}} bereite Szene generieren",
-      "generateReadyScenes_other": "{{count}} bereite Szenen generieren",
-      "noReadyScenes": "Keine Szene ist bereit zur Generierung.",
-      "generateScene": "Szene generieren",
-      "regenerateScene": "Weitere Variante generieren",
-      "title": "Generierung prüfen",
-      "sceneCount": "{{count}} ausgewählte Szenen",
-      "videoSeconds": "{{seconds}} angeforderte Videosekunden",
-      "selectedDurationFull": "Ausgewählte Dauer: {{seconds}} Sekunden",
-      "selectedDurationFull_one": "Ausgewählte Dauer: {{seconds}} Sekunde",
-      "selectedDurationFull_other": "Ausgewählte Dauer: {{seconds}} Sekunden",
-      "targetDurationFull": "Zieldauer: {{seconds}} Sekunden",
-      "targetDurationFull_one": "Zieldauer: {{seconds}} Sekunde",
-      "targetDurationFull_other": "Zieldauer: {{seconds}} Sekunden",
-      "providerLabel": "Anbieter",
-      "modelLabel": "Modell",
-      "aspectRatio": "Seitenverhältnis",
-      "resolution": "Auflösung",
-      "watermarkOff": "Wasserzeichen deaktiviert",
-      "audioOff": "Stumme Ausgabe; Audiogenerierung deaktiviert",
-      "missingRoute": "Mindestens eine Szene hat keine Engine.",
-      "invalidRoute": "Mindestens eine ausgewählte Engine ist ungültig.",
-      "durationMismatch": "Das Storyboard-Timing entspricht nicht dem Projektziel.",
-      "chargeNotice": "Die Generierung nutzt dein ausgewähltes Anbieterkonto und kann Kosten verursachen.",
-      "confirm": "Bestätigen und generieren",
-      "cancel": "Abbrechen",
-      "disabledMissingRoutes": "{{count}} Einstellungen haben keine Engine. Schließe dieses Fenster, um eine festzulegen.",
-      "disabledMissingRoutes_one": "{{count}} Einstellung hat keine Engine. Schließe dieses Fenster, um eine festzulegen.",
-      "disabledMissingRoutes_other": "{{count}} Einstellungen haben keine Engine. Schließe dieses Fenster, um eine festzulegen.",
-      "setEngines": "Schließen und Engines festlegen",
-      "excludedFirstFrame": "{{count}} Einstellungen sind nicht in diesem Render enthalten, weil diese Engine nicht mit einem Bild beginnen kann.",
-      "excludedFirstFrame_one": "{{count}} Einstellung ist nicht in diesem Render enthalten, weil diese Engine nicht mit einem Bild beginnen kann.",
-      "excludedFirstFrame_other": "{{count}} Einstellungen sind nicht in diesem Render enthalten, weil diese Engine nicht mit einem Bild beginnen kann.",
-      "audioOn": "Dieses Rendering enthält generiertes Audio; stumme Engines bleiben, sofern vorhanden, stumm."
-    },
     "jobs": {
       "progress": "{{percent}} % abgeschlossen",
       "cancel": "Auftrag abbrechen",
@@ -1899,36 +1824,6 @@
         "actionRemoveReference": "Referenz entfernen",
         "actionShorten": "Diese Einstellung kürzen"
       }
-    },
-    "brief": {
-      "conversationTitle": "Briefing-Unterhaltung",
-      "danglingNotice": "Die Briefing-Unterhaltung dieses Projekts ist nicht mehr verfügbar.",
-      "danglingStartFresh": "Neue Unterhaltung beginnen",
-      "proposalTitle": "Vorgeschlagenes Skript",
-      "proposalMeta": "Basierend auf Revision {{revision}} · {{createdAt}}",
-      "proposalSummary": "{{added}} hinzugefügt · {{removed}} entfernt · {{changed}} geändert",
-      "proposalSceneChange": "Einstellung {{position}}: {{fields}}",
-      "proposalFieldSeparator": ", ",
-      "proposalNoChanges": "Keine Änderung am aktuellen Skript",
-      "proposalDiffUnavailable": "Änderungsübersicht nicht verfügbar — das Skript wurde nach Erstellung dieses Vorschlags weiterbearbeitet",
-      "proposalField": {
-        "title": "Titel",
-        "purpose": "Ziel",
-        "visualPrompt": "visueller Prompt",
-        "narration": "Sprechertext",
-        "onScreenText": "Bildschirmtext",
-        "mediaKind": "Ausgabetyp",
-        "durationSeconds": "Dauer",
-        "referenceAssetId": "Referenzbild"
-      },
-      "proposalAccept": "Skript annehmen",
-      "proposalReject": "Ablehnen",
-      "proposalAccepted": "Skript angewendet",
-      "proposalRejected": "Abgelehnt",
-      "proposalExpired": "Abgelaufen",
-      "proposalStale": "Das Skript wurde geändert, während dieser Vorschlag wartete. Fordern Sie eine neue Fassung an.",
-      "proposalRepropose": "Neue Fassung anfordern",
-      "proposalFlushRefused": "Ihre ungespeicherten Änderungen konnten nicht gespeichert werden, daher wurde der Vorschlag nicht angewendet. Korrigieren Sie die Änderungen und versuchen Sie es erneut."
     },
     "shell": {
       "showDirector": "Creative Director einblenden",

@@ -880,38 +880,16 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "Proje referansları",
-      "inheritanceDescription": "Her yeni referans karesi, bu projedeki tüm etkin Oyuncu ve Görünüm görsellerini kullanır.",
-      "castHeading": "Oyuncu",
-      "lookHeading": "Görünüm",
-      "castEmpty": "Henüz oyuncu referansı yok.",
-      "lookEmpty": "Henüz görünüm referansı yok.",
-      "addCast": "Oyuncu referansı ekle",
-      "addLook": "Görünüm referansı ekle",
-      "activeCount": "{{count}} etkin referans",
-      "activeCount_one": "{{count}} etkin referans",
-      "activeCount_other": "{{count}} etkin referans",
-      "limitReached": "Bu projede zaten 6 etkin referans var. Yeni bir tane eklemeden önce birini kaldırın.",
-      "removeFromBrief": "Brief'ten kaldır",
-      "removeAccessible": "{{label}} referansını Brief'ten kaldır",
-      "previewAccessible": "{{role}} referansı: {{label}}",
-      "engineCapacityNone": "Bu görüntü motoru referans görselleri için doğrulanmadı. Model Ayarları'nı açıp yeniden doğrulayın.",
-      "engineMenuCapacityNone": "Referans görseli yok",
-      "engineCapacityMaximum": "En fazla {{count}} referans görseli",
-      "engineCapacityMaximum_one": "En fazla {{count}} referans görseli",
-      "engineCapacityMaximum_other": "En fazla {{count}} referans görseli",
-      "capacityMismatch": "{{count}} etkin referansınız var, ancak bu görüntü motoru {{maximum}} referansı destekliyor. Referansları kaldırana veya motoru değiştirip yeniden doğrulayana kadar yeni referans kareleri engellenir.",
-      "importError": "Referans eklenemedi. Yeniden deneyin."
-    },
     "workspace": {
-      "views": { "references": "Referanslar" },
+      "views": {
+        "references": "Referanslar"
+      },
       "referenceWorkflow": {
-        "description": "Önce tutarlı karakter sayfalarını, ardından yinelenen arka planları onaylayın. Çekim adayları bu onaylı referansları otomatik olarak kullanır.",
+        "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka planların kanonik görsellerini onaylayın. Board veya ilk kare oluşturulmadan önce onaylı referansları her Shot'a bağlayın.",
         "generationScope": "Oluşturma kapsamı",
         "characters": {
           "title": "Karakterler",
-          "description": "Adı geçen her karakter için bir kimlik sayfasını onaylayın.",
+          "description": "Adı geçen her karakter için bir kanonik görsel onaylayın.",
           "empty": "Bu hikâyede adı geçen karakter yok. Arka planlar şimdi incelenebilir."
         },
         "backgrounds": {
@@ -935,17 +913,41 @@
         "regenerate": "Yeniden oluştur",
         "ready": "Gerekli tüm referanslar onaylandı. Tabloya devam edebilirsiniz.",
         "notReady": "Devam etmek için gerekli tüm referansları onaylayın.",
-        "continueToTable": "Tabloya devam et"
+        "continueToTable": "Tabloya devam et",
+        "approvalProgress": "{{total}} referansın {{approved}} tanesi onaylandı",
+        "bindings": {
+          "title": "Shot bağlamaları",
+          "description": "Her Shot’ın Board paneli ve ilk karesi için kullanacağı onaylı karakterleri ve arka planı seçin.",
+          "empty": "Bağlanacak etkin Shot yok.",
+          "shot": "Shot {{position}}",
+          "unassigned": "Bu Shot için henüz referans kararı verilmedi.",
+          "invalid": "Kaydedilen bu bağlama artık geçerli değil. Güncel onaylı referansları seçip yeniden kaydedin.",
+          "capacity": "{{count}} referans seçildi, ancak görüntü rotası {{limit}} destekliyor.",
+          "characters": "Karakterler",
+          "background": "Arka plan",
+          "save": "Bağlamayı kaydet"
+        }
       },
-      "references": { "referenceCount": "{{total}} öğe için referans istendi" },
+      "references": {
+        "referenceCount": "{{total}} öğe için referans istendi"
+      },
       "handoffs": {
         "referenceCount": "Bu aktarımda {{total}} referans var",
         "progress": "Sırada {{queued}} · Çalışıyor {{running}} · Başarılı {{succeeded}} · Başarısız {{failed}}",
         "reviewReferences": "Referansları incele",
-        "retryFailed": "Başarısız referansları yeniden dene"
+        "retryFailed": "Başarısız referansları yeniden dene",
+        "awaiting_spend": "Harcama incelemesi bekleniyor",
+        "running": "Referans üretimi sürüyor.",
+        "succeeded": "İstenen tüm referanslar üretildi.",
+        "partially_failed": "Bazı referanslar üretildi; başarısız olanları ayrı tekrar deneyin.",
+        "failed": "Referans üretimi başarısız oldu. Hiçbir şey otomatik tekrarlanmaz.",
+        "dismissed": "Harcama yapmadan kapatıldı"
       },
       "table": {
-        "columns": { "panel": "Panel" },
+        "columns": {
+          "panel": "Panel",
+          "story": "Hikâye"
+        },
         "board": {
           "label": "Yönetmen panosu denetimleri",
           "progress": "{{total}} panelden {{drawn}} tanesi çizildi",
@@ -1043,15 +1045,8 @@
       "proposals": {
         "before": "Önce",
         "after": "Sonra",
-        "placement": "Yerleşim",
         "ownerBeat": "Sahip Beat",
-        "order": "Sıra",
-        "beforeItem": "{{kind}} öncesi",
-        "technicalDetails": "Teknik ayrıntılar",
         "reviewUnavailable": "Bu öneri desteklenmeyen bir değişiklik içeriyor ve kabul edilemiyor.",
-        "referenceKind": "Referans türü",
-        "referencePrompt": "Referans istemi",
-        "assignedShots": "Atanan Shot'lar",
         "chatDecisionBusy": "Başka bir incelenmiş işlem hâlâ sürüyor.",
         "chatDirty": "Bir Yönetmen önerisini onaylamadan veya reddetmeden önce tüm çalışma alanı taslaklarını kaydedin ya da sıfırlayın.",
         "chatNoPending": "İşlem yapılacak bekleyen bir Yönetmen önerisi yok.",
@@ -1059,8 +1054,40 @@
         "chatStale": "Bu öneri artık geçerli proje revizyonuyla eşleşmiyor.",
         "chatAccepted": "Öneri kabul edildi.",
         "chatRejected": "Öneri reddedildi.",
-        "fixedReason": {
-          "video_asset": "Bu çekimin geçerli bir görüntüsü var."
+        "reviewStale": "Bu inceleme {{baseRevision}} revizyonundan türetildi; proje artık {{currentRevision}} revizyonunda.",
+        "noChanges": "Bu öneri anlamsal bir değişiklik yapmıyor.",
+        "subject": {
+          "project": "Proje",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "Eklendi",
+          "edited": "Düzenlendi",
+          "removed": "Kaldırıldı",
+          "reordered": "Yeniden sıralandı"
+        },
+        "placementValue": {
+          "active": "Etkin",
+          "bin": "Kutu",
+          "removed": "Kaldırıldı"
+        },
+        "field": {
+          "name": "Ad",
+          "brief": "Brief",
+          "rules": "Kurallar",
+          "aspectRatio": "En-boy oranı",
+          "resolution": "Çözünürlük",
+          "targetDurationSeconds": "Hedef süre",
+          "boardStyle": "Board stili",
+          "title": "Başlık",
+          "story": "Hikâye",
+          "targetSeconds": "Beat hedefi",
+          "shootingScript": "Çekim senaryosu",
+          "durationSeconds": "Süre",
+          "chainBreak": "Süreklilik",
+          "placement": "Konum",
+          "order": "Sıra"
         }
       },
       "beatPanel": {
@@ -1093,19 +1120,16 @@
           "beatBodyStale": "Tüm çekimler ile oluşturulan ve ücreti ödenmiş tüm içerik bu Beat ile kalır. Çöp Kutusu'na taşındığında şu içerik güncelliğini yitirir: {{shots}}.",
           "confirmBeat": "Çöp Kutusu'na taşı"
         },
-        "beatFieldsLabel": "Beat aksiyonu, görünümü ve hedef süresi",
+        "beatFieldsLabel": "Beat hikâyesi ve hedefi",
         "fieldGuidance": {
-          "action": "Aksiyon · Yazdığınız tek şey",
-          "look": "Görünüm · Her çekim bunu devralır"
+          "story": "Hikâye · Bu Beat’in anlatı amacı ve ilerleyişi"
         },
         "fields": {
-          "action": "Aksiyon",
-          "look": "Görünüm",
-          "targetSeconds": "Saniye cinsinden hedef süre"
+          "targetSeconds": "Saniye cinsinden hedef süre",
+          "story": "Hikâye",
+          "shootingScript": "Çekim senaryosu",
+          "shootingScriptFor": "Shot {{index}} için çekim senaryosu"
         },
-        "lookCounter": "{{count}} / {{limit}} kelime",
-        "lookCounter_one": "{{count}} / {{limit}} kelime",
-        "lookCounter_other": "{{count}} / {{limit}} kelime",
         "chain": {
           "hardCutState": "Sert kesme · İlk kareden başlar",
           "hardCutUnavailable": "Sert kesmede geçici olarak değişiklik yapılamıyor. Önce gerekli ikame medya için hazırlanan tahminin incelenmesi gerekiyor.",
@@ -1115,12 +1139,6 @@
           "reviewRejoinDescription": "Çekim {{shot}} yeniden bağlandığında ilk kare seçimi temizlenir ve Çekim {{previous}} için kırpmaya göre son kare kullanılır. Onaydan sonra bu Çekim ve sonraki sert kesmeye kadar devam eden çekimler sağlayıcıya gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
           "segmentHead": "Zincirin başı · İlk kareden başlar",
           "continuous": "{{position}}. çekimin son karesinden devam eder"
-        },
-        "derivation": {
-          "derived": "Aksiyondan türetildi",
-          "detached": "Ayrıldı · Size ait",
-          "attachedLineGuidance": "Aksiyondan yazıldı · Ayırmak için düzenleyin",
-          "detachedLineGuidance": "Sizin sözleriniz · Artık aksiyonu takip etmez"
         },
         "coverage": {
           "trimGuidance": "Kenar · Kırpma · Ücretsiz",
@@ -1158,8 +1176,8 @@
           "label": "Beat önizlemesi",
           "noMedia": "Beat önizlemesi kullanılamıyor",
           "mediaError": "Geçerli görüntünün önizlemesi gösterilemedi.",
-          "videoLabel": "Çekim {{position}} videosu · {{line}}",
-          "slateLabel": "Çekim {{position}} planlama slaytı · {{line}}",
+          "videoLabel": "Çekim {{position}} videosu · {{shootingScript}}",
+          "slateLabel": "Çekim {{position}} planlama slaytı · {{shootingScript}}",
           "slate": "Planlama slaytı",
           "slateHold": "{{clock}} boyunca tut",
           "play": "Beat'i oynat",
@@ -1171,31 +1189,23 @@
           "nextJoin": "Sonraki birleşim",
           "loopJoin": "En yakın birleşimi döngüye al",
           "keyboardGuidance": "Boşluk oynatır · Oklar arar · [ ] birleşimler · L döngü"
-        }
+        },
+        "directorRequestHint": "Yaratıcı Yönetmenden incelenmiş bir yeniden bölme önerisi isteyin."
       },
       "controls": {
         "briefAndRulesTitle": "Brief ve kurallar",
         "undoLabel": {
           "promote_board_panel": "Paneli ilk kare olarak kullan",
-          "set_project_references": "proje referansları",
-          "set_shot_background_reference": "çekim arka plan referansı"
+          "set_reference_plan": "referans planı",
+          "approve_reference": "referans onayı",
+          "set_shot_reference_binding": "Shot referans bağlaması"
         }
       },
       "gate": {
-        "backgroundChoice": {
-          "title": "Her çekim için bir arka plan seçin",
-          "description": "Üretim fiyatlandırmasından önce her çekime onaylı bir arka plan atayın. Bu ücretsiz değişiklik karakter referanslarını korur.",
-          "shotLabel": "{{shotId}} çekiminin arka planı",
-          "incomplete": "Listelenen her çekim için bir arka plan seçin.",
-          "assign": "Arka planları ata",
-          "assigning": "Arka planlar atanıyor…",
-          "noneTitle": "Kullanılabilir onaylı arka plan yok.",
-          "noneBody": "Bu üretimi fiyatlandırmadan önce referansları inceleyin ve bir arka planı onaylayın.",
-          "reviewReferences": "Referansları incele",
-          "invalid": "Bu arka plan seçimleri artık güncel değil. Referansları inceleyin veya bu incelemeyi kapatıp yeniden deneyin.",
-          "failed": "Arka plan atamaları kaydedilmedi. Mevcut projeyi inceleyip yeniden deneyin."
+        "purpose": {
+          "board_still": "Pano paneli",
+          "reference_image": "Referans görüntüsü"
         },
-        "purpose": { "board_still": "Pano paneli" },
         "promotion": {
           "title": "Paneli ilk kare olarak kullan",
           "summary": "Shot {{shotId}} için geçerli pano panelini ilk kareye yükseltin. Bu işlem Shot'ın devamlılık sınırını değiştirmez.",
@@ -1225,7 +1235,9 @@
         "hideBreakdown": "Her üretimi gizle",
         "showBreakdown": "Her üretimi göster",
         "routeShared": "Tümü {{model}} üzerinden",
-        "group": { "required": "Zorunlu" },
+        "group": {
+          "required": "Zorunlu"
+        },
         "continuity": {
           "severTitle": "Sert kesmeyi incele",
           "rejoinTitle": "Yeniden bağlanmayı incele",
@@ -1261,6 +1273,19 @@
             "missingConditioning": "Bir video çekimi için uygun ilk kare veya önceki kare yok. Gerekli görseli ekleyin ya da seçin.",
             "unsafeTotal": "Tahmin toplamı güvenli biçimde gösterilemedi. Seçimi azaltın; hiçbir şey gönderilmedi."
           }
+        },
+        "reviewShotBinding": "Shot bağlamasını incele",
+        "readout": {
+          "prompt": "Kesin prompt",
+          "rendersAs": "Şöyle işlenir",
+          "sourceRevision": "Kaynak revizyonu",
+          "source": "Kaynak",
+          "story": "Hikâye",
+          "shootingScript": "Çekim senaryosu",
+          "referencePrompt": "Referans açıklaması",
+          "references": "Çözümlenen referanslar",
+          "noReferences": "Doğrudan referans girdisi yok",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
         }
       }
     },
@@ -1615,106 +1640,6 @@
       "durationSeconds_other": "{{seconds}} saniye",
       "selected": "Seçili sahne"
     },
-    "inspector": {
-      "title": "Sahne yönlendirmesi",
-      "sectionsLabel": "Sahne düzenleme bölümleri",
-      "directionTab": "Görsel",
-      "scriptTab": "Senaryo",
-      "titleLabel": "Sahne başlığı",
-      "purposeLabel": "Sahne hedefi",
-      "purposePlaceholder": "Bu sahne neyi başarmalı?",
-      "visualPromptLabel": "Görsel prompt",
-      "visualPromptPlaceholder": "Çekimi, özneyi, ortamı, ışığı ve hareketi açıklayın.",
-      "narrationLabel": "Anlatım",
-      "onScreenTextLabel": "Ekran metni",
-      "mediaKindLabel": "Çıktı türü",
-      "durationLabel": "Saniye cinsinden sahne süresi",
-      "invalidDuration": "1 ile 60 saniye arasında bir tam sayı girin.",
-      "saving": "Sahne kaydediliyor...",
-      "saved": "Sahne kaydedildi",
-      "saveFailed": "Sahne kaydedilemedi.",
-      "unsavedChanges": "Kaydedilmemiş değişiklikleriniz korundu."
-    },
-    "draft": {
-      "title": "Storyboard taslağı oluştur",
-      "body": "WePrompt incelemeniz için sahneler, anlatım, ekran metni ve zamanlama önerecek.",
-      "checking": "Seçilen hikâye panosu modeli kontrol ediliyor...",
-      "ready": "Taslak oluşturmaya hazır",
-      "setupRequired": "Yapay zekâ ile taslak oluşturmak için bir hikâye panosu modeli seçip yapılandırın.",
-      "unavailable": "Storyboard taslağı oluşturma şu anda kullanılamıyor.",
-      "providerLabel": "Hikâye panosu sağlayıcısı",
-      "modelLabel": "Hikâye panosu modeli",
-      "chargeNotice": "Taslak, projede seçilen modeli kullanır ve sağlayıcı ücreti doğurabilir.",
-      "replaceTitle": "Mevcut storyboard değiştirilsin mi?",
-      "replaceBody": "Yeniden taslak oluşturmak, yalnızca geçerli bir öneri döndürüldükten sonra tüm mevcut sahneleri değiştirir.",
-      "confirm": "Storyboard taslağı oluştur",
-      "cancel": "İptal",
-      "configureModel": "Model ayarlarını aç",
-      "manualFallback": "Elle düzenlemeye devam et",
-      "failed": "Storyboard taslağı oluşturulamadı. Mevcut sahneleriniz değiştirilmedi."
-    },
-    "conditioning": {
-      "inputsTitle": "Bu sabit görüntünün girdileri",
-      "role": {
-        "cast": "Oyuncular",
-        "look": "Görünüm"
-      },
-      "maximum": "Bu motor en fazla {{count}} brief referansı kabul eder.",
-      "unsupported": "Bu görüntü motoru etkin brief referanslarını kullanamaz. Başka bir görüntü motoru seçin veya bunları brief'ten kaldırın.",
-      "overflow": "Bu görüntü motoru en fazla {{maximum}} brief referansı kabul eder, ancak {{count}} referans etkin.",
-      "malformed": "Brief referansları değişti veya geçersiz. Üretmeden önce incelemeyi yenileyin.",
-      "reviewChanged": "Brief referansları veya görüntü motoru değişti. Üretmeden önce yenilenen girdileri inceleyin.",
-      "plateOutOfDate": "Seçilen ilk kare farklı brief referansları, en-boy oranı veya çözünürlükle oluşturuldu. Bu klibi yine de işleyebilirsiniz."
-    },
-    "reference": {
-      "generate": "Referans oluştur",
-      "dialogTitle": "Referans görseli oluştur",
-      "promptLabel": "Referans istemi",
-      "reviewTag": "Referans",
-      "excludedSummary": "İstenen bazı sahneler hazır olmadığı için bu onaya dahil edilmedi:",
-      "excludedNoneReady": "İstenen sahnelerin hiçbiri referans oluşturmaya hazır değil:",
-      "discardExcludedRequests": "Bu istekleri sil",
-      "excludedUnavailable": "Sahne artık kullanılamıyor",
-      "excludedPromptUnusable": "Sahnenin görsel istemi bir referans görseli tanımlayamıyor",
-      "dismissFailed": "İstek kuyruğu güncellenemedi. İnceleme kapatıldı; daha sonra tekrar deneyin."
-    },
-    "review": {
-      "generateReadyScenes": "{{count}} hazır sahne oluştur",
-      "generateReadyScenes_one": "{{count}} hazır sahne oluştur",
-      "generateReadyScenes_other": "{{count}} hazır sahne oluştur",
-      "noReadyScenes": "Oluşturulmaya hazır sahne yok.",
-      "generateScene": "Sahneyi oluştur",
-      "regenerateScene": "Başka bir varyasyon oluştur",
-      "title": "Oluşturmayı gözden geçir",
-      "sceneCount": "{{count}} sahne seçildi",
-      "videoSeconds": "{{seconds}} saniye video istendi",
-      "selectedDurationFull": "Seçili süre: {{seconds}} saniye",
-      "selectedDurationFull_one": "Seçili süre: {{seconds}} saniye",
-      "selectedDurationFull_other": "Seçili süre: {{seconds}} saniye",
-      "targetDurationFull": "Hedef süre: {{seconds}} saniye",
-      "targetDurationFull_one": "Hedef süre: {{seconds}} saniye",
-      "targetDurationFull_other": "Hedef süre: {{seconds}} saniye",
-      "providerLabel": "Sağlayıcı",
-      "modelLabel": "Model",
-      "aspectRatio": "En-boy oranı",
-      "resolution": "Çözünürlük",
-      "watermarkOff": "Filigran devre dışı",
-      "audioOff": "Sessiz çıktı; ses oluşturma devre dışı",
-      "missingRoute": "En az bir sahnenin motoru yok.",
-      "invalidRoute": "Seçilen motorlardan en az biri geçersiz.",
-      "durationMismatch": "Storyboard zamanlaması proje hedefiyle eşleşmiyor.",
-      "chargeNotice": "Oluşturma, seçtiğiniz sağlayıcı hesabını kullanır ve ücrete tabi olabilir.",
-      "confirm": "Onayla ve oluştur",
-      "cancel": "İptal",
-      "disabledMissingRoutes": "{{count}} çekimin motoru yok. Bir motor ayarlamak için bunu kapatın.",
-      "disabledMissingRoutes_one": "{{count}} çekimin motoru yok. Bir motor ayarlamak için bunu kapatın.",
-      "disabledMissingRoutes_other": "{{count}} çekimin motoru yok. Bir motor ayarlamak için bunu kapatın.",
-      "setEngines": "Kapat ve motorları ayarla",
-      "excludedFirstFrame": "{{count}} çekim bu oluşturmada yok — bu motor bir kareden başlayamaz.",
-      "excludedFirstFrame_one": "{{count}} çekim bu oluşturmada yok — bu motor bir kareden başlayamaz.",
-      "excludedFirstFrame_other": "{{count}} çekim bu oluşturmada yok — bu motor bir kareden başlayamaz.",
-      "audioOn": "Bu işleme oluşturulmuş ses içerir; varsa sessiz motorlar sessiz kalır."
-    },
     "jobs": {
       "progress": "%{{percent}} tamamlandı",
       "cancel": "İşi iptal et",
@@ -1900,36 +1825,6 @@
         "actionRemoveReference": "Referansı kaldır",
         "actionShorten": "Bu çekimi kısalt"
       }
-    },
-    "brief": {
-      "conversationTitle": "Brifing konuşması",
-      "danglingNotice": "Bu projenin brifing konuşmasına artık erişilemiyor.",
-      "danglingStartFresh": "Yeni konuşma başlat",
-      "proposalTitle": "Önerilen senaryo",
-      "proposalMeta": "Revizyon {{revision}} temel alındı · {{createdAt}}",
-      "proposalSummary": "{{added}} eklendi · {{removed}} kaldırıldı · {{changed}} değiştirildi",
-      "proposalSceneChange": "Çekim {{position}}: {{fields}}",
-      "proposalFieldSeparator": ", ",
-      "proposalNoChanges": "Mevcut senaryoda değişiklik yok",
-      "proposalDiffUnavailable": "Değişiklik özeti kullanılamıyor — bu öneri taslaklandıktan sonra senaryo değişti",
-      "proposalField": {
-        "title": "başlık",
-        "purpose": "hedef",
-        "visualPrompt": "görsel prompt",
-        "narration": "anlatım",
-        "onScreenText": "ekran metni",
-        "mediaKind": "çıktı türü",
-        "durationSeconds": "süre",
-        "referenceAssetId": "referans görseli"
-      },
-      "proposalAccept": "Senaryoyu kabul et",
-      "proposalReject": "Reddet",
-      "proposalAccepted": "Senaryo uygulandı",
-      "proposalRejected": "Reddedildi",
-      "proposalExpired": "Süresi doldu",
-      "proposalStale": "Bu öneri beklerken senaryo değişti. Yeniden taslak hazırlanmasını isteyin.",
-      "proposalRepropose": "Yeniden taslak iste",
-      "proposalFlushRefused": "Kaydedilmemiş düzenlemeleriniz kaydedilemediği için öneri uygulanmadı. Düzenlemeleri düzeltip tekrar deneyin."
     },
     "shell": {
       "showDirector": "Kreatif Direktörü göster",

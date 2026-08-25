@@ -13,7 +13,8 @@ import {
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_PROJECT_REFERENCES,
-  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   isValidProviderJobId,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
@@ -79,14 +80,12 @@ const legacyLease = () => ({
 });
 
 const emptyShotV2 = () => ({
-  line: '',
-  narration: '',
-  onScreenText: '',
+  shootingScript: '',
   durationSeconds: 5,
 });
 
 const validCommandV2 = (overrides: Partial<StudioDirectorCommandRecordV2> = {}): StudioDirectorCommandRecordV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   commandId: 'command_1',
   projectId: 'project_1',
   expectedRevision: 4,
@@ -98,7 +97,7 @@ const validCommandV2 = (overrides: Partial<StudioDirectorCommandRecordV2> = {}):
 });
 
 const validSlotV2 = (overrides: Partial<StudioDirectorCommandSlotV2> = {}): StudioDirectorCommandSlotV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   commandId: 'command_1',
   reservedAt: NOW,
   deadlineAt: '2026-08-16T12:00:15.000Z',
@@ -106,7 +105,7 @@ const validSlotV2 = (overrides: Partial<StudioDirectorCommandSlotV2> = {}): Stud
 });
 
 const validLeaseV2 = (overrides: Partial<StudioDirectorCommandSlotLeaseV2> = {}): StudioDirectorCommandSlotLeaseV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   leaseId: 'lease_1',
   owner: 'writer',
   commandId: 'command_1',
@@ -133,10 +132,10 @@ describe('Studio Director V2 command contracts', () => {
     {
       kind: 'add_beat',
       beatId: 'section_new',
-      beat: { title: 'Opening', action: 'Establish the place', look: 'Morning light', targetSeconds: null },
+      beat: { title: 'Opening', story: 'Establish the place in morning light.', targetSeconds: null },
       beforeBeatId: null,
     },
-    { kind: 'edit_beat', beatId: 'section_1', changes: { action: 'A quieter opening.' } },
+    { kind: 'edit_beat', beatId: 'section_1', changes: { story: 'A quieter opening.' } },
     { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
     {
       kind: 'add_shot',
@@ -145,7 +144,7 @@ describe('Studio Director V2 command contracts', () => {
       shot: emptyShotV2(),
       beforeShotId: null,
     },
-    { kind: 'edit_shot', shotId: 'clip_1', changes: { narration: 'Hello.' } },
+    { kind: 'edit_shot', shotId: 'clip_1', changes: { shootingScript: 'Dialogue: Hello.' } },
     { kind: 'delete_shot', shotId: 'clip_1' },
     { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
     {
@@ -154,11 +153,33 @@ describe('Studio Director V2 command contracts', () => {
     },
   ];
 
-  it('accepts the exact schema-2 envelope and every current Director operation', () => {
+  it('accepts exact direct commands and keeps proposal operations out of the durable direct-command lane', () => {
     expect(operations.map((operation) => parsePendingV2(validCommandV2({ operations: [operation] })).status)).toEqual(
-      Array.from({ length: operations.length }, () => 'valid')
+      operations.map((operation) =>
+        classifyStudioDirectorOperationV2(operation.kind) === 'direct' ? 'valid' : 'invalid'
+      )
     );
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(STUDIO_PROJECT_SCHEMA_VERSION);
+    for (const operation of [
+      {
+        kind: 'set_reference_plan' as const,
+        references: [
+          {
+            kind: 'character' as const,
+            label: 'Ming',
+            prompt: 'Character reference for Ming.',
+          },
+        ],
+      },
+      {
+        kind: 'set_shot_reference_binding' as const,
+        shotId: 'clip_1',
+        characterReferenceIds: ['ref_ming'],
+        backgroundReferenceId: null,
+      },
+    ]) {
+      expect(parsePendingV2(validCommandV2({ operations: [operation] })).status).toBe('valid');
+    }
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(5);
     expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
   });
 
@@ -181,20 +202,22 @@ describe('Studio Director V2 command contracts', () => {
     expect(source).not.toMatch(/export function parseStudioDirectorCommandReceipt\s*\(/u);
   });
 
-  it('freezes an exhaustive 30-kind capability table and rejects unknown provenance', () => {
+  it('freezes the exhaustive schema-5 capability table and rejects unknown provenance', () => {
     const expected = {
       edit_project: 'operation_not_permitted',
       set_brief: 'direct',
       set_rules: 'operation_not_permitted',
-      set_project_references: 'proposal',
-      add_beat: 'direct',
-      edit_beat: 'direct',
+      set_reference_plan: 'direct',
+      approve_reference: 'operation_not_permitted',
+      set_shot_reference_binding: 'direct',
+      add_beat: 'proposal',
+      edit_beat: 'proposal',
       reorder_beats: 'direct',
       park_beat: 'operation_not_permitted',
       restore_beat: 'operation_not_permitted',
       add_binned_beat: 'proposal',
-      add_shot: 'direct',
-      edit_shot: 'direct',
+      add_shot: 'proposal',
+      edit_shot: 'proposal',
       delete_shot: 'direct',
       park_shot: 'operation_not_permitted',
       restore_shot: 'operation_not_permitted',
@@ -202,12 +225,8 @@ describe('Studio Director V2 command contracts', () => {
       apply_coverage: 'proposal',
       set_hard_cut: 'operation_not_permitted',
       set_seed_still: 'operation_not_permitted',
-      set_shot_background_reference: 'operation_not_permitted',
       promote_board_panel: 'operation_not_permitted',
       trim_shot: 'operation_not_permitted',
-      redetach_line: 'proposal',
-      rederive_line: 'proposal',
-      restore_line: 'operation_not_permitted',
       reorder_bin: 'direct',
       set_routes: 'operation_not_permitted',
       set_spend_policy: 'operation_not_permitted',
@@ -218,7 +237,7 @@ describe('Studio Director V2 command contracts', () => {
     >;
 
     expect(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2).toEqual(expected);
-    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(30);
+    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(28);
     expect(Object.isFrozen(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toBe(true);
     for (const [kind, disposition] of Object.entries(expected)) {
       expect(classifyStudioDirectorOperationV2(kind), kind).toBe(disposition);
@@ -231,7 +250,7 @@ describe('Studio Director V2 command contracts', () => {
   it.each([
     { kind: 'edit_project', changes: { name: 'Not direct' } },
     { kind: 'park_beat', beatId: 'section_1' },
-    { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_background' },
+    { kind: 'approve_reference', referenceId: 'reference_1', candidateAssetId: 'asset_1' },
     { kind: 'set_routes', imageRouteId: null, videoRouteId: null },
     { kind: 'undo_last', entryId: 'mutation_1' },
   ])('rejects the known but unavailable $kind capability', (operation) => {
@@ -253,7 +272,7 @@ describe('Studio Director V2 command contracts', () => {
         operations: [
           {
             ...operations[1],
-            beat: { title: '', action: '', look: '', rawPath: '/private/tmp/secret' },
+            beat: { title: '', story: '', rawPath: '/private/tmp/secret' },
           } as never,
         ],
       }),
@@ -278,7 +297,7 @@ describe('Studio Director V2 command contracts', () => {
     [
       'shot edit',
       validCommandV2({
-        operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: { narration: 'x', jobIds: [] } } as never],
+        operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: { shootingScript: 'x', jobIds: [] } } as never],
       }),
     ],
     [
@@ -338,7 +357,7 @@ describe('Studio Director V2 command contracts', () => {
     expect(parsePendingV2(validCommandV2({ operations: operationsWithBaggage })).status).toBe('invalid');
   });
 
-  it('enforces V2 authored bounds, safe identities, and shot durations', () => {
+  it('enforces V2 authored bounds, safe identities, and integral shot durations across direct and proposal records', () => {
     const validShot = {
       kind: 'add_shot' as const,
       beatId: 'section_1',
@@ -347,15 +366,26 @@ describe('Studio Director V2 command contracts', () => {
       beforeShotId: null,
     };
 
-    expect(parsePendingV2(validCommandV2({ operations: [validShot] })).status).toBe('valid');
-    expect(
-      parsePendingV2(
-        validCommandV2({ operations: [{ ...validShot, shot: { ...validShot.shot, durationSeconds: 3 } }] })
-      ).status
-    ).toBe('invalid');
-    expect(parsePendingV2(validCommandV2({ operations: [{ ...validShot, shotId: '../unsafe' }] })).status).toBe(
-      'invalid'
-    );
+    const proposal = (operation: unknown) => ({
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      id: 'proposal_shot',
+      projectId: 'project_1',
+      status: 'pending',
+      baseRevision: 4,
+      payload: { kind: 'mutation_batch', operations: [operation] },
+      createdAt: NOW,
+      decidedAt: null,
+    });
+    const parseProposal = (operation: unknown) =>
+      parseStudioProposalRecordV2({
+        projectId: 'project_1',
+        proposalId: 'proposal_shot',
+        value: proposal(operation),
+      });
+
+    expect(parseProposal(validShot).status).toBe('valid');
+    expect(parseProposal({ ...validShot, shot: { ...validShot.shot, durationSeconds: 3.5 } }).status).toBe('invalid');
+    expect(parseProposal({ ...validShot, shotId: '../unsafe' }).status).toBe('invalid');
     expect(
       parsePendingV2(validCommandV2({ operations: [{ kind: 'set_brief', brief: 'x'.repeat(16 * 1024 + 1) }] })).status
     ).toBe('invalid');
@@ -375,7 +405,9 @@ describe('Studio Director V2 command contracts', () => {
   });
 
   it('distinguishes unknown versions from malformed schema-2 records', () => {
-    expect(parsePendingV2({ ...validCommandV2(), schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1 })).toEqual({
+    expect(
+      parsePendingV2({ ...validCommandV2(), schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 + 1 })
+    ).toEqual({
       status: 'invalid',
       commandId: 'command_1',
       expectedRevision: 4,
@@ -411,7 +443,7 @@ describe('Studio Director V2 command contracts', () => {
   it('is total on accessor and revoked-Proxy input without executing attacker-controlled getters', () => {
     let getterCalls = 0;
     const accessorRecord: Record<string, unknown> = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'command_1',
       expectedRevision: 4,
     };
@@ -481,7 +513,7 @@ describe('Studio Director V2 slot and lease contracts', () => {
       'slot unknown version',
       () =>
         parseStudioDirectorCommandSlotV2(
-          { ...validSlotV2(), schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1 },
+          { ...validSlotV2(), schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 + 1 },
           NOW,
           WAIT_MS
         ),
@@ -509,7 +541,7 @@ describe('Studio Director V2 slot and lease contracts', () => {
 describe('Studio Director V2 receipt contracts', () => {
   const receipts: StudioDirectorCommandReceiptV2[] = [
     {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'command_1',
       projectId: 'project_1',
       expectedRevision: 4,
@@ -520,7 +552,7 @@ describe('Studio Director V2 receipt contracts', () => {
       createdShotIds: ['clip_new', 'clip_extra'],
     },
     {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'command_1',
       projectId: 'project_1',
       expectedRevision: null,
@@ -530,7 +562,7 @@ describe('Studio Director V2 receipt contracts', () => {
       reasonCode: 'malformed_record',
     },
     {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'command_1',
       projectId: 'project_1',
       expectedRevision: 4,
@@ -540,7 +572,7 @@ describe('Studio Director V2 receipt contracts', () => {
       reasonCode: 'deadline_elapsed',
     },
     {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'command_1',
       projectId: 'project_1',
       expectedRevision: 4,
@@ -659,60 +691,31 @@ describe('Studio Director V2 receipt contracts', () => {
 
 describe('Studio proposal and reference sidecar V2 contracts', () => {
   const mutationProposal: StudioProposalRecordV2 = {
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
     id: 'proposal_1',
     projectId: 'project_1',
     status: 'pending',
     baseRevision: 4,
     payload: {
       kind: 'mutation_batch',
-      operations: [{ kind: 'rederive_line', shotId: 'clip_1', line: 'A focused launch.' }],
+      operations: [{ kind: 'edit_shot', shotId: 'clip_1', changes: { shootingScript: 'A focused launch.' } }],
     },
     createdAt: NOW,
     decidedAt: null,
   };
   const proposalDecision: StudioProposalDecisionV2 = {
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
     proposalId: 'proposal_1',
     status: 'accepted',
     decidedAt: NOW,
   };
   const proposalSlot: StudioProposalSlotV2 = {
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
     proposalId: 'proposal_1',
     reservedAt: NOW,
   };
 
-  it('accepts exact mutation-batch, project-reference, legacy hard-cut, and pin-rule proposals', () => {
-    const projectReferences: StudioProposalRecordV2 = {
-      ...mutationProposal,
-      id: 'proposal_references',
-      payload: {
-        kind: 'mutation_batch',
-        operations: [
-          {
-            kind: 'set_project_references',
-            references: [
-              {
-                id: 'ref_ming',
-                kind: 'character',
-                label: 'Ming',
-                prompt: 'Character turnaround sheet for Ming.',
-                shotIds: ['clip_1'],
-              },
-            ],
-          },
-        ],
-      },
-    };
-    const legacyHardCut: StudioProposalRecordV2 = {
-      ...mutationProposal,
-      id: 'proposal_hard_cut',
-      payload: {
-        kind: 'mutation_batch',
-        operations: [{ kind: 'set_hard_cut', shotId: 'shot_2', hardCut: true }],
-      },
-    };
+  it('accepts exact prose and pin-rule proposals', () => {
     const pinRule: StudioProposalRecordV2 = {
       ...mutationProposal,
       id: 'proposal_rule',
@@ -725,20 +728,6 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     expect(
       parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_1', value: mutationProposal })
     ).toEqual({ status: 'valid', record: mutationProposal });
-    expect(
-      parseStudioProposalRecordV2({
-        projectId: 'project_1',
-        proposalId: 'proposal_references',
-        value: projectReferences,
-      })
-    ).toEqual({ status: 'valid', record: projectReferences });
-    expect(
-      parseStudioProposalRecordV2({
-        projectId: 'project_1',
-        proposalId: 'proposal_hard_cut',
-        value: legacyHardCut,
-      })
-    ).toEqual({ status: 'valid', record: legacyHardCut });
     expect(
       parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_rule', value: pinRule })
     ).toEqual({ status: 'valid', record: pinRule });
@@ -764,7 +753,10 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     expect(
       parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_1', value: directProposal })
     ).toEqual({ status: 'valid', record: directProposal });
-    for (const operation of [{ kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' }]) {
+    for (const operation of [
+      { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
+      { kind: 'set_hard_cut', shotId: 'shot_2', hardCut: true },
+    ]) {
       expect(
         parseStudioProposalRecordV2({
           projectId: 'project_1',
@@ -817,7 +809,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
   it('accepts the bounded ordered unique project-reference IDs and rejects empty, oversized, or duplicates', () => {
     const maximumReferences = Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES }, (_, index) => `ref_${index}`);
     const reference = (referenceIds: string[]): StudioReferenceRequestV2 => ({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       id: 'request_1',
       projectId: 'project_1',
       referenceIds,
@@ -841,12 +833,12 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
 
   it('accepts an exact V2 reference slot and reports V1 reference sidecars as unsupported', () => {
     const slot: StudioReferenceRequestSlotV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: 'request_1',
       reservedAt: NOW,
     };
     const reference: StudioReferenceRequestV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       id: 'request_1',
       projectId: 'project_1',
       referenceIds: ['ref_1'],
@@ -870,28 +862,21 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
   it('accepts every exact terminal reference decision and handoff receipt variant', () => {
     const decisions: StudioReferenceRequestDecisionV2[] = [
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: 'request_rejected',
         projectId: 'project_1',
         decidedAt: NOW,
         outcome: { kind: 'rejected' },
       },
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: 'request_expired',
         projectId: 'project_1',
         decidedAt: NOW,
         outcome: { kind: 'expired' },
       },
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
-        requestId: 'request_imported',
-        projectId: 'project_1',
-        decidedAt: NOW,
-        outcome: { kind: 'imported_reference', assetId: 'asset_1', projectRevision: 7 },
-      },
-      {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: 'request_generation',
         projectId: 'project_1',
         decidedAt: NOW,
@@ -910,14 +895,14 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
 
     const receipts: StudioReferenceGenerationHandoffReceiptV2[] = [
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         handoffId: 'handoff_dismissed',
         requestId: 'request_dismissed',
         completedAt: NOW,
         result: { kind: 'dismissed' },
       },
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         handoffId: 'handoff_confirmed',
         requestId: 'request_confirmed',
         completedAt: NOW,
@@ -934,7 +919,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
 
   it('rejects malformed reference decisions without weakening exact nested contracts', () => {
     const generationDecision: StudioReferenceRequestDecisionV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: 'request_1',
       projectId: 'project_1',
       decidedAt: NOW,
@@ -993,7 +978,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
 
   it('rejects malformed handoff receipts and preserves V1 sidecars as unsupported', () => {
     const confirmed: StudioReferenceGenerationHandoffReceiptV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       handoffId: 'handoff_1',
       requestId: 'request_1',
       completedAt: NOW,
@@ -1017,7 +1002,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     expect(parse({ ...confirmed, schemaVersion: 1 })).toEqual({ status: 'unsupported_prototype_schema' });
 
     const rejectedDecision: StudioReferenceRequestDecisionV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId: 'request_1',
       projectId: 'project_1',
       decidedAt: NOW,

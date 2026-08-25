@@ -124,12 +124,21 @@ const expectedLeaves = [
   'referenceWorkflow.ready',
   'referenceWorkflow.notReady',
   'referenceWorkflow.continueToTable',
+  'referenceWorkflow.approvalProgress',
+  'referenceWorkflow.bindings.title',
+  'referenceWorkflow.bindings.description',
+  'referenceWorkflow.bindings.empty',
+  'referenceWorkflow.bindings.shot',
+  'referenceWorkflow.bindings.unassigned',
+  'referenceWorkflow.bindings.invalid',
+  'referenceWorkflow.bindings.capacity',
+  'referenceWorkflow.bindings.characters',
+  'referenceWorkflow.bindings.background',
+  'referenceWorkflow.bindings.save',
   'table.label',
   'table.columns.position',
   'table.columns.beat',
-  'table.columns.action',
-  'table.columns.look',
-  'table.columns.actionLook',
+  'table.columns.story',
   'table.columns.shots',
   'table.columns.panel',
   'table.columns.length',
@@ -165,7 +174,6 @@ const expectedLeaves = [
   'table.panel.status.needsAttention',
   'table.panel.status.failed',
   'table.panel.status.cancelled',
-  'table.lookMissing',
   'table.shotCount',
   'table.shotCount_one',
   'table.shotCount_other',
@@ -373,11 +381,7 @@ const expectedLeaves = [
   'beatPanel.nextBeat',
   'beatPanel.nextBeatShort',
   'beatPanel.beatFieldsLabel',
-  'beatPanel.fieldGuidance.action',
-  'beatPanel.fieldGuidance.look',
-  'beatPanel.lookCounter',
-  'beatPanel.lookCounter_one',
-  'beatPanel.lookCounter_other',
+  'beatPanel.fieldGuidance.story',
   'beatPanel.directorRequestHint',
   'beatPanel.common.cancel',
   'beatPanel.common.keepWaiting',
@@ -385,17 +389,12 @@ const expectedLeaves = [
   'beatPanel.common.resetBeat',
   'beatPanel.common.saveShot',
   'beatPanel.common.resetShot',
-  'beatPanel.fields.action',
-  'beatPanel.fields.look',
   'beatPanel.fields.targetSeconds',
-  'beatPanel.fields.line',
-  'beatPanel.fields.lineFor',
-  'beatPanel.fields.narration',
-  'beatPanel.fields.narrationFor',
-  'beatPanel.fields.onScreenText',
-  'beatPanel.fields.onScreenTextFor',
   'beatPanel.fields.duration',
   'beatPanel.fields.durationFor',
+  'beatPanel.fields.story',
+  'beatPanel.fields.shootingScript',
+  'beatPanel.fields.shootingScriptFor',
   'beatPanel.chain.authorHardCut',
   'beatPanel.chain.hardCut',
   'beatPanel.chain.hardCutState',
@@ -478,16 +477,6 @@ const expectedLeaves = [
   'beatPanel.reorder.next',
   'beatPanel.reorder.nextShort',
   'beatPanel.reorder.announcement',
-  'beatPanel.derivation.label',
-  'beatPanel.derivation.title',
-  'beatPanel.derivation.derived',
-  'beatPanel.derivation.detached',
-  'beatPanel.derivation.attachedLineGuidance',
-  'beatPanel.derivation.detachedLineGuidance',
-  'beatPanel.derivation.stale',
-  'beatPanel.derivation.detach',
-  'beatPanel.derivation.rederiveReviewed',
-  'beatPanel.derivation.restoreHistory',
   'beatPanel.seeds.label',
   'beatPanel.seeds.title',
   'beatPanel.seeds.stillLabel',
@@ -511,8 +500,6 @@ const expectedLeaves = [
   'beatPanel.generation.generateSeed',
   'beatPanel.generation.renderVideo',
   'beatPanel.generation.choiceLabel',
-  'beatPanel.generation.referenceForChoice',
-  'beatPanel.generation.noReference',
   'beatPanel.generation.purpose.seedStill',
   'beatPanel.generation.reviewUnavailable',
   'beatPanel.lift.shot',
@@ -590,15 +577,8 @@ const expectedLeaves = [
   'library.composer.empty',
   'proposals.title',
   'proposals.ownerBeat',
-  'proposals.assignedShots',
-  'proposals.order',
-  'proposals.placement',
   'proposals.before',
   'proposals.after',
-  'proposals.beforeItem',
-  'proposals.referenceKind',
-  'proposals.referencePrompt',
-  'proposals.technicalDetails',
   'proposals.reviewUnavailable',
   'proposals.chatAccepted',
   'proposals.chatRejected',
@@ -608,60 +588,56 @@ const expectedLeaves = [
   'proposals.chatDecisionBusy',
   'proposals.chatDirty',
   'proposals.revision',
-  'proposals.pinRule',
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
-  'proposals.coverageReviewTitle',
-  'proposals.proposedShots',
-  'proposals.proposedShot',
-  'proposals.proposedDuration',
-  'proposals.proposedDurationValue',
-  'proposals.proposedLine',
-  'proposals.proposedNarration',
   'proposals.emptyAuthoredField',
-  'proposals.proposedOnScreenText',
-  'proposals.proposedChain',
-  'proposals.chainBreak.hard_cut',
-  'proposals.chainBreak.none',
-  'proposals.fixedShotsTitle',
-  'proposals.fixedReviewAnnouncement',
-  'proposals.fixedReviewAnnouncement_one',
-  'proposals.fixedReviewAnnouncement_other',
-  'proposals.noFixedShots',
-  'proposals.fixedShot',
-  'proposals.fixedReason.owned_asset',
-  'proposals.fixedReason.owned_job',
-  'proposals.fixedReason.video_asset',
-  'proposals.fixedReason.seed_still',
-  'proposals.fixedReason.conditioning_frame',
-  'proposals.fixedReason.conditioning_input',
-  'proposals.fixedReason.narration',
-  'proposals.fixedReason.on_screen_text',
-  'proposals.rederiveTitle',
-  'proposals.rederiveShot',
+  'proposals.reviewStale',
+  'proposals.noChanges',
+  'proposals.subject.project',
+  'proposals.subject.beat',
+  'proposals.subject.shot',
+  'proposals.change.added',
+  'proposals.change.edited',
+  'proposals.change.removed',
+  'proposals.change.reordered',
+  'proposals.placementValue.active',
+  'proposals.placementValue.bin',
+  'proposals.placementValue.removed',
+  'proposals.field.name',
+  'proposals.field.brief',
+  'proposals.field.rules',
+  'proposals.field.aspectRatio',
+  'proposals.field.resolution',
+  'proposals.field.targetDurationSeconds',
+  'proposals.field.boardStyle',
+  'proposals.field.title',
+  'proposals.field.story',
+  'proposals.field.targetSeconds',
+  'proposals.field.shootingScript',
+  'proposals.field.durationSeconds',
+  'proposals.field.chainBreak',
+  'proposals.field.placement',
+  'proposals.field.order',
   'proposals.saveBeforeApply',
   'proposals.accept',
   'proposals.reject',
   'references.title',
   'references.referenceCount',
-  'references.shotCount',
-  'references.shotCount_one',
-  'references.shotCount_other',
   'references.generate',
   'references.reject',
   'handoffs.title',
   'handoffs.referenceCount',
   'handoffs.progress',
-  'handoffs.shotCount',
-  'handoffs.shotCount_one',
-  'handoffs.shotCount_other',
-  'handoffs.awaitingGate',
+  'handoffs.awaiting_spend',
+  'handoffs.running',
+  'handoffs.succeeded',
+  'handoffs.partially_failed',
+  'handoffs.failed',
   'handoffs.review',
   'handoffs.reviewReferences',
   'handoffs.retryFailed',
   'handoffs.dismiss',
-  'handoffs.confirmed',
   'handoffs.dismissed',
   'controls.settingsTitle',
   'controls.name',
@@ -703,8 +679,9 @@ const expectedLeaves = [
   'controls.undoLabel.edit_project',
   'controls.undoLabel.set_brief',
   'controls.undoLabel.set_rules',
-  'controls.undoLabel.set_project_references',
-  'controls.undoLabel.set_shot_background_reference',
+  'controls.undoLabel.set_reference_plan',
+  'controls.undoLabel.approve_reference',
+  'controls.undoLabel.set_shot_reference_binding',
   'controls.undoLabel.add_beat',
   'controls.undoLabel.edit_beat',
   'controls.undoLabel.reorder_beats',
@@ -722,9 +699,6 @@ const expectedLeaves = [
   'controls.undoLabel.set_seed_still',
   'controls.undoLabel.promote_board_panel',
   'controls.undoLabel.trim_shot',
-  'controls.undoLabel.redetach_line',
-  'controls.undoLabel.rederive_line',
-  'controls.undoLabel.restore_line',
   'controls.undoLabel.reorder_bin',
   'controls.undoLabel.set_routes',
   'controls.undoLabel.set_spend_policy',
@@ -746,17 +720,6 @@ const expectedLeaves = [
   'controls.cancelWaiting',
   'controls.retryConditioningFor',
   'gate.title',
-  'gate.backgroundChoice.title',
-  'gate.backgroundChoice.description',
-  'gate.backgroundChoice.shotLabel',
-  'gate.backgroundChoice.incomplete',
-  'gate.backgroundChoice.assign',
-  'gate.backgroundChoice.assigning',
-  'gate.backgroundChoice.noneTitle',
-  'gate.backgroundChoice.noneBody',
-  'gate.backgroundChoice.reviewReferences',
-  'gate.backgroundChoice.invalid',
-  'gate.backgroundChoice.failed',
   'gate.reviewBeforeSpend',
   'gate.requestedShots',
   'gate.requestedShots_one',
@@ -817,6 +780,7 @@ const expectedLeaves = [
   'gate.purpose.board_still',
   'gate.purpose.seed_still',
   'gate.purpose.video_take',
+  'gate.purpose.reference_image',
   'gate.route',
   'gate.routeShared',
   'gate.duration',
@@ -847,6 +811,17 @@ const expectedLeaves = [
   'gate.errors.pricing.invalidReference',
   'gate.errors.pricing.missingConditioning',
   'gate.errors.pricing.unsafeTotal',
+  'gate.reviewShotBinding',
+  'gate.readout.prompt',
+  'gate.readout.rendersAs',
+  'gate.readout.sourceRevision',
+  'gate.readout.source',
+  'gate.readout.story',
+  'gate.readout.shootingScript',
+  'gate.readout.referencePrompt',
+  'gate.readout.references',
+  'gate.readout.noReferences',
+  'gate.readout.referenceFact',
   'review.title',
 ] as const;
 
@@ -1036,40 +1011,17 @@ const localizedBoardPromotionKeys = [
   'gate.promotion.close',
 ] as const;
 
-const localizedBackgroundChoiceKeys = [
-  'controls.undoLabel.set_shot_background_reference',
-  'gate.backgroundChoice.title',
-  'gate.backgroundChoice.description',
-  'gate.backgroundChoice.shotLabel',
-  'gate.backgroundChoice.incomplete',
-  'gate.backgroundChoice.assign',
-  'gate.backgroundChoice.assigning',
-  'gate.backgroundChoice.noneTitle',
-  'gate.backgroundChoice.noneBody',
-  'gate.backgroundChoice.reviewReferences',
-  'gate.backgroundChoice.invalid',
-  'gate.backgroundChoice.failed',
-] as const;
-
 const localizedOnePicturePresentationKeys = [
   'library.subtitle',
   'library.status.complete',
   'library.status.partial',
   'cut.exports.editorFolderDescription',
-  'proposals.fixedReason.video_asset',
 ] as const;
 
 const localizedWorkspaceKeys = [
   'proposals.ownerBeat',
-  'proposals.assignedShots',
-  'proposals.order',
-  'proposals.placement',
   'proposals.before',
   'proposals.after',
-  'proposals.beforeItem',
-  'proposals.referenceKind',
-  'proposals.referencePrompt',
-  'proposals.technicalDetails',
   'proposals.reviewUnavailable',
   'proposals.chatAccepted',
   'proposals.chatRejected',
@@ -1078,6 +1030,33 @@ const localizedWorkspaceKeys = [
   'proposals.chatStale',
   'proposals.chatDecisionBusy',
   'proposals.chatDirty',
+  'proposals.reviewStale',
+  'proposals.noChanges',
+  'proposals.subject.project',
+  'proposals.subject.beat',
+  'proposals.subject.shot',
+  'proposals.change.added',
+  'proposals.change.edited',
+  'proposals.change.removed',
+  'proposals.change.reordered',
+  'proposals.placementValue.active',
+  'proposals.placementValue.bin',
+  'proposals.placementValue.removed',
+  'proposals.field.name',
+  'proposals.field.brief',
+  'proposals.field.rules',
+  'proposals.field.aspectRatio',
+  'proposals.field.resolution',
+  'proposals.field.targetDurationSeconds',
+  'proposals.field.boardStyle',
+  'proposals.field.title',
+  'proposals.field.story',
+  'proposals.field.targetSeconds',
+  'proposals.field.shootingScript',
+  'proposals.field.durationSeconds',
+  'proposals.field.chainBreak',
+  'proposals.field.placement',
+  'proposals.field.order',
   'views.references',
   'referenceWorkflow.description',
   'referenceWorkflow.generationScope',
@@ -1102,7 +1081,19 @@ const localizedWorkspaceKeys = [
   'referenceWorkflow.ready',
   'referenceWorkflow.notReady',
   'referenceWorkflow.continueToTable',
+  'referenceWorkflow.approvalProgress',
+  'referenceWorkflow.bindings.title',
+  'referenceWorkflow.bindings.description',
+  'referenceWorkflow.bindings.empty',
+  'referenceWorkflow.bindings.shot',
+  'referenceWorkflow.bindings.unassigned',
+  'referenceWorkflow.bindings.invalid',
+  'referenceWorkflow.bindings.capacity',
+  'referenceWorkflow.bindings.characters',
+  'referenceWorkflow.bindings.background',
+  'referenceWorkflow.bindings.save',
   'beatPanel.beatFieldsLabel',
+  'beatPanel.directorRequestHint',
   'beatPanel.chain.continuous',
   'beatPanel.chain.hardCutUnavailable',
   'beatPanel.chain.hardCutState',
@@ -1113,18 +1104,11 @@ const localizedWorkspaceKeys = [
   'beatPanel.chain.segmentHead',
   'beatPanel.coverage.boundaryGuidance',
   'beatPanel.coverage.trimGuidance',
-  'beatPanel.derivation.attachedLineGuidance',
-  'beatPanel.derivation.derived',
-  'beatPanel.derivation.detached',
-  'beatPanel.derivation.detachedLineGuidance',
-  'beatPanel.fieldGuidance.action',
-  'beatPanel.fieldGuidance.look',
-  'beatPanel.fields.action',
-  'beatPanel.fields.look',
+  'beatPanel.fieldGuidance.story',
+  'beatPanel.fields.story',
+  'beatPanel.fields.shootingScript',
+  'beatPanel.fields.shootingScriptFor',
   'beatPanel.fields.targetSeconds',
-  'beatPanel.lookCounter',
-  'beatPanel.lookCounter_one',
-  'beatPanel.lookCounter_other',
   ...localizedCurrentPictureKeys,
   'library.pictureCount',
   'library.pictureCount_one',
@@ -1138,9 +1122,11 @@ const localizedWorkspaceKeys = [
   ...localizedMoveToBinKeys,
   ...localizedBoardKeys,
   ...localizedBoardPromotionKeys,
-  ...localizedBackgroundChoiceKeys,
+  'table.columns.story',
   'controls.briefAndRulesTitle',
-  'controls.undoLabel.set_project_references',
+  'controls.undoLabel.set_reference_plan',
+  'controls.undoLabel.approve_reference',
+  'controls.undoLabel.set_shot_reference_binding',
   'gate.headline_one',
   'gate.headline_other',
   'gate.confirm_one',
@@ -1179,11 +1165,29 @@ const localizedWorkspaceKeys = [
   'gate.errors.pricing.invalidReference',
   'gate.errors.pricing.missingConditioning',
   'gate.errors.pricing.unsafeTotal',
+  'gate.purpose.reference_image',
+  'gate.reviewShotBinding',
+  'gate.readout.prompt',
+  'gate.readout.rendersAs',
+  'gate.readout.sourceRevision',
+  'gate.readout.source',
+  'gate.readout.story',
+  'gate.readout.shootingScript',
+  'gate.readout.referencePrompt',
+  'gate.readout.references',
+  'gate.readout.noReferences',
+  'gate.readout.referenceFact',
   'references.referenceCount',
   'handoffs.referenceCount',
   'handoffs.progress',
   'handoffs.reviewReferences',
   'handoffs.retryFailed',
+  'handoffs.awaiting_spend',
+  'handoffs.running',
+  'handoffs.succeeded',
+  'handoffs.partially_failed',
+  'handoffs.failed',
+  'handoffs.dismissed',
 ] as const;
 
 describe('Creative Studio workspace translations', () => {
@@ -1273,27 +1277,30 @@ describe('Creative Studio workspace translations', () => {
     });
   });
 
-  it('keeps the exact generation-time background choice copy in en-US', () => {
+  it('keeps exact Shot-binding and quote-readout copy in en-US', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
-      'controls.undoLabel.set_shot_background_reference': 'Shot background reference',
-      'gate.backgroundChoice.title': 'Choose a background for each Shot',
-      'gate.backgroundChoice.description':
-        'Assign one approved background before generation pricing. This free change keeps character references in place.',
-      'gate.backgroundChoice.shotLabel': 'Background for Shot {{shotId}}',
-      'gate.backgroundChoice.incomplete': 'Choose one background for every listed Shot.',
-      'gate.backgroundChoice.assign': 'Assign backgrounds',
-      'gate.backgroundChoice.assigning': 'Assigning backgrounds…',
-      'gate.backgroundChoice.noneTitle': 'No approved backgrounds are available.',
-      'gate.backgroundChoice.noneBody': 'Review References and approve a background before pricing this generation.',
-      'gate.backgroundChoice.reviewReferences': 'Review references',
-      'gate.backgroundChoice.invalid':
-        'These background choices are no longer current. Review References or close this review and try again.',
-      'gate.backgroundChoice.failed':
-        'Background assignments were not saved. Review the current project and try again.',
+      'controls.undoLabel.set_shot_reference_binding': 'Shot reference binding',
+      'referenceWorkflow.bindings.title': 'Shot bindings',
+      'referenceWorkflow.bindings.description':
+        'Choose the exact approved characters and background each Shot uses for its Board panel and first frame.',
+      'referenceWorkflow.bindings.unassigned': 'This Shot has no reference decision yet.',
+      'referenceWorkflow.bindings.invalid':
+        'This saved binding is no longer valid. Choose current approved references and save it again.',
+      'referenceWorkflow.bindings.capacity':
+        '{{count}} references are selected, but the image route supports {{limit}}.',
+      'gate.reviewShotBinding': 'Review Shot binding',
+      'gate.readout.prompt': 'Exact prompt',
+      'gate.readout.rendersAs': 'Renders as',
+      'gate.readout.sourceRevision': 'Source revision',
+      'gate.readout.story': 'Story',
+      'gate.readout.shootingScript': 'Shooting script',
+      'gate.readout.references': 'Resolved references',
+      'gate.readout.referenceFact': '{{kind}} · {{referenceId}} → {{assetId}}',
     });
-    expect(placeholders(leaves['gate.backgroundChoice.shotLabel']!)).toEqual(['shotId']);
+    expect(placeholders(leaves['referenceWorkflow.bindings.capacity']!)).toEqual(['count', 'limit']);
+    expect(placeholders(leaves['gate.readout.referenceFact']!)).toEqual(['assetId', 'kind', 'referenceId']);
   });
 
   it('keeps Cut preview labels and transport copy as complete en-US phrases', () => {
@@ -1343,8 +1350,8 @@ describe('Creative Studio workspace translations', () => {
       'beatPanel.preview.label': 'Beat preview',
       'beatPanel.preview.noMedia': 'Beat preview unavailable',
       'beatPanel.preview.mediaError': 'The current picture could not be previewed.',
-      'beatPanel.preview.videoLabel': 'Shot {{position}} video · {{line}}',
-      'beatPanel.preview.slateLabel': 'Shot {{position}} planning slate · {{line}}',
+      'beatPanel.preview.videoLabel': 'Shot {{position}} video · {{shootingScript}}',
+      'beatPanel.preview.slateLabel': 'Shot {{position}} planning slate · {{shootingScript}}',
       'beatPanel.preview.slate': 'Planning slate',
       'beatPanel.preview.slateHold': 'Hold {{clock}}',
       'beatPanel.preview.play': 'Play Beat',
@@ -1414,16 +1421,12 @@ describe('Creative Studio workspace translations', () => {
     );
   });
 
-  it('keeps Shot and Line provenance as complete sentence-case en-US phrases', () => {
+  it('keeps Shot continuity provenance as complete sentence-case en-US phrases', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
       'beatPanel.chain.segmentHead': 'Head of the chain · Starts from the first frame',
       'beatPanel.chain.continuous': 'Continues from Shot {{position}}’s last frame',
-      'beatPanel.derivation.attachedLineGuidance': 'Written from the action · Edit to detach',
-      'beatPanel.derivation.detachedLineGuidance': 'Your words · No longer follows the action',
-      'beatPanel.derivation.derived': 'Derived from the action',
-      'beatPanel.derivation.detached': 'Detached · Yours',
     });
     expect(placeholders(leaves['beatPanel.chain.continuous']!)).toEqual(['position']);
   });
@@ -1468,7 +1471,6 @@ describe('Creative Studio workspace translations', () => {
       'library.status.partial': 'Some Shots have current pictures',
       'cut.exports.editorFolderDescription':
         'Current Shot pictures, target slates, timeline data and the optional bed in film order.',
-      'proposals.fixedReason.video_asset': 'It has a current picture.',
     });
     for (const key of localizedOnePicturePresentationKeys) expect(placeholders(leaves[key]!)).toEqual([]);
   });
@@ -1479,7 +1481,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(23);
+    expect(pluralBases).toHaveLength(19);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
@@ -1677,11 +1679,9 @@ describe('Creative Studio workspace translations', () => {
       expect(localizedTitle, locale).toBeTypeOf('string');
       expect(Object.keys(localizedLeaves).toSorted(), locale).toEqual(localizedWorkspaceKeys.toSorted());
       expect(localizedLeaves['controls.briefAndRulesTitle'], locale).toBe(localizedTitle);
-      for (const field of ['action', 'look'] as const) {
-        const conciseName = localizedLeaves[`beatPanel.fields.${field}`];
-        const guidance = localizedLeaves[`beatPanel.fieldGuidance.${field}`];
-        expect(guidance?.startsWith(`${conciseName} · `), `${locale}:${field}`).toBe(true);
-      }
+      const storyName = localizedLeaves['beatPanel.fields.story'];
+      const storyGuidance = localizedLeaves['beatPanel.fieldGuidance.story'];
+      expect(storyGuidance?.startsWith(`${storyName} · `), `${locale}:story`).toBe(true);
       for (const key of localizedCutPreviewKeys) {
         const englishCopy = englishLeaves[key];
         const localizedCopy = localizedLeaves[key];
@@ -1702,7 +1702,7 @@ describe('Creative Studio workspace translations', () => {
         ...localizedMoveToBinKeys,
         ...localizedBoardKeys,
         ...localizedBoardPromotionKeys,
-        ...localizedBackgroundChoiceKeys,
+        'table.columns.story',
       ]) {
         const englishCopy = englishLeaves[key];
         const localizedCopy = localizedLeaves[key];
@@ -1736,7 +1736,7 @@ describe('Creative Studio workspace translations', () => {
     const errors = asObject(creativeStudio.errors, 'creativeStudio.errors');
 
     expect(errors.mediaInUse).toBe(
-      'This reference is in use by a queued paid request. Finish or cancel that request before detaching it.'
+      'This audio is currently selected or in use. Clear it as the bed or wait for the active operation before detaching it.'
     );
   });
 
@@ -1784,7 +1784,6 @@ describe('Creative Studio workspace translations', () => {
       'beatPanel.generation.generateSeed': 'Review first-frame generation',
       'beatPanel.generation.purpose.seedStill': 'first frame',
       'beatPanel.recovery.reason.choose_seed': 'Choose an eligible first frame to continue the existing authorization.',
-      'proposals.fixedReason.seed_still': 'It has a pinned first frame.',
       'controls.imageRouteBlocked':
         'Choose a ready image route before reviewing first-frame generation. Video-only work remains available.',
       'controls.videoRouteBlocked':

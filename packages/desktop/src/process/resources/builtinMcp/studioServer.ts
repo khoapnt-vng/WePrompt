@@ -21,6 +21,7 @@ import {
 } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import {
+  isUnsupportedStudioPrototypeSchemaVersion,
   STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
@@ -32,10 +33,13 @@ import {
   STUDIO_MAX_BIN_SHOT_ITEMS,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
+  STUDIO_MAX_STORY_LENGTH,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
-  STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
   type StudioDirectorOperationV2,
   type StudioMutationOperationV2,
   type StudioProjectV2,
@@ -100,6 +104,14 @@ export type ProposeStoryboardInputV2 = {
 };
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+const NONTERMINAL_REFERENCE_JOB_STATUSES: ReadonlySet<StudioProjectV2['jobs'][string]['status']> = new Set([
+  'waiting_for_conditioning',
+  'queued_local',
+  'submitting',
+  'queued_remote',
+  'running',
+  'needs_attention',
+]);
 
 const compareCodeUnits = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
@@ -125,44 +137,35 @@ const studioEditableProjectChangesSchemaV2 = z4.union([
 const studioBeatInputSchemaV2 = z4
   .object({
     title: z4.string().max(256),
-    action: z4.string().max(4 * 1024),
-    look: z4.string().max(8 * 1024),
+    story: z4.string().max(STUDIO_MAX_STORY_LENGTH),
     targetSeconds: z4.number().int().min(1).max(1440).nullable(),
   })
   .strict();
 
 const studioShotInputSchemaV2 = z4
   .object({
-    line: z4.string().max(8 * 1024),
-    narration: z4.string().max(4 * 1024),
-    onScreenText: z4.string().max(1024),
+    shootingScript: z4.string().max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH),
     durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
   })
   .strict();
 
 const studioBeatChangesFieldsV2 = {
   title: z4.string().max(256),
-  action: z4.string().max(4 * 1024),
-  look: z4.string().max(8 * 1024),
+  story: z4.string().max(STUDIO_MAX_STORY_LENGTH),
   targetSeconds: z4.number().int().min(1).max(1440).nullable(),
 };
 const studioBeatChangesSchemaV2 = z4.union([
   z4.object(studioBeatChangesFieldsV2).partial().required({ title: true }).strict(),
-  z4.object(studioBeatChangesFieldsV2).partial().required({ action: true }).strict(),
-  z4.object(studioBeatChangesFieldsV2).partial().required({ look: true }).strict(),
+  z4.object(studioBeatChangesFieldsV2).partial().required({ story: true }).strict(),
   z4.object(studioBeatChangesFieldsV2).partial().required({ targetSeconds: true }).strict(),
 ]);
 
 const studioShotChangesFieldsV2 = {
-  line: z4.string().max(8 * 1024),
-  narration: z4.string().max(4 * 1024),
-  onScreenText: z4.string().max(1024),
+  shootingScript: z4.string().max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH),
   durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
 };
 const studioShotChangesSchemaV2 = z4.union([
-  z4.object(studioShotChangesFieldsV2).partial().required({ line: true }).strict(),
-  z4.object(studioShotChangesFieldsV2).partial().required({ narration: true }).strict(),
-  z4.object(studioShotChangesFieldsV2).partial().required({ onScreenText: true }).strict(),
+  z4.object(studioShotChangesFieldsV2).partial().required({ shootingScript: true }).strict(),
   z4.object(studioShotChangesFieldsV2).partial().required({ durationSeconds: true }).strict(),
 ]);
 
@@ -221,7 +224,6 @@ const studioRuleDraftsSchemaV2 = z4
 
 const studioProjectReferenceDraftSchemaV2 = z4
   .object({
-    id: studioDirectorIdSchemaV2,
     kind: z4.enum(['character', 'background']),
     label: z4
       .string()
@@ -233,23 +235,12 @@ const studioProjectReferenceDraftSchemaV2 = z4
       .min(1)
       .max(STUDIO_MAX_REFERENCE_PROMPT_LENGTH)
       .refine((prompt) => prompt === prompt.trim(), { message: 'Reference prompts must be trimmed.' }),
-    shotIds: z4
-      .array(studioDirectorIdSchemaV2)
-      .max(STUDIO_MAX_SHOTS_PER_PROJECT)
-      .refine((shotIds) => new Set(shotIds).size === shotIds.length, {
-        message: 'Assigned shot ids must not repeat.',
-      })
-      .meta({ uniqueItems: true }),
   })
   .strict();
 
 const studioProjectReferenceDraftsSchemaV2 = z4
   .array(studioProjectReferenceDraftSchemaV2)
-  .min(1)
   .max(STUDIO_MAX_PROJECT_REFERENCES)
-  .refine((references) => new Set(references.map((reference) => reference.id)).size === references.length, {
-    message: 'Reference ids must not repeat.',
-  })
   .refine(
     (references) =>
       new Set(references.map((reference) => `${reference.kind}\0${reference.label}`)).size === references.length,
@@ -274,15 +265,12 @@ const STUDIO_FIXED_SHOT_REASONS_V2 = [
   'seed_still',
   'conditioning_frame',
   'conditioning_input',
-  'narration',
-  'on_screen_text',
+  'shooting_script',
 ] as const;
 const studioProposedShotSchemaV2 = z4
   .object({
     shotId: studioDirectorIdSchemaV2,
-    line: z4.string().max(8 * 1024),
-    narration: z4.string().max(4 * 1024),
-    onScreenText: z4.string().max(1024),
+    shootingScript: z4.string().max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH),
     durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
     chainBreak: z4.enum(['none', 'hard_cut']),
   })
@@ -336,8 +324,23 @@ const studioMutationOperationSchemasV2 = {
   editProject: z4.object({ kind: z4.literal('edit_project'), changes: studioEditableProjectChangesSchemaV2 }).strict(),
   setBrief: z4.object({ kind: z4.literal('set_brief'), brief: z4.string().max(16 * 1024) }).strict(),
   setRules: z4.object({ kind: z4.literal('set_rules'), rules: studioRuleDraftsSchemaV2 }).strict(),
-  setProjectReferences: z4
-    .object({ kind: z4.literal('set_project_references'), references: studioProjectReferenceDraftsSchemaV2 })
+  setReferencePlan: z4
+    .object({ kind: z4.literal('set_reference_plan'), references: studioProjectReferenceDraftsSchemaV2 })
+    .strict(),
+  approveReference: z4
+    .object({
+      kind: z4.literal('approve_reference'),
+      referenceId: studioDirectorIdSchemaV2,
+      candidateAssetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  setShotReferenceBinding: z4
+    .object({
+      kind: z4.literal('set_shot_reference_binding'),
+      shotId: studioDirectorIdSchemaV2,
+      characterReferenceIds: uniqueStudioIdsSchema(STUDIO_MAX_PROJECT_REFERENCES),
+      backgroundReferenceId: studioDirectorIdSchemaV2.nullable(),
+    })
     .strict(),
   addBeat: z4
     .object({
@@ -414,13 +417,6 @@ const studioMutationOperationSchemasV2 = {
       assetId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
-  setShotBackgroundReference: z4
-    .object({
-      kind: z4.literal('set_shot_background_reference'),
-      shotId: studioDirectorIdSchemaV2,
-      referenceId: studioDirectorIdSchemaV2,
-    })
-    .strict(),
   promoteBoardPanel: z4
     .object({
       kind: z4.literal('promote_board_panel'),
@@ -434,26 +430,6 @@ const studioMutationOperationSchemasV2 = {
       shotId: studioDirectorIdSchemaV2,
       trimInSeconds: studioTrimBoundarySchemaV2.nullable(),
       trimOutSeconds: studioTrimBoundarySchemaV2.nullable(),
-    })
-    .strict(),
-  redetachLine: z4
-    .object({ kind: z4.literal('redetach_line'), shotId: studioDirectorIdSchemaV2, line: z4.string().max(8 * 1024) })
-    .strict(),
-  rederiveLine: z4
-    .object({
-      kind: z4.literal('rederive_line'),
-      shotId: studioDirectorIdSchemaV2,
-      line: z4
-        .string()
-        .min(1)
-        .max(8 * 1024),
-    })
-    .strict(),
-  restoreLine: z4
-    .object({
-      kind: z4.literal('restore_line'),
-      shotId: studioDirectorIdSchemaV2,
-      historyEntryId: studioDirectorIdSchemaV2,
     })
     .strict(),
   reorderBin: z4
@@ -495,7 +471,9 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.editProject,
   studioMutationOperationSchemasV2.setBrief,
   studioMutationOperationSchemasV2.setRules,
-  studioMutationOperationSchemasV2.setProjectReferences,
+  studioMutationOperationSchemasV2.setReferencePlan,
+  studioMutationOperationSchemasV2.approveReference,
+  studioMutationOperationSchemasV2.setShotReferenceBinding,
   studioMutationOperationSchemasV2.addBeat,
   studioMutationOperationSchemasV2.editBeat,
   studioMutationOperationSchemasV2.reorderBeats,
@@ -511,12 +489,8 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.applyCoverage,
   studioMutationOperationSchemasV2.setHardCut,
   studioMutationOperationSchemasV2.setSeedStill,
-  studioMutationOperationSchemasV2.setShotBackgroundReference,
   studioMutationOperationSchemasV2.promoteBoardPanel,
   studioMutationOperationSchemasV2.trimShot,
-  studioMutationOperationSchemasV2.redetachLine,
-  studioMutationOperationSchemasV2.rederiveLine,
-  studioMutationOperationSchemasV2.restoreLine,
   studioMutationOperationSchemasV2.reorderBin,
   studioMutationOperationSchemasV2.setRoutes,
   studioMutationOperationSchemasV2.setSpendPolicy,
@@ -537,7 +511,7 @@ const proposalInputFitsDurableRecordV2 = (value: unknown): boolean => {
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
     const input = value as { base_revision?: unknown; operations?: unknown };
     const preview = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       id: 'x'.repeat(256),
       projectId: 'x'.repeat(256),
       status: 'pending',
@@ -546,7 +520,7 @@ const proposalInputFitsDurableRecordV2 = (value: unknown): boolean => {
       createdAt: '9999-12-31T23:59:59.999Z',
       decidedAt: null as null,
     };
-    return Buffer.byteLength(JSON.stringify(preview), 'utf8') <= STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES;
+    return Buffer.byteLength(JSON.stringify(preview), 'utf8') <= STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES;
   } catch {
     return false;
   }
@@ -649,7 +623,7 @@ const studioApplyEditsCapabilityRejectionV2 = (
       directCapableOperationIndexes,
       guidance: {
         proposal:
-          'After omitting unavailable operations, submit the full ordered direct-and-proposal-capable subset to propose_storyboard when it still expresses the intended atomic change.',
+          'After omitting unavailable and reference-direct operations, submit the full ordered proposal-eligible subset to propose_storyboard when it still expresses the intended atomic change.',
         unavailable:
           'Omit unavailable operations or ask the user to perform them manually in Creative Studio when supported.',
         direct:
@@ -663,6 +637,7 @@ const studioApplyEditsCapabilityRejectionV2 = (
 const operationBatchIsProposalCapableV2 = (operations: readonly StudioMutationOperationV2[]): boolean =>
   Array.isArray(operations) &&
   operations.every((operation) => {
+    if (operation.kind === 'set_reference_plan' || operation.kind === 'set_shot_reference_binding') return false;
     const disposition = classifyStudioDirectorOperationV2(operation?.kind);
     return disposition === 'direct' || disposition === 'proposal';
   });
@@ -735,9 +710,10 @@ const readProjectSnapshotV2 = async (config: StudioServerEnv): Promise<StudioPro
     ) {
       throw new StudioProjectReadErrorV2('invalid');
     }
-    if (schemaDescriptor.value !== STUDIO_PROJECT_SCHEMA_VERSION) {
+    if (isUnsupportedStudioPrototypeSchemaVersion(schemaDescriptor.value)) {
       throw new StudioProjectReadErrorV2('unsupported_prototype_schema');
     }
+    if (schemaDescriptor.value !== STUDIO_PROJECT_SCHEMA_VERSION) throw new StudioProjectReadErrorV2('invalid');
     const briefRecord = await readBoundedRegularFileWithIdentity({
       fs: recordFs,
       canonicalRoot,
@@ -754,11 +730,7 @@ const readProjectSnapshotV2 = async (config: StudioServerEnv): Promise<StudioPro
       throw new StudioProjectReadErrorV2('storage');
     }
     const decoded = decodeStudioProjectManifestV2(raw, briefRecord?.bytes ?? null);
-    if (
-      decoded === null ||
-      (decoded.kind === 'brief_file' && !decoded.synchronized) ||
-      decoded.project.id !== config.projectId
-    ) {
+    if (decoded === null || !decoded.synchronized || decoded.project.id !== config.projectId) {
       throw new StudioProjectReadErrorV2('invalid');
     }
     return {
@@ -889,8 +861,7 @@ export function createReadStoryboardHandlerV2(
             beatId,
             {
               title: beat.title,
-              action: beat.action,
-              look: beat.look,
+              story: beat.story,
               targetSeconds: beat.targetSeconds,
               shotOrder: [...beat.shotOrder],
             },
@@ -904,15 +875,13 @@ export function createReadStoryboardHandlerV2(
           return [
             shotId,
             {
-              line: shot.line,
-              derivation: shot.derivation,
-              narration: shot.narration,
-              onScreenText: shot.onScreenText,
+              shootingScript: shot.shootingScript,
               durationSeconds: shot.durationSeconds,
               chainBreak: shot.chainBreak,
               hasSeedStill: shot.seedStillId !== null,
               hasVideo: shot.videoAssetId !== null,
               videoAssetId: shot.videoAssetId,
+              referenceBinding: structuredClone(shot.referenceBinding),
             },
           ];
         })
@@ -923,28 +892,34 @@ export function createReadStoryboardHandlerV2(
         enforced: rule.predicate !== null,
         ...(rule.predicate === null ? {} : { forbiddenTerms: rule.predicate.terms }),
       }));
-      const briefReferences = Object.values(project.assets)
-        .filter(
-          (asset) =>
-            asset.shotId === null && asset.briefReferenceRole !== undefined && asset.briefReferenceLabel !== undefined
-        )
-        .toSorted(
-          (left, right) =>
-            Number(left.briefReferenceRole === 'look') - Number(right.briefReferenceRole === 'look') ||
-            compareCodeUnits(left.createdAt, right.createdAt) ||
-            compareCodeUnits(left.id, right.id)
-        )
-        .map((asset) => ({ id: asset.id, label: asset.briefReferenceLabel!, role: asset.briefReferenceRole! }));
       const beatCount = Object.keys(project.beats).length;
+      const references = project.referenceOrder.map((referenceId) => {
+        const reference = project.references[referenceId]!;
+        return {
+          id: referenceId,
+          kind: reference.kind,
+          label: reference.label,
+          prompt: reference.prompt,
+          approvalStatus:
+            reference.approvedAssetId !== null
+              ? 'approved'
+              : reference.candidateAssetId !== null
+                ? 'candidate_ready'
+                : 'awaiting_generation',
+          approvedAssetId: reference.approvedAssetId,
+        };
+      });
       const view = {
         revision: project.revision,
         name: project.name,
         brief: project.brief,
-        briefReferences,
         rules,
         aspectRatio: project.aspectRatio,
         targetDurationSeconds: project.targetDurationSeconds,
         boardStyle: project.boardStyle,
+        referencePlanStatus: project.referencePlanStatus,
+        referenceOrder: [...project.referenceOrder],
+        references,
         beatCapacity: {
           current: beatCount,
           maximum: STUDIO_MAX_BEATS,
@@ -1142,24 +1117,38 @@ export function createRequestReferenceImagesHandlerV2(
         projectAuthority
       );
       const alreadyQueued = referenceIds.filter((referenceId) => pendingReferenceIds.has(referenceId));
-      const referencesToQueue = referenceIds.filter((referenceId) => !pendingReferenceIds.has(referenceId));
-      if (referencesToQueue.length > 0) {
-        await assertProjectSnapshotStatusV2(config, snapshot);
-        await writeReferenceRequestRecordV2({
-          pendingDir: config.referencePendingDir,
-          projectId: config.projectId,
-          referenceIds: referencesToQueue,
-          fs: config.fs,
-          authorityFence: () => projectSnapshotStatusV2(config, snapshot),
-          projectAuthority,
-        });
+      if (alreadyQueued.length > 0) {
+        return errorResult(`References already have pending requests: ${alreadyQueued.join(', ')}`);
       }
-      const details = [
-        `Queued ${referencesToQueue.length} of ${referenceIds.length} reference image request(s) for user approval`,
-        ...(alreadyQueued.length > 0 ? [`Already queued: ${alreadyQueued.join(', ')}`] : []),
-        'Nothing was generated',
-      ];
-      return { content: [{ type: 'text', text: `${details.join('. ')}.` }] };
+      const alreadyRunning = referenceIds.filter((referenceId) =>
+        Object.values(project.jobs).some(
+          (job) =>
+            job.purpose === 'reference_image' &&
+            job.target.kind === 'reference' &&
+            job.target.referenceId === referenceId &&
+            NONTERMINAL_REFERENCE_JOB_STATUSES.has(job.status)
+        )
+      );
+      if (alreadyRunning.length > 0) {
+        return errorResult(`References already have generation in progress: ${alreadyRunning.join(', ')}`);
+      }
+      await assertProjectSnapshotStatusV2(config, snapshot);
+      await writeReferenceRequestRecordV2({
+        pendingDir: config.referencePendingDir,
+        projectId: config.projectId,
+        referenceIds,
+        fs: config.fs,
+        authorityFence: () => projectSnapshotStatusV2(config, snapshot),
+        projectAuthority,
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Queued ${referenceIds.length} reference image request(s) for user approval. Nothing was generated.`,
+          },
+        ],
+      };
     } catch (error) {
       if (error instanceof StudioPendingRecordWriteError) return errorResult(error.message);
       return errorResult(`Reference requests could not be recorded: ${describeError(error)}`);
@@ -1241,7 +1230,7 @@ export function registerStudioToolsV2(
     'propose_storyboard',
     {
       description:
-        'Record one ordered schema-5 direct- or proposal-capable mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Unavailable operations return operation_not_permitted before any ID or I/O; the final serialized proposal record must fit within 256 KiB.',
+        'Record one ordered schema-5 authoring mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Reference planning and shot-reference binding are Director-direct operations and must use studio_apply_edits; approval remains renderer-only. Unavailable operations return operation_not_permitted before any ID or I/O. Rejections identify a zero-based operation index; do not retry a rejected batch unchanged. The final serialized proposal record must fit within 256 KiB.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
     },
     async (input) =>
@@ -1269,7 +1258,7 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of direct-capable Beat/Shot edits to that exact revision. Canonical schema-5 batch: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_beat","beatId":"beat_1","changes":{"title":"..."}},{"kind":"edit_shot","shotId":"shot_1","changes":{"line":"..."}},{"kind":"reorder_beats","beatOrder":["beat_2","beat_1"]}]}. Exact add_beat and add_shot variants require caller-provided beatId and shotId and never accept legacy firstShot fields. This never starts paid generation. A batch containing proposal-only or unavailable operations is rejected atomically at capability preflight before any ID or I/O: no operation reaches command evaluation or is applied, and the operation_not_permitted error names every rejected zero-based index, kind, disposition, and reason plus every direct-capable index. Omit unavailable operations or ask the user to perform them manually when supported. If the remaining ordered direct-and-proposal-capable subset still expresses the intended atomic change, send that whole subset to propose_storyboard for user review; resubmit a direct-only subset through studio_apply_edits only when it is independently valid and only after calling read_storyboard. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. Reference planning and binding are separate Director-direct phases: first set_reference_plan, then request and human-approve canonical reference images, then read the fresh revision and set_shot_reference_binding to approved references. Beat Story and Shot Shooting-script authoring belongs in propose_storyboard for human review. approve_reference is renderer-only and never Director-callable. This never starts paid generation. A batch containing proposal-only or unavailable operations returns operation_not_permitted and is rejected atomically at capability preflight; no operation reaches command evaluation or is applied. The error reports each zero-based index. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
     createStudioApplyEditsHandlerV2(config, writerDeps)

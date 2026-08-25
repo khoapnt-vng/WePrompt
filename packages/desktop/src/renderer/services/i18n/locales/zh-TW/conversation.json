@@ -878,36 +878,16 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "專案參考圖",
-      "inheritanceDescription": "每張新的參考靜幀都會使用此專案中所有啟用的角色與視覺風格圖片。",
-      "castHeading": "角色",
-      "lookHeading": "視覺風格",
-      "castEmpty": "尚無角色參考圖。",
-      "lookEmpty": "尚無視覺風格參考圖。",
-      "addCast": "新增角色參考圖",
-      "addLook": "新增視覺風格參考圖",
-      "activeCount": "{{count}} 張啟用的參考圖",
-      "activeCount_other": "{{count}} 張啟用的參考圖",
-      "limitReached": "此專案已有 6 張啟用的參考圖。請先移除一張再新增。",
-      "removeFromBrief": "從簡報中移除",
-      "removeAccessible": "從簡報中移除 {{label}}",
-      "previewAccessible": "{{role}}參考圖：{{label}}",
-      "engineCapacityNone": "此圖片引擎尚未通過參考圖驗證。請開啟「模型設定」並重新驗證。",
-      "engineMenuCapacityNone": "無參考圖片",
-      "engineCapacityMaximum": "最多 {{count}} 張參考圖",
-      "engineCapacityMaximum_other": "最多 {{count}} 張參考圖",
-      "capacityMismatch": "你有 {{count}} 張啟用的參考圖，但此圖片引擎僅支援 {{maximum}} 張。在移除參考圖或更換、重新驗證引擎之前，無法產生新的參考靜幀。",
-      "importError": "無法新增參考圖，請再試一次。"
-    },
     "workspace": {
-      "views": { "references": "參考圖" },
+      "views": {
+        "references": "參考圖"
+      },
       "referenceWorkflow": {
-        "description": "先核准穩定的角色設定圖，再核准重複出現的背景。鏡頭候選會自動使用這些已核准的參考圖。",
+        "description": "先核准角色的目前標準圖，再核准重複出現背景的目前標準圖。產生分鏡或首幀之前，請將已核准的參考圖明確綁定到每個鏡頭。",
         "generationScope": "產生範圍",
         "characters": {
           "title": "角色",
-          "description": "為每個有名字的角色核准一張身分設定圖。",
+          "description": "為每個有名字的角色核准一張目前標準圖。",
           "empty": "此故事沒有有名字的角色。現在可以檢閱背景。"
         },
         "backgrounds": {
@@ -931,17 +911,41 @@
         "regenerate": "重新產生",
         "ready": "所有必要的參考圖均已核准。可以繼續前往表格。",
         "notReady": "核准所有必要的參考圖後才能繼續。",
-        "continueToTable": "繼續前往表格"
+        "continueToTable": "繼續前往表格",
+        "approvalProgress": "已核准 {{approved}} / {{total}} 個參考",
+        "bindings": {
+          "title": "Shot 綁定",
+          "description": "選擇每個 Shot 的 Board 面板和首格所使用的確切已核准角色與背景。",
+          "empty": "沒有需要綁定的使用中 Shot。",
+          "shot": "Shot {{position}}",
+          "unassigned": "此 Shot 尚未決定參考。",
+          "invalid": "已儲存的綁定不再有效。請選擇目前已核准的參考並重新儲存。",
+          "capacity": "已選擇 {{count}} 個參考，但影像路由最多支援 {{limit}} 個。",
+          "characters": "角色",
+          "background": "背景",
+          "save": "儲存綁定"
+        }
       },
-      "references": { "referenceCount": "已為 {{total}} 個項目請求參考圖" },
+      "references": {
+        "referenceCount": "已為 {{total}} 個項目請求參考圖"
+      },
       "handoffs": {
         "referenceCount": "此交接包含 {{total}} 張參考圖",
         "progress": "佇列 {{queued}} · 執行中 {{running}} · 成功 {{succeeded}} · 失敗 {{failed}}",
         "reviewReferences": "檢閱參考圖",
-        "retryFailed": "重試失敗的參考圖"
+        "retryFailed": "重試失敗的參考圖",
+        "awaiting_spend": "等待費用審核",
+        "running": "正在產生參考。",
+        "succeeded": "已產生所有要求的參考。",
+        "partially_failed": "部分參考已產生；請個別重試失敗的參考。",
+        "failed": "參考產生失敗。不會自動重試。",
+        "dismissed": "未花費並已關閉"
       },
       "table": {
-        "columns": { "panel": "分鏡" },
+        "columns": {
+          "panel": "分鏡",
+          "story": "故事"
+        },
         "board": {
           "label": "導演分鏡控制",
           "progress": "已繪製 {{drawn}} / {{total}} 個分鏡",
@@ -1039,15 +1043,8 @@
       "proposals": {
         "before": "之前",
         "after": "之後",
-        "placement": "位置",
         "ownerBeat": "所屬節拍",
-        "order": "順序",
-        "beforeItem": "在{{kind}}之前",
-        "technicalDetails": "技術詳情",
         "reviewUnavailable": "此提案包含不支援的變更，無法接受。",
-        "referenceKind": "參考類型",
-        "referencePrompt": "參考提示詞",
-        "assignedShots": "已指派鏡頭",
         "chatDecisionBusy": "另一個審核操作仍在進行中。",
         "chatDirty": "請先儲存或重設所有工作區草稿，再核准或拒絕導演提案。",
         "chatNoPending": "目前沒有待處理的導演提案。",
@@ -1055,8 +1052,40 @@
         "chatStale": "此提案已與目前專案版本不符。",
         "chatAccepted": "提案已接受。",
         "chatRejected": "提案已拒絕。",
-        "fixedReason": {
-          "video_asset": "此鏡頭有目前畫面。"
+        "reviewStale": "此審核基於修訂版 {{baseRevision}}，但專案目前為修訂版 {{currentRevision}}。",
+        "noChanges": "此提案沒有語意變更。",
+        "subject": {
+          "project": "專案",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "已新增",
+          "edited": "已編輯",
+          "removed": "已移除",
+          "reordered": "已重新排序"
+        },
+        "placementValue": {
+          "active": "使用中",
+          "bin": "Bin",
+          "removed": "已移除"
+        },
+        "field": {
+          "name": "名稱",
+          "brief": "Brief",
+          "rules": "規則",
+          "aspectRatio": "長寬比",
+          "resolution": "解析度",
+          "targetDurationSeconds": "目標時長",
+          "boardStyle": "Board 風格",
+          "title": "標題",
+          "story": "故事",
+          "targetSeconds": "Beat 目標",
+          "shootingScript": "拍攝腳本",
+          "durationSeconds": "時長",
+          "chainBreak": "連續性",
+          "placement": "位置",
+          "order": "順序"
         }
       },
       "beatPanel": {
@@ -1089,19 +1118,16 @@
           "beatBodyStale": "此節拍中的所有鏡頭、已創作內容和付費產生素材都會保留。移到垃圾桶後，以下內容會變成過時狀態：{{shots}}。",
           "confirmBeat": "移到垃圾桶"
         },
-        "beatFieldsLabel": "節拍動作、視覺風格和目標時長",
+        "beatFieldsLabel": "Beat 故事與目標",
         "fieldGuidance": {
-          "action": "動作 · 你唯一需要寫的內容",
-          "look": "視覺風格 · 每個鏡頭都沿用它"
+          "story": "故事 · 此 Beat 的敘事目的與推進"
         },
         "fields": {
-          "action": "動作",
-          "look": "視覺風格",
-          "targetSeconds": "目標秒數"
+          "targetSeconds": "目標秒數",
+          "story": "故事",
+          "shootingScript": "拍攝腳本",
+          "shootingScriptFor": "Shot {{index}} 的拍攝腳本"
         },
-        "lookCounter": "{{count}} / {{limit}} 個詞",
-        "lookCounter_one": "{{count}} / {{limit}} 個詞",
-        "lookCounter_other": "{{count}} / {{limit}} 個詞",
         "chain": {
           "hardCutState": "硬切 · 從首幀開始",
           "hardCutUnavailable": "暫時無法變更硬切。必須先審閱所需替換媒體的估價。",
@@ -1111,12 +1137,6 @@
           "reviewRejoinDescription": "重新銜接鏡頭 {{shot}} 會清除其首幀選擇，並使用鏡頭 {{previous}} 經裁剪後的最後一幀。確認後，免費的畫面擷取可能會先完成，再將此鏡頭及其後直到下一個硬切的連續鏡頭送交提供者。",
           "segmentHead": "鏈首 · 從首幀開始",
           "continuous": "承接鏡頭 {{position}} 的最後一幀"
-        },
-        "derivation": {
-          "derived": "由動作衍生",
-          "detached": "已分離 · 你的文字",
-          "attachedLineGuidance": "根據動作撰寫 · 編輯即分離",
-          "detachedLineGuidance": "你的文字 · 不再跟隨動作"
         },
         "coverage": {
           "trimGuidance": "邊緣 · 修剪 · 免費",
@@ -1154,8 +1174,8 @@
           "label": "節拍預覽",
           "noMedia": "節拍預覽無法使用",
           "mediaError": "無法預覽目前畫面。",
-          "videoLabel": "鏡頭 {{position}} 影片 · {{line}}",
-          "slateLabel": "鏡頭 {{position}} 規劃場記卡 · {{line}}",
+          "videoLabel": "鏡頭 {{position}} 影片 · {{shootingScript}}",
+          "slateLabel": "鏡頭 {{position}} 規劃場記卡 · {{shootingScript}}",
           "slate": "規劃場記卡",
           "slateHold": "保留 {{clock}}",
           "play": "播放節拍",
@@ -1167,31 +1187,23 @@
           "nextJoin": "下一個接點",
           "loopJoin": "循環最近接點",
           "keyboardGuidance": "空白鍵播放 · 方向鍵定位 · [ ] 切換接點 · L 循環"
-        }
+        },
+        "directorRequestHint": "請 Creative Director 提供經審核的重新拆分方案。"
       },
       "controls": {
         "briefAndRulesTitle": "簡報與規則",
         "undoLabel": {
           "promote_board_panel": "將分鏡用作首幀",
-          "set_project_references": "專案參考",
-          "set_shot_background_reference": "鏡頭背景參考"
+          "set_reference_plan": "參考計畫",
+          "approve_reference": "參考核准",
+          "set_shot_reference_binding": "Shot 參考綁定"
         }
       },
       "gate": {
-        "backgroundChoice": {
-          "title": "為每個鏡頭選擇背景",
-          "description": "在計算生成費用前，為每個鏡頭指派一個已核准的背景。此免費變更會保留角色參考。",
-          "shotLabel": "鏡頭 {{shotId}} 的背景",
-          "incomplete": "請為清單中的每個鏡頭選擇一個背景。",
-          "assign": "指派背景",
-          "assigning": "正在指派背景…",
-          "noneTitle": "沒有可用的已核准背景。",
-          "noneBody": "請先檢查參考並核准一個背景，再計算此次生成的費用。",
-          "reviewReferences": "檢查參考",
-          "invalid": "這些背景選擇已不是最新狀態。請檢查參考，或關閉此審查後再試一次。",
-          "failed": "未能儲存背景指派。請檢查目前的專案並再試一次。"
+        "purpose": {
+          "board_still": "分鏡",
+          "reference_image": "參考影像"
         },
-        "purpose": { "board_still": "分鏡" },
         "promotion": {
           "title": "將分鏡用作首幀",
           "summary": "將 Shot {{shotId}} 的目前導演分鏡提升為首幀。此操作不會變更該 Shot 的連續性邊界。",
@@ -1221,7 +1233,9 @@
         "hideBreakdown": "隱藏每次生成",
         "showBreakdown": "顯示每次生成",
         "routeShared": "全部使用 {{model}}",
-        "group": { "required": "必要" },
+        "group": {
+          "required": "必要"
+        },
         "continuity": {
           "severTitle": "審閱硬切",
           "rejoinTitle": "審閱重新銜接",
@@ -1257,6 +1271,19 @@
             "missingConditioning": "一個影片鏡頭缺少可用的首幀或前序影格。請新增或選擇所需影像。",
             "unsafeTotal": "無法安全表示估價總額。請減少選擇；未提交任何內容。"
           }
+        },
+        "reviewShotBinding": "審核 Shot 綁定",
+        "readout": {
+          "prompt": "確切提示詞",
+          "rendersAs": "算圖設定",
+          "sourceRevision": "來源修訂版",
+          "source": "來源",
+          "story": "故事",
+          "shootingScript": "拍攝腳本",
+          "referencePrompt": "參考描述",
+          "references": "已解析參考",
+          "noReferences": "無直接參考輸入",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
         }
       }
     },
@@ -1600,101 +1627,6 @@
       "durationSeconds_other": "{{seconds}} 秒",
       "selected": "已選場景"
     },
-    "inspector": {
-      "title": "場景指引",
-      "sectionsLabel": "場景編輯區",
-      "directionTab": "視覺",
-      "scriptTab": "腳本",
-      "titleLabel": "場景標題",
-      "purposeLabel": "場景目標",
-      "purposePlaceholder": "這個場景要達成什麼目的？",
-      "visualPromptLabel": "視覺提示詞",
-      "visualPromptPlaceholder": "描述鏡頭、主體、環境、光線和動作。",
-      "narrationLabel": "旁白",
-      "onScreenTextLabel": "畫面文字",
-      "mediaKindLabel": "輸出類型",
-      "durationLabel": "場景時間（秒）",
-      "invalidDuration": "請輸入 1 到 60 秒之間的整數。",
-      "saving": "正在儲存場景...",
-      "saved": "場景已儲存",
-      "saveFailed": "無法儲存場景。",
-      "unsavedChanges": "未儲存的變更已為你保留。"
-    },
-    "draft": {
-      "title": "建立分鏡草稿",
-      "body": "WePrompt 會提出場景、旁白、畫面文字與時間，供你檢視。",
-      "checking": "正在檢查所選分鏡模型...",
-      "ready": "可以建立草稿",
-      "setupRequired": "請選擇並設定分鏡模型以使用 AI 起草。",
-      "unavailable": "目前無法使用分鏡草稿功能。",
-      "providerLabel": "分鏡供應商",
-      "modelLabel": "分鏡模型",
-      "chargeNotice": "起草會使用專案所選的分鏡模型，可能產生供應商費用。",
-      "replaceTitle": "要取代現有分鏡嗎？",
-      "replaceBody": "再次建立草稿只會在收到有效提案後取代所有目前場景。",
-      "confirm": "建立分鏡草稿",
-      "cancel": "取消",
-      "configureModel": "開啟模型設定",
-      "manualFallback": "繼續手動編輯",
-      "failed": "無法建立分鏡草稿。目前的場景未被變更。"
-    },
-    "conditioning": {
-      "inputsTitle": "此靜幀的輸入",
-      "role": {
-        "cast": "角色",
-        "look": "風格"
-      },
-      "maximum": "此引擎最多接受 {{count}} 個簡報參考。",
-      "unsupported": "此圖像引擎無法使用有效的簡報參考。請選擇其他圖像引擎，或從簡報中移除這些參考。",
-      "overflow": "此圖像引擎最多接受 {{maximum}} 個簡報參考，但目前有 {{count}} 個有效參考。",
-      "malformed": "簡報參考已變更或無效。請在生成前重新整理審核。",
-      "reviewChanged": "簡報參考或圖像引擎已變更。請在生成前審核重新整理後的輸入。",
-      "plateOutOfDate": "所選首幀使用了不同的簡報參考、長寬比或解析度。你仍可算繪此片段。"
-    },
-    "reference": {
-      "generate": "產生參考圖",
-      "dialogTitle": "產生參考圖像",
-      "promptLabel": "參考圖提示詞",
-      "reviewTag": "參考圖",
-      "excludedSummary": "部分要求的場景尚未就緒，因此不包含在本次核准中：",
-      "excludedNoneReady": "要求的場景均未準備好產生參考圖：",
-      "discardExcludedRequests": "捨棄這些要求",
-      "excludedUnavailable": "場景已無法使用",
-      "excludedPromptUnusable": "該場景的畫面提示詞無法描述參考圖",
-      "dismissFailed": "無法更新要求佇列。審核視窗已關閉，請稍後再試。"
-    },
-    "review": {
-      "generateReadyScenes": "產生 {{count}} 個已就緒場景",
-      "generateReadyScenes_other": "產生 {{count}} 個已就緒場景",
-      "noReadyScenes": "沒有可產生的已就緒場景。",
-      "generateScene": "產生場景",
-      "regenerateScene": "產生另一個版本",
-      "title": "檢視產生設定",
-      "sceneCount": "已選擇 {{count}} 個場景",
-      "videoSeconds": "要求產生 {{seconds}} 秒影片",
-      "selectedDurationFull": "已選時間：{{seconds}} 秒",
-      "selectedDurationFull_other": "已選時間：{{seconds}} 秒",
-      "targetDurationFull": "目標時間：{{seconds}} 秒",
-      "targetDurationFull_other": "目標時間：{{seconds}} 秒",
-      "providerLabel": "服務供應商",
-      "modelLabel": "模型",
-      "aspectRatio": "長寬比",
-      "resolution": "解析度",
-      "watermarkOff": "浮水印已停用",
-      "audioOff": "靜音輸出；音訊產生已停用",
-      "missingRoute": "至少有一個場景沒有引擎。",
-      "invalidRoute": "至少有一個所選引擎無效。",
-      "durationMismatch": "分鏡時間與專案目標不符。",
-      "chargeNotice": "產生內容會使用你選擇的供應商帳戶，可能產生供應商費用。",
-      "confirm": "確認並產生",
-      "cancel": "取消",
-      "disabledMissingRoutes": "有 {{count}} 個鏡頭沒有引擎。關閉此視窗進行設定。",
-      "disabledMissingRoutes_other": "有 {{count}} 個鏡頭沒有引擎。關閉此視窗進行設定。",
-      "setEngines": "關閉並設定引擎",
-      "excludedFirstFrame": "本次算繪不包含 {{count}} 個鏡頭——此引擎無法從一幀開始。",
-      "excludedFirstFrame_other": "本次算繪不包含 {{count}} 個鏡頭——此引擎無法從一幀開始。",
-      "audioOn": "此次算繪包含產生的音訊；靜音引擎（如有）仍會保持靜音。"
-    },
     "jobs": {
       "progress": "已完成 {{percent}}%",
       "cancel": "取消工作",
@@ -1874,36 +1806,6 @@
         "actionRemoveReference": "移除參考圖片",
         "actionShorten": "縮短此鏡頭"
       }
-    },
-    "brief": {
-      "conversationTitle": "簡報對話",
-      "danglingNotice": "此專案的簡報對話已無法使用。",
-      "danglingStartFresh": "開始新對話",
-      "proposalTitle": "提議的腳本",
-      "proposalMeta": "基於修訂版 {{revision}} · {{createdAt}}",
-      "proposalSummary": "新增 {{added}} · 移除 {{removed}} · 修改 {{changed}}",
-      "proposalSceneChange": "鏡頭 {{position}}：{{fields}}",
-      "proposalFieldSeparator": "、",
-      "proposalNoChanges": "目前的腳本沒有變更",
-      "proposalDiffUnavailable": "變更摘要無法使用 — 此提案擬定後，腳本已發生變化",
-      "proposalField": {
-        "title": "標題",
-        "purpose": "目標",
-        "visualPrompt": "視覺提示詞",
-        "narration": "旁白",
-        "onScreenText": "畫面文字",
-        "mediaKind": "輸出類型",
-        "durationSeconds": "時長",
-        "referenceAssetId": "參考圖"
-      },
-      "proposalAccept": "接受腳本",
-      "proposalReject": "拒絕",
-      "proposalAccepted": "腳本已套用",
-      "proposalRejected": "已拒絕",
-      "proposalExpired": "已過期",
-      "proposalStale": "此提案等待期間腳本已變更。請要求重新起草。",
-      "proposalRepropose": "要求重新起草",
-      "proposalFlushRefused": "無法儲存你尚未儲存的編輯，因此未套用此提案。請修正這些編輯後再試一次。"
     },
     "shell": {
       "showDirector": "顯示創意總監",

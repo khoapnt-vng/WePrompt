@@ -12,28 +12,27 @@ import { PassThrough, Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import type {
   StudioAssetV2,
-  StudioBriefReferenceRole,
   StudioDetachBedAudioRequestV2,
-  StudioDetachBriefReferenceRequest,
   StudioFrameExtraction,
   StudioJobPurpose,
   StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_PROJECT_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+  STUDIO_PROJECT_SCHEMA_VERSION,
+} from '@/common/types/project/creativeStudioTypes';
 import {
   extractConditioningFrame,
   StudioConditioningFrameError,
   type StudioConditioningFrameExtractionInput,
   type StudioConditioningFrameExtractionResult,
 } from './adapters/conditioningFrame';
+import { STUDIO_MANAGED_ASSET_COLLECTIONS_V2 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
-  allocateStudioBriefReferenceLabel,
-  STUDIO_MANAGED_ASSET_COLLECTIONS_V2,
-  STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
-  isStudioBriefReferenceLabel,
-  isStudioReferenceImageMimeType,
-} from '@/common/types/project/creativeStudioManagedAssetCollections';
-import { applyStudioMutationBatchV2, type StudioVerifiedConditioningFrameV2 } from './service/schema2';
+  applyStudioMutationBatchV2,
+  studioGenerationCompositionDigestV2,
+  type StudioVerifiedConditioningFrameV2,
+} from './service/schema2';
 import {
   decodeStudioProjectManifestV2,
   STUDIO_BRIEF_FILE_MAX_BYTES,
@@ -51,7 +50,8 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const BED_MEDIA_INTENT_MAX_BYTES = 16 * 1024;
-const STUDIO_ASSET_SOURCE_LOOK_MAX_LENGTH = 8 * 1024;
+/** Bed publication journal version. This sidecar contract is independent from the project manifest schema. */
+export const STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION = 1 as const;
 const STUDIO_CLEANUP_QUARANTINE_DIRECTORY = /^\.studio-cleanup-[A-Za-z0-9]{6}$/;
 const hasExactOwnKeys = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -97,9 +97,10 @@ const isCanonicalBedAudioAssetForProjectV2 = (projectId: string, asset: StudioAs
   asset.durationSeconds! <= Number.MAX_SAFE_INTEGER &&
   asset.width === undefined &&
   asset.height === undefined &&
-  asset.briefReferenceRole === undefined &&
-  asset.briefReferenceLabel === undefined &&
-  asset.sourceLook === undefined;
+  asset.projectReferenceId === null &&
+  asset.generationReferenceAssetIds.length === 0 &&
+  asset.producerJobId === null &&
+  asset.compositionDigest === null;
 
 const isCanonicalBedAudioAssetV2 = (project: StudioProjectV2, asset: StudioAssetV2): boolean =>
   isCanonicalBedAudioAssetForProjectV2(project.id, asset);
@@ -118,7 +119,7 @@ const sameCanonicalBedAudioAssetV2 = (left: StudioAssetV2, right: StudioAssetV2)
   left.createdAt === right.createdAt;
 
 type StudioBedMediaIntentV2 = {
-  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION;
+  schemaVersion: typeof STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION;
   kind: 'import_bed_audio' | 'detach_bed_audio';
   projectId: string;
   expectedRevision: number;
@@ -139,7 +140,7 @@ const bedMediaIntentFileNameV2 = (intent: Pick<StudioBedMediaIntentV2, 'kind' | 
 const isStudioBedMediaIntentV2 = (value: unknown): value is StudioBedMediaIntentV2 => {
   if (
     !hasExactOwnKeys(value, ['schemaVersion', 'kind', 'projectId', 'expectedRevision', 'asset', 'managedIdentity']) ||
-    value.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
+    value.schemaVersion !== STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION ||
     (value.kind !== 'import_bed_audio' && value.kind !== 'detach_bed_audio') ||
     typeof value.projectId !== 'string' ||
     !SAFE_ID.test(value.projectId) ||
@@ -162,6 +163,10 @@ const isStudioBedMediaIntentV2 = (value: unknown): value is StudioBedMediaIntent
       'byteSize',
       'sha256',
       'durationSeconds',
+      'projectReferenceId',
+      'generationReferenceAssetIds',
+      'producerJobId',
+      'compositionDigest',
       'createdAt',
     ])
   ) {
@@ -188,41 +193,14 @@ const isStudioBedMediaIntentV2 = (value: unknown): value is StudioBedMediaIntent
     Number.isFinite(asset.durationSeconds) &&
     asset.durationSeconds > 0 &&
     asset.durationSeconds <= Number.MAX_SAFE_INTEGER &&
+    asset.projectReferenceId === null &&
+    Array.isArray(asset.generationReferenceAssetIds) &&
+    asset.generationReferenceAssetIds.length === 0 &&
+    asset.producerJobId === null &&
+    asset.compositionDigest === null &&
     typeof asset.createdAt === 'string' &&
     CANONICAL_TIMESTAMP.test(asset.createdAt)
   );
-};
-
-const resolveActiveStudioBriefReferencesV2 = (
-  assets: Readonly<Record<string, StudioAssetV2>>
-): StudioAssetV2[] | null => {
-  const active: StudioAssetV2[] = [];
-  for (const asset of Object.values(assets)) {
-    const hasRole = asset.briefReferenceRole !== undefined;
-    const hasLabel = asset.briefReferenceLabel !== undefined;
-    if (hasRole !== hasLabel) return null;
-    if (!hasRole) continue;
-    if (
-      (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look') ||
-      !isStudioBriefReferenceLabel(asset.briefReferenceLabel) ||
-      asset.shotId !== null ||
-      asset.mediaKind !== 'image' ||
-      !isStudioReferenceImageMimeType(asset.mimeType) ||
-      asset.managedAsset.collection !== 'imports'
-    ) {
-      return null;
-    }
-    active.push(asset);
-  }
-  if (active.length > STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) return null;
-  return active.toSorted((left, right) => {
-    const byRole = Number(left.briefReferenceRole === 'look') - Number(right.briefReferenceRole === 'look');
-    return (
-      byRole ||
-      (left.createdAt < right.createdAt ? -1 : left.createdAt > right.createdAt ? 1 : 0) ||
-      (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
-    );
-  });
 };
 
 type VerifiedIdentity = {
@@ -311,6 +289,7 @@ const providerPrimaryMediaKindV2 = (purpose: StudioJobPurpose): 'image' | 'video
   switch (purpose) {
     case 'seed_still':
     case 'board_still':
+    case 'reference_image':
       return 'image';
     case 'video_take':
       return 'video';
@@ -322,6 +301,7 @@ const providerPrimaryCollectionV2 = (
 ): Extract<StudioAssetV2['managedAsset']['collection'], 'assets' | 'boardStills'> => {
   switch (purpose) {
     case 'seed_still':
+    case 'reference_image':
     case 'video_take':
       return 'assets';
     case 'board_still':
@@ -329,21 +309,10 @@ const providerPrimaryCollectionV2 = (
   }
 };
 
-const nonterminalJobNeedsBriefReferenceV2 = (project: StudioProjectV2, assetId: string): boolean =>
-  Object.values(project.jobs).some((job) => {
-    if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') return false;
-    const referenceInputs =
-      job.requestPlan.kind === 'resolved'
-        ? job.requestPlan.snapshot.referenceInputs
-        : job.requestPlan.template.referenceInputs;
-    return referenceInputs.some((referenceInput) => referenceInput.assetId === assetId);
-  });
-
-export type InternalImportReferenceInputV2 = {
+export type InternalImportSeedStillInputV2 = {
   projectId: string;
   sourcePath: string;
-  shotId?: string;
-  briefReferenceRole?: StudioBriefReferenceRole;
+  shotId: string;
   expectedRevision: number;
   returnProject?: boolean;
 };
@@ -365,7 +334,7 @@ export type InternalDetachBedAudioInputV2 = StudioDetachBedAudioRequestV2 & {
 
 export type PersistProviderJobOutputInputV2 = {
   projectId: string;
-  shotId: string;
+  shotId: string | null;
   jobId: string;
   mediaKind: 'image' | 'video';
   declaredMimeType: string;
@@ -419,13 +388,12 @@ export type StudioResolvedAssetV2 = {
 };
 
 export type StudioMediaStore = {
-  importReferenceFromPathV2(
-    input: InternalImportReferenceInputV2 & { returnProject: true }
+  importSeedStillFromPathV2(
+    input: InternalImportSeedStillInputV2 & { returnProject: true }
   ): Promise<StudioMediaImportResultV2>;
-  importReferenceFromPathV2(input: InternalImportReferenceInputV2): Promise<StudioAssetV2>;
+  importSeedStillFromPathV2(input: InternalImportSeedStillInputV2): Promise<StudioAssetV2>;
   importBedAudioFromPathV2(input: InternalImportBedAudioInputV2): Promise<StudioMediaImportResultV2>;
   detachBedAudioV2(input: InternalDetachBedAudioInputV2): Promise<StudioProjectV2>;
-  detachBriefReferenceV2(input: StudioDetachBriefReferenceRequest): Promise<StudioProjectV2>;
   persistProviderOutputForJobV2(input: PersistProviderJobOutputInputV2): Promise<StudioAssetV2>;
   persistProviderOutputFromUrlForJobV2(input: PersistProviderJobOutputUrlInputV2): Promise<StudioAssetV2>;
   persistProviderPosterForJobV2(input: PersistProviderJobPosterInputV2): Promise<StudioAssetV2>;
@@ -698,6 +666,26 @@ const assertStudioProjectPathAuthorityV2 = async (authority: StudioProjectPathAu
     current.briefByteLength !== authority.briefByteLength ||
     current.briefSha256 !== authority.briefSha256
   ) {
+    throw new CreativeStudioMediaError('storage_error');
+  }
+};
+
+const assertStudioProjectDirectoryAuthorityV2 = async (authority: StudioProjectPathAuthorityV2): Promise<void> => {
+  try {
+    const stats = await fs.lstat(authority.projectDir);
+    const identity = fileIdentity(stats);
+    if (
+      !stats.isDirectory() ||
+      stats.isSymbolicLink() ||
+      path.basename(authority.projectDir) !== authority.projectId ||
+      (await fs.realpath(authority.projectDir)) !== authority.projectDir ||
+      identity.dev !== authority.directoryIdentity.dev ||
+      identity.ino !== authority.directoryIdentity.ino
+    ) {
+      throw new CreativeStudioMediaError('storage_error');
+    }
+  } catch (error) {
+    if (error instanceof CreativeStudioMediaError) throw error;
     throw new CreativeStudioMediaError('storage_error');
   }
 };
@@ -1553,12 +1541,43 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     return { projectDir, project: captured.project, authority: captured.authority };
   };
 
-  const assertV2ManagedMutation = async (
+  /**
+   * Captures a coherent provider-output plan while the Store's short project queue is held. Paid
+   * sibling jobs may commit while bytes are streamed, but they cannot split this initial project
+   * snapshot from its directory authority and turn a valid output into a download failure.
+   */
+  const loadProviderOutputContextV2 = (
+    projectId: string
+  ): Promise<{ projectDir: string; project: StudioProjectV2; authority: StudioProjectPathAuthorityV2 }> =>
+    deps.store.withProjectAuthorityV2(projectId, async (projectAuthority) => {
+      if (
+        projectAuthority.project.id !== projectId ||
+        path.basename(projectAuthority.projectDir) !== projectId ||
+        (await fs.realpath(projectAuthority.projectDir)) !== projectAuthority.projectDir
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      await projectAuthority.assertCurrent?.();
+      const captured = await captureStudioProjectPathAuthorityV2(projectId, projectAuthority.projectDir);
+      await projectAuthority.assertCurrent?.();
+      if (
+        captured.project.id !== projectAuthority.project.id ||
+        captured.project.revision !== projectAuthority.project.revision ||
+        captured.project.updatedAt !== projectAuthority.project.updatedAt
+      ) {
+        throw new CreativeStudioMediaError('storage_error');
+      }
+      return {
+        projectDir: projectAuthority.projectDir,
+        project: structuredClone(projectAuthority.project),
+        authority: captured.authority,
+      };
+    });
+
+  const assertManagedDirectoriesV2 = async (
     authority: StudioProjectPathAuthorityV2,
-    directories: readonly VerifiedDirectory[] = []
+    directories: readonly VerifiedDirectory[]
   ): Promise<void> => {
-    await deps.beforeV2ManagedMutation?.(authority.projectDir);
-    await assertStudioProjectPathAuthorityV2(authority);
     for (const directory of directories) {
       if (path.dirname(directory.directory) !== authority.projectDir) {
         throw new CreativeStudioMediaError('storage_error');
@@ -1572,24 +1591,50 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     }
   };
 
+  const assertV2ManagedMutation = async (
+    authority: StudioProjectPathAuthorityV2,
+    directories: readonly VerifiedDirectory[] = []
+  ): Promise<void> => {
+    await deps.beforeV2ManagedMutation?.(authority.projectDir);
+    await assertStudioProjectPathAuthorityV2(authority);
+    await assertManagedDirectoriesV2(authority, directories);
+  };
+
+  const assertV2ProviderOutputPathMutation = async (
+    authority: StudioProjectPathAuthorityV2,
+    directories: readonly VerifiedDirectory[] = []
+  ): Promise<void> => {
+    await deps.beforeV2ManagedMutation?.(authority.projectDir);
+    await assertStudioProjectDirectoryAuthorityV2(authority);
+    await assertManagedDirectoriesV2(authority, directories);
+  };
+
   const captureManagedDirectoryV2 = async (
     authority: StudioProjectPathAuthorityV2,
-    directory: string
+    directory: string,
+    assertMutation: (
+      authority: StudioProjectPathAuthorityV2,
+      directories?: readonly VerifiedDirectory[]
+    ) => Promise<void> = assertV2ManagedMutation
   ): Promise<VerifiedDirectory> => {
     if (path.dirname(directory) !== authority.projectDir) throw new CreativeStudioMediaError('storage_error');
     const verified = await captureVerifiedDirectory(directory);
     if ((await fs.realpath(directory)) !== directory) throw new CreativeStudioMediaError('storage_error');
-    await assertV2ManagedMutation(authority, [verified]);
+    await assertMutation(authority, [verified]);
     return verified;
   };
 
   const ensureManagedDirectoryV2 = async (
     authority: StudioProjectPathAuthorityV2,
-    name: string
+    name: string,
+    assertMutation: (
+      authority: StudioProjectPathAuthorityV2,
+      directories?: readonly VerifiedDirectory[]
+    ) => Promise<void> = assertV2ManagedMutation
   ): Promise<VerifiedDirectory> => {
-    await assertV2ManagedMutation(authority);
+    await assertMutation(authority);
     const directory = await ensureManagedDirectory(authority.projectDir, name);
-    return captureManagedDirectoryV2(authority, directory);
+    return captureManagedDirectoryV2(authority, directory, assertMutation);
   };
 
   const cleanupManagedPathV2 = async (
@@ -2051,23 +2096,23 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     await removePublishedBedMediaIntentV2(context, published);
   };
 
-  async function importReferenceFromPathV2(
-    input: InternalImportReferenceInputV2 & { returnProject: true }
+  async function importSeedStillFromPathV2(
+    input: InternalImportSeedStillInputV2 & { returnProject: true }
   ): Promise<StudioMediaImportResultV2>;
-  async function importReferenceFromPathV2(input: InternalImportReferenceInputV2): Promise<StudioAssetV2>;
-  async function importReferenceFromPathV2(
-    input: InternalImportReferenceInputV2
+  async function importSeedStillFromPathV2(input: InternalImportSeedStillInputV2): Promise<StudioAssetV2>;
+  async function importSeedStillFromPathV2(
+    input: InternalImportSeedStillInputV2
   ): Promise<StudioAssetV2 | StudioMediaImportResultV2> {
     if (
+      (!hasExactOwnKeys(input, ['projectId', 'sourcePath', 'shotId', 'expectedRevision']) &&
+        !hasExactOwnKeys(input, ['projectId', 'sourcePath', 'shotId', 'expectedRevision', 'returnProject'])) ||
       !SAFE_ID.test(input.projectId) ||
-      (!SAFE_ID.test(input.shotId ?? '') && input.shotId !== undefined) ||
-      (input.briefReferenceRole !== undefined &&
-        input.briefReferenceRole !== 'cast' &&
-        input.briefReferenceRole !== 'look') ||
-      (input.shotId === undefined) === (input.briefReferenceRole === undefined) ||
+      !SAFE_ID.test(input.shotId) ||
       !Number.isSafeInteger(input.expectedRevision) ||
       input.expectedRevision < 1 ||
-      typeof input.sourcePath !== 'string'
+      typeof input.sourcePath !== 'string' ||
+      input.sourcePath.length === 0 ||
+      (input.returnProject !== undefined && input.returnProject !== true)
     ) {
       throw new CreativeStudioMediaError('invalid_media');
     }
@@ -2086,17 +2131,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const { projectDir, project } = context;
       authority = context.authority;
       if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
-      if (input.shotId !== undefined) {
-        if (!Object.hasOwn(project.shots, input.shotId)) throw new CreativeStudioMediaError('not_found');
-        if (owningBeatForShotV2(project, input.shotId) === null) {
-          throw new CreativeStudioMediaError('invalid_media');
-        }
-      }
-      if (input.briefReferenceRole !== undefined) {
-        const activeReferences = resolveActiveStudioBriefReferencesV2(project.assets);
-        if (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES) {
-          throw new CreativeStudioMediaError('invalid_media');
-        }
+      if (!Object.hasOwn(project.shots, input.shotId)) throw new CreativeStudioMediaError('not_found');
+      if (owningBeatForShotV2(project, input.shotId) === null) {
+        throw new CreativeStudioMediaError('invalid_media');
       }
       const capacity = await planWriteCapacity(project, projectDir, limits.referenceMaxBytes, sourceStats.size);
       const partsDirectory = await ensureManagedDirectoryV2(authority, 'parts');
@@ -2164,12 +2201,16 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const baseAsset: StudioAssetV2 = {
         id: assetId,
         projectId: input.projectId,
-        shotId: input.shotId ?? null,
+        shotId: input.shotId,
         mediaKind: 'image',
         mimeType: signature.mimeType,
         managedAsset: { collection: 'imports', fileName: `${assetId}.${signature.extension}` },
         byteSize,
         sha256: hash.digest('hex'),
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
         createdAt: now(),
       };
       if (finalPath === null || finalIdentity === null) throw new CreativeStudioMediaError('storage_error');
@@ -2186,27 +2227,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           (current) => {
             assertManagedProjectCapacity(current, facts.managedByteSize, byteSize);
             const next = structuredClone(current);
-            const activeReferences = resolveActiveStudioBriefReferencesV2(current.assets);
-            if (input.shotId !== undefined && owningBeatForShotV2(current, input.shotId) === null) {
+            if (owningBeatForShotV2(current, input.shotId) === null) {
               throw new CreativeStudioMediaError('invalid_media');
             }
-            if (
-              input.briefReferenceRole !== undefined &&
-              (activeReferences === null || activeReferences.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES)
-            ) {
-              throw new CreativeStudioMediaError('invalid_media');
-            }
-            const asset: StudioAssetV2 =
-              input.briefReferenceRole === undefined
-                ? baseAsset
-                : {
-                    ...baseAsset,
-                    briefReferenceRole: input.briefReferenceRole,
-                    briefReferenceLabel: allocateStudioBriefReferenceLabel(
-                      path.basename(input.sourcePath),
-                      activeReferences!.map((reference) => reference.briefReferenceLabel!)
-                    ),
-                  };
+            const asset: StudioAssetV2 = baseAsset;
             defineRecordValue(next.assets, asset.id, asset);
             if (asset.shotId !== null) {
               const shot = ownRecordValue(next.shots, asset.shotId);
@@ -2370,6 +2394,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         byteSize,
         sha256,
         durationSeconds: probe.durationSeconds,
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
         createdAt: capturedAt,
       };
       if (partPath === null || partIdentity === null || finalPath === null) {
@@ -2401,7 +2429,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         await assertV2ManagedMutation(authority, [partsDirectory, importsDirectory]);
         assertManagedProjectCapacity(projectAuthority.project, facts.managedByteSize, byteSize);
         publishedIntent = await publishBedMediaIntentV2(authority, partsDirectory, {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION,
           kind: 'import_bed_audio',
           projectId: input.projectId,
           expectedRevision: input.expectedRevision,
@@ -2442,7 +2470,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
             return applyStudioMutationBatchV2(
               withAsset,
               {
-                schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
                 projectId: current.id,
                 expectedRevision: current.revision,
                 operations: [{ kind: 'set_bed', assetId }],
@@ -2574,7 +2602,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           throw new CreativeStudioMediaError('storage_error');
         }
         publishedIntent = await publishBedMediaIntentV2(authority, partsDirectory, {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION,
           kind: 'detach_bed_audio',
           projectId: input.projectId,
           expectedRevision: input.expectedRevision,
@@ -2624,122 +2652,6 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       return mapStoreError(error);
     } finally {
       detachingBedAudio.delete(claimKey);
-    }
-  };
-
-  const detachBriefReferenceV2 = async (input: StudioDetachBriefReferenceRequest): Promise<StudioProjectV2> => {
-    if (
-      !SAFE_ID.test(input.projectId) ||
-      !SAFE_ID.test(input.assetId) ||
-      !Number.isSafeInteger(input.expectedRevision) ||
-      input.expectedRevision < 1
-    ) {
-      throw new CreativeStudioMediaError('invalid_media');
-    }
-    try {
-      const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
-      if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
-      const currentAsset = ownRecordValue(project.assets, input.assetId);
-      if (
-        currentAsset === undefined ||
-        currentAsset.projectId !== project.id ||
-        currentAsset.shotId !== null ||
-        currentAsset.mediaKind !== 'image' ||
-        currentAsset.managedAsset.collection !== 'imports' ||
-        (currentAsset.briefReferenceRole !== 'cast' && currentAsset.briefReferenceRole !== 'look') ||
-        currentAsset.briefReferenceLabel === undefined
-      ) {
-        throw new CreativeStudioMediaError(currentAsset === undefined ? 'not_found' : 'invalid_media');
-      }
-      if (nonterminalJobNeedsBriefReferenceV2(project, input.assetId)) {
-        throw new CreativeStudioMediaError('media_in_use');
-      }
-      const importsDir = path.join(projectDir, 'imports');
-      const managedFile = path.join(importsDir, currentAsset.managedAsset.fileName);
-      if (path.dirname(managedFile) !== importsDir) throw new CreativeStudioMediaError('storage_error');
-      let importsDirectory: VerifiedDirectory | null = null;
-      let managedIdentity: FileIdentity | null = null;
-      let managedFileProof: ManagedFileProofV2 | null = null;
-      try {
-        const importsStats = await fs.lstat(importsDir);
-        if (
-          !importsStats.isDirectory() ||
-          importsStats.isSymbolicLink() ||
-          (await fs.realpath(importsDir)) !== importsDir
-        ) {
-          throw new CreativeStudioMediaError('storage_error');
-        }
-        importsDirectory = { directory: importsDir, identity: fileIdentity(importsStats) };
-        await assertV2ManagedMutation(authority, [importsDirectory]);
-        const managedStats = await regularFile(managedFile);
-        if ((await fs.realpath(managedFile)) !== managedFile) throw new CreativeStudioMediaError('storage_error');
-        managedIdentity = fileIdentity(managedStats);
-        managedFileProof = await captureManagedFileProofV2(managedFile, managedIdentity, currentAsset);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      }
-      await assertV2ManagedMutation(authority, importsDirectory === null ? [] : [importsDirectory]);
-      const updated = await withManagedProjectAuthority(input.projectId, async (projectAuthority) => {
-        if (projectAuthority.projectDir !== projectDir) throw new CreativeStudioMediaError('storage_error');
-        await projectAuthority.assertCurrent?.();
-        await assertV2ManagedMutation(authority, importsDirectory === null ? [] : [importsDirectory]);
-        return projectAuthority.commit(
-          (current) => {
-            const asset = ownRecordValue(current.assets, input.assetId);
-            if (asset === undefined) throw new CreativeStudioMediaError('not_found');
-            if (
-              asset.projectId !== current.id ||
-              asset.shotId !== null ||
-              asset.mediaKind !== 'image' ||
-              asset.managedAsset.collection !== 'imports' ||
-              (asset.briefReferenceRole !== 'cast' && asset.briefReferenceRole !== 'look') ||
-              asset.briefReferenceLabel === undefined
-            ) {
-              throw new CreativeStudioMediaError('invalid_media');
-            }
-            if (nonterminalJobNeedsBriefReferenceV2(current, input.assetId)) {
-              throw new CreativeStudioMediaError('media_in_use');
-            }
-            const next = structuredClone(current);
-            if (!Object.hasOwn(next.assets, input.assetId)) throw new CreativeStudioMediaError('not_found');
-            delete next.assets[input.assetId];
-            return next;
-          },
-          input.expectedRevision,
-          undefined,
-          async () => {
-            assertOperationActive();
-            if (managedFileProof !== null) await assertManagedFileProofV2(managedFile, managedFileProof);
-          }
-        );
-      });
-      if (managedIdentity !== null) {
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            // A later valid commit may already have replaced the manifest inode. Reclassify and only
-            // remove the exact managed inode while the detached asset remains absent.
-            // eslint-disable-next-line no-await-in-loop
-            const committed = await loadProjectContextV2(input.projectId);
-            if (committed.project.revision < updated.revision) continue;
-            if (Object.hasOwn(committed.project.assets, input.assetId)) break;
-            // eslint-disable-next-line no-await-in-loop
-            const committedImports = await captureManagedDirectoryV2(committed.authority, importsDir);
-            // eslint-disable-next-line no-await-in-loop
-            const outcome = await cleanupManagedPathV2(
-              committed.authority,
-              managedFile,
-              managedIdentity,
-              committedImports
-            );
-            if (outcome === 'completed') break;
-          } catch {
-            // Detach is already authoritative. Cleanup remains recoverable and cannot turn it into failure.
-          }
-        }
-      }
-      return updated;
-    } catch (error) {
-      return mapStoreError(error);
     }
   };
 
@@ -3425,7 +3337,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         (job) =>
           job.status === 'succeeded' &&
           job.purpose === 'video_take' &&
-          job.shotId === shot.id &&
+          job.target.kind === 'shot' &&
+          job.target.shotId === shot.id &&
           job.outputAssetIdsByRole.primary === take.id
       );
       if (producers.length !== 1) throw new StudioConditioningFrameError('source_missing');
@@ -3559,6 +3472,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         managedAsset: { collection: 'conditioningFrames', fileName: `${frameAssetId}.${signature.extension}` },
         byteSize: completedByteSize,
         sha256: hash.digest('hex'),
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
         createdAt: repairingReadyAsset?.createdAt ?? now(),
       };
       if (finalPath === null || finalIdentity === null) throw new CreativeStudioMediaError('storage_error');
@@ -3719,7 +3636,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const validateProviderOutputMetadataV2 = (input: ProviderJobOutputMetadataV2 | ProviderJobPosterMetadataV2): void => {
     if (
       !SAFE_ID.test(input.projectId) ||
-      !SAFE_ID.test(input.shotId) ||
+      (input.shotId !== null && !SAFE_ID.test(input.shotId)) ||
       !SAFE_ID.test(input.jobId) ||
       typeof input.declaredMimeType !== 'string' ||
       ('mediaKind' in input && input.mediaKind !== 'image' && input.mediaKind !== 'video') ||
@@ -3742,24 +3659,32 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
 
   const prepareProviderJobWriteV2 = async (input: ProviderJobOutputMetadataV2): Promise<ManagedWritePlanV2> => {
     validateProviderOutputMetadataV2(input);
-    const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
-    const shot = ownRecordValue(project.shots, input.shotId);
+    const { projectDir, project, authority } = await loadProviderOutputContextV2(input.projectId);
     const job = ownRecordValue(project.jobs, input.jobId);
-    const beat = owningBeatForShotV2(project, input.shotId);
+    const targetShotId = job?.target.kind === 'shot' ? job.target.shotId : null;
+    const shot = targetShotId === null ? undefined : ownRecordValue(project.shots, targetShotId);
+    const beat = targetShotId === null ? null : owningBeatForShotV2(project, targetShotId);
+    const reference =
+      job?.target.kind === 'reference' ? ownRecordValue(project.references, job.target.referenceId) : undefined;
+    const ownerHasJob =
+      job?.target.kind === 'shot' ? shot?.jobIds.includes(job.id) : reference?.jobIds.includes(job?.id ?? '');
     const expectedMediaKind = job === undefined ? null : providerPrimaryMediaKindV2(job.purpose);
     const mediaKindMatchesRole = expectedMediaKind === input.mediaKind;
-    if (shot && !mediaKindMatchesRole) throw new CreativeStudioMediaError('invalid_media');
     const active =
       job?.status === 'submitting' ||
       job?.status === 'running' ||
       (job?.status === 'failed' && job.error?.code === 'download_failed');
     if (
-      !shot ||
-      !beat ||
       !job ||
       job.projectId !== input.projectId ||
-      job.shotId !== input.shotId ||
-      !shot.jobIds.includes(job.id) ||
+      targetShotId !== input.shotId ||
+      !ownerHasJob ||
+      (job.target.kind === 'shot' && (!shot || !beat || job.purpose === 'reference_image')) ||
+      (job.target.kind === 'reference' &&
+        (!reference ||
+          project.referencePlanStatus !== 'planned' ||
+          !project.referenceOrder.includes(reference.id) ||
+          job.purpose !== 'reference_image')) ||
       !mediaKindMatchesRole ||
       !active
     ) {
@@ -3796,7 +3721,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (
       job.purpose !== 'video_take' ||
       job.projectId !== input.projectId ||
-      job.shotId !== input.shotId ||
+      job.target.kind !== 'shot' ||
+      job.target.shotId !== input.shotId ||
       job.outputAssetIdsByRole.primary !== input.primaryAssetId ||
       job.outputAssetIdsByRole.poster !== null ||
       !job.outputAssetIds.includes(input.primaryAssetId) ||
@@ -3813,7 +3739,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (!SAFE_ID.test(input.primaryAssetId) || !input.declaredMimeType.startsWith('image/')) {
       throw new CreativeStudioMediaError('invalid_media');
     }
-    const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
+    const { projectDir, project, authority } = await loadProviderOutputContextV2(input.projectId);
     validateProviderPosterLineageV2(project, input);
     return {
       projectDir,
@@ -3846,7 +3772,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     const producers = shot.jobIds.flatMap((jobId) => {
       const job = ownRecordValue(project.jobs, jobId);
       return job?.projectId === input.projectId &&
-        job.shotId === input.shotId &&
+        job.target.kind === 'shot' &&
+        job.target.shotId === input.shotId &&
         job.purpose === 'video_take' &&
         job.status === 'succeeded' &&
         job.outputAssetIdsByRole.primary === input.videoAssetId &&
@@ -3872,7 +3799,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     ) {
       throw new CreativeStudioMediaError('invalid_media');
     }
-    const { projectDir, project, authority } = await loadProjectContextV2(input.projectId);
+    const { projectDir, project, authority } = await loadProviderOutputContextV2(input.projectId);
     validateCapturedPosterLineageV2(project, input);
     return {
       projectDir,
@@ -3907,8 +3834,16 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     let finalPath: string | null = null;
     let finalIdentity: FileIdentity | null = null;
     try {
-      const partsDirectory = await ensureManagedDirectoryV2(plan.authority, 'parts');
-      const collectionDirectory = await ensureManagedDirectoryV2(plan.authority, plan.collection);
+      const partsDirectory = await ensureManagedDirectoryV2(
+        plan.authority,
+        'parts',
+        assertV2ProviderOutputPathMutation
+      );
+      const collectionDirectory = await ensureManagedDirectoryV2(
+        plan.authority,
+        plan.collection,
+        assertV2ProviderOutputPathMutation
+      );
       const partsDir = partsDirectory.directory;
       const collectionDir = collectionDirectory.directory;
       partPath = path.join(partsDir, `${assetId}.part`);
@@ -3926,10 +3861,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           callback(null, chunk);
         },
       });
-      await assertV2ManagedMutation(plan.authority, [partsDirectory]);
+      await assertV2ProviderOutputPathMutation(plan.authority, [partsDirectory]);
       const partHandle = await fs.open(partPath, 'wx');
       try {
-        await assertV2ManagedMutation(plan.authority, [partsDirectory]);
+        await assertV2ProviderOutputPathMutation(plan.authority, [partsDirectory]);
         const openedPart = await partHandle.stat();
         if (!openedPart.isFile()) throw new CreativeStudioMediaError('storage_error');
         partIdentity = fileIdentity(openedPart);
@@ -3941,7 +3876,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       } finally {
         await partHandle.close().catch((): undefined => undefined);
       }
-      await assertV2ManagedMutation(plan.authority, [partsDirectory]);
+      await assertV2ProviderOutputPathMutation(plan.authority, [partsDirectory]);
       const completedPart = await regularFile(partPath);
       const completedPartIdentity = fileIdentity(completedPart);
       if (
@@ -3966,7 +3901,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         finalPath,
         collectionDir,
         partIdentity,
-        () => assertV2ManagedMutation(plan.authority, [partsDirectory, collectionDirectory]),
+        () => assertV2ProviderOutputPathMutation(plan.authority, [partsDirectory, collectionDirectory]),
         (identity) => {
           finalIdentity = identity;
         }
@@ -3997,13 +3932,20 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         ...(input.width === undefined ? {} : { width: input.width }),
         ...(input.height === undefined ? {} : { height: input.height }),
         ...(durationSeconds === undefined ? {} : { durationSeconds }),
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
         createdAt: now(),
       };
       if (finalPath === null || finalIdentity === null) throw new CreativeStudioMediaError('storage_error');
       const managedFilePath = finalPath;
       const managedFileProof = await captureManagedFileProofV2(managedFilePath, finalIdentity, asset);
-      await assertV2ManagedMutation(plan.authority, [collectionDirectory]);
-      await commit(asset, () => assertManagedFileProofV2(managedFilePath, managedFileProof));
+      await assertV2ProviderOutputPathMutation(plan.authority, [collectionDirectory]);
+      await commit(asset, async () => {
+        await assertV2ProviderOutputPathMutation(plan.authority, [collectionDirectory]);
+        await assertManagedFileProofV2(managedFilePath, managedFileProof);
+      });
       return asset;
     } catch (error) {
       await cleanupUncommittedManagedPathsV2(input.projectId, assetId, [
@@ -4051,19 +3993,22 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       asset,
       (current) => {
         const job = ownRecordValue(current.jobs, input.jobId);
-        const shot = ownRecordValue(current.shots, input.shotId);
-        const beat = owningBeatForShotV2(current, input.shotId);
+        const targetShotId = job?.target.kind === 'shot' ? job.target.shotId : null;
+        const shot = targetShotId === null ? undefined : ownRecordValue(current.shots, targetShotId);
+        const beat = targetShotId === null ? null : owningBeatForShotV2(current, targetShotId);
+        const reference =
+          job?.target.kind === 'reference' ? ownRecordValue(current.references, job.target.referenceId) : undefined;
         const active =
           job?.status === 'submitting' ||
           job?.status === 'running' ||
           (job?.status === 'failed' && job.error?.code === 'download_failed');
         if (
           !job ||
-          !shot ||
-          !beat ||
           job.projectId !== input.projectId ||
-          job.shotId !== input.shotId ||
-          !shot.jobIds.includes(job.id) ||
+          targetShotId !== input.shotId ||
+          job.requestSnapshot === null ||
+          (job.target.kind === 'shot' && (!shot || !beat || !shot.jobIds.includes(job.id))) ||
+          (job.target.kind === 'reference' && (!reference || !reference.jobIds.includes(job.id))) ||
           !active
         ) {
           throw new CreativeStudioMediaError('job_inactive');
@@ -4075,23 +4020,39 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         }
         if (
           asset.projectId !== current.id ||
-          asset.shotId !== shot.id ||
+          asset.shotId !== targetShotId ||
           asset.mediaKind !== input.mediaKind ||
           asset.managedAsset.collection !== expectedCollection
         ) {
           throw new CreativeStudioMediaError('invalid_media');
         }
-        const sourceLook = job.requestSnapshot?.prompt ?? `${beat.look.trim()}\n\n${shot.line.trim()}`;
-        if (sourceLook.length <= STUDIO_ASSET_SOURCE_LOOK_MAX_LENGTH) asset.sourceLook = sourceLook;
-        asset.referenceAssetIds = (job.requestSnapshot?.referenceInputs ?? []).map((reference) => reference.assetId);
+        asset.projectReferenceId = job.target.kind === 'reference' ? job.target.referenceId : null;
+        asset.generationReferenceAssetIds = job.requestSnapshot.referenceInputs.map((input) => input.assetId);
+        asset.producerJobId = job.id;
+        asset.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
         defineRecordValue(current.assets, asset.id, asset);
-        shot.assetIds.push(asset.id);
-        if (job.purpose === 'video_take') {
-          if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
-          shot.videoAssetId = asset.id;
-        } else if (job.purpose === 'board_still') {
-          if (shot.boardAssetId !== null) shot.supersededBoardAssetIds.push(shot.boardAssetId);
-          shot.boardAssetId = asset.id;
+        if (job.target.kind === 'shot') {
+          if (shot === undefined) throw new CreativeStudioMediaError('job_inactive');
+          shot.assetIds.push(asset.id);
+          if (job.purpose === 'video_take') {
+            if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+            shot.videoAssetId = asset.id;
+          } else if (job.purpose === 'board_still') {
+            if (shot.boardAssetId !== null) shot.supersededBoardAssetIds.push(shot.boardAssetId);
+            shot.boardAssetId = asset.id;
+          }
+        } else {
+          if (reference === undefined || job.purpose !== 'reference_image') {
+            throw new CreativeStudioMediaError('job_inactive');
+          }
+          if (
+            reference.candidateAssetId !== null &&
+            reference.candidateAssetId !== asset.id &&
+            !reference.supersededAssetIds.includes(reference.candidateAssetId)
+          ) {
+            reference.supersededAssetIds.push(reference.candidateAssetId);
+          }
+          reference.candidateAssetId = asset.id;
         }
         job.status = 'succeeded';
         job.outputAssetIds = [asset.id];
@@ -4099,12 +4060,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         job.error = null;
         delete job.progress;
         job.updatedAt = now();
-        if (job.projectReferenceId !== undefined) {
-          const reference = ownRecordValue(current.references, job.projectReferenceId);
-          if (reference === undefined || reference.candidateJobId !== job.id) {
-            throw new CreativeStudioMediaError('job_inactive');
-          }
-          reference.candidateAssetId = asset.id;
+        if (reference !== undefined) {
           reference.updatedAt = job.updatedAt;
         }
         return current;
@@ -4136,9 +4092,12 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         ) {
           throw new CreativeStudioMediaError('invalid_media');
         }
-        posterAsset.referenceAssetIds = (job.requestSnapshot?.referenceInputs ?? []).map(
+        posterAsset.projectReferenceId = null;
+        posterAsset.generationReferenceAssetIds = (job.requestSnapshot?.referenceInputs ?? []).map(
           (reference) => reference.assetId
         );
+        posterAsset.producerJobId = job.id;
+        posterAsset.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
         defineRecordValue(current.assets, posterAsset.id, posterAsset);
         shot.assetIds.push(posterAsset.id);
         job.outputAssetIds.push(posterAsset.id);
@@ -4175,9 +4134,12 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         ) {
           throw new CreativeStudioMediaError('invalid_media');
         }
-        posterAsset.referenceAssetIds = (job.requestSnapshot?.referenceInputs ?? []).map(
+        posterAsset.projectReferenceId = null;
+        posterAsset.generationReferenceAssetIds = (job.requestSnapshot?.referenceInputs ?? []).map(
           (reference) => reference.assetId
         );
+        posterAsset.producerJobId = job.id;
+        posterAsset.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
         defineRecordValue(current.assets, posterAsset.id, posterAsset);
         shot.assetIds.push(posterAsset.id);
         job.outputAssetIds.push(posterAsset.id);
@@ -4288,10 +4250,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   };
 
   return {
-    importReferenceFromPathV2,
+    importSeedStillFromPathV2,
     importBedAudioFromPathV2,
     detachBedAudioV2,
-    detachBriefReferenceV2,
     persistProviderOutputForJobV2,
     persistProviderOutputFromUrlForJobV2,
     persistProviderPosterForJobV2,

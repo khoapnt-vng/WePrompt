@@ -22,21 +22,18 @@ import {
   type StudioProjectV2,
   type StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
+import { composeStudioGenerationV2 } from '@/process/services/creative-studio/service/schema2/generation';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
-  line: '',
-  derivation: 'derived',
-  derivedFromActionRevision: 1,
-  narration: '',
-  onScreenText: '',
+  shootingScript: `Shooting script for ${id}`,
   durationSeconds: 4,
   trimInSeconds: null,
   trimOutSeconds: null,
   chainBreak: 'none',
-  referenceIds: [],
+  referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
   boardAssetId: null,
   supersededBoardAssetIds: [],
@@ -50,12 +47,9 @@ const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot =
 const makeBeat = (id: string, shotOrder: string[], overrides: Partial<StudioBeat> = {}): StudioBeat => ({
   id,
   title: id,
-  action: '',
-  look: '',
-  actionRevision: 1,
+  story: `Story for ${id}`,
   targetSeconds: null,
   shotOrder,
-  lineHistory: [],
   ...overrides,
 });
 
@@ -68,63 +62,85 @@ const makeAsset = (id: string, shotId: string, overrides: Partial<StudioAssetV2>
   managedAsset: { collection: 'assets', fileName: `${id}.png` },
   byteSize: 1,
   sha256: 'a'.repeat(64),
-  referenceAssetIds: [],
   createdAt: timestamp,
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
   ...overrides,
 });
+
+const makeComposition = (shotId: string) =>
+  composeStudioGenerationV2({
+    projectRevision: 1,
+    brief: '',
+    rules: [],
+    source: {
+      kind: 'shot',
+      beatId: 'beat_1',
+      story: 'A complete Story.',
+      shotId,
+      shootingScript: `Shooting script for ${shotId}`,
+    },
+    purpose: 'video_take',
+    referenceInputs: [],
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
+    boardStyle: null,
+    instructionProfile: 'weprompt-image-v1.video-take.v1',
+  });
 
 const makeJob = (
   id: string,
   shotId: string,
   outputAssetIds: string[],
   overrides: Partial<StudioJobV2> = {}
-): StudioJobV2 => ({
-  id,
-  projectId: 'project_1',
-  shotId,
-  status: 'succeeded',
-  provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
-  idempotencyKey: `idem_${id}`,
-  providerJobId: 'remote_1',
-  remoteStartedAt: timestamp,
-  cancellationPolicy: 'none',
-  purpose: 'video_take',
-  authorizationId: 'authorization_1',
-  authorizationItemId: 'item_1',
-  requestPlan: {
-    kind: 'resolved',
-    snapshot: {
-      prompt: 'A cinematic shot',
-      aspectRatio: '16:9',
-      resolution: '1080p',
-      durationSeconds: 4,
-      referenceInputs: [],
-      conditioningInput: { kind: 'seed_still', assetId: 'seed_1' },
-    },
-  },
-  requestSnapshot: {
-    prompt: 'A cinematic shot',
-    aspectRatio: '16:9',
-    resolution: '1080p',
+): StudioJobV2 => {
+  const composition = makeComposition(shotId);
+  const snapshot = {
+    composition,
+    aspectRatio: '16:9' as const,
+    resolution: '1080p' as const,
     durationSeconds: 4,
     referenceInputs: [],
-    conditioningInput: { kind: 'seed_still', assetId: 'seed_1' },
-  },
-  spendReceipt: null,
-  outputAssetIds,
-  outputAssetIdsByRole: {
-    primary: outputAssetIds[0] ?? null,
-    poster: outputAssetIds[1] ?? null,
-  },
-  error: null,
-  retryOfJobId: null,
-  retryReason: null,
-  duplicateChargeAcknowledged: false,
-  duplicateChargeAcknowledgedAt: null,
-  createdAt: timestamp,
-  updatedAt: timestamp,
-  ...overrides,
-});
+    conditioningInput: { kind: 'seed_still' as const, assetId: 'seed_1' },
+  };
+  return {
+    id,
+    projectId: 'project_1',
+    target: { kind: 'shot', shotId },
+    status: 'succeeded',
+    provider: { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' },
+    idempotencyKey: `idem_${id}`,
+    providerJobId: 'remote_1',
+    remoteStartedAt: timestamp,
+    cancellationPolicy: 'none',
+    purpose: 'video_take',
+    authorizationId: 'authorization_1',
+    authorizationItemId: 'item_1',
+    composition,
+    requestPlan: {
+      kind: 'resolved',
+      snapshot,
+    },
+    requestSnapshot: snapshot,
+    spendReceipt: null,
+    outputAssetIds,
+    outputAssetIdsByRole: {
+      primary: outputAssetIds[0] ?? null,
+      poster: outputAssetIds[1] ?? null,
+    },
+    error: null,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    ...overrides,
+  };
+};
 
 const makeProject = (): StudioProjectV2 => ({
   schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
@@ -141,6 +157,7 @@ const makeProject = (): StudioProjectV2 => ({
   beatOrder: [],
   beats: {},
   shots: {},
+  referencePlanStatus: 'planned',
   referenceOrder: [],
   references: {},
   bin: [],

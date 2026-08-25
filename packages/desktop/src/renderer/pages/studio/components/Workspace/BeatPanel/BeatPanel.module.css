@@ -137,13 +137,6 @@
   overflow-wrap: anywhere;
 }
 
-.beatFieldHeading > [data-look-warning] {
-  font-size: 13px;
-  font-weight: var(--fw-medium);
-  letter-spacing: 0;
-  white-space: nowrap;
-}
-
 .fieldGuidance {
   font-variant-numeric: tabular-nums;
   text-transform: uppercase;
@@ -206,21 +199,6 @@
 
 .chainState[data-chain-state='segment_head'],
 .chainState[data-chain-state='hard_cut'] {
-  color: var(--color-primary-6);
-}
-
-.lineGuidance {
-  color: var(--color-text-3);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: var(--fw-medium);
-  letter-spacing: 0.05em;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-  text-transform: uppercase;
-}
-
-.lineGuidance[data-line-derivation='detached'] {
   color: var(--color-primary-6);
 }
 

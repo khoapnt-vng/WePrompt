@@ -55,13 +55,12 @@ import type {
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT,
 } from '@/common/types/project/creativeStudioTypes';
-import {
-  allocateStudioBriefReferenceLabel,
-  STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH,
-} from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
   createEmptyStudioProjectV2,
   type StudioMutationApplyResultV2,
@@ -69,7 +68,10 @@ import {
 import { createStudioProjectManifestV2 } from '@process/services/creative-studio/service/briefFile';
 import {
   calculateStudioQuoteTotals,
+  composeStudioGenerationV2,
   createStudioQuotedGenerationId,
+  deriveStudioInstructionProfileV2,
+  studioGenerationCompositionDigestV2,
 } from '@process/services/creative-studio/service/schema2/generation';
 import {
   createCreativeStudioStore,
@@ -96,36 +98,19 @@ const validConnectionBinding = (): StudioConnectionBinding => ({
   validatedAt: '2026-07-30T00:00:00.000Z',
 });
 
-describe('Creative Studio Brief reference labels', () => {
-  it('derives a trimmed, control-free basename label', () => {
-    expect(allocateStudioBriefReferenceLabel('/tmp/  Hero\u0000\t Portrait .PNG', [])).toBe('Hero Portrait');
-  });
-
-  it('bounds labels while preserving a unique numeric suffix', () => {
-    const source = `${'x'.repeat(STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH + 20)}.png`;
-    const first = allocateStudioBriefReferenceLabel(source, []);
-    const second = allocateStudioBriefReferenceLabel(source, [first]);
-
-    expect(first).toHaveLength(STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH);
-    expect(second).toHaveLength(STUDIO_BRIEF_REFERENCE_LABEL_MAX_LENGTH);
-    expect(second.endsWith(' (2)')).toBe(true);
-    expect(second).not.toBe(first);
-  });
-});
-
 const makeStudioMutationBatchV2 = (
   project: StudioProjectV2,
   operations: StudioMutationBatchV2['operations'],
   expectedRevision = project.revision
 ): StudioMutationBatchV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   projectId: project.id,
   expectedRevision,
   operations,
 });
 
 const makeBoundaryMutationBatchV2 = (projectId: string, expectedRevision = 1): StudioMutationBatchV2 => ({
-  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   projectId,
   expectedRevision,
   operations: [{ kind: 'set_brief', brief: 'Updated without a commit tag' }],
@@ -169,7 +154,11 @@ describe('schema-2 creative studio project store', () => {
   const seedProjectV2 = (project: StudioProjectV2): void => {
     const directory = path.join(rootDir, project.id);
     mkdirSync(directory);
-    writeFileSync(path.join(directory, 'project.json'), JSON.stringify(project, null, 2));
+    writeFileSync(
+      path.join(directory, 'project.json'),
+      JSON.stringify(createStudioProjectManifestV2(project), null, 2)
+    );
+    writeFileSync(path.join(directory, 'brief.md'), project.brief);
   };
 
   const expectPersistedProjectV2 = (project: StudioProjectV2): void => {
@@ -202,7 +191,7 @@ describe('schema-2 creative studio project store', () => {
     };
     const proposalId = input.proposalId ?? 'proposal_v2';
     const proposal: StudioProposalRecordV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       id: proposalId,
       projectId: project.id,
       status: 'pending',
@@ -215,7 +204,7 @@ describe('schema-2 creative studio project store', () => {
       decidedAt: null,
     };
     const slot: StudioProposalSlotV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       proposalId,
       reservedAt: proposal.createdAt,
     };
@@ -244,7 +233,7 @@ describe('schema-2 creative studio project store', () => {
     };
     const requestId = input.requestId ?? 'reference_request_v2';
     const request: StudioReferenceRequestV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       id: requestId,
       projectId: project.id,
       referenceIds: input.referenceIds ?? [project.referenceOrder[0] ?? 'ref_reference'],
@@ -252,7 +241,7 @@ describe('schema-2 creative studio project store', () => {
       createdAt: input.createdAt ?? timestamp,
     };
     const slot: StudioReferenceRequestSlotV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       requestId,
       reservedAt: request.createdAt,
     };
@@ -301,31 +290,29 @@ describe('schema-2 creative studio project store', () => {
       {
         kind: 'add_beat',
         beatId: 'beat_reference',
-        beat: { title: 'Reference beat', action: '', look: '', targetSeconds: null },
+        beat: { title: 'Reference beat', story: 'A scene containing the planned references.', targetSeconds: null },
         beforeBeatId: null,
       },
       ...shotIds.map((shotId): StudioMutationBatchV2['operations'][number] => ({
         kind: 'add_shot',
         beatId: 'beat_reference',
         shotId,
-        shot: { line: shotId, narration: '', onScreenText: '', durationSeconds: 4 },
+        shot: { shootingScript: `Frame ${shotId}.`, durationSeconds: 4 },
         beforeShotId: null,
       })),
       {
-        kind: 'set_project_references',
-        references: shotIds.map((shotId, index) => ({
-          id: index === 0 ? 'ref_reference' : `ref_reference_${index + 1}`,
+        kind: 'set_reference_plan',
+        references: shotIds.map((_shotId, index) => ({
           kind: 'character',
           label: `Reference ${index + 1}`,
           prompt: `Character sheet for reference ${index + 1}.`,
-          shotIds: [shotId],
         })),
       },
     ];
     return (
       await store.applyMutationBatchV2(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: project.id,
           expectedRevision: project.revision,
           operations,
@@ -338,31 +325,55 @@ describe('schema-2 creative studio project store', () => {
   const addReferenceAuthorizationV2 = (
     project: StudioProjectV2,
     handoffId: string,
-    shotId = 'shot_reference',
-    referenceId = project.shots[shotId]?.referenceIds[0] ?? 'ref_reference'
+    referenceId = project.referenceOrder[0] ?? 'ref_reference'
   ): StudioProjectV2 => {
+    const provider = {
+      providerId: 'provider_reference',
+      adapterId: 'weprompt-image-v1',
+      model: 'image-model',
+    } as const;
+    const reference = project.references[referenceId];
+    if (reference === undefined) throw new Error('Missing reference authorization fixture');
+    const source = {
+      kind: 'project_reference' as const,
+      referenceId,
+      referenceKind: reference.kind,
+      prompt: reference.prompt,
+    };
+    const composition = composeStudioGenerationV2({
+      projectRevision: project.revision,
+      brief: project.brief,
+      rules: project.rules,
+      source,
+      purpose: 'reference_image',
+      referenceInputs: [],
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      route: provider,
+      boardStyle: null,
+      instructionProfile: deriveStudioInstructionProfileV2(provider, 'reference_image', source),
+    });
     const requestPlan: StudioGenerationRequestPlan = {
       kind: 'resolved',
       snapshot: {
-        prompt: 'Reference seed prompt',
+        composition,
         aspectRatio: project.aspectRatio,
         resolution: project.resolution,
-        durationSeconds: project.shots[shotId]!.durationSeconds,
+        durationSeconds: 4,
         referenceInputs: [],
         conditioningInput: null,
       },
     };
+    const target = { kind: 'reference' as const, referenceId };
     const item: StudioQuotedGeneration = {
       id: createStudioQuotedGenerationId({
         projectId: project.id,
         projectRevision: project.revision,
-        shotId,
-        purpose: 'seed_still',
-        projectReferenceId: referenceId,
+        target,
+        purpose: 'reference_image',
       }),
-      shotId,
-      purpose: 'seed_still',
-      projectReferenceId: referenceId,
+      target,
+      purpose: 'reference_image',
       routeId: 'image_route',
       generationCount: 1,
       requestPlan,
@@ -370,11 +381,6 @@ describe('schema-2 creative studio project store', () => {
       rateMinorUnits: 2,
     };
     const totals = calculateStudioQuoteTotals([item])!;
-    const provider = {
-      providerId: 'provider_reference',
-      adapterId: 'weprompt-image-v1',
-      model: 'image-model',
-    } as const;
     const authorization: StudioSpendAuthorization = {
       id: `authorization_${handoffId}`,
       projectId: project.id,
@@ -394,16 +400,16 @@ describe('schema-2 creative studio project store', () => {
     const job: StudioJobV2 = {
       id: `job_${handoffId}`,
       projectId: project.id,
-      shotId,
-      projectReferenceId: referenceId,
+      target,
       status: 'queued_local',
       provider,
       idempotencyKey: `idem_${handoffId}`,
       providerJobId: null,
       cancellationPolicy: 'queued_and_running',
-      purpose: 'seed_still',
+      purpose: 'reference_image',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
+      composition,
       requestPlan,
       requestSnapshot: requestPlan.snapshot,
       spendReceipt: null,
@@ -419,8 +425,7 @@ describe('schema-2 creative studio project store', () => {
     };
     project.spendAuthorizations.push(authorization);
     project.jobs[job.id] = job;
-    project.shots[shotId]!.jobIds.push(job.id);
-    project.references[referenceId]!.candidateJobId = job.id;
+    project.references[referenceId]!.jobIds.push(job.id);
     project.references[referenceId]!.updatedAt = authorization.confirmedAt;
     return project;
   };
@@ -570,16 +575,12 @@ describe('schema-2 creative studio project store', () => {
     const project = createEmptyStudioProjectV2(inputV2, id, timestamp);
     const shot: StudioShot = {
       id: 'clip_video',
-      line: 'A launch vehicle crosses frame',
-      derivation: 'derived',
-      derivedFromActionRevision: 1,
-      narration: '',
-      onScreenText: '',
+      shootingScript: 'A launch vehicle crosses frame.',
       durationSeconds: 4,
       trimInSeconds: null,
       trimOutSeconds: null,
       chainBreak: 'none',
-      referenceIds: [],
+      referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
       seedStillId: 'asset_seed',
       boardAssetId: null,
       supersededBoardAssetIds: [],
@@ -597,8 +598,66 @@ describe('schema-2 creative studio project store', () => {
       managedAsset: { collection: 'imports', fileName: 'asset_seed.png' },
       byteSize: 1,
       sha256: 'c'.repeat(64),
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
       createdAt: timestamp,
     };
+    const provider = {
+      providerId: 'provider_1',
+      adapterId: 'byteplus-seedance-v1',
+      model: 'model_1',
+    } as const;
+    const source = {
+      kind: 'shot' as const,
+      beatId: 'section_1',
+      story: 'A launch begins.',
+      shotId: shot.id,
+      shootingScript: shot.shootingScript,
+    };
+    const composition = composeStudioGenerationV2({
+      projectRevision: 1,
+      brief: project.brief,
+      rules: project.rules,
+      source,
+      purpose: 'video_take',
+      referenceInputs: [],
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      route: provider,
+      boardStyle: null,
+      instructionProfile: deriveStudioInstructionProfileV2(provider, 'video_take', source),
+    });
+    const requestPlan: StudioGenerationRequestPlan = {
+      kind: 'resolved',
+      snapshot: {
+        composition,
+        aspectRatio: '16:9',
+        resolution: '1080p',
+        durationSeconds: 4,
+        referenceInputs: [],
+        conditioningInput: { kind: 'seed_still', assetId: seed.id },
+      },
+    };
+    const target = { kind: 'shot' as const, shotId: shot.id };
+    const item: StudioQuotedGeneration = {
+      id: createStudioQuotedGenerationId({
+        projectId: id,
+        projectRevision: 1,
+        target,
+        purpose: 'video_take',
+      }),
+      target,
+      purpose: 'video_take',
+      routeId: 'video_route',
+      generationCount: 1,
+      requestPlan,
+      rateUnit: 'second',
+      rateMinorUnits: 2,
+    };
+    const totals = calculateStudioQuoteTotals([item])!;
+    const digest = studioGenerationCompositionDigestV2(composition);
     const video: StudioAssetV2 = {
       id: 'asset_video',
       projectId: id,
@@ -608,8 +667,11 @@ describe('schema-2 creative studio project store', () => {
       managedAsset: { collection: 'assets', fileName: 'asset_video.mp4' },
       byteSize: 1,
       sha256: 'a'.repeat(64),
-      referenceAssetIds: [],
       durationSeconds: 4,
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: 'job_video',
+      compositionDigest: digest,
       createdAt: timestamp,
     };
     const thumbnail: StudioAssetV2 = {
@@ -621,41 +683,12 @@ describe('schema-2 creative studio project store', () => {
       managedAsset: { collection: 'thumbnails', fileName: 'asset_thumbnail.png' },
       byteSize: 1,
       sha256: 'b'.repeat(64),
-      referenceAssetIds: [],
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: 'job_video',
+      compositionDigest: digest,
       createdAt: timestamp,
     };
-    const requestPlan: StudioGenerationRequestPlan = {
-      kind: 'resolved',
-      snapshot: {
-        prompt: 'A launch vehicle crosses frame',
-        aspectRatio: '16:9',
-        resolution: '1080p',
-        durationSeconds: 4,
-        referenceInputs: [],
-        conditioningInput: { kind: 'seed_still', assetId: seed.id },
-      },
-    };
-    const item: StudioQuotedGeneration = {
-      id: createStudioQuotedGenerationId({
-        projectId: id,
-        projectRevision: 1,
-        shotId: shot.id,
-        purpose: 'video_take',
-      }),
-      shotId: shot.id,
-      purpose: 'video_take',
-      routeId: 'video_route',
-      generationCount: 1,
-      requestPlan,
-      rateUnit: 'second',
-      rateMinorUnits: 2,
-    };
-    const totals = calculateStudioQuoteTotals([item])!;
-    const provider = {
-      providerId: 'provider_1',
-      adapterId: 'byteplus-seedance-v1',
-      model: 'model_1',
-    } as const;
     const authorization: StudioSpendAuthorization = {
       id: 'authorization_video',
       projectId: id,
@@ -675,7 +708,7 @@ describe('schema-2 creative studio project store', () => {
     const job: StudioJobV2 = {
       id: 'job_video',
       projectId: id,
-      shotId: shot.id,
+      target,
       status: 'succeeded',
       provider,
       idempotencyKey: 'idem_job_video',
@@ -685,6 +718,7 @@ describe('schema-2 creative studio project store', () => {
       purpose: 'video_take',
       authorizationId: authorization.id,
       authorizationItemId: item.id,
+      composition,
       requestPlan,
       requestSnapshot: requestPlan.snapshot,
       spendReceipt: {
@@ -714,17 +748,15 @@ describe('schema-2 creative studio project store', () => {
     project.beats.section_1 = {
       id: 'section_1',
       title: 'Opening',
-      action: '',
-      look: '',
-      actionRevision: 1,
+      story: 'A launch begins.',
       targetSeconds: null,
       shotOrder: [shot.id],
-      lineHistory: [],
     };
     project.shots[shot.id] = shot;
     project.assets = { [seed.id]: seed, [video.id]: video, [thumbnail.id]: thumbnail };
     project.jobs[job.id] = job;
     project.spendAuthorizations = [authorization];
+    project.videoRouteId = 'video_route';
     project.revision = 2;
     return project;
   };
@@ -813,6 +845,20 @@ describe('schema-2 creative studio project store', () => {
     schema3.schemaVersion = 3;
     delete schema3.boardStyle;
     writeFileSync(path.join(rootDir, schema3Id, 'project.json'), JSON.stringify(schema3));
+    const schema4Id = 'schema_4_project';
+    mkdirSync(path.join(rootDir, schema4Id));
+    writeFileSync(
+      path.join(rootDir, schema4Id, 'project.json'),
+      JSON.stringify({ schemaVersion: 4, id: schema4Id, deliberatelyNotMigrated: true })
+    );
+    const futureSchemaId = 'schema_6_project';
+    const futureSchemaBytes = JSON.stringify({
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION + 1,
+      id: futureSchemaId,
+      deliberatelyNotAPrototype: true,
+    });
+    mkdirSync(path.join(rootDir, futureSchemaId));
+    writeFileSync(path.join(rootDir, futureSchemaId, 'project.json'), futureSchemaBytes);
     const malformedId = 'malformed_v2';
     mkdirSync(path.join(rootDir, malformedId));
     writeFileSync(
@@ -839,6 +885,12 @@ describe('schema-2 creative studio project store', () => {
       status: 'unsupported_prototype_schema',
       projectId: schema3Id,
     });
+    await expect(store.getProjectV2(schema4Id)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId: schema4Id,
+    });
+    await expect(store.getProjectV2(futureSchemaId)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(readFileSync(path.join(rootDir, futureSchemaId, 'project.json'), 'utf8')).toBe(futureSchemaBytes);
     await expect(store.getProjectV2('missing_v2')).resolves.toEqual(missing);
     await expect(store.getProjectV2(malformedId)).rejects.toMatchObject({ code: 'storage_error' });
     expect(prototypeIndexAccesses).toEqual([]);
@@ -977,7 +1029,7 @@ describe('schema-2 creative studio project store', () => {
     expect(protectedFs.accesses).toEqual([]);
   });
 
-  it('rejects an oversized schema-2 manifest after a no-follow bounded schema sniff', async () => {
+  it('classifies an oversized duplicate-root schema-2 manifest after a no-follow bounded schema sniff', async () => {
     const projectId = 'oversized_v2';
     const projectFilePath = path.join(rootDir, projectId, 'project.json');
     mkdirSync(path.dirname(projectFilePath));
@@ -1020,7 +1072,10 @@ describe('schema-2 creative studio project store', () => {
     }) as typeof nodeFs;
     const store = createCreativeStudioStore({ rootDir, fs: boundedFs });
 
-    await expect(store.getProjectV2(projectId)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(store.getProjectV2(projectId)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      projectId,
+    });
     expect(projectOpenCount).toBe(1);
     expect(projectReadFileCount).toBe(0);
     expect(protectedFs.accesses).toEqual([]);
@@ -1044,7 +1099,10 @@ describe('schema-2 creative studio project store', () => {
     ['a positive exponent spelling of schema one', '{"schemaVersion":1e+0}'],
     ['a decimal exponent spelling of schema one', '{"schemaVersion":0.1e1}'],
     ['a negative exponent spelling of schema one', '{"schemaVersion":10e-1}'],
-  ])('accepts valid %s before a root schema-1 member', async (_label, bytes) => {
+    ['schema two', '{"schemaVersion":2}'],
+    ['schema three with a decimal exponent', '{"schemaVersion":0.3e1}'],
+    ['schema four with a negative exponent', '{"schemaVersion":40e-1}'],
+  ])('accepts valid %s as a root prior-schema member', async (_label, bytes) => {
     const projectId = 'oversized_nested_v1';
     const projectFilePath = path.join(rootDir, projectId, 'project.json');
     mkdirSync(path.dirname(projectFilePath));
@@ -1502,7 +1560,7 @@ describe('schema-2 creative studio project store', () => {
       now: () => timestamp,
     });
     const oversizedBatch: StudioMutationBatchV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
       projectId: oversizedId,
       expectedRevision: 1,
       operations: [{ kind: 'set_brief', brief: 'must not reach storage' }],
@@ -2103,7 +2161,7 @@ describe('schema-2 creative studio project store', () => {
       });
       const project = await store.createProjectV2(inputV2);
       const replacement: StudioProjectV2 = { ...project, name: `External ${operation} winner` };
-      externalBytes = `${JSON.stringify(replacement, null, 2)}\n`;
+      externalBytes = `${JSON.stringify(createStudioProjectManifestV2(replacement), null, 2)}\n`;
       const indexFile = path.join(rootDir, 'projects-v2.json');
       const indexBefore = readFileSync(indexFile);
       armed = true;
@@ -2456,14 +2514,14 @@ describe('schema-2 creative studio project store', () => {
         {
           kind: 'add_beat',
           beatId: 'section_new',
-          beat: { title: 'First title', action: '', look: '', targetSeconds: null },
+          beat: { title: 'First title', story: '', targetSeconds: null },
           beforeBeatId: null,
         },
         {
           kind: 'add_shot',
           beatId: 'section_new',
           shotId: 'clip_new',
-          shot: { line: '', narration: '', onScreenText: '', durationSeconds: 4 },
+          shot: { shootingScript: '', durationSeconds: 4 },
           beforeShotId: null,
         },
         { kind: 'edit_beat', beatId: 'section_new', changes: { title: 'Final title' } },
@@ -2635,14 +2693,14 @@ describe('schema-2 creative studio project store', () => {
         {
           kind: 'add_beat',
           beatId: 'section_retry',
-          beat: { title: 'Retry summary', action: '', look: '', targetSeconds: null },
+          beat: { title: 'Retry summary', story: '', targetSeconds: null },
           beforeBeatId: null,
         },
         {
           kind: 'add_shot',
           beatId: 'section_retry',
           shotId: 'clip_retry',
-          shot: { line: '', narration: '', onScreenText: '', durationSeconds: 4 },
+          shot: { shootingScript: '', durationSeconds: 4 },
           beforeShotId: null,
         },
       ]),
@@ -2713,7 +2771,7 @@ describe('schema-2 creative studio project store', () => {
 
     await expect(store.deleteProjectV2(project.id, project.revision + 1)).rejects.toMatchObject({ code: 'busy' });
 
-    expect(readFileSync(manifestFile)).not.toEqual(manifestBefore);
+    expect(readFileSync(manifestFile)).toEqual(manifestBefore);
     expectPersistedProjectV2(project);
     expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
     expect(prototypeIndexAccesses).toEqual([]);
@@ -2868,7 +2926,7 @@ describe('schema-2 creative studio project store', () => {
       temporaryMarker,
       JSON.stringify(
         {
-          schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+          schemaVersion: 1,
           projectId: project.id,
           expectedRevision: project.revision,
           directoryDev: directory.dev,
@@ -3650,17 +3708,6 @@ describe('schema-2 creative studio project store', () => {
     expect(readFileSync(briefFile, 'utf8')).toBe('Edited outside WePrompt');
   });
 
-  it('migrates a legacy inline Brief without changing its project revision', async () => {
-    const project = createEmptyStudioProjectV2(inputV2, 'legacy_brief_migration_v2', timestamp);
-    seedProjectV2(project);
-    const { store } = createStoreV2({ now: () => '2026-08-17T12:00:01.000Z' });
-
-    await expect(store.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
-
-    expectPersistedProjectV2(project);
-    expect(readJson(path.join(rootDir, project.id, 'project.json'))).not.toHaveProperty('brief');
-  });
-
   it('recovers a committed manifest after interruption before Brief publication', async () => {
     const projectId = 'brief_transaction_recovery_v2';
     const briefFile = path.join(realpathSync(rootDir), projectId, 'brief.md');
@@ -3995,7 +4042,7 @@ describe('schema-2 creative studio project store', () => {
     expect(retry.project.undoHistory.filter((entry) => entry.id === proposal.id)).toHaveLength(1);
   });
 
-  it('refuses a legacy pending hard-cut proposal without publishing project or decision bytes', async () => {
+  it('rejects a current-schema forbidden hard-cut proposal without publishing project or decision bytes', async () => {
     const { store } = createStoreV2({
       createId: () => 'legacy_hard_cut_proposal_project',
       now: () => '2026-08-17T12:00:01.000Z',
@@ -4006,21 +4053,21 @@ describe('schema-2 creative studio project store', () => {
         {
           kind: 'add_beat',
           beatId: 'beat_1',
-          beat: { title: 'Opening', action: '', look: '', targetSeconds: null },
+          beat: { title: 'Opening', story: '', targetSeconds: null },
           beforeBeatId: null,
         },
         {
           kind: 'add_shot',
           beatId: 'beat_1',
           shotId: 'shot_1',
-          shot: { line: '', narration: '', onScreenText: '', durationSeconds: 5 },
+          shot: { shootingScript: '', durationSeconds: 5 },
           beforeShotId: null,
         },
         {
           kind: 'add_shot',
           beatId: 'beat_1',
           shotId: 'shot_2',
-          shot: { line: '', narration: '', onScreenText: '', durationSeconds: 5 },
+          shot: { shootingScript: '', durationSeconds: 5 },
           beforeShotId: null,
         },
       ]),
@@ -4037,7 +4084,7 @@ describe('schema-2 creative studio project store', () => {
     const before = snapshotTreeV2(projectDir);
 
     await expect(store.acceptProposalV2(authored.project.id, seeded.proposal.id)).rejects.toMatchObject({
-      reasonCode: 'invalid_operation',
+      code: 'storage_error',
     });
     expect(snapshotTreeV2(projectDir)).toEqual(before);
   });
@@ -4058,11 +4105,11 @@ describe('schema-2 creative studio project store', () => {
 
     expect(accepted.project.rules).toEqual([
       {
-        id: 'pinned_rule_v2',
+        id: 'rule_0821519e257f7e0b149ed7c0',
         scope: 'project',
         text: 'Never show a logo',
         predicate: null,
-        createdAt: '2026-08-17T12:00:01.000Z',
+        createdAt: timestamp,
       },
     ]);
     expect(accepted.project.undoHistory.at(-1)).toMatchObject({ id: proposal.id, label: 'set_rules' });
@@ -4270,7 +4317,7 @@ describe('schema-2 creative studio project store', () => {
     const { proposal, directories } = await seedProposalV2(store, project, { proposalId: 'proposal_mismatch' });
     const projectBytes = readFileSync(path.join(rootDir, project.id, 'project.json'), 'utf8');
     const attribution: StudioProposalCommitAttributionV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       proposalId: proposal.id,
       projectId: project.id,
       baseRevision: project.revision,
@@ -4300,7 +4347,7 @@ describe('schema-2 creative studio project store', () => {
     const seeded = await seedProposalV2(store, project, { proposalId: 'proposal_attribution_clock' });
     const projectBytes = readFileSync(path.join(rootDir, project.id, 'project.json'), 'utf8');
     const attribution: StudioProposalCommitAttributionV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
       proposalId: seeded.proposal.id,
       projectId: project.id,
       baseRevision: project.revision,
@@ -4354,7 +4401,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       path.join(first.directories.slots, '1.slot'),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId: expiredProposal.id,
         reservedAt: expiredProposal.createdAt,
       })
@@ -4529,7 +4576,7 @@ describe('schema-2 creative studio project store', () => {
       result: { kind: 'dismissed' },
     });
     expect(dismissed.receipt).toEqual({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       handoffId: 'handoff_lifecycle_v2',
       requestId: request.id,
       completedAt: '2026-08-17T12:00:02.000Z',
@@ -4988,7 +5035,7 @@ describe('schema-2 creative studio project store', () => {
               writeFileSync(
                 receiptFile,
                 JSON.stringify({
-                  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+                  schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
                   handoffId: generated.handoffId,
                   requestId: generated.request.id,
                   completedAt: '2026-08-17T12:00:03.000Z',
@@ -5027,249 +5074,6 @@ describe('schema-2 creative studio project store', () => {
     expect(dismissed).toBe(true);
     expect(readFileSync(projectFile)).toEqual(before);
     expect(readJson<StudioReferenceGenerationHandoffReceiptV2>(receiptFile).result).toEqual({ kind: 'dismissed' });
-  });
-
-  it('selects only a current classified Brief image and allows rejection after requested references become inactive', async () => {
-    const { store } = createStoreV2({ createId: () => 'reference_import_v2', now: () => timestamp });
-    const created = await store.createProjectV2(inputV2);
-    const active = await addActiveReferenceShotsV2(store, created);
-    const withReference = await store.updateProjectV2(
-      active.id,
-      (project) => ({
-        ...project,
-        assets: {
-          ...project.assets,
-          brief_image: {
-            id: 'brief_image',
-            projectId: project.id,
-            shotId: null,
-            mediaKind: 'image',
-            mimeType: 'image/png',
-            managedAsset: { collection: 'imports', fileName: 'brief_image.png' },
-            byteSize: 1,
-            sha256: 'a'.repeat(64),
-            createdAt: timestamp,
-            briefReferenceRole: 'look',
-            briefReferenceLabel: 'Look board',
-          },
-        },
-      }),
-      active.revision
-    );
-    const imported = await seedReferenceRequestV2(store, withReference, {
-      requestId: 'request_imported',
-      slotIndex: 0,
-    });
-    const projectFile = path.join(rootDir, withReference.id, 'project.json');
-    const projectBefore = readFileSync(projectFile);
-    await expect(
-      store.decideReferenceRequestV2({
-        projectId: withReference.id,
-        requestId: imported.request.id,
-        expectedRevision: withReference.revision,
-        outcome: { kind: 'imported_reference', assetId: 'brief_image' },
-      })
-    ).resolves.toMatchObject({
-      decision: {
-        outcome: {
-          kind: 'imported_reference',
-          assetId: 'brief_image',
-          projectRevision: withReference.revision,
-        },
-      },
-    });
-    expect(readFileSync(projectFile)).toEqual(projectBefore);
-
-    const stale = await seedReferenceRequestV2(store, withReference, {
-      requestId: 'request_inactive',
-      slotIndex: 1,
-    });
-    await expect(
-      store.decideReferenceRequestV2({
-        projectId: withReference.id,
-        requestId: stale.request.id,
-        expectedRevision: withReference.revision,
-        outcome: { kind: 'imported_reference', assetId: 'missing_asset' },
-      })
-    ).rejects.toMatchObject({ code: 'invalid_payload' });
-    const replaced = await store.applyMutationBatchV2(
-      {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
-        projectId: withReference.id,
-        expectedRevision: withReference.revision,
-        operations: [
-          {
-            kind: 'set_project_references',
-            references: [
-              {
-                id: 'ref_replacement',
-                kind: 'character',
-                label: 'Replacement reference',
-                prompt: 'A replacement character sheet.',
-                shotIds: ['shot_reference'],
-              },
-            ],
-          },
-        ],
-      },
-      { mutationId: 'replace_project_reference', capturedAt: timestamp }
-    );
-    await expect(
-      store.decideReferenceRequestV2({
-        projectId: withReference.id,
-        requestId: stale.request.id,
-        expectedRevision: replaced.project.revision,
-        outcome: { kind: 'rejected' },
-      })
-    ).resolves.toMatchObject({ decision: { outcome: { kind: 'rejected' } } });
-  });
-
-  it('revalidates imported assets at the selected revision and preserves the immutable decision afterward', async () => {
-    const { store } = createStoreV2({ createId: () => 'reference_asset_race_v2', now: () => timestamp });
-    const created = await store.createProjectV2(inputV2);
-    const active = await addActiveReferenceShotsV2(store, created);
-    const asset: StudioAssetV2 = {
-      id: 'race_brief_image',
-      projectId: active.id,
-      shotId: null,
-      mediaKind: 'image',
-      mimeType: 'image/png',
-      managedAsset: { collection: 'imports', fileName: 'race_brief_image.png' },
-      byteSize: 1,
-      sha256: 'b'.repeat(64),
-      createdAt: timestamp,
-      briefReferenceRole: 'look',
-      briefReferenceLabel: 'Race look',
-    };
-    const selected = await store.updateProjectV2(
-      active.id,
-      (project) => ({ ...project, assets: { ...project.assets, [asset.id]: asset } }),
-      active.revision
-    );
-    const seeded = await seedReferenceRequestV2(store, selected, { requestId: 'asset_race_request' });
-    const detached = await store.updateProjectV2(
-      selected.id,
-      (project) => {
-        const assets = { ...project.assets };
-        delete assets[asset.id];
-        return { ...project, assets };
-      },
-      selected.revision
-    );
-
-    await expect(
-      store.decideReferenceRequestV2({
-        projectId: selected.id,
-        requestId: seeded.request.id,
-        expectedRevision: selected.revision,
-        outcome: { kind: 'imported_reference', assetId: asset.id },
-      })
-    ).rejects.toMatchObject({ code: 'stale_project' });
-    await expect(
-      store.decideReferenceRequestV2({
-        projectId: selected.id,
-        requestId: seeded.request.id,
-        expectedRevision: detached.revision,
-        outcome: { kind: 'imported_reference', assetId: asset.id },
-      })
-    ).rejects.toMatchObject({ code: 'invalid_payload' });
-    expect(readdirSync(seeded.directories.decisions)).toEqual([]);
-    expect(readdirSync(seeded.directories.slots)).toEqual(['0.slot']);
-
-    const reattached = await store.updateProjectV2(
-      selected.id,
-      (project) => ({ ...project, assets: { ...project.assets, [asset.id]: asset } }),
-      detached.revision
-    );
-    const imported = await store.decideReferenceRequestV2({
-      projectId: selected.id,
-      requestId: seeded.request.id,
-      expectedRevision: reattached.revision,
-      outcome: { kind: 'imported_reference', assetId: asset.id },
-    });
-    expect(imported.decision?.outcome).toEqual({
-      kind: 'imported_reference',
-      assetId: asset.id,
-      projectRevision: reattached.revision,
-    });
-    const detachedAgain = await store.updateProjectV2(
-      selected.id,
-      (project) => {
-        const assets = { ...project.assets };
-        delete assets[asset.id];
-        return { ...project, assets };
-      },
-      reattached.revision
-    );
-    await expect(
-      store.decideReferenceRequestV2({
-        projectId: selected.id,
-        requestId: seeded.request.id,
-        expectedRevision: reattached.revision,
-        outcome: { kind: 'imported_reference', assetId: asset.id },
-      })
-    ).resolves.toEqual(imported);
-    await expect(store.listReferenceRequestsV2(detachedAgain.id)).resolves.toContainEqual(imported);
-  });
-
-  it('rejects a same-inode project and asset replacement at the imported-decision publication gate', async () => {
-    const { store } = createStoreV2({ createId: () => 'asset_publication_race_v2', now: () => timestamp });
-    const active = await addActiveReferenceShotsV2(store, await store.createProjectV2(inputV2));
-    const asset: StudioAssetV2 = {
-      id: 'publication_race_image',
-      projectId: active.id,
-      shotId: null,
-      mediaKind: 'image',
-      mimeType: 'image/png',
-      managedAsset: { collection: 'imports', fileName: 'publication_race_image.png' },
-      byteSize: 1,
-      sha256: 'e'.repeat(64),
-      createdAt: timestamp,
-      briefReferenceRole: 'look',
-      briefReferenceLabel: 'Publication race',
-    };
-    const selected = await store.updateProjectV2(
-      active.id,
-      (project) => ({ ...project, assets: { ...project.assets, [asset.id]: asset } }),
-      active.revision
-    );
-    const seeded = await seedReferenceRequestV2(store, selected, { requestId: 'asset_publication_race_request' });
-    const replacement = structuredClone(selected);
-    delete replacement.assets[asset.id];
-    let replaced = false;
-    const racingFs = new Proxy(nodeFs, {
-      get(target, property, receiver) {
-        const value = Reflect.get(target, property, receiver) as unknown;
-        if (property !== 'open' || typeof value !== 'function') return value;
-        return (...args: unknown[]): unknown => {
-          const openedFile = String(args[0]);
-          if (
-            !replaced &&
-            openedFile.endsWith(`/${selected.id}/project.json`) &&
-            readdirSync(seeded.directories.decisions).some((name) => name.endsWith('.publish'))
-          ) {
-            replaced = true;
-            writeFileSync(openedFile, JSON.stringify(replacement, null, 2));
-          }
-          return Reflect.apply(value, target, args);
-        };
-      },
-    }) as typeof nodeFs;
-    const racing = createCreativeStudioStore({ rootDir, fs: racingFs, now: () => timestamp });
-
-    await expect(
-      racing.decideReferenceRequestV2({
-        projectId: selected.id,
-        requestId: seeded.request.id,
-        expectedRevision: selected.revision,
-        outcome: { kind: 'imported_reference', assetId: asset.id },
-      })
-    ).rejects.toMatchObject({ code: 'storage_error' });
-
-    expect(replaced).toBe(true);
-    expect(readdirSync(seeded.directories.decisions)).toEqual([]);
-    expect(readdirSync(seeded.directories.slots)).toEqual(['0.slot']);
-    expect(readJson<StudioProjectV2>(path.join(rootDir, selected.id, 'project.json')).assets[asset.id]).toBeUndefined();
   });
 
   it('rejects hidden and symbol extras on reference decision and receipt inputs before touching the ledger', async () => {
@@ -5655,7 +5459,7 @@ describe('schema-2 creative studio project store', () => {
       path.join(directories.receipts, `${handoffId}.json`)
     );
     expect(receipt).toEqual({
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       handoffId,
       requestId: request.id,
       completedAt: '2026-08-17T12:00:03.000Z',
@@ -5778,7 +5582,7 @@ describe('schema-2 creative studio project store', () => {
     const project = await addActiveReferenceShotsV2(store, created);
     const generated = await seedGenerationHandoffV2(store, project, { requestId: `relation_request_${mutate}` });
     const receipt: StudioReferenceGenerationHandoffReceiptV2 = {
-      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+      schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
       handoffId: mutate === 'handoff' ? 'different_handoff' : generated.handoffId,
       requestId: mutate === 'request' ? 'different_request' : generated.request.id,
       completedAt: timestamp,
@@ -5815,7 +5619,7 @@ describe('schema-2 creative studio project store', () => {
     }
     if (result !== null) {
       const receipt: StudioReferenceGenerationHandoffReceiptV2 = {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         handoffId: generated.handoffId,
         requestId: generated.request.id,
         completedAt: '2026-08-17T12:00:03.000Z',
@@ -5909,7 +5713,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       `${proposalDecisionFile}.publish`,
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId: proposal.proposal.id,
         status: 'rejected',
         decidedAt: timestamp,
@@ -5923,7 +5727,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       `${referenceDecisionFile}.publish`,
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: reference.request.id,
         projectId: project.id,
         decidedAt: timestamp,
@@ -5955,7 +5759,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       publicationFile,
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId: proposal.proposal.id,
         status: 'rejected',
         decidedAt: '2026-08-16T23:59:59.999Z',
@@ -6048,7 +5852,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       collidedSlotTemporary,
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId: 'proposal_collision',
         reservedAt: timestamp,
       })
@@ -6077,7 +5881,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       path.join(proposal.directories.slots, '9.slot.123_5.tmp'),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId: rolledBackProposal.id,
         reservedAt: timestamp,
       })
@@ -6095,7 +5899,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       path.join(proposal.directories.slots, '2.slot'),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId: readyProposal.id,
         reservedAt: timestamp,
       })
@@ -6110,7 +5914,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       orphanProposalTemporary,
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId: 'proposal_orphan_ready',
         reservedAt: timestamp,
       })
@@ -6155,7 +5959,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       path.join(reference.directories.slots, '9.slot.123_10.tmp'),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: rolledBackReference.id,
         reservedAt: timestamp,
       })
@@ -6173,7 +5977,7 @@ describe('schema-2 creative studio project store', () => {
     writeFileSync(
       path.join(reference.directories.slots, '2.slot'),
       JSON.stringify({
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId: readyReference.id,
         reservedAt: timestamp,
       })
@@ -6429,7 +6233,7 @@ describe('schema-2 creative studio project store', () => {
     for (let index = 0; index < STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT; index += 1) {
       const proposalId = `terminal_${index}`;
       const proposal: StudioProposalRecordV2 = {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         id: proposalId,
         projectId: project.id,
         status: 'pending',
@@ -6439,7 +6243,7 @@ describe('schema-2 creative studio project store', () => {
         decidedAt: null,
       };
       const decision = {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
         proposalId,
         status: 'rejected',
         decidedAt: timestamp,
@@ -6458,7 +6262,7 @@ describe('schema-2 creative studio project store', () => {
       writeFileSync(path.join(live.directories.pending, `${proposalId}.json`), JSON.stringify(proposal));
       writeFileSync(
         path.join(live.directories.slots, `${index}.slot`),
-        JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, proposalId, reservedAt: timestamp })
+        JSON.stringify({ schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2, proposalId, reservedAt: timestamp })
       );
     }
     await expect(store.listProposalsV2(project.id)).rejects.toMatchObject({ code: 'storage_error' });
@@ -6473,7 +6277,7 @@ describe('schema-2 creative studio project store', () => {
     for (let index = 0; index < STUDIO_REFERENCE_REQUEST_V2_MAX_PENDING_PER_PROJECT; index += 1) {
       const requestId = `terminal_reference_${index}`;
       const request: StudioReferenceRequestV2 = {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         id: requestId,
         projectId: referenceProject.id,
         referenceIds: ['historical_reference'],
@@ -6481,7 +6285,7 @@ describe('schema-2 creative studio project store', () => {
         createdAt: timestamp,
       };
       const decision: StudioReferenceRequestDecisionV2 = {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
         requestId,
         projectId: referenceProject.id,
         decidedAt: timestamp,
@@ -6502,7 +6306,7 @@ describe('schema-2 creative studio project store', () => {
       writeFileSync(path.join(liveReference.directories.pending, `${requestId}.json`), JSON.stringify(request));
       writeFileSync(
         path.join(liveReference.directories.slots, `${index}.slot`),
-        JSON.stringify({ schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION, requestId, reservedAt: timestamp })
+        JSON.stringify({ schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION, requestId, reservedAt: timestamp })
       );
     }
     await expect(referenceStore.listReferenceRequestsV2(referenceProject.id)).rejects.toMatchObject({

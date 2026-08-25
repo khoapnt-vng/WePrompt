@@ -4,45 +4,31 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { renderStudioRulesBlock } from '@/common/types/project/creativeStudioRules';
 import {
-  STUDIO_MAX_GENERATION_PROMPT_LENGTH,
+  STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
-  type StudioAspectRatio,
   type StudioAuthorizedConditioningDependency,
-  type StudioBriefRule,
   type StudioConditioningInputSnapshot,
+  type StudioGenerationCompositionV2,
   type StudioGenerationReferenceInputSnapshot,
   type StudioGenerationRequestPlan,
   type StudioGenerationRequestSnapshot,
   type StudioGenerationRequestTemplate,
-  type StudioQuotedGeneration,
-  type StudioResolution,
+  type StudioJobPurpose,
 } from '@/common/types/project/creativeStudioTypes';
+import { studioGenerationCompositionsEqualV2 } from './composition';
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
-const ASPECT_RATIOS: ReadonlySet<StudioAspectRatio> = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
-const RESOLUTIONS: ReadonlySet<StudioResolution> = new Set(['720p', '1080p']);
 
-export type StudioGenerationPromptInput = {
-  brief: string;
-  rules: readonly StudioBriefRule[];
-  look: string;
-  line: string;
-};
-
-export type StudioGenerationRequestTemplateInput = StudioGenerationPromptInput & {
-  purpose: StudioQuotedGeneration['purpose'];
-  aspectRatio: StudioAspectRatio;
-  resolution: StudioResolution;
+export type StudioGenerationRequestTemplateInput = {
+  composition: StudioGenerationCompositionV2;
   durationSeconds: number;
-  referenceInputs: readonly StudioGenerationReferenceInputSnapshot[];
 };
 
 export type StudioResolvedGenerationRequestPlanInput = {
-  purpose: StudioQuotedGeneration['purpose'];
+  purpose: StudioJobPurpose;
   template: StudioGenerationRequestTemplate;
   conditioningInput: StudioConditioningInputSnapshot | null;
 };
@@ -62,22 +48,29 @@ const assertEndpoint = (value: number): void => {
   }
 };
 
-const cloneReferenceInput = (input: StudioGenerationReferenceInputSnapshot): StudioGenerationReferenceInputSnapshot => {
-  assertSafeId(input.assetId, 'referenceInput.assetId');
-  if (!LOWERCASE_SHA256.test(input.sha256)) throw new TypeError('referenceInput.sha256 must be lowercase SHA-256');
-  return { assetId: input.assetId, sha256: input.sha256 };
-};
-
 const cloneReferenceInputs = (
   inputs: readonly StudioGenerationReferenceInputSnapshot[]
 ): StudioGenerationReferenceInputSnapshot[] => {
-  if (!Array.isArray(inputs)) throw new TypeError('referenceInputs must be an array');
-  const seen = new Set<string>();
+  if (!Array.isArray(inputs) || inputs.length > STUDIO_MAX_PROJECT_REFERENCES) {
+    throw new RangeError('referenceInputs exceed the Studio reference bound');
+  }
+  const referenceIds = new Set<string>();
+  const assetIds = new Set<string>();
   return inputs.map((input) => {
-    const cloned = cloneReferenceInput(input);
-    if (seen.has(cloned.assetId)) throw new TypeError('referenceInputs must not repeat an asset');
-    seen.add(cloned.assetId);
-    return cloned;
+    assertSafeId(input.referenceId, 'referenceInputs[].referenceId');
+    assertSafeId(input.assetId, 'referenceInputs[].assetId');
+    if (input.kind !== 'character' && input.kind !== 'background') {
+      throw new TypeError('referenceInputs[].kind is invalid');
+    }
+    if (!LOWERCASE_SHA256.test(input.sha256)) {
+      throw new TypeError('referenceInputs[].sha256 must be lowercase SHA-256');
+    }
+    if (referenceIds.has(input.referenceId) || assetIds.has(input.assetId)) {
+      throw new TypeError('referenceInputs must not repeat a semantic reference or asset');
+    }
+    referenceIds.add(input.referenceId);
+    assetIds.add(input.assetId);
+    return { ...input };
   });
 };
 
@@ -91,13 +84,7 @@ const cloneConditioningInput = (input: StudioConditioningInputSnapshot): StudioC
   assertSafeId(input.takeAssetId, 'conditioningInput.takeAssetId');
   assertSafeId(input.frameAssetId, 'conditioningInput.frameAssetId');
   assertEndpoint(input.endpointSeconds);
-  return {
-    kind: 'predecessor_frame',
-    predecessorShotId: input.predecessorShotId,
-    takeAssetId: input.takeAssetId,
-    frameAssetId: input.frameAssetId,
-    endpointSeconds: input.endpointSeconds,
-  };
+  return { ...input };
 };
 
 const cloneDependency = (
@@ -106,40 +93,38 @@ const cloneDependency = (
   if (dependency.kind === 'authorized_seed') {
     assertSafeId(dependency.upstreamItemId, 'dependency.upstreamItemId');
     assertSafeId(dependency.shotId, 'dependency.shotId');
-    return { kind: 'authorized_seed', upstreamItemId: dependency.upstreamItemId, shotId: dependency.shotId };
+    return { ...dependency };
   }
   if (dependency.kind === 'existing_predecessor') {
     assertSafeId(dependency.predecessorShotId, 'dependency.predecessorShotId');
     assertSafeId(dependency.takeAssetId, 'dependency.takeAssetId');
     assertEndpoint(dependency.endpointSeconds);
-    return {
-      kind: 'existing_predecessor',
-      predecessorShotId: dependency.predecessorShotId,
-      takeAssetId: dependency.takeAssetId,
-      endpointSeconds: dependency.endpointSeconds,
-    };
+    return { ...dependency };
   }
   if (dependency.kind !== 'authorized_predecessor') throw new TypeError('dependency.kind is invalid');
   assertSafeId(dependency.upstreamItemId, 'dependency.upstreamItemId');
   assertSafeId(dependency.predecessorShotId, 'dependency.predecessorShotId');
-  return {
-    kind: 'authorized_predecessor',
-    upstreamItemId: dependency.upstreamItemId,
-    predecessorShotId: dependency.predecessorShotId,
-  };
+  return { ...dependency };
 };
 
 const assertTemplate = (template: StudioGenerationRequestTemplate): StudioGenerationRequestTemplate => {
+  const composition = structuredClone(template.composition);
   if (
-    typeof template.prompt !== 'string' ||
-    template.prompt.length === 0 ||
-    template.prompt !== template.prompt.trim() ||
-    template.prompt.length > STUDIO_MAX_GENERATION_PROMPT_LENGTH
+    composition.prompt.length === 0 ||
+    composition.prompt !== composition.prompt.trim() ||
+    composition.inputs.referenceInputs.length !== template.referenceInputs.length ||
+    composition.inputs.referenceInputs.some(
+      (reference, index) =>
+        reference.referenceId !== template.referenceInputs[index]?.referenceId ||
+        reference.kind !== template.referenceInputs[index]?.kind ||
+        reference.assetId !== template.referenceInputs[index]?.assetId ||
+        reference.sha256 !== template.referenceInputs[index]?.sha256
+    ) ||
+    composition.inputs.aspectRatio !== template.aspectRatio ||
+    composition.inputs.resolution !== template.resolution
   ) {
-    throw new RangeError('prompt must be nonempty, trimmed, and within the generation prompt bound');
+    throw new TypeError('template does not match its frozen composition');
   }
-  if (!ASPECT_RATIOS.has(template.aspectRatio)) throw new TypeError('aspectRatio is invalid');
-  if (!RESOLUTIONS.has(template.resolution)) throw new TypeError('resolution is invalid');
   if (
     !Number.isSafeInteger(template.durationSeconds) ||
     template.durationSeconds < STUDIO_MIN_SHOT_SECONDS ||
@@ -148,7 +133,7 @@ const assertTemplate = (template: StudioGenerationRequestTemplate): StudioGenera
     throw new RangeError('durationSeconds is outside the Studio shot bound');
   }
   return {
-    prompt: template.prompt,
+    composition,
     aspectRatio: template.aspectRatio,
     resolution: template.resolution,
     durationSeconds: template.durationSeconds,
@@ -156,59 +141,31 @@ const assertTemplate = (template: StudioGenerationRequestTemplate): StudioGenera
   };
 };
 
-/** Composes the exact nonempty provider prompt from the current authored request inputs. */
-export const composeStudioGenerationPrompt = (input: StudioGenerationPromptInput): string => {
-  const brief = input.brief.trim();
-  const rules = renderStudioRulesBlock(input.rules).trim();
-  const look = input.look.trim();
-  const line = input.line.trim();
-  const sections = [
-    ...(brief.length === 0 ? [] : [`BRIEF\n${brief}`]),
-    ...(rules.length === 0 ? [] : [rules]),
-    ...(look.length === 0 ? [] : [`LOOK\n${look}`]),
-    ...(line.length === 0 ? [] : [`SHOT\n${line}`]),
-  ];
-  const prompt = sections.join('\n\n');
-  if (prompt.length === 0 || prompt.length > STUDIO_MAX_GENERATION_PROMPT_LENGTH) {
-    throw new RangeError('composed prompt is empty or exceeds the generation prompt bound');
-  }
-  return prompt;
-};
-
 /** Builds the immutable non-conditioning portion shared by resolved and deferred request plans. */
 export const createStudioGenerationRequestTemplate = (
   input: StudioGenerationRequestTemplateInput
-): StudioGenerationRequestTemplate => {
-  if (input.purpose !== 'seed_still' && input.purpose !== 'video_take') {
-    throw new TypeError('purpose must be a Studio generation purpose');
-  }
-  if (input.purpose === 'video_take' && input.referenceInputs.length > 0) {
-    throw new TypeError('video requests cannot carry a Brief reference input');
-  }
-  return assertTemplate({
-    prompt: composeStudioGenerationPrompt(input),
-    aspectRatio: input.aspectRatio,
-    resolution: input.resolution,
+): StudioGenerationRequestTemplate =>
+  assertTemplate({
+    composition: structuredClone(input.composition),
+    aspectRatio: input.composition.inputs.aspectRatio,
+    resolution: input.composition.inputs.resolution,
     durationSeconds: input.durationSeconds,
-    referenceInputs: cloneReferenceInputs(input.referenceInputs),
+    referenceInputs: cloneReferenceInputs(input.composition.inputs.referenceInputs),
   });
-};
 
 /** Builds a concrete authorization-time request plan that can be queued immediately. */
 export const createStudioResolvedGenerationRequestPlan = (
   input: StudioResolvedGenerationRequestPlanInput
 ): Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> => {
   const template = assertTemplate(input.template);
-  if (input.purpose === 'seed_still' || input.purpose === 'board_still') {
-    if (input.conditioningInput !== null) throw new TypeError('still requests cannot carry conditioning input');
-    if (input.purpose === 'board_still' && template.referenceInputs.length > 0) {
-      throw new TypeError('board requests cannot carry a Brief reference input');
-    }
-  } else if (input.purpose === 'video_take') {
+  if (template.composition.inputs.purpose !== input.purpose) {
+    throw new TypeError('request purpose does not match its frozen composition');
+  }
+  if (input.purpose === 'video_take') {
     if (input.conditioningInput === null) throw new TypeError('direct video requests require conditioning input');
-    if (template.referenceInputs.length > 0) throw new TypeError('video requests cannot carry a Brief reference input');
-  } else {
-    throw new TypeError('purpose must be a Studio generation purpose');
+    if (template.referenceInputs.length > 0) throw new TypeError('video requests cannot carry reference inputs');
+  } else if (input.conditioningInput !== null) {
+    throw new TypeError('image requests cannot carry conditioning input');
   }
   return {
     kind: 'resolved',
@@ -224,8 +181,9 @@ export const createStudioDeferredGenerationRequestPlan = (
   input: StudioDeferredGenerationRequestPlanInput
 ): Extract<StudioGenerationRequestPlan, { kind: 'after_take_selection' }> => {
   const template = assertTemplate(input.template);
-  if (template.referenceInputs.length > 0)
-    throw new TypeError('deferred video requests cannot carry a Brief reference input');
+  if (template.composition.inputs.purpose !== 'video_take' || template.referenceInputs.length > 0) {
+    throw new TypeError('deferred requests must be unreferenced video requests');
+  }
   return { kind: 'after_take_selection', template, dependency: cloneDependency(input.dependency) };
 };
 
@@ -256,13 +214,15 @@ export const studioGenerationRequestTemplatesEqual = (
   left: StudioGenerationRequestTemplate,
   right: StudioGenerationRequestTemplate
 ): boolean =>
-  left.prompt === right.prompt &&
+  studioGenerationCompositionsEqualV2(left.composition, right.composition) &&
   left.aspectRatio === right.aspectRatio &&
   left.resolution === right.resolution &&
   Object.is(left.durationSeconds, right.durationSeconds) &&
   left.referenceInputs.length === right.referenceInputs.length &&
   left.referenceInputs.every(
     (reference, index) =>
+      reference.referenceId === right.referenceInputs[index]?.referenceId &&
+      reference.kind === right.referenceInputs[index]?.kind &&
       reference.assetId === right.referenceInputs[index]?.assetId &&
       reference.sha256 === right.referenceInputs[index]?.sha256
   );
@@ -294,4 +254,8 @@ export const studioGenerationRequestSnapshotsEqual = (
 export const isStudioGenerationRequestCurrent = (
   recorded: StudioGenerationRequestSnapshot,
   current: StudioGenerationRequestSnapshot
-): boolean => studioGenerationRequestSnapshotsEqual(recorded, current);
+): boolean => {
+  const normalizedCurrent = structuredClone(current);
+  normalizedCurrent.composition.inputs.projectRevision = recorded.composition.inputs.projectRevision;
+  return studioGenerationRequestSnapshotsEqual(recorded, normalizedCurrent);
+};

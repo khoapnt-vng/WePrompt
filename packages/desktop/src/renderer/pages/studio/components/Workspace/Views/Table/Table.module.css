@@ -114,15 +114,11 @@
 
 .grid {
   inline-size: 100%;
-  min-inline-size: 956px;
+  min-inline-size: 0;
   border-collapse: collapse;
   table-layout: fixed;
   color: var(--text-secondary);
   font-family: var(--font-body);
-}
-
-.gridFolded {
-  min-inline-size: 0;
 }
 
 .headerCell {
@@ -213,13 +209,6 @@
   font-weight: var(--fw-bold);
 }
 
-.lookMissing {
-  /* The drawing keeps the empty-Look prompt in the same warning colour the row's NO COVERAGE state
-     uses, folded or columnar, so the gap reads as a gap rather than as absent prose. */
-  color: var(--danger);
-  font-style: italic;
-}
-
 .shotCount {
   white-space: nowrap;
 }
@@ -293,28 +282,6 @@
   color: var(--color-text-3);
   font-family: var(--font-body);
   font-size: 13px;
-}
-
-.actionFolded {
-  display: grid;
-  min-inline-size: 0;
-}
-
-.actionLine {
-  min-inline-size: 0;
-}
-
-.lookLine {
-  display: -webkit-box;
-  overflow: hidden;
-  margin-block-start: 3px;
-  min-inline-size: 0;
-  color: var(--text-secondary);
-  font-family: var(--font-body);
-  font-size: 12.5px;
-  text-overflow: ellipsis;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
 .panelThumbButton {

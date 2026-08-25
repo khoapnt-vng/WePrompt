@@ -26,8 +26,12 @@ import {
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_REFERENCE_LABEL_LENGTH,
+  STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
+  STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
   STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MAX_STORY_LENGTH,
   STUDIO_MIN_SHOT_SECONDS,
 } from '../../types/project/creativeStudioTypes';
 import type { NativeBridgeProviderKey, RendererBridgeQueryKey } from './constants';
@@ -301,8 +305,9 @@ const studioConnectionSchema = z
   })
   .strict();
 
-// Schema-2 renderer authority. These are deliberately separate from the full mutation catalog:
-// the renderer may batch only the frozen authoring subset, while settings, rules, parking, Take,
+// Renderer protocol V2 authority. The protocol version is independent from the schema-5 project cutover.
+// These are deliberately separate from the full mutation catalog:
+// the renderer may batch only the frozen authoring subset, while settings, rules, parking, media,
 // Bin, cascade, and undo gestures cross their dedicated narrow providers below.
 const studioV2ProjectInputSchema = z
   .object({
@@ -339,21 +344,51 @@ const studioV2EditableProjectChangesSchema = z
 const studioV2BeatSchema = z
   .object({
     title: z.string().max(256),
-    action: z.string().max(4 * 1024),
-    look: z.string().max(8 * 1024),
+    story: z.string().max(STUDIO_MAX_STORY_LENGTH),
     targetSeconds: z.number().finite().int().min(1).max(1440).nullable(),
   })
   .strict();
 const studioV2BeatChangesSchema = studioV2BeatSchema.partial().refine((changes) => Object.keys(changes).length > 0);
 const studioV2ShotSchema = z
   .object({
-    line: z.string().max(8 * 1024),
-    narration: z.string().max(4 * 1024),
-    onScreenText: z.string().max(1024),
+    shootingScript: z.string().max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH),
     durationSeconds: z.number().finite().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
   })
   .strict();
 const studioV2ShotChangesSchema = studioV2ShotSchema.partial().refine((changes) => Object.keys(changes).length > 0);
+const studioV2ReferenceDraftSchema = z
+  .object({
+    kind: z.enum(['character', 'background']),
+    label: z
+      .string()
+      .min(1)
+      .max(STUDIO_MAX_REFERENCE_LABEL_LENGTH)
+      .refine((label) => label === label.trim()),
+    prompt: z
+      .string()
+      .min(1)
+      .max(STUDIO_MAX_REFERENCE_PROMPT_LENGTH)
+      .refine((prompt) => prompt === prompt.trim()),
+  })
+  .strict();
+const studioV2ReferencePlanSchema = z
+  .array(studioV2ReferenceDraftSchema)
+  .max(STUDIO_MAX_PROJECT_REFERENCES)
+  .superRefine((references, context) => {
+    const labels = new Set<string>();
+    let sawBackground = false;
+    references.forEach((reference, index) => {
+      const labelIdentity = `${reference.kind}\0${reference.label}`;
+      if (labels.has(labelIdentity)) {
+        context.addIssue({ code: 'custom', message: 'duplicate reference label', path: [index] });
+      }
+      if (sawBackground && reference.kind === 'character') {
+        context.addIssue({ code: 'custom', message: 'character reference after background', path: [index] });
+      }
+      labels.add(labelIdentity);
+      if (reference.kind === 'background') sawBackground = true;
+    });
+  });
 const studioV2UniqueIdsSchema = (maximum: number) =>
   z
     .array(safeIdSchema)
@@ -416,6 +451,18 @@ const studioV2SpendPolicySchema = z
   .strict();
 const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('set_brief'), brief: z.string().max(16 * 1024) }).strict(),
+  z.object({ kind: z.literal('set_reference_plan'), references: studioV2ReferencePlanSchema }).strict(),
+  z
+    .object({ kind: z.literal('approve_reference'), referenceId: safeIdSchema, candidateAssetId: safeIdSchema })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('set_shot_reference_binding'),
+      shotId: safeIdSchema,
+      characterReferenceIds: studioV2UniqueIdsSchema(STUDIO_MAX_PROJECT_REFERENCES),
+      backgroundReferenceId: safeIdSchema.nullable(),
+    })
+    .strict(),
   z
     .object({
       kind: z.literal('add_beat'),
@@ -447,13 +494,6 @@ const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
     .strict(),
   z.object({ kind: z.literal('set_hard_cut'), shotId: safeIdSchema, hardCut: z.boolean() }).strict(),
   z.object({ kind: z.literal('set_seed_still'), shotId: safeIdSchema, assetId: safeIdSchema.nullable() }).strict(),
-  z
-    .object({
-      kind: z.literal('set_shot_background_reference'),
-      shotId: safeIdSchema,
-      referenceId: safeIdSchema,
-    })
-    .strict(),
   z.object({ kind: z.literal('promote_board_panel'), shotId: safeIdSchema, boardAssetId: safeIdSchema }).strict(),
   z
     .object({
@@ -463,8 +503,6 @@ const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
       trimOutSeconds: studioV2TrimBoundarySchema.nullable(),
     })
     .strict(),
-  z.object({ kind: z.literal('redetach_line'), shotId: safeIdSchema, line: z.string().max(8 * 1024) }).strict(),
-  z.object({ kind: z.literal('restore_line'), shotId: safeIdSchema, historyEntryId: safeIdSchema }).strict(),
   z
     .object({
       kind: z.literal('set_routes'),
@@ -498,7 +536,6 @@ const studioV2ReferenceDecisionSchema = z
     outcome: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('rejected') }).strict(),
       z.object({ kind: z.literal('generation_gate') }).strict(),
-      z.object({ kind: z.literal('imported_reference'), assetId: safeIdSchema }).strict(),
     ]),
   })
   .strict();
@@ -511,36 +548,16 @@ const studioV2PrepareProjectReferencesSchema = z
   .refine((request) => new Set(request.referenceIds).size === request.referenceIds.length, {
     message: 'duplicate project reference',
   });
-const studioV2PrepareGenerationChoiceShape = {
-  shotId: safeIdSchema,
-};
-const studioV2PrepareGenerationChoiceSchema = z.discriminatedUnion('purpose', [
-  z
-    .object({
-      ...studioV2PrepareGenerationChoiceShape,
-      purpose: z.literal('seed_still'),
-      referenceAssetId: safeIdSchema.nullable(),
-    })
-    .strict(),
-  z
-    .object({
-      ...studioV2PrepareGenerationChoiceShape,
-      purpose: z.literal('board_still'),
-      referenceAssetId: z.null(),
-    })
-    .strict(),
-  z
-    .object({
-      ...studioV2PrepareGenerationChoiceShape,
-      purpose: z.literal('video_take'),
-      referenceAssetId: z.null(),
-    })
-    .strict(),
-]);
+const studioV2PrepareGenerationChoiceSchema = z
+  .object({
+    target: z.object({ kind: z.literal('shot'), shotId: safeIdSchema }).strict(),
+    purpose: z.enum(['seed_still', 'board_still', 'video_take']),
+  })
+  .strict();
 const studioV2OrdinaryPrepareSubmissionSchema = z
   .object({
     ...studioV2MutationRequestShape,
-    originReferenceHandoffId: safeIdSchema.nullable(),
+    originReferenceHandoffId: z.null(),
     baseChoices: z.array(studioV2PrepareGenerationChoiceSchema).min(1).max(STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST),
     cascadeChoices: z.array(studioV2PrepareGenerationChoiceSchema).max(STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST),
   })
@@ -585,10 +602,10 @@ const studioV2PrepareSubmissionSchema = z
     if (choices.length > STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST) {
       context.addIssue({ code: 'custom', message: 'generation item bound exceeded' });
     }
-    if (new Set(choices.map((choice) => choice.shotId)).size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) {
+    if (new Set(choices.map((choice) => choice.target.shotId)).size > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST) {
       context.addIssue({ code: 'custom', message: 'generation shot bound exceeded' });
     }
-    if (new Set(choices.map((choice) => `${choice.shotId}:${choice.purpose}`)).size !== choices.length) {
+    if (new Set(choices.map((choice) => `${choice.target.shotId}:${choice.purpose}`)).size !== choices.length) {
       context.addIssue({ code: 'custom', message: 'duplicate generation choice' });
     }
     const boardChoiceCount = choices.filter((choice) => choice.purpose === 'board_still').length;
@@ -884,13 +901,6 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.decide-reference-request': studioV2ReferenceDecisionSchema,
   'creative-studio.list-reference-generation-handoffs': studioV2ProjectRequestSchema,
   'creative-studio.prepare-project-references': studioV2PrepareProjectReferencesSchema,
-  'creative-studio.approve-project-reference': z
-    .object({
-      ...studioV2MutationRequestShape,
-      referenceId: safeIdSchema,
-      candidateAssetId: safeIdSchema,
-    })
-    .strict(),
   'creative-studio.prepare-submission': studioV2PrepareSubmissionSchema,
   'creative-studio.confirm-submission': z.object({ ...studioV2MutationRequestShape, quoteId: safeIdSchema }).strict(),
   'creative-studio.cancel-job': z.object({ ...studioV2MutationRequestShape, jobId: safeIdSchema }).strict(),
@@ -929,20 +939,6 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.reorder-bin': z.object({ ...studioV2MutationRequestShape, bin: studioV2BinSchema }).strict(),
   'creative-studio.delete-project': z.object(studioV2MutationRequestShape).strict(),
   'creative-studio.persist-captured-poster': studioV2CapturedPosterSchema,
-  'creative-studio.choose-and-import-reference': z
-    .object({
-      projectId: safeIdSchema,
-      briefReferenceRole: z.enum(['cast', 'look']),
-      expectedRevision: studioExpectedRevisionSchema,
-    })
-    .strict(),
-  'creative-studio.detach-brief-reference': z
-    .object({
-      projectId: safeIdSchema,
-      assetId: safeIdSchema,
-      expectedRevision: studioExpectedRevisionSchema,
-    })
-    .strict(),
   'creative-studio.import-seed-still': z.object({ ...studioV2MutationRequestShape, shotId: safeIdSchema }).strict(),
   'creative-studio.import-bed-audio': z.object(studioV2MutationRequestShape).strict(),
   'creative-studio.detach-bed-audio': z.object({ ...studioV2MutationRequestShape, assetId: safeIdSchema }).strict(),

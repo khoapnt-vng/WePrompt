@@ -9,7 +9,6 @@ import type {
   StudioAssetV2,
   StudioBeat,
   StudioBinItem,
-  StudioLineHistoryEntry,
   StudioPlanningShotBoundaryV2,
   StudioRendererBoardPanelStatusV2,
   StudioRendererChainBoundaryV2,
@@ -89,14 +88,9 @@ export type WorkspaceAttentionJobProjection = Pick<StudioRendererJobV2, 'id' | '
 
 export type WorkspaceShotProjection = {
   id: string;
-  line: string;
-  narration: string;
-  onScreenText: string;
+  shootingScript: string;
   durationSeconds: number;
   chainBreak: StudioShot['chainBreak'];
-  derivation: StudioShot['derivation'];
-  derivedFromActionRevision: number | null;
-  derivationStale: boolean;
   trimInSeconds: number | null;
   trimOutSeconds: number | null;
   currentPicture: WorkspaceCurrentPictureProjection | null;
@@ -125,10 +119,7 @@ export type WorkspaceShotProjection = {
 export type WorkspaceBeatProjection = {
   id: string;
   title: string;
-  action: string;
-  look: string;
-  actionRevision: number;
-  lineHistory: StudioLineHistoryEntry[];
+  story: string;
   targetSeconds: number | null;
   actualSeconds: number | null;
   displayState: WorkspaceBeatDisplayState;
@@ -208,7 +199,7 @@ export type WorkspaceCutCoverCandidateProjection = {
   shotId: string;
   beatId: string;
   beatTitle: string;
-  line: string;
+  shootingScript: string;
   coverAssetId: string | null;
 };
 
@@ -275,7 +266,8 @@ const videoPosterId = (project: StudioRendererProjectV2, shot: StudioShot, video
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.status === 'succeeded' &&
       job.purpose === 'video_take' &&
       job.outputAssetIdsByRole.primary === videoTake.id &&
@@ -299,23 +291,12 @@ const videoPosterId = (project: StudioRendererProjectV2, shot: StudioShot, video
     : null;
 };
 
-const isProjectReferenceOutput = (project: StudioRendererProjectV2, shot: StudioShot, assetId: string): boolean =>
-  shot.jobIds.some((jobId) => {
-    const job = ownValue(project.jobs, jobId);
-    return (
-      job?.id === jobId &&
-      job.projectId === project.id &&
-      job.shotId === shot.id &&
-      job.projectReferenceId !== undefined &&
-      job.outputAssetIds.includes(assetId)
-    );
-  });
+const isProjectReferenceOutput = (project: StudioRendererProjectV2, _shot: StudioShot, assetId: string): boolean =>
+  ownValue(project.assets, assetId)?.projectReferenceId !== null;
 
 const isEligibleImageTake = (project: StudioRendererProjectV2, shot: StudioShot, asset: StudioAssetV2): boolean =>
   asset.mediaKind === 'image' &&
   (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
-  asset.briefReferenceRole === undefined &&
-  asset.briefReferenceLabel === undefined &&
   asset.projectId === project.id &&
   asset.shotId === shot.id &&
   !isProjectReferenceOutput(project, shot, asset.id) &&
@@ -349,8 +330,6 @@ const validExplicitSeedStillId = (project: StudioRendererProjectV2, shot: Studio
     (seed.managedAsset.collection === 'assets' ||
       seed.managedAsset.collection === 'imports' ||
       seed.managedAsset.collection === 'boardStills') &&
-    seed.briefReferenceRole === undefined &&
-    seed.briefReferenceLabel === undefined &&
     !isProjectReferenceOutput(project, shot, seed.id) &&
     shot.assetIds.includes(seed.id)
     ? seed.id
@@ -401,9 +380,7 @@ const projectSeedStills = (input: {
       isEligibleImageTake(input.project, input.shot, asset) ||
       (asset.id === input.explicitSeedAssetId &&
         asset.mediaKind === 'image' &&
-        asset.managedAsset.collection === 'boardStills' &&
-        asset.briefReferenceRole === undefined &&
-        asset.briefReferenceLabel === undefined)
+        asset.managedAsset.collection === 'boardStills')
     ) {
       seedStills.push({
         assetId: asset.id,
@@ -421,10 +398,7 @@ const hasOwnedShotJob = (project: StudioRendererProjectV2, shot: StudioShot): bo
   shot.jobIds.some((jobId) => {
     const job = ownValue(project.jobs, jobId);
     return (
-      job?.id === jobId &&
-      job.projectId === project.id &&
-      job.shotId === shot.id &&
-      job.projectReferenceId === undefined
+      job?.id === jobId && job.projectId === project.id && job.target.kind === 'shot' && job.target.shotId === shot.id
     );
   });
 
@@ -463,8 +437,8 @@ const hasOwnedGenerationWithStatus = (
     return (
       job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
-      job.projectReferenceId === undefined &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.purpose === purpose &&
       statuses.has(job.status)
     );
@@ -476,8 +450,8 @@ const ownedAttentionJobs = (project: StudioRendererProjectV2, shot: StudioShot):
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
-      job.projectReferenceId === undefined &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.status === 'needs_attention' &&
       job.error !== null &&
       (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
@@ -498,7 +472,6 @@ const projectShot = (
   project: StudioRendererProjectV2,
   shot: StudioShot,
   context: {
-    beatActionRevision: number | null;
     segmentHead: boolean;
     planningBoundary: StudioPlanningShotBoundaryV2 | null;
     frameBoundary: StudioRendererChainBoundaryV2 | null;
@@ -537,17 +510,9 @@ const projectShot = (
         : 'draft';
   return {
     id: shot.id,
-    line: shot.line,
-    narration: shot.narration,
-    onScreenText: shot.onScreenText,
+    shootingScript: shot.shootingScript,
     durationSeconds: shot.durationSeconds,
     chainBreak: shot.chainBreak,
-    derivation: shot.derivation,
-    derivedFromActionRevision: shot.derivedFromActionRevision,
-    derivationStale:
-      shot.derivation === 'derived' &&
-      context.beatActionRevision !== null &&
-      shot.derivedFromActionRevision !== context.beatActionRevision,
     trimInSeconds: shot.trimInSeconds,
     trimOutSeconds: shot.trimOutSeconds,
     currentPicture,
@@ -624,8 +589,6 @@ const validCutAudioImport = (
     asset.shotId === null &&
     asset.mediaKind === 'audio' &&
     asset.managedAsset?.collection === 'imports' &&
-    asset.briefReferenceRole === undefined &&
-    asset.briefReferenceLabel === undefined &&
     typeof asset.mimeType === 'string' &&
     asset.mimeType.startsWith('audio/') &&
     Number.isSafeInteger(asset.byteSize) &&
@@ -751,7 +714,7 @@ const projectCut = (
         if (
           seenShotIds.has(shot.id) ||
           !isSafeStudioId(shot.id) ||
-          !isDisplayText(shot.line) ||
+          !isDisplayText(shot.shootingScript) ||
           !seenBeatIds.has(beat.id)
         ) {
           continue;
@@ -761,7 +724,7 @@ const projectCut = (
           shotId: shot.id,
           beatId: beat.id,
           beatTitle: beat.title,
-          line: shot.line,
+          shootingScript: shot.shootingScript,
           coverAssetId: shot.coverAssetId === null || isSafeStudioId(shot.coverAssetId) ? shot.coverAssetId : null,
         });
       }
@@ -842,37 +805,18 @@ const projectBeatDisplayState = (input: {
 
 const hasSafeBeatDisplayFacts = (beat: StudioBeat): boolean =>
   isDisplayText(beat.title) &&
-  isDisplayText(beat.action) &&
-  isDisplayText(beat.look) &&
-  Number.isSafeInteger(beat.actionRevision) &&
-  beat.actionRevision >= 0 &&
+  isDisplayText(beat.story) &&
   (beat.targetSeconds === null ||
     (Number.isSafeInteger(beat.targetSeconds) &&
       beat.targetSeconds > 0 &&
       beat.targetSeconds <= Number.MAX_SAFE_INTEGER)) &&
-  Array.isArray(beat.shotOrder) &&
-  Array.isArray(beat.lineHistory) &&
-  beat.lineHistory.every(
-    (entry) =>
-      entry !== null &&
-      typeof entry === 'object' &&
-      isSafeStudioId(entry.id) &&
-      Number.isSafeInteger(entry.shotOrdinal) &&
-      entry.shotOrdinal > 0 &&
-      isDisplayText(entry.text) &&
-      isDisplayTimestamp(entry.capturedAt)
-  );
+  Array.isArray(beat.shotOrder);
 
 const hasSafeShotDisplayFacts = (shot: StudioShot): boolean =>
-  isDisplayText(shot.line) &&
-  isDisplayText(shot.narration) &&
-  isDisplayText(shot.onScreenText) &&
+  isDisplayText(shot.shootingScript) &&
   Number.isSafeInteger(shot.durationSeconds) &&
   shot.durationSeconds > 0 &&
   (shot.chainBreak === 'none' || shot.chainBreak === 'hard_cut') &&
-  (shot.derivation === 'derived' || shot.derivation === 'detached') &&
-  (shot.derivedFromActionRevision === null ||
-    (Number.isSafeInteger(shot.derivedFromActionRevision) && shot.derivedFromActionRevision >= 0)) &&
   (shot.trimInSeconds === null || (Number.isFinite(shot.trimInSeconds) && shot.trimInSeconds >= 0)) &&
   (shot.trimOutSeconds === null || (Number.isFinite(shot.trimOutSeconds) && shot.trimOutSeconds >= 0)) &&
   (shot.seedStillId === null || isSafeStudioId(shot.seedStillId)) &&
@@ -1035,7 +979,6 @@ const projectStoredBeat = (input: {
       downstreamShotIds.push(downstream.id);
     }
     return projectShot(input.project, shot, {
-      beatActionRevision: input.beat.actionRevision,
       segmentHead: shotIndex === 0 || shot.chainBreak === 'hard_cut',
       planningBoundary: boundaryByShotId.get(shot.id) ?? null,
       frameBoundary: null,
@@ -1051,10 +994,7 @@ const projectStoredBeat = (input: {
   return {
     id: input.beat.id,
     title: input.beat.title,
-    action: input.beat.action,
-    look: input.beat.look,
-    actionRevision: input.beat.actionRevision,
-    lineHistory: input.beat.lineHistory.map((entry) => ({ ...entry })),
+    story: input.beat.story,
     targetSeconds: input.beat.targetSeconds,
     actualSeconds: projectBeatActualSeconds(input.project, input.beat),
     displayState: projectBeatDisplayState({
@@ -1092,8 +1032,6 @@ const validBoardAssetId = (project: StudioRendererProjectV2, shot: StudioShot): 
   return asset !== null &&
     asset.mediaKind === 'image' &&
     asset.managedAsset.collection === 'boardStills' &&
-    asset.briefReferenceRole === undefined &&
-    asset.briefReferenceLabel === undefined &&
     shot.assetIds.filter((assetId) => assetId === asset.id).length === 1
     ? asset.id
     : null;
@@ -1104,7 +1042,8 @@ const boardJobs = (project: StudioRendererProjectV2, shot: StudioShot): StudioRe
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.purpose === 'board_still' &&
       shot.jobIds.filter((ownedId) => ownedId === jobId).length === 1
       ? [job]
@@ -1288,7 +1227,8 @@ const exactCurrentVideoJobs = (
     if (
       job?.id !== jobId ||
       job.projectId !== project.id ||
-      job.shotId !== shot.id ||
+      job.target.kind !== 'shot' ||
+      job.target.shotId !== shot.id ||
       job.purpose !== 'video_take' ||
       shot.jobIds.filter((ownedId) => ownedId === jobId).length !== 1
     ) {
@@ -1436,7 +1376,6 @@ export const projectWorkspace = (
       const conditioningFailure = exactConditioningFailure(matchedChainStatus, shot.id);
       const frameBoundary = exactFrameBoundary(project, matchedChainStatus, orderedShots, shotIndex);
       return projectShot(project, shot, {
-        beatActionRevision: beat.actionRevision,
         segmentHead: shotIndex === 0 || shot.chainBreak === 'hard_cut',
         planningBoundary: planningBoundaryByShotId.get(shot.id) ?? null,
         frameBoundary: frameBoundary.value,
@@ -1453,10 +1392,7 @@ export const projectWorkspace = (
       {
         id: beat.id,
         title: beat.title,
-        action: beat.action,
-        look: beat.look,
-        actionRevision: beat.actionRevision,
-        lineHistory: beat.lineHistory.map((entry) => ({ ...entry })),
+        story: beat.story,
         targetSeconds: beat.targetSeconds,
         actualSeconds: projectBeatActualSeconds(project, beat),
         displayState: projectBeatDisplayState({
@@ -1528,7 +1464,6 @@ export const projectWorkspace = (
         continue;
       }
       const projectedShot = projectShot(project, shot, {
-        beatActionRevision: owner.beat.actionRevision,
         segmentHead: shot.chainBreak === 'hard_cut',
         planningBoundary: null,
         frameBoundary: null,

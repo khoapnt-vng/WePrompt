@@ -10,8 +10,8 @@ import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativ
 import { isCanonicalStudioBedAudioAssetV2 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
   STUDIO_BED_FADE_OUT_SECONDS,
+  STUDIO_EXPORT_SCHEMA_VERSION_V2,
   STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
-  STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAssetV2,
   type StudioEditorFolderTimelineBeatV2,
   type StudioEditorFolderTimelineV2,
@@ -332,7 +332,7 @@ export const composeStudioEditorFolderV2 = (
 
   if (usedProofIds.size !== proofs.size) return fail('invalid_media');
   const timeline: StudioEditorFolderTimelineV2 = {
-    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+    schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
     projectId: project.id,
     sourceRevision: project.revision,
     name: project.name,

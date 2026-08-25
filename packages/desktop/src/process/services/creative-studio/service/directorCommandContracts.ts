@@ -7,12 +7,14 @@
 import {
   STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
-  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
@@ -167,20 +169,26 @@ const V2_REFERENCE_REQUEST_KEYS = new Set(['schemaVersion', 'id', 'projectId', '
 const V2_REFERENCE_SLOT_KEYS = new Set(['schemaVersion', 'requestId', 'reservedAt']);
 const V2_REFERENCE_DECISION_KEYS = new Set(['schemaVersion', 'requestId', 'projectId', 'decidedAt', 'outcome']);
 const V2_REFERENCE_REJECTED_OUTCOME_KEYS = new Set(['kind']);
-const V2_REFERENCE_IMPORTED_OUTCOME_KEYS = new Set(['kind', 'assetId', 'projectRevision']);
 const V2_REFERENCE_GENERATION_OUTCOME_KEYS = new Set(['kind', 'handoffId', 'referenceIds']);
 const V2_REFERENCE_HANDOFF_RECEIPT_KEYS = new Set(['schemaVersion', 'handoffId', 'requestId', 'completedAt', 'result']);
 const V2_REFERENCE_DISMISSED_RESULT_KEYS = new Set(['kind']);
 const V2_REFERENCE_CONFIRMED_RESULT_KEYS = new Set(['kind', 'authorizationId']);
 const V2_PROPOSAL_DECISION_STATUSES = new Set(['accepted', 'rejected', 'expired']);
 
-const sidecarSchemaV2 = (value: unknown): SidecarSchemaV2 => {
+const sidecarSchemaV2 = (value: unknown, currentVersion: number): SidecarSchemaV2 => {
   try {
     if (!isRecord(value)) return 'missing';
     const descriptor = Object.getOwnPropertyDescriptor(value, 'schemaVersion');
     if (descriptor === undefined || !Object.hasOwn(descriptor, 'value')) return 'missing';
-    if (descriptor.value === 1) return 'v1';
-    if (descriptor.value === STUDIO_PROJECT_SCHEMA_VERSION) return 'v2';
+    if (
+      typeof descriptor.value === 'number' &&
+      Number.isSafeInteger(descriptor.value) &&
+      descriptor.value >= 1 &&
+      descriptor.value < currentVersion
+    ) {
+      return 'v1';
+    }
+    if (descriptor.value === currentVersion) return 'v2';
     return 'other';
   } catch {
     return 'missing';
@@ -281,15 +289,17 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   edit_project: 'operation_not_permitted',
   set_brief: 'direct',
   set_rules: 'operation_not_permitted',
-  set_project_references: 'proposal',
-  add_beat: 'direct',
-  edit_beat: 'direct',
+  set_reference_plan: 'direct',
+  approve_reference: 'operation_not_permitted',
+  set_shot_reference_binding: 'direct',
+  add_beat: 'proposal',
+  edit_beat: 'proposal',
   reorder_beats: 'direct',
   park_beat: 'operation_not_permitted',
   restore_beat: 'operation_not_permitted',
   add_binned_beat: 'proposal',
-  add_shot: 'direct',
-  edit_shot: 'direct',
+  add_shot: 'proposal',
+  edit_shot: 'proposal',
   delete_shot: 'direct',
   park_shot: 'operation_not_permitted',
   restore_shot: 'operation_not_permitted',
@@ -297,12 +307,8 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   apply_coverage: 'proposal',
   set_hard_cut: 'operation_not_permitted',
   set_seed_still: 'operation_not_permitted',
-  set_shot_background_reference: 'operation_not_permitted',
   promote_board_panel: 'operation_not_permitted',
   trim_shot: 'operation_not_permitted',
-  redetach_line: 'proposal',
-  rederive_line: 'proposal',
-  restore_line: 'operation_not_permitted',
   reorder_bin: 'direct',
   set_routes: 'operation_not_permitted',
   set_spend_policy: 'operation_not_permitted',
@@ -395,7 +401,7 @@ export function parseStudioDirectorCommandSlotV2(
   now: string,
   waitMs: number
 ): StudioDirectorSidecarParseResultV2<StudioDirectorCommandSlotV2> {
-  const schema = sidecarSchemaV2(value);
+  const schema = sidecarSchemaV2(value, STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2);
   if (schema === 'v1') return unsupportedSidecarV2();
   const record = schema === 'v2' ? snapshotDataRecordV2(value) : null;
   if (record === null || !hasExactKeysV2(record, SLOT_KEYS)) {
@@ -425,7 +431,7 @@ export function parseStudioDirectorCommandSlotLeaseV2(
   now: string,
   waitMs: number
 ): StudioDirectorSidecarParseResultV2<StudioDirectorCommandSlotLeaseV2> {
-  const schema = sidecarSchemaV2(value);
+  const schema = sidecarSchemaV2(value, STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2);
   if (schema === 'v1') return unsupportedSidecarV2();
   const record = schema === 'v2' ? snapshotDataRecordV2(value) : null;
   if (
@@ -456,7 +462,7 @@ export function parseStudioDirectorCommandSlotLeaseV2(
   if (identityIsComplete) {
     const slot = parseStudioDirectorCommandSlotV2(
       {
-        schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
         commandId: record.commandId,
         reservedAt: record.reservedAt,
         deadlineAt: record.deadlineAt,
@@ -480,7 +486,7 @@ export function parseStudioDirectorPendingRecordV2(input: {
   if (!isSafeStudioDirectorId(input.projectId) || !isSafeStudioDirectorId(input.commandId)) {
     return invalidCommandV2(input.value, input.projectId, input.commandId, 'malformed_record');
   }
-  const schema = sidecarSchemaV2(input.value);
+  const schema = sidecarSchemaV2(input.value, STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2);
   if (schema === 'v1') return unsupportedCommandV2(input.value, input.projectId, input.commandId);
   if (schema === 'other') return invalidCommandV2(input.value, input.projectId, input.commandId, 'unsupported_version');
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
@@ -524,7 +530,7 @@ export function parseStudioDirectorCommandReceiptV2(input: {
   commandId: string;
   value: unknown;
 }): StudioDirectorSidecarParseResultV2<StudioDirectorCommandReceiptV2> {
-  const schema = sidecarSchemaV2(input.value);
+  const schema = sidecarSchemaV2(input.value, STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2);
   if (schema === 'v1') return unsupportedSidecarV2();
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
   if (
@@ -610,8 +616,8 @@ const validateProposalPayloadV2 = (value: unknown): boolean => {
       validateOperationListV2(value.operations) &&
       value.operations.every(
         (operation) =>
-          // Pre-containment pending proposals must remain readable so acceptance can reject them in the reducer.
-          operation.kind === 'set_hard_cut' ||
+          operation.kind !== 'set_reference_plan' &&
+          operation.kind !== 'set_shot_reference_binding' &&
           classifyStudioDirectorOperationV2(operation.kind) !== 'operation_not_permitted'
       )
     );
@@ -633,7 +639,7 @@ export function parseStudioProposalRecordV2(input: {
   proposalId: string;
   value: unknown;
 }): StudioDirectorSidecarParseResultV2<StudioProposalRecordV2> {
-  const schema = sidecarSchemaV2(input.value);
+  const schema = sidecarSchemaV2(input.value, STUDIO_PROPOSAL_SCHEMA_VERSION_V2);
   if (schema === 'v1') return unsupportedSidecarV2();
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
   if (
@@ -659,7 +665,7 @@ export function parseStudioProposalDecisionV2(input: {
   proposalId: string;
   value: unknown;
 }): StudioDirectorSidecarParseResultV2<StudioProposalDecisionV2> {
-  const schema = sidecarSchemaV2(input.value);
+  const schema = sidecarSchemaV2(input.value, STUDIO_PROPOSAL_SCHEMA_VERSION_V2);
   if (schema === 'v1') return unsupportedSidecarV2();
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
   if (
@@ -677,7 +683,7 @@ export function parseStudioProposalDecisionV2(input: {
 }
 
 export function parseStudioProposalSlotV2(value: unknown): StudioDirectorSidecarParseResultV2<StudioProposalSlotV2> {
-  const schema = sidecarSchemaV2(value);
+  const schema = sidecarSchemaV2(value, STUDIO_PROPOSAL_SCHEMA_VERSION_V2);
   if (schema === 'v1') return unsupportedSidecarV2();
   const record = schema === 'v2' ? snapshotDataRecordV2(value) : null;
   if (
@@ -696,7 +702,7 @@ export function parseStudioReferenceRequestV2(input: {
   requestId: string;
   value: unknown;
 }): StudioDirectorSidecarParseResultV2<StudioReferenceRequestV2> {
-  const schema = sidecarSchemaV2(input.value);
+  const schema = sidecarSchemaV2(input.value, STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION);
   if (schema === 'v1') return unsupportedSidecarV2();
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
   if (
@@ -719,7 +725,7 @@ export function parseStudioReferenceRequestV2(input: {
 export function parseStudioReferenceRequestSlotV2(
   value: unknown
 ): StudioDirectorSidecarParseResultV2<StudioReferenceRequestSlotV2> {
-  const schema = sidecarSchemaV2(value);
+  const schema = sidecarSchemaV2(value, STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION);
   if (schema === 'v1') return unsupportedSidecarV2();
   const record = schema === 'v2' ? snapshotDataRecordV2(value) : null;
   if (
@@ -738,13 +744,6 @@ const validateStudioReferenceRequestDecisionOutcomeV2 = (value: unknown): boolea
   if (value.kind === 'rejected' || value.kind === 'expired') {
     return hasExactKeysV2(value, V2_REFERENCE_REJECTED_OUTCOME_KEYS);
   }
-  if (value.kind === 'imported_reference') {
-    return (
-      hasExactKeysV2(value, V2_REFERENCE_IMPORTED_OUTCOME_KEYS) &&
-      isSafeStudioDirectorId(value.assetId) &&
-      isRevision(value.projectRevision)
-    );
-  }
   return (
     value.kind === 'generation_gate' &&
     hasExactKeysV2(value, V2_REFERENCE_GENERATION_OUTCOME_KEYS) &&
@@ -758,7 +757,7 @@ export function parseStudioReferenceRequestDecisionV2(input: {
   requestId: string;
   value: unknown;
 }): StudioDirectorSidecarParseResultV2<StudioReferenceRequestDecisionV2> {
-  const schema = sidecarSchemaV2(input.value);
+  const schema = sidecarSchemaV2(input.value, STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION);
   if (schema === 'v1') return unsupportedSidecarV2();
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
   if (
@@ -793,7 +792,7 @@ export function parseStudioReferenceGenerationHandoffReceiptV2(input: {
   handoffId: string;
   value: unknown;
 }): StudioDirectorSidecarParseResultV2<StudioReferenceGenerationHandoffReceiptV2> {
-  const schema = sidecarSchemaV2(input.value);
+  const schema = sidecarSchemaV2(input.value, STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION);
   if (schema === 'v1') return unsupportedSidecarV2();
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
   if (

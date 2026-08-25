@@ -11,8 +11,10 @@ import type {
   StudioProjectV2,
   StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MAX_PROJECT_REFERENCES } from '@/common/types/project/creativeStudioTypes';
 import { createStudioBoardGenerationRequestPlanForShot } from './boardRequest';
 import { isStudioGenerationRequestCurrent } from './generationRequest';
+import { resolveStudioReferenceBindingV2 } from './referenceBinding';
 
 const ownValue = <T>(record: Readonly<Record<string, T>>, id: string): T | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
@@ -35,8 +37,6 @@ export const resolveStudioCanonicalBoardAssetV2 = (
     asset.shotId !== shot.id ||
     asset.mediaKind !== 'image' ||
     asset.managedAsset.collection !== 'boardStills' ||
-    asset.briefReferenceRole !== undefined ||
-    asset.briefReferenceLabel !== undefined ||
     shot.assetIds.filter((candidate) => candidate === assetId).length !== 1
   ) {
     return null;
@@ -45,7 +45,8 @@ export const resolveStudioCanonicalBoardAssetV2 = (
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
       job.projectId === project.id &&
-      job.shotId === shot.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
       job.purpose === 'board_still' &&
       job.status === 'succeeded' &&
       job.outputAssetIdsByRole.primary === assetId &&
@@ -60,6 +61,42 @@ export type StudioCurrentBoardPanelAuthorityV2 = StudioCanonicalBoardAssetV2 & {
   beat: StudioBeat;
   shot: StudioShot;
   shotIndex: number;
+};
+
+export const studioBoardPanelFreshnessV2 = (
+  project: StudioProjectV2,
+  beat: StudioBeat,
+  shot: StudioShot,
+  producer: StudioJobV2
+): { requestCurrent: boolean; routeCurrent: boolean } => {
+  const routeCurrent =
+    producer.spendReceipt !== null &&
+    project.imageRouteId !== null &&
+    producer.spendReceipt.purpose === 'board_still' &&
+    producer.spendReceipt.routeId === project.imageRouteId;
+  if (producer.requestSnapshot === null) return { requestCurrent: false, routeCurrent };
+  const binding = resolveStudioReferenceBindingV2({
+    project,
+    shotId: shot.id,
+    maxConditioningImages: STUDIO_MAX_PROJECT_REFERENCES,
+  });
+  if (binding.ok === false) return { requestCurrent: false, routeCurrent };
+  try {
+    const currentRequest = createStudioBoardGenerationRequestPlanForShot({
+      project,
+      beat,
+      shot,
+      route: producer.provider,
+      referenceInputs: binding.referenceInputs,
+    });
+    return {
+      requestCurrent:
+        currentRequest !== null && isStudioGenerationRequestCurrent(producer.requestSnapshot, currentRequest.snapshot),
+      routeCurrent,
+    };
+  } catch {
+    return { requestCurrent: false, routeCurrent };
+  }
 };
 
 /**
@@ -85,25 +122,7 @@ export const resolveStudioCurrentBoardPanelAuthorityV2 = (
   if (location === null || location.shot.boardAssetId !== boardAssetId) return null;
   const canonical = resolveStudioCanonicalBoardAssetV2(project, location.shot, boardAssetId);
   if (canonical === null) return null;
-  let currentRequest: ReturnType<typeof createStudioBoardGenerationRequestPlanForShot>;
-  try {
-    currentRequest = createStudioBoardGenerationRequestPlanForShot({
-      project,
-      beat: location.beat,
-      shot: location.shot,
-    });
-  } catch {
-    return null;
-  }
-  if (
-    currentRequest === null ||
-    canonical.producer.requestSnapshot === null ||
-    !isStudioGenerationRequestCurrent(canonical.producer.requestSnapshot, currentRequest.snapshot) ||
-    project.imageRouteId === null ||
-    canonical.producer.spendReceipt?.purpose !== 'board_still' ||
-    canonical.producer.spendReceipt.routeId !== project.imageRouteId
-  ) {
-    return null;
-  }
+  const freshness = studioBoardPanelFreshnessV2(project, location.beat, location.shot, canonical.producer);
+  if (!freshness.requestCurrent || !freshness.routeCurrent) return null;
   return { ...canonical, ...location };
 };
