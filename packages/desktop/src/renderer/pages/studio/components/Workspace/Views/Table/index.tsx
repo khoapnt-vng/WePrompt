@@ -32,7 +32,7 @@ const COLUMNS = [
     labelKey: 'conversation.creativeStudio.workspace.table.columns.position',
     fixedInlineSize: 46,
   },
-  { id: 'panel', labelKey: 'conversation.creativeStudio.workspace.table.columns.panel', fixedInlineSize: 96 },
+  { id: 'panel', labelKey: 'conversation.creativeStudio.workspace.table.columns.panel', fixedInlineSize: 176 },
   { id: 'beat', labelKey: 'conversation.creativeStudio.workspace.table.columns.beat', fixedInlineSize: 100 },
   { id: 'story', labelKey: 'conversation.creativeStudio.workspace.table.columns.story' },
   { id: 'shots', labelKey: 'conversation.creativeStudio.workspace.table.columns.shots', fixedInlineSize: 68 },

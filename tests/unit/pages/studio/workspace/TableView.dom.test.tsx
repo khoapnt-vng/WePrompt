@@ -277,7 +277,7 @@ describe('TableView', () => {
       .getByRole('grid', { name: 'Beat table' })
       .querySelector<HTMLTableColElement>('col[data-grid-column-name="panel"]');
     const disclosure = screen.getByRole('button', { name: 'Open Board panels for Opening' });
-    expect(panelColumn).toHaveAttribute('data-fixed-inline-size', '96');
+    expect(panelColumn).toHaveAttribute('data-fixed-inline-size', '176');
     expect(disclosure.querySelector('[data-asset-id="board_1"]')).not.toBeNull();
     expect(disclosure).toHaveTextContent('+2');
   });
@@ -1134,7 +1134,12 @@ describe('TableView', () => {
 
 describe('the Table layout contract', () => {
   it('keeps one seven-column grid and addresses columns semantically', () => {
-    expect(tableCss).toMatch(/\.grid\s*{[^}]*min-inline-size:\s*0/s);
+    // The pane must never blow out horizontally, and the shrinking element that guarantees that is
+    // the scroll container, not the table. The table itself holds a floor so columns keep readable
+    // widths and overflow becomes a scrollbar rather than squeezed cells.
+    expect(tableCss).toMatch(/\.scroll\s*{[^}]*min-inline-size:\s*0/s);
+    expect(tableCss).toMatch(/\.scroll\s*{[^}]*overflow-x:\s*auto/s);
+    expect(tableCss).toMatch(/\.grid\s*{[^}]*min-inline-size:\s*\d+px/s);
     expect(tableCss).not.toContain('nth-child');
     const durationRule = tableCss.match(/\.durationFact\s*{([^}]*)}/s)?.[1] ?? '';
     expect(durationRule).not.toContain('overflow: hidden');

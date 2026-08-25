@@ -86,8 +86,11 @@
 }
 
 .grid {
+  /* Columns keep their comfortable widths and the table scrolls horizontally rather than
+     squeezing every cell to fit the pane. The floor is the sum of the fixed columns plus a
+     readable minimum for the flexible Story column. */
   inline-size: 100%;
-  min-inline-size: 0;
+  min-inline-size: 1040px;
   border-collapse: collapse;
   table-layout: fixed;
   color: var(--text-secondary);
@@ -261,10 +264,10 @@
   position: relative;
   display: block;
   overflow: visible;
-  inline-size: 64px;
-  min-inline-size: 64px;
-  block-size: 36px;
-  min-block-size: 36px;
+  inline-size: 144px;
+  min-inline-size: 144px;
+  block-size: 81px;
+  min-block-size: 81px;
   padding: 0;
   border: 0;
   border-radius: 4px;
