@@ -5,7 +5,7 @@
  */
 
 import { Alert, Button, Dropdown, Input, InputNumber, Menu, Modal, Popconfirm } from '@arco-design/web-react';
-import { MoreOne } from '@icon-park/react';
+import { MoreOne, Notes } from '@icon-park/react';
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -1085,6 +1085,9 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   // than a nested Modal, which this panel — itself a Modal — would have to trap focus inside.
   const [targetOpen, setTargetOpen] = useState(false);
   const targetFieldRef = useRef<HTMLLabelElement | null>(null);
+  // Story is context for this screen rather than its work: it reads on hover and opens to edit.
+  const [storyOpen, setStoryOpen] = useState(false);
+  const storyFieldRef = useRef<HTMLLabelElement | null>(null);
   const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
   const restoreMenuFocusAfterCloseRef = useRef(false);
   const beatLiftAuthorityRef = useRef({
@@ -1323,7 +1326,13 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   }, [targetOpen]);
 
   useEffect(() => {
+    if (!storyOpen) return;
+    storyFieldRef.current?.querySelector('textarea')?.focus();
+  }, [storyOpen]);
+
+  useEffect(() => {
     setTargetOpen(false);
+    setStoryOpen(false);
     setMenuOpen(false);
     confirmationHandleRef.current?.close();
     confirmationHandleRef.current = null;
@@ -1419,18 +1428,31 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
         {errorMessageKey === null ? null : <Alert content={t(errorMessageKey)} type='error' />}
 
         <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
-          <label className={styles.beatField} data-beat-field='story'>
-            <span className={styles.beatFieldHeading}>
-              <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
-            </span>
-            <Input.TextArea
-              aria-label={t(`${KEY_ROOT}.fields.story`)}
-              autoSize={{ minRows: 3, maxRows: 8 }}
-              disabled={mutationLocked}
-              onChange={(value) => drafts.setValue(storyKey, value)}
-              value={story}
-            />
-          </label>
+          <Button
+            aria-expanded={storyOpen}
+            aria-label={t(`${KEY_ROOT}.fields.story`)}
+            data-beat-story-toggle
+            icon={<Notes aria-hidden='true' />}
+            onClick={() => setStoryOpen((open) => !open)}
+            shape='circle'
+            size='small'
+            title={story}
+            type='text'
+          />
+          {storyOpen ? (
+            <label className={styles.beatField} data-beat-field='story' ref={storyFieldRef}>
+              <span className={styles.beatFieldHeading}>
+                <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
+              </span>
+              <Input.TextArea
+                aria-label={t(`${KEY_ROOT}.fields.story`)}
+                autoSize={{ minRows: 3, maxRows: 8 }}
+                disabled={mutationLocked}
+                onChange={(value) => drafts.setValue(storyKey, value)}
+                value={story}
+              />
+            </label>
+          ) : null}
           <div className={styles.beatMetaRow} data-beat-meta-row>
             {targetOpen ? (
               <label className={styles.beatTargetField} data-beat-field='target' ref={targetFieldRef}>

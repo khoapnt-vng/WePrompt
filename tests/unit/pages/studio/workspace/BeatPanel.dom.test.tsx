@@ -187,6 +187,7 @@ vi.mock('@arco-design/web-react', async () => {
 vi.mock('@icon-park/react', () => ({
   FullScreen: (props: Record<string, unknown>) => <span data-icon='fullscreen' {...props} />,
   MoreOne: (props: Record<string, unknown>) => <span data-icon='more' {...props} />,
+  Notes: (props: Record<string, unknown>) => <span data-icon='notes' {...props} />,
   OffScreen: (props: Record<string, unknown>) => <span data-icon='offscreen' {...props} />,
 }));
 
@@ -1812,6 +1813,12 @@ describe('BeatPanel', () => {
     render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
 
     const fields = screen.getByRole('region', { name: 'Beat fields' });
+    // Story collapses to a hover-readable icon and opens to edit.
+    expect(fields.querySelector('[data-beat-field="story"]')).toBeNull();
+    const storyToggle = fields.querySelector<HTMLButtonElement>('[data-beat-story-toggle]');
+    if (storyToggle === null) throw new Error('Missing Story toggle');
+    expect(storyToggle).toHaveAttribute('title', expect.stringContaining('') as unknown as string);
+    fireEvent.click(storyToggle);
     const storyField = fields.querySelector<HTMLElement>('[data-beat-field="story"]');
     const targetField = fields.querySelector<HTMLElement>('[data-beat-field="target"]');
     const metaRow = fields.querySelector<HTMLElement>('[data-beat-meta-row]');
@@ -2089,6 +2096,8 @@ describe('BeatPanel', () => {
     stale.rerender(
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { gateLocked: true })} />
     );
+    // Story reads while locked; opening it reveals an editor that refuses edits.
+    fireEvent.click(stale.container.querySelector<HTMLButtonElement>('[data-beat-story-toggle]')!);
     expect(screen.getByRole('textbox', { name: 'Story' })).toBeDisabled();
     inspectShot(stale.container, 'shot_2');
     expect(
