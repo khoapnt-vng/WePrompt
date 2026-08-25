@@ -8,7 +8,6 @@ import { Alert, Button, Drawer, Popconfirm, Select, Slider } from '@arco-design/
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import type { StudioRendererExportCatalogV2 } from '@/common/types/project/creativeStudioTypes';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import type { WorkspaceBeatProjection, WorkspaceProjection } from '../../workspaceProjection';
 import {
@@ -43,30 +42,17 @@ const CUT_STATE_KEYS = {
 const englishFallbackPluralKey = (base: string, count: number): string => `${base}_${count === 1 ? 'one' : 'other'}`;
 
 export type CutImportResult = 'cancelled' | 'imported' | 'failed';
-export type CutCopyResult = 'cancelled' | 'copied' | 'failed';
-
-export type CutCreateExportInput =
-  | { shape: 'editor_folder' }
-  | { shape: 'script' }
-  | { shape: 'still'; shotId: string };
-
 export type CutActions = {
   reorderBeats: (order: readonly string[]) => Promise<boolean>;
   importBedAudio: () => Promise<CutImportResult>;
   setBed: (assetId: string | null) => Promise<boolean>;
   detachBedAudio: (assetId: string) => Promise<boolean>;
-  createExport: (input: CutCreateExportInput) => Promise<boolean>;
-  refreshExports: () => Promise<boolean>;
-  copyExport: (artifactId: string) => Promise<CutCopyResult>;
-  revealExport: (artifactId: string) => Promise<boolean>;
 };
 
 export type CutViewProps = {
   projectId: string;
   projection: WorkspaceProjection;
-  exportCatalog: StudioRendererExportCatalogV2 | null;
   pending: boolean;
-  exportErrorMessageKey: string | null;
   actions: CutActions;
   onOpenBeat: (beatId: string) => void;
 };
@@ -83,26 +69,14 @@ const moveOrder = (order: readonly string[], from: number, to: number): string[]
 const selectedBedId = (projection: WorkspaceProjection): string | null =>
   projection.cut.bed.status === 'none' || projection.cut.bed.status === 'invalid' ? null : projection.cut.bed.assetId;
 
-const exportShapeKey = (shape: StudioRendererExportCatalogV2['artifacts'][number]['shape']): string =>
-  `${ASSETS_ROOT}.shape.${shape}`;
-
 /** Film-level Cut controls. Beat internals and paid generation remain outside this surface. */
-export const CutView: React.FC<CutViewProps> = ({
-  projectId,
-  projection,
-  exportCatalog,
-  pending,
-  exportErrorMessageKey,
-  actions,
-  onOpenBeat,
-}) => {
+export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending, actions, onOpenBeat }) => {
   const { t } = useTranslation();
   const [announcement, setAnnouncement] = useState('');
   const [assetsVisible, setAssetsVisible] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [reorderFocusId, setReorderFocusId] = useState<string | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string | null>(() => projection.cut.beats[0]?.id ?? null);
-  const [stillShotId, setStillShotId] = useState<string | null>(null);
   const [playback, setPlayback] = useState<CutPlaybackNavigation>(EMPTY_CUT_PLAYBACK_NAVIGATION);
   const summaryTitleId = useId();
   const actionPendingRef = useRef(false);
@@ -124,18 +98,6 @@ export const CutView: React.FC<CutViewProps> = ({
   const locked = pending || actionPendingRef.current || projectId !== projection.projectId;
   const currentBedId = selectedBedId(projection);
   const currentBed = projection.cut.audioImports.find((asset) => asset.assetId === currentBedId) ?? null;
-  const stillCandidates = useMemo(
-    () => projection.cut.coverCandidates.filter((candidate) => candidate.coverAssetId !== null),
-    [projection.cut.coverCandidates]
-  );
-
-  useEffect(() => {
-    setStillShotId((current) => {
-      if (current !== null && stillCandidates.some((candidate) => candidate.shotId === current)) return current;
-      return stillCandidates[0]?.shotId ?? null;
-    });
-  }, [projectId, stillCandidates]);
-
   useEffect(() => {
     if (reorderFocusId === null || busyKey !== null) return;
     const control = segmentRefs.current.get(reorderFocusId);
@@ -209,27 +171,6 @@ export const CutView: React.FC<CutViewProps> = ({
     setAnnouncement(
       t(`${CUT_ROOT}.bed.${changed === true ? (assetId === null ? 'cleared' : 'selected') : 'setFailed'}`)
     );
-  };
-
-  const createExport = async (input: CutCreateExportInput): Promise<void> => {
-    const created = await runAction(`export:${input.shape}`, () => actions.createExport(input));
-    setAnnouncement(t(`${CUT_ROOT}.exports.${created === true ? 'created' : 'createFailed'}`));
-  };
-
-  const refreshExports = async (): Promise<void> => {
-    const refreshed = await runAction('exports:refresh', actions.refreshExports);
-    setAnnouncement(t(`${CUT_ROOT}.exports.${refreshed === true ? 'refreshed' : 'refreshFailed'}`));
-  };
-
-  const copyExport = async (artifactId: string): Promise<void> => {
-    const result = await runAction(`copy:${artifactId}`, () => actions.copyExport(artifactId));
-    const key = result === 'copied' ? 'copied' : result === 'cancelled' ? 'copyCancelled' : 'copyFailed';
-    setAnnouncement(t(`${ASSETS_ROOT}.${key}`));
-  };
-
-  const revealExport = async (artifactId: string): Promise<void> => {
-    const revealed = await runAction(`reveal:${artifactId}`, () => actions.revealExport(artifactId));
-    setAnnouncement(t(`${ASSETS_ROOT}.${revealed === true ? 'revealed' : 'revealFailed'}`));
   };
 
   const detachAudio = async (assetId: string): Promise<void> => {
@@ -677,82 +618,6 @@ export const CutView: React.FC<CutViewProps> = ({
         </section>
       </div>
 
-      <section className={styles.exports}>
-        <div className={styles.panelHeading}>
-          <div>
-            <h3>{t(`${CUT_ROOT}.exports.title`)}</h3>
-            <p>{t(`${CUT_ROOT}.exports.description`)}</p>
-          </div>
-          <Button disabled={locked} loading={busyKey === 'exports:refresh'} onClick={() => void refreshExports()}>
-            {t(`${CUT_ROOT}.exports.refresh`)}
-          </Button>
-        </div>
-        {exportErrorMessageKey === null ? null : <Alert type='warning' content={t(exportErrorMessageKey)} />}
-        {exportCatalog === null ? <p className={styles.status}>{t(`${CUT_ROOT}.exports.catalogUnavailable`)}</p> : null}
-        <div className={styles.exportGrid}>
-          <article className={styles.exportCard} data-export-shape='editor_folder'>
-            <h4>{t(`${CUT_ROOT}.exports.editorFolderTitle`)}</h4>
-            <p>{t(`${CUT_ROOT}.exports.editorFolderDescription`)}</p>
-            <Button
-              disabled={locked || exportCatalog === null}
-              loading={busyKey === 'export:editor_folder'}
-              onClick={() => void createExport({ shape: 'editor_folder' })}
-              type='primary'
-            >
-              {t(`${CUT_ROOT}.exports.createEditorFolder`)}
-            </Button>
-          </article>
-          <article className={styles.exportCard} data-export-shape='still'>
-            <h4>{t(`${CUT_ROOT}.exports.stillTitle`)}</h4>
-            <p>{t(`${CUT_ROOT}.exports.stillDescription`)}</p>
-            <label>
-              <span>{t(`${CUT_ROOT}.exports.stillLabel`)}</span>
-              <Select
-                aria-label={t(`${CUT_ROOT}.exports.stillLabel`)}
-                disabled={locked || stillCandidates.length === 0}
-                onChange={(value) => {
-                  setStillShotId(
-                    typeof value === 'string' && stillCandidates.some((candidate) => candidate.shotId === value)
-                      ? value
-                      : null
-                  );
-                }}
-                placeholder={t(`${CUT_ROOT}.exports.noStill`)}
-                value={stillShotId ?? undefined}
-              >
-                {stillCandidates.map((candidate) => (
-                  <Select.Option key={candidate.shotId} value={candidate.shotId}>
-                    <span dir='auto'>{candidate.shootingScript || candidate.shotId}</span>
-                  </Select.Option>
-                ))}
-              </Select>
-            </label>
-            <Button
-              disabled={locked || exportCatalog === null || stillShotId === null}
-              loading={busyKey === 'export:still'}
-              onClick={() => {
-                if (stillShotId !== null) void createExport({ shape: 'still', shotId: stillShotId });
-              }}
-              type='primary'
-            >
-              {t(`${CUT_ROOT}.exports.createStill`)}
-            </Button>
-          </article>
-          <article className={styles.exportCard} data-export-shape='script'>
-            <h4>{t(`${CUT_ROOT}.exports.scriptTitle`)}</h4>
-            <p>{t(`${CUT_ROOT}.exports.scriptDescription`)}</p>
-            <Button
-              disabled={locked || exportCatalog === null}
-              loading={busyKey === 'export:script'}
-              onClick={() => void createExport({ shape: 'script' })}
-              type='primary'
-            >
-              {t(`${CUT_ROOT}.exports.createScript`)}
-            </Button>
-          </article>
-        </div>
-      </section>
-
       <Drawer
         footer={<Button onClick={() => setAssetsVisible(false)}>{t(`${ASSETS_ROOT}.close`)}</Button>}
         onCancel={() => setAssetsVisible(false)}
@@ -805,47 +670,6 @@ export const CutView: React.FC<CutViewProps> = ({
                     </li>
                   );
                 })}
-              </ul>
-            )}
-          </section>
-          <section>
-            <h3>{t(`${ASSETS_ROOT}.exportsTitle`)}</h3>
-            {exportCatalog === null || exportCatalog.artifacts.length === 0 ? (
-              <p>{t(`${ASSETS_ROOT}.exportsEmpty`)}</p>
-            ) : (
-              <ul className={styles.assetList}>
-                {exportCatalog.artifacts.map((artifact) => (
-                  <li key={artifact.id} data-export-artifact-id={artifact.id}>
-                    <div>
-                      <strong>{t(exportShapeKey(artifact.shape))}</strong>
-                      <p>
-                        <bdi>
-                          {t(`${ASSETS_ROOT}.exportFacts`, {
-                            bytes: artifact.byteSize,
-                            count: artifact.fileCount,
-                            revision: artifact.sourceRevision,
-                          })}
-                        </bdi>
-                      </p>
-                    </div>
-                    <div className={styles.assetActions}>
-                      <Button
-                        disabled={locked}
-                        loading={busyKey === `copy:${artifact.id}`}
-                        onClick={() => void copyExport(artifact.id)}
-                      >
-                        {t(`${ASSETS_ROOT}.copy`)}
-                      </Button>
-                      <Button
-                        disabled={locked}
-                        loading={busyKey === `reveal:${artifact.id}`}
-                        onClick={() => void revealExport(artifact.id)}
-                      >
-                        {t(`${ASSETS_ROOT}.reveal`)}
-                      </Button>
-                    </div>
-                  </li>
-                ))}
               </ul>
             )}
           </section>

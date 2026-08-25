@@ -246,6 +246,13 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.lift.shot': 'Move to Bin',
         'conversation.creativeStudio.workspace.beatPanel.lift.shotFailed': 'Shot was not moved to the Bin.',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelBody': 'Cancel this waiting item only',
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoin': 'Cancel and review rejoin',
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinBody':
+          'Cancel the waiting authorized work, then review a fresh rejoin quote.',
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinConfirm':
+          'Confirm cancel and review',
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinTitle':
+          'Cancel authorized work and review rejoin?',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelConfirm': 'Confirm cancel waiting',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelTitle': 'Cancel waiting?',
         'conversation.creativeStudio.workspace.beatPanel.recovery.cancelWaiting': 'Cancel waiting',
@@ -258,6 +265,10 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.reorder.nextShort': 'Down',
         'conversation.creativeStudio.workspace.beatPanel.reorder.previousShort': 'Up',
         'conversation.creativeStudio.workspace.beatPanel.seeds.clearPin': 'Clear first-frame pin',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.authorizationIncompatible':
+          'Not available to authorized work',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked':
+          'Authorized video work has locked this Shot’s first frame. Imported candidates remain stored, but cannot replace the seed in the reviewed quote.',
         'conversation.creativeStudio.workspace.beatPanel.seeds.empty': 'No first frames yet.',
         'conversation.creativeStudio.workspace.beatPanel.seeds.import': 'Import first frame',
         'conversation.creativeStudio.workspace.beatPanel.seeds.latestDefault':
@@ -474,6 +485,8 @@ const makeShot = (
   seedGenerationInFlight: false,
   videoGenerationBlocked: false,
   seedGenerationBlocked: false,
+  seedAuthorityStatusReady: true,
+  seedAuthorizationLock: null,
   attentionJobs: [],
   hasEffectiveSeed: false,
   ...overrides,
@@ -580,6 +593,7 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   cancelGenerationJob: vi.fn().mockResolvedValue(true),
   retryConditioning: vi.fn().mockResolvedValue(true),
   cancelWaiting: vi.fn().mockResolvedValue(true),
+  cancelAndReviewRejoin: vi.fn().mockResolvedValue(true),
   requestResplit: vi.fn(),
   ...overrides,
 });
@@ -2639,6 +2653,153 @@ describe('BeatPanel', () => {
     expect(trigger).toHaveFocus();
     expect(screen.getByText('Shot was not moved to the Bin.')).toBeInTheDocument();
     expect(onParkShotSuccess).not.toHaveBeenCalled();
+  });
+
+  it('keeps incompatible imports outside an authorized seed and exposes one confirmed cancel-and-rejoin path', async () => {
+    const authorized = makeSeedStill('image_authorized', {
+      createdAt: '2026-08-20T00:00:00.000Z',
+    });
+    const imported = makeSeedStill('image_imported_newer', {
+      createdAt: '2026-08-21T00:00:00.000Z',
+    });
+    const upstream = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_1') });
+    const locked = makeShot('shot_2', 1, {
+      chainBreak: 'hard_cut',
+      effectiveSeedAssetId: null,
+      hasEffectiveSeed: false,
+      seedAuthorizationLock: {
+        compatibleAssetIds: [authorized.assetId],
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+      seedStills: [authorized, imported],
+      segmentHead: true,
+    });
+    const beat = makeBeat('beat_1', [upstream, locked]);
+    const row: StudioCascadeProgressV2 = {
+      dependentShotId: locked.id,
+      upstreamShotId: locked.id,
+      eligiblePrimaryAssetIds: [authorized.assetId],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: true,
+      waitingReason: 'choose_seed',
+    };
+    const actions = makeActions();
+    const { container } = render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat], { cascadeProgress: [row] }))} />
+    );
+
+    const lockedCard = inspectShot(container, locked.id);
+    const ordinaryRejoin = within(lockedCard).getByRole('button', { name: 'Review rejoin…' });
+    const ordinaryGeneration = within(lockedCard).getByRole('button', {
+      name: 'Review first-frame generation',
+    });
+    expect(ordinaryRejoin).toBeDisabled();
+    expect(ordinaryGeneration).toBeDisabled();
+    fireEvent.click(ordinaryRejoin);
+    fireEvent.click(ordinaryGeneration);
+    expect(actions.reviewContinuity).not.toHaveBeenCalled();
+    expect(actions.reviewShot).not.toHaveBeenCalled();
+
+    const importedCard = assetCard(container, imported.assetId);
+    expect(importedCard).not.toHaveTextContent('Current first frame');
+    expect(importedCard).toHaveTextContent('Not available to authorized work');
+    expect(within(importedCard).queryByRole('button', { name: 'Pin as first frame' })).toBeNull();
+
+    const authorizedCard = assetCard(container, authorized.assetId);
+    fireEvent.click(within(authorizedCard).getByRole('button', { name: 'Pin as first frame' }));
+    expect(actions.setSeedStill).toHaveBeenCalledWith(locked.id, authorized.assetId);
+    expect(actions.setSeedStill).not.toHaveBeenCalledWith(locked.id, imported.assetId);
+
+    expect(
+      screen.getByText(
+        'Authorized video work has locked this Shot’s first frame. Imported candidates remain stored, but cannot replace the seed in the reviewed quote.'
+      )
+    ).toBeVisible();
+    expect(screen.queryByText('Creative Studio could not read or save this workspace.')).toBeNull();
+
+    const boundedActions = screen.getAllByRole('button', { name: 'Cancel and review rejoin' });
+    expect(boundedActions).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Cancel waiting' })).toBeNull();
+    fireEvent.click(boundedActions[0]);
+    expect(actions.cancelAndReviewRejoin).not.toHaveBeenCalled();
+
+    const confirmation = screen.getByRole('group', {
+      name: 'Cancel authorized work and review rejoin?',
+    });
+    expect(confirmation).toHaveTextContent('Cancel the waiting authorized work, then review a fresh rejoin quote.');
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirm cancel and review' }));
+    await waitFor(() => expect(actions.cancelAndReviewRejoin).toHaveBeenCalledWith(locked.id));
+    expect(actions.cancelWaiting).not.toHaveBeenCalled();
+  });
+
+  it('keeps generic confirmed cancellation for a first-Shot seed lock that cannot rejoin', async () => {
+    const locked = makeShot('shot_1', 0, {
+      seedAuthorizationLock: {
+        compatibleAssetIds: ['image_authorized'],
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+      segmentHead: true,
+    });
+    const beat = makeBeat('beat_1', [locked]);
+    const row: StudioCascadeProgressV2 = {
+      dependentShotId: locked.id,
+      upstreamShotId: locked.id,
+      eligiblePrimaryAssetIds: ['image_authorized'],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: true,
+      waitingReason: 'choose_seed',
+    };
+    const actions = makeActions();
+    render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat], { cascadeProgress: [row] }))} />
+    );
+
+    expect(screen.queryByRole('button', { name: 'Cancel and review rejoin' })).toBeNull();
+    const genericCancel = screen.getByRole('button', { name: 'Cancel waiting' });
+    fireEvent.click(genericCancel);
+    expect(actions.cancelWaiting).not.toHaveBeenCalled();
+
+    const confirmation = screen.getByRole('group', { name: 'Cancel waiting?' });
+    fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirm cancel waiting' }));
+    await waitFor(() => expect(actions.cancelWaiting).toHaveBeenCalledWith(locked.id));
+    expect(actions.cancelAndReviewRejoin).not.toHaveBeenCalled();
+  });
+
+  it('fails the bounded cancel-and-rejoin action closed while quote review is blocked', () => {
+    const locked = makeShot('shot_2', 1, {
+      chainBreak: 'hard_cut',
+      seedAuthorizationLock: {
+        compatibleAssetIds: ['image_authorized'],
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+      segmentHead: true,
+    });
+    const beat = makeBeat('beat_1', [makeShot('shot_1', 0), locked]);
+    const row: StudioCascadeProgressV2 = {
+      dependentShotId: locked.id,
+      upstreamShotId: locked.id,
+      eligiblePrimaryAssetIds: ['image_authorized'],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: true,
+      waitingReason: 'choose_seed',
+    };
+    const actions = makeActions();
+    render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), actions, makeProjection([beat], { cascadeProgress: [row] }), {
+          reviewBlockedMessageKey: 'conversation.creativeStudio.workspace.controls.saveBeforeReview',
+        })}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Cancel and review rejoin' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Confirm cancel and review' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm cancel and review' }));
+    expect(actions.cancelAndReviewRejoin).not.toHaveBeenCalled();
+    expect(actions.cancelWaiting).not.toHaveBeenCalled();
   });
 
   it('offers free retry and cancellation only when projected flags permit them without asset-choice controls', () => {

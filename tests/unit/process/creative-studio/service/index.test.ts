@@ -1371,6 +1371,7 @@ describe('CreativeStudioServiceV2', () => {
           id: 'export_service_1',
           sourceRevision: 2,
           shape: 'script',
+          folderName: 'private-export-name',
           byteSize: 42,
           fileCount: 1,
           createdAt: '2026-08-17T00:00:02.000Z',
@@ -1414,7 +1415,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.onProjectUpdated).not.toHaveBeenCalled();
     expect(JSON.stringify(created)).not.toContain('managedExport');
     expect(JSON.stringify(created)).not.toContain('manifestSha256');
-    expect(JSON.stringify(created)).not.toContain('private-export-name');
+    expect(JSON.stringify(created)).not.toContain('/studio/');
   });
 
   it('normalizes every authored script field to canonical LF bytes', async () => {
@@ -1505,6 +1506,9 @@ describe('CreativeStudioServiceV2', () => {
     expect(authorityResolver.mock.calls.map(([, assetId]) => assetId)).toEqual(['seed_clip_1', 'take_01']);
     expect(create.mock.calls.map(([, plan]) => plan.shape)).toEqual(['still', 'editor_folder']);
     expect(create.mock.calls[1]?.[1].files.some((file) => file.relativePath === 'media/shot-001.mp4')).toBe(true);
+    expect(create.mock.calls[1]?.[1].files.some((file) => file.relativePath === 'script.md')).toBe(true);
+    expect(create.mock.calls[1]?.[1].managedFileName).toMatch(/^editor-folder-\d{8}-\d{6}-\d{3}-[a-f0-9]{16}$/);
+    expect(create.mock.calls[1]?.[1].managedFileName).not.toBe(create.mock.calls[1]?.[1].artifactId);
   });
 
   it('chooses the newest deterministic eligible seed when a still has no explicit cover', async () => {
@@ -1631,18 +1635,24 @@ describe('CreativeStudioServiceV2', () => {
     });
   });
 
-  it('normalizes an editor-folder coverage refusal without publishing an artifact', async () => {
+  it('exports missing Shot coverage as one shared slate without entering generation or spend', async () => {
     const harness = makeHarness();
 
-    await expect(
-      harness.service.createExport({
-        projectId: 'project_v2',
-        expectedRevision: 2,
-        expectedCatalogRevision: 1,
-        shape: 'editor_folder',
-      })
-    ).rejects.toMatchObject({ code: 'invalid_payload' });
-    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+    await harness.service.createExport({
+      projectId: 'project_v2',
+      expectedRevision: 2,
+      expectedCatalogRevision: 1,
+      shape: 'editor_folder',
+    });
+    expect(harness.exportCatalogStore.create).toHaveBeenCalledOnce();
+    const plan = vi.mocked(harness.exportCatalogStore.create).mock.calls[0]![1];
+    expect(plan.files.map(({ relativePath }) => relativePath).toSorted()).toEqual([
+      'media/slate.png',
+      'script.md',
+      'timeline.json',
+    ]);
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
   });
 
   it('fences copy and reveal when close wins while their main callbacks are pending', async () => {
@@ -5713,6 +5723,250 @@ describe('CreativeStudioServiceV2', () => {
     ]);
     expect(status.cascadeProgress[0]).not.toHaveProperty('authorizationId');
     expect(status.cascadeProgress[0]).not.toHaveProperty('jobId');
+  });
+
+  it('cancels one authorized seed wait, persists downstream terminalization, and requotes an exact trim-aware rejoin', async () => {
+    let { project, take, seed: importedCandidate } = makeRejoinProject();
+    project.shots.clip_2!.seedStillId = null;
+    importedCandidate = project.assets[importedCandidate.id]!;
+    importedCandidate.managedAsset = { collection: 'imports', fileName: 'seed_rejoin_import.png' };
+    importedCandidate.sha256 = 'e'.repeat(64);
+    importedCandidate.projectReferenceId = null;
+    importedCandidate.generationReferenceAssetIds = [];
+    importedCandidate.producerJobId = null;
+    importedCandidate.compositionDigest = null;
+    importedCandidate.createdAt = '2026-08-17T00:00:03.000Z';
+    project.beats.section_1!.shotOrder.push('clip_3');
+    project.shots.clip_3 = {
+      ...structuredClone(project.shots.clip_2!),
+      id: 'clip_3',
+      shootingScript: 'A final connected composition.',
+      chainBreak: 'none',
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      seedStillId: null,
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
+      assetIds: [],
+      jobIds: [],
+    };
+
+    const completedTakeBefore = structuredClone(project.assets[take.id]!);
+    const importedCandidateBefore = structuredClone(project.assets[importedCandidate.id]!);
+    const referenceBefore = structuredClone(project.references.ref_background!);
+    const referenceAuthorizationBefore = structuredClone(
+      project.spendAuthorizations.find((authorization) => authorization.id === SERVICE_REFERENCE_AUTHORIZATION_ID)!
+    );
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [shotChoiceV2('clip_2', 'seed_still')],
+      cascadeChoices: [shotChoiceV2('clip_2', 'video_take'), shotChoiceV2('clip_3', 'video_take')],
+    });
+    expect(prepared.withCascade).not.toBeNull();
+    await harness.service.confirmSubmission({
+      projectId: project.id,
+      quoteId: prepared.withCascade!.id,
+      expectedRevision: project.revision,
+    });
+
+    const authorized = harness.getProject();
+    const seedJob = Object.values(authorized.jobs).find(
+      (job) =>
+        job.authorizationId === prepared.withCascade!.id &&
+        job.purpose === 'seed_still' &&
+        job.target.kind === 'shot' &&
+        job.target.shotId === 'clip_2'
+    )!;
+    const generatedSeed: StudioAssetV2 = {
+      id: 'seed_bug_123_authorized',
+      projectId: authorized.id,
+      shotId: 'clip_2',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'assets', fileName: 'seed_bug_123_authorized.png' },
+      byteSize: 21,
+      sha256: 'f'.repeat(64),
+      projectReferenceId: null,
+      generationReferenceAssetIds: ['asset_reference_background'],
+      producerJobId: seedJob.id,
+      compositionDigest: studioGenerationCompositionDigestV2(seedJob.composition),
+      createdAt: '2026-08-17T00:00:02.000Z',
+    };
+    authorized.assets[generatedSeed.id] = generatedSeed;
+    authorized.shots.clip_2!.assetIds.push(generatedSeed.id);
+    seedJob.status = 'succeeded';
+    seedJob.providerJobId = 'remote_seed_bug_123';
+    seedJob.outputAssetIds = [generatedSeed.id];
+    seedJob.outputAssetIdsByRole = { primary: generatedSeed.id, poster: null };
+    seedJob.spendReceipt = {
+      authorizationId: seedJob.authorizationId,
+      itemId: seedJob.authorizationItemId,
+      jobId: seedJob.id,
+      purpose: 'seed_still',
+      routeId: imageRoute.choiceId,
+      currency: 'USD',
+      rateUnit: 'generation',
+      rateMinorUnits: 3,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: 3,
+    };
+    harness.setProject(authorized);
+    const beforeCancellation = harness.getProject();
+    const previousAuthorizations = structuredClone(beforeCancellation.spendAuthorizations);
+    const previousAssets = structuredClone(beforeCancellation.assets);
+    const previousJobs = structuredClone(beforeCancellation.jobs);
+
+    const cancelledStatus = await harness.service.cancelWaitingCascade({
+      projectId: project.id,
+      expectedRevision: beforeCancellation.revision,
+      dependentShotId: 'clip_2',
+    });
+
+    const cancelled = harness.getProject();
+    const cancelledShotJob = Object.values(cancelled.jobs).find(
+      (job) =>
+        job.authorizationId === prepared.withCascade!.id &&
+        job.purpose === 'video_take' &&
+        job.target.kind === 'shot' &&
+        job.target.shotId === 'clip_2'
+    )!;
+    const downstreamJob = Object.values(cancelled.jobs).find(
+      (job) =>
+        job.authorizationId === prepared.withCascade!.id &&
+        job.purpose === 'video_take' &&
+        job.target.kind === 'shot' &&
+        job.target.shotId === 'clip_3'
+    )!;
+    expect(cancelled.revision).toBe(beforeCancellation.revision + 1);
+    expect(cancelledShotJob).toMatchObject({ status: 'cancelled', error: null, spendReceipt: null });
+    expect(downstreamJob).toMatchObject({
+      status: 'failed',
+      error: { code: 'dependency_failed', messageKey: 'dependency_failed' },
+      spendReceipt: null,
+    });
+    expect(cancelledStatus.cascadeProgress).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ dependentShotId: 'clip_2', waitingReason: 'cancelled' }),
+        expect.objectContaining({ dependentShotId: 'clip_3', waitingReason: 'dependency_failed' }),
+      ])
+    );
+    expect(cancelled.assets).toEqual(previousAssets);
+    expect(cancelled.assets[take.id]).toEqual(completedTakeBefore);
+    expect(cancelled.assets[importedCandidate.id]).toEqual(importedCandidateBefore);
+    expect(cancelled.assets[generatedSeed.id]).toEqual(generatedSeed);
+    expect(cancelled.references.ref_background).toEqual(referenceBefore);
+    expect(cancelled.spendAuthorizations).toEqual(previousAuthorizations);
+    expect(cancelled.spendAuthorizations).toContainEqual(referenceAuthorizationBefore);
+    expect(cancelled.jobs[seedJob.id]).toEqual(previousJobs[seedJob.id]);
+    expect(cancelled.shots.clip_1).toMatchObject({ videoAssetId: take.id, trimOutSeconds: 2 });
+    expect(cancelled.shots.clip_2!.seedStillId).toBeNull();
+    expect(harness.cancelJobV2).not.toHaveBeenCalled();
+
+    const reloadedHarness = makeHarness(cancelled);
+    await expect(reloadedHarness.service.getProjectWorkspace({ projectId: project.id })).resolves.toMatchObject({
+      status: 'supported',
+      snapshot: {
+        project: { revision: cancelled.revision },
+        workspaceStatus: {
+          projectRevision: cancelled.revision,
+          cascadeProgress: expect.arrayContaining([
+            expect.objectContaining({ dependentShotId: 'clip_2', waitingReason: 'cancelled' }),
+            expect.objectContaining({ dependentShotId: 'clip_3', waitingReason: 'dependency_failed' }),
+          ]),
+        },
+      },
+    });
+
+    await expect(
+      harness.service.prepareSubmission({
+        projectId: project.id,
+        expectedRevision: beforeCancellation.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        continuityChange: { shotId: 'clip_2', hardCut: false, requiresSeedGeneration: false },
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+
+    const beforeRejoinReview = harness.getProject();
+    const rejoin = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: cancelled.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: false, requiresSeedGeneration: false },
+    });
+    expect(harness.getProject()).toEqual(beforeRejoinReview);
+    const rejoinQuote = rejoin.withCascade ?? rejoin.baseOnly;
+    const rejoinItems = [...rejoinQuote.baseItems, ...rejoinQuote.cascadeItems];
+    const rejoinShotItem = rejoinItems.find(
+      (item) => item.purpose === 'video_take' && item.target.kind === 'shot' && item.target.shotId === 'clip_2'
+    );
+    if (rejoinShotItem === undefined) throw new Error(`missing rejoin item: ${JSON.stringify(rejoin)}`);
+    expect(rejoinQuote.id).not.toBe(prepared.withCascade!.id);
+    expect(rejoinQuote.projectRevision).toBe(cancelled.revision);
+    expect(rejoinShotItem).toMatchObject({ purpose: 'video_take', generationCount: 1 });
+    expect(rejoinItems).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ target: { kind: 'shot', shotId: 'clip_2' }, purpose: 'video_take' }),
+        expect.objectContaining({ target: { kind: 'shot', shotId: 'clip_3' }, purpose: 'video_take' }),
+      ])
+    );
+    expect(JSON.stringify(rejoinQuote)).not.toContain(importedCandidate.id);
+    expect(JSON.stringify(rejoinQuote)).not.toContain(generatedSeed.id);
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: rejoinQuote.id,
+        expectedRevision: cancelled.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: cancelled.revision + 1 });
+
+    const rejoined = harness.getProject();
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'clip_1',
+      videoAssetId: take.id,
+      endpointSeconds: 8,
+    });
+    expect(rejoined.shots.clip_2).toMatchObject({ chainBreak: 'none', seedStillId: null });
+    expect(rejoined.frameExtractions[extractionId]).toMatchObject({
+      shotId: 'clip_1',
+      videoAssetId: take.id,
+      endpointSeconds: 8,
+      status: 'pending',
+    });
+    expect(rejoined.assets).toEqual(previousAssets);
+    expect(rejoined.spendAuthorizations.slice(0, previousAuthorizations.length)).toEqual(previousAuthorizations);
+    const rejoinAuthorization = rejoined.spendAuthorizations.at(-1)!;
+    expect(rejoinAuthorization).toMatchObject({ id: rejoinQuote.id, projectRevision: cancelled.revision });
+    const rejoinAuthorizedItem = [...rejoinAuthorization.baseItems, ...rejoinAuthorization.cascadeItems].find(
+      (item) => item.purpose === 'video_take' && item.target.kind === 'shot' && item.target.shotId === 'clip_2'
+    )!;
+    expect(rejoinAuthorizedItem.requestPlan).toMatchObject({
+      kind: 'after_take_selection',
+      dependency: {
+        kind: 'existing_predecessor',
+        predecessorShotId: 'clip_1',
+        takeAssetId: take.id,
+        endpointSeconds: 8,
+      },
+    });
+    expect(rejoined.jobs[cancelledShotJob.id]).toEqual(cancelledShotJob);
+    expect(rejoined.jobs[downstreamJob.id]).toEqual(downstreamJob);
+    expect(JSON.stringify(rejoined.jobs)).not.toContain(`"assetId":"${importedCandidate.id}"`);
+    expect(harness.extractConditioningFrameV2).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      extractionId,
+    });
+    expect(harness.cancelJobV2).not.toHaveBeenCalled();
   });
 
   it('projects one revision-matched project/workspace/chain snapshot through one authority seam', async () => {

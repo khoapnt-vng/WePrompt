@@ -1100,7 +1100,9 @@
           "stillLabel": "鏡頭 {{shotIndex}} 的首幀 {{stillIndex}}",
           "previewAlt": "預覽 · {{label}}",
           "effective": "目前首幀",
-          "pinnedBadge": "已釘選"
+          "pinnedBadge": "已釘選",
+          "authorizationLocked": "已授權的影片工作已鎖定此鏡頭的首幀。匯入的候選仍會保留，但不能取代已審核報價中的種子幀。",
+          "authorizationIncompatible": "不可用於已授權工作"
         },
         "picture": {
           "title": "目前畫面",
@@ -1195,7 +1197,15 @@
           "loopJoin": "循環最近接點",
           "keyboardGuidance": "空白鍵播放 · 方向鍵定位 · [ ] 切換接點 · L 循環"
         },
-        "directorRequestHint": "請 Creative Director 提供經審核的重新拆分方案。"
+        "directorRequestHint": "請 Creative Director 提供經審核的重新拆分方案。",
+        "recovery": {
+          "cancelAndReviewRejoin": "取消並審核重新銜接",
+          "cancelAndReviewRejoinTitle": "取消已授權工作並審核重新銜接？",
+          "cancelAndReviewRejoinBody": "這只會取消尚未提交的等待中影片工作。已完成的媒體與授權記錄會保留。替代生成前必須審核新的重新銜接估算。",
+          "cancelAndReviewRejoinConfirm": "取消並審核重新銜接",
+          "cancelAndReviewRejoinUnconfirmed": "等待中的工作已取消，但無法確認重新整理後的工作區。請先重新整理，再審核重新銜接。",
+          "cancelAndReviewRejoinOutcomeUnknown": "無法確認取消結果。請先重新整理工作區，再審核重新銜接。"
+        }
       },
       "controls": {
         "briefAndRulesTitle": "簡報與規則",
@@ -1292,6 +1302,35 @@
           "references": "已解析參考",
           "noReferences": "無直接參考輸入",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        }
+      },
+      "editorFolderExport": {
+        "action": "匯出剪輯資料夾…",
+        "actionWithSlates": "匯出剪輯資料夾 · {{count}} 個佔位畫面…",
+        "exporting": "正在匯出… 不會產生媒體，也不會產生費用。",
+        "reveal": "在 Finder 中顯示",
+        "dismiss": "關閉",
+        "none": "無",
+        "successFacts": "{{bytes}} 位元組 · {{count}} 個檔案",
+        "successSlates": "佔位畫面 Shot 編號：{{shots}}",
+        "successQuarantine": "已移到一旁的舊匯出：{{count}}",
+        "disabled": {
+          "no_beats": "請先新增 Beat 再匯出",
+          "duration_pending": "請先為每個空 Beat 設定時長",
+          "invalid_media": "請先處理過期或無效的已選媒體",
+          "bed_too_short": "請選擇足以涵蓋時間軸的音床",
+          "mutationActive": "請等待目前的工作區變更完成",
+          "exportRunning": "剪輯資料夾匯出正在進行",
+          "catalogUnavailable": "剪輯資料夾匯出儲存空間無法使用"
+        },
+        "errors": {
+          "catalogUnavailable": "匯出目錄無法使用。請重新載入專案後再試。",
+          "staleAuthority": "專案或匯出目錄已變更。請檢查目前專案後再匯出。",
+          "invalidMedia": "所選媒體已過期、非標準或無效。請先檢查剪輯。",
+          "mediaUnavailable": "無法驗證所選媒體檔案。未發佈任何不完整匯出。",
+          "busy": "Creative Studio 正在完成另一項工作區操作。請稍後再試。",
+          "artifactUnavailable": "此匯出已不在目前目錄中。請重新載入後再顯示。",
+          "resultConflict": "確認結果前收到較新的匯出目錄。請重新載入並檢查匯出。"
         }
       }
     },

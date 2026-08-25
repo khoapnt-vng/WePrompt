@@ -51,6 +51,12 @@ export type WorkspaceSeedStillProjection = {
   effectiveSeed: boolean;
 };
 
+export type WorkspaceSeedAuthorizationLockProjection = {
+  compatibleAssetIds: string[];
+  canCancelWaiting: boolean;
+  waitingReason: 'upstream_running' | 'choose_seed';
+};
+
 export type WorkspaceCurrentPictureProjection = {
   assetId: string;
   sourceDurationSeconds: number;
@@ -97,6 +103,8 @@ export type WorkspaceShotProjection = {
   playedDurationSeconds: number | null;
   explicitSeedAssetId: string | null;
   effectiveSeedAssetId: string | null;
+  seedAuthorityStatusReady: boolean;
+  seedAuthorizationLock: WorkspaceSeedAuthorizationLockProjection | null;
   segmentHead: boolean;
   planningBoundary: StudioPlanningShotBoundaryV2 | null;
   frameBoundary: StudioRendererChainBoundaryV2 | null;
@@ -478,6 +486,7 @@ const projectShot = (
     dirtyCauses: ReadonlyArray<StudioRendererDirtyShotV2['causes'][number]>;
     downstreamShotIds: readonly string[];
     segmentStatusReady: boolean;
+    cascadeStatusReady: boolean;
     cascade: StudioCascadeProgressV2 | null;
     upstreamShotNumber: number | null;
     conditioningFailed: boolean;
@@ -485,7 +494,26 @@ const projectShot = (
   }
 ): WorkspaceShotProjection => {
   const explicitSeedAssetId = validExplicitSeedStillId(project, shot);
-  const effectiveSeedAssetId = context.segmentHead ? effectiveSeedStillId(project, shot) : null;
+  const seedAuthorizationLock: WorkspaceSeedAuthorizationLockProjection | null =
+    context.segmentHead &&
+    context.cascade?.dependentShotId === shot.id &&
+    context.cascade.upstreamShotId === shot.id &&
+    (context.cascade.waitingReason === 'upstream_running' || context.cascade.waitingReason === 'choose_seed')
+      ? {
+          compatibleAssetIds: [...context.cascade.eligiblePrimaryAssetIds],
+          canCancelWaiting: context.cascade.canCancelWaiting,
+          waitingReason: context.cascade.waitingReason,
+        }
+      : null;
+  const effectiveSeedAssetId = !context.segmentHead
+    ? null
+    : !context.cascadeStatusReady
+      ? explicitSeedAssetId
+      : seedAuthorizationLock === null
+        ? effectiveSeedStillId(project, shot)
+        : explicitSeedAssetId !== null && seedAuthorizationLock.compatibleAssetIds.includes(explicitSeedAssetId)
+          ? explicitSeedAssetId
+          : null;
   const currentVideo = validCurrentVideo(project, shot);
   const currentPicture =
     currentVideo === null
@@ -519,6 +547,8 @@ const projectShot = (
     playedDurationSeconds,
     explicitSeedAssetId,
     effectiveSeedAssetId,
+    seedAuthorityStatusReady: context.cascadeStatusReady,
+    seedAuthorizationLock,
     segmentHead: context.segmentHead,
     planningBoundary: context.planningBoundary === null ? null : { ...context.planningBoundary },
     frameBoundary: context.frameBoundary === null ? null : { ...context.frameBoundary },
@@ -985,6 +1015,7 @@ const projectStoredBeat = (input: {
       dirtyCauses: input.status.dirtyCausesByShotId.get(shot.id) ?? [],
       downstreamShotIds,
       segmentStatusReady: false,
+      cascadeStatusReady: true,
       cascade: null,
       upstreamShotNumber: null,
       conditioningFailed: false,
@@ -1382,6 +1413,7 @@ export const projectWorkspace = (
         dirtyCauses: dirtyCausesByShotId.get(shot.id) ?? [],
         downstreamShotIds,
         segmentStatusReady: currentVideoJobs.valid && cascade.valid && conditioningFailure.valid && frameBoundary.valid,
+        cascadeStatusReady: cascade.valid,
         cascade: cascade.value?.row ?? null,
         upstreamShotNumber: cascade.value?.upstreamShotNumber ?? null,
         conditioningFailed: conditioningFailure.value ?? false,
@@ -1470,6 +1502,7 @@ export const projectWorkspace = (
         dirtyCauses: dirtyCausesByShotId.get(shot.id) ?? [],
         downstreamShotIds: [],
         segmentStatusReady: false,
+        cascadeStatusReady: true,
         cascade: null,
         upstreamShotNumber: null,
         conditioningFailed: false,

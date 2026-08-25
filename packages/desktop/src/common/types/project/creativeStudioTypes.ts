@@ -1038,7 +1038,7 @@ export type StudioExportCatalogV2 = {
 export type StudioRendererExportArtifactV2 = Pick<
   StudioExportArtifactV2,
   'id' | 'sourceRevision' | 'shape' | 'byteSize' | 'fileCount' | 'createdAt'
->;
+> & { folderName: string };
 
 export type StudioRendererExportCatalogV2 = {
   revision: number;
@@ -1070,6 +1070,7 @@ export type StudioListExportsRequestV2 = { projectId: string };
 export type StudioEditorFolderTimelineEntryV2 =
   | {
       kind: 'shot';
+      shotOrdinal: number;
       shotId: string;
       videoAssetId: string;
       relativePath: string;
@@ -1081,6 +1082,8 @@ export type StudioEditorFolderTimelineEntryV2 =
     }
   | {
       kind: 'slate';
+      shotOrdinal: number | null;
+      shotId: string | null;
       relativePath: 'media/slate.png';
       timelineStartSeconds: number;
       durationSeconds: number;

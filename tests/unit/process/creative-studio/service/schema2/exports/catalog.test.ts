@@ -145,6 +145,7 @@ describe('schema-2 export catalog', () => {
           id: 'artifact_1',
           sourceRevision: 7,
           shape: 'editor_folder',
+          folderName: 'managed_artifact_1',
           byteSize: 4,
           fileCount: 1,
           createdAt: CREATED_AT,
@@ -152,7 +153,7 @@ describe('schema-2 export catalog', () => {
       ],
     });
     expect(JSON.stringify(projectStudioRendererExportCatalogV2(catalog))).not.toMatch(
-      /projectId|managedExport|fileName|manifestSha256|payloadKind/
+      /projectId|managedExport|manifestSha256|payloadKind/
     );
   });
 

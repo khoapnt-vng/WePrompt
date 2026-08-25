@@ -608,13 +608,23 @@ const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 
     if (!Object.hasOwn(value.artifacts, index)) return exportBoundaryFailure();
     const artifact = value.artifacts[index];
     if (
-      !isExactDataObject(artifact, ['id', 'sourceRevision', 'shape', 'byteSize', 'fileCount', 'createdAt']) ||
+      !isExactDataObject(artifact, [
+        'id',
+        'sourceRevision',
+        'shape',
+        'folderName',
+        'byteSize',
+        'fileCount',
+        'createdAt',
+      ]) ||
       typeof artifact.id !== 'string' ||
       !/^[A-Za-z0-9_-]{1,256}$/.test(artifact.id) ||
       ids.has(artifact.id) ||
       !Number.isSafeInteger(artifact.sourceRevision) ||
       (artifact.sourceRevision as number) < 1 ||
       (artifact.shape !== 'editor_folder' && artifact.shape !== 'still' && artifact.shape !== 'script') ||
+      typeof artifact.folderName !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,256}$/.test(artifact.folderName) ||
       !Number.isSafeInteger(artifact.byteSize) ||
       (artifact.byteSize as number) < 0 ||
       !Number.isSafeInteger(artifact.fileCount) ||
@@ -643,6 +653,7 @@ const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 
       id: artifact.id,
       sourceRevision: artifact.sourceRevision as number,
       shape: artifact.shape,
+      folderName: artifact.folderName,
       byteSize: artifact.byteSize as number,
       fileCount: artifact.fileCount as number,
       createdAt: artifact.createdAt,

@@ -1100,7 +1100,9 @@
           "stillLabel": "ショット{{shotIndex}}の最初のフレーム{{stillIndex}}",
           "previewAlt": "プレビュー · {{label}}",
           "effective": "現在の最初のフレーム",
-          "pinnedBadge": "固定済み"
+          "pinnedBadge": "固定済み",
+          "authorizationLocked": "承認済みの動画作業により、このショットの最初のフレームはロックされています。読み込んだ候補は保存されますが、確認済み見積もりのシードを置き換えることはできません。",
+          "authorizationIncompatible": "承認済み作業には使用できません"
         },
         "picture": {
           "title": "現在の画像",
@@ -1195,7 +1197,15 @@
           "loopJoin": "最寄りのつなぎ目をループ",
           "keyboardGuidance": "スペースで再生 · 矢印でシーク · [ ] でつなぎ目 · L でループ"
         },
-        "directorRequestHint": "Creative Director に、レビュー付きの再分割案を依頼してください。"
+        "directorRequestHint": "Creative Director に、レビュー付きの再分割案を依頼してください。",
+        "recovery": {
+          "cancelAndReviewRejoin": "キャンセルして再接続を確認",
+          "cancelAndReviewRejoinTitle": "承認済み作業をキャンセルして再接続を確認しますか？",
+          "cancelAndReviewRejoinBody": "まだ送信されていない待機中の動画作業だけをキャンセルします。完了済みメディアと承認履歴は保持されます。代替生成の前に、新しい再接続見積もりの確認が必要です。",
+          "cancelAndReviewRejoinConfirm": "キャンセルして再接続を確認",
+          "cancelAndReviewRejoinUnconfirmed": "待機中の作業はキャンセルされましたが、更新後のワークスペースを確認できませんでした。再接続を確認する前に更新してください。",
+          "cancelAndReviewRejoinOutcomeUnknown": "キャンセル結果を確認できませんでした。再接続を確認する前にワークスペースを更新してください。"
+        }
       },
       "controls": {
         "briefAndRulesTitle": "ブリーフとルール",
@@ -1292,6 +1302,35 @@
           "references": "解決済みリファレンス",
           "noReferences": "直接のリファレンス入力なし",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        }
+      },
+      "editorFolderExport": {
+        "action": "編集用フォルダーを書き出す…",
+        "actionWithSlates": "編集用フォルダーを書き出す · スレート {{count}} 件…",
+        "exporting": "書き出し中… メディア生成や課金は行われません。",
+        "reveal": "Finder で表示",
+        "dismiss": "閉じる",
+        "none": "なし",
+        "successFacts": "{{bytes}} バイト · {{count}} ファイル",
+        "successSlates": "スレートの Shot 番号：{{shots}}",
+        "successQuarantine": "退避した古い書き出し：{{count}}",
+        "disabled": {
+          "no_beats": "書き出す前に Beat を追加してください",
+          "duration_pending": "空の Beat すべてに長さを設定してください",
+          "invalid_media": "古い、または無効な選択メディアを解決してください",
+          "bed_too_short": "タイムラインを満たす長さの音声ベッドを選択してください",
+          "mutationActive": "現在のワークスペース変更が完了するまでお待ちください",
+          "exportRunning": "編集用フォルダーを書き出し中です",
+          "catalogUnavailable": "編集用フォルダーの書き出しストレージを利用できません"
+        },
+        "errors": {
+          "catalogUnavailable": "書き出しカタログを利用できません。プロジェクトを再読み込みしてください。",
+          "staleAuthority": "プロジェクトまたは書き出しカタログが変更されました。確認して再試行してください。",
+          "invalidMedia": "選択メディアが古い、非正規、または無効です。Cut を確認してください。",
+          "mediaUnavailable": "選択メディアを検証できませんでした。不完全な書き出しは公開されていません。",
+          "busy": "Creative Studio は別の操作を完了中です。完了後に再試行してください。",
+          "artifactUnavailable": "この書き出しは現在のカタログにありません。再読み込みしてください。",
+          "resultConflict": "結果の確認前に新しいカタログが届きました。再読み込みして確認してください。"
         }
       }
     },

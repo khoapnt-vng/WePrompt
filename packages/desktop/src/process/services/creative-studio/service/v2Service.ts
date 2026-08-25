@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import type { IProvider, ISessionMcpServer } from '@/common/config/storage';
@@ -129,6 +129,7 @@ import {
 } from './schema2/pricing';
 import {
   composeStudioEditorFolderV2,
+  composeStudioEditorFolderScriptV2,
   createStudioExportCatalogStoreV2,
   projectStudioRendererExportCatalogV2,
   StudioEditorFolderErrorV2,
@@ -762,22 +763,6 @@ const canonicalCutCoverAssetV2 = (project: StudioProjectV2, shotId: string): Stu
         : -1
   );
   return candidates[0] ?? null;
-};
-
-const composeStudioScriptV2 = (project: StudioProjectV2): Uint8Array => {
-  const lines: string[] = [`# ${project.name}`, '', project.brief, ''];
-  project.beatOrder.forEach((beatId, beatIndex) => {
-    const beat = ownValue(project.beats, beatId);
-    if (beat === undefined) return;
-    lines.push(`## Beat ${beatIndex + 1}: ${beat.title}`, '', 'Story', '', beat.story, '');
-    beat.shotOrder.forEach((shotId, shotIndex) => {
-      const shot = ownValue(project.shots, shotId);
-      if (shot === undefined) return;
-      lines.push(`### Shot ${shotIndex + 1}`, '', 'Shooting script', '', shot.shootingScript);
-      lines.push('');
-    });
-  });
-  return Buffer.from(lines.join('\n').replace(/\r\n?/gu, '\n').replace(/\n+$/u, '\n'), 'utf8');
 };
 
 const defineOwn = <Value>(record: Record<string, Value>, id: string, value: Value): void => {
@@ -1565,6 +1550,14 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     }
     throw error;
   };
+  const editorFolderManagedFileName = (createdAt: string, artifactId: string): string => {
+    const timestamp = createdAt.replace(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$/u,
+      '$1$2$3-$4$5$6-$7'
+    );
+    const identity = createHash('sha256').update(artifactId, 'utf8').digest('hex').slice(0, 16);
+    return `editor-folder-${timestamp}-${identity}`;
+  };
   const assertGeneralServiceActive = (): void => {
     if (disposed) throw new CreativeStudioStoreError('busy', 'Creative Studio service is closed');
   };
@@ -1604,7 +1597,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   ): Promise<StudioExportPayloadFilePlanV2[]> => {
     const project = authority.project;
     if (input.shape === 'script') {
-      return [{ kind: 'generated', relativePath: 'script.md', bytes: composeStudioScriptV2(project) }];
+      return [{ kind: 'generated', relativePath: 'script.md', bytes: composeStudioEditorFolderScriptV2(project) }];
     }
     if (input.shape === 'still') {
       const cover = canonicalCutCoverAssetV2(project, input.shotId);
@@ -2602,15 +2595,17 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           assertGeneralServiceActive();
           const artifactId = createExportId();
           assertSafeId(artifactId, 'export id');
+          const createdAt = readNow().toISOString();
           const catalog = await exportCatalogStore.create(
             { ...authority, assertActive: assertGeneralServiceActive },
             {
               expectedProjectRevision: input.expectedRevision,
               expectedCatalogRevision: input.expectedCatalogRevision,
               artifactId,
-              managedFileName: artifactId,
+              managedFileName:
+                input.shape === 'editor_folder' ? editorFolderManagedFileName(createdAt, artifactId) : artifactId,
               shape: input.shape,
-              createdAt: readNow().toISOString(),
+              createdAt,
               files,
             }
           );

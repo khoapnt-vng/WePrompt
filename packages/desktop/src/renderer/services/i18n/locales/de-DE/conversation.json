@@ -1101,7 +1101,9 @@
           "stillLabel": "Erstes Bild {{stillIndex}} für Shot {{shotIndex}}",
           "previewAlt": "Vorschau · {{label}}",
           "effective": "Aktuelles erstes Bild",
-          "pinnedBadge": "Angeheftet"
+          "pinnedBadge": "Angeheftet",
+          "authorizationLocked": "Autorisierte Videoarbeit hat das erste Bild dieses Shots gesperrt. Importierte Kandidaten bleiben gespeichert, können aber den Seed im geprüften Angebot nicht ersetzen.",
+          "authorizationIncompatible": "Für autorisierte Arbeit nicht verfügbar"
         },
         "picture": {
           "title": "Aktuelles Bild",
@@ -1196,7 +1198,15 @@
           "loopJoin": "Nächstgelegenen Schnitt wiederholen",
           "keyboardGuidance": "Leertaste spielt · Pfeile suchen · [ ] Schnitte · L wiederholt"
         },
-        "directorRequestHint": "Bitte den Creative Director um einen geprüften Vorschlag zur Neuaufteilung."
+        "directorRequestHint": "Bitte den Creative Director um einen geprüften Vorschlag zur Neuaufteilung.",
+        "recovery": {
+          "cancelAndReviewRejoin": "Abbrechen und Wiederverbindung prüfen",
+          "cancelAndReviewRejoinTitle": "Autorisierte Arbeit abbrechen und Wiederverbindung prüfen?",
+          "cancelAndReviewRejoinBody": "Nur die noch nicht übermittelte wartende Videoarbeit wird abgebrochen. Fertige Medien und der Autorisierungsverlauf bleiben erhalten. Vor einer Ersatzgenerierung muss eine neue Wiederverbindungs-Schätzung geprüft werden.",
+          "cancelAndReviewRejoinConfirm": "Abbrechen und Wiederverbindung prüfen",
+          "cancelAndReviewRejoinUnconfirmed": "Die wartende Arbeit wurde abgebrochen, aber der aktualisierte Arbeitsbereich konnte nicht bestätigt werden. Aktualisieren Sie ihn, bevor Sie die Wiederverbindung prüfen.",
+          "cancelAndReviewRejoinOutcomeUnknown": "Das Ergebnis des Abbruchs konnte nicht bestätigt werden. Aktualisieren Sie den Arbeitsbereich, bevor Sie die Wiederverbindung prüfen."
+        }
       },
       "controls": {
         "briefAndRulesTitle": "Brief & Regeln",
@@ -1293,6 +1303,35 @@
           "references": "Aufgelöste Referenzen",
           "noReferences": "Keine direkten Referenzeingaben",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        }
+      },
+      "editorFolderExport": {
+        "action": "Editor-Ordner exportieren…",
+        "actionWithSlates": "Editor-Ordner exportieren · {{count}} Platzhalter…",
+        "exporting": "Export läuft… Es werden keine Medien erzeugt und keine Kosten ausgelöst.",
+        "reveal": "Im Finder anzeigen",
+        "dismiss": "Schließen",
+        "none": "keine",
+        "successFacts": "{{bytes}} Byte · {{count}} Dateien",
+        "successSlates": "Shot-Nummern mit Platzhalter: {{shots}}",
+        "successQuarantine": "Ältere Exporte verschoben: {{count}}",
+        "disabled": {
+          "no_beats": "Füge vor dem Export einen Beat hinzu",
+          "duration_pending": "Lege für jeden leeren Beat eine Dauer fest",
+          "invalid_media": "Behebe veraltete oder ungültige ausgewählte Medien",
+          "bed_too_short": "Wähle ein ausreichend langes Audiobett",
+          "mutationActive": "Warte, bis die aktuelle Änderung abgeschlossen ist",
+          "exportRunning": "Ein Editor-Ordner wird bereits exportiert",
+          "catalogUnavailable": "Der Export-Speicher ist nicht verfügbar"
+        },
+        "errors": {
+          "catalogUnavailable": "Der Exportkatalog ist nicht verfügbar. Lade das Projekt neu.",
+          "staleAuthority": "Projekt oder Exportkatalog wurden geändert. Prüfe das Projekt erneut.",
+          "invalidMedia": "Das ausgewählte Medium ist veraltet, nicht kanonisch oder ungültig. Prüfe Cut.",
+          "mediaUnavailable": "Die ausgewählte Mediendatei konnte nicht geprüft werden. Es wurde kein Teilexport veröffentlicht.",
+          "busy": "Creative Studio schließt einen anderen Vorgang ab. Versuche es danach erneut.",
+          "artifactUnavailable": "Dieser Export ist nicht mehr im aktiven Katalog. Lade das Projekt neu.",
+          "resultConflict": "Vor der Bestätigung ist ein neuerer Katalog eingetroffen. Lade ihn neu und prüfe ihn."
         }
       }
     },

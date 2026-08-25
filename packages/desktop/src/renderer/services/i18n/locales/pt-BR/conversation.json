@@ -1106,7 +1106,9 @@
           "stillLabel": "Primeiro quadro {{stillIndex}} do plano {{shotIndex}}",
           "previewAlt": "Prévia · {{label}}",
           "effective": "Primeiro quadro atual",
-          "pinnedBadge": "Fixada"
+          "pinnedBadge": "Fixada",
+          "authorizationLocked": "O trabalho de vídeo autorizado bloqueou o primeiro quadro deste plano. Os candidatos importados continuam armazenados, mas não podem substituir a imagem-semente da cotação revisada.",
+          "authorizationIncompatible": "Indisponível para o trabalho autorizado"
         },
         "picture": {
           "title": "Imagem atual",
@@ -1201,7 +1203,15 @@
           "loopJoin": "Repetir a junção mais próxima",
           "keyboardGuidance": "Espaço reproduz · Setas buscam · [ ] junções · L repete"
         },
-        "directorRequestHint": "Peça ao Diretor Criativo uma proposta revisada para redistribuir os Shots."
+        "directorRequestHint": "Peça ao Diretor Criativo uma proposta revisada para redistribuir os Shots.",
+        "recovery": {
+          "cancelAndReviewRejoin": "Cancelar e revisar reconexão",
+          "cancelAndReviewRejoinTitle": "Cancelar o trabalho autorizado e revisar a reconexão?",
+          "cancelAndReviewRejoinBody": "Isso cancela apenas o trabalho de vídeo em espera que ainda não foi enviado. A mídia concluída e o histórico de autorização permanecem. Uma nova estimativa de reconexão deve ser revisada antes da geração substituta.",
+          "cancelAndReviewRejoinConfirm": "Cancelar e revisar reconexão",
+          "cancelAndReviewRejoinUnconfirmed": "O trabalho em espera foi cancelado, mas não foi possível confirmar o espaço de trabalho atualizado. Atualize antes de revisar a reconexão.",
+          "cancelAndReviewRejoinOutcomeUnknown": "Não foi possível confirmar o resultado do cancelamento. Atualize o espaço de trabalho antes de revisar a reconexão."
+        }
       },
       "controls": {
         "briefAndRulesTitle": "Brief e regras",
@@ -1298,6 +1308,35 @@
           "references": "Referências resolvidas",
           "noReferences": "Sem entradas diretas de referência",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        }
+      },
+      "editorFolderExport": {
+        "action": "Exportar pasta para edição…",
+        "actionWithSlates": "Exportar pasta para edição · {{count}} slates…",
+        "exporting": "Exportando… Nenhuma mídia será gerada e nada será gasto.",
+        "reveal": "Mostrar no Finder",
+        "dismiss": "Fechar",
+        "none": "nenhum",
+        "successFacts": "{{bytes}} bytes · {{count}} arquivos",
+        "successSlates": "Números de Shot com slate: {{shots}}",
+        "successQuarantine": "Exportações antigas movidas: {{count}}",
+        "disabled": {
+          "no_beats": "Adicione um Beat antes de exportar",
+          "duration_pending": "Defina a duração de cada Beat vazio",
+          "invalid_media": "Resolva a mídia selecionada desatualizada ou inválida",
+          "bed_too_short": "Escolha uma cama de áudio longa o bastante para a linha do tempo",
+          "mutationActive": "Aguarde a alteração atual do espaço de trabalho",
+          "exportRunning": "Uma pasta para edição já está sendo exportada",
+          "catalogUnavailable": "O armazenamento da exportação não está disponível"
+        },
+        "errors": {
+          "catalogUnavailable": "O catálogo de exportação está indisponível. Recarregue o projeto.",
+          "staleAuthority": "O projeto ou catálogo mudou. Revise o projeto antes de exportar novamente.",
+          "invalidMedia": "A mídia selecionada está desatualizada, não canônica ou inválida. Revise o Cut.",
+          "mediaUnavailable": "Não foi possível verificar a mídia selecionada. Nenhuma exportação parcial foi publicada.",
+          "busy": "O Creative Studio está concluindo outra operação. Tente novamente depois.",
+          "artifactUnavailable": "Essa exportação não está mais no catálogo ativo. Recarregue o projeto.",
+          "resultConflict": "Um catálogo mais recente chegou antes da confirmação. Recarregue e revise."
         }
       }
     },

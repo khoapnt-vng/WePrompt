@@ -27,6 +27,7 @@ import type {
   ReferencesViewActions,
   TableBoardActions,
   WorkspaceMutationCallbacks,
+  WorkspaceProjectMenuProps,
 } from '@/renderer/pages/studio/components/Workspace';
 
 const mocks = vi.hoisted(() => {
@@ -58,6 +59,7 @@ const mocks = vi.hoisted(() => {
     cutActions: null as CutActions | null,
     referenceActions: null as ReferencesViewActions | null,
     workspaceMutations: null as WorkspaceMutationCallbacks | null,
+    projectMenuProps: null as WorkspaceProjectMenuProps | null,
     directorProposalIntent: null as null | ((intent: 'accept' | 'reject') => Promise<void>),
     bridge: {
       getProject: { invoke: vi.fn() },
@@ -135,6 +137,10 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
       mocks.referenceActions = props.referenceActions ?? null;
       mocks.workspaceMutations = props.mutations;
       return React.createElement(actual.WorkspaceControls, props);
+    },
+    WorkspaceProjectMenu: (props: React.ComponentProps<typeof actual.WorkspaceProjectMenu>) => {
+      mocks.projectMenuProps = props;
+      return React.createElement(actual.WorkspaceProjectMenu, props);
     },
   };
 });
@@ -824,6 +830,40 @@ const projectWithRecovery = (revision = 3): StudioRendererProjectV2 => {
   return value;
 };
 
+const projectWithAuthorizedSeedLock = (revision = 3): StudioRendererProjectV2 => {
+  const value = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+  value.revision = revision;
+  value.targetDurationSeconds = 8;
+  value.beats.beat_0!.targetSeconds = 8;
+  value.beats.beat_0!.shotOrder.push('shot_locked');
+  value.shots.shot_locked = {
+    ...value.shots.shot_0!,
+    id: 'shot_locked',
+    shootingScript: 'Authorized locked Shot',
+    chainBreak: 'hard_cut',
+    seedStillId: null,
+    boardAssetId: null,
+    supersededBoardAssetIds: [],
+    videoAssetId: null,
+    supersededVideoAssetIds: [],
+    assetIds: ['authorized_seed', 'imported_seed'],
+    jobIds: [],
+  };
+  value.assets.authorized_seed = {
+    ...recoveryAsset('authorized_seed', 'shot_locked', 'image'),
+    managedAsset: { collection: 'assets', fileName: 'authorized_seed.png' },
+    createdAt: '2026-01-01T00:00:01.000Z',
+    sha256: 'd'.repeat(64),
+  };
+  value.assets.imported_seed = {
+    ...recoveryAsset('imported_seed', 'shot_locked', 'image'),
+    managedAsset: { collection: 'imports', fileName: 'imported_seed.png' },
+    createdAt: '2026-01-01T00:00:02.000Z',
+    sha256: 'e'.repeat(64),
+  };
+  return value;
+};
+
 const projectWithAttentionJob = (
   status: 'needs_attention' | 'queued_remote' | 'failed' | 'cancelled'
 ): StudioRendererProjectV2 => {
@@ -994,6 +1034,23 @@ const workspaceStatus = (source: number | StudioRendererProjectV2, locked = fals
       : [],
   };
 };
+
+const authorizedSeedLockStatus = (
+  authority: StudioRendererProjectV2,
+  waitingReason: 'choose_seed' | 'cancelled' = 'choose_seed'
+): StudioRendererWorkspaceStatusV2 => ({
+  ...workspaceStatus(authority),
+  cascadeProgress: [
+    {
+      dependentShotId: 'shot_locked',
+      upstreamShotId: 'shot_locked',
+      eligiblePrimaryAssetIds: waitingReason === 'choose_seed' ? ['authorized_seed'] : [],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: waitingReason === 'choose_seed',
+      waitingReason,
+    },
+  ],
+});
 
 const chainStatus = (source: number | StudioRendererProjectV2): StudioRendererChainStatusV2 => {
   const authority = statusProject(source);
@@ -1268,6 +1325,11 @@ const capturedWorkspaceMutations = (): WorkspaceMutationCallbacks => {
   return mocks.workspaceMutations!;
 };
 
+const capturedProjectMenuProps = (): WorkspaceProjectMenuProps => {
+  expect(mocks.projectMenuProps).not.toBeNull();
+  return mocks.projectMenuProps!;
+};
+
 const capturedDirectorProposalIntent = (): ((intent: 'accept' | 'reject') => Promise<void>) => {
   expect(mocks.directorProposalIntent).not.toBeNull();
   return mocks.directorProposalIntent!;
@@ -1335,6 +1397,7 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.cutActions = null;
     mocks.referenceActions = null;
     mocks.workspaceMutations = null;
+    mocks.projectMenuProps = null;
     mocks.directorProposalIntent = null;
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok([]));
@@ -1926,6 +1989,7 @@ describe('StudioPage schema-5 cutover', () => {
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.cutActions).not.toBeNull());
     const cut = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
     const references = capturedReferenceActions();
 
     let pendingImport!: Promise<'cancelled' | 'imported' | 'failed'>;
@@ -1936,10 +2000,14 @@ describe('StudioPage schema-5 cutover', () => {
 
     await expect(cut.importBedAudio()).resolves.toBe('failed');
     await expect(cut.detachBedAudio('audio_other')).resolves.toBe(false);
-    await expect(cut.createExport({ shape: 'script' })).resolves.toBe(false);
-    await expect(cut.refreshExports()).resolves.toBe(false);
-    await expect(cut.copyExport('missing_export')).resolves.toBe('failed');
-    await expect(cut.revealExport('missing_export')).resolves.toBe(false);
+    await expect(projectMenu.createEditorFolder()).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+    });
+    await expect(projectMenu.revealEditorFolder('missing_export')).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+    });
     await expect(references.approve('reference_3', 'asset_reference_3')).resolves.toBe(false);
     act(() => references.regenerate('reference_3'));
 
@@ -4486,6 +4554,7 @@ describe('StudioPage schema-5 cutover', () => {
           id: 'export_new',
           sourceRevision: 3,
           shape: 'script',
+          folderName: 'export_new',
           byteSize: 24,
           fileCount: 1,
           createdAt: '2026-01-01T00:00:03.000Z',
@@ -4806,6 +4875,167 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
+  it('rejects an incompatible imported seed against exact authorized work before invoking Main', async () => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().setSeedStill('shot_locked', 'imported_seed');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+  });
+
+  it.each([
+    {
+      path: 'continuity',
+      invoke: (actions: BeatPanelActions) => actions.reviewContinuity('shot_locked', false),
+    },
+    {
+      path: 'Shot generation',
+      invoke: (actions: BeatPanelActions) =>
+        actions.reviewShot('shot_locked', [{ shotId: 'shot_locked', purpose: 'seed_still' }]),
+    },
+  ])('blocks the ordinary $path review path while authorized work owns the seed', async ({ invoke }) => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => invoke(capturedBeatPanelActions()));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('cancels an exact authorized seed wait once and rebuilds rejoin review from the committed revision', async () => {
+    const initial = projectWithAuthorizedSeedLock(3);
+    const refreshed = projectWithAuthorizedSeedLock(4);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial, authorizedSeedLockStatus(initial), chainStatus(initial)))
+      .mockResolvedValue(
+        projectWorkspaceLoad(refreshed, authorizedSeedLockStatus(refreshed, 'cancelled'), chainStatus(refreshed))
+      );
+    mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(true);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      dependentShotId: 'shot_locked',
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+
+    const prepare = within(modal).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.gate.prepare',
+    });
+    expect(prepare).toBeEnabled();
+    fireEvent.click(prepare);
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        continuityChange: { shotId: 'shot_locked', hardCut: false, requiresSeedGeneration: false },
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reports a committed cancellation whose exact reload cannot be confirmed without opening review', async () => {
+    const initial = projectWithAuthorizedSeedLock(3);
+    const unexpected = projectWithAuthorizedSeedLock(5);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial, authorizedSeedLockStatus(initial), chainStatus(initial)))
+      .mockResolvedValue(
+        projectWorkspaceLoad(unexpected, authorizedSeedLockStatus(unexpected, 'cancelled'), chainStatus(unexpected))
+      );
+    mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(4));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText(
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+      )
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown cancellation outcome once without retrying or opening review', async () => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    mocks.bridge.cancelWaitingCascade.invoke.mockRejectedValueOnce(new Error('transport stopped after dispatch'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledOnce();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText(
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinOutcomeUnknown'
+      )
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
   it('keeps seed import cancellation inert and refreshes exact authority after an imported receipt', async () => {
     const initial = projectWithRecovery(3);
     const imported = projectWithRecovery(4);
@@ -4858,7 +5088,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(document.querySelector('[data-asset-id="imported_seed"]')).not.toBeNull();
   });
 
-  it('routes the seven Cut providers through exact project and catalog revisions without paid work', async () => {
+  it('routes Cut media changes and project-menu export through exact revisions without paid work', async () => {
     const projectAt = (revision: number): StudioRendererProjectV2 => {
       const value = projectWithHandoffShot();
       value.revision = revision;
@@ -4912,7 +5142,8 @@ describe('StudioPage schema-5 cutover', () => {
     const artifact = {
       id: 'export_1',
       sourceRevision: 7,
-      shape: 'still' as const,
+      shape: 'editor_folder' as const,
+      folderName: 'editor-folder-20260101-000008-000-0123456789abcdef',
       byteSize: 64,
       fileCount: 1,
       createdAt: '2026-01-01T00:00:08.000Z',
@@ -4929,6 +5160,7 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(mocks.cutActions).not.toBeNull());
     await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledWith({ projectId: 'project_1' }));
     const cutApi = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
 
     let importResult: Awaited<ReturnType<CutActions['importBedAudio']>> | undefined;
     await act(async () => {
@@ -4969,39 +5201,29 @@ describe('StudioPage schema-5 cutover', () => {
     });
 
     const projectReadsBeforeExports = mocks.bridge.getProject.invoke.mock.calls.length;
-    await expectSuccessfulBeatPanelAction(() => cutApi.createExport({ shape: 'still', shotId: 'shot_3' }));
+    await act(async () => {
+      await expect(projectMenu.createEditorFolder()).resolves.toEqual({ ok: true, catalog: catalog2 });
+    });
     expect(mocks.bridge.createExport.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
       expectedRevision: 7,
       expectedCatalogRevision: 1,
-      shape: 'still',
-      shotId: 'shot_3',
+      shape: 'editor_folder',
     });
     expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(projectReadsBeforeExports);
+    await waitFor(() => expect(capturedProjectMenuProps().exportCatalog?.revision).toBe(2));
 
-    let copyResult: Awaited<ReturnType<CutActions['copyExport']>> | undefined;
-    await act(async () => {
-      copyResult = await cutApi.copyExport('export_1');
-    });
-    expect(copyResult).toBe('cancelled');
-    expect(mocks.bridge.copyExport.invoke).toHaveBeenLastCalledWith({
-      projectId: 'project_1',
-      expectedCatalogRevision: 2,
-      artifactId: 'export_1',
-    });
-    await expectSuccessfulBeatPanelAction(() => cutApi.revealExport('export_1'));
+    await expect(capturedProjectMenuProps().revealEditorFolder('export_1')).resolves.toEqual({ ok: true });
     expect(mocks.bridge.revealExport.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
       expectedCatalogRevision: 2,
       artifactId: 'export_1',
     });
-    await expectSuccessfulBeatPanelAction(cutApi.refreshExports);
-    expect(mocks.bridge.listExports.invoke).toHaveBeenLastCalledWith({ projectId: 'project_1' });
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('keeps every Cut file boundary fail-closed on refusal, stale authority, and missing artifacts', async () => {
+  it('keeps Cut media and project-menu export boundaries fail-closed', async () => {
     const authority = projectWithHandoffShot();
     const selectedBed = recoveryAsset('audio_current', null, 'audio');
     selectedBed.durationSeconds = 20;
@@ -5014,7 +5236,8 @@ describe('StudioPage schema-5 cutover', () => {
     const artifact = {
       id: 'export_1',
       sourceRevision: authority.revision,
-      shape: 'still' as const,
+      shape: 'editor_folder' as const,
+      folderName: 'editor-folder-20260101-000008-000-0123456789abcdef',
       byteSize: 64,
       fileCount: 1,
       createdAt: '2026-01-01T00:00:08.000Z',
@@ -5047,25 +5270,36 @@ describe('StudioPage schema-5 cutover', () => {
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.cutActions).not.toBeNull());
     const cut = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
 
     await expect(invokeStudioAction(cut.importBedAudio)).resolves.toBe('failed');
     await expect(invokeStudioAction(cut.importBedAudio)).resolves.toBe('failed');
     await expect(invokeStudioAction(() => cut.detachBedAudio('audio_current'))).resolves.toBe(false);
     await expect(invokeStudioAction(() => cut.detachBedAudio('audio_other'))).resolves.toBe(false);
     await expect(invokeStudioAction(() => cut.detachBedAudio('audio_other'))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => cut.createExport({ shape: 'script' }))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => cut.copyExport('missing_export'))).resolves.toBe('failed');
-    await expect(invokeStudioAction(() => cut.copyExport('export_1'))).resolves.toBe('failed');
-    await expect(invokeStudioAction(() => cut.revealExport('missing_export'))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => cut.revealExport('export_1'))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => cut.createExport({ shape: 'script' }))).resolves.toBe(false);
+    await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable',
+    });
+    await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('missing_export'))).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.artifactUnavailable',
+    });
+    await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('export_1'))).resolves.toEqual({
+      ok: false,
+      messageKey: 'native.revealFailed',
+    });
+    await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
+      ok: true,
+      catalog: { revision: 3, artifacts: [{ ...artifact, sourceRevision: 99 }] },
+    });
 
     expect(mocks.bridge.getProject.invoke.mock.calls.length).toBeGreaterThan(1);
     expect(mocks.bridge.createExport.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
       expectedRevision: 3,
       expectedCatalogRevision: 1,
-      shape: 'script',
+      shape: 'editor_folder',
     });
   });
 

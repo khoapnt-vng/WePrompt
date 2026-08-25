@@ -43,13 +43,11 @@ export type WorkspaceControlsProps = {
   activeView: StudioView;
   project: StudioRendererProjectV2;
   projection: WorkspaceProjection;
-  exportCatalog: StudioRendererExportCatalogV2 | null;
   drafts: UseWorkspaceDraftsResult;
   pending: boolean;
   gateLocked: boolean;
   imageRouteReady: boolean;
   errorMessageKey: string | null;
-  exportErrorMessageKey: string | null;
   mutations: WorkspaceMutationCallbacks;
   tableBoardActions: TableBoardActions;
   boardActions: BoardActions;
@@ -69,6 +67,11 @@ export type WorkspaceProjectMenuProps = Pick<
   WorkspaceControlsProps,
   'project' | 'projection' | 'drafts' | 'pending' | 'errorMessageKey' | 'mutations'
 > & {
+  exportCatalog: StudioRendererExportCatalogV2 | null;
+  createEditorFolder: () => Promise<
+    { ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }
+  >;
+  revealEditorFolder: (artifactId: string) => Promise<{ ok: true } | { ok: false; messageKey: string }>;
   routeCatalog: StudioRouteCatalogV2 | null;
   generationCapability?: StudioGenerationCapabilityV2 | null;
   briefDialogRequest?: number;

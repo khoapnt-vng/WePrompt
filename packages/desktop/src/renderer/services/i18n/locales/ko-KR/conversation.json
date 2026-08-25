@@ -1100,7 +1100,9 @@
           "stillLabel": "샷 {{shotIndex}}의 첫 프레임 {{stillIndex}}",
           "previewAlt": "미리보기 · {{label}}",
           "effective": "현재 첫 프레임",
-          "pinnedBadge": "고정됨"
+          "pinnedBadge": "고정됨",
+          "authorizationLocked": "승인된 비디오 작업이 이 샷의 첫 프레임을 잠갔습니다. 가져온 후보는 저장되지만 검토된 견적의 시드를 대체할 수 없습니다.",
+          "authorizationIncompatible": "승인된 작업에 사용할 수 없음"
         },
         "picture": {
           "title": "현재 사진",
@@ -1195,7 +1197,15 @@
           "loopJoin": "가장 가까운 연결점 반복",
           "keyboardGuidance": "스페이스바 재생 · 화살표 탐색 · [ ] 연결점 · L 반복"
         },
-        "directorRequestHint": "크리에이티브 디렉터에게 검토된 재분할 제안을 요청하세요."
+        "directorRequestHint": "크리에이티브 디렉터에게 검토된 재분할 제안을 요청하세요.",
+        "recovery": {
+          "cancelAndReviewRejoin": "취소하고 다시 연결 검토",
+          "cancelAndReviewRejoinTitle": "승인된 작업을 취소하고 다시 연결을 검토할까요?",
+          "cancelAndReviewRejoinBody": "아직 제출되지 않은 대기 중 비디오 작업만 취소합니다. 완료된 미디어와 승인 기록은 유지됩니다. 대체 생성 전에 새로운 다시 연결 견적을 검토해야 합니다.",
+          "cancelAndReviewRejoinConfirm": "취소하고 다시 연결 검토",
+          "cancelAndReviewRejoinUnconfirmed": "대기 중 작업은 취소되었지만 새로 고친 작업 공간을 확인할 수 없습니다. 다시 연결을 검토하기 전에 새로 고치세요.",
+          "cancelAndReviewRejoinOutcomeUnknown": "취소 결과를 확인할 수 없습니다. 다시 연결을 검토하기 전에 작업 공간을 새로 고치세요."
+        }
       },
       "controls": {
         "briefAndRulesTitle": "브리프 및 규칙",
@@ -1292,6 +1302,35 @@
           "references": "확정된 참조",
           "noReferences": "직접 참조 입력 없음",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        }
+      },
+      "editorFolderExport": {
+        "action": "편집기 폴더 내보내기…",
+        "actionWithSlates": "편집기 폴더 내보내기 · 슬레이트 {{count}}개…",
+        "exporting": "내보내는 중… 미디어를 생성하거나 비용을 사용하지 않습니다.",
+        "reveal": "Finder에서 보기",
+        "dismiss": "닫기",
+        "none": "없음",
+        "successFacts": "{{bytes}}바이트 · 파일 {{count}}개",
+        "successSlates": "슬레이트 Shot 번호: {{shots}}",
+        "successQuarantine": "별도로 보관한 이전 내보내기: {{count}}",
+        "disabled": {
+          "no_beats": "내보내기 전에 Beat를 추가하세요",
+          "duration_pending": "비어 있는 모든 Beat의 길이를 설정하세요",
+          "invalid_media": "오래되었거나 잘못된 선택 미디어를 해결하세요",
+          "bed_too_short": "타임라인보다 긴 오디오 베드를 선택하세요",
+          "mutationActive": "현재 작업 공간 변경이 끝날 때까지 기다리세요",
+          "exportRunning": "편집기 폴더를 내보내는 중입니다",
+          "catalogUnavailable": "편집기 폴더 내보내기 저장소를 사용할 수 없습니다"
+        },
+        "errors": {
+          "catalogUnavailable": "내보내기 카탈로그를 사용할 수 없습니다. 프로젝트를 다시 불러오세요.",
+          "staleAuthority": "프로젝트 또는 내보내기 카탈로그가 변경되었습니다. 현재 프로젝트를 검토하세요.",
+          "invalidMedia": "선택 미디어가 오래되었거나 비정규 또는 유효하지 않습니다. Cut을 검토하세요.",
+          "mediaUnavailable": "선택 미디어 파일을 확인할 수 없습니다. 불완전한 내보내기는 게시되지 않았습니다.",
+          "busy": "Creative Studio가 다른 작업을 완료 중입니다. 완료 후 다시 시도하세요.",
+          "artifactUnavailable": "이 내보내기는 현재 카탈로그에 없습니다. 다시 불러오세요.",
+          "resultConflict": "결과 확인 전에 새 카탈로그가 도착했습니다. 다시 불러와 검토하세요."
         }
       }
     },

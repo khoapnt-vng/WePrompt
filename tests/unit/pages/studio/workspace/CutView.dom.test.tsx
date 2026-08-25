@@ -10,7 +10,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { StudioRendererExportCatalogV2 } from '@/common/types/project/creativeStudioTypes';
 import type {
   WorkspaceBeatProjection,
   WorkspaceCutProjection,
@@ -1629,37 +1628,17 @@ describe('the truthful Cut player and transport', () => {
   });
 });
 
-const catalog = (): StudioRendererExportCatalogV2 => ({
-  revision: 4,
-  artifacts: [
-    {
-      id: 'export_1',
-      sourceRevision: 6,
-      shape: 'editor_folder',
-      byteSize: 4096,
-      fileCount: 4,
-      createdAt: '2026-08-19T03:00:00.000Z',
-    },
-  ],
-});
-
 const actions = (): CutActions => ({
   reorderBeats: vi.fn().mockResolvedValue(true),
   importBedAudio: vi.fn().mockResolvedValue('cancelled'),
   setBed: vi.fn().mockResolvedValue(true),
   detachBedAudio: vi.fn().mockResolvedValue(true),
-  createExport: vi.fn().mockResolvedValue(true),
-  refreshExports: vi.fn().mockResolvedValue(true),
-  copyExport: vi.fn().mockResolvedValue('copied'),
-  revealExport: vi.fn().mockResolvedValue(true),
 });
 
 const renderCut = (
   input: {
     actions?: CutActions;
     cutProjection?: WorkspaceCutProjection;
-    exportCatalog?: StudioRendererExportCatalogV2 | null;
-    exportErrorMessageKey?: string | null;
     pending?: boolean;
     activeBeats?: WorkspaceProjection['activeBeats'];
     onOpenBeat?: (beatId: string) => void;
@@ -1670,8 +1649,6 @@ const renderCut = (
   render(
     <CutView
       actions={cutActions}
-      exportCatalog={input.exportCatalog === undefined ? catalog() : input.exportCatalog}
-      exportErrorMessageKey={input.exportErrorMessageKey ?? null}
       pending={input.pending ?? false}
       projectId='project_1'
       projection={projection(input.cutProjection, input.activeBeats)}
@@ -1688,15 +1665,12 @@ describe('CutView', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders one film-level rail, an honest bed, and exactly three export shapes', () => {
+  it('renders one film-level rail and an honest bed without obsolete Cut export controls', () => {
     renderCut();
 
     expect(screen.getByRole('region', { name: 'conversation.creativeStudio.workspace.cut.ariaLabel' })).toBeVisible();
     expect(screen.getByRole('list', { name: 'conversation.creativeStudio.workspace.cut.railLabel' })).toBeVisible();
-    expect(document.querySelectorAll('[data-export-shape]')).toHaveLength(3);
-    expect(document.querySelector('[data-export-shape="editor_folder"]')).not.toBeNull();
-    expect(document.querySelector('[data-export-shape="still"]')).not.toBeNull();
-    expect(document.querySelector('[data-export-shape="script"]')).not.toBeNull();
+    expect(document.querySelectorAll('[data-export-shape]')).toHaveLength(0);
     expect(document.body.textContent?.toLowerCase()).not.toContain('stitched');
     expect(document.body.textContent?.toLowerCase()).not.toContain('auto-duck');
     expect(document.querySelector('audio')).toBeNull();
@@ -2031,14 +2005,10 @@ describe('CutView', () => {
     expect(screen.getByText('conversation.creativeStudio.workspace.cut.bed.importCancelled')).toBeInTheDocument();
   });
 
-  it('announces success, refusal, cancellation, and provider failure across film-level actions', async () => {
+  it('announces success, refusal, cancellation, and provider failure across remaining film-level actions', async () => {
     const cutActions = actions();
     vi.mocked(cutActions.importBedAudio).mockResolvedValueOnce('imported').mockRejectedValueOnce(new Error('closed'));
     vi.mocked(cutActions.setBed).mockResolvedValueOnce(false);
-    vi.mocked(cutActions.refreshExports).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
-    vi.mocked(cutActions.createExport).mockResolvedValueOnce(true).mockResolvedValueOnce(false).mockResolvedValue(true);
-    vi.mocked(cutActions.copyExport).mockResolvedValueOnce('cancelled').mockRejectedValueOnce(new Error('closed'));
-    vi.mocked(cutActions.revealExport).mockResolvedValueOnce(false);
     vi.mocked(cutActions.detachBedAudio).mockResolvedValueOnce(false);
     renderCut({ actions: cutActions });
 
@@ -2060,42 +2030,8 @@ describe('CutView', () => {
     fireEvent.change(bed, { target: { value: 'audio_current' } });
     expect(cutActions.setBed).toHaveBeenCalledTimes(1);
 
-    const refresh = screen.getByText('conversation.creativeStudio.workspace.cut.exports.refresh');
-    fireEvent.click(refresh);
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.cut.exports.refreshFailed')).toBeVisible()
-    );
-    fireEvent.click(refresh);
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.cut.exports.refreshed')).toBeVisible()
-    );
-
-    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.cut.exports.createEditorFolder'));
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.cut.exports.created')).toBeVisible()
-    );
-    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.cut.exports.createScript'));
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.cut.exports.createFailed')).toBeVisible()
-    );
-    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.cut.exports.createStill'));
-    await waitFor(() => expect(cutActions.createExport).toHaveBeenLastCalledWith({ shape: 'still', shotId: 'shot_1' }));
-
     fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.assets.show'));
     const drawer = screen.getByRole('dialog', { name: 'conversation.creativeStudio.workspace.assets.title' });
-    fireEvent.click(within(drawer).getByText('conversation.creativeStudio.workspace.assets.copy'));
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.assets.copyCancelled')).toBeVisible()
-    );
-    fireEvent.click(within(drawer).getByText('conversation.creativeStudio.workspace.assets.copy'));
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.assets.copyFailed')).toBeVisible()
-    );
-    fireEvent.click(within(drawer).getByText('conversation.creativeStudio.workspace.assets.reveal'));
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.assets.revealFailed')).toBeVisible()
-    );
-
     const oldAudio = drawer.querySelector('[data-audio-position="2"]')!;
     fireEvent.click(within(oldAudio).getByText('conversation.creativeStudio.workspace.assets.detach'));
     const confirmation = screen.getByLabelText('conversation.creativeStudio.workspace.assets.detachTitle');
@@ -2122,7 +2058,7 @@ describe('CutView', () => {
     expect(screen.getByText(new RegExp(messageKey))).toBeVisible();
   });
 
-  it('renders pending and empty authority without inventing Beat, audio, still, or export facts', () => {
+  it('renders pending and empty authority without inventing Beat or audio facts', () => {
     renderCut({
       cutProjection: cut({
         beats: [],
@@ -2131,13 +2067,10 @@ describe('CutView', () => {
         bed: { status: 'none', assetId: null },
         coverCandidates: [],
       }),
-      exportErrorMessageKey: 'conversation.creativeStudio.workspace.errors.storage',
     });
 
     expect(screen.getByText('conversation.creativeStudio.workspace.cut.empty')).toBeVisible();
     expect(screen.getByText('conversation.creativeStudio.workspace.cut.durationPending')).toBeVisible();
-    expect(screen.getByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
-    expect(screen.getByText('conversation.creativeStudio.workspace.cut.exports.createStill')).toBeDisabled();
     fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.assets.show'));
     const drawer = screen.getByRole('dialog', { name: 'conversation.creativeStudio.workspace.assets.title' });
     expect(within(drawer).getByText('conversation.creativeStudio.workspace.assets.audioEmpty')).toBeVisible();
@@ -2145,16 +2078,14 @@ describe('CutView', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('keeps the selected bed attached and exposes only sanitized export actions in Assets', async () => {
+  it('keeps the selected bed attached and keeps exports out of Assets', async () => {
     const cutActions = renderCut();
     fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.assets.show'));
     const drawer = screen.getByRole('dialog', { name: 'conversation.creativeStudio.workspace.assets.title' });
     expect(within(drawer).getByText(/workspace\.assets\.audioItem.*"position":1/)).toBeVisible();
     expect(drawer.textContent).not.toContain('audio_current');
     expect(drawer.textContent).not.toContain('audio_old');
-    expect(within(drawer).getByText(/4096/)).toBeVisible();
-    expect(drawer.textContent).not.toContain('manifestSha256');
-    expect(drawer.textContent).not.toContain('/exports/');
+    expect(drawer.textContent).not.toContain('workspace.assets.exportsTitle');
 
     const current = drawer.querySelector('[data-audio-position="1"]')!;
     expect(within(current).getByText('conversation.creativeStudio.workspace.assets.detach')).toBeDisabled();
@@ -2165,27 +2096,19 @@ describe('CutView', () => {
       within(confirmation).getByRole('button', { name: 'conversation.creativeStudio.workspace.assets.detach' })
     );
     await waitFor(() => expect(cutActions.detachBedAudio).toHaveBeenCalledWith('audio_old'));
-
-    fireEvent.click(within(drawer).getByText('conversation.creativeStudio.workspace.assets.copy'));
-    await waitFor(() => expect(cutActions.copyExport).toHaveBeenCalledWith('export_1'));
-    fireEvent.click(within(drawer).getByText('conversation.creativeStudio.workspace.assets.reveal'));
-    await waitFor(() => expect(cutActions.revealExport).toHaveBeenCalledWith('export_1'));
   });
 
-  it('fails closed for malformed order, missing catalog authority, and invalid current selections', () => {
+  it('fails closed for malformed order and invalid current selections', () => {
     renderCut({
       cutProjection: cut({
         orderReady: false,
         filmDurationSeconds: null,
         bed: { status: 'invalid', assetId: 'missing_audio' },
       }),
-      exportCatalog: null,
     });
 
     expect(screen.getByText('conversation.creativeStudio.workspace.cut.orderUnavailable')).toBeVisible();
     expect(screen.getByText('conversation.creativeStudio.workspace.cut.bed.invalid')).toBeVisible();
-    expect(screen.getByText('conversation.creativeStudio.workspace.cut.exports.catalogUnavailable')).toBeVisible();
-    document.querySelectorAll('[data-export-shape] button').forEach((button) => expect(button).toBeDisabled());
   });
 
   it('keeps the implementation semantic, Arco-owned, logical, container-responsive, and RTL-neutral', () => {

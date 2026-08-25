@@ -586,6 +586,77 @@ describe('projectWorkspace', () => {
     expect(shot).not.toHaveProperty('videoTakes');
   });
 
+  it('keeps a newer imported first frame visible but non-current while exact authorized seed work is waiting', () => {
+    const project = makeProject();
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    const authorized = makeAsset('seed_authorized', 'shot_2', 'image', 'assets', '2026-08-19T01:00:00.000Z');
+    const imported = makeAsset('seed_imported', 'shot_2', 'image', 'imports', '2026-08-19T02:00:00.000Z');
+    for (const asset of [authorized, imported]) {
+      project.assets[asset.id] = asset;
+      project.shots.shot_2!.assetIds.push(asset.id);
+    }
+    const status: StudioRendererWorkspaceStatusV2 = {
+      ...cleanWorkspaceStatus(),
+      cascadeProgress: [
+        {
+          dependentShotId: 'shot_2',
+          upstreamShotId: 'shot_2',
+          eligiblePrimaryAssetIds: [authorized.id],
+          canRetryConditioningFrame: false,
+          canCancelWaiting: true,
+          waitingReason: 'choose_seed',
+        },
+      ],
+    };
+    const chain: StudioRendererChainStatusV2 = { ...cleanChainStatus(), boundaries: [] };
+
+    for (const [projectInput, statusInput, chainInput] of [
+      [project, status, chain],
+      [structuredClone(project), structuredClone(status), structuredClone(chain)],
+    ] as const) {
+      const shot = projectWorkspace(projectInput, statusInput, chainInput).activeBeats[0]!.shots[1]!;
+
+      expect(shot).toMatchObject({
+        effectiveSeedAssetId: null,
+        hasEffectiveSeed: false,
+        seedAuthorityStatusReady: true,
+        seedAuthorizationLock: {
+          compatibleAssetIds: [authorized.id],
+          canCancelWaiting: true,
+          waitingReason: 'choose_seed',
+        },
+      });
+      expect(shot.seedStills).toEqual([
+        { assetId: imported.id, createdAt: imported.createdAt, explicitSeed: false, effectiveSeed: false },
+        { assetId: authorized.id, createdAt: authorized.createdAt, explicitSeed: false, effectiveSeed: false },
+      ]);
+    }
+  });
+
+  it('fails seed controls closed when duplicate cascade authority makes the lock ambiguous', () => {
+    const project = makeProject();
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    addSeed(project, 'shot_2', 'seed_imported');
+    const row: StudioCascadeProgressV2 = {
+      dependentShotId: 'shot_2',
+      upstreamShotId: 'shot_2',
+      eligiblePrimaryAssetIds: [],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: true,
+      waitingReason: 'upstream_running',
+    };
+    const status = { ...cleanWorkspaceStatus(), cascadeProgress: [row, { ...row }] };
+    const shot = projectWorkspace(project, status, { ...cleanChainStatus(), boundaries: [] }).activeBeats[0]!.shots[1]!;
+
+    expect(shot).toMatchObject({
+      effectiveSeedAssetId: null,
+      hasEffectiveSeed: false,
+      seedAuthorityStatusReady: false,
+      seedAuthorizationLock: null,
+    });
+    expect(shot.seedStills).toEqual([expect.objectContaining({ assetId: 'seed_imported', effectiveSeed: false })]);
+  });
+
   it('keeps reference outputs and jobs out of Shot seed, activity, and recovery state', () => {
     const project = makeProject();
     const shot = project.shots.shot_1!;

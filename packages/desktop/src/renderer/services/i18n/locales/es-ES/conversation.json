@@ -1101,7 +1101,9 @@
           "stillLabel": "Primer fotograma {{stillIndex}} del plano {{shotIndex}}",
           "previewAlt": "Vista previa · {{label}}",
           "effective": "Primer fotograma actual",
-          "pinnedBadge": "Fijada"
+          "pinnedBadge": "Fijada",
+          "authorizationLocked": "El trabajo de vídeo autorizado ha bloqueado el primer fotograma de este plano. Los candidatos importados permanecen guardados, pero no pueden sustituir la imagen de referencia de la cotización revisada.",
+          "authorizationIncompatible": "No disponible para el trabajo autorizado"
         },
         "picture": {
           "title": "Imagen actual",
@@ -1196,7 +1198,15 @@
           "loopJoin": "Repetir la unión más cercana",
           "keyboardGuidance": "Espacio reproduce · Flechas buscan · [ ] uniones · L repite"
         },
-        "directorRequestHint": "Pide al Director creativo una propuesta revisada para volver a dividir."
+        "directorRequestHint": "Pide al Director creativo una propuesta revisada para volver a dividir.",
+        "recovery": {
+          "cancelAndReviewRejoin": "Cancelar y revisar la reconexión",
+          "cancelAndReviewRejoinTitle": "¿Cancelar el trabajo autorizado y revisar la reconexión?",
+          "cancelAndReviewRejoinBody": "Esto cancela únicamente el trabajo de vídeo en espera que aún no se ha enviado. Los medios completados y el historial de autorización se conservan. Debe revisarse una nueva estimación de reconexión antes de generar reemplazos.",
+          "cancelAndReviewRejoinConfirm": "Cancelar y revisar la reconexión",
+          "cancelAndReviewRejoinUnconfirmed": "El trabajo en espera se canceló, pero no se pudo confirmar el espacio de trabajo actualizado. Actualícelo antes de revisar la reconexión.",
+          "cancelAndReviewRejoinOutcomeUnknown": "No se pudo confirmar el resultado de la cancelación. Actualice el espacio de trabajo antes de revisar la reconexión."
+        }
       },
       "controls": {
         "briefAndRulesTitle": "Brief y reglas",
@@ -1293,6 +1303,35 @@
           "references": "Referencias resueltas",
           "noReferences": "Sin entradas de referencia directas",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        }
+      },
+      "editorFolderExport": {
+        "action": "Exportar carpeta para edición…",
+        "actionWithSlates": "Exportar carpeta para edición · {{count}} claquetas…",
+        "exporting": "Exportando… No se generarán medios ni se realizará ningún gasto.",
+        "reveal": "Mostrar en Finder",
+        "dismiss": "Cerrar",
+        "none": "ninguno",
+        "successFacts": "{{bytes}} bytes · {{count}} archivos",
+        "successSlates": "Números de Shot con claqueta: {{shots}}",
+        "successQuarantine": "Exportaciones anteriores apartadas: {{count}}",
+        "disabled": {
+          "no_beats": "Añade un Beat antes de exportar",
+          "duration_pending": "Define la duración de cada Beat vacío",
+          "invalid_media": "Resuelve los medios seleccionados obsoletos o no válidos",
+          "bed_too_short": "Elige una cama de audio suficientemente larga",
+          "mutationActive": "Espera a que termine el cambio actual",
+          "exportRunning": "Ya se está exportando una carpeta para edición",
+          "catalogUnavailable": "El almacenamiento de exportación no está disponible"
+        },
+        "errors": {
+          "catalogUnavailable": "El catálogo de exportación no está disponible. Recarga el proyecto.",
+          "staleAuthority": "El proyecto o el catálogo cambió. Revisa el proyecto antes de volver a exportar.",
+          "invalidMedia": "El medio seleccionado está obsoleto, no es canónico o no es válido. Revisa Cut.",
+          "mediaUnavailable": "No se pudo verificar el archivo seleccionado. No se publicó una exportación parcial.",
+          "busy": "Creative Studio está terminando otra operación. Inténtalo cuando finalice.",
+          "artifactUnavailable": "Esta exportación ya no está en el catálogo activo. Recarga el proyecto.",
+          "resultConflict": "Llegó un catálogo más reciente antes de confirmar el resultado. Recarga y revísalo."
         }
       }
     },
