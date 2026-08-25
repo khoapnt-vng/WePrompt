@@ -771,145 +771,147 @@ const ShotCard: React.FC<ShotCardProps> = ({
         ) : null}
       </div>
 
-      {shot.segmentHead || shot.seedStills.length > 0 ? (
-        <section aria-label={t(`${KEY_ROOT}.seeds.label`, { index: index + 1 })} className={styles.subsection}>
-          {shot.segmentHead ? (
-            <div className={styles.subsectionHeader}>
-              <div>
-                <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
-                <p className={styles.muted}>
-                  {t(
-                    shot.effectiveSeedAssetId === null
-                      ? `${KEY_ROOT}.seeds.pending`
-                      : shot.explicitSeedAssetId === null
-                        ? `${KEY_ROOT}.seeds.latestDefault`
-                        : `${KEY_ROOT}.seeds.pinned`
-                  )}
-                </p>
-              </div>
-              <Button disabled={disabled || importing} loading={importing} onClick={() => void importSeed()}>
-                {t(`${KEY_ROOT}.seeds.import`)}
-              </Button>
-            </div>
-          ) : (
-            <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
-          )}
-          <div className={styles.mediaStrip}>
-            {shot.seedStills.map((still, stillIndex) => (
-              <SeedStillCard
-                key={still.assetId}
-                actions={actions}
-                canManageSeed={shot.segmentHead}
-                disabled={disabled}
-                projectId={projectId}
-                shot={shot}
-                shotIndex={index}
-                still={still}
-                stillIndex={stillIndex}
-              />
-            ))}
-          </div>
-          {shot.seedAuthorizationLock !== null ? (
-            <Alert content={t(`${KEY_ROOT}.seeds.authorizationLocked`)} showIcon type='warning' />
-          ) : null}
-          {shot.seedStills.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.seeds.empty`)}</p> : null}
-        </section>
-      ) : null}
-
-      <section aria-label={pictureLabel} className={styles.subsection}>
-        <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.picture.title`)}</h4>
-        {shot.currentPicture === null ? (
-          <p className={styles.muted}>{t(`${KEY_ROOT}.picture.empty`)}</p>
-        ) : !currentPictureAvailable ? (
-          <p className={styles.warning} role='alert'>
-            {t(`${KEY_ROOT}.picture.unavailable`)}
-          </p>
-        ) : (
-          <article className={styles.mediaCard} data-asset-id={shot.currentPicture.assetId} data-current-picture>
-            <FullscreenMediaFrame className={styles.mediaPreviewFrame}>
-              <video
-                aria-label={t(`${KEY_ROOT}.picture.videoPreview`, { label: pictureLabel })}
-                className={styles.mediaPreview}
-                controls
-                poster={currentPicturePosterUrl ?? undefined}
-                preload='metadata'
-                src={currentPictureUrl!}
-              />
-            </FullscreenMediaFrame>
-            <div className={styles.mediaDetails}>
-              <span className={styles.mediaIdentity} dir='auto'>
-                {pictureLabel}
-              </span>
-              <span>
-                <bdi>
-                  {t(`${KEY_ROOT}.picture.sourceDuration`, {
-                    seconds: shot.currentPicture.sourceDurationSeconds,
-                  })}
-                </bdi>
-              </span>
-            </div>
-          </article>
-        )}
-        <div className={styles.shotFooter} data-shot-footer>
-          {reviewBlockCopy === null && reviewPreferences === null ? (
-            <p className={styles.blocker} role='status'>
-              {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
-            </p>
-          ) : reviewBlockCopy === null ? null : (
-            <div>
-              <p className={styles.blocker} id={generationBlockDescriptionId} role='status'>
-                {t(reviewBlockCopy.key, reviewBlockCopy.values)}
-              </p>
-              {reviewBlockRemedy === 'none' ? null : (
-                <Button
-                  onClick={() => {
-                    if (reviewBlock === null) return;
-                    if (reviewBlockRemedy === 'duration') {
-                      // The field is revealed from the Shot's menu, so the remedy opens it rather
-                      // than reaching for an input that is not on screen. The card focuses it.
-                      onRevealDuration(blockedShotId);
-                      return;
-                    }
-                    actions.resolveGenerationBlock(blockedShotId, reviewBlock);
-                  }}
-                  size='small'
-                >
-                  {t(
-                    reviewBlockRemedy === 'routes'
-                      ? 'conversation.creativeStudio.models.blocked.actionSetEngines'
-                      : reviewBlockRemedy === 'references'
-                        ? 'conversation.creativeStudio.workspace.gate.reviewShotBinding'
-                        : 'conversation.creativeStudio.models.blocked.actionShorten'
-                  )}
+      <div className={styles.mediaRegions} data-shot-media-regions>
+        {shot.segmentHead || shot.seedStills.length > 0 ? (
+          <section aria-label={t(`${KEY_ROOT}.seeds.label`, { index: index + 1 })} className={styles.subsection}>
+            {shot.segmentHead ? (
+              <div className={styles.subsectionHeader}>
+                <div>
+                  <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
+                  <p className={styles.muted}>
+                    {t(
+                      shot.effectiveSeedAssetId === null
+                        ? `${KEY_ROOT}.seeds.pending`
+                        : shot.explicitSeedAssetId === null
+                          ? `${KEY_ROOT}.seeds.latestDefault`
+                          : `${KEY_ROOT}.seeds.pinned`
+                    )}
+                  </p>
+                </div>
+                <Button disabled={disabled || importing} loading={importing} onClick={() => void importSeed()}>
+                  {t(`${KEY_ROOT}.seeds.import`)}
                 </Button>
-              )}
-            </div>
-          )}
-          <Button
-            aria-describedby={reviewBlock === null ? undefined : generationBlockDescriptionId}
-            disabled={
-              disabled ||
-              reviewBlocked ||
-              reviewedGenerationBlocked ||
-              reviewPreferences === null ||
-              reviewBlock !== null ||
-              shot.seedAuthorizationLock !== null
-            }
-            onClick={() => {
-              if (reviewPreferences !== null && reviewPreferences.length > 0) {
-                actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
-              }
-            }}
-            type='primary'
-          >
-            {t(
-              shot.segmentHead && shot.effectiveSeedAssetId === null
-                ? `${KEY_ROOT}.generation.generateSeed`
-                : `${KEY_ROOT}.generation.renderVideo`
+              </div>
+            ) : (
+              <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
             )}
-          </Button>
-        </div>
-      </section>
+            <div className={styles.mediaStrip}>
+              {shot.seedStills.map((still, stillIndex) => (
+                <SeedStillCard
+                  key={still.assetId}
+                  actions={actions}
+                  canManageSeed={shot.segmentHead}
+                  disabled={disabled}
+                  projectId={projectId}
+                  shot={shot}
+                  shotIndex={index}
+                  still={still}
+                  stillIndex={stillIndex}
+                />
+              ))}
+            </div>
+            {shot.seedAuthorizationLock !== null ? (
+              <Alert content={t(`${KEY_ROOT}.seeds.authorizationLocked`)} showIcon type='warning' />
+            ) : null}
+            {shot.seedStills.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.seeds.empty`)}</p> : null}
+          </section>
+        ) : null}
+
+        <section aria-label={pictureLabel} className={styles.subsection}>
+          <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.picture.title`)}</h4>
+          {shot.currentPicture === null ? (
+            <p className={styles.muted}>{t(`${KEY_ROOT}.picture.empty`)}</p>
+          ) : !currentPictureAvailable ? (
+            <p className={styles.warning} role='alert'>
+              {t(`${KEY_ROOT}.picture.unavailable`)}
+            </p>
+          ) : (
+            <article className={styles.mediaCard} data-asset-id={shot.currentPicture.assetId} data-current-picture>
+              <FullscreenMediaFrame className={styles.mediaPreviewFrame}>
+                <video
+                  aria-label={t(`${KEY_ROOT}.picture.videoPreview`, { label: pictureLabel })}
+                  className={styles.mediaPreview}
+                  controls
+                  poster={currentPicturePosterUrl ?? undefined}
+                  preload='metadata'
+                  src={currentPictureUrl!}
+                />
+              </FullscreenMediaFrame>
+              <div className={styles.mediaDetails}>
+                <span className={styles.mediaIdentity} dir='auto'>
+                  {pictureLabel}
+                </span>
+                <span>
+                  <bdi>
+                    {t(`${KEY_ROOT}.picture.sourceDuration`, {
+                      seconds: shot.currentPicture.sourceDurationSeconds,
+                    })}
+                  </bdi>
+                </span>
+              </div>
+            </article>
+          )}
+          <div className={styles.shotFooter} data-shot-footer>
+            {reviewBlockCopy === null && reviewPreferences === null ? (
+              <p className={styles.blocker} role='status'>
+                {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
+              </p>
+            ) : reviewBlockCopy === null ? null : (
+              <div>
+                <p className={styles.blocker} id={generationBlockDescriptionId} role='status'>
+                  {t(reviewBlockCopy.key, reviewBlockCopy.values)}
+                </p>
+                {reviewBlockRemedy === 'none' ? null : (
+                  <Button
+                    onClick={() => {
+                      if (reviewBlock === null) return;
+                      if (reviewBlockRemedy === 'duration') {
+                        // The field is revealed from the Shot's menu, so the remedy opens it rather
+                        // than reaching for an input that is not on screen. The card focuses it.
+                        onRevealDuration(blockedShotId);
+                        return;
+                      }
+                      actions.resolveGenerationBlock(blockedShotId, reviewBlock);
+                    }}
+                    size='small'
+                  >
+                    {t(
+                      reviewBlockRemedy === 'routes'
+                        ? 'conversation.creativeStudio.models.blocked.actionSetEngines'
+                        : reviewBlockRemedy === 'references'
+                          ? 'conversation.creativeStudio.workspace.gate.reviewShotBinding'
+                          : 'conversation.creativeStudio.models.blocked.actionShorten'
+                    )}
+                  </Button>
+                )}
+              </div>
+            )}
+            <Button
+              aria-describedby={reviewBlock === null ? undefined : generationBlockDescriptionId}
+              disabled={
+                disabled ||
+                reviewBlocked ||
+                reviewedGenerationBlocked ||
+                reviewPreferences === null ||
+                reviewBlock !== null ||
+                shot.seedAuthorizationLock !== null
+              }
+              onClick={() => {
+                if (reviewPreferences !== null && reviewPreferences.length > 0) {
+                  actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
+                }
+              }}
+              type='primary'
+            >
+              {t(
+                shot.segmentHead && shot.effectiveSeedAssetId === null
+                  ? `${KEY_ROOT}.generation.generateSeed`
+                  : `${KEY_ROOT}.generation.renderVideo`
+              )}
+            </Button>
+          </div>
+        </section>
+      </div>
 
       {shot.attentionJobs.length > 0 ? (
         <section
