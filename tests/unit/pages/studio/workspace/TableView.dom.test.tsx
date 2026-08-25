@@ -21,6 +21,8 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       const copy: Record<string, string> = {
+        'common.collapse': 'Collapse',
+        'common.expand': 'Expand',
         'conversation.creativeStudio.workspace.table.label': 'Beat table',
         'conversation.creativeStudio.workspace.table.columns.position': '#',
         'conversation.creativeStudio.workspace.table.columns.panel': 'Panel',
@@ -373,7 +375,7 @@ describe('TableView', () => {
     expect(disclosure).toHaveFocus();
   });
 
-  it('renders one 104 by 59 card per Shot and tags every actual segment head', async () => {
+  it('renders one large card per Shot with fullscreen access and tags every actual segment head', async () => {
     const user = userEvent.setup();
     const beats = [
       makeBeat('opening', {
@@ -405,7 +407,19 @@ describe('TableView', () => {
     expect(screen.getAllByText('Head')).toHaveLength(2);
     expect(screen.getByRole('article', { name: 'Shot 2: Stale' })).toHaveTextContent('Stale');
     expect(screen.getByRole('article', { name: 'Shot 3: Drawing' })).toHaveTextContent('Drawing');
-    expect(tableCss).toMatch(/\.panelFrame\s*{[^}]*inline-size:\s*104px[^}]*block-size:\s*59px/s);
+    expect(tableCss).toMatch(/\.panelFrame\s*{[^}]*inline-size:\s*180px[^}]*block-size:\s*101px/s);
+
+    const currentPanel = screen.getByRole('article', { name: 'Shot 1: Current' });
+    const expand = within(currentPanel).getByRole('button', { name: 'Expand' });
+    const fullscreenFrame = expand.closest<HTMLElement>('[data-fullscreen-media-frame]');
+    if (fullscreenFrame === null) throw new Error('Missing fullscreen frame for current Board panel');
+    const requestFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(fullscreenFrame, 'requestFullscreen', { configurable: true, value: requestFullscreen });
+    await user.click(expand);
+    expect(requestFullscreen).toHaveBeenCalledTimes(1);
+    expect(
+      within(screen.getByRole('article', { name: 'Shot 2: Stale' })).queryByRole('button', { name: 'Expand' })
+    ).toBeNull();
   });
 
   it('offers first-frame promotion only for a stable current Board panel on an actual segment head', async () => {
@@ -512,7 +526,7 @@ describe('TableView', () => {
     expect(screen.getAllByText('Status pending')).toHaveLength(2);
   });
 
-  it('names exact Board completeness separately from the capped next paid batch and exposes style as radios', async () => {
+  it('names exact Board completeness separately from the capped next paid batch without exposing Board style', async () => {
     const user = userEvent.setup();
     const actions = makeTableBoardActions();
     const shots = Array.from({ length: 30 }, (_, index) => makeShot(`shot_${String(index + 1)}`));
@@ -556,31 +570,15 @@ describe('TableView', () => {
     await user.keyboard('{Enter}');
     expect(actions.drawNext).toHaveBeenCalledTimes(1);
 
-    const greyTone = within(controls).getByRole('radio', { name: 'Grey tone' });
-    expect(greyTone).toBeChecked();
-    await user.click(within(controls).getByRole('radio', { name: 'Line art' }));
-    expect(actions.setStyle).toHaveBeenCalledWith('line_art');
+    expect(within(controls).queryByRole('radio')).toBeNull();
+    expect(within(controls).queryByText('Board style')).toBeNull();
+    expect(actions.setStyle).not.toHaveBeenCalled();
   });
 
-  it('fails Board generation controls closed when style, route, or exact panel status is unavailable', () => {
+  it('fails Board generation controls closed when the route or exact panel status is unavailable', () => {
     const beats = [makeBeat('opening', { title: 'Opening' })];
     const actions = makeTableBoardActions();
     const { rerender } = render(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardStyle={null}
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
-    );
-
-    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
-    expect(screen.getByText('Choose a Board style before drawing.')).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Grey tone' })).toBeEnabled();
-
-    rerender(
       <TableView
         {...tableBoardProps(beats)}
         actions={actions}
@@ -590,8 +588,9 @@ describe('TableView', () => {
         onSelectBeat={vi.fn()}
       />
     );
+
     expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
-    expect(screen.getByRole('radio', { name: 'Grey tone' })).toBeEnabled();
+    expect(screen.queryByRole('radio')).toBeNull();
 
     rerender(
       <TableView
@@ -604,11 +603,11 @@ describe('TableView', () => {
       />
     );
     expect(screen.getByRole('button', { name: 'Draw next batch (0)' })).toBeDisabled();
-    expect(screen.getByRole('radio', { name: 'Grey tone' })).toBeDisabled();
+    expect(screen.queryByRole('radio')).toBeNull();
     expect(actions.drawNext).not.toHaveBeenCalled();
   });
 
-  it('offers Stop only for active Board work, preserves the completed/charged warning, and locks style changes', async () => {
+  it('offers Stop only for active Board work and preserves the completed/charged warning', async () => {
     const user = userEvent.setup();
     const beats = [makeBeat('opening', { title: 'Opening' })];
     const actions = makeTableBoardActions();
@@ -639,7 +638,7 @@ describe('TableView', () => {
         'Stop requests cancellation where possible. Completed panels and charges already incurred remain.'
       )
     ).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Grey tone' })).toBeDisabled();
+    expect(screen.queryByRole('radio')).toBeNull();
     const stop = screen.getByRole('button', { name: 'Stop drawing' });
     act(() => stop.focus());
     await user.keyboard('{Enter}');
@@ -692,7 +691,7 @@ describe('TableView', () => {
 
     expect(screen.getByText('0 in progress')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Stop drawing' })).toBeNull();
-    expect(screen.getByRole('radio', { name: 'Grey tone' })).toBeDisabled();
+    expect(screen.queryByRole('radio')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
 
     const unknown = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_unknown"]');

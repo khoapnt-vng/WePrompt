@@ -308,6 +308,26 @@
   background: var(--color-fill-2);
 }
 
+.mediaPreviewFrame {
+  min-inline-size: 0;
+  overflow: hidden;
+  border-radius: 7px;
+}
+
+.mediaPreviewFrame:fullscreen {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border-radius: 0;
+}
+
+.mediaPreviewFrame:fullscreen .mediaPreview {
+  inline-size: 100%;
+  block-size: 100%;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+
 .mediaDetails {
   display: grid;
   min-inline-size: 0;
@@ -446,6 +466,21 @@
   align-self: flex-start;
   align-content: start;
   gap: 7px;
+}
+
+.previewColumn:fullscreen {
+  position: relative;
+  inset: auto;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  inline-size: 100%;
+  block-size: 100%;
+  align-self: stretch;
+  padding: 24px;
+}
+
+.previewColumn:fullscreen .beatPreview {
+  min-block-size: 0;
+  aspect-ratio: auto;
 }
 
 .workingRow[data-has-inspector='false'] .previewColumn {

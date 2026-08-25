@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button, Popconfirm, Radio } from '@arco-design/web-react';
+import { Button, Popconfirm } from '@arco-design/web-react';
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
-  STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   type StudioBoardStyleV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
 import type { WorkspaceBeatProjection, WorkspaceBoardPanelProjection } from '../../workspaceProjection';
@@ -70,12 +70,6 @@ const PANEL_STATUS_KEYS = {
   cancelled: 'conversation.creativeStudio.workspace.table.panel.status.cancelled',
 } as const;
 
-const BOARD_STYLE_KEYS = {
-  grey_tone: 'conversation.creativeStudio.workspace.table.board.style.greyTone',
-  line_art: 'conversation.creativeStudio.workspace.table.board.style.lineArt',
-  colour_key: 'conversation.creativeStudio.workspace.table.board.style.colourKey',
-} as const satisfies Record<StudioBoardStyleV2, string>;
-
 const DRAWABLE_BOARD_ACTIVITIES = new Set<WorkspaceBoardPanelProjection['activity']>(['idle', 'failed', 'cancelled']);
 const BUSY_BOARD_ACTIVITIES = new Set<WorkspaceBoardPanelProjection['activity']>(['queued', 'drawing']);
 
@@ -90,9 +84,6 @@ const isPromotableBoardPanel = (
 ): panel is WorkspaceBoardPanelProjection & {
   assetId: string;
 } => panel.assetId !== null && panel.freshness === 'current' && isDrawableBoardPanel(panel);
-
-const isStudioBoardStyle = (value: unknown): value is StudioBoardStyleV2 =>
-  typeof value === 'string' && (STUDIO_BOARD_STYLES_V2 as readonly string[]).includes(value);
 
 const panelStatusKey = (panel: WorkspaceBoardPanelProjection): string =>
   panel.activity === 'idle' ? PANEL_STATUS_KEYS[panel.freshness] : PANEL_STATUS_KEYS[panel.activity];
@@ -305,8 +296,6 @@ export const TableView: React.FC<TableViewProps> = ({
   }, [exactBoardPanels]);
   const interactionLocked = pending || gateLocked;
   const generationLocked = interactionLocked || boardStyle === null || boardSummary.statusPending || !imageRouteReady;
-  const styleLocked =
-    interactionLocked || boardSummary.statusPending || boardSummary.busy > 0 || boardSummary.needsAttention;
   const canDrawNext = !generationLocked && boardSummary.nextBatch > 0;
   const canStop = !interactionLocked && boardSummary.busy > 0;
 
@@ -419,25 +408,6 @@ export const TableView: React.FC<TableViewProps> = ({
             </span>
           </span>
         </div>
-        <fieldset className={styles.boardStyleFieldset} disabled={styleLocked}>
-          <legend>{t('conversation.creativeStudio.workspace.table.board.style.label')}</legend>
-          <Radio.Group
-            className={styles.boardStyleChoices}
-            disabled={styleLocked}
-            mode='fill'
-            onChange={(value) => {
-              if (!styleLocked && isStudioBoardStyle(value)) actions.setStyle(value);
-            }}
-            type='button'
-            value={boardStyle ?? undefined}
-          >
-            {STUDIO_BOARD_STYLES_V2.map((style) => (
-              <Radio key={style} value={style}>
-                {t(BOARD_STYLE_KEYS[style])}
-              </Radio>
-            ))}
-          </Radio.Group>
-        </fieldset>
         <div className={styles.boardPrimaryAction}>
           {boardSummary.busy > 0 ? (
             <>
@@ -465,11 +435,6 @@ export const TableView: React.FC<TableViewProps> = ({
               })}
             </Button>
           )}
-          {boardStyle === null ? (
-            <p className={styles.boardStyleRequired}>
-              {t('conversation.creativeStudio.workspace.table.board.styleRequired')}
-            </p>
-          ) : null}
         </div>
       </section>
       <div ref={scrollRef} className={styles.scroll} data-studio-table-scroll>
@@ -755,14 +720,17 @@ export const TableView: React.FC<TableViewProps> = ({
                                     className={styles.panelCard}
                                     data-shot-id={shot.id}
                                   >
-                                    <div className={styles.panelFrame}>
+                                    <FullscreenMediaFrame
+                                      className={styles.panelFrame}
+                                      enabled={panel.assetId !== null}
+                                    >
                                       <BoardPanelArtwork panel={panel} projectId={projectId} />
                                       {shot.segmentHead ? (
                                         <span className={styles.panelHead}>
                                           {t('conversation.creativeStudio.workspace.table.panel.head')}
                                         </span>
                                       ) : null}
-                                    </div>
+                                    </FullscreenMediaFrame>
                                     <div className={styles.panelCaption}>
                                       <bdi>{String(shotIndex + 1).padStart(2, '0')}</bdi>
                                       <bdi>

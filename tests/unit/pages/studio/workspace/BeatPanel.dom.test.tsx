@@ -185,13 +185,17 @@ vi.mock('@arco-design/web-react', async () => {
 });
 
 vi.mock('@icon-park/react', () => ({
+  FullScreen: (props: Record<string, unknown>) => <span data-icon='fullscreen' {...props} />,
   MoreOne: (props: Record<string, unknown>) => <span data-icon='more' {...props} />,
+  OffScreen: (props: Record<string, unknown>) => <span data-icon='offscreen' {...props} />,
 }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       const copy: Record<string, string> = {
+        'common.collapse': 'Collapse',
+        'common.expand': 'Expand',
         'common.more': 'More actions',
         'conversation.creativeStudio.workspace.beatPanel.beatFieldsLabel': 'Beat fields',
         'conversation.creativeStudio.workspace.beatPanel.blocker.statusUnavailable': 'Status unavailable',
@@ -2102,6 +2106,58 @@ describe('BeatPanel', () => {
 
     fireEvent.click(within(picture).getByRole('button', { name: 'Generate again' }));
     expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [{ shotId: 'shot_1', purpose: 'video_take' }]);
+  });
+
+  it('opens the Beat player, first-frame image, and current Shot video from their exact fullscreen frames', () => {
+    const seed = makeSeedStill('image_current', { effectiveSeed: true });
+    const shot = makeShot('shot_1', 0, {
+      currentPicture: makeCurrentPicture('video_current', 8, 'poster_current'),
+      effectiveSeedAssetId: seed.assetId,
+      hasEffectiveSeed: true,
+      seedStills: [seed],
+      segmentHead: true,
+    });
+    const beat = makeBeat('beat_1', [shot]);
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
+
+    const beatPreview = screen.getByRole('region', { name: 'Beat preview' });
+    const beatFrame = beatPreview.closest<HTMLElement>('[data-fullscreen-media-frame]');
+    if (beatFrame === null) throw new Error('Missing Beat player fullscreen frame');
+    const beatExpand = within(beatFrame).getByRole('button', { name: 'Expand' });
+    const requestBeatFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(beatFrame, 'requestFullscreen', {
+      configurable: true,
+      value: requestBeatFullscreen,
+    });
+    fireEvent.click(beatExpand);
+    expect(requestBeatFullscreen).toHaveBeenCalledTimes(1);
+    expect(within(beatFrame).getByRole('group', { name: 'Beat transport' })).toBeInTheDocument();
+
+    const seedCard = assetCard(container, seed.assetId);
+    const seedExpand = within(seedCard).getByRole('button', { name: 'Expand' });
+    const seedFrame = seedExpand.closest<HTMLElement>('[data-fullscreen-media-frame]');
+    if (seedFrame === null) throw new Error('Missing first-frame image fullscreen frame');
+    const requestSeedFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(seedFrame, 'requestFullscreen', {
+      configurable: true,
+      value: requestSeedFullscreen,
+    });
+    fireEvent.click(seedExpand);
+    expect(requestSeedFullscreen).toHaveBeenCalledTimes(1);
+
+    const picture = within(shotCard(container, shot.id)).getByRole('region', {
+      name: 'Current picture for Shot 1',
+    });
+    const pictureExpand = within(picture).getByRole('button', { name: 'Expand' });
+    const pictureFrame = pictureExpand.closest<HTMLElement>('[data-fullscreen-media-frame]');
+    if (pictureFrame === null) throw new Error('Missing current Shot video fullscreen frame');
+    const requestPictureFullscreen = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(pictureFrame, 'requestFullscreen', {
+      configurable: true,
+      value: requestPictureFullscreen,
+    });
+    fireEvent.click(pictureExpand);
+    expect(requestPictureFullscreen).toHaveBeenCalledTimes(1);
   });
 
   it('keeps seed still pinning reachable without any video selection or overflow surface', () => {

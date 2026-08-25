@@ -9,6 +9,7 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef,
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
+import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 
 import type { WorkspaceBeatProjection, WorkspaceProjection } from '../workspaceProjection';
 import styles from './BeatPanel.module.css';
@@ -889,7 +890,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
       tabIndex={available ? 0 : -1}
     >
       <div className={styles.workingRow} data-beat-working-row data-has-inspector={inspector !== undefined}>
-        <div className={styles.previewColumn} data-beat-preview-column>
+        <FullscreenMediaFrame className={styles.previewColumn} enabled={!unavailable && segment.kind === 'video'}>
           <section
             aria-label={t(`${PREVIEW_ROOT}.label`)}
             className={styles.beatPreview}
@@ -1069,7 +1070,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
           >
             {state.failed ? t(`${PREVIEW_ROOT}.mediaError`) : segmentCopy}
           </p>
-        </div>
+        </FullscreenMediaFrame>
         {inspector}
       </div>
 

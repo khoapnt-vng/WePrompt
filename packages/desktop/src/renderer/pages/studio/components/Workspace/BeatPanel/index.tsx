@@ -17,6 +17,7 @@ import {
   type StudioRendererParkEligibilityV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
+import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../workspaceProjection';
@@ -249,11 +250,13 @@ const SeedStillCard: React.FC<SeedStillCardProps> = ({
       data-explicit-seed={still.explicitSeed}
       data-seed-still
     >
-      <img
-        alt={t(`${KEY_ROOT}.seeds.previewAlt`, { label: stillLabel })}
-        className={styles.mediaPreview}
-        src={assetUrl}
-      />
+      <FullscreenMediaFrame className={styles.mediaPreviewFrame}>
+        <img
+          alt={t(`${KEY_ROOT}.seeds.previewAlt`, { label: stillLabel })}
+          className={styles.mediaPreview}
+          src={assetUrl}
+        />
+      </FullscreenMediaFrame>
       <div className={styles.mediaDetails}>
         <span className={styles.mediaIdentity} dir='auto'>
           {stillLabel}
@@ -783,14 +786,16 @@ const ShotCard: React.FC<ShotCardProps> = ({
           </p>
         ) : (
           <article className={styles.mediaCard} data-asset-id={shot.currentPicture.assetId} data-current-picture>
-            <video
-              aria-label={t(`${KEY_ROOT}.picture.videoPreview`, { label: pictureLabel })}
-              className={styles.mediaPreview}
-              controls
-              poster={currentPicturePosterUrl ?? undefined}
-              preload='metadata'
-              src={currentPictureUrl!}
-            />
+            <FullscreenMediaFrame className={styles.mediaPreviewFrame}>
+              <video
+                aria-label={t(`${KEY_ROOT}.picture.videoPreview`, { label: pictureLabel })}
+                className={styles.mediaPreview}
+                controls
+                poster={currentPicturePosterUrl ?? undefined}
+                preload='metadata'
+                src={currentPictureUrl!}
+              />
+            </FullscreenMediaFrame>
             <div className={styles.mediaDetails}>
               <span className={styles.mediaIdentity} dir='auto'>
                 {pictureLabel}

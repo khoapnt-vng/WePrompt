@@ -13,7 +13,7 @@ import {
 } from '@/process/services/creative-studio/service/schema2';
 
 describe('createEmptyStudioProjectV2', () => {
-  it('creates the exact empty schema-5 project state with no Board style or references selected', () => {
+  it('creates the exact empty schema-5 project state with the hidden Board style default', () => {
     const project = createEmptyStudioProjectV2(
       {
         name: '  Project One  ',
@@ -39,7 +39,7 @@ describe('createEmptyStudioProjectV2', () => {
       aspectRatio: '16:9',
       targetDurationSeconds: 30,
       resolution: '1080p',
-      boardStyle: null,
+      boardStyle: 'grey_tone',
       beatOrder: [],
       beats: {},
       shots: {},
