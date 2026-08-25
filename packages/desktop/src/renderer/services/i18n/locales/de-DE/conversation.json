@@ -895,7 +895,14 @@
           "title": "Hintergründe",
           "description": "Genehmigen Sie wiederkehrende Orte, die den Film visuell konsistent halten.",
           "charactersRequired": "Genehmigen Sie alle Charaktere, bevor Sie Hintergründe prüfen.",
-          "empty": "Es sind keine wiederkehrenden Hintergründe erforderlich."
+          "empty": "Es sind keine wiederkehrenden Hintergründe erforderlich.",
+          "add": "Hintergrund hinzufügen",
+          "addTitle": "Wiederkehrenden Hintergrund hinzufügen",
+          "nameLabel": "Name des Hintergrunds",
+          "promptLabel": "Generierungs-Prompt",
+          "duplicate": "Ein Hintergrund mit diesem Namen ist bereits vorhanden.",
+          "cancel": "Abbrechen",
+          "confirm": "Hintergrund hinzufügen"
         },
         "previewPending": "Es wurde noch kein Referenzkandidat erzeugt.",
         "previewAlt": "Referenzkandidat für {{label}}",
@@ -1196,6 +1203,7 @@
         "undoLabel": {
           "promote_board_panel": "Panel als erstes Bild verwenden",
           "set_reference_plan": "Referenzplan",
+          "amend_reference_plan": "Hintergrund hinzufügen",
           "approve_reference": "Referenzgenehmigung",
           "set_shot_reference_binding": "Shot-Referenzzuordnung"
         }

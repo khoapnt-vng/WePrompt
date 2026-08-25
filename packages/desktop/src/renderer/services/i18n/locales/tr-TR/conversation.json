@@ -896,7 +896,14 @@
           "title": "Arka planlar",
           "description": "Filmin görsel tutarlılığını koruyan yinelenen mekânları onaylayın.",
           "charactersRequired": "Arka planları incelemeden önce tüm karakterleri onaylayın.",
-          "empty": "Yinelenen arka plan gerekmiyor."
+          "empty": "Yinelenen arka plan gerekmiyor.",
+          "add": "Arka plan ekle",
+          "addTitle": "Yinelenen arka plan ekle",
+          "nameLabel": "Arka plan adı",
+          "promptLabel": "Üretim istemi",
+          "duplicate": "Bu ada sahip bir arka plan zaten var.",
+          "cancel": "İptal",
+          "confirm": "Arka plan ekle"
         },
         "previewPending": "Henüz bir referans adayı oluşturulmadı.",
         "previewAlt": "{{label}} için referans adayı",
@@ -1197,6 +1204,7 @@
         "undoLabel": {
           "promote_board_panel": "Paneli ilk kare olarak kullan",
           "set_reference_plan": "referans planı",
+          "amend_reference_plan": "arka plan ekle",
           "approve_reference": "referans onayı",
           "set_shot_reference_binding": "Shot referans bağlaması"
         }

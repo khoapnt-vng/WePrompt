@@ -128,6 +128,8 @@ describe('the Director preset rules', () => {
     }
     expect(DIRECTOR_PRESET_RULES).toMatch(/do not invent\s+reference IDs/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/app owns them/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/recurring background.*discovered[\s\S]*amend_reference_plan/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never replace or repeat set_reference_plan/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/request only records work for human review; it does not\s+generate media/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/approve_reference is\s+human-only and renderer-only/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/once for\s+each active Shot/i);

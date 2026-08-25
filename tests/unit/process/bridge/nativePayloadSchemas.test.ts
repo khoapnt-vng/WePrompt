@@ -1341,6 +1341,10 @@ describe('native bridge payload schemas', () => {
         { kind: 'background', label: 'Dai pai dong', prompt: 'A neon food stall.' },
       ],
     },
+    {
+      kind: 'amend_reference_plan',
+      additions: [{ kind: 'background', label: 'Night market', prompt: 'A recurring neon night market.' }],
+    },
     { kind: 'approve_reference', referenceId: 'ming', candidateAssetId: 'asset_ming_candidate' },
     {
       kind: 'set_shot_reference_binding',
@@ -1419,6 +1423,33 @@ describe('native bridge payload schemas', () => {
             ],
           },
         ],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    { kind: 'amend_reference_plan', additions: [] },
+    {
+      kind: 'amend_reference_plan',
+      additions: [{ kind: 'character', label: 'Mei', prompt: 'Mei character sheet.' }],
+    },
+    {
+      kind: 'amend_reference_plan',
+      additions: [{ id: 'caller_owned', kind: 'background', label: 'Market', prompt: 'A market.' }],
+    },
+    {
+      kind: 'amend_reference_plan',
+      additions: [
+        { kind: 'background', label: 'Market', prompt: 'A market.' },
+        { kind: 'background', label: 'Market', prompt: 'A duplicate market.' },
+      ],
+    },
+  ])('rejects invalid reference-plan amendment %#', (operation) => {
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: [operation],
       })
     ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });

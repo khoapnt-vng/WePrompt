@@ -109,6 +109,7 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   set_brief: new Set(['kind', 'brief']),
   set_rules: new Set(['kind', 'rules']),
   set_reference_plan: new Set(['kind', 'references']),
+  amend_reference_plan: new Set(['kind', 'additions']),
   approve_reference: new Set(['kind', 'referenceId', 'candidateAssetId']),
   set_shot_reference_binding: new Set(['kind', 'shotId', 'characterReferenceIds', 'backgroundReferenceId']),
   add_beat: new Set(['kind', 'beatId', 'beat', 'beforeBeatId']),
@@ -455,6 +456,15 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
       return;
     case 'set_reference_plan':
       if (!isProjectReferenceDraftArray(operation.references)) fail('invalid_operation');
+      return;
+    case 'amend_reference_plan':
+      if (
+        !isProjectReferenceDraftArray(operation.additions) ||
+        operation.additions.length === 0 ||
+        operation.additions.some((reference) => reference.kind !== 'background')
+      ) {
+        fail('invalid_operation');
+      }
       return;
     case 'approve_reference':
       if (!isSafeId(operation.referenceId) || !isSafeId(operation.candidateAssetId)) fail('invalid_operation');
@@ -1261,6 +1271,51 @@ export const applyStudioMutationBatchV2 = (
         draft.referencePlanStatus = 'planned';
         draft.referenceOrder = referenceIds;
         draft.references = references;
+        break;
+      }
+
+      case 'amend_reference_plan': {
+        if (
+          draft.referencePlanStatus !== 'planned' ||
+          draft.referenceOrder.length + operation.additions.length > STUDIO_MAX_PROJECT_REFERENCES
+        ) {
+          fail('invalid_operation');
+        }
+        const existingDrafts = draft.referenceOrder.map((referenceId) => {
+          const reference = ownValue(draft.references, referenceId);
+          if (reference === undefined) fail('invalid_operation');
+          return { kind: reference.kind, label: reference.label, prompt: reference.prompt };
+        });
+        if (!isProjectReferenceDraftArray([...existingDrafts, ...operation.additions])) {
+          fail('invalid_operation');
+        }
+        const referenceIds = operation.additions.map((_reference, referenceIndex) =>
+          createStudioProjectReferenceIdV2(draft.id, reducerContext.mutationId, operationIndex, referenceIndex)
+        );
+        if (
+          referenceIds.some(
+            (referenceId) =>
+              ownValue(draft.references, referenceId) !== undefined || draft.referenceOrder.includes(referenceId)
+          )
+        ) {
+          fail('invalid_operation');
+        }
+        touchReferenceCatalog(tracker, draft);
+        for (let referenceIndex = 0; referenceIndex < operation.additions.length; referenceIndex += 1) {
+          const reference = operation.additions[referenceIndex]!;
+          const referenceId = referenceIds[referenceIndex]!;
+          defineOwn(draft.references, referenceId, {
+            ...reference,
+            id: referenceId,
+            candidateAssetId: null,
+            approvedAssetId: null,
+            supersededAssetIds: [],
+            jobIds: [],
+            createdAt: reducerContext.capturedAt,
+            updatedAt: reducerContext.capturedAt,
+          });
+        }
+        draft.referenceOrder.push(...referenceIds);
         break;
       }
 

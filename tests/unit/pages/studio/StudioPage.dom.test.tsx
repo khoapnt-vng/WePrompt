@@ -1747,6 +1747,112 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
   });
 
+  it('adds a background from References through the shared typed amendment operation', async () => {
+    const authority = projectWithReferenceHandoff();
+    authority.references.reference_3!.approvedAssetId = 'asset_reference_3';
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1/references');
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.add',
+      })
+    );
+    fireEvent.change(
+      screen.getByLabelText('conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.nameLabel'),
+      { target: { value: 'Dai pai dong' } }
+    );
+    fireEvent.change(
+      screen.getByLabelText('conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.promptLabel'),
+      { target: { value: 'A compact food stall beneath a red awning.' } }
+    );
+
+    const amended = structuredClone(authority);
+    amended.revision = 4;
+    amended.referenceOrder.push('reference_background');
+    amended.references.reference_background = {
+      id: 'reference_background',
+      kind: 'background',
+      label: 'Dai pai dong',
+      prompt: 'A compact food stall beneath a red awning.',
+      candidateAssetId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: '2026-01-01T00:00:01.000Z',
+      updatedAt: '2026-01-01T00:00:01.000Z',
+    };
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    mockSupportedProject(amended);
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.confirm',
+      })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        operations: [
+          {
+            kind: 'amend_reference_plan',
+            additions: [
+              {
+                kind: 'background',
+                label: 'Dai pai dong',
+                prompt: 'A compact food stall beneath a red awning.',
+              },
+            ],
+          },
+        ],
+      })
+    );
+    expect(await screen.findByText('Dai pai dong')).toBeVisible();
+    expect(screen.getAllByText('Hero')).not.toHaveLength(0);
+    expect(amended.shots.shot_3!.referenceBinding).toEqual(authority.shots.shot_3!.referenceBinding);
+  });
+
+  it('keeps a refused background amendment open and leaves project authority unchanged', async () => {
+    const authority = projectWithReferenceHandoff();
+    authority.references.reference_3!.approvedAssetId = 'asset_reference_3';
+    mockSupportedProject(authority);
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.amendReferencePlanFailed' },
+    });
+    renderStudio('/studio/project_1/references');
+    await screen.findAllByText('Hero');
+    const references = capturedReferenceActions();
+
+    await expect(
+      invokeStudioAction(() =>
+        references.addBackground({ label: 'Dai pai dong', prompt: 'A compact food stall beneath a red awning.' })
+      )
+    ).resolves.toBe(false);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        {
+          kind: 'amend_reference_plan',
+          additions: [
+            {
+              kind: 'background',
+              label: 'Dai pai dong',
+              prompt: 'A compact food stall beneath a red awning.',
+            },
+          ],
+        },
+      ],
+    });
+    expect(await screen.findByText('native.amendReferencePlanFailed')).toBeVisible();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(1);
+    expect(authority.referenceOrder).toEqual(['reference_3']);
+  });
+
   it('approves the exact visible reference candidate and installs the committed revision', async () => {
     const candidate = projectWithCandidateReference();
     mockSupportedProject(candidate);

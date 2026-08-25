@@ -55,6 +55,7 @@ const binding = (overrides: Partial<ReferenceBindingWorkspaceItem> = {}): Refere
 });
 
 const createActions = (): ReferencesViewActions => ({
+  addBackground: vi.fn(async () => true),
   approve: vi.fn(async () => true),
   regenerate: vi.fn(),
   retryJob: vi.fn(async () => true),
@@ -128,6 +129,68 @@ describe('the schema-5 References workspace', () => {
     expect(screen.getByText(`${WORKFLOW_KEY}.characters.empty`)).toBeVisible();
     const card = screen.getByText('Dai pai dong').closest('[data-reference-id]');
     expect(within(card!).getByRole('button', { name: `${WORKFLOW_KEY}.regenerate` })).toBeEnabled();
+  });
+
+  it('adds the first background through the explicit typed action and closes only after success', async () => {
+    const actions = createActions();
+    vi.mocked(actions.addBackground).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+    renderWorkflow({
+      actions,
+      references: [workflowReference({ approvedAssetId: 'asset_ming_approved', candidateAssetId: null })],
+    });
+
+    expect(screen.getByText(`${WORKFLOW_KEY}.backgrounds.empty`)).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: `${WORKFLOW_KEY}.backgrounds.add` }));
+    const confirm = screen.getByRole('button', { name: `${WORKFLOW_KEY}.backgrounds.confirm` });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(`${WORKFLOW_KEY}.backgrounds.nameLabel`), {
+      target: { value: '  Dai pai dong  ' },
+    });
+    fireEvent.change(screen.getByLabelText(`${WORKFLOW_KEY}.backgrounds.promptLabel`), {
+      target: { value: '  A compact food stall beneath a red awning.  ' },
+    });
+    expect(confirm).toBeEnabled();
+
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(actions.addBackground).toHaveBeenCalledExactlyOnceWith({
+        label: 'Dai pai dong',
+        prompt: 'A compact food stall beneath a red awning.',
+      })
+    );
+    expect(screen.getByRole('dialog', { name: `${WORKFLOW_KEY}.backgrounds.addTitle` })).toBeVisible();
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(actions.addBackground).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: `${WORKFLOW_KEY}.backgrounds.addTitle` })).toBeNull()
+    );
+  });
+
+  it('blocks duplicate background names before invoking the typed action', () => {
+    const { actions } = renderWorkflow({
+      references: [
+        workflowReference({ approvedAssetId: 'asset_ming_approved', candidateAssetId: null }),
+        workflowReference({
+          id: 'reference_market',
+          kind: 'background',
+          label: 'Market',
+          approvedAssetId: null,
+          candidateAssetId: null,
+        }),
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: `${WORKFLOW_KEY}.backgrounds.add` }));
+    fireEvent.change(screen.getByLabelText(`${WORKFLOW_KEY}.backgrounds.nameLabel`), {
+      target: { value: 'Market' },
+    });
+    fireEvent.change(screen.getByLabelText(`${WORKFLOW_KEY}.backgrounds.promptLabel`), {
+      target: { value: 'A duplicate market.' },
+    });
+    expect(screen.getByText(`${WORKFLOW_KEY}.backgrounds.duplicate`)).toBeVisible();
+    expect(screen.getByRole('button', { name: `${WORKFLOW_KEY}.backgrounds.confirm` })).toBeDisabled();
+    expect(actions.addBackground).not.toHaveBeenCalled();
   });
 
   it('approves the exact visible candidate while keeping regeneration separately explicit', async () => {

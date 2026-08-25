@@ -1312,7 +1312,14 @@
           "title": "Backgrounds",
           "description": "Approve the recurring locations that keep the film visually consistent.",
           "charactersRequired": "Approve every character before reviewing backgrounds.",
-          "empty": "No recurring backgrounds are required."
+          "empty": "No recurring backgrounds are required.",
+          "add": "Add background",
+          "addTitle": "Add recurring background",
+          "nameLabel": "Background name",
+          "promptLabel": "Generation prompt",
+          "duplicate": "A background with this name already exists.",
+          "cancel": "Cancel",
+          "confirm": "Add background"
         },
         "previewPending": "A reference candidate has not been generated yet.",
         "previewAlt": "Reference candidate for {{label}}",
@@ -2016,6 +2023,7 @@
           "mutation_batch": "authoring changes",
           "unknown": "last authoring change",
           "set_reference_plan": "reference plan",
+          "amend_reference_plan": "add background",
           "approve_reference": "reference approval",
           "set_shot_reference_binding": "Shot reference binding"
         },

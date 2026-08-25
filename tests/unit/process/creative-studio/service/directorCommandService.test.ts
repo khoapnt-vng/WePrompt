@@ -126,6 +126,10 @@ describe('Studio Director schema-2 command service', () => {
       { kind: 'set_brief', brief: 'A quieter launch story.' },
       { kind: 'set_reference_plan', references: [] },
       {
+        kind: 'amend_reference_plan',
+        additions: [{ kind: 'background', label: 'Dai pai dong', prompt: 'A recurring food stall.' }],
+      },
+      {
         kind: 'set_shot_reference_binding',
         shotId: 'clip_1',
         characterReferenceIds: [],
@@ -167,6 +171,12 @@ describe('Studio Director schema-2 command service', () => {
           clip_2: { shootingScript: 'Close product reveal.' },
         },
       },
+    });
+    expect(result.project.referenceOrder).toHaveLength(1);
+    expect(result.project.references[result.project.referenceOrder[0]!]).toMatchObject({
+      kind: 'background',
+      label: 'Dai pai dong',
+      approvedAssetId: null,
     });
     expect(result.project.undoHistory.at(-1)).toMatchObject({
       id: command.commandId,
@@ -213,9 +223,16 @@ describe('Studio Director schema-2 command service', () => {
     await store.updateProjectV2(project.id, (current) => ({ ...current, name: 'Concurrent winner' }), project.revision);
 
     await expect(
-      service.apply(makeCommandV2(project, [{ kind: 'set_brief', brief: 'Must not apply' }]), APPLY_CUTOFF_MS, {
-        commitTag: 'command_v2',
-      })
+      service.apply(
+        makeCommandV2(project, [
+          {
+            kind: 'amend_reference_plan',
+            additions: [{ kind: 'background', label: 'Dai pai dong', prompt: 'Must not apply.' }],
+          },
+        ]),
+        APPLY_CUTOFF_MS,
+        { commitTag: 'command_v2' }
+      )
     ).rejects.toMatchObject({ code: 'stale_project' });
 
     expect(now).not.toHaveBeenCalled();

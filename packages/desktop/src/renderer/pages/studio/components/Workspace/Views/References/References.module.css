@@ -35,6 +35,23 @@
   gap: 4px;
 }
 
+.sectionTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.backgroundForm,
+.backgroundForm label {
+  display: grid;
+  gap: 8px;
+}
+
+.backgroundForm {
+  gap: 16px;
+}
+
 .sectionHeader p,
 .cardDescription,
 .empty,

@@ -290,6 +290,7 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   set_brief: 'direct',
   set_rules: 'operation_not_permitted',
   set_reference_plan: 'direct',
+  amend_reference_plan: 'direct',
   approve_reference: 'operation_not_permitted',
   set_shot_reference_binding: 'direct',
   add_beat: 'proposal',
@@ -617,6 +618,7 @@ const validateProposalPayloadV2 = (value: unknown): boolean => {
       value.operations.every(
         (operation) =>
           operation.kind !== 'set_reference_plan' &&
+          operation.kind !== 'amend_reference_plan' &&
           operation.kind !== 'set_shot_reference_binding' &&
           classifyStudioDirectorOperationV2(operation.kind) !== 'operation_not_permitted'
       )

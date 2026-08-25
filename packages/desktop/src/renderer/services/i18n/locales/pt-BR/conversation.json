@@ -900,7 +900,14 @@
           "title": "Cenários",
           "description": "Aprove os locais recorrentes que mantêm a consistência visual do filme.",
           "charactersRequired": "Aprove todos os personagens antes de revisar os cenários.",
-          "empty": "Nenhum cenário recorrente é necessário."
+          "empty": "Nenhum cenário recorrente é necessário.",
+          "add": "Adicionar cenário",
+          "addTitle": "Adicionar cenário recorrente",
+          "nameLabel": "Nome do cenário",
+          "promptLabel": "Prompt de geração",
+          "duplicate": "Já existe um cenário com esse nome.",
+          "cancel": "Cancelar",
+          "confirm": "Adicionar cenário"
         },
         "previewPending": "Ainda não foi gerado um candidato de referência.",
         "previewAlt": "Candidato de referência para {{label}}",
@@ -1201,6 +1208,7 @@
         "undoLabel": {
           "promote_board_panel": "Usar painel como primeiro quadro",
           "set_reference_plan": "plano de referências",
+          "amend_reference_plan": "adicionar cenário",
           "approve_reference": "aprovação da referência",
           "set_shot_reference_binding": "vínculo de referências do Shot"
         }

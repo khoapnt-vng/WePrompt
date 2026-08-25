@@ -15,6 +15,8 @@ import { ipcBridge } from '@/common';
 import {
   STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_REFERENCE_LABEL_LENGTH,
+  STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_MUTATION_OPERATIONS,
   type StudioBinItem,
@@ -1904,6 +1906,66 @@ const StudioProjectPage: React.FC<{
 
   const referenceActions = useMemo<ReferencesViewActions>(
     () => ({
+      addBackground: async ({ label, prompt }): Promise<boolean> => {
+        const current = projectRef.current;
+        const trimmedLabel = label.trim();
+        const trimmedPrompt = prompt.trim();
+        if (
+          current === null ||
+          current.referencePlanStatus !== 'planned' ||
+          current.referenceOrder.length >= STUDIO_MAX_PROJECT_REFERENCES ||
+          trimmedLabel.length === 0 ||
+          trimmedLabel.length > STUDIO_MAX_REFERENCE_LABEL_LENGTH ||
+          trimmedPrompt.length === 0 ||
+          trimmedPrompt.length > STUDIO_MAX_REFERENCE_PROMPT_LENGTH ||
+          current.referenceOrder.some((referenceId) => {
+            const reference = Object.hasOwn(current.references, referenceId)
+              ? current.references[referenceId]
+              : undefined;
+            return reference?.kind === 'background' && reference.label === trimmedLabel;
+          }) ||
+          workspacePendingRef.current ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        const previousReferenceOrder = [...current.referenceOrder];
+        const committed = await runWorkspaceCommit((latest) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: latest.id,
+            expectedRevision: latest.revision,
+            operations: [
+              {
+                kind: 'amend_reference_plan',
+                additions: [{ kind: 'background', label: trimmedLabel, prompt: trimmedPrompt }],
+              },
+            ],
+          })
+        );
+        if (!committed) return false;
+        const refreshed = projectRef.current;
+        const appendedReferenceId = refreshed?.referenceOrder[previousReferenceOrder.length];
+        const appendedReference =
+          refreshed !== null &&
+          appendedReferenceId !== undefined &&
+          Object.hasOwn(refreshed.references, appendedReferenceId)
+            ? refreshed.references[appendedReferenceId]
+            : undefined;
+        if (
+          refreshed === null ||
+          refreshed.referenceOrder.length !== previousReferenceOrder.length + 1 ||
+          previousReferenceOrder.some((referenceId, index) => refreshed.referenceOrder[index] !== referenceId) ||
+          appendedReference?.kind !== 'background' ||
+          appendedReference.label !== trimmedLabel ||
+          appendedReference.prompt !== trimmedPrompt ||
+          appendedReference.approvedAssetId !== null ||
+          appendedReference.candidateAssetId !== null
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        return true;
+      },
       approve: async (referenceId, candidateAssetId): Promise<boolean> => {
         const current = projectRef.current;
         const reference =

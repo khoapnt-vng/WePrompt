@@ -171,6 +171,16 @@ describe('Studio Director V2 command contracts', () => {
         ],
       },
       {
+        kind: 'amend_reference_plan' as const,
+        additions: [
+          {
+            kind: 'background' as const,
+            label: 'Dai pai dong',
+            prompt: 'Recurring dai-pai-dong background.',
+          },
+        ],
+      },
+      {
         kind: 'set_shot_reference_binding' as const,
         shotId: 'clip_1',
         characterReferenceIds: ['ref_ming'],
@@ -208,6 +218,7 @@ describe('Studio Director V2 command contracts', () => {
       set_brief: 'direct',
       set_rules: 'operation_not_permitted',
       set_reference_plan: 'direct',
+      amend_reference_plan: 'direct',
       approve_reference: 'operation_not_permitted',
       set_shot_reference_binding: 'direct',
       add_beat: 'proposal',
@@ -237,7 +248,7 @@ describe('Studio Director V2 command contracts', () => {
     >;
 
     expect(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2).toEqual(expected);
-    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(28);
+    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(29);
     expect(Object.isFrozen(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toBe(true);
     for (const [kind, disposition] of Object.entries(expected)) {
       expect(classifyStudioDirectorOperationV2(kind), kind).toBe(disposition);
@@ -756,6 +767,10 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     for (const operation of [
       { kind: 'park_take', shotId: 'clip_1', assetId: 'take_1' },
       { kind: 'set_hard_cut', shotId: 'shot_2', hardCut: true },
+      {
+        kind: 'amend_reference_plan',
+        additions: [{ kind: 'background', label: 'Dai pai dong', prompt: 'A recurring food stall.' }],
+      },
     ]) {
       expect(
         parseStudioProposalRecordV2({

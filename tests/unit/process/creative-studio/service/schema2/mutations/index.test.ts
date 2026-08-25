@@ -267,6 +267,10 @@ const operationSamples: StudioMutationOperationV2[] = [
   { kind: 'set_brief', brief: 'Brief' },
   { kind: 'set_rules', rules: [] },
   { kind: 'set_reference_plan', references: [] },
+  {
+    kind: 'amend_reference_plan',
+    additions: [{ kind: 'background', label: 'Market', prompt: 'A recurring night market.' }],
+  },
   { kind: 'approve_reference', referenceId: 'ref_1', candidateAssetId: 'asset_1' },
   { kind: 'set_shot_reference_binding', shotId: 'shot_1', characterReferenceIds: [], backgroundReferenceId: null },
   {
@@ -305,9 +309,9 @@ const operationSamples: StudioMutationOperationV2[] = [
 ];
 
 describe('schema-5 mutation operation contract', () => {
-  it('contains exactly the 28 current operations and validates each exact envelope', () => {
-    expect(operationSamples).toHaveLength(28);
-    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(28);
+  it('contains exactly the 29 current operations and validates each exact envelope', () => {
+    expect(operationSamples).toHaveLength(29);
+    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(29);
     for (const operation of operationSamples) expect(validateStudioMutationOperationV2(operation)).toBe(true);
   });
 
@@ -357,6 +361,15 @@ describe('schema-5 mutation operation contract', () => {
           { kind: 'background', label: 'Market', prompt: 'Market.' },
           { kind: 'character', label: 'Ming', prompt: 'Ming.' },
         ],
+      },
+      { kind: 'amend_reference_plan', additions: [] },
+      {
+        kind: 'amend_reference_plan',
+        additions: [{ kind: 'character', label: 'Ming', prompt: 'Ming.' }],
+      },
+      {
+        kind: 'amend_reference_plan',
+        additions: [{ id: 'director_id', kind: 'background', label: 'Market', prompt: 'Market.' }],
       },
       { kind: 'approve_reference', referenceId: '', candidateAssetId: 'asset_1' },
       { kind: 'approve_reference', referenceId: 'ref_1', candidateAssetId: '' },
@@ -574,6 +587,164 @@ describe('schema-5 reference lifecycle mutations', () => {
 
     const empty = apply(makeProject(), [{ kind: 'set_reference_plan', references: [] }]).project;
     expect(empty).toMatchObject({ referencePlanStatus: 'planned', referenceOrder: [], references: {} });
+  });
+
+  it('adds a background to a character-only plan without changing approvals, asset hashes, or Shot bindings', () => {
+    let project = persist(
+      apply(
+        makeProject(),
+        [
+          {
+            kind: 'set_reference_plan',
+            references: [{ kind: 'character', label: 'Ming', prompt: 'Ming character sheet.' }],
+          },
+        ],
+        'plan_ming'
+      ).project
+    );
+    const mingId = project.referenceOrder[0]!;
+    addReferenceCandidate(project, mingId, 'asset_ming_approved');
+    project = persist(
+      apply(
+        project,
+        [{ kind: 'approve_reference', referenceId: mingId, candidateAssetId: 'asset_ming_approved' }],
+        'approve_ming'
+      ).project
+    );
+    project = persist(
+      apply(
+        project,
+        [
+          {
+            kind: 'set_shot_reference_binding',
+            shotId: 'shot_1',
+            characterReferenceIds: [mingId],
+            backgroundReferenceId: null,
+          },
+        ],
+        'bind_ming'
+      ).project
+    );
+    const existingReference = structuredClone(project.references[mingId]);
+    const assets = structuredClone(project.assets);
+    const bindings = Object.fromEntries(
+      Object.entries(project.shots).map(([shotId, shot]) => [shotId, structuredClone(shot.referenceBinding)])
+    );
+    const existingOrder = [...project.referenceOrder];
+
+    const mutationId = 'add_dai_pai_dong';
+    const amended = persist(
+      apply(
+        project,
+        [
+          {
+            kind: 'amend_reference_plan',
+            additions: [
+              {
+                kind: 'background',
+                label: 'Dai pai dong',
+                prompt: 'A compact dai pai dong beneath a red awning at night.',
+              },
+            ],
+          },
+        ],
+        mutationId
+      ).project
+    );
+    const backgroundId = createStudioProjectReferenceIdV2(project.id, mutationId, 0, 0);
+
+    expect(amended.referenceOrder).toEqual([...existingOrder, backgroundId]);
+    expect(amended.references[mingId]).toEqual(existingReference);
+    expect(amended.assets).toEqual(assets);
+    expect(amended.assets.asset_ming_approved?.sha256).toBe(digest);
+    expect(
+      Object.fromEntries(Object.entries(amended.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding]))
+    ).toEqual(bindings);
+    expect(amended.references[backgroundId]).toEqual({
+      id: backgroundId,
+      kind: 'background',
+      label: 'Dai pai dong',
+      prompt: 'A compact dai pai dong beneath a red awning at night.',
+      candidateAssetId: null,
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: laterTimestamp,
+      updatedAt: laterTimestamp,
+    });
+    expect(validateStudioProjectV2(amended)).toBe(true);
+  });
+
+  it('fails duplicate, stale, and invalid reference-plan amendments atomically', () => {
+    const planned = persist(
+      apply(makeProject(), [
+        {
+          kind: 'set_reference_plan',
+          references: [
+            { kind: 'character', label: 'Ming', prompt: 'Ming character sheet.' },
+            { kind: 'background', label: 'Market', prompt: 'A recurring market.' },
+          ],
+        },
+      ]).project
+    );
+    const addition = {
+      kind: 'amend_reference_plan' as const,
+      additions: [{ kind: 'background' as const, label: 'Dai pai dong', prompt: 'A recurring food stall.' }],
+    };
+
+    expectReason(
+      planned,
+      [
+        {
+          kind: 'amend_reference_plan',
+          additions: [{ kind: 'background', label: 'Market', prompt: 'A different market prompt.' }],
+        },
+      ],
+      'invalid_operation'
+    );
+    expectReason(
+      planned,
+      [
+        {
+          kind: 'amend_reference_plan',
+          additions: [
+            { kind: 'background', label: 'Arcade', prompt: 'An old arcade.' },
+            { kind: 'background', label: 'Arcade', prompt: 'The same semantic background twice.' },
+          ],
+        },
+      ],
+      'invalid_operation'
+    );
+    expectReason(planned, [addition, addition], 'invalid_operation');
+    expectReason(makeProject(), [addition], 'invalid_operation');
+
+    for (const malformed of [
+      { kind: 'amend_reference_plan', additions: [] },
+      {
+        kind: 'amend_reference_plan',
+        additions: [{ kind: 'character', label: 'Mei', prompt: 'Mei character sheet.' }],
+      },
+      {
+        kind: 'amend_reference_plan',
+        additions: [{ kind: 'background', label: ' Arcade', prompt: 'Untrimmed label.' }],
+      },
+      {
+        kind: 'amend_reference_plan',
+        additions: [{ kind: 'background', label: 'Arcade', prompt: 'Arcade.', approvedAssetId: 'asset_injected' }],
+      },
+    ]) {
+      expect(validateStudioMutationOperationV2(malformed), JSON.stringify(malformed)).toBe(false);
+    }
+
+    const before = structuredClone(planned);
+    const staleBatch = { ...mutationBatch(planned, [addition]), expectedRevision: planned.revision - 1 };
+    expect(() =>
+      applyStudioMutationBatchV2(planned, staleBatch, {
+        mutationId: 'stale_amendment',
+        capturedAt: laterTimestamp,
+      })
+    ).toThrow(expect.objectContaining({ reasonCode: 'invalid_operation' }));
+    expect(planned).toEqual(before);
   });
 
   it('promotes only the exact candidate and retains the approved → superseded lifecycle', () => {

@@ -894,7 +894,14 @@
           "title": "背景",
           "description": "映像の一貫性を保つため、繰り返し登場する場所を承認します。",
           "charactersRequired": "背景を確認する前に、すべてのキャラクターを承認してください。",
-          "empty": "繰り返し登場する背景は必要ありません。"
+          "empty": "繰り返し登場する背景は必要ありません。",
+          "add": "背景を追加",
+          "addTitle": "繰り返し登場する背景を追加",
+          "nameLabel": "背景名",
+          "promptLabel": "生成プロンプト",
+          "duplicate": "この名前の背景はすでに存在します。",
+          "cancel": "キャンセル",
+          "confirm": "背景を追加"
         },
         "previewPending": "リファレンス候補はまだ生成されていません。",
         "previewAlt": "{{label}} のリファレンス候補",
@@ -1195,6 +1202,7 @@
         "undoLabel": {
           "promote_board_panel": "パネルを最初のフレームに使用",
           "set_reference_plan": "リファレンス計画",
+          "amend_reference_plan": "背景を追加",
           "approve_reference": "リファレンス承認",
           "set_shot_reference_binding": "Shot リファレンスのバインド"
         }

@@ -894,7 +894,14 @@
           "title": "배경",
           "description": "영상의 시각적 일관성을 유지할 반복 장소를 승인하세요.",
           "charactersRequired": "배경을 검토하기 전에 모든 캐릭터를 승인하세요.",
-          "empty": "반복되는 배경이 필요하지 않습니다."
+          "empty": "반복되는 배경이 필요하지 않습니다.",
+          "add": "배경 추가",
+          "addTitle": "반복 배경 추가",
+          "nameLabel": "배경 이름",
+          "promptLabel": "생성 프롬프트",
+          "duplicate": "이 이름의 배경이 이미 있습니다.",
+          "cancel": "취소",
+          "confirm": "배경 추가"
         },
         "previewPending": "레퍼런스 후보가 아직 생성되지 않았습니다.",
         "previewAlt": "{{label}}의 레퍼런스 후보",
@@ -1195,6 +1202,7 @@
         "undoLabel": {
           "promote_board_panel": "패널을 첫 프레임으로 사용",
           "set_reference_plan": "참조 계획",
+          "amend_reference_plan": "배경 추가",
           "approve_reference": "참조 승인",
           "set_shot_reference_binding": "Shot 참조 바인딩"
         }

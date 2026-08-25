@@ -238,6 +238,10 @@ const studioProjectReferenceDraftSchemaV2 = z4
   })
   .strict();
 
+const studioBackgroundReferenceDraftSchemaV2 = studioProjectReferenceDraftSchemaV2
+  .extend({ kind: z4.literal('background') })
+  .strict();
+
 const studioProjectReferenceDraftsSchemaV2 = z4
   .array(studioProjectReferenceDraftSchemaV2)
   .max(STUDIO_MAX_PROJECT_REFERENCES)
@@ -257,6 +261,17 @@ const studioProjectReferenceDraftsSchemaV2 = z4
     },
     { message: 'Character references must precede background references.' }
   );
+
+const studioProjectReferencePlanAdditionsSchemaV2 = z4
+  .array(studioBackgroundReferenceDraftSchemaV2)
+  .min(1)
+  .max(STUDIO_MAX_PROJECT_REFERENCES)
+  .refine(
+    (references) =>
+      new Set(references.map((reference) => `${reference.kind}\0${reference.label}`)).size === references.length,
+    { message: 'Reference labels must be unique within each kind.' }
+  )
+  .meta({ minItems: 1 });
 
 const STUDIO_FIXED_SHOT_REASONS_V2 = [
   'owned_asset',
@@ -326,6 +341,9 @@ const studioMutationOperationSchemasV2 = {
   setRules: z4.object({ kind: z4.literal('set_rules'), rules: studioRuleDraftsSchemaV2 }).strict(),
   setReferencePlan: z4
     .object({ kind: z4.literal('set_reference_plan'), references: studioProjectReferenceDraftsSchemaV2 })
+    .strict(),
+  amendReferencePlan: z4
+    .object({ kind: z4.literal('amend_reference_plan'), additions: studioProjectReferencePlanAdditionsSchemaV2 })
     .strict(),
   approveReference: z4
     .object({
@@ -472,6 +490,7 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.setBrief,
   studioMutationOperationSchemasV2.setRules,
   studioMutationOperationSchemasV2.setReferencePlan,
+  studioMutationOperationSchemasV2.amendReferencePlan,
   studioMutationOperationSchemasV2.approveReference,
   studioMutationOperationSchemasV2.setShotReferenceBinding,
   studioMutationOperationSchemasV2.addBeat,
@@ -637,7 +656,13 @@ const studioApplyEditsCapabilityRejectionV2 = (
 const operationBatchIsProposalCapableV2 = (operations: readonly StudioMutationOperationV2[]): boolean =>
   Array.isArray(operations) &&
   operations.every((operation) => {
-    if (operation.kind === 'set_reference_plan' || operation.kind === 'set_shot_reference_binding') return false;
+    if (
+      operation.kind === 'set_reference_plan' ||
+      operation.kind === 'amend_reference_plan' ||
+      operation.kind === 'set_shot_reference_binding'
+    ) {
+      return false;
+    }
     const disposition = classifyStudioDirectorOperationV2(operation?.kind);
     return disposition === 'direct' || disposition === 'proposal';
   });
@@ -1258,7 +1283,7 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. Reference planning and binding are separate Director-direct phases: first set_reference_plan, then request and human-approve canonical reference images, then read the fresh revision and set_shot_reference_binding to approved references. Beat Story and Shot Shooting-script authoring belongs in propose_storyboard for human review. approve_reference is renderer-only and never Director-callable. This never starts paid generation. A batch containing proposal-only or unavailable operations returns operation_not_permitted and is rejected atomically at capability preflight; no operation reaches command evaluation or is applied. The error reports each zero-based index. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. Reference planning and binding are separate Director-direct phases: first set_reference_plan; if a recurring background is discovered later, append it with amend_reference_plan instead of replacing the plan; then request and human-approve canonical reference images; then read the fresh revision and set_shot_reference_binding to approved references. Beat Story and Shot Shooting-script authoring belongs in propose_storyboard for human review. approve_reference is renderer-only and never Director-callable. This never starts paid generation. A batch containing proposal-only or unavailable operations returns operation_not_permitted and is rejected atomically at capability preflight; no operation reaches command evaluation or is applied. The error reports each zero-based index. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
     createStudioApplyEditsHandlerV2(config, writerDeps)

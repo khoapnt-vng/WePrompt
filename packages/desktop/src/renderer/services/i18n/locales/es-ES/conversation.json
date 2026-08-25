@@ -895,7 +895,14 @@
           "title": "Fondos",
           "description": "Aprueba las ubicaciones recurrentes que mantienen la coherencia visual de la película.",
           "charactersRequired": "Aprueba todos los personajes antes de revisar los fondos.",
-          "empty": "No se requieren fondos recurrentes."
+          "empty": "No se requieren fondos recurrentes.",
+          "add": "Añadir fondo",
+          "addTitle": "Añadir fondo recurrente",
+          "nameLabel": "Nombre del fondo",
+          "promptLabel": "Prompt de generación",
+          "duplicate": "Ya existe un fondo con este nombre.",
+          "cancel": "Cancelar",
+          "confirm": "Añadir fondo"
         },
         "previewPending": "Todavía no se ha generado un candidato de referencia.",
         "previewAlt": "Candidato de referencia para {{label}}",
@@ -1196,6 +1203,7 @@
         "undoLabel": {
           "promote_board_panel": "Usar panel como primer fotograma",
           "set_reference_plan": "plan de referencias",
+          "amend_reference_plan": "añadir fondo",
           "approve_reference": "aprobación de referencia",
           "set_shot_reference_binding": "vínculo de referencias del Shot"
         }

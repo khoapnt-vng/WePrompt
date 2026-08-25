@@ -564,6 +564,16 @@ describe('Studio Director subprocess command writer', () => {
           ],
         },
         {
+          kind: 'amend_reference_plan',
+          additions: [
+            {
+              kind: 'background',
+              label: 'Dai pai dong',
+              prompt: 'A recurring dai-pai-dong background.',
+            },
+          ],
+        },
+        {
           kind: 'set_shot_reference_binding',
           shotId: 'clip_1',
           characterReferenceIds: [],
