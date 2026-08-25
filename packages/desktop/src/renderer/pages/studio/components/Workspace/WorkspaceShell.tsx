@@ -20,7 +20,7 @@ export type WorkspaceShellProps = {
   project: StudioRendererProjectV2;
   activeView: StudioView;
   stats?: StudioBarStats;
-  reviewedOutput?: React.ReactNode;
+  reviewedOutputs?: readonly WorkspaceReviewedOutput[];
   onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
   /** The bar's primary action. It spends money, so it is the control that never leaves the bar. */
   renderAction?: React.ReactNode;
@@ -28,6 +28,8 @@ export type WorkspaceShellProps = {
   projectMenu?: React.ReactNode;
   children: React.ReactNode;
 };
+
+export type WorkspaceReviewedOutput = { id: string; content: React.ReactNode; createdAt: number };
 
 export type WorkspaceShellHandle = {
   /** Opens and focuses the Director without changing the person's persisted collapse choice. */
@@ -140,7 +142,17 @@ const clock = (seconds: number | null | undefined): string | null => {
  * rail therefore has no header of its own and its collapse control is the leftmost thing in the bar.
  */
 export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceShellProps>(function WorkspaceShell(
-  { project, activeView, stats, reviewedOutput, onDirectorProposalIntent, renderAction, notice, projectMenu, children },
+  {
+    project,
+    activeView,
+    stats,
+    reviewedOutputs,
+    onDirectorProposalIntent,
+    renderAction,
+    notice,
+    projectMenu,
+    children,
+  },
   ref
 ) {
   const { t } = useTranslation();
@@ -278,7 +290,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
       <div className={styles.panes} data-studio-panes>
         <DirectorRail
           project={project}
-          reviewedOutput={reviewedOutput}
+          reviewedOutputs={reviewedOutputs}
           onProposalIntent={onDirectorProposalIntent}
           collapsed={railCollapsed}
           contentId={railContentId}

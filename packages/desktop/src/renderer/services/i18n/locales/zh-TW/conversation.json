@@ -883,17 +883,17 @@
         "references": "參考圖"
       },
       "referenceWorkflow": {
-        "description": "先核准角色的目前標準圖，再核准重複出現背景的目前標準圖。產生分鏡或首幀之前，請將已核准的參考圖明確綁定到每個鏡頭。",
+        "description": "先產生角色的目前標準圖，再產生重複出現的背景圖。產生分鏡或首幀之前，請將目前參考圖明確綁定到每個鏡頭。",
         "generationScope": "產生範圍",
         "characters": {
           "title": "角色",
-          "description": "為每個有名字的角色核准一張目前標準圖。",
+          "description": "為每個有名字的角色產生一張目前標準圖。",
           "empty": "此故事沒有有名字的角色。現在可以檢閱背景。"
         },
         "backgrounds": {
           "title": "背景",
-          "description": "核准重複出現的場景，讓影片保持視覺一致。",
-          "charactersRequired": "請先核准所有角色，再檢閱背景。",
+          "description": "產生重複出現的場景，讓影片保持視覺一致。",
+          "charactersRequired": "請先產生所有角色，再檢閱背景。",
           "empty": "不需要重複出現的背景。",
           "add": "新增背景",
           "addTitle": "新增重複出現的背景",
@@ -903,30 +903,37 @@
           "cancel": "取消",
           "confirm": "新增背景"
         },
-        "previewPending": "尚未產生參考圖候選。",
-        "previewAlt": "{{label}} 的參考圖候選",
+        "previewPending": "尚未產生參考圖。",
+        "previewAlt": "{{label}} 的目前參考圖",
         "status": {
           "idle": "尚未產生",
           "queued": "已排入佇列",
           "running": "產生中",
           "succeeded": "已產生",
           "failed": "產生失敗",
-          "candidate": "待檢閱",
-          "approved": "已核准"
+          "current": "目前"
         },
-        "approve": "核准",
         "regenerate": "重新產生",
-        "ready": "所有必要的參考圖均已核准。可以繼續前往表格。",
-        "notReady": "核准所有必要的參考圖後才能繼續。",
+        "chooseGenerated": "選擇已產生的圖片",
+        "regeneratePromptLabel": "產生提示詞",
+        "regenerateCancel": "取消",
+        "reviewGeneration": "檢閱產生費用",
+        "generatedHistory": "已產生的圖片",
+        "historyClose": "關閉",
+        "historyPreviewAlt": "{{label}} 的已產生參考圖",
+        "historyCurrent": "目前圖片",
+        "historyChoose": "選擇此圖片",
+        "ready": "所有必要的參考都有目前圖片。可以繼續前往表格。",
+        "notReady": "產生所有必要的參考圖後才能繼續。",
         "continueToTable": "繼續前往表格",
-        "approvalProgress": "已核准 {{approved}} / {{total}} 個參考",
+        "currentProgress": "已產生 {{current}} / {{total}} 個參考",
         "bindings": {
           "title": "Shot 綁定",
-          "description": "選擇每個 Shot 的 Board 面板和首格所使用的確切已核准角色與背景。",
+          "description": "選擇每個 Shot 的 Board 面板和首格所使用的確切目前角色與背景。",
           "empty": "沒有需要綁定的使用中 Shot。",
           "shot": "Shot {{position}}",
           "unassigned": "此 Shot 尚未決定參考。",
-          "invalid": "已儲存的綁定不再有效。請選擇目前已核准的參考並重新儲存。",
+          "invalid": "已儲存的綁定不再有效。請選擇目前參考並重新儲存。",
           "capacity": "已選擇 {{count}} 個參考，但影像路由最多支援 {{limit}} 個。",
           "characters": "角色",
           "background": "背景",
@@ -1213,7 +1220,8 @@
           "promote_board_panel": "將分鏡用作首幀",
           "set_reference_plan": "參考計畫",
           "amend_reference_plan": "新增背景",
-          "approve_reference": "參考核准",
+          "set_reference_prompt": "參考提示詞",
+          "select_reference_image": "目前參考圖",
           "set_shot_reference_binding": "Shot 參考綁定"
         }
       },
@@ -1250,6 +1258,7 @@
         "confirm_other": "確認 {{count}} 次生成 · {{cost}}",
         "hideBreakdown": "隱藏每次生成",
         "showBreakdown": "顯示每次生成",
+        "conditioningFrameAlt": "{{shot}} 的條件影格",
         "routeShared": "全部使用 {{model}}",
         "group": {
           "required": "必要"

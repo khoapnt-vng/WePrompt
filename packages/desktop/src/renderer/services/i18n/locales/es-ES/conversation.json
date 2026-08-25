@@ -884,17 +884,17 @@
         "references": "Referencias"
       },
       "referenceWorkflow": {
-        "description": "Aprueba primero las imágenes canónicas de los personajes y después las imágenes canónicas de los fondos recurrentes. Vincula las referencias aprobadas a cada Shot antes de generar el Board o el primer fotograma.",
+        "description": "Genera primero las imágenes canónicas de los personajes y después las imágenes de los fondos recurrentes. Vincula las referencias actuales a cada Shot antes de generar el Board o el primer fotograma.",
         "generationScope": "Alcance de la generación",
         "characters": {
           "title": "Personajes",
-          "description": "Aprueba una imagen canónica para cada personaje con nombre.",
+          "description": "Genera una imagen canónica actual para cada personaje con nombre.",
           "empty": "Esta historia no tiene personajes con nombre. Ya se pueden revisar los fondos."
         },
         "backgrounds": {
           "title": "Fondos",
-          "description": "Aprueba las ubicaciones recurrentes que mantienen la coherencia visual de la película.",
-          "charactersRequired": "Aprueba todos los personajes antes de revisar los fondos.",
+          "description": "Genera las ubicaciones recurrentes que mantienen la coherencia visual de la película.",
+          "charactersRequired": "Genera todos los personajes antes de revisar los fondos.",
           "empty": "No se requieren fondos recurrentes.",
           "add": "Añadir fondo",
           "addTitle": "Añadir fondo recurrente",
@@ -904,30 +904,37 @@
           "cancel": "Cancelar",
           "confirm": "Añadir fondo"
         },
-        "previewPending": "Todavía no se ha generado un candidato de referencia.",
-        "previewAlt": "Candidato de referencia para {{label}}",
+        "previewPending": "Todavía no se ha generado una imagen de referencia.",
+        "previewAlt": "Imagen de referencia actual para {{label}}",
         "status": {
           "idle": "No generado",
           "queued": "En cola",
           "running": "Generando",
           "succeeded": "Generado",
           "failed": "Error de generación",
-          "candidate": "Listo para revisar",
-          "approved": "Aprobado"
+          "current": "Actual"
         },
-        "approve": "Aprobar",
         "regenerate": "Volver a generar",
-        "ready": "Todas las referencias necesarias están aprobadas. Puedes continuar a la Tabla.",
-        "notReady": "Aprueba todas las referencias necesarias para continuar.",
+        "chooseGenerated": "Elegir imagen generada",
+        "regeneratePromptLabel": "Prompt de generación",
+        "regenerateCancel": "Cancelar",
+        "reviewGeneration": "Revisar coste de generación",
+        "generatedHistory": "Imágenes generadas",
+        "historyClose": "Cerrar",
+        "historyPreviewAlt": "Imagen de referencia generada para {{label}}",
+        "historyCurrent": "Imagen actual",
+        "historyChoose": "Elegir esta imagen",
+        "ready": "Todas las referencias necesarias tienen una imagen actual. Puedes continuar a la Tabla.",
+        "notReady": "Genera todas las referencias necesarias para continuar.",
         "continueToTable": "Continuar a la Tabla",
-        "approvalProgress": "{{approved}} de {{total}} referencias aprobadas",
+        "currentProgress": "{{current}} de {{total}} referencias generadas",
         "bindings": {
           "title": "Vínculos de Shots",
-          "description": "Elige los personajes y el fondo aprobados exactos que usa cada Shot para su panel del Board y primer fotograma.",
+          "description": "Elige los personajes y el fondo actuales exactos que usa cada Shot para su panel del Board y primer fotograma.",
           "empty": "No hay Shots activos que vincular.",
           "shot": "Shot {{position}}",
           "unassigned": "Este Shot aún no tiene una decisión de referencias.",
-          "invalid": "Este vínculo guardado ya no es válido. Elige referencias aprobadas actuales y vuelve a guardarlo.",
+          "invalid": "Este vínculo guardado ya no es válido. Elige las referencias actuales y vuelve a guardarlo.",
           "capacity": "Hay {{count}} referencias seleccionadas, pero la ruta de imagen admite {{limit}}.",
           "characters": "Personajes",
           "background": "Fondo",
@@ -1214,7 +1221,8 @@
           "promote_board_panel": "Usar panel como primer fotograma",
           "set_reference_plan": "plan de referencias",
           "amend_reference_plan": "añadir fondo",
-          "approve_reference": "aprobación de referencia",
+          "set_reference_prompt": "prompt de referencia",
+          "select_reference_image": "imagen de referencia actual",
           "set_shot_reference_binding": "vínculo de referencias del Shot"
         }
       },
@@ -1251,6 +1259,7 @@
         "confirm_other": "Confirmar {{count}} generaciones · {{cost}}",
         "hideBreakdown": "Ocultar cada generación",
         "showBreakdown": "Mostrar cada generación",
+        "conditioningFrameAlt": "Fotograma de condicionamiento de {{shot}}",
         "routeShared": "Todo mediante {{model}}",
         "group": {
           "required": "Obligatorio"

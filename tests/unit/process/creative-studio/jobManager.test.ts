@@ -273,7 +273,6 @@ const createV2Harness = async (
               kind: 'character',
               label: 'Ming',
               prompt: 'Ming, late 20s, short black hair, red rain jacket.',
-              candidateAssetId: null,
               approvedAssetId: null,
               supersededAssetIds: [],
               jobIds: [],
@@ -1619,11 +1618,10 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     const loaded = await harness.store.getProjectV2(harness.project.id);
     if (loaded.status !== 'supported') throw new Error('Reference project disappeared');
     const reference = loaded.project.references.reference_character!;
-    const candidate = loaded.project.assets[reference.candidateAssetId!];
+    const candidate = loaded.project.assets[reference.approvedAssetId!];
     expect(reference).toMatchObject({
       label: 'Ming',
-      candidateAssetId: expect.any(String),
-      approvedAssetId: null,
+      approvedAssetId: expect.any(String),
       supersededAssetIds: [],
       jobIds: ['job_v2_1'],
     });

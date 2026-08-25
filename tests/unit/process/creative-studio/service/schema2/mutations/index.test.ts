@@ -256,7 +256,8 @@ const addReferenceCandidate = (project: StudioProjectV2, referenceId: string, as
   };
   project.spendAuthorizations.push(authorization);
   reference.jobIds.push(jobId);
-  reference.candidateAssetId = assetId;
+  if (reference.approvedAssetId !== null) reference.supersededAssetIds.push(reference.approvedAssetId);
+  reference.approvedAssetId = assetId;
   reference.updatedAt = laterTimestamp;
   project.revision += 1;
   expect(validateStudioProjectV2(project)).toBe(true);
@@ -271,7 +272,8 @@ const operationSamples: StudioMutationOperationV2[] = [
     kind: 'amend_reference_plan',
     additions: [{ kind: 'background', label: 'Market', prompt: 'A recurring night market.' }],
   },
-  { kind: 'approve_reference', referenceId: 'ref_1', candidateAssetId: 'asset_1' },
+  { kind: 'set_reference_prompt', referenceId: 'ref_1', prompt: 'Updated prompt' },
+  { kind: 'select_reference_image', referenceId: 'ref_1', assetId: 'asset_1' },
   { kind: 'set_shot_reference_binding', shotId: 'shot_1', characterReferenceIds: [], backgroundReferenceId: null },
   {
     kind: 'add_beat',
@@ -309,9 +311,9 @@ const operationSamples: StudioMutationOperationV2[] = [
 ];
 
 describe('schema-5 mutation operation contract', () => {
-  it('contains exactly the 29 current operations and validates each exact envelope', () => {
-    expect(operationSamples).toHaveLength(29);
-    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(29);
+  it('contains exactly the 30 current operations and validates each exact envelope', () => {
+    expect(operationSamples).toHaveLength(30);
+    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(30);
     for (const operation of operationSamples) expect(validateStudioMutationOperationV2(operation)).toBe(true);
   });
 
@@ -371,8 +373,10 @@ describe('schema-5 mutation operation contract', () => {
         kind: 'amend_reference_plan',
         additions: [{ id: 'director_id', kind: 'background', label: 'Market', prompt: 'Market.' }],
       },
-      { kind: 'approve_reference', referenceId: '', candidateAssetId: 'asset_1' },
-      { kind: 'approve_reference', referenceId: 'ref_1', candidateAssetId: '' },
+      { kind: 'set_reference_prompt', referenceId: '', prompt: 'Updated prompt' },
+      { kind: 'set_reference_prompt', referenceId: 'ref_1', prompt: '' },
+      { kind: 'select_reference_image', referenceId: '', assetId: 'asset_1' },
+      { kind: 'select_reference_image', referenceId: 'ref_1', assetId: '' },
       {
         kind: 'set_shot_reference_binding',
         shotId: '',
@@ -578,7 +582,6 @@ describe('schema-5 reference lifecycle mutations', () => {
       id: mingId,
       kind: 'character',
       label: 'Ming',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -604,13 +607,6 @@ describe('schema-5 reference lifecycle mutations', () => {
     );
     const mingId = project.referenceOrder[0]!;
     addReferenceCandidate(project, mingId, 'asset_ming_approved');
-    project = persist(
-      apply(
-        project,
-        [{ kind: 'approve_reference', referenceId: mingId, candidateAssetId: 'asset_ming_approved' }],
-        'approve_ming'
-      ).project
-    );
     project = persist(
       apply(
         project,
@@ -665,7 +661,6 @@ describe('schema-5 reference lifecycle mutations', () => {
       kind: 'background',
       label: 'Dai pai dong',
       prompt: 'A compact dai pai dong beneath a red awning at night.',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -747,7 +742,7 @@ describe('schema-5 reference lifecycle mutations', () => {
     expect(planned).toEqual(before);
   });
 
-  it('promotes only the exact candidate and retains the approved → superseded lifecycle', () => {
+  it('edits regeneration prompts and selects only an exact historical image', () => {
     let project = apply(makeProject(), [
       {
         kind: 'set_reference_plan',
@@ -757,20 +752,20 @@ describe('schema-5 reference lifecycle mutations', () => {
     const referenceId = project.referenceOrder[0]!;
     project = persist(project);
     addReferenceCandidate(project, referenceId, 'asset_candidate_1');
-    expectReason(
-      project,
-      [{ kind: 'approve_reference', referenceId, candidateAssetId: 'asset_other' }],
-      'invalid_operation'
-    );
     project = persist(
       apply(
         project,
-        [{ kind: 'approve_reference', referenceId, candidateAssetId: 'asset_candidate_1' }],
-        'approve_candidate_1'
+        [{ kind: 'set_reference_prompt', referenceId, prompt: 'Revised Ming character sheet.' }],
+        'edit_prompt'
       ).project
     );
+    expect(project.references[referenceId]?.prompt).toBe('Revised Ming character sheet.');
+    expectReason(
+      project,
+      [{ kind: 'select_reference_image', referenceId, assetId: 'asset_other' }],
+      'invalid_operation'
+    );
     expect(project.references[referenceId]).toMatchObject({
-      candidateAssetId: null,
       approvedAssetId: 'asset_candidate_1',
       supersededAssetIds: [],
     });
@@ -778,13 +773,12 @@ describe('schema-5 reference lifecycle mutations', () => {
     addReferenceCandidate(project, referenceId, 'asset_candidate_2');
     const replaced = apply(
       project,
-      [{ kind: 'approve_reference', referenceId, candidateAssetId: 'asset_candidate_2' }],
-      'approve_candidate_2'
+      [{ kind: 'select_reference_image', referenceId, assetId: 'asset_candidate_1' }],
+      'select_candidate_1'
     ).project;
     expect(replaced.references[referenceId]).toMatchObject({
-      candidateAssetId: null,
-      approvedAssetId: 'asset_candidate_2',
-      supersededAssetIds: ['asset_candidate_1'],
+      approvedAssetId: 'asset_candidate_1',
+      supersededAssetIds: ['asset_candidate_2'],
     });
   });
 
@@ -866,18 +860,7 @@ describe('schema-5 reference lifecycle mutations', () => {
     if (mingId === undefined || meiId === undefined) throw new Error('Expected two app-owned reference identities');
 
     addReferenceCandidate(project, mingId, 'asset_ming');
-    project = persist(
-      apply(
-        project,
-        [{ kind: 'approve_reference', referenceId: mingId, candidateAssetId: 'asset_ming' }],
-        'approve_ming'
-      ).project
-    );
     addReferenceCandidate(project, meiId, 'asset_mei');
-    project = persist(
-      apply(project, [{ kind: 'approve_reference', referenceId: meiId, candidateAssetId: 'asset_mei' }], 'approve_mei')
-        .project
-    );
 
     const bound = persist(
       apply(

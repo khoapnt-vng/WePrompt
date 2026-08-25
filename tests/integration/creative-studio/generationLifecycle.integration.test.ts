@@ -271,9 +271,9 @@ describe('Creative Studio generation lifecycle integration', () => {
           ? loaded.project
           : null;
       });
-      expect(
-        referenceIds.map((referenceId) => completedAfterRestart.references[referenceId]?.candidateAssetId)
-      ).toEqual([expect.any(String), expect.any(String)]);
+      expect(referenceIds.map((referenceId) => completedAfterRestart.references[referenceId]?.approvedAssetId)).toEqual(
+        [expect.any(String), expect.any(String)]
+      );
     } finally {
       service?.dispose();
       await restartedManager?.dispose().catch((): undefined => undefined);
@@ -700,8 +700,8 @@ describe('Creative Studio generation lifecycle integration', () => {
         }),
       ]);
       const successfulCandidateIds = [
-        partiallyFailed.references[mingId]?.candidateAssetId,
-        partiallyFailed.references[junId]?.candidateAssetId,
+        partiallyFailed.references[mingId]?.approvedAssetId,
+        partiallyFailed.references[junId]?.approvedAssetId,
       ];
       expect(successfulCandidateIds).toEqual([expect.any(String), expect.any(String)]);
       const successfulCandidateSnapshots = successfulCandidateIds.map((assetId) => {
@@ -710,7 +710,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         if (asset === undefined) throw new Error('Successful reference asset was missing');
         return { assetId, sha256: asset.sha256, producerJobId: asset.producerJobId };
       });
-      expect(partiallyFailed.references[failedReferenceId]?.candidateAssetId).toBeNull();
+      expect(partiallyFailed.references[failedReferenceId]?.approvedAssetId).toBeNull();
 
       service.dispose();
       service = null;
@@ -780,16 +780,14 @@ describe('Creative Studio generation lifecycle integration', () => {
         'job_partial_reference_retry',
       ]);
       expect(
-        [recovered.references[mingId]?.candidateAssetId, recovered.references[junId]?.candidateAssetId].map(
-          (assetId) => {
-            if (assetId === null || assetId === undefined) throw new Error('Recovered reference candidate was missing');
-            const asset = recovered.assets[assetId];
-            if (asset === undefined) throw new Error('Recovered reference asset was missing');
-            return { assetId, sha256: asset.sha256, producerJobId: asset.producerJobId };
-          }
-        )
+        [recovered.references[mingId]?.approvedAssetId, recovered.references[junId]?.approvedAssetId].map((assetId) => {
+          if (assetId === null || assetId === undefined) throw new Error('Recovered reference candidate was missing');
+          const asset = recovered.assets[assetId];
+          if (asset === undefined) throw new Error('Recovered reference asset was missing');
+          return { assetId, sha256: asset.sha256, producerJobId: asset.producerJobId };
+        })
       ).toEqual(successfulCandidateSnapshots);
-      expect(recovered.references[failedReferenceId]?.candidateAssetId).toEqual(expect.any(String));
+      expect(recovered.references[failedReferenceId]?.approvedAssetId).toEqual(expect.any(String));
       expect(recovered.spendAuthorizations).toHaveLength(2);
       await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
         expect.objectContaining({
@@ -970,43 +968,11 @@ describe('Creative Studio generation lifecycle integration', () => {
           return null;
         }
       });
-      const candidateBeforeRejectedBinding = structuredClone(referenceCompleted.project);
-      await expect(
-        service.applyMutations(
-          {
-            schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
-            projectId: configured.id,
-            expectedRevision: referenceCompleted.project.revision,
-            operations: [
-              {
-                kind: 'set_shot_reference_binding',
-                shotId: 'clip_lifecycle',
-                characterReferenceIds: [],
-                backgroundReferenceId: referenceId,
-              },
-            ],
-          },
-          { mutationId: 'reject_unapproved_v2_lifecycle_reference', capturedAt: new Date().toISOString() }
-        )
-      ).rejects.toMatchObject({ reasonCode: 'invalid_operation' });
-      await expect(store.getProjectV2(configured.id)).resolves.toEqual({
-        status: 'supported',
-        project: candidateBeforeRejectedBinding,
-      });
-      const approved = await service.applyMutations(
-        {
-          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
-          projectId: configured.id,
-          expectedRevision: referenceCompleted.project.revision,
-          operations: [{ kind: 'approve_reference', referenceId, candidateAssetId: referenceCompleted.assetId }],
-        },
-        { mutationId: 'approve_v2_lifecycle_reference', capturedAt: new Date().toISOString() }
-      );
       const bound = await service.applyMutations(
         {
           schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: configured.id,
-          expectedRevision: approved.project.revision,
+          expectedRevision: referenceCompleted.project.revision,
           operations: [
             {
               kind: 'set_shot_reference_binding',
@@ -1030,24 +996,24 @@ describe('Creative Studio generation lifecycle integration', () => {
         expectedRevision: bound.project.revision,
       });
       for (const delayMs of [2_000, 4_000, 8_000]) (await clock.take(delayMs)).release();
-      const replacementCandidate = await waitFor(async () => {
+      const replacementCurrent = await waitFor(async () => {
         try {
           const loaded = await store.getProjectV2(configured.id);
           if (loaded.status !== 'supported') return null;
           const job = loaded.project.jobs.job_v2_lifecycle_reference_replacement;
-          const candidateAssetId = loaded.project.references[referenceId]?.candidateAssetId;
-          return job?.status === 'succeeded' && candidateAssetId !== null && candidateAssetId !== undefined
-            ? { project: loaded.project, assetId: candidateAssetId }
+          const currentAssetId = loaded.project.references[referenceId]?.approvedAssetId;
+          return job?.status === 'succeeded' && currentAssetId !== null && currentAssetId !== undefined
+            ? { project: loaded.project, assetId: currentAssetId }
             : null;
         } catch {
           return null;
         }
       });
-      expect(replacementCandidate.assetId).not.toBe(referenceCompleted.assetId);
+      expect(replacementCurrent.assetId).not.toBe(referenceCompleted.assetId);
 
       const replacementStaleQuote = await service.prepareSubmission({
         projectId: configured.id,
-        expectedRevision: replacementCandidate.project.revision,
+        expectedRevision: replacementCurrent.project.revision,
         originReferenceHandoffId: null,
         baseChoices: [seedChoice],
         cascadeChoices: [],
@@ -1056,15 +1022,14 @@ describe('Creative Studio generation lifecycle integration', () => {
         {
           schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
           projectId: configured.id,
-          expectedRevision: replacementCandidate.project.revision,
-          operations: [{ kind: 'approve_reference', referenceId, candidateAssetId: replacementCandidate.assetId }],
+          expectedRevision: replacementCurrent.project.revision,
+          operations: [{ kind: 'select_reference_image', referenceId, assetId: referenceCompleted.assetId }],
         },
-        { mutationId: 'approve_v2_lifecycle_reference_replacement', capturedAt: new Date().toISOString() }
+        { mutationId: 'select_v2_lifecycle_reference_image', capturedAt: new Date().toISOString() }
       );
       expect(replacementApproved.project.references[referenceId]).toMatchObject({
-        candidateAssetId: null,
-        approvedAssetId: replacementCandidate.assetId,
-        supersededAssetIds: [referenceCompleted.assetId],
+        approvedAssetId: referenceCompleted.assetId,
+        supersededAssetIds: [replacementCurrent.assetId],
       });
       const afterReplacementApproval = await store.getProjectV2(configured.id);
       await expect(
@@ -1186,7 +1151,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         receiptAuthorizationId: prepared.baseOnly.id,
         shotJobIds: ['job_v2_lifecycle'],
         shotAssetIds: [primaryAssetId],
-        generationReferenceAssetIds: [replacementCandidate.assetId],
+        generationReferenceAssetIds: [referenceCompleted.assetId],
         videoAssetId: null,
         assetShotId: 'clip_lifecycle',
         mediaKind: 'image',

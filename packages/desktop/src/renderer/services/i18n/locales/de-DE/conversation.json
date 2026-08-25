@@ -884,17 +884,17 @@
         "references": "Referenzen"
       },
       "referenceWorkflow": {
-        "description": "Genehmigen Sie zuerst die kanonischen Charakterbilder und danach die kanonischen Bilder wiederkehrender Hintergründe. Binden Sie die genehmigten Referenzen an jeden Shot, bevor Sie das Board oder das erste Bild generieren.",
+        "description": "Erzeugen Sie zuerst kanonische Charakterbilder und danach Bilder wiederkehrender Hintergründe. Binden Sie die aktuellen Referenzen an jeden Shot, bevor Sie das Board oder das erste Bild generieren.",
         "generationScope": "Generierungsumfang",
         "characters": {
           "title": "Charaktere",
-          "description": "Genehmigen Sie genau ein kanonisches Bild für jeden benannten Charakter.",
+          "description": "Erzeugen Sie genau ein aktuelles kanonisches Bild für jeden benannten Charakter.",
           "empty": "Diese Geschichte enthält keine benannten Charaktere. Hintergründe können jetzt geprüft werden."
         },
         "backgrounds": {
           "title": "Hintergründe",
-          "description": "Genehmigen Sie wiederkehrende Orte, die den Film visuell konsistent halten.",
-          "charactersRequired": "Genehmigen Sie alle Charaktere, bevor Sie Hintergründe prüfen.",
+          "description": "Erzeugen Sie die wiederkehrenden Orte, die den Film visuell konsistent halten.",
+          "charactersRequired": "Erzeugen Sie alle Charaktere, bevor Sie Hintergründe prüfen.",
           "empty": "Es sind keine wiederkehrenden Hintergründe erforderlich.",
           "add": "Hintergrund hinzufügen",
           "addTitle": "Wiederkehrenden Hintergrund hinzufügen",
@@ -904,30 +904,37 @@
           "cancel": "Abbrechen",
           "confirm": "Hintergrund hinzufügen"
         },
-        "previewPending": "Es wurde noch kein Referenzkandidat erzeugt.",
-        "previewAlt": "Referenzkandidat für {{label}}",
+        "previewPending": "Es wurde noch kein Referenzbild erzeugt.",
+        "previewAlt": "Aktuelles Referenzbild für {{label}}",
         "status": {
           "idle": "Nicht erzeugt",
           "queued": "In Warteschlange",
           "running": "Wird erzeugt",
           "succeeded": "Erzeugt",
           "failed": "Erzeugung fehlgeschlagen",
-          "candidate": "Bereit zur Prüfung",
-          "approved": "Genehmigt"
+          "current": "Aktuell"
         },
-        "approve": "Genehmigen",
         "regenerate": "Neu erzeugen",
-        "ready": "Alle erforderlichen Referenzen sind genehmigt. Sie können mit der Tabelle fortfahren.",
-        "notReady": "Genehmigen Sie alle erforderlichen Referenzen, um fortzufahren.",
+        "chooseGenerated": "Erzeugtes Bild wählen",
+        "regeneratePromptLabel": "Generierungsprompt",
+        "regenerateCancel": "Abbrechen",
+        "reviewGeneration": "Generierungskosten prüfen",
+        "generatedHistory": "Erzeugte Bilder",
+        "historyClose": "Schließen",
+        "historyPreviewAlt": "Erzeugtes Referenzbild für {{label}}",
+        "historyCurrent": "Aktuelles Bild",
+        "historyChoose": "Dieses Bild wählen",
+        "ready": "Alle erforderlichen Referenzen haben ein aktuelles Bild. Sie können mit der Tabelle fortfahren.",
+        "notReady": "Erzeugen Sie alle erforderlichen Referenzen, um fortzufahren.",
         "continueToTable": "Weiter zur Tabelle",
-        "approvalProgress": "{{approved}} von {{total}} Referenzen genehmigt",
+        "currentProgress": "{{current}} von {{total}} Referenzen erzeugt",
         "bindings": {
           "title": "Shot-Zuordnungen",
-          "description": "Wähle die genehmigten Figuren und den Hintergrund, die jeder Shot für Board-Panel und erstes Bild verwendet.",
+          "description": "Wähle die exakten aktuellen Figuren und den Hintergrund, die jeder Shot für Board-Panel und erstes Bild verwendet.",
           "empty": "Es gibt keine aktiven Shots zum Zuordnen.",
           "shot": "Shot {{position}}",
           "unassigned": "Für diesen Shot wurde noch keine Referenzentscheidung getroffen.",
-          "invalid": "Diese gespeicherte Zuordnung ist nicht mehr gültig. Wähle aktuelle genehmigte Referenzen und speichere erneut.",
+          "invalid": "Diese gespeicherte Zuordnung ist nicht mehr gültig. Wähle aktuelle Referenzen und speichere erneut.",
           "capacity": "{{count}} Referenzen sind gewählt, aber die Bildroute unterstützt {{limit}}.",
           "characters": "Figuren",
           "background": "Hintergrund",
@@ -1214,7 +1221,8 @@
           "promote_board_panel": "Panel als erstes Bild verwenden",
           "set_reference_plan": "Referenzplan",
           "amend_reference_plan": "Hintergrund hinzufügen",
-          "approve_reference": "Referenzgenehmigung",
+          "set_reference_prompt": "Referenzprompt",
+          "select_reference_image": "aktuelles Referenzbild",
           "set_shot_reference_binding": "Shot-Referenzzuordnung"
         }
       },
@@ -1251,6 +1259,7 @@
         "confirm_other": "{{count}} Generierungen bestätigen · {{cost}}",
         "hideBreakdown": "Jede Generierung ausblenden",
         "showBreakdown": "Jede Generierung anzeigen",
+        "conditioningFrameAlt": "Konditionierungsbild für {{shot}}",
         "routeShared": "Alle über {{model}}",
         "group": {
           "required": "Erforderlich"

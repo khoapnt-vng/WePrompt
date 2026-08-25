@@ -34,9 +34,9 @@ const workflowReference = (overrides: Partial<ReferenceWorkspaceItem> = {}): Ref
   id: 'reference_ming',
   kind: 'character',
   label: 'Ming',
-  description: 'Red jacket and round glasses',
-  approvedAssetId: null,
-  candidateAssetId: 'asset_ming_candidate',
+  prompt: 'Red jacket and round glasses',
+  approvedAssetId: 'asset_ming_current',
+  generatedAssetIds: ['asset_ming_current'],
   generationStatus: 'succeeded',
   candidateJob: null,
   ...overrides,
@@ -56,8 +56,8 @@ const binding = (overrides: Partial<ReferenceBindingWorkspaceItem> = {}): Refere
 
 const createActions = (): ReferencesViewActions => ({
   addBackground: vi.fn(async () => true),
-  approve: vi.fn(async () => true),
-  regenerate: vi.fn(),
+  selectImage: vi.fn(async () => true),
+  regenerate: vi.fn(async () => true),
   retryJob: vi.fn(async () => true),
   retryDownload: vi.fn(async () => true),
   cancelJob: vi.fn(async () => true),
@@ -89,15 +89,16 @@ const renderWorkflow = (props: Partial<React.ComponentProps<typeof ReferencesVie
 const WORKFLOW_KEY = 'conversation.creativeStudio.workspace.referenceWorkflow';
 
 describe('the schema-5 References workspace', () => {
-  it('renders Characters before Backgrounds and disables background generation until all characters are approved', () => {
+  it('renders Characters before Backgrounds and disables background generation until all characters are generated', () => {
     const { container } = renderWorkflow({
       references: [
-        workflowReference(),
+        workflowReference({ approvedAssetId: null, generatedAssetIds: [] }),
         workflowReference({
           id: 'reference_dai_pai_dong',
           kind: 'background',
           label: 'Dai pai dong',
-          candidateAssetId: null,
+          approvedAssetId: null,
+          generatedAssetIds: [],
           generationStatus: 'idle',
         }),
       ],
@@ -120,7 +121,8 @@ describe('the schema-5 References workspace', () => {
           id: 'reference_dai_pai_dong',
           kind: 'background',
           label: 'Dai pai dong',
-          candidateAssetId: null,
+          approvedAssetId: null,
+          generatedAssetIds: [],
           generationStatus: 'idle',
         }),
       ],
@@ -136,7 +138,9 @@ describe('the schema-5 References workspace', () => {
     vi.mocked(actions.addBackground).mockResolvedValueOnce(false).mockResolvedValueOnce(true);
     renderWorkflow({
       actions,
-      references: [workflowReference({ approvedAssetId: 'asset_ming_approved', candidateAssetId: null })],
+      references: [
+        workflowReference({ approvedAssetId: 'asset_ming_current', generatedAssetIds: ['asset_ming_current'] }),
+      ],
     });
 
     expect(screen.getByText(`${WORKFLOW_KEY}.backgrounds.empty`)).toBeVisible();
@@ -170,13 +174,13 @@ describe('the schema-5 References workspace', () => {
   it('blocks duplicate background names before invoking the typed action', () => {
     const { actions } = renderWorkflow({
       references: [
-        workflowReference({ approvedAssetId: 'asset_ming_approved', candidateAssetId: null }),
+        workflowReference({ approvedAssetId: 'asset_ming_current', generatedAssetIds: ['asset_ming_current'] }),
         workflowReference({
           id: 'reference_market',
           kind: 'background',
           label: 'Market',
           approvedAssetId: null,
-          candidateAssetId: null,
+          generatedAssetIds: [],
         }),
       ],
     });
@@ -193,38 +197,55 @@ describe('the schema-5 References workspace', () => {
     expect(actions.addBackground).not.toHaveBeenCalled();
   });
 
-  it('approves the exact visible candidate while keeping regeneration separately explicit', async () => {
+  it('keeps the prompt off the card and submits an edited prompt from the regenerate review', async () => {
     const { actions } = renderWorkflow({ references: [workflowReference()] });
 
-    fireEvent.click(screen.getByRole('button', { name: `${WORKFLOW_KEY}.approve` }));
-    await waitFor(() => expect(actions.approve).toHaveBeenCalledWith('reference_ming', 'asset_ming_candidate'));
+    expect(screen.queryByDisplayValue('Red jacket and round glasses')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: `${WORKFLOW_KEY}.regenerate` }));
-    expect(actions.regenerate).toHaveBeenCalledWith('reference_ming');
+    const prompt = screen.getByLabelText(`${WORKFLOW_KEY}.regeneratePromptLabel`);
+    expect(prompt).toHaveValue('Red jacket and round glasses');
+    fireEvent.change(prompt, { target: { value: '  Red jacket, round glasses, neutral turnaround  ' } });
+    fireEvent.click(screen.getByRole('button', { name: `${WORKFLOW_KEY}.reviewGeneration` }));
+    await waitFor(() =>
+      expect(actions.regenerate).toHaveBeenCalledWith('reference_ming', 'Red jacket, round glasses, neutral turnaround')
+    );
   });
 
-  it('distinguishes a replacement candidate from the retained approved canonical image', () => {
+  it('shows one large current image and can repoint it to a generated historical image', async () => {
+    const actions = createActions();
     const { container } = renderWorkflow({
-      references: [workflowReference({ approvedAssetId: 'asset_ming_approved' })],
+      actions,
+      references: [
+        workflowReference({
+          approvedAssetId: 'asset_ming_current',
+          generatedAssetIds: ['asset_ming_current', 'asset_ming_previous'],
+        }),
+      ],
     });
 
-    expect(screen.getByText(`${WORKFLOW_KEY}.status.candidate`)).toBeVisible();
-    expect(screen.getByText(`${WORKFLOW_KEY}.status.approved`)).toBeVisible();
-    const approved = container.querySelector<HTMLElement>('[data-reference-preview="approved"]');
-    const candidate = container.querySelector<HTMLElement>('[data-reference-preview="candidate"]');
-    expect(within(approved!).getByRole('img')).toHaveAttribute('src', expect.stringContaining('asset_ming_approved'));
-    expect(within(candidate!).getByRole('img')).toHaveAttribute('src', expect.stringContaining('asset_ming_candidate'));
+    expect(container.querySelectorAll('[data-reference-preview="current"]')).toHaveLength(1);
+    expect(container.querySelector('[data-reference-preview="current"] img')).toHaveAttribute(
+      'src',
+      expect.stringContaining('asset_ming_current')
+    );
+    expect(container.querySelector('[data-fullscreen-media-frame]')).not.toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: `${WORKFLOW_KEY}.chooseGenerated` }));
+    const history = screen.getByRole('region', { name: `${WORKFLOW_KEY}.generatedHistory` });
+    const choose = within(history).getByRole('button', { name: new RegExp(`${WORKFLOW_KEY}.historyChoose`) });
+    fireEvent.click(choose);
+    await waitFor(() => expect(actions.selectImage).toHaveBeenCalledWith('reference_ming', 'asset_ming_previous'));
   });
 
-  it('shows approval progress and enables Continue to Table only from durable approval readiness', () => {
-    const references = [workflowReference()];
+  it('shows current-image progress and enables Continue to Table only from durable readiness', () => {
+    const references = [workflowReference({ approvedAssetId: null, generatedAssetIds: [] })];
     const { actions, rerender } = renderWorkflow({ references });
 
-    expect(screen.getByText(`${WORKFLOW_KEY}.approvalProgress:{"approved":0,"total":1}`)).toBeVisible();
+    expect(screen.getByText(`${WORKFLOW_KEY}.currentProgress:{"current":0,"total":1}`)).toBeVisible();
     expect(screen.getByRole('button', { name: `${WORKFLOW_KEY}.continueToTable` })).toBeDisabled();
     rerender(
       <ReferencesView
         projectId='project_1'
-        references={[workflowReference({ approvedAssetId: 'asset_ming_candidate', candidateAssetId: null })]}
+        references={[workflowReference()]}
         bindings={[]}
         maxConditioningImages={3}
         readyForTable
@@ -234,20 +255,20 @@ describe('the schema-5 References workspace', () => {
         actions={actions}
       />
     );
-    expect(screen.getByText(`${WORKFLOW_KEY}.approvalProgress:{"approved":1,"total":1}`)).toBeVisible();
+    expect(screen.getByText(`${WORKFLOW_KEY}.currentProgress:{"current":1,"total":1}`)).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: `${WORKFLOW_KEY}.continueToTable` }));
     expect(actions.continueToTable).toHaveBeenCalledTimes(1);
   });
 
   it('lists every active Shot binding and leaves unassigned/invalid rows visibly actionable', async () => {
     const references = [
-      workflowReference({ approvedAssetId: 'asset_ming_approved', candidateAssetId: null }),
+      workflowReference(),
       workflowReference({
         id: 'reference_dai_pai_dong',
         kind: 'background',
         label: 'Dai pai dong',
-        approvedAssetId: 'asset_background_approved',
-        candidateAssetId: null,
+        approvedAssetId: 'asset_background_current',
+        generatedAssetIds: ['asset_background_current'],
       }),
     ];
     const bindings = [
@@ -283,7 +304,7 @@ describe('the schema-5 References workspace', () => {
         id: `reference_${name}`,
         label: name,
         approvedAssetId: `asset_${name}`,
-        candidateAssetId: null,
+        generatedAssetIds: [`asset_${name}`],
       })
     );
     renderWorkflow({
@@ -303,7 +324,7 @@ describe('the schema-5 References workspace', () => {
 
   it('blocks duplicate regeneration while the durable candidate job is active', () => {
     renderWorkflow({
-      references: [workflowReference({ candidateAssetId: null, generationStatus: 'running' })],
+      references: [workflowReference({ approvedAssetId: null, generatedAssetIds: [], generationStatus: 'running' })],
     });
 
     expect(screen.getByText(`${WORKFLOW_KEY}.status.running`)).toBeVisible();
@@ -314,7 +335,6 @@ describe('the schema-5 References workspace', () => {
     const { actions } = renderWorkflow({
       references: [
         workflowReference({
-          candidateAssetId: null,
           generationStatus: 'failed',
           candidateJob: {
             id: 'job_reference_ming',
@@ -342,7 +362,6 @@ describe('the schema-5 References workspace', () => {
     const { actions } = renderWorkflow({
       references: [
         workflowReference({
-          candidateAssetId: null,
           generationStatus: 'failed',
           candidateJob: {
             id: 'job_reference_ming',

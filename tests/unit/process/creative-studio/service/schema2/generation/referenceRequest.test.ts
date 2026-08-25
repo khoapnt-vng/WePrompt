@@ -35,7 +35,6 @@ const reference = (overrides: Partial<StudioProjectReferenceV2> = {}): StudioPro
   kind: 'character',
   label: 'Ming',
   prompt: 'Ming, late 20s, short black hair, red rain jacket, warm illustrated style.',
-  candidateAssetId: null,
   approvedAssetId: null,
   supersededAssetIds: [],
   jobIds: [],

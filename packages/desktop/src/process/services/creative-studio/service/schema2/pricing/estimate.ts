@@ -1509,6 +1509,12 @@ const projectRendererItem = (
   const route = resolveRoute(item.routeId, item.purpose);
   if (route.choiceId !== item.routeId) fail('invalid_quote');
   const durationSeconds = rendererDurationSeconds(item);
+  const conditioningAssetId =
+    item.requestPlan.kind === 'resolved' && item.requestPlan.snapshot.conditioningInput !== null
+      ? item.requestPlan.snapshot.conditioningInput.kind === 'seed_still'
+        ? item.requestPlan.snapshot.conditioningInput.assetId
+        : item.requestPlan.snapshot.conditioningInput.frameAssetId
+      : null;
   const composition =
     item.requestPlan.kind === 'resolved'
       ? item.requestPlan.snapshot.composition
@@ -1542,6 +1548,7 @@ const projectRendererItem = (
     route: { ...route },
     generationCount: item.generationCount,
     durationSeconds,
+    conditioningAssetId,
     oneGenerationMinorUnits: amounts.oneGenerationMinorUnits,
     requestedTotalMinorUnits: amounts.requestedTotalMinorUnits,
     composition: {

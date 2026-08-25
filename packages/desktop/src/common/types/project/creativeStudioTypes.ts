@@ -330,10 +330,9 @@ export type StudioBackgroundReferenceDraftV2 = Omit<StudioReferenceDraftV2, 'kin
   kind: 'background';
 };
 
-/** Durable candidate/approval authority for one project-level reference sheet. */
+/** Durable current-image authority for one project-level reference sheet. */
 export type StudioProjectReferenceV2 = StudioReferenceDraftV2 & {
   id: string;
-  candidateAssetId: string | null;
   approvedAssetId: string | null;
   supersededAssetIds: string[];
   jobIds: string[];
@@ -648,6 +647,7 @@ export type StudioRendererQuotedGenerationV2 = {
   route: StudioRendererMediaModelRef;
   generationCount: number;
   durationSeconds: number | null;
+  conditioningAssetId: string | null;
   oneGenerationMinorUnits: number;
   requestedTotalMinorUnits: number;
   composition: StudioRendererGenerationCompositionV2;
@@ -843,7 +843,8 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'set_seed_still'
       | 'set_reference_plan'
       | 'amend_reference_plan'
-      | 'approve_reference'
+      | 'set_reference_prompt'
+      | 'select_reference_image'
       | 'set_shot_reference_binding'
       | 'promote_board_panel'
       | 'trim_shot'
@@ -1353,7 +1354,8 @@ export type StudioMutationOperationV2 =
   | { kind: 'set_rules'; rules: StudioBriefRuleDraft[] }
   | { kind: 'set_reference_plan'; references: StudioReferenceDraftV2[] }
   | { kind: 'amend_reference_plan'; additions: StudioBackgroundReferenceDraftV2[] }
-  | { kind: 'approve_reference'; referenceId: string; candidateAssetId: string }
+  | { kind: 'set_reference_prompt'; referenceId: string; prompt: string }
+  | { kind: 'select_reference_image'; referenceId: string; assetId: string }
   | {
       kind: 'set_shot_reference_binding';
       shotId: string;

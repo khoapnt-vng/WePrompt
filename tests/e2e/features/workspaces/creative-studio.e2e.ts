@@ -1758,6 +1758,10 @@ test.describe('Creative Studio workspace', () => {
       { kind: 'edit_shot', shotId: firstShotId, changes: { shootingScript: firstShootingScript } },
       { kind: 'edit_shot', shotId: secondShotId, changes: { shootingScript: secondShootingScript } },
     ]);
+    // The E2E writer runs outside Electron and can outrun Main's recursive sidecar watcher.
+    // Remounting proves the durable proposal is recovered into the Director transcript.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table', { timeout: 30_000 });
     const proposalCard = page.getByTestId(`studio-proposal-${proposalId}`);
     await expect(proposalCard).toBeVisible({ timeout: 10_000 });
     const proposalReview = proposalCard.getByTestId('studio-proposal-semantic-review');
@@ -1873,7 +1877,7 @@ test.describe('Creative Studio workspace', () => {
         .poll(
           async () => {
             const project = await readStudioProject(page, projectId);
-            return referenceIds.map((referenceId) => project.references[referenceId]?.candidateAssetId ?? null);
+            return referenceIds.map((referenceId) => project.references[referenceId]?.approvedAssetId ?? null);
           },
           { timeout: studioFakeMediaTimeoutMs }
         )
@@ -1905,28 +1909,14 @@ test.describe('Creative Studio workspace', () => {
       'data-reference-highlighted',
       'true'
     );
-    const characterCandidates = await readStableStudioProject(page, projectId);
-    const mingAssetId = characterCandidates.references[mingId]?.candidateAssetId;
-    const meiAssetId = characterCandidates.references[meiId]?.candidateAssetId;
+    const currentCharacters = await readStableStudioProject(page, projectId);
+    const mingAssetId = currentCharacters.references[mingId]?.approvedAssetId;
+    const meiAssetId = currentCharacters.references[meiId]?.approvedAssetId;
     if (mingAssetId === null || mingAssetId === undefined || meiAssetId === null || meiAssetId === undefined) {
-      throw new Error('Character reference candidates were unavailable');
+      throw new Error('Current character reference images were unavailable');
     }
-    await referencesView
-      .locator(`[data-reference-id="${mingId}"]`)
-      .getByRole('button', { name: 'Approve', exact: true })
-      .click();
-    await referencesView
-      .locator(`[data-reference-id="${meiId}"]`)
-      .getByRole('button', { name: 'Approve', exact: true })
-      .click();
-    await expect
-      .poll(async () => {
-        const project = await readStudioProject(page, projectId);
-        return [project.references[mingId]?.approvedAssetId, project.references[meiId]?.approvedAssetId];
-      })
-      .toEqual([mingAssetId, meiAssetId]);
     await expect(continueToTable).toBeDisabled();
-    const approvedCharacters = await readStableStudioProject(page, projectId);
+    const characterReferencesReady = await readStableStudioProject(page, projectId);
 
     const backgroundReview = await reviewReferenceBatch([backgroundId]);
     expect(backgroundReview.prompts).toHaveLength(1);
@@ -1938,20 +1928,13 @@ test.describe('Creative Studio workspace', () => {
       'data-reference-highlighted',
       'true'
     );
-    const backgroundCandidate = await readStableStudioProject(page, projectId);
-    expect(backgroundCandidate.revision).toBeGreaterThan(approvedCharacters.revision);
-    const backgroundAssetId = backgroundCandidate.references[backgroundId]?.candidateAssetId;
+    const currentBackground = await readStableStudioProject(page, projectId);
+    expect(currentBackground.revision).toBeGreaterThan(characterReferencesReady.revision);
+    const backgroundAssetId = currentBackground.references[backgroundId]?.approvedAssetId;
     if (backgroundAssetId === null || backgroundAssetId === undefined) {
-      throw new Error('Background reference candidate was unavailable');
+      throw new Error('Current background reference image was unavailable');
     }
-    await referencesView
-      .locator(`[data-reference-id="${backgroundId}"]`)
-      .getByRole('button', { name: 'Approve', exact: true })
-      .click();
-    await expect
-      .poll(async () => (await readStudioProject(page, projectId)).references[backgroundId]?.approvedAssetId)
-      .toBe(backgroundAssetId);
-    await expect(continueToTable).toBeDisabled();
+    await expect(continueToTable).toBeEnabled();
 
     const approved = await readStableStudioProject(page, projectId);
     const expectedReferenceAssets = [
@@ -2276,7 +2259,6 @@ test.describe('Creative Studio workspace', () => {
     expect(reloaded.references[meiId]?.approvedAssetId).toBe(meiAssetId);
     expect(reloaded.references[backgroundId]?.approvedAssetId).toBe(backgroundAssetId);
     for (const referenceId of [mingId, meiId, backgroundId]) {
-      expect(reloaded.references[referenceId]?.candidateAssetId).toBeNull();
       expect(reloaded.references[referenceId]?.supersededAssetIds).toEqual([]);
     }
     expect(reloaded.shots[firstShotId]?.referenceBinding).toEqual({

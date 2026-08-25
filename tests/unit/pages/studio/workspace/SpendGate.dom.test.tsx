@@ -414,6 +414,7 @@ const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => 
       route: { choiceId: 'image_choice', providerId: 'safe_provider', model: 'safe_model' },
       generationCount: 1,
       durationSeconds: null,
+      conditioningAssetId: null,
       oneGenerationMinorUnits: 125,
       requestedTotalMinorUnits: 125,
       composition: shotComposition('shot_1', 'seed_still', 'safe_provider', 'safe_model'),
@@ -428,6 +429,7 @@ const quote = (id: string, cascade = false): StudioRendererSubmissionQuoteV2 => 
           route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
           generationCount: 1,
           durationSeconds: 4,
+          conditioningAssetId: 'seed_shot_1',
           oneGenerationMinorUnits: 400,
           requestedTotalMinorUnits: 400,
           composition: shotComposition('shot_1', 'video_take', 'safe_video', 'video_model'),
@@ -475,6 +477,7 @@ const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
       route: { choiceId: 'image_choice', providerId: 'safe_provider', model: 'safe_model' },
       generationCount: 1,
       durationSeconds: null,
+      conditioningAssetId: null,
       oneGenerationMinorUnits: 125,
       requestedTotalMinorUnits: 125,
       composition: shotComposition('shot_2', 'seed_still', 'safe_provider', 'safe_model'),
@@ -486,6 +489,7 @@ const continuityQuote = (): StudioRendererSubmissionQuoteV2 => ({
       route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
       generationCount: 1,
       durationSeconds: 4,
+      conditioningAssetId: 'seed_shot_2',
       oneGenerationMinorUnits: 400,
       requestedTotalMinorUnits: 400,
       composition: shotComposition('shot_2', 'video_take', 'safe_video', 'video_model'),
@@ -510,6 +514,7 @@ const promotionQuote = (): StudioRendererSubmissionQuoteV2 => ({
     route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
     generationCount: 1,
     durationSeconds: 4,
+    conditioningAssetId: `seed_${shotId}`,
     oneGenerationMinorUnits: 400,
     requestedTotalMinorUnits: 400,
     composition: shotComposition(shotId, 'video_take', 'safe_video', 'video_model'),
@@ -2342,6 +2347,18 @@ describe('SpendGateModal', () => {
     expect(rows[0]).toHaveTextContent('conversation.creativeStudio.workspace.gate.purpose.seed_still');
     expect(rows[1]).toHaveTextContent('conversation.creativeStudio.workspace.gate.group.cascade');
     expect(rows[1]).toHaveTextContent('conversation.creativeStudio.workspace.gate.purpose.video_take');
+  });
+
+  it('shows the exact persisted conditioning frame beside only the generation that consumes it', async () => {
+    const modal = await openPreparedGate({ baseOnly: quote('quote_conditioning', true), withCascade: null });
+    showGateBreakdown(modal);
+
+    const image = within(modal).getByRole('img', {
+      name: /conversation\.creativeStudio\.workspace\.gate\.conditioningFrameAlt/,
+    });
+    expect(image).toHaveAttribute('data-conditioning-asset-id', 'seed_shot_1');
+    expect(image).toHaveAttribute('src', expect.stringContaining('seed_shot_1'));
+    expect(modal.querySelectorAll('[data-conditioning-asset-id]')).toHaveLength(1);
   });
 
   it('omits homogeneous group and purpose labels from each compact row', async () => {

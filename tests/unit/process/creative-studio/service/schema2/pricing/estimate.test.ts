@@ -288,7 +288,6 @@ const makePendingCharacterReference = (id: string, label: string): StudioProject
   kind: 'character',
   label,
   prompt: `A stable character sheet for ${label}.`,
-  candidateAssetId: null,
   approvedAssetId: null,
   supersededAssetIds: [],
   jobIds: [],
@@ -334,7 +333,6 @@ const makeDerivationProject = (): StudioProjectV2 => {
     kind: 'background',
     label: 'Recurring space',
     prompt: 'The same clean daylight atrium.',
-    candidateAssetId: null,
     approvedAssetId: backgroundAsset.id,
     supersededAssetIds: [],
     jobIds: [],
@@ -1275,7 +1273,6 @@ describe('schema-2 Studio estimates', () => {
         kind: 'character',
         label: 'Ming',
         prompt: 'A precise character sheet for Ming.',
-        candidateAssetId: null,
         approvedAssetId: characterA.id,
         supersededAssetIds: [],
         jobIds: [],
@@ -1287,7 +1284,6 @@ describe('schema-2 Studio estimates', () => {
         kind: 'character',
         label: 'Mei',
         prompt: 'A precise character sheet for Mei.',
-        candidateAssetId: null,
         approvedAssetId: characterB.id,
         supersededAssetIds: [],
         jobIds: [],
@@ -1392,7 +1388,6 @@ describe('schema-2 Studio estimates', () => {
       kind: 'background',
       label: 'Second recurring space',
       prompt: 'A different location that makes the Shot ambiguous.',
-      candidateAssetId: null,
       approvedAssetId: secondBackgroundAsset.id,
       supersededAssetIds: [],
       jobIds: [],
@@ -1993,6 +1988,7 @@ describe('schema-2 Studio estimates', () => {
       route: { choiceId: 'image_route', providerId: 'image-provider', model: 'image-model' },
       generationCount: 1,
       durationSeconds: null,
+      conditioningAssetId: null,
       oneGenerationMinorUnits: 25,
       requestedTotalMinorUnits: 25,
       composition: compositionFor('shot_1', 'seed_still'),
@@ -2032,6 +2028,10 @@ describe('schema-2 Studio estimates', () => {
       (routeId) => ({ choiceId: routeId, providerId: 'video-provider', model: 'video-model' })
     );
 
-    expect(projected.baseItems[0]).toMatchObject({ purpose: 'video_take', durationSeconds: 8 });
+    expect(projected.baseItems[0]).toMatchObject({
+      purpose: 'video_take',
+      durationSeconds: 8,
+      conditioningAssetId: 'take_seed',
+    });
   });
 });

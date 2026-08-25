@@ -1345,7 +1345,8 @@ describe('native bridge payload schemas', () => {
       kind: 'amend_reference_plan',
       additions: [{ kind: 'background', label: 'Night market', prompt: 'A recurring neon night market.' }],
     },
-    { kind: 'approve_reference', referenceId: 'ming', candidateAssetId: 'asset_ming_candidate' },
+    { kind: 'set_reference_prompt', referenceId: 'ming', prompt: 'Ming in a navy jacket, neutral turnaround.' },
+    { kind: 'select_reference_image', referenceId: 'ming', assetId: 'asset_ming_previous' },
     {
       kind: 'set_shot_reference_binding',
       shotId: 'shot_1',

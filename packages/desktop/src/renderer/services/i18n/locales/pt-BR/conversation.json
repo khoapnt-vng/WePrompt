@@ -889,17 +889,17 @@
         "references": "Referências"
       },
       "referenceWorkflow": {
-        "description": "Aprove primeiro as imagens canônicas dos personagens e depois as imagens canônicas dos cenários recorrentes. Vincule as referências aprovadas a cada Shot antes de gerar o Board ou o primeiro quadro.",
+        "description": "Gere primeiro as imagens canônicas dos personagens e depois as imagens dos cenários recorrentes. Vincule as referências atuais a cada Shot antes de gerar o Board ou o primeiro quadro.",
         "generationScope": "Escopo da geração",
         "characters": {
           "title": "Personagens",
-          "description": "Aprove uma imagem canônica para cada personagem com nome.",
+          "description": "Gere uma imagem canônica atual para cada personagem com nome.",
           "empty": "Esta história não tem personagens com nome. Os cenários já podem ser revisados."
         },
         "backgrounds": {
           "title": "Cenários",
-          "description": "Aprove os locais recorrentes que mantêm a consistência visual do filme.",
-          "charactersRequired": "Aprove todos os personagens antes de revisar os cenários.",
+          "description": "Gere os locais recorrentes que mantêm a consistência visual do filme.",
+          "charactersRequired": "Gere todos os personagens antes de revisar os cenários.",
           "empty": "Nenhum cenário recorrente é necessário.",
           "add": "Adicionar cenário",
           "addTitle": "Adicionar cenário recorrente",
@@ -909,30 +909,37 @@
           "cancel": "Cancelar",
           "confirm": "Adicionar cenário"
         },
-        "previewPending": "Ainda não foi gerado um candidato de referência.",
-        "previewAlt": "Candidato de referência para {{label}}",
+        "previewPending": "Ainda não foi gerada uma imagem de referência.",
+        "previewAlt": "Imagem de referência atual para {{label}}",
         "status": {
           "idle": "Não gerado",
           "queued": "Na fila",
           "running": "Gerando",
           "succeeded": "Gerado",
           "failed": "Falha na geração",
-          "candidate": "Pronto para revisão",
-          "approved": "Aprovado"
+          "current": "Atual"
         },
-        "approve": "Aprovar",
         "regenerate": "Gerar novamente",
-        "ready": "Todas as referências necessárias foram aprovadas. Você pode continuar para a Tabela.",
-        "notReady": "Aprove todas as referências necessárias para continuar.",
+        "chooseGenerated": "Escolher imagem gerada",
+        "regeneratePromptLabel": "Prompt de geração",
+        "regenerateCancel": "Cancelar",
+        "reviewGeneration": "Revisar custo de geração",
+        "generatedHistory": "Imagens geradas",
+        "historyClose": "Fechar",
+        "historyPreviewAlt": "Imagem de referência gerada para {{label}}",
+        "historyCurrent": "Imagem atual",
+        "historyChoose": "Escolher esta imagem",
+        "ready": "Todas as referências necessárias têm uma imagem atual. Você pode continuar para a Tabela.",
+        "notReady": "Gere todas as referências necessárias para continuar.",
         "continueToTable": "Continuar para a Tabela",
-        "approvalProgress": "{{approved}} de {{total}} referências aprovadas",
+        "currentProgress": "{{current}} de {{total}} referências geradas",
         "bindings": {
           "title": "Vínculos dos Shots",
-          "description": "Escolha os personagens e o fundo aprovados exatos usados por cada Shot no painel do Board e no primeiro quadro.",
+          "description": "Escolha os personagens e o fundo atuais exatos usados por cada Shot no painel do Board e no primeiro quadro.",
           "empty": "Não há Shots ativos para vincular.",
           "shot": "Shot {{position}}",
           "unassigned": "Este Shot ainda não tem uma decisão de referências.",
-          "invalid": "Este vínculo salvo não é mais válido. Escolha referências aprovadas atuais e salve novamente.",
+          "invalid": "Este vínculo salvo não é mais válido. Escolha as referências atuais e salve novamente.",
           "capacity": "{{count}} referências selecionadas, mas a rota de imagem aceita {{limit}}.",
           "characters": "Personagens",
           "background": "Fundo",
@@ -1219,7 +1226,8 @@
           "promote_board_panel": "Usar painel como primeiro quadro",
           "set_reference_plan": "plano de referências",
           "amend_reference_plan": "adicionar cenário",
-          "approve_reference": "aprovação da referência",
+          "set_reference_prompt": "prompt da referência",
+          "select_reference_image": "imagem de referência atual",
           "set_shot_reference_binding": "vínculo de referências do Shot"
         }
       },
@@ -1256,6 +1264,7 @@
         "confirm_other": "Confirmar {{count}} gerações · {{cost}}",
         "hideBreakdown": "Ocultar cada geração",
         "showBreakdown": "Mostrar cada geração",
+        "conditioningFrameAlt": "Quadro de condicionamento de {{shot}}",
         "routeShared": "Tudo por {{model}}",
         "group": {
           "required": "Obrigatório"

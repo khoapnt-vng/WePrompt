@@ -464,6 +464,45 @@ describe('MessageList', () => {
     expect(summaries[1]).toHaveTextContent('tool_call');
   });
 
+  it('places structured inline output at its chronological point inside the scrolling transcript', () => {
+    const messages = [
+      {
+        id: 'director-1',
+        type: 'text',
+        position: 'left',
+        content: { content: 'I prepared a handoff.' },
+        created_at: 1,
+      },
+      { id: 'user-1', type: 'text', position: 'right', content: { content: 'Review it' }, created_at: 3 },
+      { id: 'director-2', type: 'text', position: 'left', content: { content: 'I prepared another.' }, created_at: 5 },
+    ] as unknown as TMessage[];
+
+    render(
+      <MessageList
+        inlineItems={[
+          { id: 'handoff-1', createdAt: 2, content: <section>Reviewed handoff</section> },
+          { id: 'handoff-2', createdAt: 4, content: <section>Reviewed second handoff</section> },
+        ]}
+      />,
+      { wrapper: ({ children }) => <Wrapper messages={messages}>{children}</Wrapper> }
+    );
+
+    const transcript = screen.getByTestId('message-list-content');
+    const firstMessage = screen.getByText('I prepared a handoff.');
+    const handoff = screen.getByText('Reviewed handoff').closest('[data-message-inline-item="handoff-1"]');
+    const nextMessage = screen.getByText('Review it');
+    const secondHandoff = screen.getByText('Reviewed second handoff').closest('[data-message-inline-item="handoff-2"]');
+    const lastMessage = screen.getByText('I prepared another.');
+    expect(handoff).not.toBeNull();
+    expect(secondHandoff).not.toBeNull();
+    expect(transcript).toContainElement(handoff);
+    expect(transcript).toContainElement(secondHandoff);
+    expect(firstMessage.compareDocumentPosition(handoff!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(handoff!.compareDocumentPosition(nextMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(nextMessage.compareDocumentPosition(secondHandoff!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(secondHandoff!.compareDocumentPosition(lastMessage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('keeps file summaries and artifacts independent from a turn work summary', () => {
     useConversationArtifactsMock.mockReturnValue([
       { id: 'artifact-1', kind: 'skill_suggest', status: 'pending', created_at: 6 },

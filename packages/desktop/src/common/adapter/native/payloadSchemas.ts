@@ -499,8 +499,13 @@ const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('set_reference_plan'), references: studioV2ReferencePlanSchema }).strict(),
   z.object({ kind: z.literal('amend_reference_plan'), additions: studioV2ReferencePlanAdditionsSchema }).strict(),
   z
-    .object({ kind: z.literal('approve_reference'), referenceId: safeIdSchema, candidateAssetId: safeIdSchema })
+    .object({
+      kind: z.literal('set_reference_prompt'),
+      referenceId: safeIdSchema,
+      prompt: z.string().trim().min(1).max(STUDIO_MAX_REFERENCE_PROMPT_LENGTH),
+    })
     .strict(),
+  z.object({ kind: z.literal('select_reference_image'), referenceId: safeIdSchema, assetId: safeIdSchema }).strict(),
   z
     .object({
       kind: z.literal('set_shot_reference_binding'),

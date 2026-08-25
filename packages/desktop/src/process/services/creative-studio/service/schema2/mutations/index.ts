@@ -110,7 +110,8 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   set_rules: new Set(['kind', 'rules']),
   set_reference_plan: new Set(['kind', 'references']),
   amend_reference_plan: new Set(['kind', 'additions']),
-  approve_reference: new Set(['kind', 'referenceId', 'candidateAssetId']),
+  set_reference_prompt: new Set(['kind', 'referenceId', 'prompt']),
+  select_reference_image: new Set(['kind', 'referenceId', 'assetId']),
   set_shot_reference_binding: new Set(['kind', 'shotId', 'characterReferenceIds', 'backgroundReferenceId']),
   add_beat: new Set(['kind', 'beatId', 'beat', 'beforeBeatId']),
   edit_beat: new Set(['kind', 'beatId', 'changes']),
@@ -466,8 +467,18 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
         fail('invalid_operation');
       }
       return;
-    case 'approve_reference':
-      if (!isSafeId(operation.referenceId) || !isSafeId(operation.candidateAssetId)) fail('invalid_operation');
+    case 'set_reference_prompt':
+      if (
+        !isSafeId(operation.referenceId) ||
+        !isStringWithin(operation.prompt, STUDIO_MAX_REFERENCE_PROMPT_LENGTH) ||
+        operation.prompt.length === 0 ||
+        operation.prompt !== operation.prompt.trim()
+      ) {
+        fail('invalid_operation');
+      }
+      return;
+    case 'select_reference_image':
+      if (!isSafeId(operation.referenceId) || !isSafeId(operation.assetId)) fail('invalid_operation');
       return;
     case 'set_shot_reference_binding':
       if (
@@ -1259,7 +1270,6 @@ export const applyStudioMutationBatchV2 = (
           defineOwn(references, referenceId, {
             ...reference,
             id: referenceId,
-            candidateAssetId: null,
             approvedAssetId: null,
             supersededAssetIds: [],
             jobIds: [],
@@ -1307,7 +1317,6 @@ export const applyStudioMutationBatchV2 = (
           defineOwn(draft.references, referenceId, {
             ...reference,
             id: referenceId,
-            candidateAssetId: null,
             approvedAssetId: null,
             supersededAssetIds: [],
             jobIds: [],
@@ -1319,25 +1328,47 @@ export const applyStudioMutationBatchV2 = (
         break;
       }
 
-      case 'approve_reference': {
+      case 'set_reference_prompt': {
         const reference = ownValue(draft.references, operation.referenceId);
         if (
           draft.referencePlanStatus !== 'planned' ||
           reference === undefined ||
-          reference.candidateAssetId !== operation.candidateAssetId ||
-          !hasCanonicalProjectReferenceAsset(draft, reference.id, operation.candidateAssetId)
+          reference.prompt === operation.prompt
         ) {
           fail('invalid_operation');
         }
-        const supersededAssetIds =
-          reference.approvedAssetId === null
-            ? [...reference.supersededAssetIds]
-            : [...reference.supersededAssetIds, reference.approvedAssetId];
+        if (hasBoundNonterminalJob(draft, (job) => jobTargetsReference(job, reference.id))) {
+          fail('dependency_blocked');
+        }
         touchReferenceCatalog(tracker, draft);
         defineOwn(draft.references, reference.id, {
           ...reference,
-          candidateAssetId: null,
-          approvedAssetId: operation.candidateAssetId,
+          prompt: operation.prompt,
+          updatedAt: reducerContext.capturedAt,
+        });
+        break;
+      }
+
+      case 'select_reference_image': {
+        const reference = ownValue(draft.references, operation.referenceId);
+        if (
+          draft.referencePlanStatus !== 'planned' ||
+          reference === undefined ||
+          reference.approvedAssetId === operation.assetId ||
+          !reference.supersededAssetIds.includes(operation.assetId) ||
+          !hasCanonicalProjectReferenceAsset(draft, reference.id, operation.assetId)
+        ) {
+          fail('invalid_operation');
+        }
+        if (hasBoundNonterminalJob(draft, (job) => jobTargetsReference(job, reference.id))) {
+          fail('dependency_blocked');
+        }
+        const supersededAssetIds = reference.supersededAssetIds.filter((assetId) => assetId !== operation.assetId);
+        if (reference.approvedAssetId !== null) supersededAssetIds.push(reference.approvedAssetId);
+        touchReferenceCatalog(tracker, draft);
+        defineOwn(draft.references, reference.id, {
+          ...reference,
+          approvedAssetId: operation.assetId,
           supersededAssetIds,
           updatedAt: reducerContext.capturedAt,
         });

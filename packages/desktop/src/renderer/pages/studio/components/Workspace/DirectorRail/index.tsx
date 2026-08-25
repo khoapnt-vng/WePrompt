@@ -33,6 +33,7 @@ import { useConversationHistoryContext } from '@/renderer/hooks/context/Conversa
 import { buildContextHandoffExtraPatch } from '@/renderer/pages/conversation/contextHandoff/contextConversationUpdate';
 import { getConversationPinnedContext } from '@/renderer/pages/conversation/contextHandoff/pinnedContext';
 import AionrsChat from '@/renderer/pages/conversation/platforms/aionrs/AionrsChat';
+import type { MessageListInlineItem } from '@/renderer/pages/conversation/Messages/MessageList';
 import { useAionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
 import styles from './DirectorRail.module.css';
@@ -416,7 +417,7 @@ const withOrderedKeys = (value: unknown): unknown => {
   const record = value as Record<string, unknown>;
   return Object.fromEntries(
     Object.keys(record)
-      .sort()
+      .toSorted()
       .map((key) => [key, withOrderedKeys(record[key])])
   );
 };
@@ -491,9 +492,7 @@ const messageKeyFromError = (error: unknown, fallback: string): string =>
   error instanceof Error && SAFE_DIRECTOR_REJECTION_MESSAGE_KEYS.has(error.message) ? error.message : fallback;
 
 type DirectorAuthorityOutcome =
-  | { kind: 'trusted' }
-  | { kind: 'mismatch' }
-  | { kind: 'unavailable'; messageKey: string };
+  { kind: 'trusted' } | { kind: 'mismatch' } | { kind: 'unavailable'; messageKey: string };
 type DirectorAuthorityCheck = { snapshot: string; promise: Promise<DirectorAuthorityOutcome> };
 const directorAuthorityChecks = new Map<string, DirectorAuthorityCheck>();
 
@@ -514,12 +513,10 @@ const checkPersistedDirectorAuthority = (
         ? { kind: 'trusted' }
         : { kind: 'mismatch' };
     })
-    .catch(
-      (error): DirectorAuthorityOutcome => ({
-        kind: 'unavailable',
-        messageKey: messageKeyFromError(error, DIRECTOR_SESSION_VERIFICATION_KEY),
-      })
-    )
+    .catch((error): DirectorAuthorityOutcome => ({
+      kind: 'unavailable',
+      messageKey: messageKeyFromError(error, DIRECTOR_SESSION_VERIFICATION_KEY),
+    }))
     .then((outcome) => {
       if (outcome.kind === 'unavailable' && directorAuthorityChecks.get(key)?.promise === promise) {
         directorAuthorityChecks.delete(key);
@@ -852,8 +849,9 @@ const resolveBoundConversation = async (
 
 const DirectorConversationSurface: React.FC<{
   conversation: DirectorConversation;
+  inlineItems?: readonly MessageListInlineItem[];
   onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
-}> = ({ conversation, onProposalIntent }) => {
+}> = ({ conversation, inlineItems, onProposalIntent }) => {
   const onSelectModel = useCallback(
     async (provider: IProvider, modelName: string): Promise<boolean> => {
       const model = { ...provider, use_model: modelName } as TProviderWithModel;
@@ -867,6 +865,7 @@ const DirectorConversationSurface: React.FC<{
     <AionrsChat
       conversation_id={conversation.id}
       conversation={conversation}
+      inlineItems={inlineItems}
       workspace={conversation.extra.workspace ?? ''}
       modelSelection={modelSelection}
       session_mode={conversation.extra.session_mode}
@@ -892,7 +891,7 @@ const DirectorConversationSurface: React.FC<{
 
 export type DirectorRailProps = {
   project: StudioRendererProjectV2;
-  reviewedOutput?: React.ReactNode;
+  reviewedOutputs?: readonly MessageListInlineItem[];
   onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
   /** Owned by the shell: the collapse control lives in the app bar, not in this pane. */
   collapsed: boolean;
@@ -904,7 +903,7 @@ export type DirectorRailProps = {
 /** A single docked owner: collapsing or changing workspace views never unmounts its chat surface. */
 export const DirectorRail: React.FC<DirectorRailProps> = ({
   project,
-  reviewedOutput,
+  reviewedOutputs = [],
   onProposalIntent,
   collapsed,
   contentId,
@@ -921,6 +920,14 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
   const mountedRef = useRef(true);
   const boundResolutionVersion = useRef(0);
   const contentRef = useRef<HTMLDivElement>(null);
+  const inlineItems = useMemo<readonly MessageListInlineItem[]>(
+    () =>
+      reviewedOutputs.map((output) => ({
+        ...output,
+        id: `studio-reviewed-output-${project.id}-${output.id}`,
+      })),
+    [project.id, reviewedOutputs]
+  );
   stateRef.current = state;
   projectRef.current = project;
   conversationsRef.current = allConversations;
@@ -1230,6 +1237,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
             <DirectorConversationSurface
               key={visibleState.conversation.id}
               conversation={visibleState.conversation}
+              inlineItems={inlineItems}
               onProposalIntent={onProposalIntent}
             />
           ) : (
@@ -1253,14 +1261,23 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
                   </Button>
                 </>
               )}
+              {inlineItems.length === 0 ? null : (
+                <div className={styles.pendingOutputs} data-studio-director-pending-output-fallback>
+                  {inlineItems.map((item) => (
+                    <div
+                      key={item.id}
+                      className={styles.pendingOutput}
+                      data-message-inline-item={item.id}
+                      data-studio-director-reviewed-output
+                    >
+                      {item.content}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
-        {reviewedOutput === undefined ? null : (
-          <div className={styles.reviewedOutput} data-studio-director-reviewed-output>
-            {reviewedOutput}
-          </div>
-        )}
       </div>
     </aside>
   );

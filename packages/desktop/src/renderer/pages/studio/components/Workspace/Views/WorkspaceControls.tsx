@@ -68,15 +68,15 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       project.referenceOrder.flatMap((referenceId) => {
         const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
         if (reference?.id !== referenceId) return [];
-        const candidateAsset =
-          reference.candidateAssetId !== null && Object.hasOwn(project.assets, reference.candidateAssetId)
-            ? project.assets[reference.candidateAssetId]
+        const currentAsset =
+          reference.approvedAssetId !== null && Object.hasOwn(project.assets, reference.approvedAssetId)
+            ? project.assets[reference.approvedAssetId]
             : undefined;
         const latestReferenceJobId =
-          candidateAsset?.projectReferenceId === reference.id && candidateAsset.producerJobId !== null
-            ? candidateAsset.producerJobId
+          currentAsset?.projectReferenceId === reference.id && currentAsset.producerJobId !== null
+            ? currentAsset.producerJobId
             : ([...reference.jobIds]
-                .reverse()
+                .toReversed()
                 .find(
                   (jobId) => Object.hasOwn(project.jobs, jobId) && project.jobs[jobId]?.target.kind === 'reference'
                 ) ?? null);
@@ -93,7 +93,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           reference.jobIds.includes(candidateJob.id);
         const generationStatus: ReferenceWorkspaceItem['generationStatus'] =
           latestReferenceJobId === null
-            ? reference.candidateAssetId === null
+            ? reference.approvedAssetId === null
               ? 'idle'
               : 'succeeded'
             : !candidateJobValid
@@ -112,9 +112,12 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
             id: reference.id,
             kind: reference.kind,
             label: reference.label,
-            description: reference.prompt,
+            prompt: reference.prompt,
             approvedAssetId: reference.approvedAssetId,
-            candidateAssetId: reference.candidateAssetId,
+            generatedAssetIds: [
+              ...(reference.approvedAssetId === null ? [] : [reference.approvedAssetId]),
+              ...reference.supersededAssetIds,
+            ],
             generationStatus,
             candidateJob: candidateJobValid
               ? {
@@ -231,8 +234,8 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           actions={
             referenceActions ?? {
               addBackground: async () => false,
-              approve: async () => false,
-              regenerate: () => undefined,
+              selectImage: async () => false,
+              regenerate: async () => false,
               retryJob: async () => false,
               retryDownload: async () => false,
               cancelJob: async () => false,

@@ -679,18 +679,18 @@ describe('initCreativeStudioBridge', () => {
     }
   });
 
-  it('routes reference preparation through pricing and human approval through the mutation reducer', async () => {
+  it('routes reference preparation through pricing and current-image selection through the mutation reducer', async () => {
     initCreativeStudioBridge(dependencies);
     const prepareInput = {
       projectId: 'project_1',
       expectedRevision: 7,
       referenceIds: ['reference_character', 'reference_background'],
     };
-    const approvalInput = {
+    const selectionInput = {
       projectId: 'project_1',
       expectedRevision: 7,
       referenceId: 'reference_character',
-      candidateAssetId: 'asset_candidate',
+      assetId: 'asset_previous',
     };
 
     await expect(registeredHandler('prepareProjectReferences')(prepareInput as never)).resolves.toEqual({
@@ -699,13 +699,13 @@ describe('initCreativeStudioBridge', () => {
     });
     await expect(
       registeredHandler('applyAuthoringBatch')({
-        projectId: approvalInput.projectId,
-        expectedRevision: approvalInput.expectedRevision,
+        projectId: selectionInput.projectId,
+        expectedRevision: selectionInput.expectedRevision,
         operations: [
           {
-            kind: 'approve_reference',
-            referenceId: approvalInput.referenceId,
-            candidateAssetId: approvalInput.candidateAssetId,
+            kind: 'select_reference_image',
+            referenceId: selectionInput.referenceId,
+            assetId: selectionInput.assetId,
           },
         ],
       } as never)
@@ -721,13 +721,13 @@ describe('initCreativeStudioBridge', () => {
     expect(service.prepareProjectReferences).toHaveBeenCalledExactlyOnceWith(prepareInput);
     expect(service.applyMutations).toHaveBeenCalledWith(
       expect.objectContaining({
-        projectId: approvalInput.projectId,
-        expectedRevision: approvalInput.expectedRevision,
+        projectId: selectionInput.projectId,
+        expectedRevision: selectionInput.expectedRevision,
         operations: [
           {
-            kind: 'approve_reference',
-            referenceId: approvalInput.referenceId,
-            candidateAssetId: approvalInput.candidateAssetId,
+            kind: 'select_reference_image',
+            referenceId: selectionInput.referenceId,
+            assetId: selectionInput.assetId,
           },
         ],
       }),

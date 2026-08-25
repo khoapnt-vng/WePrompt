@@ -883,17 +883,17 @@
         "references": "参考图"
       },
       "referenceWorkflow": {
-        "description": "先批准角色的当前标准图，再批准重复出现背景的当前标准图。生成分镜或首帧之前，请将已批准的参考图明确绑定到每个镜头。",
+        "description": "先生成角色的当前标准图，再生成重复出现的背景图。生成分镜或首帧之前，请将当前参考图明确绑定到每个镜头。",
         "generationScope": "生成范围",
         "characters": {
           "title": "角色",
-          "description": "为每个有名字的角色批准一张当前标准图。",
+          "description": "为每个有名字的角色生成一张当前标准图。",
           "empty": "此故事没有有名字的角色。现在可以审核背景。"
         },
         "backgrounds": {
           "title": "背景",
-          "description": "批准重复出现的场景，让影片保持视觉一致。",
-          "charactersRequired": "请先批准所有角色，再审核背景。",
+          "description": "生成重复出现的场景，让影片保持视觉一致。",
+          "charactersRequired": "请先生成所有角色，再审核背景。",
           "empty": "不需要重复出现的背景。",
           "add": "添加背景",
           "addTitle": "添加重复出现的背景",
@@ -903,30 +903,37 @@
           "cancel": "取消",
           "confirm": "添加背景"
         },
-        "previewPending": "尚未生成参考图候选。",
-        "previewAlt": "{{label}} 的参考图候选",
+        "previewPending": "尚未生成参考图。",
+        "previewAlt": "{{label}} 的当前参考图",
         "status": {
           "idle": "尚未生成",
           "queued": "已排队",
           "running": "生成中",
           "succeeded": "已生成",
           "failed": "生成失败",
-          "candidate": "待审核",
-          "approved": "已批准"
+          "current": "当前"
         },
-        "approve": "批准",
         "regenerate": "重新生成",
-        "ready": "所有必需的参考图均已批准。可以继续前往表格。",
-        "notReady": "批准所有必需的参考图后才能继续。",
+        "chooseGenerated": "选择已生成的图片",
+        "regeneratePromptLabel": "生成提示词",
+        "regenerateCancel": "取消",
+        "reviewGeneration": "审核生成费用",
+        "generatedHistory": "已生成的图片",
+        "historyClose": "关闭",
+        "historyPreviewAlt": "{{label}} 的已生成参考图",
+        "historyCurrent": "当前图片",
+        "historyChoose": "选择此图片",
+        "ready": "所有必需的参考均有当前图片。可以继续前往表格。",
+        "notReady": "生成所有必需的参考图后才能继续。",
         "continueToTable": "继续前往表格",
-        "approvalProgress": "已批准 {{approved}} / {{total}} 个参考",
+        "currentProgress": "已生成 {{current}} / {{total}} 个参考",
         "bindings": {
           "title": "Shot 绑定",
-          "description": "选择每个 Shot 的 Board 面板和首帧所使用的确切已批准角色与背景。",
+          "description": "选择每个 Shot 的 Board 面板和首帧所使用的确切当前角色与背景。",
           "empty": "没有需要绑定的活动 Shot。",
           "shot": "Shot {{position}}",
           "unassigned": "此 Shot 尚未作出参考选择。",
-          "invalid": "已保存的绑定不再有效。请选择当前已批准的参考并重新保存。",
+          "invalid": "已保存的绑定不再有效。请选择当前参考并重新保存。",
           "capacity": "已选择 {{count}} 个参考，但图像路由最多支持 {{limit}} 个。",
           "characters": "角色",
           "background": "背景",
@@ -1213,7 +1220,8 @@
           "promote_board_panel": "将分镜用作首帧",
           "set_reference_plan": "参考计划",
           "amend_reference_plan": "添加背景",
-          "approve_reference": "参考批准",
+          "set_reference_prompt": "参考提示词",
+          "select_reference_image": "当前参考图",
           "set_shot_reference_binding": "Shot 参考绑定"
         }
       },
@@ -1250,6 +1258,7 @@
         "confirm_other": "确认 {{count}} 次生成 · {{cost}}",
         "hideBreakdown": "隐藏每次生成",
         "showBreakdown": "显示每次生成",
+        "conditioningFrameAlt": "{{shot}} 的条件帧",
         "routeShared": "全部使用 {{model}}",
         "group": {
           "required": "必需"

@@ -4045,14 +4045,17 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           if (reference === undefined || job.purpose !== 'reference_image') {
             throw new CreativeStudioMediaError('job_inactive');
           }
+          reference.supersededAssetIds = reference.supersededAssetIds.filter(
+            (supersededAssetId) => supersededAssetId !== asset.id
+          );
           if (
-            reference.candidateAssetId !== null &&
-            reference.candidateAssetId !== asset.id &&
-            !reference.supersededAssetIds.includes(reference.candidateAssetId)
+            reference.approvedAssetId !== null &&
+            reference.approvedAssetId !== asset.id &&
+            !reference.supersededAssetIds.includes(reference.approvedAssetId)
           ) {
-            reference.supersededAssetIds.push(reference.candidateAssetId);
+            reference.supersededAssetIds.push(reference.approvedAssetId);
           }
-          reference.candidateAssetId = asset.id;
+          reference.approvedAssetId = asset.id;
         }
         job.status = 'succeeded';
         job.outputAssetIds = [asset.id];

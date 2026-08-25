@@ -415,7 +415,6 @@ const addProjectReferenceRetryLineage = (
     kind: 'background',
     label: 'City skyline',
     prompt: 'A recurring city skyline.',
-    candidateAssetId: null,
     approvedAssetId: null,
     supersededAssetIds: [],
     jobIds: [],
@@ -474,7 +473,6 @@ const addApprovedProjectReference = (
       kind: referenceId.includes('character') ? 'character' : 'background',
       label: referenceId.includes('character') ? 'Character' : 'Background',
       prompt: 'Canonical reference description.',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -521,7 +519,6 @@ const addApprovedProjectReference = (
   addAuthorizationWithJobs(project, authorization, [job]);
   if (reference.approvedAssetId !== null) reference.supersededAssetIds.push(reference.approvedAssetId);
   reference.approvedAssetId = asset.id;
-  reference.candidateAssetId = null;
   return asset;
 };
 
@@ -888,7 +885,6 @@ describe('validateStudioProjectV2 total ownership and capacities', () => {
         kind: 'character',
         label: `Character ${index}`,
         prompt: `Reference description ${index}`,
-        candidateAssetId: null,
         approvedAssetId: null,
         supersededAssetIds: [],
         jobIds: [],
@@ -903,7 +899,6 @@ describe('validateStudioProjectV2 total ownership and capacities', () => {
       kind: 'background',
       label: 'Background 25',
       prompt: 'Reference description 25',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -1571,13 +1566,12 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     addFrozenReferenceJob(crossSemantic, 'ref_character_other', 'character', firstAsset);
     expect(validateStudioProjectV2(crossSemantic)).toBe(false);
 
-    const candidateOnly = makeProject();
-    const candidateAsset = addApprovedProjectReference(candidateOnly, 'ref_character_candidate', 'reference_candidate');
-    const candidateReference = candidateOnly.references.ref_character_candidate!;
-    candidateReference.candidateAssetId = candidateReference.approvedAssetId;
-    candidateReference.approvedAssetId = null;
-    addFrozenReferenceJob(candidateOnly, candidateReference.id, 'character', candidateAsset);
-    expect(validateStudioProjectV2(candidateOnly)).toBe(false);
+    const noCurrentImage = makeProject();
+    const unboundAsset = addApprovedProjectReference(noCurrentImage, 'ref_character_unbound', 'reference_unbound');
+    const unboundReference = noCurrentImage.references.ref_character_unbound!;
+    unboundReference.approvedAssetId = null;
+    addFrozenReferenceJob(noCurrentImage, unboundReference.id, 'character', unboundAsset);
+    expect(validateStudioProjectV2(noCurrentImage)).toBe(false);
 
     const wrongCollection = makeProject();
     const wrongCollectionAsset = addApprovedProjectReference(wrongCollection);
@@ -1798,7 +1792,6 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
       kind: 'character',
       label: 'Ming',
       prompt: 'Character sheet for Ming.',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -1810,7 +1803,6 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
       kind: 'character',
       label: 'Mei',
       prompt: 'Character sheet for Mei.',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],

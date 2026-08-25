@@ -232,7 +232,6 @@ describe('Creative Studio project recovery integration', () => {
           projectId: configured.id,
           expectedRevision: referenceCompleted.project.revision,
           operations: [
-            { kind: 'approve_reference', referenceId, candidateAssetId: referenceCompleted.assetId },
             {
               kind: 'set_shot_reference_binding',
               shotId: 'clip_recovery',
@@ -241,7 +240,7 @@ describe('Creative Studio project recovery integration', () => {
             },
           ],
         },
-        { mutationId: 'approve_and_bind_v2_recovery_reference', capturedAt: new Date().toISOString() }
+        { mutationId: 'bind_v2_recovery_reference', capturedAt: new Date().toISOString() }
       );
       const prepared = await beforeService.prepareSubmission({
         projectId: configured.id,

@@ -150,14 +150,14 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
   // stop passing it without a single test noticing.
   DirectorRail: ({
     project,
-    reviewedOutput,
+    reviewedOutputs = [],
     collapsed,
     contentId,
     widthPixels,
     onProposalIntent,
   }: {
     project: StudioRendererProjectV2;
-    reviewedOutput?: React.ReactNode;
+    reviewedOutputs?: readonly { id: string; content: React.ReactNode; createdAt: number }[];
     collapsed: boolean;
     contentId: string;
     widthPixels?: number;
@@ -173,8 +173,16 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
           <span tabIndex={0} data-studio-director-focus-target>
             Director focus target
           </span>
-          <div data-studio-director-conversation-owner>{project.id}</div>
-          {reviewedOutput === undefined ? null : <div data-studio-director-reviewed-output>{reviewedOutput}</div>}
+          <div data-studio-director-conversation-owner>
+            {project.id}
+            <div data-testid='message-list-content'>
+              {reviewedOutputs.map((output) => (
+                <div data-studio-director-reviewed-output={output.id} key={output.id}>
+                  {output.content}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </aside>
     );
@@ -369,7 +377,6 @@ const projectWithReferenceHandoff = (): StudioRendererProjectV2 => {
     kind: 'character',
     label: 'Hero',
     prompt: 'Stable character sheet for the hero',
-    candidateAssetId: null,
     approvedAssetId: null,
     supersededAssetIds: [],
     jobIds: [],
@@ -383,7 +390,8 @@ const projectWithReferenceHandoff = (): StudioRendererProjectV2 => {
 const projectWithCandidateReference = (): StudioRendererProjectV2 => {
   const value = projectWithReferenceHandoff();
   value.imageRouteId = 'route_image';
-  value.references.reference_3!.candidateAssetId = 'asset_reference_3';
+  value.references.reference_3!.approvedAssetId = 'asset_reference_3';
+  value.references.reference_3!.supersededAssetIds = ['asset_reference_3_old'];
   return value;
 };
 
@@ -475,7 +483,6 @@ const projectWithGenerationReferences = (
       kind,
       label,
       prompt: label,
-      candidateAssetId: assetId,
       approvedAssetId: assetId,
       supersededAssetIds: [],
       jobIds: [jobId],
@@ -530,7 +537,6 @@ const projectWithGenerationReferences = (
       kind: 'background',
       label: 'City park',
       prompt: 'City park',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -1838,7 +1844,6 @@ describe('StudioPage schema-5 cutover', () => {
       kind: 'background',
       label: 'Dai pai dong',
       prompt: 'A compact food stall beneath a red awning.',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -1916,20 +1921,42 @@ describe('StudioPage schema-5 cutover', () => {
     expect(authority.referenceOrder).toEqual(['reference_3']);
   });
 
-  it('approves the exact visible reference candidate and installs the committed revision', async () => {
+  it('rejects malformed reference prompt inputs before any mutation or spend review', async () => {
+    const authority = projectWithCandidateReference();
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    const references = capturedReferenceActions();
+
+    await expect(
+      references.addBackground({ label: 'Dai pai dong', prompt: undefined as unknown as string })
+    ).resolves.toBe(false);
+    await expect(references.regenerate('reference_3', undefined as unknown as string)).resolves.toBe(false);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+  });
+
+  it('selects an exact historical reference image and installs the committed revision', async () => {
     const candidate = projectWithCandidateReference();
     mockSupportedProject(candidate);
     renderStudio('/studio/project_1/references');
-    const approve = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.workspace.referenceWorkflow.approve',
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.chooseGenerated',
+      })
+    );
+    const choose = await screen.findByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.historyChoose/u,
     });
     const approved = structuredClone(candidate);
     approved.revision = 4;
-    approved.references.reference_3!.approvedAssetId = 'asset_reference_3';
+    approved.references.reference_3!.approvedAssetId = 'asset_reference_3_old';
+    approved.references.reference_3!.supersededAssetIds = ['asset_reference_3'];
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
     mockSupportedProject(approved);
 
-    fireEvent.click(approve);
+    fireEvent.click(choose);
 
     await waitFor(() =>
       expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
@@ -1937,22 +1964,19 @@ describe('StudioPage schema-5 cutover', () => {
         expectedRevision: 3,
         operations: [
           {
-            kind: 'approve_reference',
+            kind: 'select_reference_image',
             referenceId: 'reference_3',
-            candidateAssetId: 'asset_reference_3',
+            assetId: 'asset_reference_3_old',
           },
         ],
       })
     );
     expect(
-      await screen.findByText('conversation.creativeStudio.workspace.referenceWorkflow.status.approved')
+      await screen.findByText('conversation.creativeStudio.workspace.referenceWorkflow.status.current')
     ).toBeVisible();
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.workspace.referenceWorkflow.approve' })
-    ).toBeNull();
   });
 
-  it('fails closed across missing, refused, malformed, and stale reference approvals', async () => {
+  it('fails closed across missing, refused, malformed, and stale reference selections', async () => {
     const authority = projectWithCandidateReference();
     const missingReferenceRefresh = structuredClone(authority);
     missingReferenceRefresh.revision = 4;
@@ -1970,14 +1994,20 @@ describe('StudioPage schema-5 cutover', () => {
     await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
     const references = capturedReferenceActions();
 
-    await expect(invokeStudioAction(() => references.approve('missing_reference', 'asset_reference_3'))).resolves.toBe(
-      false
-    );
-    await expect(invokeStudioAction(() => references.approve('reference_3', 'asset_reference_3'))).resolves.toBe(false);
+    await expect(
+      invokeStudioAction(() => references.selectImage('missing_reference', 'asset_reference_3_old'))
+    ).resolves.toBe(false);
+    await expect(
+      invokeStudioAction(() => references.selectImage('reference_3', 'asset_reference_3_old'))
+    ).resolves.toBe(false);
     expect(await screen.findByText('native.approveFailed')).toBeVisible();
-    await expect(invokeStudioAction(() => references.approve('reference_3', 'asset_reference_3'))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => references.approve('reference_3', 'asset_reference_3'))).resolves.toBe(false);
-    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledTimes(3);
+    await expect(
+      invokeStudioAction(() => references.selectImage('reference_3', 'asset_reference_3_old'))
+    ).resolves.toBe(false);
+    await expect(
+      invokeStudioAction(() => references.selectImage('reference_3', 'asset_reference_3_old'))
+    ).resolves.toBe(false);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledTimes(2);
   });
 
   it('serializes Cut and reference commands behind one workspace authority lock', async () => {
@@ -2008,8 +2038,10 @@ describe('StudioPage schema-5 cutover', () => {
       ok: false,
       messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
     });
-    await expect(references.approve('reference_3', 'asset_reference_3')).resolves.toBe(false);
-    act(() => references.regenerate('reference_3'));
+    await expect(references.selectImage('reference_3', 'asset_reference_3_old')).resolves.toBe(false);
+    await act(async () => {
+      await references.regenerate('reference_3', 'Stable character sheet for the hero');
+    });
 
     expect(mocks.bridge.detachBedAudio.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.createExport.invoke).not.toHaveBeenCalled();
@@ -2035,6 +2067,11 @@ describe('StudioPage schema-5 cutover', () => {
         name: 'conversation.creativeStudio.workspace.referenceWorkflow.regenerate',
       })
     );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.reviewGeneration',
+      })
+    );
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'project_references');
     expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
@@ -2048,6 +2085,41 @@ describe('StudioPage schema-5 cutover', () => {
       })
     );
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('persists an edited reference prompt before opening review at the committed revision', async () => {
+    const authority = projectWithCandidateReference();
+    const updated = structuredClone(authority);
+    updated.revision = 4;
+    updated.updatedAt = '2026-01-01T00:00:01.000Z';
+    updated.references.reference_3!.prompt = 'Hero character sheet with a blue rain jacket';
+    updated.references.reference_3!.updatedAt = updated.updatedAt;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(updated));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().regenerate('reference_3', '  Hero character sheet with a blue rain jacket  ')
+      )
+    ).resolves.toBe(true);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        {
+          kind: 'set_reference_prompt',
+          referenceId: 'reference_3',
+          prompt: 'Hero character sheet with a blue rain jacket',
+        },
+      ],
+    });
+    expect(await screen.findByTestId('studio-spend-gate')).toBeVisible();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
   });
 
   it('discloses and blocks an exact project-reference request outside Main route capability', async () => {
@@ -2075,6 +2147,11 @@ describe('StudioPage schema-5 cutover', () => {
     fireEvent.click(
       await screen.findByRole('button', {
         name: 'conversation.creativeStudio.workspace.referenceWorkflow.regenerate',
+      })
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.reviewGeneration',
       })
     );
     const modal = await screen.findByTestId('studio-spend-gate');
@@ -2124,7 +2201,6 @@ describe('StudioPage schema-5 cutover', () => {
           kind: 'character',
           label: 'Ming',
           prompt: 'Ming in a red rain jacket.',
-          candidateAssetId: null,
           approvedAssetId: null,
           supersededAssetIds: [],
           jobIds: [],
@@ -2142,7 +2218,9 @@ describe('StudioPage schema-5 cutover', () => {
     await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
     await waitFor(() => expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalled());
 
-    act(() => capturedReferenceActions().regenerate('reference_3'));
+    await act(async () => {
+      await capturedReferenceActions().regenerate('reference_3', 'Stable character sheet for the hero');
+    });
 
     expect((await screen.findAllByText(messageKey)).length).toBeGreaterThan(0);
     expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
@@ -2160,7 +2238,9 @@ describe('StudioPage schema-5 cutover', () => {
     renderStudio('/studio/project_1/references');
     await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
 
-    act(() => capturedReferenceActions().regenerate('reference_3'));
+    await act(async () => {
+      await capturedReferenceActions().regenerate('reference_3', 'Stable character sheet for the hero');
+    });
 
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
@@ -3496,9 +3576,16 @@ describe('StudioPage schema-5 cutover', () => {
     expect(screen.getAllByTestId('studio-handoff-handoff_awaiting_spend')).toHaveLength(1);
     expect(screen.getByTestId('studio-handoff-handoff_succeeded')).toBeVisible();
     expect(screen.getByTestId('studio-handoff-handoff_dismissed')).toBeVisible();
-    const reviewedOutput = document.querySelector('[data-studio-director-reviewed-output]');
-    expect(reviewedOutput).toContainElement(screen.getByTestId('studio-proposal-proposal_1'));
-    expect(reviewedOutput).toContainElement(screen.getByTestId('studio-reference-reference_1'));
+    const transcript = screen.getByTestId('message-list-content');
+    const proposalOutput = screen
+      .getByTestId('studio-proposal-proposal_1')
+      .closest('[data-studio-director-reviewed-output]');
+    const referenceOutput = screen
+      .getByTestId('studio-reference-reference_1')
+      .closest('[data-studio-director-reviewed-output]');
+    expect(transcript).toContainElement(proposalOutput);
+    expect(transcript).toContainElement(referenceOutput);
+    expect(proposalOutput).not.toBe(referenceOutput);
   });
 
   it('refreshes running handoff progress and thumbnails when project-owned jobs change', async () => {

@@ -65,7 +65,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 14px;
   margin: 0;
   padding: 0;
@@ -93,6 +93,15 @@
   background: var(--color-border-2);
 }
 
+.fullscreenFrame {
+  min-inline-size: 0;
+}
+
+.fullscreenFrame:fullscreen .preview {
+  block-size: 100%;
+  aspect-ratio: auto;
+}
+
 .preview {
   position: relative;
   display: grid;
@@ -106,6 +115,27 @@
   inline-size: 100%;
   block-size: 100%;
   object-fit: cover;
+}
+
+.previewActions {
+  position: absolute;
+  z-index: 3;
+  inset-inline: 10px;
+  inset-block-end: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.preview:hover .previewActions,
+.preview:focus-within .previewActions {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 .previewPlaceholder {
@@ -124,6 +154,65 @@
   display: grid;
   gap: 8px;
   padding: 14px;
+}
+
+.promptReview,
+.promptReview label,
+.generatedHistory {
+  display: grid;
+  min-inline-size: 0;
+  gap: 8px;
+}
+
+.generatedHistory {
+  border-block-start: 1px solid var(--color-border-2);
+  padding-block-start: 10px;
+}
+
+.historyHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.generatedHistory ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.generatedHistory button {
+  display: grid;
+  overflow: hidden;
+  inline-size: 100%;
+  min-inline-size: 0;
+  gap: 6px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  padding: 6px;
+  color: var(--color-text-2);
+  background: var(--color-bg-2);
+  cursor: pointer;
+}
+
+.generatedHistory button[aria-current='true'] {
+  border-color: rgb(var(--primary-6));
+}
+
+.generatedHistory button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.generatedHistory img {
+  inline-size: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 4px;
+  object-fit: cover;
 }
 
 .cardTitle {
@@ -215,10 +304,19 @@
   .cardHighlighted {
     animation: none;
   }
+
+  .previewActions {
+    transition: none;
+  }
 }
 
 @media (max-width: 720px) {
   .grid {
     grid-template-columns: 1fr;
+  }
+
+  .previewActions {
+    opacity: 1;
+    transform: none;
   }
 }

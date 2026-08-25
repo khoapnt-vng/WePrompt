@@ -124,7 +124,6 @@ const project = (): StudioRendererProjectV2 => ({
       kind: 'character',
       label: 'Ming',
       prompt: 'Ming reference prompt',
-      candidateAssetId: null,
       approvedAssetId: 'asset_ming',
       supersededAssetIds: [],
       jobIds: [],

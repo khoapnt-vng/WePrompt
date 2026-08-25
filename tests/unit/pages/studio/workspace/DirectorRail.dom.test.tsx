@@ -25,8 +25,7 @@ const harness = vi.hoisted(() => ({
   chatUnmounts: 0,
   renderedChatConversation: undefined as TChatConversation | undefined,
   beforeSend: undefined as
-    | ((input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>)
-    | undefined,
+    ((input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>) | undefined,
   uuid: vi.fn(),
   descriptor: vi.fn(),
   authority: vi.fn(),
@@ -90,10 +89,12 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
     conversation_id,
     conversation,
     beforeSend,
+    inlineItems,
   }: {
     conversation_id: string;
     conversation: TChatConversation;
     beforeSend?: (input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>;
+    inlineItems?: readonly { id: string; createdAt: number; content: React.ReactNode }[];
   }) => {
     harness.renderedChatConversation = conversation;
     harness.beforeSend = beforeSend;
@@ -105,15 +106,22 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
       };
     }, []);
     return (
-      <label>
-        Director composer
-        <input
-          aria-label='Director composer'
-          data-conversation-id={conversation_id}
-          value={draft}
-          onChange={(event) => setDraft(event.currentTarget.value)}
-        />
-      </label>
+      <div data-testid='message-list-content'>
+        {inlineItems?.map((item) => (
+          <div data-studio-director-reviewed-output key={item.id}>
+            {item.content}
+          </div>
+        ))}
+        <label>
+          Director composer
+          <input
+            aria-label='Director composer'
+            data-conversation-id={conversation_id}
+            value={draft}
+            onChange={(event) => setDraft(event.currentTarget.value)}
+          />
+        </label>
+      </div>
     );
   },
 }));
@@ -363,7 +371,7 @@ describe('DirectorRail', () => {
           ? value.map(sortKeys)
           : Object.fromEntries(
               Object.keys(value as Record<string, unknown>)
-                .sort()
+                .toSorted()
                 .map((key) => [key, sortKeys((value as Record<string, unknown>)[key])])
             );
 
@@ -1124,7 +1132,9 @@ describe('DirectorRail', () => {
     const rendered = render(
       <DirectorRail
         project={project({ briefConversationId: 'conversation_director' })}
-        reviewedOutput={<button type='button'>Reviewed proposal</button>}
+        reviewedOutputs={[
+          { id: 'proposal-1', content: <button type='button'>Reviewed proposal</button>, createdAt: 1 },
+        ]}
         collapsed={false}
         contentId='director-content'
       />
@@ -1142,7 +1152,9 @@ describe('DirectorRail', () => {
     rendered.rerender(
       <DirectorRail
         project={project({ briefConversationId: 'conversation_director' })}
-        reviewedOutput={<button type='button'>Reviewed proposal</button>}
+        reviewedOutputs={[
+          { id: 'proposal-1', content: <button type='button'>Reviewed proposal</button>, createdAt: 1 },
+        ]}
         collapsed
         contentId='director-content'
       />
@@ -1156,7 +1168,9 @@ describe('DirectorRail', () => {
     expect(harness.chatMounts).toBe(1);
     expect(harness.chatUnmounts).toBe(0);
     expect(screen.getByText('Reviewed proposal')).toBeInTheDocument();
-    expect(screen.getByText('Reviewed proposal').closest('[data-studio-director-reviewed-output]')).not.toBeNull();
+    const reviewedOutput = screen.getByText('Reviewed proposal').closest('[data-studio-director-reviewed-output]');
+    expect(reviewedOutput).not.toBeNull();
+    expect(screen.getByTestId('message-list-content')).toContainElement(reviewedOutput);
     // The rail no longer carries a header of its own; the bar heads the project.
     expect(screen.queryByRole('heading', { name: 'Creative Director' })).toBeNull();
 
@@ -1484,9 +1498,23 @@ describe('DirectorRail', () => {
     harness.conversations = [];
     harness.currentModel = undefined;
     harness.modelList = [];
-    rendered.rerender(<DirectorRail project={project()} />);
+    rendered.rerender(
+      <DirectorRail
+        project={project()}
+        reviewedOutputs={[
+          { id: 'proposal-without-model', content: <button type='button'>Review proposal</button>, createdAt: 1 },
+        ]}
+      />
+    );
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Configure a text model before starting the Creative Director.'
+    );
+    const fallback = document.querySelector('[data-studio-director-pending-output-fallback]');
+    const proposal = screen.getByRole('button', { name: 'Review proposal' });
+    expect(fallback).toContainElement(proposal);
+    expect(proposal.closest('[data-message-inline-item]')).toHaveAttribute(
+      'data-message-inline-item',
+      'studio-reviewed-output-project_1-proposal-without-model'
     );
   });
 

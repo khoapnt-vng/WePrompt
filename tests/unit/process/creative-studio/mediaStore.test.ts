@@ -236,7 +236,6 @@ const makeStoreV2 = async (
               kind: 'character' as const,
               label: 'Ming',
               prompt: 'A careful engineer',
-              candidateAssetId: null,
               approvedAssetId: null,
               supersededAssetIds: [],
               jobIds: [],
@@ -982,8 +981,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       project: {
         references: {
           reference_character: {
-            candidateAssetId: 'reference_candidate_output',
-            approvedAssetId: null,
+            approvedAssetId: 'reference_candidate_output',
             supersededAssetIds: [],
           },
         },
@@ -1039,7 +1037,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       project: {
         references: {
           reference_character: {
-            candidateAssetId: 'detached_reference_candidate_output',
+            approvedAssetId: 'detached_reference_candidate_output',
           },
         },
         shots: {
@@ -1108,7 +1106,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       project: {
         assets: {},
         references: {
-          reference_character: { candidateAssetId: null, approvedAssetId: null },
+          reference_character: { approvedAssetId: null },
         },
         jobs: { job_1: { status: 'running', outputAssetIds: [] } },
       },
@@ -2932,7 +2930,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
           return current;
         });
         const projectDirectory = path.join(rootDir, project.id);
-        const entriesBefore = (await fs.readdir(projectDirectory, { recursive: true })).sort();
+        const entriesBefore = (await fs.readdir(projectDirectory, { recursive: true })).toSorted();
         const projectBefore = JSON.stringify(inactive);
         const media = createStudioMediaStore({ store, createId: () => `inactive_${binKind}_asset` });
 
@@ -2948,7 +2946,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         const loaded = await store.getProjectV2(project.id);
         expect(loaded.status).toBe('supported');
         expect(loaded.status === 'supported' ? JSON.stringify(loaded.project) : null).toBe(projectBefore);
-        expect((await fs.readdir(projectDirectory, { recursive: true })).sort()).toEqual(entriesBefore);
+        expect((await fs.readdir(projectDirectory, { recursive: true })).toSorted()).toEqual(entriesBefore);
       })
     );
   });

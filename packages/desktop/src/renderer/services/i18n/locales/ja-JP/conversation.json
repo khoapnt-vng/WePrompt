@@ -883,17 +883,17 @@
         "references": "リファレンス"
       },
       "referenceWorkflow": {
-        "description": "まずキャラクターの正規画像を承認し、次に繰り返し登場する背景の正規画像を承認します。Board または最初のフレームを生成する前に、承認済みリファレンスを各 Shot に割り当ててください。",
+        "description": "まずキャラクターの正規画像を生成し、次に繰り返し登場する背景画像を生成します。Board または最初のフレームを生成する前に、現在のリファレンスを各 Shot に割り当ててください。",
         "generationScope": "生成範囲",
         "characters": {
           "title": "キャラクター",
-          "description": "名前のある各キャラクターについて、正規画像を 1 枚承認します。",
+          "description": "名前のある各キャラクターについて、現在の正規画像を 1 枚生成します。",
           "empty": "このストーリーに名前のあるキャラクターはいません。背景を確認できます。"
         },
         "backgrounds": {
           "title": "背景",
-          "description": "映像の一貫性を保つため、繰り返し登場する場所を承認します。",
-          "charactersRequired": "背景を確認する前に、すべてのキャラクターを承認してください。",
+          "description": "映像の一貫性を保つため、繰り返し登場する場所を生成します。",
+          "charactersRequired": "背景を確認する前に、すべてのキャラクターを生成してください。",
           "empty": "繰り返し登場する背景は必要ありません。",
           "add": "背景を追加",
           "addTitle": "繰り返し登場する背景を追加",
@@ -903,30 +903,37 @@
           "cancel": "キャンセル",
           "confirm": "背景を追加"
         },
-        "previewPending": "リファレンス候補はまだ生成されていません。",
-        "previewAlt": "{{label}} のリファレンス候補",
+        "previewPending": "リファレンス画像はまだ生成されていません。",
+        "previewAlt": "{{label}} の現在のリファレンス画像",
         "status": {
           "idle": "未生成",
           "queued": "待機中",
           "running": "生成中",
           "succeeded": "生成済み",
           "failed": "生成に失敗",
-          "candidate": "確認待ち",
-          "approved": "承認済み"
+          "current": "現在"
         },
-        "approve": "承認",
         "regenerate": "再生成",
-        "ready": "必要なリファレンスがすべて承認されました。テーブルに進めます。",
-        "notReady": "続行するには、必要なリファレンスをすべて承認してください。",
+        "chooseGenerated": "生成済み画像から選択",
+        "regeneratePromptLabel": "生成プロンプト",
+        "regenerateCancel": "キャンセル",
+        "reviewGeneration": "生成費用を確認",
+        "generatedHistory": "生成済み画像",
+        "historyClose": "閉じる",
+        "historyPreviewAlt": "{{label}} の生成済みリファレンス画像",
+        "historyCurrent": "現在の画像",
+        "historyChoose": "この画像を選択",
+        "ready": "必要なリファレンスに現在の画像がすべて揃いました。テーブルに進めます。",
+        "notReady": "続行するには、必要なリファレンスをすべて生成してください。",
         "continueToTable": "テーブルに進む",
-        "approvalProgress": "{{total}} 件中 {{approved}} 件のリファレンスを承認済み",
+        "currentProgress": "{{total}} 件中 {{current}} 件のリファレンスを生成済み",
         "bindings": {
           "title": "Shot のバインド",
-          "description": "各 Shot が Board パネルと最初のフレームで使う、承認済みのキャラクターと背景を選択します。",
+          "description": "各 Shot が Board パネルと最初のフレームで使う、現在のキャラクターと背景を正確に選択します。",
           "empty": "バインドするアクティブな Shot はありません。",
           "shot": "Shot {{position}}",
           "unassigned": "この Shot のリファレンスはまだ決定されていません。",
-          "invalid": "保存済みのバインドは無効になりました。現在の承認済みリファレンスを選び、再保存してください。",
+          "invalid": "保存済みのバインドは無効になりました。現在のリファレンスを選び、再保存してください。",
           "capacity": "{{count}} 件を選択していますが、画像ルートが対応するのは {{limit}} 件です。",
           "characters": "キャラクター",
           "background": "背景",
@@ -1213,7 +1220,8 @@
           "promote_board_panel": "パネルを最初のフレームに使用",
           "set_reference_plan": "リファレンス計画",
           "amend_reference_plan": "背景を追加",
-          "approve_reference": "リファレンス承認",
+          "set_reference_prompt": "リファレンスプロンプト",
+          "select_reference_image": "現在のリファレンス画像",
           "set_shot_reference_binding": "Shot リファレンスのバインド"
         }
       },
@@ -1250,6 +1258,7 @@
         "confirm_other": "{{count}} 件の生成を確定 · {{cost}}",
         "hideBreakdown": "各生成を非表示",
         "showBreakdown": "各生成を表示",
+        "conditioningFrameAlt": "{{shot}} の条件フレーム",
         "routeShared": "すべて {{model}} を使用",
         "group": {
           "required": "必須"

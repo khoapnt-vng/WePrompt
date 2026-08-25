@@ -50,7 +50,6 @@ const reference = (
   kind,
   label: id,
   prompt: `${id} reference prompt`,
-  candidateAssetId: null,
   approvedAssetId,
   supersededAssetIds: [],
   jobIds: [],
@@ -179,18 +178,15 @@ describe('exact persisted Shot reference binding resolution', () => {
     }
   });
 
-  it('uses only the currently approved canonical asset, not a candidate or superseded asset', () => {
+  it('uses only the current canonical asset, not a superseded asset', () => {
     const value = project();
-    value.references.reference_ming!.candidateAssetId = 'asset_ming_candidate';
     value.references.reference_ming!.supersededAssetIds = ['asset_ming_old'];
-    value.assets.asset_ming_candidate = asset('asset_ming_candidate', 'reference_ming', 'd'.repeat(64));
     value.assets.asset_ming_old = asset('asset_ming_old', 'reference_ming', 'e'.repeat(64));
 
     const result = resolve(value);
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.referenceInputs[0]).toMatchObject({ assetId: 'asset_ming', sha256: 'a'.repeat(64) });
-    expect(result.referenceInputs.map((input) => input.assetId)).not.toContain('asset_ming_candidate');
     expect(result.referenceInputs.map((input) => input.assetId)).not.toContain('asset_ming_old');
   });
 

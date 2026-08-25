@@ -15,6 +15,7 @@ import type {
   StudioProjectReferenceV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST } from '@/common/types/project/creativeStudioTypes';
+import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import {
   initialSpendGateState,
   formatMinorUnits,
@@ -737,24 +738,36 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                         data-shot-id={row.target.kind === 'shot' ? row.target.shotId : undefined}
                         key={`${row.group}:${row.target.kind}:${targetId}:${row.purpose}:${index}`}
                       >
-                        <span>
-                          {mixedGroups
-                            ? `${t(
-                                `conversation.creativeStudio.workspace.gate.group.${requiredChange ? 'required' : row.group}`
-                              )} · `
-                            : null}
-                          {mixedPurposes
-                            ? `${t(`conversation.creativeStudio.workspace.gate.purpose.${row.purpose}`)} · `
-                            : null}
-                          <bdi dir='auto'>{rowIdentity}</bdi> ·{' '}
-                          {row.durationSeconds === null
-                            ? t('conversation.creativeStudio.workspace.gate.durationNotApplicable')
-                            : t('conversation.creativeStudio.workspace.gate.duration', {
-                                seconds: row.durationSeconds,
+                        <div className={styles.rowSummary}>
+                          {typeof row.conditioningAssetId !== 'string' ? null : (
+                            <img
+                              alt={t('conversation.creativeStudio.workspace.gate.conditioningFrameAlt', {
+                                shot: rowIdentity,
                               })}
-                          {' · '}
-                          {formatMoney(row.requestedTotalMinorUnits, summary.currency)}
-                        </span>
+                              className={styles.conditioningFrame}
+                              data-conditioning-asset-id={row.conditioningAssetId}
+                              src={createManagedStudioAssetUrl(summary.projectId, row.conditioningAssetId)}
+                            />
+                          )}
+                          <span>
+                            {mixedGroups
+                              ? `${t(
+                                  `conversation.creativeStudio.workspace.gate.group.${requiredChange ? 'required' : row.group}`
+                                )} · `
+                              : null}
+                            {mixedPurposes
+                              ? `${t(`conversation.creativeStudio.workspace.gate.purpose.${row.purpose}`)} · `
+                              : null}
+                            <bdi dir='auto'>{rowIdentity}</bdi> ·{' '}
+                            {row.durationSeconds === null
+                              ? t('conversation.creativeStudio.workspace.gate.durationNotApplicable')
+                              : t('conversation.creativeStudio.workspace.gate.duration', {
+                                  seconds: row.durationSeconds,
+                                })}
+                            {' · '}
+                            {formatMoney(row.requestedTotalMinorUnits, summary.currency)}
+                          </span>
+                        </div>
                         {sharedRoute === null ? (
                           <bdi dir='auto'>
                             {t('conversation.creativeStudio.workspace.gate.route', {

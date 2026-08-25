@@ -109,14 +109,14 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/cannot approve or reject your own proposal/i);
   });
 
-  it('spells out the ordered app-owned approved-reference workflow', () => {
+  it('spells out the ordered app-owned current-reference workflow', () => {
     const orderedSteps = [
       'Call read_storyboard at the agreed revision',
       'set_reference_plan through studio_apply_edits',
       'Request character reference images first',
-      'approve character candidates',
+      'confirm character generation spend',
       'request background reference images',
-      'approve background candidates',
+      'confirm background generation spend',
       'Call read_storyboard again',
       'set_shot_reference_binding through studio_apply_edits',
     ];
@@ -131,7 +131,7 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/recurring background.*discovered[\s\S]*amend_reference_plan/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/never replace or repeat set_reference_plan/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/request only records work for human review; it does not\s+generate media/i);
-    expect(DIRECTOR_PRESET_RULES).toMatch(/approve_reference is\s+human-only and renderer-only/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/choosing a different current image are human-only/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/once for\s+each active Shot/i);
   });
 

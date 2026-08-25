@@ -225,7 +225,6 @@ const PROJECT_REFERENCE_KEYS = new Set([
   'kind',
   'label',
   'prompt',
-  'candidateAssetId',
   'approvedAssetId',
   'supersededAssetIds',
   'jobIds',
@@ -665,12 +664,9 @@ const validateProjectReference = (referenceId: string, value: unknown): boolean 
   value.label === (value.label as string).trim() &&
   isNonEmptyStringWithin(value.prompt, STUDIO_MAX_REFERENCE_PROMPT_LENGTH) &&
   value.prompt === (value.prompt as string).trim() &&
-  isNullableSafeId(value.candidateAssetId) &&
   isNullableSafeId(value.approvedAssetId) &&
   isUniqueSafeIdArray(value.supersededAssetIds) &&
   isUniqueSafeIdArray(value.jobIds) &&
-  (value.candidateAssetId === null || value.candidateAssetId !== value.approvedAssetId) &&
-  !value.supersededAssetIds.includes(value.candidateAssetId) &&
   !value.supersededAssetIds.includes(value.approvedAssetId) &&
   isCanonicalTimestamp(value.createdAt) &&
   isCanonicalTimestamp(value.updatedAt) &&
@@ -2540,7 +2536,6 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       return false;
     }
     if (
-      (reference.candidateAssetId !== null && !isReferenceOutput(referenceId, reference.candidateAssetId)) ||
       (reference.approvedAssetId !== null && !isReferenceOutput(referenceId, reference.approvedAssetId)) ||
       reference.supersededAssetIds.some((assetId) => !isReferenceOutput(referenceId, assetId))
     ) {

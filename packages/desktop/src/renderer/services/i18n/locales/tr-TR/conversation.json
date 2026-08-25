@@ -885,17 +885,17 @@
         "references": "Referanslar"
       },
       "referenceWorkflow": {
-        "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka planların kanonik görsellerini onaylayın. Board veya ilk kare oluşturulmadan önce onaylı referansları her Shot'a bağlayın.",
+        "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka plan görsellerini oluşturun. Board veya ilk kare oluşturulmadan önce güncel referansları her Shot'a bağlayın.",
         "generationScope": "Oluşturma kapsamı",
         "characters": {
           "title": "Karakterler",
-          "description": "Adı geçen her karakter için bir kanonik görsel onaylayın.",
+          "description": "Adı geçen her karakter için güncel bir kanonik görsel oluşturun.",
           "empty": "Bu hikâyede adı geçen karakter yok. Arka planlar şimdi incelenebilir."
         },
         "backgrounds": {
           "title": "Arka planlar",
-          "description": "Filmin görsel tutarlılığını koruyan yinelenen mekânları onaylayın.",
-          "charactersRequired": "Arka planları incelemeden önce tüm karakterleri onaylayın.",
+          "description": "Filmin görsel tutarlılığını koruyan yinelenen mekânları oluşturun.",
+          "charactersRequired": "Arka planları incelemeden önce tüm karakterleri oluşturun.",
           "empty": "Yinelenen arka plan gerekmiyor.",
           "add": "Arka plan ekle",
           "addTitle": "Yinelenen arka plan ekle",
@@ -905,30 +905,37 @@
           "cancel": "İptal",
           "confirm": "Arka plan ekle"
         },
-        "previewPending": "Henüz bir referans adayı oluşturulmadı.",
-        "previewAlt": "{{label}} için referans adayı",
+        "previewPending": "Henüz bir referans görseli oluşturulmadı.",
+        "previewAlt": "{{label}} için güncel referans görseli",
         "status": {
           "idle": "Oluşturulmadı",
           "queued": "Sırada",
           "running": "Oluşturuluyor",
           "succeeded": "Oluşturuldu",
           "failed": "Oluşturma başarısız",
-          "candidate": "İncelemeye hazır",
-          "approved": "Onaylandı"
+          "current": "Geçerli"
         },
-        "approve": "Onayla",
         "regenerate": "Yeniden oluştur",
-        "ready": "Gerekli tüm referanslar onaylandı. Tabloya devam edebilirsiniz.",
-        "notReady": "Devam etmek için gerekli tüm referansları onaylayın.",
+        "chooseGenerated": "Oluşturulan görseli seç",
+        "regeneratePromptLabel": "Oluşturma istemi",
+        "regenerateCancel": "İptal",
+        "reviewGeneration": "Oluşturma maliyetini incele",
+        "generatedHistory": "Oluşturulan görseller",
+        "historyClose": "Kapat",
+        "historyPreviewAlt": "{{label}} için oluşturulan referans görseli",
+        "historyCurrent": "Geçerli görsel",
+        "historyChoose": "Bu görseli seç",
+        "ready": "Gerekli tüm referansların güncel bir görseli var. Tabloya devam edebilirsiniz.",
+        "notReady": "Devam etmek için gerekli tüm referansları oluşturun.",
         "continueToTable": "Tabloya devam et",
-        "approvalProgress": "{{total}} referansın {{approved}} tanesi onaylandı",
+        "currentProgress": "{{total}} referansın {{current}} tanesi oluşturuldu",
         "bindings": {
           "title": "Shot bağlamaları",
-          "description": "Her Shot’ın Board paneli ve ilk karesi için kullanacağı onaylı karakterleri ve arka planı seçin.",
+          "description": "Her Shot’ın Board paneli ve ilk karesi için kullanacağı güncel karakterleri ve arka planı tam olarak seçin.",
           "empty": "Bağlanacak etkin Shot yok.",
           "shot": "Shot {{position}}",
           "unassigned": "Bu Shot için henüz referans kararı verilmedi.",
-          "invalid": "Kaydedilen bu bağlama artık geçerli değil. Güncel onaylı referansları seçip yeniden kaydedin.",
+          "invalid": "Kaydedilen bu bağlama artık geçerli değil. Güncel referansları seçip yeniden kaydedin.",
           "capacity": "{{count}} referans seçildi, ancak görüntü rotası {{limit}} destekliyor.",
           "characters": "Karakterler",
           "background": "Arka plan",
@@ -1215,7 +1222,8 @@
           "promote_board_panel": "Paneli ilk kare olarak kullan",
           "set_reference_plan": "referans planı",
           "amend_reference_plan": "arka plan ekle",
-          "approve_reference": "referans onayı",
+          "set_reference_prompt": "referans istemi",
+          "select_reference_image": "geçerli referans görseli",
           "set_shot_reference_binding": "Shot referans bağlaması"
         }
       },
@@ -1252,6 +1260,7 @@
         "confirm_other": "{{count}} üretimi onayla · {{cost}}",
         "hideBreakdown": "Her üretimi gizle",
         "showBreakdown": "Her üretimi göster",
+        "conditioningFrameAlt": "{{shot}} için koşullandırma karesi",
         "routeShared": "Tümü {{model}} üzerinden",
         "group": {
           "required": "Zorunlu"

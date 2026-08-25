@@ -168,7 +168,8 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
                 const reference = project.referenceOrder
                   .map((referenceId) => project.references[referenceId])
                   .find(
-                    (candidate) => candidate?.candidateAssetId === assetId || candidate?.approvedAssetId === assetId
+                    (candidate) =>
+                      candidate?.approvedAssetId === assetId || candidate?.supersededAssetIds.includes(assetId)
                   );
                 return (
                   <img

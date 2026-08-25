@@ -201,7 +201,6 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
       kind: 'background',
       label: 'City skyline',
       prompt: 'Warm city skyline from sunrise through evening.',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -331,7 +330,6 @@ const makeSchema2ServiceProject = (): StudioProjectV2 => {
     createdAt: capturedAt,
     updatedAt: capturedAt,
   };
-  project.references[referenceId]!.candidateAssetId = null;
   project.references[referenceId]!.approvedAssetId = assetId;
   project.references[referenceId]!.jobIds.push(jobId);
   project.references[referenceId]!.updatedAt = capturedAt;
@@ -1990,10 +1988,6 @@ describe('CreativeStudioServiceV2', () => {
     });
     expect(JSON.stringify(confirmed)).not.toContain(SERVICE_REFERENCE_AUTHORIZATION_ID);
 
-    const laterCandidate = structuredClone(project);
-    laterCandidate.references.ref_background!.candidateAssetId = null;
-    expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, laterCandidate)).toEqual(confirmed);
-
     const failed = structuredClone(project);
     failed.jobs[SERVICE_REFERENCE_JOB_ID]!.status = 'failed';
     failed.jobs[SERVICE_REFERENCE_JOB_ID]!.error = {
@@ -2047,7 +2041,8 @@ describe('CreativeStudioServiceV2', () => {
       retryReason: 'provider_failure',
     };
     retried.references.ref_background!.jobIds.push('job_reference_background_retry');
-    retried.references.ref_background!.candidateAssetId = retryAssetId;
+    retried.references.ref_background!.supersededAssetIds.push('asset_reference_background');
+    retried.references.ref_background!.approvedAssetId = retryAssetId;
     expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, retried)).toMatchObject({
       counts: { queued: 0, running: 0, succeeded: 1, failed: 0 },
       resultAssetIds: [retryAssetId],
@@ -2313,7 +2308,6 @@ describe('CreativeStudioServiceV2', () => {
       purpose: 'reference_image',
     });
     expect(committed.references.ref_background).toMatchObject({
-      candidateAssetId: null,
       approvedAssetId: 'asset_reference_background',
       jobIds: expect.arrayContaining([regenerated.id]),
     });
@@ -2356,7 +2350,6 @@ describe('CreativeStudioServiceV2', () => {
       }
       delete project.assets[oldAssetId];
       project.shots.clip_1!.assetIds = project.shots.clip_1!.assetIds.filter((assetId) => assetId !== oldAssetId);
-      project.references.ref_background!.candidateAssetId = null;
       project.references.ref_background!.approvedAssetId = null;
       for (const shot of Object.values(project.shots)) {
         shot.referenceBinding = { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null };
@@ -2384,7 +2377,6 @@ describe('CreativeStudioServiceV2', () => {
         duplicateChargeAcknowledgedAt: expectedDuplicateChargeAcknowledged ? '2026-08-17T00:00:02.000Z' : null,
       });
       expect(committed.references.ref_background).toMatchObject({
-        candidateAssetId: null,
         jobIds: expect.arrayContaining([retry.id]),
       });
       expect(validateStudioProjectV2(committed)).toBe(true);
@@ -5216,6 +5208,7 @@ describe('CreativeStudioServiceV2', () => {
     const rendererItem = prepared.withCascade!.cascadeItems[0]!;
     expect(Object.keys(rendererItem).toSorted()).toEqual([
       'composition',
+      'conditioningAssetId',
       'durationSeconds',
       'generationCount',
       'oneGenerationMinorUnits',
@@ -5292,6 +5285,7 @@ describe('CreativeStudioServiceV2', () => {
       route: { choiceId: imageRoute.choiceId, providerId: 'provider_1', model: 'image-model' },
       generationCount: 1,
       durationSeconds: null,
+      conditioningAssetId: null,
       oneGenerationMinorUnits: 3,
       requestedTotalMinorUnits: 3,
       composition: prepared.baseOnly.baseItems[0]!.composition,
@@ -5303,6 +5297,7 @@ describe('CreativeStudioServiceV2', () => {
       route: { choiceId: videoRoute.choiceId, providerId: 'provider_1', model: 'video-model' },
       generationCount: 1,
       durationSeconds: 5,
+      conditioningAssetId: null,
       oneGenerationMinorUnits: 25,
       requestedTotalMinorUnits: 25,
       composition: prepared.withCascade!.cascadeItems[0]!.composition,
@@ -6193,7 +6188,8 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
       },
     ],
   },
-  { kind: 'approve_reference', referenceId: 'ref_ming', candidateAssetId: 'asset_ming' },
+  { kind: 'set_reference_prompt', referenceId: 'ref_ming', prompt: 'Updated Ming prompt.' },
+  { kind: 'select_reference_image', referenceId: 'ref_ming', assetId: 'asset_ming' },
   { kind: 'add_beat', beatId: 'section_new', beat: editableBeatV2(), beforeBeatId: null },
   { kind: 'edit_beat', beatId: 'section_1', changes: { targetSeconds: 12 } },
   { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
@@ -6774,7 +6770,7 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(29);
+      expect(operationKinds).toHaveLength(30);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds
@@ -7469,11 +7465,11 @@ describe('Studio MCP schema-2 server', () => {
         kind: 'background',
         label: 'City skyline',
         prompt: 'Warm city skyline from sunrise through evening.',
-        approvalStatus: 'approved',
+        approvalStatus: 'current',
         approvedAssetId: 'asset_reference_background',
       },
     ]);
-    expect(JSON.stringify(view.references)).not.toMatch(/sha256|provider|superseded|candidateAssetId/u);
+    expect(JSON.stringify(view.references)).not.toMatch(/sha256|provider|superseded/u);
     expect(view.rules).toEqual([
       { scope: 'project', text: 'Keep the tone optimistic.', enforced: false },
       {
@@ -9062,7 +9058,6 @@ describe('Studio MCP schema-2 server', () => {
       kind: 'character',
       label: 'Ming',
       prompt: 'Character turnaround sheet for Ming.',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -9074,7 +9069,6 @@ describe('Studio MCP schema-2 server', () => {
       kind: 'character',
       label: 'Mei',
       prompt: 'Character turnaround sheet for Mei.',
-      candidateAssetId: null,
       approvedAssetId: null,
       supersededAssetIds: [],
       jobIds: [],
@@ -9197,7 +9191,6 @@ describe('Studio MCP schema-2 server', () => {
         kind: 'background',
         label: 'Other background',
         prompt: 'A second approved workflow location.',
-        candidateAssetId: null,
         approvedAssetId: null,
         supersededAssetIds: [],
         jobIds: [],

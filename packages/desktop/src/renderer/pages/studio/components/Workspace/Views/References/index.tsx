@@ -14,6 +14,7 @@ import {
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   type StudioRendererJobV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import styles from './References.module.css';
 import { referenceWorkspaceStatus } from './referenceStatus';
@@ -27,9 +28,9 @@ export type ReferenceWorkspaceItem = {
   id: string;
   kind: 'character' | 'background';
   label: string;
-  description: string | null;
+  prompt: string;
   approvedAssetId: string | null;
-  candidateAssetId: string | null;
+  generatedAssetIds: readonly string[];
   generationStatus: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed';
   candidateJob: ReferenceCandidateJob | null;
 };
@@ -55,8 +56,8 @@ export type StudioReferenceFocusIntent = {
 
 export type ReferencesViewActions = {
   addBackground: (background: { label: string; prompt: string }) => Promise<boolean>;
-  approve: (referenceId: string, candidateAssetId: string) => Promise<boolean>;
-  regenerate: (referenceId: string) => void;
+  selectImage: (referenceId: string, assetId: string) => Promise<boolean>;
+  regenerate: (referenceId: string, prompt: string) => Promise<boolean>;
   retryJob: (referenceId: string, jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   retryDownload: (referenceId: string, jobId: string) => Promise<boolean>;
   cancelJob: (referenceId: string, jobId: string) => Promise<boolean>;
@@ -208,7 +209,7 @@ const BindingCard: React.FC<BindingCardProps> = ({
   );
 };
 
-/** Project-level identity and location references, approved before any Shot candidates are made. */
+/** Project-level identity and location references, made current before any Shot candidates are made. */
 export const ReferencesView: React.FC<ReferencesViewProps> = ({
   projectId,
   references,
@@ -235,11 +236,15 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
   const [backgroundLabel, setBackgroundLabel] = useState('');
   const [backgroundPrompt, setBackgroundPrompt] = useState('');
   const [addingBackground, setAddingBackground] = useState(false);
+  const [regenerateReferenceId, setRegenerateReferenceId] = useState<string | null>(null);
+  const [regeneratePrompt, setRegeneratePrompt] = useState('');
+  const [historyReferenceId, setHistoryReferenceId] = useState<string | null>(null);
+  const [cardActionPending, setCardActionPending] = useState(false);
   const characters = useMemo(() => references.filter((item) => item.kind === 'character'), [references]);
   const backgrounds = useMemo(() => references.filter((item) => item.kind === 'background'), [references]);
-  const charactersApproved = characters.every((item) => item.approvedAssetId !== null);
-  const approvedCount = references.filter((item) => item.approvedAssetId !== null).length;
-  const approvalPercent = references.length === 0 ? 100 : Math.round((approvedCount * 100) / references.length);
+  const charactersGenerated = characters.every((item) => item.approvedAssetId !== null);
+  const currentCount = references.filter((item) => item.approvedAssetId !== null).length;
+  const currentPercent = references.length === 0 ? 100 : Math.round((currentCount * 100) / references.length);
   const focusIds = useMemo(() => new Set(activeFocusIntent?.referenceIds ?? []), [activeFocusIntent]);
   const focusAssets = useMemo(() => new Set(activeFocusIntent?.assetIds ?? []), [activeFocusIntent]);
   const focusShots = useMemo(() => new Set(activeFocusIntent?.shotIds ?? []), [activeFocusIntent]);
@@ -251,6 +256,10 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
     setBackgroundLabel('');
     setBackgroundPrompt('');
     setAddingBackground(false);
+    setRegenerateReferenceId(null);
+    setRegeneratePrompt('');
+    setHistoryReferenceId(null);
+    setCardActionPending(false);
   }, [projectId]);
 
   useEffect(() => {
@@ -269,9 +278,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
     const focused = references.find(
       (item) =>
         cardRefs.current.has(item.id) &&
-        (requestedReferenceIds.has(item.id) ||
-          (item.candidateAssetId !== null && requestedAssetIds.has(item.candidateAssetId)) ||
-          (item.approvedAssetId !== null && requestedAssetIds.has(item.approvedAssetId)))
+        (requestedReferenceIds.has(item.id) || item.generatedAssetIds.some((assetId) => requestedAssetIds.has(assetId)))
     );
     const focusedBinding = bindings.find(
       (item) => requestedShotIds.has(item.shotId) && bindingCardRefs.current.has(item.shotId)
@@ -340,28 +347,58 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
 
   const renderCard = (item: ReferenceWorkspaceItem): React.ReactNode => {
     const status = referenceWorkspaceStatus(item);
-    const previewAssets = [
-      ...(item.approvedAssetId === null ? [] : [{ assetId: item.approvedAssetId, status: 'approved' as const }]),
-      ...(item.candidateAssetId === null || item.candidateAssetId === item.approvedAssetId
-        ? []
-        : [{ assetId: item.candidateAssetId, status: 'candidate' as const }]),
-    ];
-    const showSeparateStatus = previewAssets.length > 0 && !previewAssets.some((preview) => preview.status === status);
     const highlighted =
       activeFocusIntent !== null &&
-      (focusIds.has(item.id) ||
-        (item.candidateAssetId !== null && focusAssets.has(item.candidateAssetId)) ||
-        (item.approvedAssetId !== null && focusAssets.has(item.approvedAssetId)));
+      (focusIds.has(item.id) || item.generatedAssetIds.some((assetId) => focusAssets.has(assetId)));
     const busy = pendingReferenceId === item.id;
     const generationActive = item.generationStatus === 'queued' || item.generationStatus === 'running';
     const recoveryPending = item.candidateJob?.status === 'needs_attention';
     const downloadRecoveryPending = item.candidateJob?.canRetryDownload === true;
-    const mayApprove = item.candidateAssetId !== null && item.candidateAssetId !== item.approvedAssetId;
     const recoveryDescriptionId = `studio-reference-recovery-${item.id}`;
     const actionsDisabled = gateLocked || pendingReferenceId !== null;
+    const regenerationOpen = regenerateReferenceId === item.id;
+    const historyOpen = historyReferenceId === item.id;
+    const trimmedRegeneratePrompt = regeneratePrompt.trim();
+    const mayRegenerate =
+      trimmedRegeneratePrompt.length > 0 &&
+      trimmedRegeneratePrompt.length <= STUDIO_MAX_REFERENCE_PROMPT_LENGTH &&
+      !cardActionPending;
+    const generationDisabled =
+      gateLocked ||
+      generationActive ||
+      recoveryPending ||
+      downloadRecoveryPending ||
+      pendingReferenceId !== null ||
+      (!charactersGenerated && item.kind === 'background');
     const retryJob = (acknowledgePossibleDuplicateCharge: boolean): void => {
       if (item.candidateJob === null) return;
       void actions.retryJob(item.id, item.candidateJob.id, acknowledgePossibleDuplicateCharge);
+    };
+    const openRegeneration = (): void => {
+      setHistoryReferenceId(null);
+      setRegenerateReferenceId(item.id);
+      setRegeneratePrompt(item.prompt);
+    };
+    const submitRegeneration = async (): Promise<void> => {
+      if (!mayRegenerate || generationDisabled) return;
+      setCardActionPending(true);
+      try {
+        if (await actions.regenerate(item.id, trimmedRegeneratePrompt)) {
+          setRegenerateReferenceId(null);
+          setRegeneratePrompt('');
+        }
+      } finally {
+        setCardActionPending(false);
+      }
+    };
+    const selectImage = async (assetId: string): Promise<void> => {
+      if (assetId === item.approvedAssetId || actionsDisabled || cardActionPending) return;
+      setCardActionPending(true);
+      try {
+        if (await actions.selectImage(item.id, assetId)) setHistoryReferenceId(null);
+      } finally {
+        setCardActionPending(false);
+      }
     };
     return (
       <li
@@ -376,23 +413,43 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
         key={item.id}
       >
         <div className={styles.previewStack}>
-          {previewAssets.length === 0 ? (
-            <div className={styles.preview} data-reference-preview='pending'>
+          {item.approvedAssetId === null ? (
+            <div className={styles.preview} data-reference-preview='empty'>
               <span className={styles.previewPlaceholder}>{t(`${ROOT}.previewPending`)}</span>
               <Tag className={styles.status}>{t(`${ROOT}.status.${status}`)}</Tag>
+              <div className={styles.previewActions}>
+                <Button disabled={generationDisabled} size='small' onClick={openRegeneration}>
+                  {t(`${ROOT}.regenerate`)}
+                </Button>
+              </div>
             </div>
           ) : (
-            previewAssets.map((preview) => (
-              <div className={styles.preview} data-reference-preview={preview.status} key={preview.assetId}>
+            <FullscreenMediaFrame className={styles.fullscreenFrame}>
+              <div className={styles.preview} data-reference-preview='current'>
                 <img
                   alt={t(`${ROOT}.previewAlt`, { label: item.label })}
-                  src={createManagedStudioAssetUrl(projectId, preview.assetId)}
+                  src={createManagedStudioAssetUrl(projectId, item.approvedAssetId)}
                 />
-                <Tag className={styles.status} color={preview.status === 'approved' ? 'green' : undefined}>
-                  {t(`${ROOT}.status.${preview.status}`)}
+                <Tag className={styles.status} color='green'>
+                  {t(`${ROOT}.status.current`)}
                 </Tag>
+                <div className={styles.previewActions}>
+                  <Button disabled={generationDisabled} size='small' onClick={openRegeneration}>
+                    {t(`${ROOT}.regenerate`)}
+                  </Button>
+                  <Button
+                    disabled={actionsDisabled || cardActionPending || item.generatedAssetIds.length < 2}
+                    size='small'
+                    onClick={() => {
+                      setRegenerateReferenceId(null);
+                      setHistoryReferenceId(item.id);
+                    }}
+                  >
+                    {t(`${ROOT}.chooseGenerated`)}
+                  </Button>
+                </div>
               </div>
-            ))
+            </FullscreenMediaFrame>
           )}
         </div>
         <div className={styles.cardBody}>
@@ -400,47 +457,86 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
             <h4>
               <bdi dir='auto'>{item.label}</bdi>
             </h4>
-            {showSeparateStatus ? (
-              <Tag color={status === 'approved' ? 'green' : undefined} data-reference-status={status}>
-                {t(`${ROOT}.status.${status}`)}
-              </Tag>
-            ) : null}
+            {status === 'current' || item.approvedAssetId === null ? null : (
+              <Tag data-reference-status={status}>{t(`${ROOT}.status.${status}`)}</Tag>
+            )}
           </div>
-          {item.description === null ? null : (
-            <p className={styles.cardDescription}>
-              <bdi dir='auto'>{item.description}</bdi>
-            </p>
-          )}
+          {regenerationOpen ? (
+            <form
+              className={styles.promptReview}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submitRegeneration();
+              }}
+            >
+              <label>
+                <span>{t(`${ROOT}.regeneratePromptLabel`)}</span>
+                <Input.TextArea
+                  autoFocus
+                  autoSize={{ minRows: 4, maxRows: 10 }}
+                  disabled={cardActionPending}
+                  maxLength={STUDIO_MAX_REFERENCE_PROMPT_LENGTH}
+                  value={regeneratePrompt}
+                  onChange={setRegeneratePrompt}
+                />
+              </label>
+              <div className={styles.actions}>
+                <Button
+                  disabled={cardActionPending}
+                  onClick={() => {
+                    setRegenerateReferenceId(null);
+                    setRegeneratePrompt('');
+                  }}
+                >
+                  {t(`${ROOT}.regenerateCancel`)}
+                </Button>
+                <Button
+                  disabled={!mayRegenerate || generationDisabled}
+                  htmlType='submit'
+                  loading={cardActionPending}
+                  type='primary'
+                >
+                  {t(`${ROOT}.reviewGeneration`)}
+                </Button>
+              </div>
+            </form>
+          ) : null}
+          {historyOpen ? (
+            <section className={styles.generatedHistory} aria-label={t(`${ROOT}.generatedHistory`)}>
+              <div className={styles.historyHeader}>
+                <strong>{t(`${ROOT}.generatedHistory`)}</strong>
+                <Button size='mini' onClick={() => setHistoryReferenceId(null)}>
+                  {t(`${ROOT}.historyClose`)}
+                </Button>
+              </div>
+              <ul>
+                {item.generatedAssetIds.map((assetId) => (
+                  <li key={assetId}>
+                    <button
+                      aria-current={assetId === item.approvedAssetId ? 'true' : undefined}
+                      disabled={actionsDisabled || cardActionPending || assetId === item.approvedAssetId}
+                      onClick={() => void selectImage(assetId)}
+                      type='button'
+                    >
+                      <img
+                        alt={t(`${ROOT}.historyPreviewAlt`, { label: item.label })}
+                        src={createManagedStudioAssetUrl(projectId, assetId)}
+                      />
+                      <span>
+                        {t(assetId === item.approvedAssetId ? `${ROOT}.historyCurrent` : `${ROOT}.historyChoose`)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
           {item.candidateJob?.error === null || item.candidateJob === null ? null : (
             <p className={styles.jobError} id={recoveryDescriptionId} role='alert'>
               {t(item.candidateJob.error.messageKey)}
             </p>
           )}
           <div className={styles.actions}>
-            {mayApprove ? (
-              <Button
-                type='primary'
-                loading={busy}
-                disabled={actionsDisabled}
-                onClick={() => void actions.approve(item.id, item.candidateAssetId!)}
-              >
-                {t(`${ROOT}.approve`)}
-              </Button>
-            ) : null}
-            <Button
-              loading={busy && !mayApprove}
-              disabled={
-                gateLocked ||
-                generationActive ||
-                recoveryPending ||
-                downloadRecoveryPending ||
-                pendingReferenceId !== null ||
-                (!charactersApproved && item.kind === 'background')
-              }
-              onClick={() => actions.regenerate(item.id)}
-            >
-              {t(`${ROOT}.regenerate`)}
-            </Button>
             {item.candidateJob?.status === 'needs_attention' && item.candidateJob.canRetry ? (
               item.candidateJob.error?.code === 'submission_unknown' ? (
                 <Popconfirm
@@ -503,8 +599,8 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
       <header className={styles.introduction}>
         <p>{t(`${ROOT}.description`)}</p>
         <div aria-live='polite'>
-          <Progress percent={approvalPercent} showText={false} />
-          <p>{t(`${ROOT}.approvalProgress`, { approved: approvedCount, total: references.length })}</p>
+          <Progress percent={currentPercent} showText={false} />
+          <p>{t(`${ROOT}.currentProgress`, { current: currentCount, total: references.length })}</p>
         </div>
       </header>
       {errorMessageKey === null ? null : <Alert type='error' content={t(errorMessageKey)} />}
@@ -534,7 +630,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
               {t(`${ROOT}.backgrounds.add`)}
             </Button>
           </div>
-          <p>{t(charactersApproved ? `${ROOT}.backgrounds.description` : `${ROOT}.backgrounds.charactersRequired`)}</p>
+          <p>{t(charactersGenerated ? `${ROOT}.backgrounds.description` : `${ROOT}.backgrounds.charactersRequired`)}</p>
         </header>
         {backgrounds.length === 0 ? (
           <Empty description={t(`${ROOT}.backgrounds.empty`)} />
