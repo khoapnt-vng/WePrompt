@@ -1166,3 +1166,92 @@ after explicit owner authorization and use `just push`, never raw `git push`.
 - [ ] All changed UI copy is present in twelve locales.
 - [ ] No new directory exceeds ten direct children.
 - [ ] No `docs/superpowers/` file is force-added.
+
+---
+
+## Assignable follow-on — editor-folder export from the project menu
+
+**Status:** owner-approved 2026-08-25. Implement only from the latest combined Creative Studio head
+after BUG-122 and BUG-123 land. The rejected `feat/studio-export-menu` branch at `5b747030f` is
+behavioral evidence only: do not merge, rebase, or cherry-pick it wholesale. Its focused baseline
+passed 475 tests and TypeScript, but it is sixteen commits behind this line, produces eleven content
+conflicts, reads the retired Action/Look/Line/Narration schema, carries an unrelated spend-gate
+change, and adds only one of twenty-four export keys outside `en-US`.
+
+### Problem and goal
+
+Creative Studio can compose an editor package, but the working export surface is buried in Cut and
+does not communicate partial coverage cleanly. Put one explicit **Export editor folder…** action in
+the project menu so an owner can hand the current film to an editor without generating media,
+approving spend, or leaving the active workspace.
+
+### Required product behavior
+
+- The project `⋮` menu is the only place that starts a new editor-folder export. Remove the obsolete
+  export controls from Cut only after the menu path works.
+- The action runs immediately. It must never prepare a quote, request confirmation, authorize spend,
+  or dispatch image/video generation.
+- Every run creates a new timestamped folder and never overwrites an earlier export. Keep at most five
+  editor-folder exports; move evicted folders to the existing recoverable quarantine.
+- Before the click, the menu states either **Export editor folder…**, **Export editor folder · N
+  slates…**, or one exact disabled reason. Disable when there are no Beats, when an empty Beat has no
+  usable duration, while another workspace mutation is active, or while this export is running.
+- A rendered Shot contributes its canonical trimmed video in film order. A Shot without a rendered
+  video contributes one shared, resolution- and aspect-ratio-correct slate image whose duration is
+  recorded in the timeline. Stable film ordinals do not renumber when a neighbouring Shot is a slate.
+- An empty Beat with a known target duration contributes the same kind of timed slate. Missing media
+  is disclosed as slates; corrupt, unverifiable, stale, or noncanonical media fails closed instead of
+  being silently treated as missing.
+- Every folder contains the ordered media, optional selected bed audio, `timeline.json`, `script.md`,
+  and a manifest of relative path, byte size, and SHA-256 digest. `script.md` is derived from the
+  schema-5 project name, Brief, each Beat title and Story, and each Shot Shooting script. It must not
+  restore Action, Look, Line, Narration, or On-screen text as independent authoring fields.
+- Pin both the project revision and export-catalog revision at submission. Main re-reads authority and
+  validates ownership, media kind, digest, byte size, trim bounds, canonical generation provenance,
+  retention, containment, and arithmetic before publishing.
+- Renderer preview and main composition use the same canonical eligibility rule. Renderer payloads
+  never expose absolute managed paths.
+
+### Status and recovery
+
+- Show a non-modal, indeterminate **Exporting…** status that explicitly says no media is being
+  generated.
+- On success, show the new folder name, total byte size, file count, slate Shot numbers, and the count
+  of older exports moved aside. Offer **Reveal in Finder** and **Dismiss**; successful status may
+  auto-dismiss after eight seconds without deleting the export.
+- On failure, show the specific mapped error as an assertive alert, offer Dismiss, and never offer
+  Reveal for a folder that was not published.
+- Keep the catalog monotonic across reload and concurrent reads. A stale or conflicting catalog never
+  replaces newer renderer state.
+
+### Required implementation corrections
+
+- Rebuild against schema 5 and the current project menu, References flow, Studio page, export service,
+  and tests. Resolve current behavior deliberately instead of importing stale conflict resolutions.
+- Keep the change atomic: exclude the old branch's unrelated spend-gate layout commit.
+- Add every new or changed user-facing key to all twelve configured locales and regenerate the i18n
+  key types.
+- Use Arco controls, `@icon-park/react`, semantic color tokens, and the existing renderer/main IPC
+  boundary. Do not import Node or Electron APIs into the renderer.
+
+### Explicit non-goals
+
+- A single playable final film, FFmpeg concat/mux/transitions, or an **Export film…** action.
+- Determinate per-file progress or a new progress event channel.
+- Export-history UI, Files-panel redesign, Finder-drop ingestion, or a storage-layout migration.
+- Capturing arbitrary Cut frames as references or adding new reference nouns.
+- Any paid generation, provider routing, or credentials work.
+
+### Acceptance boundary
+
+The task is complete only when focused tests and the full repository gate prove all of the following:
+
+1. A mixed project exports rendered Shots and correctly timed slates in stable film order.
+2. `timeline.json`, schema-5 `script.md`, optional bed audio, manifest, sizes, and digests are
+   deterministic and internally consistent.
+3. Empty, pending-duration, stale-revision, stale-catalog, corrupt-media, noncanonical-media,
+   retention, reveal, dismissal, reload, and concurrent-catalog cases behave as specified.
+4. Export does not touch prepare, confirm, authorization, generation, or spend paths.
+5. The Cut export controls are gone only after the project-menu path is covered.
+6. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the full
+   test suite, format, lint, and `git diff --check` pass from the exact final head.
