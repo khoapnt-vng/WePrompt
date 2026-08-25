@@ -493,10 +493,11 @@ export const projectStudioRendererExportCatalogV2 = (
   catalog: StudioExportCatalogV2
 ): StudioRendererExportCatalogV2 => ({
   revision: catalog.revision,
-  artifacts: catalog.artifacts.map(({ id, sourceRevision, shape, byteSize, fileCount, createdAt }) => ({
+  artifacts: catalog.artifacts.map(({ id, sourceRevision, shape, managedExport, byteSize, fileCount, createdAt }) => ({
     id,
     sourceRevision,
     shape,
+    folderName: managedExport.fileName,
     byteSize,
     fileCount,
     createdAt,

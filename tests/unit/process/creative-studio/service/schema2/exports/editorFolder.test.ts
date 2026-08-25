@@ -30,6 +30,7 @@ import {
 } from '@/process/services/creative-studio/service/schema2/generation';
 import { createStudioSpendReceiptV2 } from '@/process/services/creative-studio/service/schema2/pricing';
 import { validateStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/validation';
+import { deriveStudioEditorFolderPreviewV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
   composeStudioEditorFolderV2,
   createStudioBlackSlatePngV2,
@@ -474,6 +475,30 @@ const expectCode = (operation: () => unknown, code: string): void => {
 };
 
 describe('composeStudioEditorFolderV2', () => {
+  it('shares exact ready, slate, duration, and invalid-media eligibility with the renderer', () => {
+    const project = makeProject();
+    expect(deriveStudioEditorFolderPreviewV2(project)).toEqual({
+      status: 'ready',
+      durationSeconds: 24,
+      slateCount: 1,
+      slateShotOrdinals: [],
+      emptyBeatSlateCount: 1,
+    });
+
+    project.shots.shot_2!.videoAssetId = null;
+    project.shots.shot_2!.assetIds = project.shots.shot_2!.assetIds.filter((id) => id !== 'take_2');
+    expect(deriveStudioEditorFolderPreviewV2(project)).toEqual({
+      status: 'ready',
+      durationSeconds: 20,
+      slateCount: 2,
+      slateShotOrdinals: [2],
+      emptyBeatSlateCount: 1,
+    });
+
+    project.shots.shot_2!.videoAssetId = 'take_2';
+    expect(deriveStudioEditorFolderPreviewV2(project)).toEqual({ status: 'blocked', reason: 'invalid_media' });
+  });
+
   it('freezes active order, trim-derived time, one slate, verified media, and the bed end fade', () => {
     const project = makeProject();
     const result = composeStudioEditorFolderV2(project, proofsFor(project, 'take_1', 'take_2', 'bed_1'));
@@ -488,6 +513,7 @@ describe('composeStudioEditorFolderV2', () => {
         entries: [
           {
             kind: 'shot',
+            shotOrdinal: 1,
             shotId: 'shot_1',
             videoAssetId: 'take_1',
             relativePath: 'media/shot-001.mp4',
@@ -499,6 +525,7 @@ describe('composeStudioEditorFolderV2', () => {
           },
           {
             kind: 'shot',
+            shotOrdinal: 2,
             shotId: 'shot_2',
             videoAssetId: 'take_2',
             relativePath: 'media/shot-002.mp4',
@@ -518,6 +545,8 @@ describe('composeStudioEditorFolderV2', () => {
         entries: [
           {
             kind: 'slate',
+            shotOrdinal: null,
+            shotId: null,
             relativePath: 'media/slate.png',
             timelineStartSeconds: 19,
             durationSeconds: 5,
@@ -539,14 +568,23 @@ describe('composeStudioEditorFolderV2', () => {
       'media/shot-001.mp4',
       'media/shot-002.mp4',
       'media/slate.png',
+      'script.md',
       'timeline.json',
     ]);
     expect(result.files.filter(({ relativePath }) => relativePath === 'media/slate.png')).toHaveLength(1);
+    const script = result.files.find(({ relativePath }) => relativePath === 'script.md');
+    if (script?.kind !== 'generated') throw new Error('missing generated schema-5 script');
+    expect(Buffer.from(script.bytes).toString('utf8')).toBe(
+      '# Editor package\n\nA complete active film.\n\n## Beat 1: Covered beat\n\nStory\n\nFirst story\n\n### Shot 1\n\nShooting script\n\nShooting script for shot_1\n\n### Shot 2\n\nShooting script\n\nShooting script for shot_2\n\n## Beat 2: Uncovered beat\n\nStory\n\nSecond story\n'
+    );
     expect(result.manifest.map(({ relativePath }) => relativePath)).toEqual(
       result.files.map(({ relativePath }) => relativePath)
     );
-    expect(result.fileCount).toBe(5);
+    expect(result.fileCount).toBe(6);
     expect(result.byteSize).toBe(result.manifest.reduce((sum, entry) => sum + entry.byteSize, 0));
+    const repeated = composeStudioEditorFolderV2(project, proofsFor(project, 'take_1', 'take_2', 'bed_1'));
+    expect(repeated.manifestBytes).toEqual(result.manifestBytes);
+    expect(repeated.manifestSha256).toBe(result.manifestSha256);
   });
 
   it('reuses one deterministic resolution-correct slate across every truly empty active beat', () => {
@@ -595,7 +633,7 @@ describe('composeStudioEditorFolderV2', () => {
     }
   });
 
-  it('refuses covered beats with zero or only some pictures instead of substituting slates', () => {
+  it('uses timed slates for missing Shots without renumbering neighboring canonical media', () => {
     for (const pictureCount of [0, 1]) {
       const project = makeProject();
       for (let index = pictureCount; index < 2; index += 1) {
@@ -628,11 +666,59 @@ describe('composeStudioEditorFolderV2', () => {
         authorization.upperMinorUnits = totals.upperMinorUnits;
       }
       const pictureIds = Array.from({ length: pictureCount }, (_, index) => `take_${index + 1}`);
-      expectCode(
-        () => composeStudioEditorFolderV2(project, proofsFor(project, ...pictureIds, 'bed_1')),
-        'coverage_incomplete'
+      const result = composeStudioEditorFolderV2(project, proofsFor(project, ...pictureIds, 'bed_1'));
+      const firstBeatEntries = result.timeline.beats[0]!.entries;
+      expect(firstBeatEntries.map(({ kind, shotOrdinal }) => ({ kind, shotOrdinal }))).toEqual(
+        pictureCount === 0
+          ? [
+              { kind: 'slate', shotOrdinal: 1 },
+              { kind: 'slate', shotOrdinal: 2 },
+            ]
+          : [
+              { kind: 'shot', shotOrdinal: 1 },
+              { kind: 'slate', shotOrdinal: 2 },
+            ]
       );
+      expect(result.files.some(({ relativePath }) => relativePath === 'media/shot-001.mp4')).toBe(pictureCount === 1);
+      expect(result.files.some(({ relativePath }) => relativePath === 'media/shot-002.mp4')).toBe(false);
     }
+  });
+
+  it('keeps a rendered Shot at film ordinal 2 when Shot 1 is a slate', () => {
+    const project = makeProject();
+    const shot = project.shots.shot_1!;
+    shot.videoAssetId = null;
+    shot.assetIds = shot.assetIds.filter((id) => id !== 'take_1');
+    shot.jobIds = [];
+    shot.trimInSeconds = null;
+    shot.trimOutSeconds = null;
+    delete project.assets.take_1;
+    delete project.jobs.job_1;
+    const authorization = project.spendAuthorizations[0]!;
+    authorization.baseItems = authorization.baseItems.filter(
+      (item) => item.target.kind === 'shot' && item.target.shotId !== 'shot_1'
+    );
+    authorization.providerBindings = authorization.providerBindings.filter(({ itemId }) =>
+      authorization.baseItems.some((item) => item.id === itemId)
+    );
+    authorization.idempotencyKeys = authorization.idempotencyKeys.filter(({ itemId }) =>
+      authorization.baseItems.some((item) => item.id === itemId)
+    );
+    const totals = calculateStudioQuoteTotals(authorization.baseItems)!;
+    authorization.lowerMinorUnits = totals.lowerMinorUnits;
+    authorization.upperMinorUnits = totals.upperMinorUnits;
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    const result = composeStudioEditorFolderV2(project, proofsFor(project, 'take_2', 'bed_1'));
+    expect(result.timeline.beats[0]!.entries).toEqual([
+      expect.objectContaining({ kind: 'slate', shotId: 'shot_1', shotOrdinal: 1, durationSeconds: 8 }),
+      expect.objectContaining({
+        kind: 'shot',
+        shotId: 'shot_2',
+        shotOrdinal: 2,
+        relativePath: 'media/shot-002.mp4',
+      }),
+    ]);
   });
 
   it('refuses pending empty-beat duration, invalid proof sets, and a noncanonical picture pointer', () => {
@@ -694,16 +780,16 @@ describe('composeStudioEditorFolderV2', () => {
     );
   });
 
-  it('composes the maximum canonical project into 99 files below the artifact capacity', () => {
+  it('composes the maximum canonical project into 100 files below the artifact capacity', () => {
     const project = makeMaximumCapacityProject();
     const takeIds = Array.from({ length: STUDIO_MAX_SHOTS_PER_PROJECT }, (_, index) => `take_${index + 1}`);
     const result = composeStudioEditorFolderV2(project, proofsFor(project, ...takeIds, 'bed_1'));
 
-    expect(result.fileCount).toBe(99);
+    expect(result.fileCount).toBe(100);
     expect(result.fileCount).toBeLessThan(STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT);
-    expect(result.files).toHaveLength(99);
+    expect(result.files).toHaveLength(100);
     expect(result.files.filter(({ kind }) => kind === 'managed_asset')).toHaveLength(97);
-    expect(result.files.filter(({ kind }) => kind === 'generated')).toHaveLength(2);
+    expect(result.files.filter(({ kind }) => kind === 'generated')).toHaveLength(3);
     expect(result.timeline.beats).toHaveLength(13);
     expect(result.timeline.beats.flatMap(({ entries }) => entries).filter(({ kind }) => kind === 'shot')).toHaveLength(
       STUDIO_MAX_SHOTS_PER_PROJECT

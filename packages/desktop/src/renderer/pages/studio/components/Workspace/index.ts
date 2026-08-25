@@ -95,8 +95,6 @@ export type {
   BoardActions,
   BoardViewProps,
   CutActions,
-  CutCopyResult,
-  CutCreateExportInput,
   CutImportResult,
   CutViewProps,
   ReferenceWorkspaceItem,

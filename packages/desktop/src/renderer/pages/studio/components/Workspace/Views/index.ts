@@ -1,7 +1,7 @@
 export { BoardView } from './Board';
 export type { BoardActions, BoardViewProps } from './Board';
 export { CutView } from './Cut';
-export type { CutActions, CutCopyResult, CutCreateExportInput, CutImportResult, CutViewProps } from './Cut';
+export type { CutActions, CutImportResult, CutViewProps } from './Cut';
 export { ReferencesView } from './References';
 export type {
   ReferenceWorkspaceItem,

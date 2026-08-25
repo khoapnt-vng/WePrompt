@@ -882,6 +882,35 @@
       "views": {
         "references": "參考圖"
       },
+      "editorFolderExport": {
+        "action": "匯出剪輯資料夾…",
+        "actionWithSlates": "匯出剪輯資料夾 · {{count}} 個佔位畫面…",
+        "exporting": "正在匯出… 不會產生媒體，也不會產生費用。",
+        "reveal": "在 Finder 中顯示",
+        "dismiss": "關閉",
+        "none": "無",
+        "successFacts": "{{bytes}} 位元組 · {{count}} 個檔案",
+        "successSlates": "佔位畫面 Shot 編號：{{shots}}",
+        "successQuarantine": "已移到一旁的舊匯出：{{count}}",
+        "disabled": {
+          "no_beats": "請先新增 Beat 再匯出",
+          "duration_pending": "請先為每個空 Beat 設定時長",
+          "invalid_media": "請先處理過期或無效的已選媒體",
+          "bed_too_short": "請選擇足以涵蓋時間軸的音床",
+          "mutationActive": "請等待目前的工作區變更完成",
+          "exportRunning": "剪輯資料夾匯出正在進行",
+          "catalogUnavailable": "剪輯資料夾匯出儲存空間無法使用"
+        },
+        "errors": {
+          "catalogUnavailable": "匯出目錄無法使用。請重新載入專案後再試。",
+          "staleAuthority": "專案或匯出目錄已變更。請檢查目前專案後再匯出。",
+          "invalidMedia": "所選媒體已過期、非標準或無效。請先檢查剪輯。",
+          "mediaUnavailable": "無法驗證所選媒體檔案。未發佈任何不完整匯出。",
+          "busy": "Creative Studio 正在完成另一項工作區操作。請稍後再試。",
+          "artifactUnavailable": "此匯出已不在目前目錄中。請重新載入後再顯示。",
+          "resultConflict": "確認結果前收到較新的匯出目錄。請重新載入並檢查匯出。"
+        }
+      },
       "referenceWorkflow": {
         "description": "先核准角色的目前標準圖，再核准重複出現背景的目前標準圖。產生分鏡或首幀之前，請將已核准的參考圖明確綁定到每個鏡頭。",
         "generationScope": "產生範圍",

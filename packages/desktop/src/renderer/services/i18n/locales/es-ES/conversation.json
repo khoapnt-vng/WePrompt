@@ -883,6 +883,35 @@
       "views": {
         "references": "Referencias"
       },
+      "editorFolderExport": {
+        "action": "Exportar carpeta para edición…",
+        "actionWithSlates": "Exportar carpeta para edición · {{count}} claquetas…",
+        "exporting": "Exportando… No se generarán medios ni se realizará ningún gasto.",
+        "reveal": "Mostrar en Finder",
+        "dismiss": "Cerrar",
+        "none": "ninguno",
+        "successFacts": "{{bytes}} bytes · {{count}} archivos",
+        "successSlates": "Números de Shot con claqueta: {{shots}}",
+        "successQuarantine": "Exportaciones anteriores apartadas: {{count}}",
+        "disabled": {
+          "no_beats": "Añade un Beat antes de exportar",
+          "duration_pending": "Define la duración de cada Beat vacío",
+          "invalid_media": "Resuelve los medios seleccionados obsoletos o no válidos",
+          "bed_too_short": "Elige una cama de audio suficientemente larga",
+          "mutationActive": "Espera a que termine el cambio actual",
+          "exportRunning": "Ya se está exportando una carpeta para edición",
+          "catalogUnavailable": "El almacenamiento de exportación no está disponible"
+        },
+        "errors": {
+          "catalogUnavailable": "El catálogo de exportación no está disponible. Recarga el proyecto.",
+          "staleAuthority": "El proyecto o el catálogo cambió. Revisa el proyecto antes de volver a exportar.",
+          "invalidMedia": "El medio seleccionado está obsoleto, no es canónico o no es válido. Revisa Cut.",
+          "mediaUnavailable": "No se pudo verificar el archivo seleccionado. No se publicó una exportación parcial.",
+          "busy": "Creative Studio está terminando otra operación. Inténtalo cuando finalice.",
+          "artifactUnavailable": "Esta exportación ya no está en el catálogo activo. Recarga el proyecto.",
+          "resultConflict": "Llegó un catálogo más reciente antes de confirmar el resultado. Recarga y revísalo."
+        }
+      },
       "referenceWorkflow": {
         "description": "Aprueba primero las imágenes canónicas de los personajes y después las imágenes canónicas de los fondos recurrentes. Vincula las referencias aprobadas a cada Shot antes de generar el Board o el primer fotograma.",
         "generationScope": "Alcance de la generación",

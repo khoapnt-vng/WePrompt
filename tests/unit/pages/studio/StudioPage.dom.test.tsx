@@ -27,6 +27,7 @@ import type {
   ReferencesViewActions,
   TableBoardActions,
   WorkspaceMutationCallbacks,
+  WorkspaceProjectMenuProps,
 } from '@/renderer/pages/studio/components/Workspace';
 
 const mocks = vi.hoisted(() => {
@@ -58,6 +59,7 @@ const mocks = vi.hoisted(() => {
     cutActions: null as CutActions | null,
     referenceActions: null as ReferencesViewActions | null,
     workspaceMutations: null as WorkspaceMutationCallbacks | null,
+    projectMenuProps: null as WorkspaceProjectMenuProps | null,
     directorProposalIntent: null as null | ((intent: 'accept' | 'reject') => Promise<void>),
     bridge: {
       getProject: { invoke: vi.fn() },
@@ -135,6 +137,10 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
       mocks.referenceActions = props.referenceActions ?? null;
       mocks.workspaceMutations = props.mutations;
       return React.createElement(actual.WorkspaceControls, props);
+    },
+    WorkspaceProjectMenu: (props: React.ComponentProps<typeof actual.WorkspaceProjectMenu>) => {
+      mocks.projectMenuProps = props;
+      return React.createElement(actual.WorkspaceProjectMenu, props);
     },
   };
 });
@@ -1319,6 +1325,11 @@ const capturedWorkspaceMutations = (): WorkspaceMutationCallbacks => {
   return mocks.workspaceMutations!;
 };
 
+const capturedProjectMenuProps = (): WorkspaceProjectMenuProps => {
+  expect(mocks.projectMenuProps).not.toBeNull();
+  return mocks.projectMenuProps!;
+};
+
 const capturedDirectorProposalIntent = (): ((intent: 'accept' | 'reject') => Promise<void>) => {
   expect(mocks.directorProposalIntent).not.toBeNull();
   return mocks.directorProposalIntent!;
@@ -1386,6 +1397,7 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.cutActions = null;
     mocks.referenceActions = null;
     mocks.workspaceMutations = null;
+    mocks.projectMenuProps = null;
     mocks.directorProposalIntent = null;
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok([]));
@@ -1977,6 +1989,7 @@ describe('StudioPage schema-5 cutover', () => {
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.cutActions).not.toBeNull());
     const cut = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
     const references = capturedReferenceActions();
 
     let pendingImport!: Promise<'cancelled' | 'imported' | 'failed'>;
@@ -1987,10 +2000,14 @@ describe('StudioPage schema-5 cutover', () => {
 
     await expect(cut.importBedAudio()).resolves.toBe('failed');
     await expect(cut.detachBedAudio('audio_other')).resolves.toBe(false);
-    await expect(cut.createExport({ shape: 'script' })).resolves.toBe(false);
-    await expect(cut.refreshExports()).resolves.toBe(false);
-    await expect(cut.copyExport('missing_export')).resolves.toBe('failed');
-    await expect(cut.revealExport('missing_export')).resolves.toBe(false);
+    await expect(projectMenu.createEditorFolder()).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+    });
+    await expect(projectMenu.revealEditorFolder('missing_export')).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+    });
     await expect(references.approve('reference_3', 'asset_reference_3')).resolves.toBe(false);
     act(() => references.regenerate('reference_3'));
 
@@ -4537,6 +4554,7 @@ describe('StudioPage schema-5 cutover', () => {
           id: 'export_new',
           sourceRevision: 3,
           shape: 'script',
+          folderName: 'export_new',
           byteSize: 24,
           fileCount: 1,
           createdAt: '2026-01-01T00:00:03.000Z',
@@ -5070,7 +5088,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(document.querySelector('[data-asset-id="imported_seed"]')).not.toBeNull();
   });
 
-  it('routes the seven Cut providers through exact project and catalog revisions without paid work', async () => {
+  it('routes Cut media changes and project-menu export through exact revisions without paid work', async () => {
     const projectAt = (revision: number): StudioRendererProjectV2 => {
       const value = projectWithHandoffShot();
       value.revision = revision;
@@ -5124,7 +5142,8 @@ describe('StudioPage schema-5 cutover', () => {
     const artifact = {
       id: 'export_1',
       sourceRevision: 7,
-      shape: 'still' as const,
+      shape: 'editor_folder' as const,
+      folderName: 'editor-folder-20260101-000008-000-0123456789abcdef',
       byteSize: 64,
       fileCount: 1,
       createdAt: '2026-01-01T00:00:08.000Z',
@@ -5141,6 +5160,7 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(mocks.cutActions).not.toBeNull());
     await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledWith({ projectId: 'project_1' }));
     const cutApi = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
 
     let importResult: Awaited<ReturnType<CutActions['importBedAudio']>> | undefined;
     await act(async () => {
@@ -5181,39 +5201,29 @@ describe('StudioPage schema-5 cutover', () => {
     });
 
     const projectReadsBeforeExports = mocks.bridge.getProject.invoke.mock.calls.length;
-    await expectSuccessfulBeatPanelAction(() => cutApi.createExport({ shape: 'still', shotId: 'shot_3' }));
+    await act(async () => {
+      await expect(projectMenu.createEditorFolder()).resolves.toEqual({ ok: true, catalog: catalog2 });
+    });
     expect(mocks.bridge.createExport.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
       expectedRevision: 7,
       expectedCatalogRevision: 1,
-      shape: 'still',
-      shotId: 'shot_3',
+      shape: 'editor_folder',
     });
     expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(projectReadsBeforeExports);
+    await waitFor(() => expect(capturedProjectMenuProps().exportCatalog?.revision).toBe(2));
 
-    let copyResult: Awaited<ReturnType<CutActions['copyExport']>> | undefined;
-    await act(async () => {
-      copyResult = await cutApi.copyExport('export_1');
-    });
-    expect(copyResult).toBe('cancelled');
-    expect(mocks.bridge.copyExport.invoke).toHaveBeenLastCalledWith({
-      projectId: 'project_1',
-      expectedCatalogRevision: 2,
-      artifactId: 'export_1',
-    });
-    await expectSuccessfulBeatPanelAction(() => cutApi.revealExport('export_1'));
+    await expect(capturedProjectMenuProps().revealEditorFolder('export_1')).resolves.toEqual({ ok: true });
     expect(mocks.bridge.revealExport.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
       expectedCatalogRevision: 2,
       artifactId: 'export_1',
     });
-    await expectSuccessfulBeatPanelAction(cutApi.refreshExports);
-    expect(mocks.bridge.listExports.invoke).toHaveBeenLastCalledWith({ projectId: 'project_1' });
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('keeps every Cut file boundary fail-closed on refusal, stale authority, and missing artifacts', async () => {
+  it('keeps Cut media and project-menu export boundaries fail-closed', async () => {
     const authority = projectWithHandoffShot();
     const selectedBed = recoveryAsset('audio_current', null, 'audio');
     selectedBed.durationSeconds = 20;
@@ -5226,7 +5236,8 @@ describe('StudioPage schema-5 cutover', () => {
     const artifact = {
       id: 'export_1',
       sourceRevision: authority.revision,
-      shape: 'still' as const,
+      shape: 'editor_folder' as const,
+      folderName: 'editor-folder-20260101-000008-000-0123456789abcdef',
       byteSize: 64,
       fileCount: 1,
       createdAt: '2026-01-01T00:00:08.000Z',
@@ -5259,25 +5270,36 @@ describe('StudioPage schema-5 cutover', () => {
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.cutActions).not.toBeNull());
     const cut = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
 
     await expect(invokeStudioAction(cut.importBedAudio)).resolves.toBe('failed');
     await expect(invokeStudioAction(cut.importBedAudio)).resolves.toBe('failed');
     await expect(invokeStudioAction(() => cut.detachBedAudio('audio_current'))).resolves.toBe(false);
     await expect(invokeStudioAction(() => cut.detachBedAudio('audio_other'))).resolves.toBe(false);
     await expect(invokeStudioAction(() => cut.detachBedAudio('audio_other'))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => cut.createExport({ shape: 'script' }))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => cut.copyExport('missing_export'))).resolves.toBe('failed');
-    await expect(invokeStudioAction(() => cut.copyExport('export_1'))).resolves.toBe('failed');
-    await expect(invokeStudioAction(() => cut.revealExport('missing_export'))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => cut.revealExport('export_1'))).resolves.toBe(false);
-    await expect(invokeStudioAction(() => cut.createExport({ shape: 'script' }))).resolves.toBe(false);
+    await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable',
+    });
+    await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('missing_export'))).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.artifactUnavailable',
+    });
+    await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('export_1'))).resolves.toEqual({
+      ok: false,
+      messageKey: 'native.revealFailed',
+    });
+    await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
+      ok: true,
+      catalog: { revision: 3, artifacts: [{ ...artifact, sourceRevision: 99 }] },
+    });
 
     expect(mocks.bridge.getProject.invoke.mock.calls.length).toBeGreaterThan(1);
     expect(mocks.bridge.createExport.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
       expectedRevision: 3,
       expectedCatalogRevision: 1,
-      shape: 'script',
+      shape: 'editor_folder',
     });
   });
 

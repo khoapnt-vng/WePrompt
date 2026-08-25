@@ -1284,6 +1284,35 @@
         "storage": "Creative Studio could not read or save this workspace.",
         "staleProject": "The project changed elsewhere. Review the current Director before retrying."
       },
+      "editorFolderExport": {
+        "action": "Export editor folder…",
+        "actionWithSlates": "Export editor folder · {{count}} slates…",
+        "exporting": "Exporting… No media will be generated and nothing will be spent.",
+        "reveal": "Reveal in Finder",
+        "dismiss": "Dismiss",
+        "none": "none",
+        "successFacts": "{{bytes}} bytes · {{count}} files",
+        "successSlates": "Slate Shot numbers: {{shots}}",
+        "successQuarantine": "Older exports moved aside: {{count}}",
+        "disabled": {
+          "no_beats": "Add a Beat before exporting",
+          "duration_pending": "Set a duration for every empty Beat before exporting",
+          "invalid_media": "Resolve stale or invalid selected media before exporting",
+          "bed_too_short": "Choose an audio bed long enough for the timeline",
+          "mutationActive": "Finish the current workspace change before exporting",
+          "exportRunning": "An editor-folder export is already running",
+          "catalogUnavailable": "Editor-folder export storage is unavailable"
+        },
+        "errors": {
+          "catalogUnavailable": "The export catalog is unavailable. Reload the project and try again.",
+          "staleAuthority": "The project or export catalog changed. Review the current project before exporting again.",
+          "invalidMedia": "The selected media is stale, noncanonical, or invalid. Review the Cut before exporting.",
+          "mediaUnavailable": "A selected media file could not be verified. No partial export was published.",
+          "busy": "Creative Studio is finishing another workspace operation. Try again when it completes.",
+          "artifactUnavailable": "That completed export is no longer in the active catalog. Reload before revealing it.",
+          "resultConflict": "A newer export catalog arrived before this result could be confirmed. Reload and review the exports."
+        }
+      },
       "project": {
         "backToLibrary": "Back to Creative Studio",
         "loading": "Loading workspace…",

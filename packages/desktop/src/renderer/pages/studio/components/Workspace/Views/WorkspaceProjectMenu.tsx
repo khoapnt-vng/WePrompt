@@ -29,6 +29,7 @@ import {
   type StudioBriefRule,
   type StudioBriefRuleDraft,
 } from '@/common/types/project/creativeStudioRules';
+import { deriveStudioEditorFolderPreviewV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import { majorUnitsToMinorUnits } from '../spendGate';
 import { generationBlockMessage, generationCapabilityIsCurrent } from '../Gate/generationBlockers';
 import type { WorkspaceDraftValue } from '../useWorkspaceDrafts';
@@ -36,6 +37,20 @@ import styles from './WorkspaceControls.module.css';
 import type { WorkspaceProjectMenuProps } from './viewTypes';
 
 type ProjectDialog = 'settings' | 'brief' | null;
+
+type EditorFolderExportStatus =
+  | { kind: 'idle' }
+  | { kind: 'exporting' }
+  | {
+      kind: 'success';
+      artifactId: string;
+      folderName: string;
+      byteSize: number;
+      fileCount: number;
+      slateShotOrdinals: number[];
+      movedAsideCount: number;
+    }
+  | { kind: 'failure'; messageKey: string };
 
 type RuleValidation = {
   field: 'text' | 'terms';
@@ -758,6 +773,9 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   projection,
   routeCatalog,
   generationCapability,
+  exportCatalog,
+  createEditorFolder,
+  revealEditorFolder,
   drafts,
   pending,
   errorMessageKey,
@@ -786,6 +804,8 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<ProjectDialog>(null);
+  const [editorFolderExportStatus, setEditorFolderExportStatus] = useState<EditorFolderExportStatus>({ kind: 'idle' });
+  const [revealingEditorFolder, setRevealingEditorFolder] = useState(false);
   const [briefErrorKey, setBriefErrorKey] = useState<string | null>(null);
   const [ruleText, setRuleText] = useState(initialStoredRuleDrafts.add.text);
   const [ruleTerms, setRuleTerms] = useState(initialStoredRuleDrafts.add.termsValue);
@@ -1148,6 +1168,62 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   };
 
   const atRuleLimit = organisationRules.length + project.rules.length >= STUDIO_RULE_LIMITS.maxRules;
+  const editorFolderPreview = useMemo(() => deriveStudioEditorFolderPreviewV2(project), [project]);
+  const editorFolderDisabledKey =
+    editorFolderExportStatus.kind === 'exporting'
+      ? 'conversation.creativeStudio.workspace.editorFolderExport.disabled.exportRunning'
+      : pending
+        ? 'conversation.creativeStudio.workspace.editorFolderExport.disabled.mutationActive'
+        : exportCatalog === null
+          ? 'conversation.creativeStudio.workspace.editorFolderExport.disabled.catalogUnavailable'
+          : editorFolderPreview.status === 'blocked'
+            ? `conversation.creativeStudio.workspace.editorFolderExport.disabled.${editorFolderPreview.reason}`
+            : null;
+  const exportEditorFolder = async (): Promise<void> => {
+    if (editorFolderDisabledKey !== null || exportCatalog === null || editorFolderPreview.status !== 'ready') return;
+    const beforeIds = new Set(exportCatalog.artifacts.map(({ id }) => id));
+    const beforeCount = exportCatalog.artifacts.filter(({ shape }) => shape === 'editor_folder').length;
+    const submittedRevision = project.revision;
+    const submittedPreview = editorFolderPreview;
+    setMenuOpen(false);
+    setEditorFolderExportStatus({ kind: 'exporting' });
+    const result = await createEditorFolder();
+    if (result.ok === false) {
+      setEditorFolderExportStatus({ kind: 'failure', messageKey: result.messageKey });
+      return;
+    }
+    const created = result.catalog.artifacts.filter(
+      (artifact) =>
+        artifact.shape === 'editor_folder' &&
+        artifact.sourceRevision === submittedRevision &&
+        !beforeIds.has(artifact.id)
+    );
+    if (created.length !== 1) {
+      setEditorFolderExportStatus({
+        kind: 'failure',
+        messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.resultConflict',
+      });
+      return;
+    }
+    const artifact = created[0]!;
+    const afterCount = result.catalog.artifacts.filter(({ shape }) => shape === 'editor_folder').length;
+    setEditorFolderExportStatus({
+      kind: 'success',
+      artifactId: artifact.id,
+      folderName: artifact.folderName,
+      byteSize: artifact.byteSize,
+      fileCount: artifact.fileCount,
+      slateShotOrdinals: submittedPreview.slateShotOrdinals,
+      movedAsideCount: Math.max(0, beforeCount + 1 - afterCount),
+    });
+  };
+  const revealCompletedEditorFolder = async (artifactId: string): Promise<void> => {
+    if (revealingEditorFolder || pending) return;
+    setRevealingEditorFolder(true);
+    const result = await revealEditorFolder(artifactId);
+    setRevealingEditorFolder(false);
+    if (result.ok === false) setEditorFolderExportStatus({ kind: 'failure', messageKey: result.messageKey });
+  };
   const menu = (
     <Menu>
       <Menu.Item key='settings' onClick={() => openDialog('settings')}>
@@ -1155,6 +1231,20 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
       </Menu.Item>
       <Menu.Item key='brief' onClick={() => openDialog('brief')}>
         {t('conversation.creativeStudio.workspace.controls.briefAndRulesTitle')}
+      </Menu.Item>
+      <Menu.Item
+        key='editor-folder-export'
+        disabled={editorFolderDisabledKey !== null}
+        data-studio-editor-folder-export
+        onClick={() => void exportEditorFolder()}
+      >
+        {editorFolderDisabledKey !== null
+          ? t(editorFolderDisabledKey)
+          : editorFolderPreview.status === 'ready' && editorFolderPreview.slateCount > 0
+            ? t('conversation.creativeStudio.workspace.editorFolderExport.actionWithSlates', {
+                count: editorFolderPreview.slateCount,
+              })
+            : t('conversation.creativeStudio.workspace.editorFolderExport.action')}
       </Menu.Item>
     </Menu>
   );
@@ -1183,6 +1273,73 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
           data-studio-project-menu-trigger
         />
       </Dropdown>
+
+      {editorFolderExportStatus.kind === 'idle' ? null : (
+        <div className={styles.editorFolderExportStatus} data-studio-editor-folder-export-status>
+          {editorFolderExportStatus.kind === 'exporting' ? (
+            <Alert
+              showIcon
+              type='info'
+              content={t('conversation.creativeStudio.workspace.editorFolderExport.exporting')}
+            />
+          ) : editorFolderExportStatus.kind === 'failure' ? (
+            <Alert
+              showIcon
+              type='error'
+              content={
+                <div className={styles.editorFolderExportStatusContent} role='alert'>
+                  <span>{t(editorFolderExportStatus.messageKey)}</span>
+                  <Button size='small' onClick={() => setEditorFolderExportStatus({ kind: 'idle' })}>
+                    {t('conversation.creativeStudio.workspace.editorFolderExport.dismiss')}
+                  </Button>
+                </div>
+              }
+            />
+          ) : (
+            <Alert
+              showIcon
+              type='success'
+              content={
+                <div className={styles.editorFolderExportStatusContent} role='status'>
+                  <strong dir='auto'>{editorFolderExportStatus.folderName}</strong>
+                  <span>
+                    {t('conversation.creativeStudio.workspace.editorFolderExport.successFacts', {
+                      bytes: editorFolderExportStatus.byteSize,
+                      count: editorFolderExportStatus.fileCount,
+                    })}
+                  </span>
+                  <span>
+                    {t('conversation.creativeStudio.workspace.editorFolderExport.successSlates', {
+                      shots:
+                        editorFolderExportStatus.slateShotOrdinals.length === 0
+                          ? t('conversation.creativeStudio.workspace.editorFolderExport.none')
+                          : editorFolderExportStatus.slateShotOrdinals.join(', '),
+                    })}
+                  </span>
+                  <span>
+                    {t('conversation.creativeStudio.workspace.editorFolderExport.successQuarantine', {
+                      count: editorFolderExportStatus.movedAsideCount,
+                    })}
+                  </span>
+                  <div className={styles.editorFolderExportStatusActions}>
+                    <Button
+                      size='small'
+                      loading={revealingEditorFolder}
+                      disabled={pending}
+                      onClick={() => void revealCompletedEditorFolder(editorFolderExportStatus.artifactId)}
+                    >
+                      {t('conversation.creativeStudio.workspace.editorFolderExport.reveal')}
+                    </Button>
+                    <Button size='small' onClick={() => setEditorFolderExportStatus({ kind: 'idle' })}>
+                      {t('conversation.creativeStudio.workspace.editorFolderExport.dismiss')}
+                    </Button>
+                  </div>
+                </div>
+              }
+            />
+          )}
+        </div>
+      )}
 
       <Modal
         visible={dialog === 'settings'}

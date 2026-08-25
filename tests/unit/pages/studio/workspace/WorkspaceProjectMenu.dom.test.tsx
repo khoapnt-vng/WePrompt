@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -17,6 +17,7 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioGenerationCapabilityV2,
   type StudioRendererChainStatusV2,
+  type StudioRendererExportCatalogV2,
   type StudioRendererProjectV2,
   type StudioRendererWorkspaceStatusV2,
   type StudioRouteCatalogV2,
@@ -209,6 +210,11 @@ type MenuHarnessProps = {
   briefRouteFocusRole?: 'image' | 'video' | null;
   staleRevision?: boolean;
   onRuleDraftDirtyCountChange?: (count: number) => void;
+  exportCatalog?: StudioRendererExportCatalogV2 | null;
+  createEditorFolder?: () => Promise<
+    { ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }
+  >;
+  revealEditorFolder?: (artifactId: string) => Promise<{ ok: true } | { ok: false; messageKey: string }>;
   mutations: WorkspaceMutationCallbacks;
 };
 
@@ -224,6 +230,12 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
   briefRouteFocusRole = null,
   staleRevision,
   onRuleDraftDirtyCountChange,
+  exportCatalog = { revision: 1, artifacts: [] },
+  createEditorFolder = vi.fn(async () => ({
+    ok: false as const,
+    messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.storage',
+  })),
+  revealEditorFolder = vi.fn(async () => ({ ok: true as const })),
   mutations,
 }) => {
   const projected = projectWorkspace(project, workspaceStatus(project), chainStatus(project));
@@ -252,6 +264,9 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
       projection={projection}
       routeCatalog={routeCatalog}
       generationCapability={generationCapability}
+      exportCatalog={exportCatalog}
+      createEditorFolder={createEditorFolder}
+      revealEditorFolder={revealEditorFolder}
       briefDialogRequest={briefDialogRequest}
       briefRouteFocusRole={briefRouteFocusRole}
       drafts={staleRevision === undefined ? drafts : { ...drafts, staleRevision }}
@@ -304,6 +319,65 @@ const deferred = <T,>(): { promise: Promise<T>; resolve: (value: T) => void } =>
   return { promise, resolve };
 };
 
+const editorFolderProject = (includeCanonicalVideo = true): StudioRendererProjectV2 => {
+  const firstShot = {
+    id: 'shot_1',
+    shootingScript: 'Missing establishing shot',
+    durationSeconds: 5,
+    trimInSeconds: null,
+    trimOutSeconds: null,
+    chainBreak: 'none' as const,
+    referenceBinding: { status: 'unassigned' as const, characterReferenceIds: [], backgroundReferenceId: null },
+    seedStillId: null,
+    boardAssetId: null,
+    supersededBoardAssetIds: [],
+    videoAssetId: null,
+    supersededVideoAssetIds: [],
+    assetIds: [],
+    jobIds: [],
+  };
+  const secondShot = {
+    ...firstShot,
+    id: 'shot_2',
+    shootingScript: 'Rendered closing shot',
+    videoAssetId: 'take_2',
+    assetIds: ['take_2'],
+  };
+  return makeProject([], {
+    beatOrder: ['beat_1'],
+    beats: {
+      beat_1: {
+        id: 'beat_1',
+        title: 'Opening',
+        story: 'A launch begins and ends.',
+        targetSeconds: null,
+        shotOrder: ['shot_1', 'shot_2'],
+      },
+    },
+    shots: { shot_1: firstShot, shot_2: secondShot },
+    assets: includeCanonicalVideo
+      ? {
+          take_2: {
+            id: 'take_2',
+            projectId: 'project_1',
+            shotId: 'shot_2',
+            mediaKind: 'video',
+            mimeType: 'video/mp4',
+            managedAsset: { collection: 'assets', fileName: 'take_2.mp4' },
+            byteSize: 256,
+            sha256: 'a'.repeat(64),
+            durationSeconds: 7,
+            createdAt: '2026-08-21T00:00:00.000Z',
+            projectReferenceId: null,
+            generationReferenceAssetIds: [],
+            producerJobId: 'job_2',
+            compositionDigest: 'b'.repeat(64),
+          },
+        }
+      : {},
+  });
+};
+
 describe('WorkspaceProjectMenu', () => {
   beforeEach(() => window.sessionStorage.clear());
 
@@ -316,6 +390,97 @@ describe('WorkspaceProjectMenu', () => {
     const menu = await openMenu();
     expect(within(menu).getByRole('menuitem', { name: SETTINGS_TITLE })).toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: BRIEF_RULES_TITLE })).toBeInTheDocument();
+  });
+
+  it('exports one timestamped editor folder from the project menu and reports exact slate evidence', async () => {
+    const { callbacks } = makeMutations();
+    const flight = deferred<{ ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }>();
+    const createEditorFolder = vi.fn(() => flight.promise);
+    const revealEditorFolder = vi.fn(async () => ({ ok: true as const }));
+    render(
+      <MenuHarness
+        project={editorFolderProject()}
+        mutations={callbacks}
+        createEditorFolder={createEditorFolder}
+        revealEditorFolder={revealEditorFolder}
+      />
+    );
+
+    const menu = await openMenu();
+    const action = within(menu).getByRole('menuitem', {
+      name: /conversation\.creativeStudio\.workspace\.editorFolderExport\.actionWithSlates/,
+    });
+    expect(action).toHaveTextContent('"count":1');
+    fireEvent.click(action);
+    expect(screen.getByText('conversation.creativeStudio.workspace.editorFolderExport.exporting')).toBeVisible();
+    expect(createEditorFolder).toHaveBeenCalledOnce();
+
+    const artifact = {
+      id: 'export_1',
+      sourceRevision: 7,
+      shape: 'editor_folder' as const,
+      folderName: 'editor-folder-20260821-120000-000-0123456789abcdef',
+      byteSize: 8192,
+      fileCount: 5,
+      createdAt: '2026-08-21T12:00:00.000Z',
+    };
+    await act(async () => flight.resolve({ ok: true, catalog: { revision: 2, artifacts: [artifact] } }));
+
+    expect(await screen.findByText(artifact.folderName)).toBeVisible();
+    expect(screen.getByText(/editorFolderExport\.successFacts/)).toHaveTextContent('"bytes":8192');
+    expect(screen.getByText(/editorFolderExport\.successSlates/)).toHaveTextContent('"shots":"1"');
+    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.editorFolderExport.reveal'));
+    await waitFor(() => expect(revealEditorFolder).toHaveBeenCalledWith('export_1'));
+    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.editorFolderExport.dismiss'));
+    expect(document.querySelector('[data-studio-editor-folder-export-status]')).toBeNull();
+  });
+
+  it.each([
+    ['no Beats', makeProject(), false, 'conversation.creativeStudio.workspace.editorFolderExport.disabled.no_beats'],
+    [
+      'an empty Beat with pending duration',
+      makeProject([], {
+        beatOrder: ['beat_1'],
+        beats: { beat_1: { id: 'beat_1', title: 'Pending', story: '', targetSeconds: null, shotOrder: [] } },
+      }),
+      false,
+      'conversation.creativeStudio.workspace.editorFolderExport.disabled.duration_pending',
+    ],
+    [
+      'noncanonical selected media',
+      editorFolderProject(false),
+      false,
+      'conversation.creativeStudio.workspace.editorFolderExport.disabled.invalid_media',
+    ],
+    [
+      'an active workspace mutation',
+      editorFolderProject(),
+      true,
+      'conversation.creativeStudio.workspace.editorFolderExport.disabled.mutationActive',
+    ],
+  ])('shows one exact disabled export reason for %s', async (_label, project, pending, reason) => {
+    const { callbacks } = makeMutations();
+    render(<MenuHarness project={project} pending={pending} mutations={callbacks} />);
+    const menu = await openMenu();
+    expect(within(menu).getByRole('menuitem', { name: reason })).toHaveClass('arco-dropdown-menu-disabled');
+  });
+
+  it('maps export refusal into an assertive failure with Dismiss and no Reveal action', async () => {
+    const { callbacks } = makeMutations();
+    const createEditorFolder = vi.fn(async () => ({
+      ok: false as const,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable',
+    }));
+    render(
+      <MenuHarness project={editorFolderProject()} mutations={callbacks} createEditorFolder={createEditorFolder} />
+    );
+    const menu = await openMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: /editorFolderExport\.actionWithSlates/ }));
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.editorFolderExport.reveal')).toBeNull();
+    expect(screen.getByText('conversation.creativeStudio.workspace.editorFolderExport.dismiss')).toBeVisible();
   });
 
   it('keeps project settings out of the workspace until its modal opens', async () => {

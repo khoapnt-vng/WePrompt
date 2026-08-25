@@ -883,6 +883,35 @@
       "views": {
         "references": "Referenzen"
       },
+      "editorFolderExport": {
+        "action": "Editor-Ordner exportieren…",
+        "actionWithSlates": "Editor-Ordner exportieren · {{count}} Platzhalter…",
+        "exporting": "Export läuft… Es werden keine Medien erzeugt und keine Kosten ausgelöst.",
+        "reveal": "Im Finder anzeigen",
+        "dismiss": "Schließen",
+        "none": "keine",
+        "successFacts": "{{bytes}} Byte · {{count}} Dateien",
+        "successSlates": "Shot-Nummern mit Platzhalter: {{shots}}",
+        "successQuarantine": "Ältere Exporte verschoben: {{count}}",
+        "disabled": {
+          "no_beats": "Füge vor dem Export einen Beat hinzu",
+          "duration_pending": "Lege für jeden leeren Beat eine Dauer fest",
+          "invalid_media": "Behebe veraltete oder ungültige ausgewählte Medien",
+          "bed_too_short": "Wähle ein ausreichend langes Audiobett",
+          "mutationActive": "Warte, bis die aktuelle Änderung abgeschlossen ist",
+          "exportRunning": "Ein Editor-Ordner wird bereits exportiert",
+          "catalogUnavailable": "Der Export-Speicher ist nicht verfügbar"
+        },
+        "errors": {
+          "catalogUnavailable": "Der Exportkatalog ist nicht verfügbar. Lade das Projekt neu.",
+          "staleAuthority": "Projekt oder Exportkatalog wurden geändert. Prüfe das Projekt erneut.",
+          "invalidMedia": "Das ausgewählte Medium ist veraltet, nicht kanonisch oder ungültig. Prüfe Cut.",
+          "mediaUnavailable": "Die ausgewählte Mediendatei konnte nicht geprüft werden. Es wurde kein Teilexport veröffentlicht.",
+          "busy": "Creative Studio schließt einen anderen Vorgang ab. Versuche es danach erneut.",
+          "artifactUnavailable": "Dieser Export ist nicht mehr im aktiven Katalog. Lade das Projekt neu.",
+          "resultConflict": "Vor der Bestätigung ist ein neuerer Katalog eingetroffen. Lade ihn neu und prüfe ihn."
+        }
+      },
       "referenceWorkflow": {
         "description": "Genehmigen Sie zuerst die kanonischen Charakterbilder und danach die kanonischen Bilder wiederkehrender Hintergründe. Binden Sie die genehmigten Referenzen an jeden Shot, bevor Sie das Board oder das erste Bild generieren.",
         "generationScope": "Generierungsumfang",

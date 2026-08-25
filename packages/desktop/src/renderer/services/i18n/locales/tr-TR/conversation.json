@@ -884,6 +884,35 @@
       "views": {
         "references": "Referanslar"
       },
+      "editorFolderExport": {
+        "action": "Editör klasörünü dışa aktar…",
+        "actionWithSlates": "Editör klasörünü dışa aktar · {{count}} slate…",
+        "exporting": "Dışa aktarılıyor… Medya üretilmeyecek ve harcama yapılmayacak.",
+        "reveal": "Finder'da göster",
+        "dismiss": "Kapat",
+        "none": "yok",
+        "successFacts": "{{bytes}} bayt · {{count}} dosya",
+        "successSlates": "Slate Shot numaraları: {{shots}}",
+        "successQuarantine": "Kenara taşınan eski dışa aktarmalar: {{count}}",
+        "disabled": {
+          "no_beats": "Dışa aktarmadan önce bir Beat ekleyin",
+          "duration_pending": "Her boş Beat için süre belirleyin",
+          "invalid_media": "Eski veya geçersiz seçili medyayı düzeltin",
+          "bed_too_short": "Zaman çizelgesine yetecek bir ses yatağı seçin",
+          "mutationActive": "Geçerli çalışma alanı değişikliğinin bitmesini bekleyin",
+          "exportRunning": "Bir editör klasörü dışa aktarılıyor",
+          "catalogUnavailable": "Editör klasörü dışa aktarma depolaması kullanılamıyor"
+        },
+        "errors": {
+          "catalogUnavailable": "Dışa aktarma kataloğu kullanılamıyor. Projeyi yeniden yükleyin.",
+          "staleAuthority": "Proje veya katalog değişti. Yeniden dışa aktarmadan önce projeyi inceleyin.",
+          "invalidMedia": "Seçili medya eski, standart dışı veya geçersiz. Cut görünümünü inceleyin.",
+          "mediaUnavailable": "Seçili medya doğrulanamadı. Eksik bir dışa aktarma yayımlanmadı.",
+          "busy": "Creative Studio başka bir işlemi tamamlıyor. Tamamlanınca yeniden deneyin.",
+          "artifactUnavailable": "Bu dışa aktarma artık etkin katalogda değil. Yeniden yükleyin.",
+          "resultConflict": "Sonuç doğrulanmadan daha yeni bir katalog geldi. Yeniden yükleyip inceleyin."
+        }
+      },
       "referenceWorkflow": {
         "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka planların kanonik görsellerini onaylayın. Board veya ilk kare oluşturulmadan önce onaylı referansları her Shot'a bağlayın.",
         "generationScope": "Oluşturma kapsamı",

@@ -151,7 +151,7 @@ const sanitizeExportCatalog = (
     if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return null;
     const artifact = candidate as Record<string, unknown>;
     if (
-      !hasExactKeys(artifact, ['byteSize', 'createdAt', 'fileCount', 'id', 'shape', 'sourceRevision']) ||
+      !hasExactKeys(artifact, ['byteSize', 'createdAt', 'fileCount', 'folderName', 'id', 'shape', 'sourceRevision']) ||
       typeof artifact.id !== 'string' ||
       !SAFE_STUDIO_ID.test(artifact.id) ||
       ids.has(artifact.id) ||
@@ -159,6 +159,8 @@ const sanitizeExportCatalog = (
       (artifact.sourceRevision as number) < 1 ||
       (artifact.sourceRevision as number) > currentProjectRevision ||
       (artifact.shape !== 'editor_folder' && artifact.shape !== 'still' && artifact.shape !== 'script') ||
+      typeof artifact.folderName !== 'string' ||
+      !SAFE_STUDIO_ID.test(artifact.folderName) ||
       !Number.isSafeInteger(artifact.byteSize) ||
       (artifact.byteSize as number) < 0 ||
       !Number.isSafeInteger(artifact.fileCount) ||
@@ -182,6 +184,7 @@ const sanitizeExportCatalog = (
       id: artifact.id,
       sourceRevision: artifact.sourceRevision as number,
       shape: artifact.shape,
+      folderName: artifact.folderName,
       byteSize: artifact.byteSize as number,
       fileCount: artifact.fileCount as number,
       createdAt: artifact.createdAt,

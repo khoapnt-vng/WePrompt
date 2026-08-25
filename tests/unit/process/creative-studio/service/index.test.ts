@@ -1371,6 +1371,7 @@ describe('CreativeStudioServiceV2', () => {
           id: 'export_service_1',
           sourceRevision: 2,
           shape: 'script',
+          folderName: 'private-export-name',
           byteSize: 42,
           fileCount: 1,
           createdAt: '2026-08-17T00:00:02.000Z',
@@ -1414,7 +1415,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.onProjectUpdated).not.toHaveBeenCalled();
     expect(JSON.stringify(created)).not.toContain('managedExport');
     expect(JSON.stringify(created)).not.toContain('manifestSha256');
-    expect(JSON.stringify(created)).not.toContain('private-export-name');
+    expect(JSON.stringify(created)).not.toContain('/studio/');
   });
 
   it('normalizes every authored script field to canonical LF bytes', async () => {
@@ -1505,6 +1506,9 @@ describe('CreativeStudioServiceV2', () => {
     expect(authorityResolver.mock.calls.map(([, assetId]) => assetId)).toEqual(['seed_clip_1', 'take_01']);
     expect(create.mock.calls.map(([, plan]) => plan.shape)).toEqual(['still', 'editor_folder']);
     expect(create.mock.calls[1]?.[1].files.some((file) => file.relativePath === 'media/shot-001.mp4')).toBe(true);
+    expect(create.mock.calls[1]?.[1].files.some((file) => file.relativePath === 'script.md')).toBe(true);
+    expect(create.mock.calls[1]?.[1].managedFileName).toMatch(/^editor-folder-\d{8}-\d{6}-\d{3}-[a-f0-9]{16}$/);
+    expect(create.mock.calls[1]?.[1].managedFileName).not.toBe(create.mock.calls[1]?.[1].artifactId);
   });
 
   it('chooses the newest deterministic eligible seed when a still has no explicit cover', async () => {
@@ -1631,18 +1635,24 @@ describe('CreativeStudioServiceV2', () => {
     });
   });
 
-  it('normalizes an editor-folder coverage refusal without publishing an artifact', async () => {
+  it('exports missing Shot coverage as one shared slate without entering generation or spend', async () => {
     const harness = makeHarness();
 
-    await expect(
-      harness.service.createExport({
-        projectId: 'project_v2',
-        expectedRevision: 2,
-        expectedCatalogRevision: 1,
-        shape: 'editor_folder',
-      })
-    ).rejects.toMatchObject({ code: 'invalid_payload' });
-    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+    await harness.service.createExport({
+      projectId: 'project_v2',
+      expectedRevision: 2,
+      expectedCatalogRevision: 1,
+      shape: 'editor_folder',
+    });
+    expect(harness.exportCatalogStore.create).toHaveBeenCalledOnce();
+    const plan = vi.mocked(harness.exportCatalogStore.create).mock.calls[0]![1];
+    expect(plan.files.map(({ relativePath }) => relativePath).toSorted()).toEqual([
+      'media/slate.png',
+      'script.md',
+      'timeline.json',
+    ]);
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
   });
 
   it('fences copy and reveal when close wins while their main callbacks are pending', async () => {

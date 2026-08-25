@@ -882,6 +882,35 @@
       "views": {
         "references": "레퍼런스"
       },
+      "editorFolderExport": {
+        "action": "편집기 폴더 내보내기…",
+        "actionWithSlates": "편집기 폴더 내보내기 · 슬레이트 {{count}}개…",
+        "exporting": "내보내는 중… 미디어를 생성하거나 비용을 사용하지 않습니다.",
+        "reveal": "Finder에서 보기",
+        "dismiss": "닫기",
+        "none": "없음",
+        "successFacts": "{{bytes}}바이트 · 파일 {{count}}개",
+        "successSlates": "슬레이트 Shot 번호: {{shots}}",
+        "successQuarantine": "별도로 보관한 이전 내보내기: {{count}}",
+        "disabled": {
+          "no_beats": "내보내기 전에 Beat를 추가하세요",
+          "duration_pending": "비어 있는 모든 Beat의 길이를 설정하세요",
+          "invalid_media": "오래되었거나 잘못된 선택 미디어를 해결하세요",
+          "bed_too_short": "타임라인보다 긴 오디오 베드를 선택하세요",
+          "mutationActive": "현재 작업 공간 변경이 끝날 때까지 기다리세요",
+          "exportRunning": "편집기 폴더를 내보내는 중입니다",
+          "catalogUnavailable": "편집기 폴더 내보내기 저장소를 사용할 수 없습니다"
+        },
+        "errors": {
+          "catalogUnavailable": "내보내기 카탈로그를 사용할 수 없습니다. 프로젝트를 다시 불러오세요.",
+          "staleAuthority": "프로젝트 또는 내보내기 카탈로그가 변경되었습니다. 현재 프로젝트를 검토하세요.",
+          "invalidMedia": "선택 미디어가 오래되었거나 비정규 또는 유효하지 않습니다. Cut을 검토하세요.",
+          "mediaUnavailable": "선택 미디어 파일을 확인할 수 없습니다. 불완전한 내보내기는 게시되지 않았습니다.",
+          "busy": "Creative Studio가 다른 작업을 완료 중입니다. 완료 후 다시 시도하세요.",
+          "artifactUnavailable": "이 내보내기는 현재 카탈로그에 없습니다. 다시 불러오세요.",
+          "resultConflict": "결과 확인 전에 새 카탈로그가 도착했습니다. 다시 불러와 검토하세요."
+        }
+      },
       "referenceWorkflow": {
         "description": "먼저 캐릭터의 대표 이미지를 승인한 다음 반복되는 배경의 대표 이미지를 승인하세요. Board 또는 첫 프레임을 생성하기 전에 승인된 레퍼런스를 각 Shot에 연결하세요.",
         "generationScope": "생성 범위",

@@ -882,6 +882,35 @@
       "views": {
         "references": "参考图"
       },
+      "editorFolderExport": {
+        "action": "导出剪辑文件夹…",
+        "actionWithSlates": "导出剪辑文件夹 · {{count}} 个占位画面…",
+        "exporting": "正在导出… 不会生成媒体，也不会产生费用。",
+        "reveal": "在访达中显示",
+        "dismiss": "关闭",
+        "none": "无",
+        "successFacts": "{{bytes}} 字节 · {{count}} 个文件",
+        "successSlates": "占位画面镜头编号：{{shots}}",
+        "successQuarantine": "已移到一旁的旧导出：{{count}}",
+        "disabled": {
+          "no_beats": "请先添加节拍再导出",
+          "duration_pending": "请先为每个空节拍设置时长",
+          "invalid_media": "请先处理过期或无效的已选媒体",
+          "bed_too_short": "请选择足以覆盖时间线的音频床",
+          "mutationActive": "请等待当前工作区更改完成",
+          "exportRunning": "剪辑文件夹导出正在进行",
+          "catalogUnavailable": "剪辑文件夹导出存储不可用"
+        },
+        "errors": {
+          "catalogUnavailable": "导出目录不可用。请重新加载项目后重试。",
+          "staleAuthority": "项目或导出目录已更改。请检查当前项目后重试。",
+          "invalidMedia": "所选媒体已过期、不是标准媒体或无效。请先检查剪辑。",
+          "mediaUnavailable": "无法验证所选媒体文件。未发布任何不完整导出。",
+          "busy": "Creative Studio 正在完成另一项工作区操作。请稍后重试。",
+          "artifactUnavailable": "此导出已不在当前目录中。请重新加载后再显示。",
+          "resultConflict": "确认结果前收到了更新的导出目录。请重新加载并检查导出。"
+        }
+      },
       "referenceWorkflow": {
         "description": "先批准角色的当前标准图，再批准重复出现背景的当前标准图。生成分镜或首帧之前，请将已批准的参考图明确绑定到每个镜头。",
         "generationScope": "生成范围",

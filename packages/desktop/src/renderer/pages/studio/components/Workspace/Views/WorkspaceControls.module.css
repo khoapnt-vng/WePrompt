@@ -18,6 +18,29 @@
   flex: 0 0 auto;
 }
 
+.editorFolderExportStatus {
+  position: fixed;
+  z-index: 1001;
+  inset-block-start: 64px;
+  inset-inline-end: 20px;
+  inline-size: min(440px, calc(100vw - 40px));
+  box-shadow: 0 10px 30px var(--color-fill-3);
+}
+
+.editorFolderExportStatusContent {
+  display: grid;
+  min-inline-size: 0;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.editorFolderExportStatusActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-block-start: 4px;
+}
+
 .projectModal {
   inline-size: min(760px, calc(100vw - 32px));
 }

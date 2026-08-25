@@ -20,13 +20,11 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   activeView,
   project,
   projection,
-  exportCatalog,
   drafts,
   pending,
   gateLocked,
   imageRouteReady,
   errorMessageKey,
-  exportErrorMessageKey,
   mutations,
   tableBoardActions,
   boardActions,
@@ -286,8 +284,6 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       {activeView === 'cut' ? (
         <CutView
           actions={cutActions}
-          exportCatalog={exportCatalog}
-          exportErrorMessageKey={exportErrorMessageKey}
           pending={pending}
           projectId={project.id}
           projection={projection}

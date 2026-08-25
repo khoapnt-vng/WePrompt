@@ -60,7 +60,6 @@ import {
   type BeatPanelReviewGraph,
   type BoardActions,
   type CutActions,
-  type CutCopyResult,
   type CutImportResult,
   type ReferencesViewActions,
   type StudioReferenceFocusIntent,
@@ -306,12 +305,10 @@ const StudioProjectPage: React.FC<{
     referenceErrorMessageKey,
     workspaceErrorMessageKey,
     routeErrorMessageKey,
-    exportErrorMessageKey,
     refetchProjectWorkspace,
     refetchProposals,
     refetchReferences,
     refetchRoutes,
-    refetchExports,
     installExportCatalog,
   } = useStudioProject(projectId);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
@@ -2066,89 +2063,90 @@ const StudioProjectPage: React.FC<{
           projectRef.current = refreshed;
           return true;
         })) ?? false,
-      createExport: async (input) =>
-        (await runWorkspaceExclusive(async () => {
-          const current = projectRef.current;
-          const catalog = exportCatalogRef.current;
-          if (current === null || catalog === null) return false;
-          const request =
-            input.shape === 'still'
-              ? {
-                  projectId: current.id,
-                  expectedRevision: current.revision,
-                  expectedCatalogRevision: catalog.revision,
-                  shape: input.shape,
-                  shotId: input.shotId,
-                }
-              : {
-                  projectId: current.id,
-                  expectedRevision: current.revision,
-                  expectedCatalogRevision: catalog.revision,
-                  shape: input.shape,
-                };
-          const result = await ipcBridge.creativeStudio.createExport.invoke(request);
-          if (result.ok === false) {
-            setActionErrorMessageKey(result.error.messageKey);
-            return false;
-          }
-          if (installExportCatalog(result.data)) return true;
-          return refetchExports();
-        })) ?? false,
-      refreshExports: async () => (await runWorkspaceExclusive(refetchExports)) ?? false,
-      copyExport: async (artifactId): Promise<CutCopyResult> =>
-        (await runWorkspaceExclusive(async () => {
-          const current = projectRef.current;
-          const catalog = exportCatalogRef.current;
-          if (
-            current === null ||
-            catalog === null ||
-            catalog.artifacts.filter((artifact) => artifact.id === artifactId).length !== 1
-          ) {
-            return 'failed';
-          }
-          const result = await ipcBridge.creativeStudio.copyExport.invoke({
-            projectId: current.id,
-            expectedCatalogRevision: catalog.revision,
-            artifactId,
-          });
-          if (result.ok === false) {
-            setActionErrorMessageKey(result.error.messageKey);
-            return 'failed';
-          }
-          return result.data.status;
-        })) ?? 'failed',
-      revealExport: async (artifactId) =>
-        (await runWorkspaceExclusive(async () => {
-          const current = projectRef.current;
-          const catalog = exportCatalogRef.current;
-          if (
-            current === null ||
-            catalog === null ||
-            catalog.artifacts.filter((artifact) => artifact.id === artifactId).length !== 1
-          ) {
-            return false;
-          }
-          const result = await ipcBridge.creativeStudio.revealExport.invoke({
-            projectId: current.id,
-            expectedCatalogRevision: catalog.revision,
-            artifactId,
-          });
-          if (result.ok === false) {
-            setActionErrorMessageKey(result.error.messageKey);
-            return false;
-          }
-          return result.data.status === 'revealed';
-        })) ?? false,
     }),
     [
       boardActions.reorderBeats,
-      installExportCatalog,
-      refetchExports,
       refetchProjectWorkspace,
       runWorkspaceCommit,
       runWorkspaceExclusive,
       setActionErrorMessageKey,
     ]
+  );
+
+  const createEditorFolder = useCallback(async (): Promise<
+    { ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }
+  > => {
+    const completed = await runWorkspaceExclusive(async () => {
+      const current = projectRef.current;
+      const catalog = exportCatalogRef.current;
+      if (current === null || catalog === null) {
+        return {
+          ok: false as const,
+          messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.catalogUnavailable',
+        };
+      }
+      const result = await ipcBridge.creativeStudio.createExport.invoke({
+        projectId: current.id,
+        expectedRevision: current.revision,
+        expectedCatalogRevision: catalog.revision,
+        shape: 'editor_folder',
+      });
+      if (result.ok === false) {
+        const messageKey =
+          result.error.code === 'stale_project'
+            ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleAuthority'
+            : result.error.code === 'invalid_payload'
+              ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.invalidMedia'
+              : result.error.code === 'storage_error'
+                ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable'
+                : result.error.code === 'busy'
+                  ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy'
+                  : result.error.messageKey;
+        return { ok: false as const, messageKey };
+      }
+      installExportCatalog(result.data);
+      return { ok: true as const, catalog: result.data };
+    });
+    return (
+      completed ?? {
+        ok: false,
+        messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+      }
+    );
+  }, [installExportCatalog, runWorkspaceExclusive]);
+
+  const revealEditorFolder = useCallback(
+    async (artifactId: string): Promise<{ ok: true } | { ok: false; messageKey: string }> => {
+      const completed = await runWorkspaceExclusive(async () => {
+        const current = projectRef.current;
+        const catalog = exportCatalogRef.current;
+        if (
+          current === null ||
+          catalog === null ||
+          catalog.artifacts.filter((artifact) => artifact.id === artifactId && artifact.shape === 'editor_folder')
+            .length !== 1
+        ) {
+          return {
+            ok: false as const,
+            messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.artifactUnavailable',
+          };
+        }
+        const result = await ipcBridge.creativeStudio.revealExport.invoke({
+          projectId: current.id,
+          expectedCatalogRevision: catalog.revision,
+          artifactId,
+        });
+        if (result.ok === false) return { ok: false as const, messageKey: result.error.messageKey };
+        return { ok: true as const };
+      });
+      return (
+        completed ?? {
+          ok: false,
+          messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+        }
+      );
+    },
+    [runWorkspaceExclusive]
   );
 
   const referenceActions = useMemo<ReferencesViewActions>(
@@ -3085,6 +3083,9 @@ const StudioProjectPage: React.FC<{
               projection={projection}
               routeCatalog={routeCatalog}
               generationCapability={currentGenerationCapability}
+              exportCatalog={exportCatalog}
+              createEditorFolder={createEditorFolder}
+              revealEditorFolder={revealEditorFolder}
               drafts={drafts}
               pending={workspacePending}
               errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
@@ -3135,7 +3136,6 @@ const StudioProjectPage: React.FC<{
             cutActions={cutActions}
             project={project}
             projection={projection}
-            exportCatalog={exportCatalog}
             drafts={drafts}
             pending={workspacePending}
             gateLocked={spendGateLocked}
@@ -3144,7 +3144,6 @@ const StudioProjectPage: React.FC<{
               (project.imageRouteId !== null && routeCatalog?.image.status === 'ready')
             }
             errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
-            exportErrorMessageKey={exportErrorMessageKey}
             mutations={mutations}
             beatPanelActions={beatPanelActions}
             beatPanelReviewGraphs={beatPanelReviewGraphs}

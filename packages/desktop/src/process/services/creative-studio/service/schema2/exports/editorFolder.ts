@@ -6,7 +6,10 @@
 
 import { createHash } from 'node:crypto';
 import { deflateSync } from 'node:zlib';
-import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
+import {
+  deriveStudioEditorFolderPreviewV2,
+  isCanonicalStudioGeneratedTakeV2,
+} from '@/common/types/project/creativeStudioCanonicalTake';
 import { isCanonicalStudioBedAudioAssetV2 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
   STUDIO_BED_FADE_OUT_SECONDS,
@@ -185,6 +188,22 @@ const generatedFile = (relativePath: string, bytes: Uint8Array): StudioEditorFol
   sha256: sha256(bytes),
 });
 
+/** Serializes only schema-5 authoring fields, in active film order, with canonical LF endings. */
+export const composeStudioEditorFolderScriptV2 = (project: StudioProjectV2): Uint8Array => {
+  const lines: string[] = [`# ${project.name}`, '', project.brief, ''];
+  project.beatOrder.forEach((beatId, beatIndex) => {
+    const beat = ownRecordValue(project.beats, beatId);
+    if (beat === undefined) return;
+    lines.push(`## Beat ${beatIndex + 1}: ${beat.title}`, '', 'Story', '', beat.story, '');
+    beat.shotOrder.forEach((shotId, shotIndex) => {
+      const shot = ownRecordValue(project.shots, shotId);
+      if (shot === undefined) return;
+      lines.push(`### Shot ${shotIndex + 1}`, '', 'Shooting script', '', shot.shootingScript, '');
+    });
+  });
+  return Buffer.from(lines.join('\n').replace(/\r\n?/gu, '\n').replace(/\n+$/u, '\n'), 'utf8');
+};
+
 /**
  * Composes a complete non-stitched editor package from one canonical project revision and the exact
  * managed-media proofs revalidated by main immediately before publication.
@@ -194,6 +213,13 @@ export const composeStudioEditorFolderV2 = (
   verifiedMedia: readonly StudioEditorFolderVerifiedMediaV2[]
 ): StudioEditorFolderCompositionV2 => {
   if (!validateStudioProjectV2(project)) return fail('invalid_project');
+  const preview = deriveStudioEditorFolderPreviewV2(project);
+  if (preview.status === 'blocked') {
+    if (preview.reason === 'duration_pending') return fail('duration_pending');
+    if (preview.reason === 'bed_too_short') return fail('bed_too_short');
+    if (preview.reason === 'invalid_media') return fail('invalid_media');
+    return fail('coverage_incomplete');
+  }
   const proofs = new Map<string, StudioEditorFolderVerifiedMediaV2>();
   for (const proof of verifiedMedia) {
     if (
@@ -235,6 +261,8 @@ export const composeStudioEditorFolderV2 = (
       needsSlate = true;
       entries.push({
         kind: 'slate',
+        shotOrdinal: null,
+        shotId: null,
         relativePath: 'media/slate.png',
         timelineStartSeconds,
         durationSeconds: beat.targetSeconds,
@@ -244,7 +272,20 @@ export const composeStudioEditorFolderV2 = (
       for (const shotId of beat.shotOrder) {
         const shot = ownRecordValue(project.shots, shotId);
         if (shot === undefined) return fail('invalid_project');
-        if (shot.videoAssetId === null) return fail('coverage_incomplete');
+        shotOrdinal += 1;
+        if (shot.videoAssetId === null) {
+          needsSlate = true;
+          entries.push({
+            kind: 'slate',
+            shotOrdinal,
+            shotId,
+            relativePath: 'media/slate.png',
+            timelineStartSeconds,
+            durationSeconds: shot.durationSeconds,
+          });
+          timelineStartSeconds = safeAdd(timelineStartSeconds, shot.durationSeconds);
+          continue;
+        }
         const take = ownRecordValue(project.assets, shot.videoAssetId);
         if (
           take === undefined ||
@@ -254,7 +295,7 @@ export const composeStudioEditorFolderV2 = (
           take.durationSeconds === undefined ||
           take.durationSeconds <= 0
         ) {
-          return fail('coverage_incomplete');
+          return fail('invalid_media');
         }
         requireVerifiedAsset(take);
         const sourceInSeconds = shot.trimInSeconds ?? 0;
@@ -270,10 +311,10 @@ export const composeStudioEditorFolderV2 = (
         ) {
           return fail('invalid_media');
         }
-        shotOrdinal += 1;
         const relativePath = `media/shot-${String(shotOrdinal).padStart(3, '0')}.${extensionForAsset(take)}`;
         entries.push({
           kind: 'shot',
+          shotOrdinal,
           shotId,
           videoAssetId: take.id,
           relativePath,
@@ -343,6 +384,7 @@ export const composeStudioEditorFolderV2 = (
     bed,
   };
   const timelineBytes = Buffer.from(JSON.stringify(timeline), 'utf8');
+  files.push(generatedFile('script.md', composeStudioEditorFolderScriptV2(project)));
   files.push(generatedFile('timeline.json', timelineBytes));
   if (needsSlate) {
     const { width, height } = dimensionsForProject(project);
