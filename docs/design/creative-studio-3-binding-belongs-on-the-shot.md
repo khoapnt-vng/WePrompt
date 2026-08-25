@@ -48,18 +48,18 @@ character-first ordering.
 `generation/referenceBinding.ts:34` keeps refusing to generate a Shot whose binding is not `ready`.
 This is a relocation of the control surface, not a change to the contract it writes.
 
-## The one thing that needs deciding
+## Ruled 2026-08-25 — readiness is a state, not a door
 
 **References currently owns the handoff out of the phase.** Its footer carries a
 **Continue to Table** button enabled only when `readyForTable` — every Shot bound, nothing pending,
 gate unlocked (`References/index.tsx:576–584`). If binding moves to the Table, a button whose whole
 job is to send you to the Table in order to finish binding no longer makes sense.
 
-Recommended: **retire the phase handoff and let readiness be a state, not a door.** The Table already
+**Ruled: retire the phase handoff.** The Table already
 surfaces per-Shot blockers, and `referenceBinding.ts:34` already refuses generation on an unbound
 Shot, so an unbound Shot cannot silently cost money wherever the person happens to be. That is the
 same principle as the spend governance ruling — carry the discipline with information and a refusal
 at the point of spend, rather than with a gate between rooms.
 
-If a handoff is still wanted, it should read as progress ("3 of 10 Shots bound") rather than as a
-locked door.
+Where progress is worth stating, state it as progress — "3 of 10 Shots bound" — never as a locked
+door.

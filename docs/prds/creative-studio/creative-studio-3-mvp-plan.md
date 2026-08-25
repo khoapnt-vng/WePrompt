@@ -1255,3 +1255,65 @@ The task is complete only when focused tests and the full repository gate prove 
 5. The Cut export controls are gone only after the project-menu path is covered.
 6. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the full
    test suite, format, lint, and `git diff --check` pass from the exact final head.
+
+---
+
+## Assignable follow-on — References redesign and Shot-level binding
+
+**Status:** owner-approved 2026-08-25. Two related changes to the same surface; implement them
+together from the latest combined Creative Studio head. Full direction lives in
+[References card redesign](../../design/creative-studio-3-references-card-redesign.md) and
+[binding belongs on the Shot](../../design/creative-studio-3-binding-belongs-on-the-shot.md); this
+section is the assignment, not the specification.
+
+### Problem and goal
+
+The References view does two jobs badly. Its cards bury a large prompt paragraph under a small
+image, so the picture — the only thing worth judging — is the smallest element on screen. And it
+hosts a per-Shot binding form repeated once for every Shot in the film, without the Shot's own panel
+visible to bind against.
+
+The goal is one view about pictures, and binding where the Shot is.
+
+### Required product behavior
+
+1. **One large image per reference.** The prompt leaves the card and reappears only inside the
+   regenerate flow.
+2. **Three hover actions on the image:** view full screen (reuse `FullscreenMediaFrame.tsx`),
+   regenerate, and choose among previously generated images (already retained in
+   `supersededAssetIds`).
+3. **Regenerate proposes an editable prompt.** Creative Studio composes it; the user may edit it
+   before anything is generated. `regenerate(referenceId)` takes no prompt today, so this is a new
+   request shape.
+4. **No explicit Approve.** The newest generated image is current, and current is approved.
+   Rejection becomes regeneration. Choosing an older image re-points the same field.
+5. **Collapse `candidateAssetId` into `approvedAssetId`.** Under implicit approval the candidate
+   holds no state of its own; keep one current pointer plus `supersededAssetIds`, and rewrite the
+   `validation.ts:672` invariant that kept them distinct. Do this now while the zero-user schema-5
+   argument still holds.
+6. **Move per-Shot binding to the Board panel strip** in the Table's Beat detail — character
+   multi-select, background select, capacity warning, unassigned/invalid states and save.
+7. **Retire Continue to Table.** Readiness is a state, not a door. Where progress is worth stating,
+   state it as progress.
+
+Everything above applies to characters and recurring backgrounds identically: they are one entity
+rendered through one shared `renderCard`.
+
+### Explicit non-goals
+
+- No change to `StudioShotReferenceBindingV2` or to the refusal in
+  `generation/referenceBinding.ts:34` to generate a Shot whose binding is not `ready`.
+- No weakening of character-first ordering, and no path by which the Director can cause approval on
+  its own. A human still confirms the spend that produces every image.
+- No permanent ordinals, tombstones, cast sheets or eviction tiers — see the
+  [reference scope ruling](../creative-studio/creative-studio-3-reference-scope-ruling.md).
+
+### Acceptance boundary
+
+1. The character-first gate still refuses background generation before characters exist, now
+   measuring generation rather than a separate approval act. Reword the plan criterion that reads
+   "approvals precede Continue" to match.
+2. An unbound Shot still cannot reach paid generation from any surface.
+3. Reference image history remains reachable and reverting to an earlier image costs nothing.
+4. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
+   full test suite, format, lint, and `git diff --check` pass from the exact final head.
