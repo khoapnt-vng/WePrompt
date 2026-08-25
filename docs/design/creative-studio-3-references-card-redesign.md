@@ -35,6 +35,30 @@ actionable.
 prompt; the user may accept it or change it before anything is generated. This is the plan decision
 made concrete and visible at the point of use.
 
+## This applies to backgrounds identically
+
+Characters and recurring backgrounds are **one entity and one card**. `StudioProjectReferenceV2` is
+discriminated only by `kind: 'character' | 'background'`, and `References/index.tsx:521,542` render
+both sections through the same `renderCard`. So the large image, the hover actions, the editable
+regenerate prompt and the removal of Approve all reach backgrounds by construction — there is no
+second card to redesign, and no second decision to make.
+
+Two background-specific consequences follow from implicit approval, and both are deliberate:
+
+- **The character-first gate changes what it measures.** `pricing/estimate.ts:1089` refuses to price
+  background generation until `charactersApproved`, and `References/index.tsx:438` disables the
+  background action on the same condition. Under implicit approval that becomes _until characters
+  have been generated_. The **ordering discipline survives** — characters still come first — but the
+  enforced pause in which a human explicitly signed off the characters does not.
+- **The acceptance wording must be updated with it.** The plan's criterion reads "Characters precede
+  backgrounds and approvals precede Continue." The first half still holds exactly. The second half
+  no longer describes a separate act, because paying for a generation is the approving act. Reword
+  it rather than leaving a criterion that cannot be satisfied as written.
+
+This is consistent with the [spend governance ruling](../prds/creative-studio/creative-studio-3-spend-governance-ruling.md):
+the characters are on screen and the person can see them, so the discipline is carried by
+information rather than by a gate.
+
 ## What already exists
 
 - **The image history is already stored.** `StudioProjectReferenceV2` carries `candidateAssetId`,
@@ -55,13 +79,13 @@ made concrete and visible at the point of use.
 This is more than a button. `approvedAssetId` is read at five enforcement points, three of them in
 main:
 
-| Site | What it enforces |
-| --- | --- |
-| `pricing/estimate.ts:1089` | character-first gate — background generation refused until characters are approved |
-| `validation.ts:1731` | a Shot binding to an unapproved reference is invalid |
-| `validation.ts:672` | invariant: `candidateAssetId !== approvedAssetId` |
-| `studioServer.ts:1122` | the Director MCP requires approved character references |
-| `directorCommandContracts.ts:294` | `approve_reference` is `operation_not_permitted` for the Director |
+| Site                              | What it enforces                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------- |
+| `pricing/estimate.ts:1089`        | character-first gate — background generation refused until characters are approved |
+| `validation.ts:1731`              | a Shot binding to an unapproved reference is invalid                               |
+| `validation.ts:672`               | invariant: `candidateAssetId !== approvedAssetId`                                  |
+| `studioServer.ts:1122`            | the Director MCP requires approved character references                            |
+| `directorCommandContracts.ts:294` | `approve_reference` is `operation_not_permitted` for the Director                  |
 
 Deleting the concept would remove the input to the character-first gate and to binding validation.
 That is not what this direction asks for.

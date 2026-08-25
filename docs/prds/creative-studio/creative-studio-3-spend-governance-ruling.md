@@ -25,8 +25,8 @@ An earlier draft of this ruling proposed asking before anything that changes wha
 generation — first frames, continuity frames, bindings — citing the 2×2 grid incident that ruined
 four of thirty Shots.
 
-That was the wrong instrument. Run the counterfactual: had Studio asked *"use this image as the
-first frame?"*, the answer would have been yes. The dialog saves nobody.
+That was the wrong instrument. Run the counterfactual: had Studio asked _"use this image as the
+first frame?"_, the answer would have been yes. The dialog saves nobody.
 
 What would have caught it is **seeing the picture**. A human recognises a 2×2 grid instantly. The
 first frame was never displayed anywhere before it conditioned three paid renders. That is an
