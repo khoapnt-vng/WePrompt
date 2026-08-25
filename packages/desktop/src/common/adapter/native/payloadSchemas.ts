@@ -417,6 +417,23 @@ const studioV2ReferencePlanSchema = z
       if (reference.kind === 'background') sawBackground = true;
     });
   });
+const studioV2ReferencePlanAdditionsSchema = z
+  .array(studioV2ReferenceDraftSchema)
+  .min(1)
+  .max(STUDIO_MAX_PROJECT_REFERENCES)
+  .superRefine((references, context) => {
+    const labels = new Set<string>();
+    references.forEach((reference, index) => {
+      const labelIdentity = `${reference.kind}\0${reference.label}`;
+      if (reference.kind !== 'background') {
+        context.addIssue({ code: 'custom', message: 'only background references may be appended', path: [index] });
+      }
+      if (labels.has(labelIdentity)) {
+        context.addIssue({ code: 'custom', message: 'duplicate reference label', path: [index] });
+      }
+      labels.add(labelIdentity);
+    });
+  });
 const studioV2UniqueIdsSchema = (maximum: number) =>
   z
     .array(safeIdSchema)
@@ -480,6 +497,7 @@ const studioV2SpendPolicySchema = z
 const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('set_brief'), brief: z.string().max(16 * 1024) }).strict(),
   z.object({ kind: z.literal('set_reference_plan'), references: studioV2ReferencePlanSchema }).strict(),
+  z.object({ kind: z.literal('amend_reference_plan'), additions: studioV2ReferencePlanAdditionsSchema }).strict(),
   z
     .object({ kind: z.literal('approve_reference'), referenceId: safeIdSchema, candidateAssetId: safeIdSchema })
     .strict(),

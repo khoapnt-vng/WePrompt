@@ -232,6 +232,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
         <ReferencesView
           actions={
             referenceActions ?? {
+              addBackground: async () => false,
               approve: async () => false,
               regenerate: () => undefined,
               retryJob: async () => false,
@@ -243,7 +244,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           }
           errorMessageKey={referenceErrorMessageKey}
           focusIntent={referenceFocusIntent}
-          gateLocked={gateLocked || referenceActions === undefined}
+          gateLocked={gateLocked || pending || referenceActions === undefined}
           bindings={referenceBindings}
           maxConditioningImages={referenceMaxConditioningImages}
           pendingReferenceId={referencePendingId}

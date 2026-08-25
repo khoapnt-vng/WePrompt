@@ -406,6 +406,37 @@ describe('initCreativeStudioBridge', () => {
     expect((await registeredHandler('applyAuthoringBatch')(input as never)) as object).not.toHaveProperty('project');
   });
 
+  it('routes the UI reference-plan amendment through the shared authoring mutation seam unchanged', async () => {
+    initCreativeStudioBridge(dependencies);
+    const input = {
+      projectId: 'project_1',
+      expectedRevision: 6,
+      operations: [
+        {
+          kind: 'amend_reference_plan' as const,
+          additions: [
+            {
+              kind: 'background' as const,
+              label: 'Dai pai dong',
+              prompt: 'A recurring food stall beneath a red awning.',
+            },
+          ],
+        },
+      ],
+    };
+
+    await expect(registeredHandler('applyAuthoringBatch')(input as never)).resolves.toMatchObject({ ok: true });
+    expect(service.applyMutations).toHaveBeenCalledExactlyOnceWith(
+      {
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+        projectId: input.projectId,
+        expectedRevision: input.expectedRevision,
+        operations: input.operations,
+      },
+      { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
+    );
+  });
+
   it('binds the Director conversation through the narrow service seam and returns only an empty-created commit DTO', async () => {
     initCreativeStudioBridge(dependencies);
     const input = { projectId: 'project_1', expectedRevision: 7, conversationId: 'conversation_1' };

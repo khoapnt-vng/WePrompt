@@ -894,7 +894,14 @@
           "title": "背景",
           "description": "核准重複出現的場景，讓影片保持視覺一致。",
           "charactersRequired": "請先核准所有角色，再檢閱背景。",
-          "empty": "不需要重複出現的背景。"
+          "empty": "不需要重複出現的背景。",
+          "add": "新增背景",
+          "addTitle": "新增重複出現的背景",
+          "nameLabel": "背景名稱",
+          "promptLabel": "生成提示詞",
+          "duplicate": "已有同名背景。",
+          "cancel": "取消",
+          "confirm": "新增背景"
         },
         "previewPending": "尚未產生參考圖候選。",
         "previewAlt": "{{label}} 的參考圖候選",
@@ -1195,6 +1202,7 @@
         "undoLabel": {
           "promote_board_panel": "將分鏡用作首幀",
           "set_reference_plan": "參考計畫",
+          "amend_reference_plan": "新增背景",
           "approve_reference": "參考核准",
           "set_shot_reference_binding": "Shot 參考綁定"
         }

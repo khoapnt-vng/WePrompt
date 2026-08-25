@@ -5929,6 +5929,16 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
       },
     ],
   },
+  {
+    kind: 'amend_reference_plan',
+    additions: [
+      {
+        kind: 'background',
+        label: 'Dai pai dong',
+        prompt: 'Recurring dai-pai-dong background.',
+      },
+    ],
+  },
   { kind: 'approve_reference', referenceId: 'ref_ming', candidateAssetId: 'asset_ming' },
   { kind: 'add_beat', beatId: 'section_new', beat: editableBeatV2(), beforeBeatId: null },
   { kind: 'edit_beat', beatId: 'section_1', changes: { targetSeconds: 12 } },
@@ -6510,7 +6520,7 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(28);
+      expect(operationKinds).toHaveLength(29);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds
@@ -6527,6 +6537,17 @@ describe('Studio MCP schema-2 server', () => {
         additionalProperties: false,
         required: ['kind', 'beatId', 'shotId', 'shot', 'beforeShotId'],
       });
+      expect(
+        advertisedValidator({
+          expectedRevision: 7,
+          operations: [
+            {
+              kind: 'amend_reference_plan',
+              additions: [{ kind: 'character', label: 'Ming', prompt: 'Ming character sheet.' }],
+            },
+          ],
+        })
+      ).toMatchObject({ valid: false });
 
       const canonicalBatch = {
         expectedRevision: 8,
@@ -6756,6 +6777,15 @@ describe('Studio MCP schema-2 server', () => {
             shotId: 'clip_short',
             shot: { ...editableShotV2(), durationSeconds: 3 },
             beforeShotId: null,
+          },
+        ],
+      },
+      {
+        expectedRevision: 7,
+        operations: [
+          {
+            kind: 'amend_reference_plan',
+            additions: [{ kind: 'character', label: 'Mei', prompt: 'A character study.' }],
           },
         ],
       },

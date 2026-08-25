@@ -894,7 +894,14 @@
           "title": "背景",
           "description": "批准重复出现的场景，让影片保持视觉一致。",
           "charactersRequired": "请先批准所有角色，再审核背景。",
-          "empty": "不需要重复出现的背景。"
+          "empty": "不需要重复出现的背景。",
+          "add": "添加背景",
+          "addTitle": "添加重复出现的背景",
+          "nameLabel": "背景名称",
+          "promptLabel": "生成提示词",
+          "duplicate": "已存在同名背景。",
+          "cancel": "取消",
+          "confirm": "添加背景"
         },
         "previewPending": "尚未生成参考图候选。",
         "previewAlt": "{{label}} 的参考图候选",
@@ -1195,6 +1202,7 @@
         "undoLabel": {
           "promote_board_panel": "将分镜用作首帧",
           "set_reference_plan": "参考计划",
+          "amend_reference_plan": "添加背景",
           "approve_reference": "参考批准",
           "set_shot_reference_binding": "Shot 参考绑定"
         }

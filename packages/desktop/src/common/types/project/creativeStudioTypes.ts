@@ -192,6 +192,7 @@ export type StudioDirectorOperationV2 = Extract<
       | 'reorder_shots'
       | 'reorder_bin'
       | 'set_reference_plan'
+      | 'amend_reference_plan'
       | 'set_shot_reference_binding';
   }
 >;
@@ -323,6 +324,10 @@ export type StudioReferenceDraftV2 = {
   kind: StudioReferenceKindV2;
   label: string;
   prompt: string;
+};
+
+export type StudioBackgroundReferenceDraftV2 = Omit<StudioReferenceDraftV2, 'kind'> & {
+  kind: 'background';
 };
 
 /** Durable candidate/approval authority for one project-level reference sheet. */
@@ -837,6 +842,7 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'set_hard_cut'
       | 'set_seed_still'
       | 'set_reference_plan'
+      | 'amend_reference_plan'
       | 'approve_reference'
       | 'set_shot_reference_binding'
       | 'promote_board_panel'
@@ -1343,6 +1349,7 @@ export type StudioMutationOperationV2 =
   | { kind: 'set_brief'; brief: string }
   | { kind: 'set_rules'; rules: StudioBriefRuleDraft[] }
   | { kind: 'set_reference_plan'; references: StudioReferenceDraftV2[] }
+  | { kind: 'amend_reference_plan'; additions: StudioBackgroundReferenceDraftV2[] }
   | { kind: 'approve_reference'; referenceId: string; candidateAssetId: string }
   | {
       kind: 'set_shot_reference_binding';

@@ -79,6 +79,8 @@ export const DIRECTOR_PRESET_RULES = [
   '1. Call read_storyboard at the agreed revision.',
   '2. Create the semantic reference plan with set_reference_plan through studio_apply_edits. Do not invent',
   'reference IDs: the app owns them. Read the fresh storyboard to learn the IDs the app created.',
+  'If a recurring background is discovered after that initial plan, read the fresh revision and use',
+  'amend_reference_plan with background additions. Never replace or repeat set_reference_plan.',
   '3. Request character reference images first. A request only records work for human review; it does not',
   'generate media, so never imply that requested images were generated.',
   '4. Wait for the person to approve character candidates in the References view. approve_reference is',

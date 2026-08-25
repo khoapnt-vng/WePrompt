@@ -200,6 +200,12 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       },
     ]);
     await apply('command_set_reference_plan', [{ kind: 'set_reference_plan', references: [] }]);
+    await apply('command_amend_reference_plan', [
+      {
+        kind: 'amend_reference_plan',
+        additions: [{ kind: 'background', label: 'Dai pai dong', prompt: 'A recurring food stall.' }],
+      },
+    ]);
     await apply('command_set_shot_reference_binding', [
       {
         kind: 'set_shot_reference_binding',
@@ -228,11 +234,16 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
         },
       },
       referencePlanStatus: 'planned',
-      referenceOrder: [],
       bin: [
         { kind: 'beat', beatId: 'alternate_2', reason: 'alternate' },
         { kind: 'beat', beatId: 'alternate_1', reason: 'alternate' },
       ],
+    });
+    expect(project.referenceOrder).toHaveLength(1);
+    expect(project.references[project.referenceOrder[0]!]).toMatchObject({
+      kind: 'background',
+      label: 'Dai pai dong',
+      approvedAssetId: null,
     });
     expect(project.shots).not.toHaveProperty('clip_3');
     for (const boundary of Object.values(paidBoundaries)) expect(boundary).not.toHaveBeenCalled();
