@@ -66,7 +66,7 @@ main:
 Deleting the concept would remove the input to the character-first gate and to binding validation.
 That is not what this direction asks for.
 
-**Recommended reconciliation: keep the field, make the act implicit.** The newest generated image is
+**Ruled 2026-08-25: keep the field, make the act implicit.** The newest generated image is
 the reference's current image, and the current image is the approved image. Rejection stops being
 "withhold approval" and becomes "regenerate" — which the redesign makes a first-class hover action
 with an editable prompt. Choosing an older image from the list re-points the same field.
@@ -75,10 +75,22 @@ This preserves the human-only boundary that the plan ratifies. The Director cann
 generation; a human confirms the spend that produces one. That confirmation is the human act, and
 requiring a second approval afterwards for the same decision is the redundancy being removed here.
 
-**One invariant must change deliberately.** `validation.ts:672` asserts `candidateAssetId === null ||
-candidateAssetId !== approvedAssetId`. Under an implicit model those converge, so the candidate and
-approved states either merge into one current pointer or the invariant is rewritten. Settle this
-before implementation; do not discover it mid-change.
+**The consequence, and how to take it.** `validation.ts:672` asserts `candidateAssetId === null ||
+candidateAssetId !== approvedAssetId`. Under an implicit model those converge: every candidate is
+current the moment it exists, so `candidateAssetId` has no state of its own left to hold.
+
+**Collapse to one pointer rather than relaxing the invariant.** Keeping both fields and permitting
+them to be equal leaves a vestigial `candidateAssetId` that always equals `approvedAssetId` — dead
+weight that every future reader has to reason about and that invites the two to drift apart again.
+The reference becomes: one current image, plus `supersededAssetIds` holding everything previously
+generated.
+
+Do this now. The clean schema-5 cutover was justified on there being zero users and no production
+data to migrate, and that argument is still live today. The same collapse after a user base exists
+is a migration; today it is an edit.
+
+Retain `supersededAssetIds` exactly as it is — it is what makes "choose from generated images" and a
+free revert possible, and it is the reason rejection can safely become regeneration.
 
 **What must not change:** the character-first ordering, the refusal to bind unapproved references,
 and the rule that the Director cannot cause approval on its own.
