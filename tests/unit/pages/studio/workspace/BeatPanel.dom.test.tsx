@@ -1798,6 +1798,16 @@ describe('BeatPanel', () => {
     }
   });
 
+  /** Opens the Beat overflow menu and returns it. Save, Reset and re-split live there now. */
+  const openBeatMenu = (container: HTMLElement): HTMLElement => {
+    const trigger = container.querySelector<HTMLButtonElement>('[data-beat-overflow-trigger]');
+    if (trigger === null) throw new Error('Missing Beat overflow trigger');
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const menu = container.querySelector<HTMLElement>('[data-beat-overflow-menu]');
+    if (menu === null) throw new Error('Missing Beat overflow menu');
+    return menu;
+  };
+
   it('shows one Story field above Beat metadata and no retired prose controls', () => {
     render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
 
@@ -1805,18 +1815,17 @@ describe('BeatPanel', () => {
     const storyField = fields.querySelector<HTMLElement>('[data-beat-field="story"]');
     const targetField = fields.querySelector<HTMLElement>('[data-beat-field="target"]');
     const metaRow = fields.querySelector<HTMLElement>('[data-beat-meta-row]');
-    const editorActions = fields.querySelector<HTMLElement>('[data-beat-editor-actions]');
-    if (storyField === null || targetField === null || metaRow === null || editorActions === null) {
+    if (storyField === null || targetField === null || metaRow === null) {
       throw new Error('Beat authoring field hooks are incomplete');
     }
+    // Save, Reset and re-split moved into the Beat overflow menu; the editor holds fields only.
+    expect(fields.querySelector('[data-beat-editor-actions]')).toBeNull();
 
     expect(storyField.tagName).toBe('LABEL');
     expect(within(storyField).getByRole('textbox', { name: 'Story' })).toBeVisible();
     expect(within(storyField).getByText('Story · What happens in this Beat', { exact: true })).toBeVisible();
     expect(storyField.nextElementSibling).toBe(metaRow);
     expect(metaRow).toContainElement(targetField);
-    expect(metaRow).toContainElement(editorActions);
-    expect(targetField.compareDocumentPosition(editorActions) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
     expect(fields.querySelectorAll('textarea')).toHaveLength(1);
   });
 
@@ -2006,7 +2015,7 @@ describe('BeatPanel', () => {
     const actions = makeActions();
     render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
 
-    const save = screen.getByRole('button', { name: 'Save Beat' });
+    const save = within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Save Beat' });
     expect(save).toBeEnabled();
     fireEvent.click(save);
     await waitFor(() => expect(actions.saveBeat).toHaveBeenCalledWith('beat_1', { story }));
@@ -2068,7 +2077,7 @@ describe('BeatPanel', () => {
     );
     const actions = makeActions();
     const stale = render(<BeatPanel {...panelProps(beat, staleDrafts, actions)} />);
-    expect(screen.getByRole('button', { name: 'Save Beat' })).toBeDisabled();
+    expect(within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Save Beat' })).toBeDisabled();
     expect(screen.getAllByRole('button', { name: 'Save Shot' })[0]).toBeDisabled();
 
     stale.rerender(
@@ -2082,7 +2091,9 @@ describe('BeatPanel', () => {
     expect(screen.getByRole('slider', { name: 'Boundary after Shot 1' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Play Beat' })).toBeEnabled();
     expect(screen.getByRole('slider', { name: 'Beat seek rail' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Review re-split' }));
+    // Re-split moved into the Beat overflow menu, and a gate-locked project disables that trigger
+    // outright — so the action is unreachable rather than merely inert.
+    expect(stale.container.querySelector('[data-beat-overflow-trigger]')).toBeDisabled();
     expect(actions.requestResplit).not.toHaveBeenCalled();
   });
 

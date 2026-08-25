@@ -1261,6 +1261,30 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const beatMenu = (
     <Menu data-beat-id={beat.id} data-beat-overflow-menu>
       <Menu.Item
+        key='save-beat'
+        data-beat-save
+        disabled={mutationLocked || drafts.staleRevision || savingBeat || !beatDirty}
+        onClick={() => void saveBeat()}
+      >
+        {t(`${KEY_ROOT}.common.saveBeat`)}
+      </Menu.Item>
+      <Menu.Item
+        key='reset-beat'
+        data-beat-reset
+        disabled={mutationLocked || savingBeat || !beatDirty}
+        onClick={() => beatDraftKeys.forEach(drafts.reset)}
+      >
+        {t(`${KEY_ROOT}.common.resetBeat`)}
+      </Menu.Item>
+      <Menu.Item
+        key='resplit'
+        data-beat-resplit
+        disabled={mutationLocked}
+        onClick={() => actions.requestResplit(beat.id)}
+      >
+        {t(`${KEY_ROOT}.coverage.reviewResplit`)}
+      </Menu.Item>
+      <Menu.Item
         key='move-to-bin'
         data-beat-move-to-bin
         disabled={mutationLocked || !beatLiftAllowed}
@@ -1272,11 +1296,13 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   );
 
   useEffect(() => {
-    if (mutationLocked || !beatLiftAllowed) {
-      setMenuOpen(false);
+    // A Beat that cannot be lifted still has a reachable menu; only the pending park confirmation
+    // is retracted. Closing the menu here would hide Save exactly while drafts are dirty.
+    if (!beatLiftAllowed) {
       confirmationHandleRef.current?.close();
       confirmationHandleRef.current = null;
     }
+    if (mutationLocked) setMenuOpen(false);
   }, [beatLiftAllowed, mutationLocked]);
 
   useEffect(() => {
@@ -1353,7 +1379,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                 aria-label={`${t('common.more')} · ${beatTitle}`}
                 data-beat-id={beat.id}
                 data-beat-overflow-trigger
-                disabled={mutationLocked || !beatLiftAllowed}
+                disabled={mutationLocked}
                 icon={<MoreOne aria-hidden='true' />}
                 shape='circle'
                 type='text'
@@ -1399,25 +1425,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                 value={targetSeconds ?? undefined}
               />
             </label>
-            <div className={styles.editorActions} data-beat-editor-actions>
-              <Button
-                disabled={mutationLocked || drafts.staleRevision || savingBeat || !beatDirty}
-                loading={savingBeat}
-                onClick={() => void saveBeat()}
-                type='primary'
-              >
-                {t(`${KEY_ROOT}.common.saveBeat`)}
-              </Button>
-              <Button
-                disabled={mutationLocked || savingBeat || !beatDirty}
-                onClick={() => beatDraftKeys.forEach(drafts.reset)}
-              >
-                {t(`${KEY_ROOT}.common.resetBeat`)}
-              </Button>
-              <Button disabled={mutationLocked} onClick={() => actions.requestResplit(beat.id)}>
-                {t(`${KEY_ROOT}.coverage.reviewResplit`)}
-              </Button>
-            </div>
           </div>
         </section>
 
