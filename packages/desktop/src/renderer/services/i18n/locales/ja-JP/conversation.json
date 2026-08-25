@@ -1100,7 +1100,17 @@
           "stillLabel": "ショット{{shotIndex}}の最初のフレーム{{stillIndex}}",
           "previewAlt": "プレビュー · {{label}}",
           "effective": "現在の最初のフレーム",
-          "pinnedBadge": "固定済み"
+          "pinnedBadge": "固定済み",
+          "authorizationLocked": "承認済みの動画作業により、このショットの最初のフレームはロックされています。読み込んだ候補は保存されますが、確認済み見積もりのシードを置き換えることはできません。",
+          "authorizationIncompatible": "承認済み作業には使用できません"
+        },
+        "recovery": {
+          "cancelAndReviewRejoin": "キャンセルして再接続を確認",
+          "cancelAndReviewRejoinTitle": "承認済み作業をキャンセルして再接続を確認しますか？",
+          "cancelAndReviewRejoinBody": "まだ送信されていない待機中の動画作業だけをキャンセルします。完了済みメディアと承認履歴は保持されます。代替生成の前に、新しい再接続見積もりの確認が必要です。",
+          "cancelAndReviewRejoinConfirm": "キャンセルして再接続を確認",
+          "cancelAndReviewRejoinUnconfirmed": "待機中の作業はキャンセルされましたが、更新後のワークスペースを確認できませんでした。再接続を確認する前に更新してください。",
+          "cancelAndReviewRejoinOutcomeUnknown": "キャンセル結果を確認できませんでした。再接続を確認する前にワークスペースを更新してください。"
         },
         "picture": {
           "title": "現在の画像",

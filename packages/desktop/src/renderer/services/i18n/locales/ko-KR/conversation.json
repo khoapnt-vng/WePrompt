@@ -1100,7 +1100,17 @@
           "stillLabel": "샷 {{shotIndex}}의 첫 프레임 {{stillIndex}}",
           "previewAlt": "미리보기 · {{label}}",
           "effective": "현재 첫 프레임",
-          "pinnedBadge": "고정됨"
+          "pinnedBadge": "고정됨",
+          "authorizationLocked": "승인된 비디오 작업이 이 샷의 첫 프레임을 잠갔습니다. 가져온 후보는 저장되지만 검토된 견적의 시드를 대체할 수 없습니다.",
+          "authorizationIncompatible": "승인된 작업에 사용할 수 없음"
+        },
+        "recovery": {
+          "cancelAndReviewRejoin": "취소하고 다시 연결 검토",
+          "cancelAndReviewRejoinTitle": "승인된 작업을 취소하고 다시 연결을 검토할까요?",
+          "cancelAndReviewRejoinBody": "아직 제출되지 않은 대기 중 비디오 작업만 취소합니다. 완료된 미디어와 승인 기록은 유지됩니다. 대체 생성 전에 새로운 다시 연결 견적을 검토해야 합니다.",
+          "cancelAndReviewRejoinConfirm": "취소하고 다시 연결 검토",
+          "cancelAndReviewRejoinUnconfirmed": "대기 중 작업은 취소되었지만 새로 고친 작업 공간을 확인할 수 없습니다. 다시 연결을 검토하기 전에 새로 고치세요.",
+          "cancelAndReviewRejoinOutcomeUnknown": "취소 결과를 확인할 수 없습니다. 다시 연결을 검토하기 전에 작업 공간을 새로 고치세요."
         },
         "picture": {
           "title": "현재 사진",

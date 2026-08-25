@@ -356,6 +356,11 @@ const StudioProjectPage: React.FC<{
   const [briefDialogRequest, setBriefDialogRequest] = useState(0);
   const [briefRouteFocusRole, setBriefRouteFocusRole] = useState<'image' | 'video' | null>(null);
   const [referenceFocusIntent, setReferenceFocusIntent] = useState<StudioReferenceFocusIntent | null>(null);
+  const [pendingRejoinReview, setPendingRejoinReview] = useState<{
+    projectId: string;
+    projectRevision: number;
+    shotId: string;
+  } | null>(null);
   const referenceFocusSequenceRef = useRef(0);
   const referencesAutoOpenedRef = useRef<string | null>(null);
   const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
@@ -372,6 +377,8 @@ const StudioProjectPage: React.FC<{
     () => (project === null ? null : projectWorkspace(project, workspaceStatus, chainStatus)),
     [chainStatus, project, workspaceStatus]
   );
+  const projectionRef = useRef<WorkspaceProjection | null>(projection);
+  projectionRef.current = projection;
   const currentGenerationCapability =
     project !== null && generationCapabilityIsCurrent(project, generationCapability) ? generationCapability : null;
   const canonicalDraftValues = useMemo(() => (project === null ? {} : projectDraftValues(project)), [project]);
@@ -414,6 +421,7 @@ const StudioProjectPage: React.FC<{
 
   useEffect(() => {
     setReferenceFocusIntent(null);
+    setPendingRejoinReview(null);
   }, [projectId]);
 
   const openReferenceFocus = useCallback(
@@ -1208,6 +1216,220 @@ const StudioProjectPage: React.FC<{
     setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.directorRequestHint');
   }, [activeView, projectId, setActionErrorMessageKey]);
 
+  const openContinuityReview = useCallback(
+    (shotId: string, hardCut: boolean): void => {
+      const current = projectRef.current;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        current.id !== currentProjection.projectId ||
+        current.revision !== currentProjection.projectRevision ||
+        beatPanelReviewBlockedMessageKey !== null ||
+        spendGateLocked ||
+        workspacePendingRef.current
+      ) {
+        if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
+        return;
+      }
+      const shotMatches = currentProjection.activeBeats.flatMap((beat) =>
+        beat.shots.filter((shot) => shot.id === shotId)
+      );
+      if (shotMatches.length !== 1 || shotMatches[0]!.seedAuthorizationLock !== null) {
+        setActionErrorMessageKey(
+          shotMatches.length === 1
+            ? 'conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked'
+            : 'conversation.creativeStudio.workspace.controls.selectionNotPayable'
+        );
+        return;
+      }
+      const draft = continuityGateDraft({ project: current, projection: currentProjection, shotId, hardCut });
+      if (draft === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+        return;
+      }
+      const routeIssue =
+        currentGenerationCapability !== null || routeCatalog === null ? null : spendGateRouteIssue(routeCatalog, draft);
+      if (routeIssue !== null) {
+        setActionErrorMessageKey(
+          routeIssue === 'image'
+            ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+            : routeIssue === 'video'
+              ? 'conversation.creativeStudio.workspace.controls.videoRouteBlocked'
+              : 'conversation.creativeStudio.workspace.gate.errors.routesUnavailable'
+        );
+        return;
+      }
+      const capabilityItems = continuityCapabilityItemsForDraft(current, draft);
+      if (capabilityItems === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+        return;
+      }
+      const disclosureGroups = generationBlockGroupsForItems(currentGenerationCapability, capabilityItems);
+      setActionErrorMessageKey(null);
+      spendGate.open(
+        draft,
+        undefined,
+        disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+      );
+    },
+    [
+      beatPanelReviewBlockedMessageKey,
+      currentGenerationCapability,
+      routeCatalog,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+    ]
+  );
+
+  const cancelAndQueueRejoinReview = useCallback(
+    async (shotId: string): Promise<boolean> => {
+      const current = projectRef.current;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        current.id !== currentProjection.projectId ||
+        current.revision !== currentProjection.projectRevision ||
+        beatPanelReviewBlockedMessageKey !== null ||
+        spendGateLocked ||
+        workspacePendingRef.current
+      ) {
+        if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
+        return false;
+      }
+      const matches = currentProjection.activeBeats.flatMap((beat) =>
+        beat.shots.flatMap((shot, shotIndex) => (shot.id === shotId ? [{ shot, shotIndex }] : []))
+      );
+      const cascadeRows = currentProjection.cascadeProgress.filter((row) => row.dependentShotId === shotId);
+      const match = matches.length === 1 ? matches[0]! : null;
+      const cascade = cascadeRows.length === 1 ? cascadeRows[0]! : null;
+      if (
+        match === null ||
+        match.shotIndex === 0 ||
+        match.shot.chainBreak !== 'hard_cut' ||
+        match.shot.seedAuthorizationLock?.waitingReason !== 'choose_seed' ||
+        match.shot.seedAuthorizationLock.canCancelWaiting !== true ||
+        cascade?.upstreamShotId !== shotId ||
+        cascade.waitingReason !== 'choose_seed' ||
+        cascade.canCancelWaiting !== true
+      ) {
+        return false;
+      }
+
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
+      let cancellationCommitted = false;
+      try {
+        const result = await ipcBridge.creativeStudio.cancelWaitingCascade.invoke({
+          projectId: current.id,
+          expectedRevision: current.revision,
+          dependentShotId: shotId,
+        });
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          return false;
+        }
+        cancellationCommitted = true;
+        const refreshed = await refetchProjectWorkspace();
+        if (
+          refreshed === null ||
+          refreshed.id !== current.id ||
+          refreshed.revision !== result.data.projectRevision ||
+          refreshed.revision <= current.revision
+        ) {
+          setActionErrorMessageKey(
+            'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+          );
+          return false;
+        }
+        projectRef.current = refreshed;
+        if (!(await refetchRoutes())) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+          return false;
+        }
+        setPendingRejoinReview({
+          projectId: refreshed.id,
+          projectRevision: refreshed.revision,
+          shotId,
+        });
+        return true;
+      } catch {
+        setActionErrorMessageKey(
+          cancellationCommitted
+            ? 'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+            : 'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinOutcomeUnknown'
+        );
+        return false;
+      } finally {
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
+      }
+    },
+    [
+      beatPanelReviewBlockedMessageKey,
+      refetchProjectWorkspace,
+      refetchRoutes,
+      setActionErrorMessageKey,
+      spendGateLocked,
+    ]
+  );
+
+  useEffect(() => {
+    if (pendingRejoinReview === null || workspacePending) return;
+    if (
+      project === null ||
+      projection === null ||
+      project.id !== pendingRejoinReview.projectId ||
+      projection.projectId !== pendingRejoinReview.projectId
+    ) {
+      setPendingRejoinReview(null);
+      return;
+    }
+    if (
+      project.revision < pendingRejoinReview.projectRevision ||
+      projection.projectRevision < pendingRejoinReview.projectRevision ||
+      !projection.workspaceStatusReady ||
+      !projection.chainStatusReady ||
+      currentGenerationCapability === null ||
+      !generationCapabilityIsCurrent(project, currentGenerationCapability)
+    ) {
+      return;
+    }
+    const terminalRows = projection.cascadeProgress.filter(
+      (row) =>
+        row.dependentShotId === pendingRejoinReview.shotId &&
+        row.upstreamShotId === pendingRejoinReview.shotId &&
+        row.waitingReason === 'cancelled'
+    );
+    const shotMatches = projection.activeBeats.flatMap((beat) =>
+      beat.shots.filter((shot) => shot.id === pendingRejoinReview.shotId && shot.chainBreak === 'hard_cut')
+    );
+    setPendingRejoinReview(null);
+    if (
+      project.revision !== pendingRejoinReview.projectRevision ||
+      projection.projectRevision !== pendingRejoinReview.projectRevision ||
+      terminalRows.length !== 1 ||
+      shotMatches.length !== 1
+    ) {
+      setActionErrorMessageKey(
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+      );
+      return;
+    }
+    openContinuityReview(pendingRejoinReview.shotId, false);
+  }, [
+    currentGenerationCapability,
+    openContinuityReview,
+    pendingRejoinReview,
+    project,
+    projection,
+    setActionErrorMessageKey,
+    workspacePending,
+  ]);
+
   const beatPanelActions = useMemo<BeatPanelActions>(
     () => ({
       saveBeat: async (beatId, changes) =>
@@ -1229,14 +1451,39 @@ const StudioProjectPage: React.FC<{
           })
         );
       },
-      setSeedStill: async (shotId, assetId) =>
-        runWorkspaceCommit((current) =>
+      setSeedStill: async (shotId, assetId) => {
+        const current = projectRef.current;
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision ||
+          !currentProjection.workspaceStatusReady
+        ) {
+          return false;
+        }
+        const matches = currentProjection.activeBeats.flatMap((beat) =>
+          beat.shots.filter((shot) => shot.id === shotId)
+        );
+        if (matches.length !== 1) return false;
+        const projectedShot = matches[0]!;
+        if (!projectedShot.seedAuthorityStatusReady) return false;
+        if (
+          projectedShot.seedAuthorizationLock !== null &&
+          (assetId === null || !projectedShot.seedAuthorizationLock.compatibleAssetIds.includes(assetId))
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked');
+          return false;
+        }
+        return runWorkspaceCommit((authority) =>
           ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
+            projectId: authority.id,
+            expectedRevision: authority.revision,
             operations: [{ kind: 'set_seed_still', shotId, assetId }],
           })
-        ),
+        );
+      },
       trimShot: async (shotId, trimInSeconds, trimOutSeconds) =>
         runWorkspaceCommit((current) =>
           ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
@@ -1305,16 +1552,50 @@ const StudioProjectPage: React.FC<{
         ),
       reviewShot: (shotId, choices) => {
         const current = projectRef.current;
-        if (current === null || projection === null || beatPanelReviewBlockedMessageKey !== null || spendGateLocked) {
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision ||
+          beatPanelReviewBlockedMessageKey !== null ||
+          spendGateLocked
+        ) {
           if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
           return;
         }
-        const defaultDraft = selectionGateDraft({ project: current, projection, orderedShotIds: [shotId] });
+        const shotMatches = currentProjection.activeBeats.flatMap((beat) =>
+          beat.shots.filter((shot) => shot.id === shotId)
+        );
+        if (shotMatches.length !== 1 || shotMatches[0]!.seedAuthorizationLock !== null) {
+          setActionErrorMessageKey(
+            shotMatches.length === 1
+              ? 'conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked'
+              : 'conversation.creativeStudio.workspace.controls.selectionNotPayable'
+          );
+          return;
+        }
+        const defaultDraft = selectionGateDraft({
+          project: current,
+          projection: currentProjection,
+          orderedShotIds: [shotId],
+        });
         if (defaultDraft === null) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
           return;
         }
         const expectedChoices = [...defaultDraft.baseChoices, ...defaultDraft.cascadeChoices];
+        const lockedShotIds = new Set(
+          currentProjection.activeBeats.flatMap((beat) =>
+            beat.shots.flatMap((shot) => (shot.seedAuthorizationLock === null ? [] : [shot.id]))
+          )
+        );
+        if (
+          expectedChoices.some((choice) => choice.target.kind === 'shot' && lockedShotIds.has(choice.target.shotId))
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked');
+          return;
+        }
         if (
           choices.length !== expectedChoices.length ||
           choices.some((choice, index) => {
@@ -1361,44 +1642,7 @@ const StudioProjectPage: React.FC<{
           disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
         );
       },
-      reviewContinuity: (shotId, hardCut) => {
-        const current = projectRef.current;
-        if (current === null || projection === null || beatPanelReviewBlockedMessageKey !== null || spendGateLocked) {
-          if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
-          return;
-        }
-        const draft = continuityGateDraft({ project: current, projection, shotId, hardCut });
-        if (draft === null) {
-          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
-          return;
-        }
-        const routeIssue =
-          currentGenerationCapability !== null || routeCatalog === null
-            ? null
-            : spendGateRouteIssue(routeCatalog, draft);
-        if (routeIssue !== null) {
-          setActionErrorMessageKey(
-            routeIssue === 'image'
-              ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
-              : routeIssue === 'video'
-                ? 'conversation.creativeStudio.workspace.controls.videoRouteBlocked'
-                : 'conversation.creativeStudio.workspace.gate.errors.routesUnavailable'
-          );
-          return;
-        }
-        const capabilityItems = continuityCapabilityItemsForDraft(current, draft);
-        if (capabilityItems === null) {
-          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
-          return;
-        }
-        const disclosureGroups = generationBlockGroupsForItems(currentGenerationCapability, capabilityItems);
-        setActionErrorMessageKey(null);
-        spendGate.open(
-          draft,
-          undefined,
-          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
-        );
-      },
+      reviewContinuity: openContinuityReview,
       resolveGenerationBlock: (shotId, block: StudioGenerationBlockV2) => {
         if (block.code === 'reference_binding') {
           openReferenceFocus({ shotIds: [shotId] });
@@ -1445,14 +1689,17 @@ const StudioProjectPage: React.FC<{
         ),
       retryConditioning: mutations.retryConditioning,
       cancelWaiting: mutations.cancelWaiting,
+      cancelAndReviewRejoin: cancelAndQueueRejoinReview,
       requestResplit: focusDirectorForReviewedRequest,
     }),
     [
       beatPanelReviewBlockedMessageKey,
+      cancelAndQueueRejoinReview,
       currentGenerationCapability,
       focusDirectorForReviewedRequest,
       mutations,
       navigate,
+      openContinuityReview,
       openReferenceFocus,
       projection,
       refetchProjectWorkspace,

@@ -1106,7 +1106,17 @@
           "stillLabel": "Primeiro quadro {{stillIndex}} do plano {{shotIndex}}",
           "previewAlt": "Prévia · {{label}}",
           "effective": "Primeiro quadro atual",
-          "pinnedBadge": "Fixada"
+          "pinnedBadge": "Fixada",
+          "authorizationLocked": "O trabalho de vídeo autorizado bloqueou o primeiro quadro deste plano. Os candidatos importados continuam armazenados, mas não podem substituir a imagem-semente da cotação revisada.",
+          "authorizationIncompatible": "Indisponível para o trabalho autorizado"
+        },
+        "recovery": {
+          "cancelAndReviewRejoin": "Cancelar e revisar reconexão",
+          "cancelAndReviewRejoinTitle": "Cancelar o trabalho autorizado e revisar a reconexão?",
+          "cancelAndReviewRejoinBody": "Isso cancela apenas o trabalho de vídeo em espera que ainda não foi enviado. A mídia concluída e o histórico de autorização permanecem. Uma nova estimativa de reconexão deve ser revisada antes da geração substituta.",
+          "cancelAndReviewRejoinConfirm": "Cancelar e revisar reconexão",
+          "cancelAndReviewRejoinUnconfirmed": "O trabalho em espera foi cancelado, mas não foi possível confirmar o espaço de trabalho atualizado. Atualize antes de revisar a reconexão.",
+          "cancelAndReviewRejoinOutcomeUnknown": "Não foi possível confirmar o resultado do cancelamento. Atualize o espaço de trabalho antes de revisar a reconexão."
         },
         "picture": {
           "title": "Imagem atual",

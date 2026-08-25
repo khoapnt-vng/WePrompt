@@ -1741,11 +1741,15 @@ test.describe('Creative Studio workspace', () => {
       ],
     });
 
-    const styled = await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'edit-project', {
-      projectId,
-      expectedRevision: authored.projectRevision,
-      changes: { boardStyle: 'grey_tone' },
-    });
+    const authoredProject = await readStableStudioProject(page, projectId);
+    const styled =
+      authoredProject.boardStyle === 'grey_tone'
+        ? authored
+        : await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'edit-project', {
+            projectId,
+            expectedRevision: authored.projectRevision,
+            changes: { boardStyle: 'grey_tone' },
+          });
 
     // Provision the Director sidecar tree exactly as a real Director session does.
     await invokeStudioBridge<unknown>(page, 'get-brief-session-server', { projectId });

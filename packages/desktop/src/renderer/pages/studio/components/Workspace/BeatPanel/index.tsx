@@ -74,6 +74,7 @@ export type BeatPanelActions = {
   cancelGenerationJob: (jobId: string) => Promise<boolean>;
   retryConditioning: (dependentShotId: string) => Promise<boolean>;
   cancelWaiting: (dependentShotId: string) => Promise<boolean>;
+  cancelAndReviewRejoin: (dependentShotId: string) => Promise<boolean>;
   requestResplit: (beatId: string) => void;
 };
 
@@ -228,6 +229,10 @@ const SeedStillCard: React.FC<SeedStillCardProps> = ({
 }) => {
   const { t } = useTranslation();
   const assetUrl = createManagedStudioAssetUrl(projectId, still.assetId);
+  const pinBlockedByAuthorization =
+    shot.seedAuthorizationLock !== null && !shot.seedAuthorizationLock.compatibleAssetIds.includes(still.assetId);
+  const canClearSeed = shot.seedAuthorityStatusReady && shot.seedAuthorizationLock === null && still.explicitSeed;
+  const canPinSeed = shot.seedAuthorityStatusReady && !still.explicitSeed && !pinBlockedByAuthorization;
   const stillLabel = t(`${KEY_ROOT}.seeds.stillLabel`, {
     shotIndex: shotIndex + 1,
     stillIndex: stillIndex + 1,
@@ -264,19 +269,20 @@ const SeedStillCard: React.FC<SeedStillCardProps> = ({
         <div className={styles.badges}>
           {still.effectiveSeed ? <span>{t(`${KEY_ROOT}.seeds.effective`)}</span> : null}
           {still.explicitSeed ? <span>{t(`${KEY_ROOT}.seeds.pinnedBadge`)}</span> : null}
+          {pinBlockedByAuthorization ? <span>{t(`${KEY_ROOT}.seeds.authorizationIncompatible`)}</span> : null}
         </div>
       </div>
       {canManageSeed ? (
         <div className={styles.actions}>
-          {still.explicitSeed ? (
+          {canClearSeed ? (
             <Button disabled={disabled} onClick={() => void actions.setSeedStill(shot.id, null)} size='small'>
               {t(`${KEY_ROOT}.seeds.clearPin`)}
             </Button>
-          ) : (
+          ) : canPinSeed ? (
             <Button disabled={disabled} onClick={() => void actions.setSeedStill(shot.id, still.assetId)} size='small'>
               {t(`${KEY_ROOT}.seeds.pin`)}
             </Button>
-          )}
+          ) : null}
         </div>
       ) : null}
     </article>
@@ -397,7 +403,8 @@ const ShotCard: React.FC<ShotCardProps> = ({
       );
     });
   const chainChangeIntent = shot.chainBreak === 'hard_cut' ? 'rejoin' : 'sever';
-  const chainChangeBlocked = disabled || drafts.staleRevision || dirty || reviewBlocked;
+  const chainChangeBlocked =
+    disabled || drafts.staleRevision || dirty || reviewBlocked || shot.seedAuthorizationLock !== null;
   const chainState =
     index === 0
       ? 'segment_head'
@@ -772,6 +779,9 @@ const ShotCard: React.FC<ShotCardProps> = ({
               />
             ))}
           </div>
+          {shot.seedAuthorizationLock !== null ? (
+            <Alert content={t(`${KEY_ROOT}.seeds.authorizationLocked`)} showIcon type='warning' />
+          ) : null}
           {shot.seedStills.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.seeds.empty`)}</p> : null}
         </section>
       ) : null}
@@ -853,7 +863,8 @@ const ShotCard: React.FC<ShotCardProps> = ({
               reviewBlocked ||
               reviewedGenerationBlocked ||
               reviewPreferences === null ||
-              reviewBlock !== null
+              reviewBlock !== null ||
+              shot.seedAuthorizationLock !== null
             }
             onClick={() => {
               if (reviewPreferences !== null && reviewPreferences.length > 0) {
@@ -951,9 +962,11 @@ const ShotCard: React.FC<ShotCardProps> = ({
   );
 };
 
-type RecoveryProps = Pick<BeatPanelProps, 'actions' | 'beat' | 'pending' | 'projection'>;
+type RecoveryProps = Pick<BeatPanelProps, 'actions' | 'beat' | 'pending' | 'projection'> & {
+  reviewBlocked: boolean;
+};
 
-const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection }) => {
+const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection, reviewBlocked }) => {
   const { t } = useTranslation();
   const shotIds = new Set(beat.shots.map((shot) => shot.id));
   const rows = projection.cascadeProgress.filter((row) => shotIds.has(row.dependentShotId));
@@ -966,39 +979,65 @@ const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection 
   return (
     <section aria-label={t(`${KEY_ROOT}.recovery.label`)} className={styles.recovery}>
       <h3 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.recovery.title`)}</h3>
-      {rows.map((row) => (
-        <article
-          key={`cascade:${row.dependentShotId}`}
-          className={styles.recoveryCard}
-          data-waiting-reason={row.waitingReason}
-        >
-          <p>{t(`${KEY_ROOT}.recovery.reason.${row.waitingReason}`)}</p>
-          {row.waitingReason === 'dependency_failed' || row.waitingReason === 'cancelled' ? (
-            <p className={styles.warning}>{t(`${KEY_ROOT}.recovery.freshQuoteRequired`)}</p>
-          ) : null}
-          <div className={styles.actions}>
-            {row.canRetryConditioningFrame ? (
-              <Button disabled={pending} onClick={() => void actions.retryConditioning(row.dependentShotId)}>
-                {t(`${KEY_ROOT}.recovery.retryFree`)}
-              </Button>
+      {rows.map((row) => {
+        const shotIndex = beat.shots.findIndex((shot) => shot.id === row.dependentShotId);
+        const shot = shotIndex < 0 ? undefined : beat.shots[shotIndex];
+        const isAuthorizedSeedChoice =
+          row.waitingReason === 'choose_seed' && row.upstreamShotId === row.dependentShotId;
+        const canStructurallyRejoin = shotIndex > 0 && shot?.chainBreak === 'hard_cut';
+        const canCancelAndReviewRejoin =
+          row.canCancelWaiting &&
+          isAuthorizedSeedChoice &&
+          canStructurallyRejoin &&
+          shot.seedAuthorizationLock?.waitingReason === 'choose_seed' &&
+          shot.seedAuthorizationLock.canCancelWaiting;
+        return (
+          <article
+            key={`cascade:${row.dependentShotId}`}
+            className={styles.recoveryCard}
+            data-waiting-reason={row.waitingReason}
+          >
+            <p>{t(`${KEY_ROOT}.recovery.reason.${row.waitingReason}`)}</p>
+            {row.waitingReason === 'dependency_failed' || row.waitingReason === 'cancelled' ? (
+              <p className={styles.warning}>{t(`${KEY_ROOT}.recovery.freshQuoteRequired`)}</p>
             ) : null}
-            {row.canCancelWaiting ? (
-              <Popconfirm
-                cancelText={t(`${KEY_ROOT}.common.keepWaiting`)}
-                content={t(`${KEY_ROOT}.recovery.cancelBody`)}
-                disabled={pending}
-                okText={t(`${KEY_ROOT}.recovery.cancelConfirm`)}
-                onOk={() => actions.cancelWaiting(row.dependentShotId)}
-                title={t(`${KEY_ROOT}.recovery.cancelTitle`)}
-              >
-                <Button disabled={pending} status='danger'>
-                  {t(`${KEY_ROOT}.recovery.cancelWaiting`)}
+            <div className={styles.actions}>
+              {row.canRetryConditioningFrame ? (
+                <Button disabled={pending} onClick={() => void actions.retryConditioning(row.dependentShotId)}>
+                  {t(`${KEY_ROOT}.recovery.retryFree`)}
                 </Button>
-              </Popconfirm>
-            ) : null}
-          </div>
-        </article>
-      ))}
+              ) : null}
+              {canCancelAndReviewRejoin ? (
+                <Popconfirm
+                  cancelText={t(`${KEY_ROOT}.common.keepWaiting`)}
+                  content={t(`${KEY_ROOT}.recovery.cancelAndReviewRejoinBody`)}
+                  disabled={pending || reviewBlocked}
+                  okText={t(`${KEY_ROOT}.recovery.cancelAndReviewRejoinConfirm`)}
+                  onOk={() => actions.cancelAndReviewRejoin(row.dependentShotId)}
+                  title={t(`${KEY_ROOT}.recovery.cancelAndReviewRejoinTitle`)}
+                >
+                  <Button disabled={pending || reviewBlocked} status='danger'>
+                    {t(`${KEY_ROOT}.recovery.cancelAndReviewRejoin`)}
+                  </Button>
+                </Popconfirm>
+              ) : row.canCancelWaiting && (!isAuthorizedSeedChoice || !canStructurallyRejoin) ? (
+                <Popconfirm
+                  cancelText={t(`${KEY_ROOT}.common.keepWaiting`)}
+                  content={t(`${KEY_ROOT}.recovery.cancelBody`)}
+                  disabled={pending}
+                  okText={t(`${KEY_ROOT}.recovery.cancelConfirm`)}
+                  onOk={() => actions.cancelWaiting(row.dependentShotId)}
+                  title={t(`${KEY_ROOT}.recovery.cancelTitle`)}
+                >
+                  <Button disabled={pending} status='danger'>
+                    {t(`${KEY_ROOT}.recovery.cancelWaiting`)}
+                  </Button>
+                </Popconfirm>
+              ) : null}
+            </div>
+          </article>
+        );
+      })}
       {standaloneFailures.map((failure) => (
         <article
           key={`failure:${failure.dependentShotId}`}
@@ -1448,7 +1487,13 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           </p>
         ) : null}
 
-        <Recovery actions={actions} beat={beat} pending={mutationLocked} projection={projection} />
+        <Recovery
+          actions={actions}
+          beat={beat}
+          pending={mutationLocked}
+          projection={projection}
+          reviewBlocked={reviewBlockedMessageKey !== null}
+        />
 
         <span aria-atomic='true' aria-live='polite' className={styles.srOnly}>
           {shotLiftAnnouncement || reorderAnnouncement}

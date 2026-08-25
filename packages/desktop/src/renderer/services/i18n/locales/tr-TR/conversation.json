@@ -1102,7 +1102,17 @@
           "stillLabel": "Çekim {{shotIndex}} için ilk kare {{stillIndex}}",
           "previewAlt": "Önizleme · {{label}}",
           "effective": "Geçerli ilk kare",
-          "pinnedBadge": "Sabitlendi"
+          "pinnedBadge": "Sabitlendi",
+          "authorizationLocked": "Yetkilendirilmiş video işi bu çekimin ilk karesini kilitledi. İçe aktarılan adaylar saklanır, ancak incelenmiş teklifteki başlangıç karesinin yerini alamaz.",
+          "authorizationIncompatible": "Yetkilendirilmiş iş için kullanılamaz"
+        },
+        "recovery": {
+          "cancelAndReviewRejoin": "İptal et ve yeniden bağlanmayı incele",
+          "cancelAndReviewRejoinTitle": "Yetkilendirilmiş iş iptal edilip yeniden bağlanma incelensin mi?",
+          "cancelAndReviewRejoinBody": "Yalnızca henüz gönderilmemiş bekleyen video işi iptal edilir. Tamamlanan medya ve yetkilendirme geçmişi korunur. Yeni üretimden önce yeni bir yeniden bağlanma tahmini incelenmelidir.",
+          "cancelAndReviewRejoinConfirm": "İptal et ve yeniden bağlanmayı incele",
+          "cancelAndReviewRejoinUnconfirmed": "Bekleyen iş iptal edildi ancak yenilenen çalışma alanı doğrulanamadı. Yeniden bağlanmayı incelemeden önce yenileyin.",
+          "cancelAndReviewRejoinOutcomeUnknown": "İptal sonucu doğrulanamadı. Yeniden bağlanmayı incelemeden önce çalışma alanını yenileyin."
         },
         "picture": {
           "title": "Geçerli görüntü",

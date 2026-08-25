@@ -1100,7 +1100,17 @@
           "stillLabel": "鏡頭 {{shotIndex}} 的首幀 {{stillIndex}}",
           "previewAlt": "預覽 · {{label}}",
           "effective": "目前首幀",
-          "pinnedBadge": "已釘選"
+          "pinnedBadge": "已釘選",
+          "authorizationLocked": "已授權的影片工作已鎖定此鏡頭的首幀。匯入的候選仍會保留，但不能取代已審核報價中的種子幀。",
+          "authorizationIncompatible": "不可用於已授權工作"
+        },
+        "recovery": {
+          "cancelAndReviewRejoin": "取消並審核重新銜接",
+          "cancelAndReviewRejoinTitle": "取消已授權工作並審核重新銜接？",
+          "cancelAndReviewRejoinBody": "這只會取消尚未提交的等待中影片工作。已完成的媒體與授權記錄會保留。替代生成前必須審核新的重新銜接估算。",
+          "cancelAndReviewRejoinConfirm": "取消並審核重新銜接",
+          "cancelAndReviewRejoinUnconfirmed": "等待中的工作已取消，但無法確認重新整理後的工作區。請先重新整理，再審核重新銜接。",
+          "cancelAndReviewRejoinOutcomeUnknown": "無法確認取消結果。請先重新整理工作區，再審核重新銜接。"
         },
         "picture": {
           "title": "目前畫面",

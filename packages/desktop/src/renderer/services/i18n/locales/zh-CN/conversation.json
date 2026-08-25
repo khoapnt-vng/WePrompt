@@ -1100,7 +1100,17 @@
           "stillLabel": "镜头 {{shotIndex}} 的首帧 {{stillIndex}}",
           "previewAlt": "预览 · {{label}}",
           "effective": "当前首帧",
-          "pinnedBadge": "已固定"
+          "pinnedBadge": "已固定",
+          "authorizationLocked": "已授权的视频工作已锁定此镜头的首帧。导入的候选仍会保留，但不能替换已审核报价中的种子帧。",
+          "authorizationIncompatible": "不可用于已授权工作"
+        },
+        "recovery": {
+          "cancelAndReviewRejoin": "取消并审核重新衔接",
+          "cancelAndReviewRejoinTitle": "取消已授权工作并审核重新衔接？",
+          "cancelAndReviewRejoinBody": "这只会取消尚未提交的等待中视频工作。已完成的媒体和授权历史会保留。替代生成前必须审核新的重新衔接估算。",
+          "cancelAndReviewRejoinConfirm": "取消并审核重新衔接",
+          "cancelAndReviewRejoinUnconfirmed": "等待中的工作已取消，但无法确认刷新后的工作区。请先刷新，再审核重新衔接。",
+          "cancelAndReviewRejoinOutcomeUnknown": "无法确认取消结果。请先刷新工作区，再审核重新衔接。"
         },
         "picture": {
           "title": "当前画面",

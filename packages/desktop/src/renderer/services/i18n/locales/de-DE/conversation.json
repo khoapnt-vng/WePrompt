@@ -1101,7 +1101,17 @@
           "stillLabel": "Erstes Bild {{stillIndex}} für Shot {{shotIndex}}",
           "previewAlt": "Vorschau · {{label}}",
           "effective": "Aktuelles erstes Bild",
-          "pinnedBadge": "Angeheftet"
+          "pinnedBadge": "Angeheftet",
+          "authorizationLocked": "Autorisierte Videoarbeit hat das erste Bild dieses Shots gesperrt. Importierte Kandidaten bleiben gespeichert, können aber den Seed im geprüften Angebot nicht ersetzen.",
+          "authorizationIncompatible": "Für autorisierte Arbeit nicht verfügbar"
+        },
+        "recovery": {
+          "cancelAndReviewRejoin": "Abbrechen und Wiederverbindung prüfen",
+          "cancelAndReviewRejoinTitle": "Autorisierte Arbeit abbrechen und Wiederverbindung prüfen?",
+          "cancelAndReviewRejoinBody": "Nur die noch nicht übermittelte wartende Videoarbeit wird abgebrochen. Fertige Medien und der Autorisierungsverlauf bleiben erhalten. Vor einer Ersatzgenerierung muss eine neue Wiederverbindungs-Schätzung geprüft werden.",
+          "cancelAndReviewRejoinConfirm": "Abbrechen und Wiederverbindung prüfen",
+          "cancelAndReviewRejoinUnconfirmed": "Die wartende Arbeit wurde abgebrochen, aber der aktualisierte Arbeitsbereich konnte nicht bestätigt werden. Aktualisieren Sie ihn, bevor Sie die Wiederverbindung prüfen.",
+          "cancelAndReviewRejoinOutcomeUnknown": "Das Ergebnis des Abbruchs konnte nicht bestätigt werden. Aktualisieren Sie den Arbeitsbereich, bevor Sie die Wiederverbindung prüfen."
         },
         "picture": {
           "title": "Aktuelles Bild",

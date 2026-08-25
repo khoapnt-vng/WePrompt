@@ -1101,7 +1101,17 @@
           "stillLabel": "Primer fotograma {{stillIndex}} del plano {{shotIndex}}",
           "previewAlt": "Vista previa · {{label}}",
           "effective": "Primer fotograma actual",
-          "pinnedBadge": "Fijada"
+          "pinnedBadge": "Fijada",
+          "authorizationLocked": "El trabajo de vídeo autorizado ha bloqueado el primer fotograma de este plano. Los candidatos importados permanecen guardados, pero no pueden sustituir la imagen de referencia de la cotización revisada.",
+          "authorizationIncompatible": "No disponible para el trabajo autorizado"
+        },
+        "recovery": {
+          "cancelAndReviewRejoin": "Cancelar y revisar la reconexión",
+          "cancelAndReviewRejoinTitle": "¿Cancelar el trabajo autorizado y revisar la reconexión?",
+          "cancelAndReviewRejoinBody": "Esto cancela únicamente el trabajo de vídeo en espera que aún no se ha enviado. Los medios completados y el historial de autorización se conservan. Debe revisarse una nueva estimación de reconexión antes de generar reemplazos.",
+          "cancelAndReviewRejoinConfirm": "Cancelar y revisar la reconexión",
+          "cancelAndReviewRejoinUnconfirmed": "El trabajo en espera se canceló, pero no se pudo confirmar el espacio de trabajo actualizado. Actualícelo antes de revisar la reconexión.",
+          "cancelAndReviewRejoinOutcomeUnknown": "No se pudo confirmar el resultado de la cancelación. Actualice el espacio de trabajo antes de revisar la reconexión."
         },
         "picture": {
           "title": "Imagen actual",

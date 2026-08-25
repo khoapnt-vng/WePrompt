@@ -824,6 +824,40 @@ const projectWithRecovery = (revision = 3): StudioRendererProjectV2 => {
   return value;
 };
 
+const projectWithAuthorizedSeedLock = (revision = 3): StudioRendererProjectV2 => {
+  const value = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+  value.revision = revision;
+  value.targetDurationSeconds = 8;
+  value.beats.beat_0!.targetSeconds = 8;
+  value.beats.beat_0!.shotOrder.push('shot_locked');
+  value.shots.shot_locked = {
+    ...value.shots.shot_0!,
+    id: 'shot_locked',
+    shootingScript: 'Authorized locked Shot',
+    chainBreak: 'hard_cut',
+    seedStillId: null,
+    boardAssetId: null,
+    supersededBoardAssetIds: [],
+    videoAssetId: null,
+    supersededVideoAssetIds: [],
+    assetIds: ['authorized_seed', 'imported_seed'],
+    jobIds: [],
+  };
+  value.assets.authorized_seed = {
+    ...recoveryAsset('authorized_seed', 'shot_locked', 'image'),
+    managedAsset: { collection: 'assets', fileName: 'authorized_seed.png' },
+    createdAt: '2026-01-01T00:00:01.000Z',
+    sha256: 'd'.repeat(64),
+  };
+  value.assets.imported_seed = {
+    ...recoveryAsset('imported_seed', 'shot_locked', 'image'),
+    managedAsset: { collection: 'imports', fileName: 'imported_seed.png' },
+    createdAt: '2026-01-01T00:00:02.000Z',
+    sha256: 'e'.repeat(64),
+  };
+  return value;
+};
+
 const projectWithAttentionJob = (
   status: 'needs_attention' | 'queued_remote' | 'failed' | 'cancelled'
 ): StudioRendererProjectV2 => {
@@ -994,6 +1028,23 @@ const workspaceStatus = (source: number | StudioRendererProjectV2, locked = fals
       : [],
   };
 };
+
+const authorizedSeedLockStatus = (
+  authority: StudioRendererProjectV2,
+  waitingReason: 'choose_seed' | 'cancelled' = 'choose_seed'
+): StudioRendererWorkspaceStatusV2 => ({
+  ...workspaceStatus(authority),
+  cascadeProgress: [
+    {
+      dependentShotId: 'shot_locked',
+      upstreamShotId: 'shot_locked',
+      eligiblePrimaryAssetIds: waitingReason === 'choose_seed' ? ['authorized_seed'] : [],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: waitingReason === 'choose_seed',
+      waitingReason,
+    },
+  ],
+});
 
 const chainStatus = (source: number | StudioRendererProjectV2): StudioRendererChainStatusV2 => {
   const authority = statusProject(source);
@@ -4802,6 +4853,167 @@ describe('StudioPage schema-5 cutover', () => {
         dependentShotId: 'dependent_take',
       })
     );
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rejects an incompatible imported seed against exact authorized work before invoking Main', async () => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().setSeedStill('shot_locked', 'imported_seed');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+  });
+
+  it.each([
+    {
+      path: 'continuity',
+      invoke: (actions: BeatPanelActions) => actions.reviewContinuity('shot_locked', false),
+    },
+    {
+      path: 'Shot generation',
+      invoke: (actions: BeatPanelActions) =>
+        actions.reviewShot('shot_locked', [{ shotId: 'shot_locked', purpose: 'seed_still' }]),
+    },
+  ])('blocks the ordinary $path review path while authorized work owns the seed', async ({ invoke }) => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => invoke(capturedBeatPanelActions()));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('cancels an exact authorized seed wait once and rebuilds rejoin review from the committed revision', async () => {
+    const initial = projectWithAuthorizedSeedLock(3);
+    const refreshed = projectWithAuthorizedSeedLock(4);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial, authorizedSeedLockStatus(initial), chainStatus(initial)))
+      .mockResolvedValue(
+        projectWorkspaceLoad(refreshed, authorizedSeedLockStatus(refreshed, 'cancelled'), chainStatus(refreshed))
+      );
+    mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(true);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      dependentShotId: 'shot_locked',
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+
+    const prepare = within(modal).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.gate.prepare',
+    });
+    expect(prepare).toBeEnabled();
+    fireEvent.click(prepare);
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        continuityChange: { shotId: 'shot_locked', hardCut: false, requiresSeedGeneration: false },
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reports a committed cancellation whose exact reload cannot be confirmed without opening review', async () => {
+    const initial = projectWithAuthorizedSeedLock(3);
+    const unexpected = projectWithAuthorizedSeedLock(5);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial, authorizedSeedLockStatus(initial), chainStatus(initial)))
+      .mockResolvedValue(
+        projectWorkspaceLoad(unexpected, authorizedSeedLockStatus(unexpected, 'cancelled'), chainStatus(unexpected))
+      );
+    mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(4));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText(
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+      )
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown cancellation outcome once without retrying or opening review', async () => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    mocks.bridge.cancelWaitingCascade.invoke.mockRejectedValueOnce(new Error('transport stopped after dispatch'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledOnce();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText(
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinOutcomeUnknown'
+      )
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });

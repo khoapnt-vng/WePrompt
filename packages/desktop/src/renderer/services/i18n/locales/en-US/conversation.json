@@ -1749,7 +1749,9 @@
           "stillLabel": "First frame {{stillIndex}} for Shot {{shotIndex}}",
           "previewAlt": "Preview · {{label}}",
           "effective": "Current first frame",
-          "pinnedBadge": "Pinned"
+          "pinnedBadge": "Pinned",
+          "authorizationLocked": "Authorized video work has locked this Shot’s first frame. Imported candidates remain stored, but cannot replace the seed in the reviewed quote.",
+          "authorizationIncompatible": "Not available to authorized work"
         },
         "generation": {
           "gateLocked": "Finish or close the current generation review before opening another.",
@@ -1803,6 +1805,12 @@
           "cancelTitle": "Cancel this waiting item?",
           "cancelBody": "Only this waiting item is cancelled. Existing completed work and authorization records remain.",
           "cancelConfirm": "Cancel waiting item",
+          "cancelAndReviewRejoin": "Cancel and review rejoin",
+          "cancelAndReviewRejoinTitle": "Cancel authorized work and review rejoin?",
+          "cancelAndReviewRejoinBody": "This cancels only the unsubmitted waiting video work. Completed media and authorization history remain. A fresh rejoin estimate must be reviewed before replacement generation.",
+          "cancelAndReviewRejoinConfirm": "Cancel and review rejoin",
+          "cancelAndReviewRejoinUnconfirmed": "The waiting work was cancelled, but the refreshed workspace could not be confirmed. Refresh before reviewing rejoin.",
+          "cancelAndReviewRejoinOutcomeUnknown": "The cancellation result could not be confirmed. Refresh the workspace before reviewing rejoin.",
           "localConditioningFailure": "The local continuity-frame step failed."
         },
         "preview": {
