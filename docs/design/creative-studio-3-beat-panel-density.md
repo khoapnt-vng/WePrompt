@@ -18,13 +18,13 @@ it.**
 ## The direction
 
 1. **Story collapses to an icon.** Hover to read. It is context for this screen, not the work of it.
-2. **Beat target leaves the panel.**
+2. **Beat target leaves the layout and moves into the `⋮` menu.**
 3. **Save Beat, Reset Beat and Ask Director to re-split move into the existing `⋮` menu.**
-4. **Planned duration leaves the panel.**
+4. **Planned duration leaves the layout and moves into the `⋮` menu.**
 5. **First frames and Current picture consolidate** into one compact region instead of two stacked
    boxes each with its own heading, caption and thumbnail.
 
-## Two of these remove the only editor for durable data
+## Ruled 2026-08-25 — both durable fields move to the menu, neither is deleted
 
 Both fields are edited **nowhere else in the product**. `BeatPanel/index.tsx:99–101` owns the only
 draft keys for them: `beat.<id>.targetSeconds` and `shot.<id>.durationSeconds`.
@@ -40,10 +40,9 @@ schema — so the capability does not vanish. But the recovery path becomes "ask
 the Director is unavailable or the conversation is lost, the project cannot be exported and nothing
 on screen explains why.
 
-**Recommended: move it into the `⋮` menu rather than deleting it.** It leaves the layout, which is
-the point, and it stays reachable when it is the thing standing between a person and an export.
-Alternatively keep it out entirely and make the export's `duration_pending` refusal name the Beat and
-offer to set it — but do one of the two deliberately.
+**Ruled: it moves into the `⋮` menu.** It leaves the layout, which is the point, and it stays
+reachable when it is the one thing standing between a person and an export. The Beat's `⋮` menu is
+the right home because a null target is a property of the Beat, not of any Shot in it.
 
 ### Planned duration — safer, but it is a creative control
 
@@ -52,10 +51,12 @@ The Director can set it (`directorCommandContracts.ts:332–336`), and the timel
 of the panel already **shows** each Shot's plan and source length, which is what makes the input feel
 redundant.
 
-Removing it makes Shot length a Director-owned parameter, adjustable only by asking. That is
-coherent with the two-tier model, and it is a real reduction in direct control — worth naming as a
-decision rather than discovering later. If it should stay reachable, the `⋮` menu is the same answer
-as above.
+**Ruled: it moves into the per-Shot `⋮` menu**, beside the Shot's other overflow actions — not the
+Beat's, since duration is a property of one Shot. Shot length stays directly adjustable without
+asking the Director, and the panel still loses the field.
+
+Keep the bound stated where it is edited: the menu control must hold 4–15 seconds
+(`STUDIO_MIN_SHOT_SECONDS`/`STUDIO_MAX_SHOT_SECONDS`), the same range the Director is held to.
 
 ## Consolidating First frames and Current picture
 
