@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Drawer, Popconfirm, Select, Slider } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Button, Select, Slider } from '@arco-design/web-react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
@@ -21,7 +21,6 @@ import { buildCutFilmstrip } from './filmstrip';
 import styles from './Cut.module.css';
 
 const CUT_ROOT = 'conversation.creativeStudio.workspace.cut';
-const ASSETS_ROOT = 'conversation.creativeStudio.workspace.assets';
 
 const CUT_STATE_KEYS = {
   duration_pending: 'conversation.creativeStudio.workspace.table.state.durationPending',
@@ -73,7 +72,6 @@ const selectedBedId = (projection: WorkspaceProjection): string | null =>
 export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending, actions, onOpenBeat }) => {
   const { t } = useTranslation();
   const [announcement, setAnnouncement] = useState('');
-  const [assetsVisible, setAssetsVisible] = useState(false);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [reorderFocusId, setReorderFocusId] = useState<string | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string | null>(() => projection.cut.beats[0]?.id ?? null);
@@ -173,12 +171,6 @@ export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending
     );
   };
 
-  const detachAudio = async (assetId: string): Promise<void> => {
-    if (assetId === currentBedId) return;
-    const detached = await runAction(`detach:${assetId}`, () => actions.detachBedAudio(assetId));
-    setAnnouncement(t(`${ASSETS_ROOT}.${detached === true ? 'detached' : 'detachFailed'}`));
-  };
-
   const bedStatus = projection.cut.bed;
   const film = buildCutFilmSummary(projection.cut);
   const filmClock = formatCutClock(film.filmSeconds);
@@ -238,9 +230,6 @@ export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending
                 : t(`${CUT_ROOT}.filmDuration`, { seconds: projection.cut.filmDurationSeconds })}
             </bdi>
           </span>
-          <Button disabled={locked} onClick={() => setAssetsVisible(true)}>
-            {t(`${ASSETS_ROOT}.show`)}
-          </Button>
         </div>
       </header>
 
@@ -617,64 +606,6 @@ export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending
           )}
         </section>
       </div>
-
-      <Drawer
-        footer={<Button onClick={() => setAssetsVisible(false)}>{t(`${ASSETS_ROOT}.close`)}</Button>}
-        onCancel={() => setAssetsVisible(false)}
-        title={t(`${ASSETS_ROOT}.title`)}
-        visible={assetsVisible}
-        width={560}
-      >
-        <div className={styles.drawerContent} data-studio-assets-drawer>
-          <p>{t(`${ASSETS_ROOT}.description`)}</p>
-          <section>
-            <h3>{t(`${ASSETS_ROOT}.audioTitle`)}</h3>
-            {projection.cut.audioImports.length === 0 ? (
-              <p>{t(`${ASSETS_ROOT}.audioEmpty`)}</p>
-            ) : (
-              <ul className={styles.assetList}>
-                {projection.cut.audioImports.map((asset) => {
-                  const selected = asset.assetId === currentBedId;
-                  return (
-                    <li key={asset.assetId} data-audio-position={asset.position}>
-                      <div>
-                        <strong>
-                          <bdi>{t(`${ASSETS_ROOT}.audioItem`, { position: asset.position })}</bdi>
-                        </strong>
-                        <p>
-                          <bdi>
-                            {t(`${ASSETS_ROOT}.audioFacts`, {
-                              seconds: asset.durationSeconds,
-                              bytes: asset.byteSize,
-                            })}
-                          </bdi>
-                        </p>
-                        {selected ? <span>{t(`${ASSETS_ROOT}.selectedBed`)}</span> : null}
-                      </div>
-                      <Popconfirm
-                        cancelText={t(`${ASSETS_ROOT}.cancel`)}
-                        content={t(`${ASSETS_ROOT}.detachContent`)}
-                        disabled={locked || selected}
-                        okText={t(`${ASSETS_ROOT}.detach`)}
-                        onOk={() => detachAudio(asset.assetId)}
-                        title={t(`${ASSETS_ROOT}.detachTitle`)}
-                      >
-                        <Button
-                          disabled={locked || selected}
-                          loading={busyKey === `detach:${asset.assetId}`}
-                          status='danger'
-                        >
-                          {t(`${ASSETS_ROOT}.detach`)}
-                        </Button>
-                      </Popconfirm>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </section>
-        </div>
-      </Drawer>
 
       <span aria-atomic='true' aria-live='polite' className={styles.srOnly}>
         {announcement}

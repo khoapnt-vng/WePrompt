@@ -3086,6 +3086,7 @@ const StudioProjectPage: React.FC<{
               exportCatalog={exportCatalog}
               createEditorFolder={createEditorFolder}
               revealEditorFolder={revealEditorFolder}
+              detachBedAudio={cutActions.detachBedAudio}
               drafts={drafts}
               pending={workspacePending}
               errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
