@@ -10,7 +10,12 @@ export type {
   StudioReferenceFocusIntent,
 } from './References';
 export { TableView } from './Table';
-export type { TableBoardActions, TableViewProps } from './Table';
+export type {
+  ReferenceBindingWorkspaceItem,
+  TableBoardActions,
+  TableReferenceBindingActions,
+  TableViewProps,
+} from './Table';
 export { WorkspaceControls } from './WorkspaceControls';
 export { WorkspaceProjectMenu, countStoredStudioRuleDrafts } from './WorkspaceProjectMenu';
 export type { WorkspaceControlsProps, WorkspaceMutationCallbacks, WorkspaceProjectMenuProps } from './viewTypes';

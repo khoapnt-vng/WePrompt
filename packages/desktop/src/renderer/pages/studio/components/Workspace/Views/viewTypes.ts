@@ -20,7 +20,7 @@ import type { WorkspaceProjection } from '../workspaceProjection';
 import type { BeatPanelActions, BeatPanelReviewGraph } from '../BeatPanel';
 import type { BoardActions } from './Board';
 import type { CutActions } from './Cut';
-import type { TableBoardActions } from './Table';
+import type { TableBoardActions, TableReferenceBindingActions } from './Table';
 import type { ReferencesViewActions, StudioReferenceFocusIntent } from './References';
 
 export type WorkspaceAuthoringOperationV2 = Exclude<StudioRendererAuthoringOperationV2, { kind: 'set_hard_cut' }>;
@@ -55,7 +55,7 @@ export type WorkspaceControlsProps = {
   beatPanelActions: BeatPanelActions;
   beatPanelReviewGraphs: readonly BeatPanelReviewGraph[];
   beatPanelReviewBlockedMessageKey: string | null;
-  referenceActions?: ReferencesViewActions;
+  referenceActions?: ReferencesViewActions & TableReferenceBindingActions;
   referenceMaxConditioningImages?: number | null;
   referencePendingId?: string | null;
   referenceErrorMessageKey?: string | null;

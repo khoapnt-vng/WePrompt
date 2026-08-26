@@ -67,6 +67,7 @@ import {
   type SpendGateBoardPromotion,
   type SpendGateRouteIssue,
   type TableBoardActions,
+  type TableReferenceBindingActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
   type WorkspaceProjection,
@@ -438,7 +439,12 @@ const StudioProjectPage: React.FC<{
         assetIds,
         shotIds,
       });
-      navigate(studioViewPath(current.id, 'references'));
+      navigate(
+        studioViewPath(
+          current.id,
+          shotIds.length > 0 && referenceIds.length === 0 && assetIds.length === 0 ? 'table' : 'references'
+        )
+      );
     },
     [navigate]
   );
@@ -577,9 +583,9 @@ const StudioProjectPage: React.FC<{
     [refetchRoutes]
   );
   /**
-   * The bar's Render action. Submits the largest batch the chain permits — one shot per segment —
-   * rather than the whole film, because a shot cannot be generated before the one it follows. It is
-   * pressed again as each wave lands, which is what makes the Beat the unit of parallelism.
+   * The bar's Render action. Submits the largest bounded film-order batch the chain permits. Each
+   * selected frontier authorizes its exact downstream cascade, which advances unattended once the
+   * segment seed is fixed; a later click is needed only for work outside the request cap or recovery.
    */
   const renderFilm = useCallback((): void => {
     const current = projectRef.current;
@@ -2150,7 +2156,7 @@ const StudioProjectPage: React.FC<{
     [runWorkspaceExclusive]
   );
 
-  const referenceActions = useMemo<ReferencesViewActions>(
+  const referenceActions = useMemo<ReferencesViewActions & TableReferenceBindingActions>(
     () => ({
       addBackground: async ({ label, prompt }): Promise<boolean> => {
         const current = projectRef.current;
@@ -2438,14 +2444,10 @@ const StudioProjectPage: React.FC<{
           setPendingReferenceId(null);
         }
       },
-      continueToTable: (): void => {
-        void navigate(studioViewPath(projectId, 'table'));
-      },
     }),
     [
       currentGenerationCapability,
       generationDraftsBlockReview,
-      navigate,
       pendingReferenceId,
       projectId,
       referenceGenerationHandoffs,

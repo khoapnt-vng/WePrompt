@@ -924,9 +924,6 @@
         "historyPreviewAlt": "Erzeugtes Referenzbild für {{label}}",
         "historyCurrent": "Aktuelles Bild",
         "historyChoose": "Dieses Bild wählen",
-        "ready": "Alle erforderlichen Referenzen haben ein aktuelles Bild. Sie können mit der Tabelle fortfahren.",
-        "notReady": "Erzeugen Sie alle erforderlichen Referenzen, um fortzufahren.",
-        "continueToTable": "Weiter zur Tabelle",
         "currentProgress": "{{current}} von {{total}} Referenzen erzeugt",
         "bindings": {
           "title": "Shot-Zuordnungen",
@@ -938,7 +935,8 @@
           "capacity": "{{count}} Referenzen sind gewählt, aber die Bildroute unterstützt {{limit}}.",
           "characters": "Figuren",
           "background": "Hintergrund",
-          "save": "Zuordnung speichern"
+          "save": "Zuordnung speichern",
+          "progress": "{{ready}} von {{total}} Shots zugeordnet"
         }
       },
       "references": {

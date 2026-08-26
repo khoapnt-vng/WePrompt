@@ -18,7 +18,6 @@ vi.mock('react-i18next', () => ({
 
 import {
   ReferencesView,
-  type ReferenceBindingWorkspaceItem,
   type ReferenceWorkspaceItem,
   type ReferencesViewActions,
 } from '@/renderer/pages/studio/components/Workspace/Views/References';
@@ -42,18 +41,6 @@ const workflowReference = (overrides: Partial<ReferenceWorkspaceItem> = {}): Ref
   ...overrides,
 });
 
-const binding = (overrides: Partial<ReferenceBindingWorkspaceItem> = {}): ReferenceBindingWorkspaceItem => ({
-  shotId: 'shot_ming',
-  beatId: 'beat_reunion',
-  beatTitle: 'Reunion',
-  shotPosition: 1,
-  shootingScript: 'Ming steps beneath the red awning.',
-  status: 'unassigned',
-  characterReferenceIds: [],
-  backgroundReferenceId: null,
-  ...overrides,
-});
-
 const createActions = (): ReferencesViewActions => ({
   addBackground: vi.fn(async () => true),
   selectImage: vi.fn(async () => true),
@@ -61,8 +48,6 @@ const createActions = (): ReferencesViewActions => ({
   retryJob: vi.fn(async () => true),
   retryDownload: vi.fn(async () => true),
   cancelJob: vi.fn(async () => true),
-  saveBinding: vi.fn(async () => true),
-  continueToTable: vi.fn(),
 });
 
 const renderWorkflow = (props: Partial<React.ComponentProps<typeof ReferencesView>> = {}) => {
@@ -73,9 +58,6 @@ const renderWorkflow = (props: Partial<React.ComponentProps<typeof ReferencesVie
       <ReferencesView
         projectId='project_1'
         references={props.references ?? []}
-        bindings={props.bindings ?? []}
-        maxConditioningImages={props.maxConditioningImages ?? 3}
-        readyForTable={props.readyForTable ?? false}
         pendingReferenceId={props.pendingReferenceId ?? null}
         gateLocked={props.gateLocked ?? false}
         errorMessageKey={props.errorMessageKey ?? null}
@@ -236,19 +218,15 @@ describe('the schema-5 References workspace', () => {
     await waitFor(() => expect(actions.selectImage).toHaveBeenCalledWith('reference_ming', 'asset_ming_previous'));
   });
 
-  it('shows current-image progress and enables Continue to Table only from durable readiness', () => {
+  it('shows current-image progress without owning the Shot-binding handoff', () => {
     const references = [workflowReference({ approvedAssetId: null, generatedAssetIds: [] })];
     const { actions, rerender } = renderWorkflow({ references });
 
     expect(screen.getByText(`${WORKFLOW_KEY}.currentProgress:{"current":0,"total":1}`)).toBeVisible();
-    expect(screen.getByRole('button', { name: `${WORKFLOW_KEY}.continueToTable` })).toBeDisabled();
     rerender(
       <ReferencesView
         projectId='project_1'
         references={[workflowReference()]}
-        bindings={[]}
-        maxConditioningImages={3}
-        readyForTable
         pendingReferenceId={null}
         gateLocked={false}
         errorMessageKey={null}
@@ -256,70 +234,7 @@ describe('the schema-5 References workspace', () => {
       />
     );
     expect(screen.getByText(`${WORKFLOW_KEY}.currentProgress:{"current":1,"total":1}`)).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: `${WORKFLOW_KEY}.continueToTable` }));
-    expect(actions.continueToTable).toHaveBeenCalledTimes(1);
-  });
-
-  it('lists every active Shot binding and leaves unassigned/invalid rows visibly actionable', async () => {
-    const references = [
-      workflowReference(),
-      workflowReference({
-        id: 'reference_dai_pai_dong',
-        kind: 'background',
-        label: 'Dai pai dong',
-        approvedAssetId: 'asset_background_current',
-        generatedAssetIds: ['asset_background_current'],
-      }),
-    ];
-    const bindings = [
-      binding(),
-      binding({
-        shotId: 'shot_mei',
-        shotPosition: 2,
-        shootingScript: 'Mei looks up from the counter.',
-        status: 'invalid',
-        characterReferenceIds: ['reference_ming'],
-        backgroundReferenceId: 'reference_dai_pai_dong',
-      }),
-    ];
-    const { actions, container } = renderWorkflow({ references, bindings });
-
-    expect(container.querySelectorAll('[data-shot-id]')).toHaveLength(2);
-    expect(container.querySelector('[data-shot-id="shot_ming"]')).toHaveAttribute(
-      'data-shot-binding-status',
-      'unassigned'
-    );
-    const invalid = container.querySelector<HTMLElement>('[data-shot-id="shot_mei"]');
-    expect(invalid).toHaveAttribute('data-shot-binding-status', 'invalid');
-    expect(within(invalid!).getByRole('alert')).toHaveTextContent(`${WORKFLOW_KEY}.bindings.invalid`);
-    fireEvent.click(within(invalid!).getByRole('button', { name: `${WORKFLOW_KEY}.bindings.save` }));
-    await waitFor(() =>
-      expect(actions.saveBinding).toHaveBeenCalledWith('shot_mei', ['reference_ming'], 'reference_dai_pai_dong')
-    );
-  });
-
-  it('blocks an over-capacity exact Shot binding before save', () => {
-    const references = ['ming', 'mei', 'chen'].map((name) =>
-      workflowReference({
-        id: `reference_${name}`,
-        label: name,
-        approvedAssetId: `asset_${name}`,
-        generatedAssetIds: [`asset_${name}`],
-      })
-    );
-    renderWorkflow({
-      references,
-      bindings: [
-        binding({
-          status: 'ready',
-          characterReferenceIds: ['reference_ming', 'reference_mei', 'reference_chen'],
-        }),
-      ],
-      maxConditioningImages: 2,
-    });
-
-    expect(screen.getByRole('alert')).toHaveTextContent(`${WORKFLOW_KEY}.bindings.capacity:{"count":3,"limit":2}`);
-    expect(screen.getByRole('button', { name: `${WORKFLOW_KEY}.bindings.save` })).toBeDisabled();
+    expect(screen.queryByText(new RegExp(`${WORKFLOW_KEY}\\.bindings`))).toBeNull();
   });
 
   it('blocks duplicate regeneration while the durable candidate job is active', () => {
@@ -384,16 +299,14 @@ describe('the schema-5 References workspace', () => {
     await waitFor(() => expect(actions.retryJob).toHaveBeenCalledWith('reference_ming', 'job_reference_ming', true));
   });
 
-  it('scrolls to and briefly highlights the exact reference or Shot binding once per focus intent', () => {
+  it('scrolls to and briefly highlights the exact reference once per focus intent', () => {
     vi.useFakeTimers();
     const scrollIntoView = vi.fn();
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
     const references = [workflowReference(), workflowReference({ id: 'reference_mei', label: 'Mei' })];
-    const bindings = [binding(), binding({ shotId: 'shot_mei', shotPosition: 2 })];
     const onFocusIntentConsumed = vi.fn();
     const { actions, rerender, container } = renderWorkflow({
       references,
-      bindings,
       focusIntent: {
         id: 'focus-1',
         projectId: 'project_1',
@@ -414,32 +327,31 @@ describe('the schema-5 References workspace', () => {
     rerender(
       <ReferencesView
         actions={actions}
-        bindings={bindings}
         errorMessageKey={null}
         focusIntent={{
           id: 'focus-2',
           projectId: 'project_1',
-          referenceIds: [],
+          referenceIds: ['reference_ming'],
           assetIds: [],
-          shotIds: ['shot_mei'],
+          shotIds: [],
         }}
         gateLocked={false}
-        maxConditioningImages={3}
         onFocusIntentConsumed={onFocusIntentConsumed}
         pendingReferenceId={null}
         projectId='project_1'
-        readyForTable={false}
         references={references}
       />
     );
-    expect(container.querySelector('[data-shot-id="shot_mei"]')).toHaveAttribute(
-      'data-shot-binding-highlighted',
+    expect(container.querySelector('[data-reference-id="reference_ming"]')).toHaveAttribute(
+      'data-reference-highlighted',
       'true'
     );
-    expect(screen.getByText(`${WORKFLOW_KEY}.bindings.title`)).toHaveFocus();
+    expect(screen.getByText(`${WORKFLOW_KEY}.characters.title`)).toHaveFocus();
     expect(onFocusIntentConsumed).toHaveBeenLastCalledWith('focus-2');
     expect(scrollIntoView).toHaveBeenCalledTimes(2);
     act(() => vi.advanceTimersByTime(1_600));
-    expect(container.querySelector('[data-shot-id="shot_mei"]')).not.toHaveAttribute('data-shot-binding-highlighted');
+    expect(container.querySelector('[data-reference-id="reference_ming"]')).not.toHaveAttribute(
+      'data-reference-highlighted'
+    );
   });
 });

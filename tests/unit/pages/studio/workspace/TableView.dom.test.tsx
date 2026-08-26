@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React, { useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -67,6 +67,14 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.board.stopNote':
           'Stop requests cancellation where possible. Completed panels and charges already incurred remain.',
         'conversation.creativeStudio.workspace.table.board.styleRequired': 'Choose a Board style before drawing.',
+        'conversation.creativeStudio.workspace.referenceWorkflow.bindings.characters': 'Characters',
+        'conversation.creativeStudio.workspace.referenceWorkflow.bindings.background': 'Background',
+        'conversation.creativeStudio.workspace.referenceWorkflow.bindings.none': 'None',
+        'conversation.creativeStudio.workspace.referenceWorkflow.bindings.save': 'Save references',
+        'conversation.creativeStudio.workspace.referenceWorkflow.bindings.unassigned':
+          'Choose the exact references for this Shot.',
+        'conversation.creativeStudio.workspace.referenceWorkflow.bindings.invalid':
+          'This Shot binding is no longer valid. Review and save it again.',
         'conversation.creativeStudio.workspace.table.panel.redrawBeat': 'Redraw Beat · paid',
         'conversation.creativeStudio.jobs.retry': 'Retry generation',
         'conversation.creativeStudio.jobs.retryDownload': 'Retry download',
@@ -82,6 +90,12 @@ vi.mock('react-i18next', () => ({
       }
       if (key === 'conversation.creativeStudio.workspace.table.board.progress') {
         return `${String(values?.drawn)} of ${String(values?.total)} panels drawn`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.progress') {
+        return `${String(values?.ready)} of ${String(values?.total)} Shots bound`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.capacity') {
+        return `${String(values?.count)} references exceeds the ${String(values?.limit)}-image route limit.`;
       }
       if (key === 'conversation.creativeStudio.workspace.table.board.staleCount') {
         return `${String(values?.count)} stale`;
@@ -114,7 +128,13 @@ vi.mock('react-i18next', () => ({
 }));
 
 import { useWorkspaceDrafts } from '@/renderer/pages/studio/components/Workspace';
-import { TableView, type TableBoardActions } from '@/renderer/pages/studio/components/Workspace/Views/Table';
+import type { ReferenceWorkspaceItem } from '@/renderer/pages/studio/components/Workspace/Views/References';
+import {
+  TableView,
+  type ReferenceBindingWorkspaceItem,
+  type TableBoardActions,
+  type TableReferenceBindingActions,
+} from '@/renderer/pages/studio/components/Workspace/Views/Table';
 
 const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}): WorkspaceShotProjection => ({
   id,
@@ -193,11 +213,40 @@ const makeTableBoardActions = (): TableBoardActions => ({
   cancelJob: vi.fn(),
 });
 
+const makeBindingActions = (): TableReferenceBindingActions => ({
+  saveBinding: vi.fn(async () => true),
+});
+
+const makeReference = (overrides: Partial<ReferenceWorkspaceItem> = {}): ReferenceWorkspaceItem => ({
+  id: 'reference_ming',
+  kind: 'character',
+  label: 'Ming',
+  prompt: 'Red jacket and round glasses',
+  approvedAssetId: 'asset_ming',
+  generatedAssetIds: ['asset_ming'],
+  generationStatus: 'succeeded',
+  candidateJob: null,
+  ...overrides,
+});
+
+const makeBinding = (overrides: Partial<ReferenceBindingWorkspaceItem> = {}): ReferenceBindingWorkspaceItem => ({
+  shotId: 'opening_shot',
+  status: 'unassigned',
+  characterReferenceIds: [],
+  backgroundReferenceId: null,
+  ...overrides,
+});
+
 const tableBoardProps = (beats: readonly WorkspaceBeatProjection[], onOpenBeat = vi.fn()) => ({
   actions: makeTableBoardActions(),
   projectId: 'project_1',
   boardStyle: 'grey_tone' as const,
   boardPanels: beats.flatMap((beat) => beat.shots.map((shot) => makeBoardPanel(shot.id))),
+  references: [] as readonly ReferenceWorkspaceItem[],
+  referenceBindings: beats.flatMap((beat) => beat.shots.map((shot) => makeBinding({ shotId: shot.id }))),
+  referenceMaxConditioningImages: 3,
+  referencePendingId: null,
+  bindingActions: makeBindingActions(),
   imageRouteReady: true,
   pending: false,
   gateLocked: false,
@@ -249,6 +298,123 @@ describe('TableView', () => {
     expect(within(grid).getAllByRole('row')).toHaveLength(1);
     expect(within(grid).queryAllByRole('gridcell')).toHaveLength(0);
     expect(screen.getByRole('status')).toHaveTextContent('No beats yet');
+  });
+
+  it('owns exact Shot reference binding inside the expanded Beat and reports bound progress', async () => {
+    const user = userEvent.setup();
+    const beats = [makeBeat('opening', { title: 'Opening' })];
+    const bindingActions = makeBindingActions();
+    const references = [
+      makeReference(),
+      makeReference({
+        id: 'reference_market',
+        kind: 'background',
+        label: 'Dai pai dong',
+        approvedAssetId: 'asset_market',
+        generatedAssetIds: ['asset_market'],
+      }),
+    ];
+    const { container } = render(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        references={references}
+        referenceBindings={[makeBinding({ characterReferenceIds: ['reference_ming'] })]}
+        bindingActions={bindingActions}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText('0 of 1 Shots bound')).toBeVisible();
+    expect(container.querySelector('[data-shot-binding-status]')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+
+    const shot = container.querySelector<HTMLElement>('[data-shot-id="opening_shot"]');
+    expect(shot).toHaveAttribute('data-shot-binding-status', 'unassigned');
+    expect(within(shot!).getByRole('alert')).toHaveTextContent('Choose the exact references for this Shot.');
+
+    const background = within(shot!).getByRole('combobox', { name: 'Background' });
+    await user.click(background);
+    await waitFor(() => expect(document.getElementById(background.getAttribute('aria-controls') ?? '')).not.toBeNull());
+    const popup = document.getElementById(background.getAttribute('aria-controls') ?? '');
+    if (popup === null) throw new Error('Missing background reference popup');
+    fireEvent.click(within(popup).getByRole('option', { name: 'Dai pai dong' }));
+
+    await user.click(within(shot!).getByRole('button', { name: 'Save references' }));
+    await waitFor(() =>
+      expect(bindingActions.saveBinding).toHaveBeenCalledExactlyOnceWith(
+        'opening_shot',
+        ['reference_ming'],
+        'reference_market'
+      )
+    );
+  });
+
+  it('leaves invalid Shot bindings actionable but fails closed above the route capacity', async () => {
+    const user = userEvent.setup();
+    const beats = [makeBeat('opening', { title: 'Opening' })];
+    const references = ['ming', 'mei', 'chen'].map((name) =>
+      makeReference({
+        id: `reference_${name}`,
+        label: name,
+        approvedAssetId: `asset_${name}`,
+        generatedAssetIds: [`asset_${name}`],
+      })
+    );
+    const { container } = render(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        references={references}
+        referenceBindings={[
+          makeBinding({
+            status: 'invalid',
+            characterReferenceIds: ['reference_ming', 'reference_mei', 'reference_chen'],
+          }),
+        ]}
+        referenceMaxConditioningImages={2}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    const shot = container.querySelector<HTMLElement>('[data-shot-id="opening_shot"]');
+    expect(within(shot!).getAllByRole('alert')[0]).toHaveTextContent(
+      'This Shot binding is no longer valid. Review and save it again.'
+    );
+    expect(within(shot!).getAllByRole('alert')[1]).toHaveTextContent('3 references exceeds the 2-image route limit.');
+    expect(within(shot!).getByRole('button', { name: 'Save references' })).toBeDisabled();
+  });
+
+  it('opens and highlights the exact Shot when review sends a binding focus intent', async () => {
+    const beats = [makeBeat('opening', { title: 'Opening' })];
+    const consumed = vi.fn();
+    const { container } = render(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        referenceFocusIntent={{
+          id: 'focus_1',
+          projectId: 'project_1',
+          referenceIds: [],
+          assetIds: [],
+          shotIds: ['opening_shot'],
+        }}
+        onReferenceFocusIntentConsumed={consumed}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+
+    await waitFor(() =>
+      expect(container.querySelector('[data-shot-id="opening_shot"]')).toHaveAttribute(
+        'data-shot-binding-highlighted',
+        'true'
+      )
+    );
+    expect(consumed).toHaveBeenCalledWith('focus_1');
   });
 
   it('shows a fixed lead Panel thumbnail and the remaining Shot count from exact film-order status', () => {

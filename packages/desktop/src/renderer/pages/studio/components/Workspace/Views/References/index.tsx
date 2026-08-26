@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Empty, Input, Modal, Popconfirm, Progress, Select, Tag } from '@arco-design/web-react';
+import { Alert, Button, Empty, Input, Modal, Popconfirm, Progress, Tag } from '@arco-design/web-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -35,17 +35,6 @@ export type ReferenceWorkspaceItem = {
   candidateJob: ReferenceCandidateJob | null;
 };
 
-export type ReferenceBindingWorkspaceItem = {
-  shotId: string;
-  beatId: string;
-  beatTitle: string;
-  shotPosition: number;
-  shootingScript: string;
-  status: 'unassigned' | 'ready' | 'invalid';
-  characterReferenceIds: string[];
-  backgroundReferenceId: string | null;
-};
-
 export type StudioReferenceFocusIntent = {
   id: string;
   projectId: string;
@@ -61,20 +50,11 @@ export type ReferencesViewActions = {
   retryJob: (referenceId: string, jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   retryDownload: (referenceId: string, jobId: string) => Promise<boolean>;
   cancelJob: (referenceId: string, jobId: string) => Promise<boolean>;
-  saveBinding: (
-    shotId: string,
-    characterReferenceIds: readonly string[],
-    backgroundReferenceId: string | null
-  ) => Promise<boolean>;
-  continueToTable: () => void;
 };
 
 export type ReferencesViewProps = {
   projectId: string;
   references: readonly ReferenceWorkspaceItem[];
-  bindings: readonly ReferenceBindingWorkspaceItem[];
-  maxConditioningImages: number | null;
-  readyForTable: boolean;
   pendingReferenceId: string | null;
   gateLocked: boolean;
   errorMessageKey: string | null;
@@ -87,135 +67,10 @@ const ROOT = 'conversation.creativeStudio.workspace.referenceWorkflow';
 const JOB_ROOT = 'conversation.creativeStudio.jobs';
 const REFERENCE_HIGHLIGHT_MS = 1_600;
 
-type BindingCardProps = {
-  item: ReferenceBindingWorkspaceItem;
-  characters: readonly ReferenceWorkspaceItem[];
-  backgrounds: readonly ReferenceWorkspaceItem[];
-  maxConditioningImages: number | null;
-  pending: boolean;
-  gateLocked: boolean;
-  highlighted: boolean;
-  cardRef: (node: HTMLLIElement | null) => void;
-  save: ReferencesViewActions['saveBinding'];
-};
-
-const BindingCard: React.FC<BindingCardProps> = ({
-  item,
-  characters,
-  backgrounds,
-  maxConditioningImages,
-  pending,
-  gateLocked,
-  highlighted,
-  cardRef,
-  save,
-}) => {
-  const { t } = useTranslation();
-  const [characterReferenceIds, setCharacterReferenceIds] = useState(item.characterReferenceIds);
-  const [backgroundReferenceId, setBackgroundReferenceId] = useState(item.backgroundReferenceId);
-  const authoritySignature = JSON.stringify([
-    item.shotId,
-    item.status,
-    item.characterReferenceIds,
-    item.backgroundReferenceId,
-  ]);
-  useEffect(() => {
-    setCharacterReferenceIds(item.characterReferenceIds);
-    setBackgroundReferenceId(item.backgroundReferenceId);
-  }, [authoritySignature]);
-  const selectedCount = characterReferenceIds.length + (backgroundReferenceId === null ? 0 : 1);
-  const overCapacity = maxConditioningImages !== null && selectedCount > maxConditioningImages;
-  const dirty =
-    item.status !== 'ready' ||
-    backgroundReferenceId !== item.backgroundReferenceId ||
-    characterReferenceIds.length !== item.characterReferenceIds.length ||
-    characterReferenceIds.some((referenceId, index) => referenceId !== item.characterReferenceIds[index]);
-  const disabled = gateLocked || pending;
-
-  return (
-    <li
-      ref={cardRef}
-      className={`${styles.bindingCard} ${highlighted ? styles.cardHighlighted : ''}`}
-      data-shot-binding-highlighted={highlighted || undefined}
-      data-shot-binding-status={item.status}
-      data-shot-id={item.shotId}
-    >
-      <header>
-        <h4>
-          <bdi dir='auto'>
-            {item.beatTitle} · {t(`${ROOT}.bindings.shot`, { position: item.shotPosition })}
-          </bdi>
-        </h4>
-        <p>
-          <bdi dir='auto'>{item.shootingScript || item.shotId}</bdi>
-        </p>
-      </header>
-      {item.status === 'unassigned' ? (
-        <div>
-          <Alert type='warning' content={t(`${ROOT}.bindings.unassigned`)} />
-        </div>
-      ) : item.status === 'invalid' ? (
-        <div>
-          <Alert type='error' content={t(`${ROOT}.bindings.invalid`)} />
-        </div>
-      ) : null}
-      {overCapacity ? (
-        <div>
-          <Alert
-            type='error'
-            content={t(`${ROOT}.bindings.capacity`, { count: selectedCount, limit: maxConditioningImages })}
-          />
-        </div>
-      ) : null}
-      <label className={styles.bindingField}>
-        <span>{t(`${ROOT}.bindings.characters`)}</span>
-        <Select
-          disabled={disabled}
-          mode='multiple'
-          onChange={(value) => setCharacterReferenceIds(Array.isArray(value) ? value.map(String) : [])}
-          value={characterReferenceIds}
-        >
-          {characters.map((reference) => (
-            <Select.Option key={reference.id} value={reference.id} disabled={reference.approvedAssetId === null}>
-              <bdi dir='auto'>{reference.label}</bdi>
-            </Select.Option>
-          ))}
-        </Select>
-      </label>
-      <label className={styles.bindingField}>
-        <span>{t(`${ROOT}.bindings.background`)}</span>
-        <Select
-          allowClear
-          disabled={disabled}
-          onChange={(value) => setBackgroundReferenceId(typeof value === 'string' ? value : null)}
-          value={backgroundReferenceId ?? undefined}
-        >
-          {backgrounds.map((reference) => (
-            <Select.Option key={reference.id} value={reference.id} disabled={reference.approvedAssetId === null}>
-              <bdi dir='auto'>{reference.label}</bdi>
-            </Select.Option>
-          ))}
-        </Select>
-      </label>
-      <Button
-        type='primary'
-        disabled={disabled || overCapacity || !dirty}
-        loading={pending}
-        onClick={() => void save(item.shotId, characterReferenceIds, backgroundReferenceId)}
-      >
-        {t(`${ROOT}.bindings.save`)}
-      </Button>
-    </li>
-  );
-};
-
 /** Project-level identity and location references, made current before any Shot candidates are made. */
 export const ReferencesView: React.FC<ReferencesViewProps> = ({
   projectId,
   references,
-  bindings,
-  maxConditioningImages,
-  readyForTable,
   pendingReferenceId,
   gateLocked,
   errorMessageKey,
@@ -225,10 +80,8 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
 }) => {
   const { t } = useTranslation();
   const cardRefs = useRef(new Map<string, HTMLLIElement>());
-  const bindingCardRefs = useRef(new Map<string, HTMLLIElement>());
   const characterHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const backgroundHeadingRef = useRef<HTMLHeadingElement | null>(null);
-  const bindingHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const handledFocusIntentIdRef = useRef<string | null>(null);
   const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeFocusIntent, setActiveFocusIntent] = useState<StudioReferenceFocusIntent | null>(null);
@@ -247,7 +100,6 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
   const currentPercent = references.length === 0 ? 100 : Math.round((currentCount * 100) / references.length);
   const focusIds = useMemo(() => new Set(activeFocusIntent?.referenceIds ?? []), [activeFocusIntent]);
   const focusAssets = useMemo(() => new Set(activeFocusIntent?.assetIds ?? []), [activeFocusIntent]);
-  const focusShots = useMemo(() => new Set(activeFocusIntent?.shotIds ?? []), [activeFocusIntent]);
 
   useEffect(() => {
     handledFocusIntentIdRef.current = null;
@@ -272,7 +124,6 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
     }
     const requestedReferenceIds = new Set(focusIntent.referenceIds);
     const requestedAssetIds = new Set(focusIntent.assetIds);
-    const requestedShotIds = new Set(focusIntent.shotIds);
     if (highlightTimerRef.current !== null) clearTimeout(highlightTimerRef.current);
     highlightTimerRef.current = null;
     const focused = references.find(
@@ -280,25 +131,17 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
         cardRefs.current.has(item.id) &&
         (requestedReferenceIds.has(item.id) || item.generatedAssetIds.some((assetId) => requestedAssetIds.has(assetId)))
     );
-    const focusedBinding = bindings.find(
-      (item) => requestedShotIds.has(item.shotId) && bindingCardRefs.current.has(item.shotId)
-    );
-    if (focused === undefined && focusedBinding === undefined) return;
+    if (focused === undefined) return;
     handledFocusIntentIdRef.current = focusIntent.id;
     setActiveFocusIntent(focusIntent);
-    if (focused !== undefined) {
-      cardRefs.current.get(focused.id)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-      (focused.kind === 'character' ? characterHeadingRef.current : backgroundHeadingRef.current)?.focus();
-    } else {
-      bindingCardRefs.current.get(focusedBinding!.shotId)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
-      bindingHeadingRef.current?.focus();
-    }
+    cardRefs.current.get(focused.id)?.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+    (focused.kind === 'character' ? characterHeadingRef.current : backgroundHeadingRef.current)?.focus();
     onFocusIntentConsumed?.(focusIntent.id);
     highlightTimerRef.current = setTimeout(() => {
       setActiveFocusIntent((current) => (current?.id === focusIntent.id ? null : current));
       highlightTimerRef.current = null;
     }, REFERENCE_HIGHLIGHT_MS);
-  }, [bindings, focusIntent, onFocusIntentConsumed, projectId, references]);
+  }, [focusIntent, onFocusIntentConsumed, projectId, references]);
 
   useEffect(
     () => () => {
@@ -638,47 +481,6 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
           <ul className={styles.grid}>{backgrounds.map(renderCard)}</ul>
         )}
       </section>
-      <section className={styles.section} aria-labelledby='studio-reference-bindings'>
-        <header className={styles.sectionHeader}>
-          <h3 id='studio-reference-bindings' ref={bindingHeadingRef} tabIndex={-1}>
-            {t(`${ROOT}.bindings.title`)}
-          </h3>
-          <p>{t(`${ROOT}.bindings.description`)}</p>
-        </header>
-        {bindings.length === 0 ? (
-          <Empty description={t(`${ROOT}.bindings.empty`)} />
-        ) : (
-          <ul className={styles.bindingList}>
-            {bindings.map((item) => (
-              <BindingCard
-                key={item.shotId}
-                backgrounds={backgrounds}
-                cardRef={(node) => {
-                  if (node === null) bindingCardRefs.current.delete(item.shotId);
-                  else bindingCardRefs.current.set(item.shotId, node);
-                }}
-                characters={characters}
-                gateLocked={gateLocked}
-                highlighted={activeFocusIntent !== null && focusShots.has(item.shotId)}
-                item={item}
-                maxConditioningImages={maxConditioningImages}
-                pending={pendingReferenceId === item.shotId}
-                save={actions.saveBinding}
-              />
-            ))}
-          </ul>
-        )}
-      </section>
-      <footer className={styles.footer}>
-        <p>{t(readyForTable ? `${ROOT}.ready` : `${ROOT}.notReady`)}</p>
-        <Button
-          type='primary'
-          disabled={!readyForTable || pendingReferenceId !== null || gateLocked}
-          onClick={actions.continueToTable}
-        >
-          {t(`${ROOT}.continueToTable`)}
-        </Button>
-      </footer>
       <Modal
         footer={null}
         title={t(`${ROOT}.backgrounds.addTitle`)}

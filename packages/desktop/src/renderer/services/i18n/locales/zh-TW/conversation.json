@@ -923,9 +923,6 @@
         "historyPreviewAlt": "{{label}} 的已產生參考圖",
         "historyCurrent": "目前圖片",
         "historyChoose": "選擇此圖片",
-        "ready": "所有必要的參考都有目前圖片。可以繼續前往表格。",
-        "notReady": "產生所有必要的參考圖後才能繼續。",
-        "continueToTable": "繼續前往表格",
         "currentProgress": "已產生 {{current}} / {{total}} 個參考",
         "bindings": {
           "title": "Shot 綁定",
@@ -937,7 +934,8 @@
           "capacity": "已選擇 {{count}} 個參考，但影像路由最多支援 {{limit}} 個。",
           "characters": "角色",
           "background": "背景",
-          "save": "儲存綁定"
+          "save": "儲存綁定",
+          "progress": "已綁定 {{ready}} / {{total}} 個 Shot"
         }
       },
       "references": {

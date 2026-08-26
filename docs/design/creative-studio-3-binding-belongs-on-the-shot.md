@@ -1,6 +1,6 @@
 # Reference binding belongs on the Shot, not in References
 
-**Date:** 2026-08-25 · **Status:** owner design direction, not started
+**Date:** 2026-08-25 · **Status:** implemented 2026-08-26
 **Related:** [References card redesign](creative-studio-3-references-card-redesign.md) ·
 [spend governance ruling](../prds/creative-studio/creative-studio-3-spend-governance-ruling.md)
 
@@ -63,3 +63,15 @@ at the point of spend, rather than with a gate between rooms.
 
 Where progress is worth stating, state it as progress — "3 of 10 Shots bound" — never as a locked
 door.
+
+## Implementation evidence
+
+- References now owns only semantic reference images, prompt/history controls, and Add background.
+- The Table's expanded Beat detail owns the exact per-Shot character/background binding editor,
+  unassigned/invalid state, route-capacity refusal, and save action beside the Board panel.
+- Generation-remedy focus opens and highlights the exact Shot in Table; reference/asset review focus
+  remains in References.
+- The Table strip reports durable bound-Shot progress. The obsolete Continue to Table action and its
+  readiness-door copy are removed.
+- Focused DOM coverage pins relocation, exact save payloads, capacity failure, progress, and focus;
+  the Ming/Mei/dai-pai-dong E2E path now verifies bindings in the expanded Table panels.

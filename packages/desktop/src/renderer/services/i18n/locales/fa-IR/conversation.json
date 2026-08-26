@@ -923,9 +923,6 @@
         "historyPreviewAlt": "تصویر مرجع تولیدشده برای {{label}}",
         "historyCurrent": "تصویر فعلی",
         "historyChoose": "انتخاب این تصویر",
-        "ready": "همهٔ مرجع‌های لازم تصویر فعلی دارند. می‌توانید به جدول بروید.",
-        "notReady": "برای ادامه همهٔ مرجع‌های لازم را تولید کنید.",
-        "continueToTable": "ادامه به جدول",
         "currentProgress": "{{current}} از {{total}} مرجع تولید شده",
         "bindings": {
           "title": "اتصال‌های Shot",
@@ -937,7 +934,8 @@
           "capacity": "{{count}} مرجع انتخاب شده، اما مسیر تصویر از {{limit}} پشتیبانی می‌کند.",
           "characters": "شخصیت‌ها",
           "background": "پس‌زمینه",
-          "save": "ذخیرهٔ اتصال"
+          "save": "ذخیرهٔ اتصال",
+          "progress": "{{ready}} از {{total}} Shot متصل"
         }
       },
       "references": {

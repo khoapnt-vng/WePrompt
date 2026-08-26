@@ -929,9 +929,6 @@
         "historyPreviewAlt": "Imagem de referência gerada para {{label}}",
         "historyCurrent": "Imagem atual",
         "historyChoose": "Escolher esta imagem",
-        "ready": "Todas as referências necessárias têm uma imagem atual. Você pode continuar para a Tabela.",
-        "notReady": "Gere todas as referências necessárias para continuar.",
-        "continueToTable": "Continuar para a Tabela",
         "currentProgress": "{{current}} de {{total}} referências geradas",
         "bindings": {
           "title": "Vínculos dos Shots",
@@ -943,7 +940,8 @@
           "capacity": "{{count}} referências selecionadas, mas a rota de imagem aceita {{limit}}.",
           "characters": "Personagens",
           "background": "Fundo",
-          "save": "Salvar vínculo"
+          "save": "Salvar vínculo",
+          "progress": "{{ready}} de {{total}} Shots vinculados"
         }
       },
       "references": {

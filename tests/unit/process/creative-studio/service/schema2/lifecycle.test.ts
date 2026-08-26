@@ -409,6 +409,109 @@ describe('advanceStudioWaitingBindingsV2', () => {
     expect(replay).toEqual({ dispatchJobIds: [], extractionIds: [], projectChanged: false });
   });
 
+  it('advances an authorized Beat chain unattended after its one human seed decision', () => {
+    const project = projectFixture('seed');
+    const authorization = project.spendAuthorizations[0]!;
+    const transitivePlan: StudioGenerationRequestPlan = {
+      kind: 'after_take_selection',
+      template: {
+        composition: composition('shot_2', 'video_take'),
+        aspectRatio: '16:9',
+        resolution: '1080p',
+        durationSeconds: 5,
+        referenceInputs: [],
+      },
+      dependency: {
+        kind: 'authorized_predecessor',
+        upstreamItemId: 'item_dependent',
+        predecessorShotId: 'shot_1',
+      },
+    };
+    const transitiveItem = item('item_transitive', 'shot_2', 'video_take', transitivePlan);
+    const transitiveJob = job('job_transitive', 'shot_2', transitiveItem.id, transitivePlan);
+    authorization.cascadeItems.push(transitiveItem);
+    authorization.providerBindings.push({
+      itemId: transitiveItem.id,
+      provider: { providerId: 'provider_1', adapterId: 'openrouter-video-v1', model: 'model_1' },
+    });
+    authorization.idempotencyKeys.push({ itemId: transitiveItem.id, key: 'key_transitive' });
+    project.jobs[transitiveJob.id] = transitiveJob;
+    project.shots.shot_2!.jobIds.push(transitiveJob.id);
+
+    installPrimary(project, 'image');
+    expect(advanceStudioWaitingBindingsV2(project, capturedAt)).toEqual({
+      dispatchJobIds: ['job_dependent'],
+      extractionIds: [],
+      projectChanged: true,
+    });
+
+    const firstPicture = asset('primary_video', 'shot_1', 'video');
+    const firstVideoJob = project.jobs.job_dependent!;
+    firstPicture.producerJobId = firstVideoJob.id;
+    firstPicture.compositionDigest = studioGenerationCompositionDigestV2(firstVideoJob.composition);
+    firstPicture.generationReferenceAssetIds = firstVideoJob.composition.inputs.referenceInputs.map(
+      ({ assetId }) => assetId
+    );
+    project.assets[firstPicture.id] = firstPicture;
+    project.shots.shot_1!.assetIds.push(firstPicture.id);
+    project.shots.shot_1!.videoAssetId = firstPicture.id;
+    firstVideoJob.status = 'succeeded';
+    firstVideoJob.outputAssetIds = [firstPicture.id];
+    firstVideoJob.outputAssetIdsByRole.primary = firstPicture.id;
+
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      videoAssetId: firstPicture.id,
+      endpointSeconds: 10,
+    });
+    expect(advanceStudioWaitingBindingsV2(project, capturedAt)).toEqual({
+      dispatchJobIds: [],
+      extractionIds: [extractionId],
+      projectChanged: true,
+    });
+
+    const frame = asset('frame_transitive', 'shot_1', 'image', 'conditioningFrames');
+    project.assets[frame.id] = frame;
+    project.shots.shot_1!.assetIds.push(frame.id);
+    project.frameExtractions[extractionId] = {
+      ...project.frameExtractions[extractionId]!,
+      status: 'ready',
+      frameAssetId: frame.id,
+    };
+    expect(
+      advanceStudioWaitingBindingsV2(
+        project,
+        capturedAt,
+        new Map([
+          [
+            extractionId,
+            {
+              extractionId,
+              shotId: 'shot_1',
+              videoAssetId: firstPicture.id,
+              endpointSeconds: 10,
+              frameAssetId: frame.id,
+              byteSize: frame.byteSize,
+              sha256: frame.sha256,
+            },
+          ],
+        ])
+      )
+    ).toEqual({ dispatchJobIds: ['job_transitive'], extractionIds: [], projectChanged: true });
+    expect(project.jobs.job_transitive).toMatchObject({
+      status: 'queued_local',
+      requestSnapshot: {
+        conditioningInput: {
+          kind: 'predecessor_frame',
+          predecessorShotId: 'shot_1',
+          takeAssetId: firstPicture.id,
+          frameAssetId: frame.id,
+          endpointSeconds: 10,
+        },
+      },
+    });
+  });
+
   it('derives the current-picture endpoint, persists one frame request, then binds to the ready frame', () => {
     const project = projectFixture('predecessor');
     const primary = installPrimary(project, 'video');

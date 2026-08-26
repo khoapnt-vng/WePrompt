@@ -1341,9 +1341,6 @@
         "historyPreviewAlt": "Generated reference image for {{label}}",
         "historyCurrent": "Current image",
         "historyChoose": "Choose this image",
-        "ready": "Every required reference has a current image. You can continue to the Table.",
-        "notReady": "Generate every required reference to continue.",
-        "continueToTable": "Continue to Table",
         "currentProgress": "{{current}} of {{total}} references generated",
         "bindings": {
           "title": "Shot bindings",
@@ -1355,7 +1352,8 @@
           "capacity": "{{count}} references are selected, but the image route supports {{limit}}.",
           "characters": "Characters",
           "background": "Background",
-          "save": "Save binding"
+          "save": "Save binding",
+          "progress": "{{ready}} of {{total}} Shots bound"
         }
       },
       "table": {

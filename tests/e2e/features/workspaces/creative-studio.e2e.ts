@@ -1810,8 +1810,7 @@ test.describe('Creative Studio workspace', () => {
     expect(planned.referenceOrder).toEqual([mingId, meiId, backgroundId]);
     await page.locator(viewNavigationSelector).getByRole('link', { name: 'References', exact: true }).click();
     const referencesView = page.locator('[data-studio-references-view]');
-    const continueToTable = referencesView.getByRole('button', { name: 'Continue to Table', exact: true });
-    await expect(continueToTable).toBeDisabled();
+    await expect(referencesView.getByRole('button', { name: 'Continue to Table', exact: true })).toHaveCount(0);
 
     const providerCallsBeforeBlockedBackground = await readStudioE2EProviderCallCounts(userDataDirectory);
     await expect(
@@ -1915,7 +1914,6 @@ test.describe('Creative Studio workspace', () => {
     if (mingAssetId === null || mingAssetId === undefined || meiAssetId === null || meiAssetId === undefined) {
       throw new Error('Current character reference images were unavailable');
     }
-    await expect(continueToTable).toBeDisabled();
     const characterReferencesReady = await readStableStudioProject(page, projectId);
 
     const backgroundReview = await reviewReferenceBatch([backgroundId]);
@@ -1934,8 +1932,6 @@ test.describe('Creative Studio workspace', () => {
     if (backgroundAssetId === null || backgroundAssetId === undefined) {
       throw new Error('Current background reference image was unavailable');
     }
-    await expect(continueToTable).toBeEnabled();
-
     const approved = await readStableStudioProject(page, projectId);
     const expectedReferenceAssets = [
       { assetId: mingAssetId, kind: 'character' as const, prompt: mingPrompt, referenceId: mingId },
@@ -2013,13 +2009,14 @@ test.describe('Creative Studio workspace', () => {
     await expect(referencesLink).toBeVisible({ timeout: studioFakeMediaTimeoutMs });
     await referencesLink.click();
     await expect(referencesView.locator('[data-reference-id]')).toHaveCount(3);
-    await expect(referencesView.locator('[data-shot-binding-status="ready"]')).toHaveCount(2);
+    await expect(referencesView.locator('[data-shot-binding-status]')).toHaveCount(0);
 
-    await expect(continueToTable).toBeEnabled();
-    await continueToTable.click();
+    await navigation.getByRole('link', { name: 'Table', exact: true }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
     const beatRow = page.locator(`[data-beat-id="${beatId}"]`);
     await expect(beatRow.locator('[data-grid-column-name="story"]')).toContainText(beatStory);
+    await page.getByRole('button', { name: `Open Board panels for ${beatTitle}`, exact: true }).click();
+    await expect(page.locator('[data-shot-binding-status="ready"]')).toHaveCount(2);
     await beatRow.click();
     const beatDialog = page.getByRole('dialog');
     await expect(beatDialog.getByRole('textbox', { name: 'Story', exact: true })).toHaveValue(beatStory);
@@ -2276,7 +2273,7 @@ test.describe('Creative Studio workspace', () => {
     expect(reloaded.assets[firstBoardAssetId]).toEqual(boarded.assets[firstBoardAssetId]);
     expect(reloaded.assets[secondBoardAssetId]).toEqual(boarded.assets[secondBoardAssetId]);
     await expect(page.locator('[data-studio-references-view] [data-reference-id]')).toHaveCount(3);
-    await expect(page.locator('[data-studio-references-view] [data-shot-binding-status="ready"]')).toHaveCount(2);
+    await expect(page.locator('[data-studio-references-view] [data-shot-binding-status]')).toHaveCount(0);
     const reloadedHandoffs = await invokeStudioBridge<StudioRendererReferenceGenerationHandoffV2[]>(
       page,
       'list-reference-generation-handoffs',

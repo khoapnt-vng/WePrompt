@@ -11,8 +11,8 @@ import { useTranslation } from 'react-i18next';
 import { BeatPanel } from '../BeatPanel';
 import { BoardView, binItemFocusKey } from './Board';
 import { CutView } from './Cut';
-import { ReferencesView, type ReferenceBindingWorkspaceItem, type ReferenceWorkspaceItem } from './References';
-import { TableView } from './Table';
+import { ReferencesView, type ReferenceWorkspaceItem } from './References';
+import { TableView, type ReferenceBindingWorkspaceItem } from './Table';
 import type { WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
 
@@ -134,13 +134,10 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       }),
     [project]
   );
-  const referencesReady =
-    projectReferences.length === project.referenceOrder.length &&
-    projectReferences.every((reference) => reference.approvedAssetId !== null);
   const referenceBindings = useMemo<ReferenceBindingWorkspaceItem[]>(
     () =>
       projection.activeBeats.flatMap((beat) =>
-        beat.shots.flatMap((shot, shotIndex) => {
+        beat.shots.flatMap((shot) => {
           const authority = Object.hasOwn(project.shots, shot.id) ? project.shots[shot.id] : undefined;
           if (authority?.id !== shot.id) return [];
           const binding = authority.referenceBinding;
@@ -169,10 +166,6 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           return [
             {
               shotId: shot.id,
-              beatId: beat.id,
-              beatTitle: beat.title,
-              shotPosition: shotIndex + 1,
-              shootingScript: shot.shootingScript,
               status: binding.status === 'unassigned' ? 'unassigned' : bindingValid ? 'ready' : 'invalid',
               characterReferenceIds: [...binding.characterReferenceIds],
               backgroundReferenceId: binding.backgroundReferenceId,
@@ -239,18 +232,13 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
               retryJob: async () => false,
               retryDownload: async () => false,
               cancelJob: async () => false,
-              saveBinding: async () => false,
-              continueToTable: () => undefined,
             }
           }
           errorMessageKey={referenceErrorMessageKey}
           focusIntent={referenceFocusIntent}
           gateLocked={gateLocked || pending || referenceActions === undefined}
-          bindings={referenceBindings}
-          maxConditioningImages={referenceMaxConditioningImages}
           pendingReferenceId={referencePendingId}
           projectId={project.id}
-          readyForTable={referencesReady}
           references={projectReferences}
           onFocusIntentConsumed={onReferenceFocusIntentConsumed}
         />
@@ -259,6 +247,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
         <TableView
           actions={tableBoardActions}
           beats={projection.activeBeats}
+          bindingActions={referenceActions ?? { saveBinding: async () => false }}
           boardStyle={project.boardStyle}
           boardPanels={projection.boardPanels}
           gateLocked={gateLocked}
@@ -267,7 +256,13 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           onSelectBeat={drafts.selectBeat}
           pending={pending}
           projectId={project.id}
+          referenceBindings={referenceBindings}
+          referenceFocusIntent={referenceFocusIntent}
+          referenceMaxConditioningImages={referenceMaxConditioningImages}
+          referencePendingId={referencePendingId}
+          references={projectReferences}
           selectedBeatId={drafts.selection.selectedBeatId}
+          onReferenceFocusIntentConsumed={onReferenceFocusIntentConsumed}
         />
       ) : null}
       {activeView === 'board' ? (

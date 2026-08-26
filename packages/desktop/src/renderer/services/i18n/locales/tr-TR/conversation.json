@@ -925,9 +925,6 @@
         "historyPreviewAlt": "{{label}} için oluşturulan referans görseli",
         "historyCurrent": "Geçerli görsel",
         "historyChoose": "Bu görseli seç",
-        "ready": "Gerekli tüm referansların güncel bir görseli var. Tabloya devam edebilirsiniz.",
-        "notReady": "Devam etmek için gerekli tüm referansları oluşturun.",
-        "continueToTable": "Tabloya devam et",
         "currentProgress": "{{total}} referansın {{current}} tanesi oluşturuldu",
         "bindings": {
           "title": "Shot bağlamaları",
@@ -939,7 +936,8 @@
           "capacity": "{{count}} referans seçildi, ancak görüntü rotası {{limit}} destekliyor.",
           "characters": "Karakterler",
           "background": "Arka plan",
-          "save": "Bağlamayı kaydet"
+          "save": "Bağlamayı kaydet",
+          "progress": "{{total}} Shot’ın {{ready}} tanesi bağlandı"
         }
       },
       "references": {

@@ -414,6 +414,16 @@
 .panelCard {
   color: var(--color-text-3);
   font-family: var(--font-mono);
+  outline: none;
+}
+
+.panelCard:focus-visible {
+  border-radius: 6px;
+  box-shadow: var(--ring-focus);
+}
+
+.bindingHighlighted {
+  animation: binding-highlight 1.6s ease-out;
 }
 
 .panelFrame {
@@ -485,6 +495,58 @@
   margin-block-start: 5px;
 }
 
+.bindingEditor {
+  display: grid;
+  min-inline-size: 0;
+  gap: 6px;
+  margin-block-start: 7px;
+  padding-block-start: 7px;
+  border-block-start: 1px solid var(--color-border-2);
+  font-family: var(--font-body);
+}
+
+.bindingEditor :global(.arco-alert) {
+  padding-block: 5px;
+  padding-inline: 7px;
+  font-size: 9px;
+}
+
+.bindingField {
+  display: grid;
+  min-inline-size: 0;
+  gap: 3px;
+}
+
+.bindingField > span {
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.bindingField :global(.arco-select) {
+  inline-size: 100%;
+}
+
+.bindingEditor > button {
+  inline-size: 100%;
+}
+
+@keyframes binding-highlight {
+  0% {
+    box-shadow: 0 0 0 0 var(--color-primary-light-3);
+  }
+
+  35% {
+    box-shadow: 0 0 0 5px var(--color-primary-light-3);
+  }
+
+  100% {
+    box-shadow: 0 0 0 0 var(--color-primary-light-3);
+  }
+}
+
 .panelPromote,
 .panelRedraw {
   inline-size: 100%;
@@ -503,5 +565,11 @@
 
   .boardPrimaryAction {
     min-inline-size: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bindingHighlighted {
+    animation: none;
   }
 }

@@ -1804,14 +1804,16 @@ describe('StudioPage schema-5 cutover', () => {
     expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
   });
 
-  it('allows an empty, coherent reference plan to continue directly to the Table', async () => {
+  it('keeps an empty, coherent reference plan navigable without a References-owned continuation action', async () => {
     renderStudio('/studio/project_1/references');
 
-    const continueToTable = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.workspace.referenceWorkflow.continueToTable',
-    });
-    expect(continueToTable).toBeEnabled();
-    fireEvent.click(continueToTable);
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    expect(
+      screen.queryByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.continueToTable',
+      })
+    ).toBeNull();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
   });
@@ -2487,7 +2489,10 @@ describe('StudioPage schema-5 cutover', () => {
         limit: 3,
       })
     );
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    await waitFor(() =>
+      expect(document.querySelector('[data-shot-id="shot_0"]')).toHaveAttribute('data-shot-binding-highlighted', 'true')
+    );
   });
 
   it('filters a Main-blocked independent Film anchor out of paid review', async () => {

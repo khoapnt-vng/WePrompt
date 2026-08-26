@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button, Popconfirm } from '@arco-design/web-react';
+import { Alert, Button, Popconfirm, Select } from '@arco-design/web-react';
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -16,7 +16,11 @@ import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/Fullscr
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
 import type { WorkspaceBeatProjection, WorkspaceBoardPanelProjection } from '../../workspaceProjection';
+import type { ReferenceWorkspaceItem, StudioReferenceFocusIntent } from '../References';
 import styles from './Table.module.css';
+
+const REFERENCE_ROOT = 'conversation.creativeStudio.workspace.referenceWorkflow';
+const REFERENCE_HIGHLIGHT_MS = 1_600;
 
 type TableColumnId = 'position' | 'panel' | 'beat' | 'story' | 'shots' | 'length' | 'state';
 
@@ -227,12 +231,133 @@ export type TableBoardActions = {
   cancelJob: (jobId: string) => void;
 };
 
+export type ReferenceBindingWorkspaceItem = {
+  shotId: string;
+  status: 'unassigned' | 'ready' | 'invalid';
+  characterReferenceIds: string[];
+  backgroundReferenceId: string | null;
+};
+
+export type TableReferenceBindingActions = {
+  saveBinding: (
+    shotId: string,
+    characterReferenceIds: readonly string[],
+    backgroundReferenceId: string | null
+  ) => Promise<boolean>;
+};
+
+type ShotReferenceBindingEditorProps = {
+  item: ReferenceBindingWorkspaceItem;
+  characters: readonly ReferenceWorkspaceItem[];
+  backgrounds: readonly ReferenceWorkspaceItem[];
+  maxConditioningImages: number | null;
+  pending: boolean;
+  gateLocked: boolean;
+  save: TableReferenceBindingActions['saveBinding'];
+};
+
+const ShotReferenceBindingEditor: React.FC<ShotReferenceBindingEditorProps> = ({
+  item,
+  characters,
+  backgrounds,
+  maxConditioningImages,
+  pending,
+  gateLocked,
+  save,
+}) => {
+  const { t } = useTranslation();
+  const [characterReferenceIds, setCharacterReferenceIds] = useState(item.characterReferenceIds);
+  const [backgroundReferenceId, setBackgroundReferenceId] = useState(item.backgroundReferenceId);
+  const authoritySignature = JSON.stringify([
+    item.shotId,
+    item.status,
+    item.characterReferenceIds,
+    item.backgroundReferenceId,
+  ]);
+  useEffect(() => {
+    setCharacterReferenceIds(item.characterReferenceIds);
+    setBackgroundReferenceId(item.backgroundReferenceId);
+  }, [authoritySignature]);
+  const selectedCount = characterReferenceIds.length + (backgroundReferenceId === null ? 0 : 1);
+  const overCapacity = maxConditioningImages !== null && selectedCount > maxConditioningImages;
+  const dirty =
+    item.status !== 'ready' ||
+    backgroundReferenceId !== item.backgroundReferenceId ||
+    characterReferenceIds.length !== item.characterReferenceIds.length ||
+    characterReferenceIds.some((referenceId, index) => referenceId !== item.characterReferenceIds[index]);
+  const disabled = gateLocked || pending;
+
+  return (
+    <div className={styles.bindingEditor}>
+      {item.status === 'unassigned' ? (
+        <Alert type='warning' content={t(`${REFERENCE_ROOT}.bindings.unassigned`)} />
+      ) : item.status === 'invalid' ? (
+        <Alert type='error' content={t(`${REFERENCE_ROOT}.bindings.invalid`)} />
+      ) : null}
+      {overCapacity ? (
+        <Alert
+          type='error'
+          content={t(`${REFERENCE_ROOT}.bindings.capacity`, { count: selectedCount, limit: maxConditioningImages })}
+        />
+      ) : null}
+      <label className={styles.bindingField}>
+        <span>{t(`${REFERENCE_ROOT}.bindings.characters`)}</span>
+        <Select
+          aria-label={t(`${REFERENCE_ROOT}.bindings.characters`)}
+          disabled={disabled}
+          mode='multiple'
+          onChange={(value) => setCharacterReferenceIds(Array.isArray(value) ? value.map(String) : [])}
+          value={characterReferenceIds}
+        >
+          {characters.map((reference) => (
+            <Select.Option key={reference.id} value={reference.id} disabled={reference.approvedAssetId === null}>
+              <bdi dir='auto'>{reference.label}</bdi>
+            </Select.Option>
+          ))}
+        </Select>
+      </label>
+      <label className={styles.bindingField}>
+        <span>{t(`${REFERENCE_ROOT}.bindings.background`)}</span>
+        <Select
+          aria-label={t(`${REFERENCE_ROOT}.bindings.background`)}
+          allowClear
+          disabled={disabled}
+          onChange={(value) => setBackgroundReferenceId(typeof value === 'string' ? value : null)}
+          value={backgroundReferenceId ?? undefined}
+        >
+          {backgrounds.map((reference) => (
+            <Select.Option key={reference.id} value={reference.id} disabled={reference.approvedAssetId === null}>
+              <bdi dir='auto'>{reference.label}</bdi>
+            </Select.Option>
+          ))}
+        </Select>
+      </label>
+      <Button
+        type='primary'
+        disabled={disabled || overCapacity || !dirty}
+        loading={pending}
+        onClick={() => void save(item.shotId, characterReferenceIds, backgroundReferenceId)}
+        size='mini'
+      >
+        {t(`${REFERENCE_ROOT}.bindings.save`)}
+      </Button>
+    </div>
+  );
+};
+
 export type TableViewProps = {
   actions: TableBoardActions;
   projectId: string;
   beats: readonly WorkspaceBeatProjection[];
   boardStyle: StudioBoardStyleV2 | null;
   boardPanels: readonly WorkspaceBoardPanelProjection[];
+  references: readonly ReferenceWorkspaceItem[];
+  referenceBindings: readonly ReferenceBindingWorkspaceItem[];
+  referenceMaxConditioningImages: number | null;
+  referencePendingId: string | null;
+  bindingActions: TableReferenceBindingActions;
+  referenceFocusIntent?: StudioReferenceFocusIntent | null;
+  onReferenceFocusIntentConsumed?: (intentId: string) => void;
   imageRouteReady: boolean;
   pending: boolean;
   gateLocked: boolean;
@@ -248,6 +373,13 @@ export const TableView: React.FC<TableViewProps> = ({
   beats,
   boardStyle,
   boardPanels,
+  references,
+  referenceBindings,
+  referenceMaxConditioningImages,
+  referencePendingId,
+  bindingActions,
+  referenceFocusIntent = null,
+  onReferenceFocusIntentConsumed,
   imageRouteReady,
   pending,
   gateLocked,
@@ -263,14 +395,30 @@ export const TableView: React.FC<TableViewProps> = ({
   });
   const cellRefs = useRef<Array<Partial<Record<TableColumnId, HTMLTableCellElement | null>>>>([]);
   const panelButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const bindingCardRefs = useRef(new Map<string, HTMLElement>());
+  const bindingHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pendingPanelButtonFocusRef = useRef<string | null>(null);
   const [openBoardBeatId, setOpenBoardBeatId] = useState<string | null>(null);
+  const [highlightedBindingShotId, setHighlightedBindingShotId] = useState<string | null>(null);
   const detailIdBase = useId();
   const exactBoardPanels = useMemo(() => exactFilmOrderBoardPanels(beats, boardPanels), [beats, boardPanels]);
   const panelByShotId = useMemo(
     () => new Map(exactBoardPanels.map((panel) => [panel.shotId, panel] as const)),
     [exactBoardPanels]
+  );
+  const bindingByShotId = useMemo(
+    () => new Map(referenceBindings.map((binding) => [binding.shotId, binding] as const)),
+    [referenceBindings]
+  );
+  const characters = useMemo(() => references.filter((item) => item.kind === 'character'), [references]);
+  const backgrounds = useMemo(() => references.filter((item) => item.kind === 'background'), [references]);
+  const bindingSummary = useMemo(
+    () => ({
+      ready: referenceBindings.filter((binding) => binding.status === 'ready').length,
+      total: beats.reduce((count, beat) => count + beat.shots.length, 0),
+    }),
+    [beats, referenceBindings]
   );
   const boardSummary = useMemo(() => {
     const drawn = exactBoardPanels.filter((panel) => panel.assetId !== null).length;
@@ -310,6 +458,44 @@ export const TableView: React.FC<TableViewProps> = ({
       setOpenBoardBeatId(null);
     }
   }, [beats, openBoardBeatId]);
+
+  useEffect(() => {
+    if (referenceFocusIntent === null || referenceFocusIntent.projectId !== projectId) return;
+    const target = beats
+      .flatMap((beat) => beat.shots.map((shot) => ({ beatId: beat.id, shotId: shot.id })))
+      .find(({ shotId }) => referenceFocusIntent.shotIds.includes(shotId));
+    if (target === undefined) return;
+    setOpenBoardBeatId(target.beatId);
+    setHighlightedBindingShotId(target.shotId);
+    onSelectBeat(target.beatId);
+  }, [beats, onSelectBeat, projectId, referenceFocusIntent]);
+
+  useLayoutEffect(() => {
+    if (
+      referenceFocusIntent === null ||
+      highlightedBindingShotId === null ||
+      !referenceFocusIntent.shotIds.includes(highlightedBindingShotId)
+    ) {
+      return;
+    }
+    const node = bindingCardRefs.current.get(highlightedBindingShotId);
+    if (node === undefined) return;
+    node.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
+    node.focus({ preventScroll: true });
+    onReferenceFocusIntentConsumed?.(referenceFocusIntent.id);
+    if (bindingHighlightTimerRef.current !== null) clearTimeout(bindingHighlightTimerRef.current);
+    bindingHighlightTimerRef.current = setTimeout(() => {
+      setHighlightedBindingShotId((current) => (current === highlightedBindingShotId ? null : current));
+      bindingHighlightTimerRef.current = null;
+    }, REFERENCE_HIGHLIGHT_MS);
+  }, [highlightedBindingShotId, onReferenceFocusIntentConsumed, referenceFocusIntent]);
+
+  useEffect(
+    () => () => {
+      if (bindingHighlightTimerRef.current !== null) clearTimeout(bindingHighlightTimerRef.current);
+    },
+    []
+  );
 
   useLayoutEffect(() => {
     if (openBoardBeatId !== null) return;
@@ -400,6 +586,12 @@ export const TableView: React.FC<TableViewProps> = ({
             value={boardSummary.drawn}
           />
           <span className={styles.boardProgressFacts}>
+            <span>
+              {t(`${REFERENCE_ROOT}.bindings.progress`, {
+                ready: bindingSummary.ready,
+                total: bindingSummary.total,
+              })}
+            </span>
             <span>
               {t('conversation.creativeStudio.workspace.table.board.staleCount', { count: boardSummary.stale })}
             </span>
@@ -708,17 +900,30 @@ export const TableView: React.FC<TableViewProps> = ({
                           <ol className={styles.detailPanels}>
                             {beat.shots.map((shot, shotIndex) => {
                               const panel = boardPanelsForBeat[shotIndex] ?? statusPendingPanel(shot.id);
+                              const binding = bindingByShotId.get(shot.id) ?? {
+                                shotId: shot.id,
+                                status: 'invalid' as const,
+                                characterReferenceIds: [],
+                                backgroundReferenceId: null,
+                              };
                               const status = t(panelStatusKey(panel));
                               const panelStatusId = `${detailId(row)}-shot-${String(shotIndex)}-status`;
                               return (
                                 <li key={shot.id} className={styles.panelCardItem}>
                                   <article
+                                    ref={(node) => {
+                                      if (node === null) bindingCardRefs.current.delete(shot.id);
+                                      else bindingCardRefs.current.set(shot.id, node);
+                                    }}
                                     aria-label={t('conversation.creativeStudio.workspace.table.panel.cardLabel', {
                                       position: shotIndex + 1,
                                       status,
                                     })}
-                                    className={styles.panelCard}
+                                    className={`${styles.panelCard} ${highlightedBindingShotId === shot.id ? styles.bindingHighlighted : ''}`}
+                                    data-shot-binding-highlighted={highlightedBindingShotId === shot.id || undefined}
+                                    data-shot-binding-status={binding.status}
                                     data-shot-id={shot.id}
+                                    tabIndex={-1}
                                   >
                                     <FullscreenMediaFrame
                                       className={styles.panelFrame}
@@ -742,6 +947,15 @@ export const TableView: React.FC<TableViewProps> = ({
                                         {status}
                                       </span>
                                     </div>
+                                    <ShotReferenceBindingEditor
+                                      backgrounds={backgrounds}
+                                      characters={characters}
+                                      gateLocked={interactionLocked}
+                                      item={binding}
+                                      maxConditioningImages={referenceMaxConditioningImages}
+                                      pending={referencePendingId === shot.id}
+                                      save={bindingActions.saveBinding}
+                                    />
                                     <BoardPanelRecoveryControls
                                       actions={actions}
                                       describedBy={panelStatusId}

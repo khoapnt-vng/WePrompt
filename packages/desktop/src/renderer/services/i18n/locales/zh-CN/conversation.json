@@ -923,9 +923,6 @@
         "historyPreviewAlt": "{{label}} 的已生成参考图",
         "historyCurrent": "当前图片",
         "historyChoose": "选择此图片",
-        "ready": "所有必需的参考均有当前图片。可以继续前往表格。",
-        "notReady": "生成所有必需的参考图后才能继续。",
-        "continueToTable": "继续前往表格",
         "currentProgress": "已生成 {{current}} / {{total}} 个参考",
         "bindings": {
           "title": "Shot 绑定",
@@ -937,7 +934,8 @@
           "capacity": "已选择 {{count}} 个参考，但图像路由最多支持 {{limit}} 个。",
           "characters": "角色",
           "background": "背景",
-          "save": "保存绑定"
+          "save": "保存绑定",
+          "progress": "已绑定 {{ready}} / {{total}} 个 Shot"
         }
       },
       "references": {
