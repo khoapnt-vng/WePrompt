@@ -14,6 +14,7 @@ import type {
   StudioConnectionValidationFailureReason,
   StudioConnectionValidationResult,
   StudioConnectionValidationSuccess,
+  StudioCommandError,
   StudioMediaKind,
   StudioRendererConnectionCapabilities,
   StudioSaveConnectionRequest,
@@ -32,6 +33,10 @@ type SafeValidation = StudioConnectionValidationSuccess;
 type SafeValidationAttempt =
   | { valid: true; validation: SafeValidation }
   | { valid: false; reason: StudioConnectionValidationFailureReason };
+type SafeSaveAttempt =
+  | { saved: true; binding: SafeBinding }
+  | { saved: false; reason: StudioConnectionValidationFailureReason | null };
+type SafeListFailure = { messageKey: string; projectId: string | null };
 type EditorState = {
   visible: boolean;
   original: SafeBinding | null;
@@ -94,6 +99,11 @@ const CONNECTION_VALIDATION_FAILURE_KEYS = {
 
 const sanitizeValidationFailureReason = (value: unknown): StudioConnectionValidationFailureReason =>
   CONNECTION_VALIDATION_FAILURE_REASON_SET.has(value) ? (value as StudioConnectionValidationFailureReason) : 'unknown';
+
+const safeListFailure = (error: StudioCommandError): SafeListFailure => ({
+  messageKey: error.messageKey,
+  projectId: error.code === 'project_quarantined' ? error.projectId : null,
+});
 
 const CONNECTION_INTEGRATION_LABEL_KEYS = [
   'imageApi',
@@ -233,7 +243,7 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [busyConnectionIds, setBusyConnectionIds] = useState<readonly string[]>([]);
-  const [listFailed, setListFailed] = useState(false);
+  const [listFailure, setListFailure] = useState<SafeListFailure | null>(null);
   const [mutationFailed, setMutationFailed] = useState(false);
   const [editorValidationFailure, setEditorValidationFailure] =
     useState<StudioConnectionValidationFailureReason | null>(null);
@@ -245,22 +255,28 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
   const refresh = useCallback(async (): Promise<void> => {
     const sequence = ++requestSequence.current;
     setLoading(true);
-    setListFailed(false);
+    setListFailure(null);
     try {
       const [candidateResult, bindingResult] = await Promise.all([
         ipcBridge.creativeStudio.listConnectionCandidates.invoke(),
         ipcBridge.creativeStudio.listConnections.invoke(),
       ]);
       if (sequence !== requestSequence.current) return;
-      if (candidateResult.ok === false || bindingResult.ok === false) {
-        setListFailed(true);
+      if (candidateResult.ok === false) {
+        setListFailure(safeListFailure(candidateResult.error));
+        return;
+      }
+      if (bindingResult.ok === false) {
+        setListFailure(safeListFailure(bindingResult.error));
         return;
       }
       setCandidates(candidateResult.data.map(sanitizeCandidate));
       setIntegrations(bindingResult.data.integrations.map(sanitizeIntegration));
       setBindings(bindingResult.data.connections.map(sanitizeBinding));
     } catch {
-      if (sequence === requestSequence.current) setListFailed(true);
+      if (sequence === requestSequence.current) {
+        setListFailure({ messageKey: 'settings.mediaModels.loadFailed', projectId: null });
+      }
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
@@ -402,14 +418,24 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     setValidating(false);
   };
 
-  const saveRequest = async (safeRequest: StudioSaveConnectionRequest): Promise<SafeBinding | null> => {
+  const saveRequest = async (safeRequest: StudioSaveConnectionRequest): Promise<SafeSaveAttempt> => {
     try {
       const result = await ipcBridge.creativeStudio.saveConnection.invoke(safeRequest);
-      if (result.ok === false) return null;
+      if (result.ok === false) {
+        return {
+          saved: false,
+          reason:
+            result.error.code === 'connection_validation_failed'
+              ? sanitizeValidationFailureReason(result.error.reason)
+              : null,
+        };
+      }
       const safeBinding = sanitizeBinding(result.data);
-      return tupleMatches(safeBinding, safeRequest) ? safeBinding : null;
+      return tupleMatches(safeBinding, safeRequest)
+        ? { saved: true, binding: safeBinding }
+        : { saved: false, reason: null };
     } catch {
-      return null;
+      return { saved: false, reason: null };
     }
   };
 
@@ -417,13 +443,15 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     if (!request || !validationMatchesRequest || busy) return;
     setSaving(true);
     setMutationFailed(false);
-    const saved = await saveRequest(request);
-    if (!saved) {
-      setMutationFailed(true);
+    const save = await saveRequest(request);
+    if (save.saved === false) {
+      if (save.reason === null) setMutationFailed(true);
+      else setEditorValidationFailure(save.reason);
       await refresh();
       setSaving(false);
       return;
     }
+    const saved = save.binding;
 
     const original = editor.original;
     setBindings((current) => replaceCanonicalBinding(current, saved));
@@ -471,12 +499,13 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
       setBusyConnectionIds((current) => current.filter((id) => id !== binding.bindingId));
       return;
     }
-    const saved = await saveRequest(safeRequest);
-    if (!saved) {
-      setMutationFailed(true);
+    const save = await saveRequest(safeRequest);
+    if (save.saved === false) {
+      if (save.reason === null) setMutationFailed(true);
+      else setRowValidationFailure(save.reason);
       await refresh();
     } else {
-      setBindings((current) => replaceCanonicalBinding(current, saved));
+      setBindings((current) => replaceCanonicalBinding(current, save.binding));
     }
     setBusyConnectionIds((current) => current.filter((id) => id !== binding.bindingId));
   };
@@ -532,9 +561,15 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
         </Button>
       </div>
 
-      {listFailed && (
+      {listFailure !== null && (
         <div className='flex flex-col gap-8px'>
-          <Alert type='error' content={t('settings.mediaModels.loadFailed')} />
+          <Alert
+            type='error'
+            content={t(
+              listFailure.messageKey,
+              listFailure.projectId === null ? undefined : { projectId: listFailure.projectId }
+            )}
+          />
           <Button icon={<Refresh />} onClick={() => void refresh()}>
             {t('settings.mediaModels.refresh')}
           </Button>
@@ -545,7 +580,7 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
       )}
       {mutationFailed && <Alert type='error' content={t('settings.mediaModels.validationFailed')} />}
 
-      {listFailed && bindings.length === 0 ? null : loading && bindings.length === 0 ? (
+      {listFailure !== null && bindings.length === 0 ? null : loading && bindings.length === 0 ? (
         <div className='flex min-h-80px items-center justify-center'>
           <Spin />
         </div>

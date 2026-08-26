@@ -1320,7 +1320,7 @@ rendered through one shared `renderCard`.
 
 ## Assignable follow-on — the error-message class: stop laundering causes at boundaries
 
-**Status:** owner-approved 2026-08-26. One deliberate pass over a defect class that has now been
+**Status:** implemented and verified 2026-08-26. One deliberate pass over a defect class that has now been
 filed **five times** and point-fixed three times without stopping. Implement from the latest combined
 Creative Studio head. This section is the assignment; the five bug entries in
 [the bug list](creative-studio-3-bug-list.md) are the evidence and remain the per-instance specs.
@@ -1335,8 +1335,8 @@ boundary**, leaving the user a generic label that points at the wrong subsystem.
 | **BUG-062** | 3 unrelated Director failures → "could not read or save this workspace" | closed `ecc43f718` |
 | **BUG-065** | `unsupported` / `auth` / `timeout` / `unknown` → one validation string  | closed `b01c565ee` |
 | **BUG-093** | 140 IPC operations → `invalid operation payload`, no operation or field | closed `fa777eb6b` |
-| **BUG-126** | every non-401/402/429 4xx → `invalid_request`                           | **open**           |
-| **BUG-127** | runtime-inactive → `provider_error`                                     | **open**           |
+| **BUG-126** | every non-401/402/429 4xx → `invalid_request`                           | closed `e19f53021` |
+| **BUG-127** | runtime-inactive → `provider_error`                                     | closed             |
 
 Three closures did not stop it, because each fixed one call site and none changed what makes the
 next one easy to write. The goal of this task is the opposite: leave behind a rule and a guard, so
@@ -1404,3 +1404,17 @@ nothing anyone reads.
    on the fixed tree.
 5. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
    full test suite, format, lint, and `git diff --check` pass from the exact final head.
+
+### Implementation result
+
+- Runtime-inactive and quarantined-project conditions cross the service and IPC boundaries as their
+  own bounded causes. The quarantined form carries one deterministic safe project id, never a path.
+- Local provider-list, connection-candidate and route-catalog failures are storage/runtime causes;
+  `provider_error` remains only for malformed or unadmitted responses after provider validation.
+- Save-time connection revalidation preserves its existing seven-value sanitized failure reason.
+- `errorBoundaryGuard.test.ts` is the chosen guard. Its synthetic counterexample proves the AST
+  check detects a bare-catch service-error launder, and its repository assertion keeps every
+  user-visible rethrow in `v2Service.ts` attached to a caught cause.
+- Focused tests passed (6 files, 477 tests). Creative Studio coverage passed (658 files, 9,960 tests),
+  and the full repository suite passed (658 files, 9,960 tests). TypeScript, i18n generation and
+  validation, lint, format and `git diff --check` also passed.

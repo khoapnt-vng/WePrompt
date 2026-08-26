@@ -50,6 +50,7 @@ import {
   type CreativeStudioStore,
 } from '@process/services/creative-studio/store';
 import {
+  CreativeStudioServiceError,
   createCreativeStudioServiceV2,
   projectStudioReferenceGenerationHandoffV2,
 } from '@process/services/creative-studio/service';
@@ -2492,7 +2493,7 @@ describe('CreativeStudioServiceV2', () => {
 
     await expect(
       makeHarness(project, { includeRateCard: false }).service.prepareSubmission(request)
-    ).rejects.toMatchObject({ code: 'provider_error' });
+    ).rejects.toMatchObject({ code: 'invalid_route' });
     await expect(
       makeHarness(project, { now: () => 'not-a-date' as never }).service.prepareSubmission(request)
     ).rejects.toMatchObject({ code: 'invalid_payload' });
@@ -3511,6 +3512,14 @@ describe('CreativeStudioServiceV2', () => {
     await expect(harness.service.listConnections()).resolves.toMatchObject({ connections: [] });
   });
 
+  it('preserves a quarantined-project runtime cause while listing connection candidates', async () => {
+    const harness = makeHarness();
+    const runtimeError = new CreativeStudioServiceError('project_quarantined', 'broken_project');
+    harness.providerResolver.listConnectionCandidates.mockRejectedValueOnce(runtimeError);
+
+    await expect(harness.service.listConnectionCandidates()).rejects.toBe(runtimeError);
+  });
+
   it('rejects hostile connection envelopes before provider or adapter access', async () => {
     const harness = makeHarness();
 
@@ -3559,7 +3568,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.listProviders).not.toHaveBeenCalled();
   });
 
-  it('maps provider inventory failures to the stable provider error', async () => {
+  it('keeps local provider-inventory failures on the storage boundary', async () => {
     const harness = makeHarness();
     harness.listProviders.mockRejectedValueOnce(new Error('credential inventory unavailable'));
 
@@ -3569,7 +3578,7 @@ describe('CreativeStudioServiceV2', () => {
         integrationId: 'integration_g7Q2mB4p',
         model: 'image-model',
       })
-    ).rejects.toMatchObject({ code: 'provider_error' });
+    ).rejects.toMatchObject({ code: 'storage_error' });
     expect(harness.validateConnection).not.toHaveBeenCalled();
   });
 
@@ -3752,7 +3761,10 @@ describe('CreativeStudioServiceV2', () => {
     };
     harness.validateConnection.mockResolvedValueOnce({ ok: false, error: { code: 'auth' } });
 
-    await expect(harness.service.saveConnection(request)).rejects.toMatchObject({ code: 'provider_error' });
+    await expect(harness.service.saveConnection(request)).rejects.toMatchObject({
+      code: 'connection_validation_failed',
+      reason: 'auth',
+    });
     expect(harness.saveConnection).not.toHaveBeenCalled();
   });
 
@@ -4251,14 +4263,22 @@ describe('CreativeStudioServiceV2', () => {
     expect(catalog.image.selectionIssue).toEqual(expectedIssue);
   });
 
-  it('projects selection-required catalogs globally and maps resolver failure', async () => {
+  it('projects selection-required catalogs globally and keeps resolver failure on local storage', async () => {
     const harness = makeHarness();
 
     await expect(harness.service.listRoutes()).resolves.toMatchObject({
       image: { status: 'selection_required', selectionIssue: null },
     });
     harness.providerResolver.listGenerationRoutes.mockRejectedValueOnce(new Error('resolver unavailable'));
-    await expect(harness.service.listRoutes()).rejects.toMatchObject({ code: 'provider_error' });
+    await expect(harness.service.listRoutes()).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
+  it('preserves a quarantined-project runtime cause while refreshing routes', async () => {
+    const harness = makeHarness();
+    const runtimeError = new CreativeStudioServiceError('project_quarantined', 'broken_project');
+    harness.providerResolver.listGenerationRoutes.mockRejectedValueOnce(runtimeError);
+
+    await expect(harness.service.listRoutes()).rejects.toBe(runtimeError);
   });
 
   it.each([

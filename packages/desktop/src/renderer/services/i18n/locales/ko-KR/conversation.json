@@ -1789,6 +1789,8 @@
       "duplicateChargeAcknowledgementRequired": "다시 시도하기 전에 제공업체 요금이 중복될 수 있음을 확인하세요.",
       "busy": "이 프로젝트에서 생성 작업이 진행 중입니다.",
       "provider": "제공업체가 요청을 완료할 수 없습니다.",
+      "runtimeInactive": "Creative Studio 생성 기능이 준비되지 않았습니다. 지원되는 프로젝트를 열거나 만든 후 다시 시도하세요.",
+      "projectQuarantined": "프로젝트 {{projectId}}에 복구가 필요하여 Creative Studio를 시작할 수 없습니다. Studio 라이브러리에서 확인하세요.",
       "storage": "크리에이티브 스튜디오에서 로컬 데이터를 업데이트할 수 없습니다.",
       "ruleBreach": "비용이 청구되기 전에 규칙이 생성을 차단했습니다. 변경할 내용은 규칙에서 확인하세요."
     },

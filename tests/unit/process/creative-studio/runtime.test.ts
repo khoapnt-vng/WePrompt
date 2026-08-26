@@ -455,6 +455,39 @@ describe('Creative Studio schema-2 runtime activation', () => {
     expect(harness.calls).toEqual([]);
   });
 
+  it('reports the deterministic quarantined project instead of blaming a provider', async () => {
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Broken project',
+        brief: '',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '720p',
+      },
+      'broken_project',
+      '2026-08-26T00:00:00.000Z'
+    );
+    const harness = createHarness({
+      initialInventory: {
+        supportedProjectIds: [],
+        unsupportedProjectIds: [],
+        quarantinedProjectIds: ['later_broken_project', project.id],
+      },
+      realService: {
+        project,
+        generationCatalog: { routes: [], diagnostics: [], generationCatalogVersion: 'unused' },
+      },
+    });
+
+    await harness.runtime.start();
+
+    await expect(harness.runtime.service.listConnectionCandidates()).rejects.toMatchObject({
+      code: 'project_quarantined',
+      projectId: 'broken_project',
+    });
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+  });
+
   it('activates a mixed root for supported IDs only and resumes local/provider work after backend ready', async () => {
     const harness = createHarness({
       initialInventory: {

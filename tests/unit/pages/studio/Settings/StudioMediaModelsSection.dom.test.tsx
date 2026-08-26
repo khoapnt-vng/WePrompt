@@ -32,7 +32,12 @@ const bridge = vi.hoisted(() => ({
 
 vi.mock('@/common', () => ({ ipcBridge: { creativeStudio: bridge } }));
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({
+    t: (key: string, values?: Record<string, unknown>) =>
+      values === undefined
+        ? key
+        : `${key}(${Object.entries(values).map(([name, value]) => `${name}=${String(value)}`)})`,
+  }),
 }));
 vi.mock('@icon-park/react', () => ({
   Plus: () => <span aria-hidden='true'>+</span>,
@@ -380,6 +385,25 @@ describe('StudioMediaModelsSection', () => {
     expect(bridge.listConnections.invoke).toHaveBeenCalledTimes(2);
   });
 
+  it('names the quarantined project when the inactive runtime blocks candidate discovery', async () => {
+    bridge.listConnectionCandidates.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: 'project_quarantined',
+        projectId: 'broken_project',
+        messageKey: 'conversation.creativeStudio.errors.projectQuarantined',
+      },
+    });
+    bridge.listConnections.invoke.mockResolvedValueOnce(ok(inventory([])));
+
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.errors.projectQuarantined(projectId=broken_project)'
+    );
+    expect(screen.queryByText('settings.mediaModels.empty')).toBeNull();
+  });
+
   it('keeps bindings for deleted providers visible and refetches after provider changes', async () => {
     bridge.listConnectionCandidates.invoke.mockResolvedValueOnce(ok([])).mockResolvedValue(ok([candidate()]));
     const view = render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
@@ -686,6 +710,28 @@ describe('StudioMediaModelsSection', () => {
     await waitFor(() => expect(bridge.validateConnection.invoke).toHaveBeenCalledTimes(2));
     fireEvent.click(save);
     await waitFor(() => expect(bridge.saveConnection.invoke).toHaveBeenCalledExactlyOnceWith(safeRequest));
+  });
+
+  it('preserves a bounded save-time revalidation failure instead of showing a generic mutation error', async () => {
+    bridge.listConnections.invoke.mockResolvedValue(ok(inventory([])));
+    bridge.validateConnection.invoke.mockResolvedValue(ok(validation({ model: 'open-sora-manual' })));
+    bridge.saveConnection.invoke.mockResolvedValue({
+      ok: false,
+      error: {
+        code: 'connection_validation_failed',
+        reason: 'auth',
+        messageKey: 'settings.mediaModels.validationFailure.auth',
+      },
+    });
+    render(<StudioMediaModelsSection providerRefreshToken={0} onAddProvider={vi.fn()} />);
+    const dialog = await fillVideoTuple();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: 'settings.mediaModels.validate' }));
+    await within(dialog).findByText('settings.mediaModels.validationSuccess');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'settings.mediaModels.save' }));
+
+    expect(await within(dialog).findByText('settings.mediaModels.validationFailure.auth')).toBeInTheDocument();
+    expect(within(dialog).queryByText('settings.mediaModels.validationFailed')).toBeNull();
   });
 
   it('rejects mismatched validation DTOs and gateways without silent output', async () => {

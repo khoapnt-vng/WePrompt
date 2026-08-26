@@ -27,7 +27,10 @@ import {
   type StudioRendererExportCatalogV2,
   type StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
+import {
+  CreativeStudioServiceError,
+  StudioConnectionValidationError,
+} from '@process/services/creative-studio/service/projectMutations';
 import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
 import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import { StudioPricingErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/estimate';
@@ -37,7 +40,7 @@ import { CreativeStudioMediaError } from '@process/services/creative-studio/medi
 import { getCreativeStudioService } from '@process/services/creative-studio/runtime';
 import { BrowserWindow, dialog, shell } from 'electron';
 
-const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
+const errorMessageKeys: Record<Exclude<StudioCommandErrorCode, 'connection_validation_failed'>, string> = {
   feature_disabled: 'conversation.creativeStudio.errors.featureDisabled',
   invalid_payload: 'conversation.creativeStudio.errors.invalidPayload',
   pricing_refused: 'conversation.creativeStudio.errors.pricingRefused',
@@ -52,6 +55,8 @@ const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
   busy: 'conversation.creativeStudio.errors.busy',
   cancelled: 'conversation.creativeStudio.jobs.status.cancelled',
   provider_error: 'conversation.creativeStudio.errors.provider',
+  runtime_inactive: 'conversation.creativeStudio.errors.runtimeInactive',
+  project_quarantined: 'conversation.creativeStudio.errors.projectQuarantined',
   quote_not_found: 'conversation.creativeStudio.errors.quoteNotFound',
   quote_in_use: 'conversation.creativeStudio.errors.quoteInUse',
   quote_cache_full: 'conversation.creativeStudio.errors.quoteCacheFull',
@@ -60,13 +65,29 @@ const errorMessageKeys: Record<StudioCommandErrorCode, string> = {
   storage_error: 'conversation.creativeStudio.errors.storage',
 };
 
-type NonPricingStudioCommandErrorCode = Exclude<StudioCommandErrorCode, 'pricing_refused'>;
+const connectionValidationErrorMessageKeys: Record<StudioConnectionValidationFailureReason, string> = {
+  unsupported: 'settings.mediaModels.validationFailure.unsupported',
+  auth: 'settings.mediaModels.validationFailure.auth',
+  rate_limited: 'settings.mediaModels.validationFailure.rateLimited',
+  provider_unavailable: 'settings.mediaModels.validationFailure.providerUnavailable',
+  timeout: 'settings.mediaModels.validationFailure.timeout',
+  invalid_response: 'settings.mediaModels.validationFailure.invalidResponse',
+  unknown: 'settings.mediaModels.validationFailure.unknown',
+};
 
-const storeErrorCode = (error: CreativeStudioStoreError): NonPricingStudioCommandErrorCode =>
+type SimpleStudioCommandErrorCode = Exclude<
+  StudioCommandErrorCode,
+  'pricing_refused' | 'connection_validation_failed' | 'project_quarantined'
+>;
+
+const storeErrorCode = (error: CreativeStudioStoreError): SimpleStudioCommandErrorCode =>
   error.code === 'unsupported_prototype_schema' ? 'storage_error' : error.code;
 
-const jobManagerErrorCode = (error: StudioJobManagerError): NonPricingStudioCommandErrorCode =>
+const jobManagerErrorCode = (error: StudioJobManagerError): SimpleStudioCommandErrorCode =>
   error.code === 'invalid_request' ? 'invalid_payload' : error.code;
+
+const serviceErrorCode = (error: CreativeStudioServiceError): SimpleStudioCommandErrorCode =>
+  error.code === 'project_quarantined' ? 'runtime_inactive' : error.code;
 
 const toCommandError = (error: unknown): StudioCommandResult<never> => {
   if (error instanceof StudioPricingErrorV2 && isStudioPricingRefusalReasonV2(error.code)) {
@@ -80,13 +101,39 @@ const toCommandError = (error: unknown): StudioCommandResult<never> => {
       },
     };
   }
-  const code: NonPricingStudioCommandErrorCode =
+  if (error instanceof StudioConnectionValidationError) {
+    return {
+      ok: false,
+      error: {
+        code: 'connection_validation_failed',
+        reason: error.reason,
+        messageKey: connectionValidationErrorMessageKeys[error.reason],
+      },
+    };
+  }
+  if (error instanceof CreativeStudioServiceError && error.code === 'project_quarantined') {
+    if (error.projectId !== null) {
+      return {
+        ok: false,
+        error: {
+          code: 'project_quarantined',
+          projectId: error.projectId,
+          messageKey: errorMessageKeys.project_quarantined,
+        },
+      };
+    }
+    return {
+      ok: false,
+      error: { code: 'runtime_inactive', messageKey: errorMessageKeys.runtime_inactive },
+    };
+  }
+  const code: SimpleStudioCommandErrorCode =
     error instanceof CreativeStudioStoreError
       ? storeErrorCode(error)
       : error instanceof StudioJobManagerError
         ? jobManagerErrorCode(error)
         : error instanceof CreativeStudioServiceError
-          ? error.code
+          ? serviceErrorCode(error)
           : error instanceof StudioPreparedSubmissionCacheErrorV2
             ? error.code
             : error instanceof CreativeStudioMediaError

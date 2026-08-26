@@ -1789,6 +1789,8 @@
       "duplicateChargeAcknowledgementRequired": "重試前請確認可能產生重複供應商費用。",
       "busy": "此專案有進行中的產生工作。",
       "provider": "服務供應商無法完成要求。",
+      "runtimeInactive": "Creative Studio 的生成功能尚未就緒。請開啟或建立受支援的專案，然後再試一次。",
+      "projectQuarantined": "Creative Studio 無法啟動，因為專案 {{projectId}} 需要復原。請在 Studio 專案庫中查看該專案。",
       "storage": "創意工作室無法更新本機資料。",
       "ruleBreach": "規則在產生任何費用前阻止了生成。請開啟「規則」查看需要修改的內容。"
     },

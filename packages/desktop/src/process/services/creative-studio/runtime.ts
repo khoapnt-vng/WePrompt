@@ -53,6 +53,7 @@ import {
 import { createStudioJobManager, type StudioJobManagerDeps, type StudioJobManagerV2 } from './jobManager';
 import { createConfiguredStudioRateCardV2 } from './rateCardConfig';
 import { createStudioExportCatalogStoreV2, type StudioExportCatalogStoreV2 } from './service/schema2/exports';
+import { CreativeStudioServiceError } from './service/projectMutations';
 import {
   installCreativeStudioProtocol,
   type CreativeStudioAssetResolver,
@@ -218,6 +219,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
   const runLoopSleep = deps.runLoopSleep ?? sleepForStudioRunLoop;
   let activationState: CreativeStudioRuntimeActivationState = 'inactive';
   let supportedProjectIds: string[] = [];
+  let quarantinedProjectIds: string[] = [];
   let activeGraph: ActivationGraph | null = null;
   let activationPromise: Promise<void> | null = null;
   let inventoryPromise: Promise<void> | null = null;
@@ -251,7 +253,10 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
 
   const requireActiveGraph = (): ActivationGraph => {
     if (activeGraph === null || activationState !== 'active') {
-      throw new CreativeStudioStoreError('storage_error', 'Creative Studio runtime is not active');
+      const quarantinedProjectId = supportedProjectIds.length === 0 ? (quarantinedProjectIds[0] ?? null) : null;
+      throw quarantinedProjectId === null
+        ? new CreativeStudioServiceError('runtime_inactive')
+        : new CreativeStudioServiceError('project_quarantined', quarantinedProjectId);
     }
     return activeGraph;
   };
@@ -592,6 +597,9 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
         const next = await store.inspectProjectsV2();
         if (disposed) return;
         supportedProjectIds = [...new Set(next.supportedProjectIds)].toSorted((left, right) =>
+          left.localeCompare(right)
+        );
+        quarantinedProjectIds = [...new Set(next.quarantinedProjectIds)].toSorted((left, right) =>
           left.localeCompare(right)
         );
         if (activeGraph !== null) {

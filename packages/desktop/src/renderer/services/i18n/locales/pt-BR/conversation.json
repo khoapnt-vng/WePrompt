@@ -1827,6 +1827,8 @@
       "duplicateChargeAcknowledgementRequired": "Reconheça a possível cobrança duplicada do provedor antes de tentar novamente.",
       "busy": "Este projeto tem trabalhos de geração ativos.",
       "provider": "O provedor não conseguiu concluir a solicitação.",
+      "runtimeInactive": "A geração do Creative Studio não está pronta. Abra ou crie um projeto compatível e tente novamente.",
+      "projectQuarantined": "O Creative Studio não pôde iniciar porque o projeto {{projectId}} precisa de recuperação. Abra a biblioteca do Studio para revisá-lo.",
       "storage": "O Creative Studio não conseguiu atualizar seus dados locais.",
       "ruleBreach": "Uma regra bloqueou a geração antes de qualquer cobrança. Abra Regras para ver o que precisa ser alterado."
     },

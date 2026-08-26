@@ -1178,6 +1178,8 @@
       "duplicateChargeAcknowledgementRequired": "Acknowledge the possible duplicate provider charge before retrying.",
       "busy": "This project has active generation work.",
       "provider": "The provider could not complete the request.",
+      "runtimeInactive": "Creative Studio generation is not ready. Open or create a supported project, then try again.",
+      "projectQuarantined": "Creative Studio could not start because project {{projectId}} needs recovery. Open the Studio library to review it.",
       "storage": "Creative Studio could not update its local data.",
       "ruleBreach": "A rule blocked generation before any charge. Open Rules to see what needs changing.",
       "quoteNotFound": "This estimate expired or left the local cache. Review and prepare it again; nothing was submitted.",

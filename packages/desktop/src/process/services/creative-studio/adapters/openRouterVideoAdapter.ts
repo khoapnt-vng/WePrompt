@@ -220,6 +220,12 @@ const requestValidation = (
  * 402 earns its own code because it is the one the user can act on. Measured 2026-08-23: four video
  * submissions failed in a row and were reported as ambiguous; replaying the same submission returned
  * a plain 402 "Insufficient credits" that the redacted bodies had given no way to see.
+ *
+ * Boundary rule: when a typed or bounded cause is already known, it must remain the returned cause.
+ * `provider_error` is reserved for failures that actually cross a provider boundary and remain
+ * genuinely unknown; local runtime, storage, and validation causes must never be relabelled as the
+ * provider. Provider-controlled prose stays behind the redaction boundary even when a bounded enum
+ * refines the user-visible result.
  */
 const mapStatusError = (status: number): SanitizedProviderError => {
   if (status === 401 || status === 403) return { code: 'auth' };

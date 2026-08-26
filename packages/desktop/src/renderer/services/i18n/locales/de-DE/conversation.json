@@ -1806,6 +1806,8 @@
       "duplicateChargeAcknowledgementRequired": "Bestätige die mögliche doppelte Anbietergebühr, bevor du es erneut versuchst.",
       "busy": "Dieses Projekt enthält aktive Generierungsaufträge.",
       "provider": "Der Anbieter konnte die Anfrage nicht abschließen.",
+      "runtimeInactive": "Die Creative-Studio-Generierung ist nicht bereit. Öffnen oder erstellen Sie ein unterstütztes Projekt und versuchen Sie es erneut.",
+      "projectQuarantined": "Creative Studio konnte nicht starten, weil das Projekt {{projectId}} wiederhergestellt werden muss. Öffnen Sie die Studio-Bibliothek, um es zu prüfen.",
       "storage": "Creative Studio konnte seine lokalen Daten nicht aktualisieren.",
       "ruleBreach": "Eine Regel hat die Generierung vor einer Abbuchung blockiert. Öffnen Sie Regeln, um zu sehen, was geändert werden muss."
     },

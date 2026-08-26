@@ -1789,6 +1789,8 @@
       "duplicateChargeAcknowledgementRequired": "再試行前にプロバイダー料金が重複する可能性を了承してください。",
       "busy": "このプロジェクトには進行中の生成処理があります。",
       "provider": "プロバイダーがリクエストを完了できませんでした。",
+      "runtimeInactive": "Creative Studio の生成機能は準備できていません。対応プロジェクトを開くか作成してから、もう一度お試しください。",
+      "projectQuarantined": "プロジェクト {{projectId}} の復旧が必要なため、Creative Studio を起動できませんでした。Studio ライブラリで確認してください。",
       "storage": "クリエイティブスタジオがローカルデータを更新できませんでした。",
       "ruleBreach": "課金前にルールによって生成がブロックされました。変更が必要な内容は「ルール」で確認してください。"
     },

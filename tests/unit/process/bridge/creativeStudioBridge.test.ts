@@ -146,7 +146,10 @@ import {
   type CreativeStudioBridgeDependencies,
   type CreativeStudioCloseHandshakeDependencies,
 } from '@process/bridge/creativeStudioBridge';
-import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
+import {
+  CreativeStudioServiceError,
+  StudioConnectionValidationError,
+} from '@process/services/creative-studio/service/projectMutations';
 
 type ProviderHandler = (input?: never) => Promise<unknown>;
 
@@ -1505,6 +1508,42 @@ describe('initCreativeStudioBridge', () => {
     await expect(registeredHandler('listRoutes')({ projectId: 'project_1' } as never)).resolves.toEqual({
       ok: false,
       error: { code: 'provider_error', messageKey: 'conversation.creativeStudio.errors.provider' },
+    });
+  });
+
+  it('names a quarantined project without exposing a path or relabelling it as a provider failure', async () => {
+    vi.mocked(service.listConnectionCandidates).mockRejectedValueOnce(
+      new CreativeStudioServiceError('project_quarantined', 'broken_project')
+    );
+    initCreativeStudioBridge(dependencies);
+
+    await expect(registeredHandler('listConnectionCandidates')()).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'project_quarantined',
+        projectId: 'broken_project',
+        messageKey: 'conversation.creativeStudio.errors.projectQuarantined',
+      },
+    });
+  });
+
+  it('preserves the bounded save-time validation cause', async () => {
+    vi.mocked(service.saveConnection).mockRejectedValueOnce(new StudioConnectionValidationError('auth'));
+    initCreativeStudioBridge(dependencies);
+
+    await expect(
+      registeredHandler('saveConnection')({
+        providerId: 'provider_1',
+        integrationId: 'integration_g7Q2mB4p',
+        model: 'image-model',
+      } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'connection_validation_failed',
+        reason: 'auth',
+        messageKey: 'settings.mediaModels.validationFailure.auth',
+      },
     });
   });
 });

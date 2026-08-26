@@ -1862,6 +1862,18 @@ describe('Creative Studio workspace translations', () => {
     }
   });
 
+  it('localizes inactive-runtime recovery and identifies the quarantined project in every locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const conversation = loadConversation(locale);
+      const creativeStudio = asObject(conversation.creativeStudio, `${locale}.creativeStudio`);
+      const errors = asObject(creativeStudio.errors, `${locale}.creativeStudio.errors`);
+
+      expect(errors.runtimeInactive, `${locale}.errors.runtimeInactive`).toBeTypeOf('string');
+      expect((errors.runtimeInactive as string).trim(), `${locale}.errors.runtimeInactive`).not.toBe('');
+      expect(errors.projectQuarantined, `${locale}.errors.projectQuarantined`).toContain('{{projectId}}');
+    }
+  });
+
   it('uses first-frame copy without renaming durable seed identifiers', () => {
     const leaves = flattenLeaves(englishWorkspace);
 

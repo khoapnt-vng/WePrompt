@@ -93,7 +93,7 @@ import {
   type StudioDispatchAuthorizedJobsRequestV2,
   type StudioJobManagerV2,
 } from '../jobManager';
-import type { StudioMediaStore } from '../mediaStore';
+import { CreativeStudioMediaError, type StudioMediaStore } from '../mediaStore';
 import type { GenerationProviderAdapterRegistry } from '../adapters';
 import { ProviderDeadlineError, runWithProviderDeadline } from '../adapters/types';
 import {
@@ -160,7 +160,7 @@ import {
   type StudioVerifiedConditioningFrameV2,
   type StudioWaitingBindingAdvanceV2,
 } from './schema2';
-import { CreativeStudioServiceError } from './projectMutations';
+import { CreativeStudioServiceError, StudioConnectionValidationError } from './projectMutations';
 import { deriveStudioProposalReviewV2 } from './schema2/mutations/proposalReview';
 
 export type { StudioGenerationCapabilityV2, StudioRouteCatalogV2 } from '@/common/types/project/creativeStudioTypes';
@@ -320,6 +320,11 @@ export type CreativeStudioServiceV2Deps = {
 const invalid = (message: string): CreativeStudioStoreError => new CreativeStudioStoreError('invalid_payload', message);
 
 const isSafeId = (value: unknown): value is string => typeof value === 'string' && SAFE_ID.test(value);
+
+const rethrowLocalInventoryFailure = (error: unknown, message: string): never => {
+  if (error instanceof CreativeStudioServiceError || error instanceof CreativeStudioStoreError) throw error;
+  throw new CreativeStudioStoreError('storage_error', message);
+};
 
 const rethrowPricingFailure = (error: unknown): never => {
   if (error instanceof StudioRateCardErrorV2) {
@@ -1498,7 +1503,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     if (disposed || (claim !== undefined && !activeClaims.has(claim))) throw cacheFailure('quote_not_found');
   };
   const loadRateCard = async (generation: StudioGenerationRouteCatalog): Promise<StudioRateCardV2> => {
-    if (deps.rateCard === undefined) throw new CreativeStudioServiceError('provider_error');
+    if (deps.rateCard === undefined) throw new CreativeStudioServiceError('invalid_route');
     try {
       return await deps.rateCard(generation);
     } catch (error) {
@@ -1518,9 +1523,9 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         const catalog = await deps.providerResolver.listGenerationRoutes();
         generationRoutesSnapshot = catalog;
         return catalog;
-      } catch {
+      } catch (error) {
         generationRoutesSnapshot = null;
-        throw new CreativeStudioServiceError('provider_error');
+        return rethrowLocalInventoryFailure(error, 'Studio generation route inventory is unavailable');
       }
     })();
     generationRoutesFlight = request;
@@ -1676,8 +1681,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     let providers: IProvider[];
     try {
       providers = await deps.listProviders();
-    } catch {
-      throw new CreativeStudioServiceError('provider_error');
+    } catch (error) {
+      return rethrowLocalInventoryFailure(error, 'Studio provider inventory is unavailable');
     }
     const provider = providers.find((candidate) => candidate.id === input.providerId);
     if (provider === undefined || !providerIsAvailable(provider, input.model)) {
@@ -1697,15 +1702,20 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       throw error;
     }
     if (!isRecord(validation) || (validation.ok !== true && validation.ok !== false)) {
+      // The provider responded, but outside the bounded validation result contract.
       throw new CreativeStudioServiceError('provider_error');
     }
     if (validation.ok === false) {
       const reason = connectionValidationFailureReason(validation.error);
-      if (reason === null) throw new CreativeStudioServiceError('provider_error');
+      if (reason === null) {
+        // A provider refusal exists, but it supplied no admitted bounded reason.
+        throw new CreativeStudioServiceError('provider_error');
+      }
       return { valid: false, reason };
     }
     const capabilities = isRecord(validation.capabilities) ? validation.capabilities : undefined;
     if (adapter.id === 'openrouter-video-v1' && !hasExactOpenRouterValidationCapabilities(capabilities)) {
+      // OpenRouter answered successfully, but its capability response is outside the admitted contract.
       throw new CreativeStudioServiceError('provider_error');
     }
     return {
@@ -2741,8 +2751,12 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       try {
         generation = await currentGenerationRoutes();
       } catch (error) {
-        if (error instanceof CreativeStudioServiceError && error.code === 'provider_error') generation = null;
-        else throw error;
+        if (
+          (error instanceof CreativeStudioServiceError && error.code === 'provider_error') ||
+          (error instanceof CreativeStudioStoreError && error.code === 'storage_error')
+        ) {
+          generation = null;
+        } else throw error;
       }
       return deriveGenerationCapability(project, generation, items);
     },
@@ -3249,7 +3263,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
             projectId: input.projectId,
             extractionId: candidate.extractionId,
           });
-        } catch {
+        } catch (error) {
+          if (error instanceof CreativeStudioMediaError) throw error;
           throw new CreativeStudioStoreError('storage_error', 'Studio conditioning-frame verification failed');
         }
         if (readyVerification !== null && candidate.bindingItemId === null) {
@@ -3375,8 +3390,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     async listConnectionCandidates(): Promise<StudioConnectionCandidate[]> {
       try {
         return structuredClone(await deps.providerResolver.listConnectionCandidates());
-      } catch {
-        throw new CreativeStudioServiceError('provider_error');
+      } catch (error) {
+        return rethrowLocalInventoryFailure(error, 'Studio provider inventory is unavailable');
       }
     },
 
@@ -3399,7 +3414,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
 
     async saveConnection(input): Promise<StudioConnectionRecord> {
       const validated = await validateConnectionBinding(input);
-      if (!validated.valid) throw new CreativeStudioServiceError('provider_error');
+      if (validated.valid === false) throw new StudioConnectionValidationError(validated.reason);
       const binding: StudioConnectionBinding = {
         ...validated.binding,
         id: createConnectionId(),

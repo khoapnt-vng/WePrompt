@@ -1807,6 +1807,8 @@
       "duplicateChargeAcknowledgementRequired": "Tekrar denemeden önce olası mükerrer sağlayıcı ücretini kabul edin.",
       "busy": "Bu projede etkin oluşturma işleri var.",
       "provider": "Sağlayıcı isteği tamamlayamadı.",
+      "runtimeInactive": "Creative Studio üretimi hazır değil. Desteklenen bir projeyi açın veya oluşturun, ardından tekrar deneyin.",
+      "projectQuarantined": "{{projectId}} projesinin kurtarılması gerektiği için Creative Studio başlatılamadı. İncelemek için Studio kitaplığını açın.",
       "storage": "Creative Studio yerel verilerini güncelleyemedi.",
       "ruleBreach": "Bir kural, herhangi bir ücret oluşmadan üretimi engelledi. Nelerin değiştirilmesi gerektiğini görmek için Kurallar'ı açın."
     },

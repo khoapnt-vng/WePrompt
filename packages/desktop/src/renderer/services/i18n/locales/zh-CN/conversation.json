@@ -1789,6 +1789,8 @@
       "duplicateChargeAcknowledgementRequired": "重试前请确认可能产生重复服务商费用。",
       "busy": "此项目有正在进行的生成任务。",
       "provider": "服务商无法完成请求。",
+      "runtimeInactive": "创意工作室的生成功能尚未就绪。请打开或创建一个受支持的项目，然后重试。",
+      "projectQuarantined": "创意工作室无法启动，因为项目 {{projectId}} 需要恢复。请在创意工作室项目库中查看该项目。",
       "storage": "创意工作室无法更新本地数据。",
       "ruleBreach": "一条规则在产生任何费用前阻止了生成。打开“规则”查看需要修改的内容。"
     },

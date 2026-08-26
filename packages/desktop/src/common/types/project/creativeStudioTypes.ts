@@ -1778,6 +1778,9 @@ export type StudioCommandErrorCode =
   | 'busy'
   | 'cancelled'
   | 'provider_error'
+  | 'runtime_inactive'
+  | 'project_quarantined'
+  | 'connection_validation_failed'
   | StudioSubmissionCacheErrorCodeV2
   | 'storage_error';
 
@@ -1789,7 +1792,17 @@ export type StudioCommandError =
       messageKey: string;
     }
   | {
-      code: Exclude<StudioCommandErrorCode, 'pricing_refused'>;
+      code: 'connection_validation_failed';
+      reason: StudioConnectionValidationFailureReason;
+      messageKey: string;
+    }
+  | {
+      code: 'project_quarantined';
+      projectId: string;
+      messageKey: string;
+    }
+  | {
+      code: Exclude<StudioCommandErrorCode, 'pricing_refused' | 'connection_validation_failed' | 'project_quarantined'>;
       messageKey: string;
     };
 
