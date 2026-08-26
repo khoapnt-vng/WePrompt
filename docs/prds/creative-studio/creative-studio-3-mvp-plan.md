@@ -1802,3 +1802,28 @@ build it alongside that assignment, not independently.
 4. A reference with no photo reads `NO PHOTO` and the panel cannot reach a bound-complete state.
 5. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
    full test suite, format, lint, and `git diff --check` pass from the exact final head.
+
+## Assignable follow-on — Director troubleshooting: diagnose freely, repair free things, propose the rest
+
+**Status:** owner-directed 2026-08-27. Full direction and the fourteen-action inventory live in
+[the Director as first responder](../../design/creative-studio-3-director-troubleshooting.md).
+Charter: **diagnose freely · repair freely when free · propose when it costs · never confirm its
+own spend.**
+
+1. **Build `studio_get_generation_state`** — per-Shot status, latest job with cause-specific error,
+   extraction states, active quotes. Read-only; the prerequisite for everything else.
+2. **Grant two free recoveries as `direct`:** `retry_conditioning_frame`, and terminalizing a
+   *refused* submission (never the submission-unknown shape, which keeps its owner-only
+   duplicate-charge acknowledgement).
+3. **Extend proposals to carry a prepared quote** so recovery that costs money arrives as a card
+   with the number on it; the owner's Confirm stays the only spend. Composes with the
+   "show the estimate" assignment.
+4. **Add proposal dispositions** for `edit_project`'s editable settings and `set_reference_prompt`.
+5. **Regenerate the Director's self-description from the capability table** (BUG-139) and teach the
+   conditioning-budget and chain-shape rules in its rules text.
+
+**Do not weaken:** no autonomous spend of any size; no cross-project access; quarantine, spend
+gating and the duplicate-charge acknowledgement stay exactly as they are. Acceptance: the Director
+can, unaided, (a) explain why a given Shot is not rendering with the true cause, (b) clear a
+stalled chain whose recovery is free, and (c) present a priced recovery proposal for one that is
+not — while a typed "yes" in chat still spends nothing.
