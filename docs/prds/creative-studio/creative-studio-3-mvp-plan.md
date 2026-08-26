@@ -1541,7 +1541,7 @@ different section below and the dependency order is easy to miss.
 
 | # | Note | Status | Who acts |
 | --- | --- | --- | --- |
-| 1 | This handoff **replaces the data model** of the First Frames panel already shipped in `42473b5a2` — open list with newest-is-current and a pin, becomes three fixed slots by position. It directly contradicts **owner ruling 2** in the First Frames doc. | **Blocked** — do not build the frames region until the owner re-confirms or retires that ruling. | Owner |
+| 1 | This handoff **replaces the data model** of the First Frames panel already shipped in `42473b5a2` — open list with newest-is-current and a pin, becomes three fixed slots by position. It directly contradicts **§2 "Current vs pinned"** in the First Frames doc — not owner ruling 2, which is the staleness tag and is unaffected. | **Blocked** — do not build the frames region until the owner re-confirms or retires that ruling. | Owner |
 | 2 | The **queue state has no failure sibling**. State 07 promises `START FRAME ARRIVES WHEN SHOT 1 FINISHES`; measured reality is 5 failed extractions in 70, three of six Beats in one film (BUG-137), plus the never-created case (BUG-133). `QUEUED` as drawn is indistinguishable from a permanently dead chain. | **Blocked** — needs a state and an action designed before the strip is built. | Owner + design |
 | 3 | The **end slot ships inert**, and **chaining skips already-rendered current Shots**. | **Ruled** — see *Owner rulings* below. Build to it. | Codex |
 | 4 | The panel prototype's margin still reads `SHOT STATUS · FOUR WORDS`; the README and states board specify **six**. The prototype annotation is stale. | **Message back to design** — build the six, and tell design the two files disagree. | Owner relays |
@@ -1558,10 +1558,13 @@ resolved.
 **This supersedes a design already shipped.** It is the next revision of the First Frames panel
 handoff, which Codex implemented in `42473b5a2`. It is **not a restyle**: the frames region changes
 from an open list of candidate stills with newest-is-current and a pin, to **three fixed slots**
-(start, end, image refs) selected by position. Owner ruling 2 in
-[the First Frames doc](../../design/creative-studio-3-first-frames-panel.md) aligned first frames
-with the References model; three fixed slots is a different model. **Get that ruling re-confirmed or
-retired before building — do not contradict it silently.**
+(start, end, image refs) selected by position. **§2 "Current vs pinned"** in
+[the First Frames doc](../../design/creative-studio-3-first-frames-panel.md) established that the
+newest eligible frame is current automatically and pinning is a *hold*, matching the References model
+and the behaviour `chain.ts:104` already implements; three fixed slots by position is a different
+model. **Get that finding re-confirmed or retired before building — do not contradict it silently.**
+This is §2 of the design doc, *not* owner ruling 2 (the staleness tag), which this handoff leaves
+untouched.
 
 ### Required product behavior
 

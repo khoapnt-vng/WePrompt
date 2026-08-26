@@ -37,9 +37,13 @@ panel`). This revision is not a restyle of it — it changes the data model:
 Nothing here is unreasonable, but it should not be built as an increment on top of the shipped
 panel without the owner deciding what happens to the pin/newest-is-current model — which was itself
 an owner ruling recorded in
-[the First Frames panel doc](creative-studio-3-first-frames-panel.md#9--settled--owner-rulings-2026-08-26).
-Ruling 2 there aligned first frames with the References model. Three fixed slots is a different
-model. **That ruling needs re-confirming or retiring; it should not be contradicted silently.**
+[the First Frames panel doc](creative-studio-3-first-frames-panel.md#2--current-vs-pinned--read-this-before-implementing).
+**§2 there** — "Current vs pinned" — established that the newest eligible frame is current
+automatically and that pinning is a *hold*, matching the References model and the behaviour
+`chain.ts:104` already implements. Three fixed slots selected by position is a different model.
+**That finding needs re-confirming or retiring; it should not be contradicted silently.**
+(Note: this is §2 of the design doc, *not* owner ruling 2, which is the staleness tag and is
+unaffected by this handoff.)
 
 ## 2 · The end frame — owner ruling: build the slot now as a placeholder
 
