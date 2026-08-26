@@ -363,6 +363,9 @@ const ShotCard: React.FC<ShotCardProps> = ({
   // Planned duration leaves the Shot editor and is revealed from that Shot's overflow menu.
   const [durationOpen, setDurationOpen] = useState(false);
   const durationFieldRef = useRef<HTMLLabelElement | null>(null);
+  // The Shooting script reads on hover from the header control and opens to edit.
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const scriptFieldRef = useRef<HTMLLabelElement | null>(null);
   const shootingScript = draftString(drafts, shootingScriptKey, shot.shootingScript);
   const durationSeconds = draftNumber(drafts, durationKey, shot.durationSeconds);
   const draftKeys = [shootingScriptKey, durationKey] as const;
@@ -599,8 +602,40 @@ const ShotCard: React.FC<ShotCardProps> = ({
     durationFieldRef.current?.querySelector('input')?.focus();
   }, [durationOpen]);
 
+  useEffect(() => {
+    if (!scriptOpen) return;
+    scriptFieldRef.current?.querySelector('textarea')?.focus();
+  }, [scriptOpen]);
+
   const shotMenu = (
     <Menu data-shot-id={shot.id} data-shot-overflow-menu>
+      <Menu.Item
+        key='move-earlier'
+        data-shot-move-earlier
+        disabled={disabled || !canMovePrevious}
+        onClick={() => onMove(index, -1)}
+      >
+        {t(`${KEY_ROOT}.reorder.previous`, { index: index + 1 })}
+      </Menu.Item>
+      <Menu.Item
+        key='move-later'
+        data-shot-move-later
+        disabled={disabled || !canMoveNext}
+        onClick={() => onMove(index, 1)}
+      >
+        {t(`${KEY_ROOT}.reorder.next`, { index: index + 1 })}
+      </Menu.Item>
+      <Menu.Item
+        key='save-shot'
+        data-shot-save
+        disabled={disabled || drafts.staleRevision || saving || !dirty}
+        onClick={() => void save()}
+      >
+        {t(`${KEY_ROOT}.common.saveShot`)}
+      </Menu.Item>
+      <Menu.Item key='reset-shot' data-shot-reset disabled={disabled || saving || !dirty} onClick={reset}>
+        {t(`${KEY_ROOT}.common.resetShot`)}
+      </Menu.Item>
       <Menu.Item
         key='planned-duration'
         data-shot-duration-reveal
@@ -653,21 +688,16 @@ const ShotCard: React.FC<ShotCardProps> = ({
         </div>
         <div className={styles.actions}>
           <Button
-            aria-label={t(`${KEY_ROOT}.reorder.previous`, { index: index + 1 })}
-            disabled={disabled || !canMovePrevious}
-            onClick={() => onMove(index, -1)}
+            aria-expanded={scriptOpen}
+            aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
+            data-shot-script-toggle
+            icon={<Notes aria-hidden='true' />}
+            onClick={() => setScriptOpen((open) => !open)}
+            shape='circle'
             size='small'
-          >
-            {t(`${KEY_ROOT}.reorder.previousShort`)}
-          </Button>
-          <Button
-            aria-label={t(`${KEY_ROOT}.reorder.next`, { index: index + 1 })}
-            disabled={disabled || !canMoveNext}
-            onClick={() => onMove(index, 1)}
-            size='small'
-          >
-            {t(`${KEY_ROOT}.reorder.nextShort`)}
-          </Button>
+            title={shootingScript}
+            type='text'
+          />
           <Dropdown
             droplist={shotMenu}
             getPopupContainer={() => document.body}
@@ -697,16 +727,18 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </header>
 
       <div className={styles.editorGrid}>
-        <label data-shot-field='shooting-script'>
-          <span>{t(`${KEY_ROOT}.fields.shootingScript`)}</span>
-          <Input.TextArea
-            aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
-            autoSize={{ minRows: 3, maxRows: 6 }}
-            disabled={disabled}
-            onChange={(value) => drafts.setValue(shootingScriptKey, value)}
-            value={shootingScript}
-          />
-        </label>
+        {scriptOpen ? (
+          <label data-shot-field='shooting-script' ref={scriptFieldRef}>
+            <span>{t(`${KEY_ROOT}.fields.shootingScript`)}</span>
+            <Input.TextArea
+              aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
+              autoSize={{ minRows: 3, maxRows: 6 }}
+              disabled={disabled}
+              onChange={(value) => drafts.setValue(shootingScriptKey, value)}
+              value={shootingScript}
+            />
+          </label>
+        ) : null}
         {durationOpen ? (
           <label data-shot-duration-field ref={durationFieldRef}>
             <span>{t(`${KEY_ROOT}.fields.duration`)}</span>
@@ -727,17 +759,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
       <div className={styles.shotActionCluster}>
         <div className={styles.shotActionBand} data-shot-action-band>
           <div className={styles.editorActions} data-shot-actions>
-            <Button
-              disabled={disabled || drafts.staleRevision || saving || !dirty}
-              loading={saving}
-              onClick={() => void save()}
-              type='primary'
-            >
-              {t(`${KEY_ROOT}.common.saveShot`)}
-            </Button>
-            <Button disabled={disabled || saving || !dirty} onClick={reset}>
-              {t(`${KEY_ROOT}.common.resetShot`)}
-            </Button>
             {index > 0 ? (
               <div className={styles.chainChangeControl} data-chain-change-control>
                 <Button

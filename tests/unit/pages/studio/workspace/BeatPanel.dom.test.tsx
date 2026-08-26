@@ -1693,6 +1693,8 @@ describe('BeatPanel', () => {
     expect(within(continuation).getByText('Generated work is out of date')).toBeVisible();
 
     inspectShot(container, 'shot_private_1');
+    // The Shooting script reads from its header control and opens to edit.
+    fireEvent.click(naturalHead.querySelector<HTMLButtonElement>('[data-shot-script-toggle]')!);
     const shootingScript = within(naturalHead).getByRole('textbox', { name: 'Shooting script for Shot 1' });
     expect(shootingScript).toHaveValue('Canonical shooting script 1');
     expect(shootingScript).toHaveAttribute('data-min-rows', '3');
@@ -1799,6 +1801,17 @@ describe('BeatPanel', () => {
     }
   });
 
+  /** Opens one Shot's overflow menu. Reorder, Save, Reset and duration live there now. */
+  const openShotMenu = (container: HTMLElement, shotId: string): HTMLElement => {
+    const card = shotCard(container, shotId);
+    const trigger = card.querySelector<HTMLButtonElement>('[data-shot-overflow-trigger]');
+    if (trigger === null) throw new Error(`Missing Shot overflow trigger for ${shotId}`);
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const menu = card.querySelector<HTMLElement>('[data-shot-overflow-menu]');
+    if (menu === null) throw new Error(`Missing Shot overflow menu for ${shotId}`);
+    return menu;
+  };
+
   /** Opens the Beat overflow menu and returns it. Save, Reset and re-split live there now. */
   const openBeatMenu = (container: HTMLElement): HTMLElement => {
     const trigger = container.querySelector<HTMLButtonElement>('[data-beat-overflow-trigger]');
@@ -1857,9 +1870,9 @@ describe('BeatPanel', () => {
     const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
     const drafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Local shooting script' });
     const actions = makeActions();
-    render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
+    const { container } = render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset Shot' }));
+    fireEvent.click(within(openShotMenu(container, 'shot_1')).getByRole('menuitem', { name: 'Reset Shot' }));
     expect(drafts.reset.mock.calls.map(([key]) => key)).toEqual([
       'shot.shot_1.shootingScript',
       'shot.shot_1.durationSeconds',
@@ -1879,7 +1892,7 @@ describe('BeatPanel', () => {
     const newerDrafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Newer local shooting script' });
     const result = render(<BeatPanel {...panelProps(beat, submittedDrafts, actions)} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save Shot' }));
+    fireEvent.click(within(openShotMenu(result.container, 'shot_1')).getByRole('menuitem', { name: 'Save Shot' }));
     expect(saveShot).toHaveBeenCalledWith([
       { shotId: 'shot_1', changes: { shootingScript: 'Submitted shooting script' } },
     ]);
@@ -1908,7 +1921,7 @@ describe('BeatPanel', () => {
     const actions = makeActions();
     const stale = render(<BeatPanel {...panelProps(beat, staleDrafts, actions)} />);
     expect(within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Save Beat' })).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: 'Save Shot' })[0]).toBeDisabled();
+    expect(within(openShotMenu(stale.container, 'shot_1')).getByRole('menuitem', { name: 'Save Shot' })).toBeDisabled();
 
     stale.rerender(
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { gateLocked: true })} />
@@ -1932,8 +1945,12 @@ describe('BeatPanel', () => {
   it('exposes exactly one Shooting script editor and no retired prose workflows for a Shot', () => {
     const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const shot = within(shotCard(container, 'shot_1'));
+    const card = shotCard(container, 'shot_1');
+    const shot = within(card);
 
+    // Nothing is authored on screen until asked for.
+    expect(shot.queryAllByRole('textbox')).toHaveLength(0);
+    fireEvent.click(card.querySelector<HTMLButtonElement>('[data-shot-script-toggle]')!);
     expect(shot.getAllByRole('textbox')).toHaveLength(1);
     expect(shot.getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
       'Canonical shooting script 1'
@@ -2348,7 +2365,7 @@ describe('BeatPanel', () => {
     const beat = makeBeat();
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
-    fireEvent.click(within(shotCard(container, 'shot_1')).getByRole('button', { name: 'Move Shot 1 down' }));
+    fireEvent.click(within(openShotMenu(container, 'shot_1')).getByRole('menuitem', { name: 'Move Shot 1 down' }));
     await waitFor(() => expect(actions.reorderShots).toHaveBeenCalledWith('beat_1', ['shot_2', 'shot_1']));
     await waitFor(() => expect(screen.getByText('Moved Shot 1 to 2 of 2')).toBeInTheDocument());
   });
