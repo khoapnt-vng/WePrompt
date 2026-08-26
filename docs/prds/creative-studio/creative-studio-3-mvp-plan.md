@@ -1171,7 +1171,10 @@ after explicit owner authorization and use `just push`, never raw `git push`.
 
 ## Assignable follow-on — editor-folder export from the project menu
 
-**Status:** owner-approved 2026-08-25. Implement only from the latest combined Creative Studio head
+**Status (updated 2026-08-26 night):** the BUG-122/BUG-123 preconditions landed long ago, and
+export service code now exists on this branch (`service/schema2/exports/`). **Verify the shipped
+behaviour against this section's acceptance list rather than starting fresh.** Original status:
+owner-approved 2026-08-25. Implement only from the latest combined Creative Studio head
 after BUG-122 and BUG-123 land. The rejected `feat/studio-export-menu` branch at `5b747030f` is
 behavioral evidence only: do not merge, rebase, or cherry-pick it wholesale. Its focused baseline
 passed 475 tests and TypeScript, but it is sixteen commits behind this line, produces eleven content
@@ -1260,8 +1263,14 @@ The task is complete only when focused tests and the full repository gate prove 
 
 ## Assignable follow-on — References redesign and Shot-level binding
 
-**Status:** owner-approved 2026-08-25. Two related changes to the same surface; implement them
-together from the latest combined Creative Studio head. Full direction lives in
+**Status — shipped; superseded as a surface, standing as rulings (2026-08-26 night).** The
+substance of this assignment is in the tree: implicit approval shipped, `candidateAssetId` is gone
+from the schema (item 5's collapse), and the Shot-level binding editor exists with the shared
+`count / limit` budget counter (BUG-134's fix). Verify against this section's acceptance list rather
+than re-implementing. The **References panel** assignment below is the successor for the card/panel
+surface; this section's ruling that **binding lives per-Shot** is standing context for that panel's
+blocked `Bind to all shots` decision. Original status: owner-approved 2026-08-25. Two related
+changes to the same surface; implement them together from the latest combined Creative Studio head. Full direction lives in
 [References card redesign](../../design/creative-studio-3-references-card-redesign.md) and
 [binding belongs on the Shot](../../design/creative-studio-3-binding-belongs-on-the-shot.md); this
 section is the assignment, not the specification.
@@ -1421,7 +1430,21 @@ nothing anyone reads.
 
 ## Assignable follow-on — the First frames panel
 
-**Status:** designer handoff received 2026-08-26, owner-forwarded for implementation. Full direction
+**Status — superseded in part, 2026-08-26 night.** This panel was **built** (`42473b5a2`, the
+`BeatPanel/FirstFrames` component) and its frames-region design has since been **superseded by the
+Beat panel shot composer** assignment below (owner ruling §1a: slots are the view, this panel's list
+becomes the START slot's picker). Do not do further work from this section alone — read the composer
+assignment first. The five owner rulings recorded here **remain binding** and carry over as follows:
+
+| Ruling | Fate under the composer |
+| --- | --- |
+| 1 — takes replace, with retained history | **Carries over unchanged** (store behaviour, not layout) |
+| 2 — staleness is a tag, never a fifth status word | **Carries over** — the composer handoff is silent on it; the `FIRST FRAME CHANGED · NOT RE-RUN` tag must appear under the composer's own "tags are exceptions" rule, not be dropped |
+| 3 — current picture gets a full-screen view; its filmstrip is take history | **Carries over but is homeless** — the composer card shows inputs only and has no current-picture region. Open question for design: where do the rendered take and its history live in the composer layout? |
+| 4 — the `⋯` menus, exactly | **Carries over** — the composer's slot and card `⋯` menus are unspecified in its README; use these ruled contents |
+| 5 — panel widens to 1320 | **Done** — verified shipped in `BeatPanel.module.css` |
+
+Original status: designer handoff received 2026-08-26, owner-forwarded for implementation. Full direction
 lives in [the First frames panel](../../design/creative-studio-3-first-frames-panel.md); the two
 source bundles are committed beside this plan and are the authority for anything that document
 paraphrases. This section is the assignment, not the specification.
@@ -1456,7 +1479,9 @@ inputs, one output card, and a full-screen view where a frame is judged, pinned 
 4. **Picture first, words last.** One 9px mono caption line — frame identity left, origin right.
    Pinned state is three wordless signals: 2px orange border, `CURRENT` badge, lit pin. Hover
    controls (full screen, pin, more) float on the thumbnail at 140ms.
-5. **Four status words, no fifth.** `NOT READY` / `READY TO RENDER` / `RENDERING` / `RENDERED`, and
+5. ~~Four status words, no fifth~~ — **superseded by the composer's six** (`QUEUED` and `FAILED`
+   added); see the composer assignment. Original text: `NOT READY` / `READY TO RENDER` /
+   `RENDERING` / `RENDERED`, and
    the rail and Shot header must say the same word.
 6. **Full-screen frame view.** 94% black, image contained never cropped, filmstrip and arrows to
    navigate, pin as primary action, regenerate with a live prompt, download and remove secondary.
@@ -1545,6 +1570,13 @@ different section below and the dependency order is easy to miss.
 | 2 | The **queue state has no failure sibling** — `QUEUED` as drawn is indistinguishable from a permanently dead chain (BUG-133/BUG-137). | **RULED** — the dead chain wears `FAILED` with a **Fix — free** button; six words preserved, the button differentiates. Both underlying defects are since fixed (`4e56f8f6f`), so the state covers retry exhaustion. See §1a. | Codex |
 | 3 | The **end slot ships inert**, and **chaining skips already-rendered current Shots**. | **Ruled** — see *Owner rulings* below. Build to it. | Codex |
 | 4 | The panel prototype's margin still reads `SHOT STATUS · FOUR WORDS`; the README and states board specify **six**. The prototype annotation is stale. | **Message back to design** — build the six, and tell design the two files disagree. | Owner relays |
+
+**Carried forward from the First Frames rulings** (see the mapping table in that assignment's
+status block): the takes model (ruling 1) and the `FIRST FRAME CHANGED · NOT RE-RUN` staleness tag
+(ruling 2) apply to this panel even though its handoff never mentions them; the ruled `⋯` menu
+contents (ruling 4) fill this handoff's unspecified menus; and ruling 3's current-picture/take-history
+view **has no home in this layout** — the composer card shows inputs only. Where the rendered take
+and its history live is an open question for design, alongside the four-vs-six status-word note.
 
 **Both former blockers are resolved** — the owner ruled the same evening, and Codex's
 `4e56f8f6f` independently landed the two pipeline fixes the ruling leans on (extraction created
@@ -1724,6 +1756,7 @@ build it alongside that assignment, not independently.
 | 2 | **`+ Add character` has no supported mutation.** `amend_reference_plan` rejects non-background additions (`payloadSchemas.ts:429`); the only alternative replaces the entire plan. | **Ruled** — ship `+ Add place`, and omit or disable `+ Add character` with a reason. Do **not** implement it via `set_reference_plan`. | Codex |
 | 3 | **Handles renumber when the current take changes.** `select_reference_image` pushes the outgoing current to the end of `supersededAssetIds`, so array order is recency-of-demotion, not creation. | **Ruled** — derive the ordinal from `asset.createdAt`, which no mutation rewrites. See §4. | Codex |
 | 4 | **Naming a photo in a prompt does not make the engine use it.** Conditioning comes from the binding and the first frame, not from prose. | **Ruled** — do not ship copy claiming a named photo wins over the bound one until `@handle` resolves to a binding change. | Codex |
+| 5 | The README claims *"same status vocabulary"* as the composer, but uses three different words (`NO PHOTO` / `CURRENT SET` / `GENERATING`) against the composer's six. Different object, so likely intentional — but the claim as written is false. | **Message back to design**, alongside the composer's four-vs-six note. | Owner relays |
 
 ### Required product behavior
 
