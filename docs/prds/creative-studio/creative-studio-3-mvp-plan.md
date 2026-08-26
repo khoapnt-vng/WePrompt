@@ -1317,3 +1317,90 @@ rendered through one shared `renderCard`.
 3. Reference image history remains reachable and reverting to an earlier image costs nothing.
 4. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
    full test suite, format, lint, and `git diff --check` pass from the exact final head.
+
+## Assignable follow-on — the error-message class: stop laundering causes at boundaries
+
+**Status:** owner-approved 2026-08-26. One deliberate pass over a defect class that has now been
+filed **five times** and point-fixed three times without stopping. Implement from the latest combined
+Creative Studio head. This section is the assignment; the five bug entries in
+[the bug list](creative-studio-3-bug-list.md) are the evidence and remain the per-instance specs.
+
+### Problem and goal
+
+Five separate bugs, one mechanism: **the cause is known at the throw site and thrown away at a
+boundary**, leaving the user a generic label that points at the wrong subsystem.
+
+| Bug         | Distinct causes collapsed into one message                              | Status             |
+| ----------- | ----------------------------------------------------------------------- | ------------------ |
+| **BUG-062** | 3 unrelated Director failures → "could not read or save this workspace" | closed `ecc43f718` |
+| **BUG-065** | `unsupported` / `auth` / `timeout` / `unknown` → one validation string  | closed `b01c565ee` |
+| **BUG-093** | 140 IPC operations → `invalid operation payload`, no operation or field | closed `fa777eb6b` |
+| **BUG-126** | every non-401/402/429 4xx → `invalid_request`                           | **open**           |
+| **BUG-127** | runtime-inactive → `provider_error`                                     | **open**           |
+
+Three closures did not stop it, because each fixed one call site and none changed what makes the
+next one easy to write. The goal of this task is the opposite: leave behind a rule and a guard, so
+instance six is prevented rather than filed.
+
+The class takes exactly three forms, all visible in the table above:
+
+1. **The bare `catch {}`** — the caught error is not even bound. `v2Service.ts:1517-1524` is the
+   clearest case: a typed `CreativeStudioStoreError('storage_error', 'Creative Studio runtime is not
+active')` arrives and is replaced by a fresh `provider_error` carrying nothing (BUG-127).
+2. **The collapse to a single value** — a discriminated result is narrowed to `null` or one string
+   before it reaches the UI (`StudioMediaModelsSection.tsx:243`, BUG-065).
+3. **The log-only side channel** — the cause is parsed, printed to the console, and dropped from the
+   returned error. `openRouterVideoAdapter.ts:487` extracts `upstreamCode` into
+   `OpenRouterHttpErrorEvidence` and never puts it in the `SanitizedProviderError` (BUG-126).
+
+### Scope, measured
+
+- **8** `CreativeStudioServiceError('provider_error')` throw sites, all in `v2Service.ts`; **2** sit
+  directly inside a bare `catch {}`.
+- **154** bare `} catch {` in `process/services/creative-studio`, **87** in `renderer/pages/studio`.
+
+Treat 241 as the **search space, not the defect count.** Most are legitimate — optional parses,
+probes, best-effort cleanup. In scope is only the subset that **discards a typed cause and then
+produces a user-visible message or a persisted error code**. Do not "fix" catches that swallow
+nothing anyone reads.
+
+### Required product behavior
+
+1. **Close BUG-126 and BUG-127** to their own entries' fix directions. They are the two open
+   instances and the reason this task exists.
+2. **Audit the in-scope subset above.** For each: bind the error, preserve a bounded cause, and
+   choose the message from that cause. Where a call genuinely cannot know, keep the generic code —
+   an honest generic beats a confident wrong one.
+3. **`provider_error` must mean the provider.** BUG-127's case never contacts a provider, so the
+   name accuses the one component that is provably innocent. Any throw that is not a provider fault
+   needs a different code.
+4. **Write the rule down** where the next contributor will meet it — the same place the existing
+   `mapStatusError` doc comment lives, since that comment already argues this case correctly for 402
+   and was still not generalized.
+5. **Add a guard.** A test or lint rule that fails when a bare `catch {}` rethrows a user-visible
+   error code. Without it, this list reaches six. Oxlint has no such rule enabled today, so a focused
+   repo test asserting the in-scope call sites stay bound is acceptable — state which you chose.
+
+### Do not weaken
+
+- **The redaction boundary holds.** `safeEvidenceTag` and `nestedUpstreamCode` exist so raw provider
+  prose never escapes to the renderer. Carry a **bounded enum**, never the provider's message string.
+  This task must not become a licence to widen what reaches the UI.
+- **Status-first mapping stays.** A body-informed 4xx refinement must not let an unrecognized body
+  downgrade a 401/402/429.
+- **No behavior changes** beyond error reporting. Quarantine stays fail-closed; the activation gate
+  stays; no retry policy loosens except where BUG-126 explicitly asks that `retry-job` be withheld
+  for an input the provider will refuse identically.
+- **No scope expansion.** Do not refactor unrelated error types, and do not renumber or restructure
+  existing bug entries.
+
+### Acceptance
+
+1. BUG-126 and BUG-127 are closed with their evidence recorded in the bug list, in the file's
+   existing style.
+2. Each in-scope call site either names its cause or is explicitly justified as legitimately generic.
+3. No user-visible message names a subsystem that the failing path does not touch.
+4. The guard from item 5 exists, fails on a deliberately reintroduced bare-catch launder, and passes
+   on the fixed tree.
+5. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
+   full test suite, format, lint, and `git diff --check` pass from the exact final head.
