@@ -1053,6 +1053,10 @@
         }
       },
       "proposals": {
+        "mutationCount": "{{count}} 项提议编辑",
+        "mutationCount_one": "{{count}} 项提议编辑",
+        "mutationCount_other": "{{count}} 项提议编辑",
+        "reviewDetails": "查看提案详情",
         "before": "之前",
         "after": "之后",
         "ownerBeat": "所属节拍",
@@ -1704,6 +1708,7 @@
       },
       "errors": {
         "invalidRequest": "生成请求无效。",
+        "contentRejected": "服务商拒绝了起始图像。请重新构图或重新生成静帧后再试。",
         "auth": "服务商拒绝了凭据。",
         "quota": "服务商账户额度不足。",
         "rateLimited": "已达到服务商速率限制，请稍后重试。",

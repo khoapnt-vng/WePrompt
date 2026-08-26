@@ -631,6 +631,7 @@ const expectedLeaves = [
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
+  'proposals.reviewDetails',
   'proposals.emptyAuthoredField',
   'proposals.reviewStale',
   'proposals.noChanges',
@@ -1062,6 +1063,10 @@ const localizedOnePicturePresentationKeys = [
 ] as const;
 
 const localizedWorkspaceKeys = [
+  'proposals.mutationCount',
+  'proposals.mutationCount_one',
+  'proposals.mutationCount_other',
+  'proposals.reviewDetails',
   'proposals.ownerBeat',
   'proposals.before',
   'proposals.after',
@@ -1839,6 +1844,22 @@ describe('Creative Studio workspace translations', () => {
     expect(errors.seedStillVariationGrid).toBe(
       'The generated first frame contains a multi-panel variation grid and cannot be used for video.'
     );
+  });
+
+  it('localizes proposal summaries and the seed-image content remedy in every configured locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const conversation = loadConversation(locale);
+      const creativeStudio = asObject(conversation.creativeStudio, `${locale}.creativeStudio`);
+      const jobs = asObject(creativeStudio.jobs, `${locale}.creativeStudio.jobs`);
+      const errors = asObject(jobs.errors, `${locale}.creativeStudio.jobs.errors`);
+      const workspace = workspaceOf(conversation)!;
+      const proposals = asObject(workspace.proposals, `${locale}.creativeStudio.workspace.proposals`);
+
+      expect(errors.contentRejected, `${locale}.jobs.errors.contentRejected`).toBeTypeOf('string');
+      expect((errors.contentRejected as string).trim(), `${locale}.jobs.errors.contentRejected`).not.toBe('');
+      expect(proposals.reviewDetails, `${locale}.proposals.reviewDetails`).toBeTypeOf('string');
+      expect(proposals.mutationCount, `${locale}.proposals.mutationCount`).toContain('{{count}}');
+    }
   });
 
   it('uses first-frame copy without renaming durable seed identifiers', () => {

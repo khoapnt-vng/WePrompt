@@ -1053,6 +1053,10 @@
         }
       },
       "proposals": {
+        "mutationCount": "{{count}} 項提議編輯",
+        "mutationCount_one": "{{count}} 項提議編輯",
+        "mutationCount_other": "{{count}} 項提議編輯",
+        "reviewDetails": "查看提案詳情",
         "before": "之前",
         "after": "之後",
         "ownerBeat": "所屬節拍",
@@ -1704,6 +1708,7 @@
       },
       "errors": {
         "invalidRequest": "產生要求無效。",
+        "contentRejected": "服務供應商拒絕了起始影像。請重新構圖或重新產生靜態影格後再試。",
         "auth": "服務供應商拒絕了認證資料。",
         "quota": "服務供應商帳戶配額不足。",
         "rateLimited": "已達服務供應商速率限制，請稍後再試。",

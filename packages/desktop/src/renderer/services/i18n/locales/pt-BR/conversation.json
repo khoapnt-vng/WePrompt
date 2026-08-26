@@ -1059,6 +1059,10 @@
         }
       },
       "proposals": {
+        "mutationCount": "{{count}} edições propostas",
+        "mutationCount_one": "{{count}} edição proposta",
+        "mutationCount_other": "{{count}} edições propostas",
+        "reviewDetails": "Revisar detalhes da proposta",
         "before": "Antes",
         "after": "Depois",
         "ownerBeat": "Beat responsável",
@@ -1732,6 +1736,7 @@
       },
       "errors": {
         "invalidRequest": "A solicitação de geração é inválida.",
+        "contentRejected": "O provedor recusou a imagem inicial. Reenquadre ou gere novamente a imagem estática antes de tentar de novo.",
         "auth": "O provedor rejeitou as credenciais.",
         "quota": "A conta do provedor não tem cota suficiente.",
         "rateLimited": "O limite de solicitações do provedor foi atingido. Tente novamente mais tarde.",

@@ -1053,6 +1053,10 @@
         }
       },
       "proposals": {
+        "mutationCount": "제안된 편집 {{count}}개",
+        "mutationCount_one": "제안된 편집 {{count}}개",
+        "mutationCount_other": "제안된 편집 {{count}}개",
+        "reviewDetails": "제안 세부 정보 검토",
         "before": "변경 전",
         "after": "변경 후",
         "ownerBeat": "소유 비트",
@@ -1704,6 +1708,7 @@
       },
       "errors": {
         "invalidRequest": "생성 요청이 유효하지 않습니다.",
+        "contentRejected": "제공업체가 시작 이미지를 거부했습니다. 구도를 바꾸거나 스틸 이미지를 다시 생성한 후 시도하세요.",
         "auth": "제공업체가 자격 증명을 거부했습니다.",
         "quota": "제공업체 계정의 할당량이 부족합니다.",
         "rateLimited": "제공업체 요청 한도에 도달했습니다. 나중에 다시 시도하세요.",

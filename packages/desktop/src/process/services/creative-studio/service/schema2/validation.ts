@@ -89,6 +89,7 @@ const JOB_STATUSES = new Set([
 ]);
 const JOB_ERROR_CODES = new Set([
   'invalid_request',
+  'content_rejected',
   'auth',
   'quota',
   'rate_limited',

@@ -57,6 +57,8 @@ export type SanitizedProviderErrorCode =
   | 'quota'
   /** The provider rejected the request definitively. Never an outcome we could not determine. */
   | 'invalid_request'
+  /** The provider's bounded safety classifier rejected the supplied media. */
+  | 'content_rejected'
   | 'rate_limited'
   | 'provider_unavailable'
   | 'timeout'

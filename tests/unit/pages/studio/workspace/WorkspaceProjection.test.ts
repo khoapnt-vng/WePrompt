@@ -1000,6 +1000,36 @@ describe('projectWorkspace', () => {
     expect(JSON.stringify(shot.attentionJobs)).not.toContain('providerJobId');
   });
 
+  it('projects a terminal content refusal as actionable copy without retry authority', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    project.shots.shot_1!.jobIds.push('job_content_refused');
+    project.jobs.job_content_refused = makeJob('job_content_refused', 'shot_1', {
+      status: 'failed',
+      purpose: 'video_take',
+      error: {
+        code: 'content_rejected',
+        messageKey: 'conversation.creativeStudio.jobs.errors.contentRejected',
+      },
+      canCancel: false,
+      canRetry: false,
+    });
+
+    const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.attentionJobs).toEqual([
+      {
+        id: 'job_content_refused',
+        purpose: 'video_take',
+        error: {
+          code: 'content_rejected',
+          messageKey: 'conversation.creativeStudio.jobs.errors.contentRejected',
+        },
+        canCancel: false,
+        canRetry: false,
+      },
+    ]);
+  });
+
   it('keeps Board failures out of the legacy first-frame and video recovery surface', () => {
     const project = makeProject();
     project.beatOrder = ['beat_1'];

@@ -86,6 +86,7 @@ export type StudioMediaChoiceRef = {
 
 export type StudioJobErrorCode =
   | 'invalid_request'
+  | 'content_rejected'
   | 'auth'
   | 'quota'
   | 'rate_limited'

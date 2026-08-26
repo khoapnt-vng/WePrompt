@@ -210,7 +210,7 @@ describe('OpenRouter video generation adapter', () => {
     );
   });
 
-  it('lifts the upstream code OpenRouter buries inside the message string', async () => {
+  it('classifies a recognized upstream seed-image safety rejection without exposing provider prose', async () => {
     const emitHttpErrorEvidence = vi.fn();
     const upstream = JSON.stringify({
       error: {
@@ -229,15 +229,53 @@ describe('OpenRouter video generation adapter', () => {
     });
 
     await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
-      code: 'invalid_request',
+      code: 'content_rejected',
     });
 
     await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
     expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
-      expect.objectContaining({ upstreamCode: 'InputImageSensitiveContentDetected.PrivacyInformation' })
+      expect.objectContaining({
+        stableCode: 'content_rejected',
+        upstreamCode: 'InputImageSensitiveContentDetected.PrivacyInformation',
+      })
     );
     // The prose beside it names the request and could name the prompt; it must not travel.
     expect(JSON.stringify(emitHttpErrorEvidence.mock.calls)).not.toMatch(/may contain real person|Request id/i);
+  });
+
+  it('keeps an unrecognized upstream identifier inside the generic 4xx classification', async () => {
+    const upstream = JSON.stringify({
+      error: { code: 'InputImageDimensionsRejected.InvalidRatio', message: 'private provider prose' },
+    });
+    const adapter = createOpenRouterVideoAdapter({
+      fetch: async () => response(400, { error: { message: `HTTP 400: ${upstream}` } }),
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence: () => undefined,
+    });
+
+    await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+  });
+
+  it('keeps authentication and spend status authoritative over a safety-shaped body', async () => {
+    const upstream = JSON.stringify({
+      error: { code: 'InputImageSensitiveContentDetected.PrivacyInformation' },
+    });
+    for (const [status, code] of [
+      [402, 'quota'],
+      [403, 'auth'],
+      [429, 'rate_limited'],
+    ] as const) {
+      const adapter = createOpenRouterVideoAdapter({
+        fetch: async () => response(status, { error: { message: `HTTP ${status}: ${upstream}` } }),
+        catalog: await admittedCatalog(),
+        emitHttpErrorEvidence: () => undefined,
+      });
+
+      // eslint-disable-next-line no-await-in-loop -- Each status owns an independent authority check.
+      await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({ code });
+    }
   });
 
   it('surfaces the spend-limit source a 402 names, because it is the one field that explains it', async () => {
@@ -362,7 +400,7 @@ describe('OpenRouter video generation adapter', () => {
     });
   });
 
-  it('delivers the HTTP failure before invoking the diagnostic sink', async () => {
+  it('bounds body classification before failure and still invokes the diagnostic sink afterward', async () => {
     let failureObserved = false;
     const bodyReadOrder: string[] = [];
     const sinkOrder: string[] = [];
@@ -387,7 +425,7 @@ describe('OpenRouter video generation adapter', () => {
     failureObserved = true;
     await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
 
-    expect(bodyReadOrder).toEqual(['after-failure']);
+    expect(bodyReadOrder).toEqual(['before-failure']);
     expect(sinkOrder).toEqual(['after-failure']);
   });
 
@@ -428,7 +466,7 @@ describe('OpenRouter video generation adapter', () => {
           () => 'unexpected-success',
           (error: unknown) => error
         ),
-        new Promise<'stalled'>((resolve) => setTimeout(() => resolve('stalled'), 20)),
+        new Promise<'stalled'>((resolve) => setTimeout(() => resolve('stalled'), 200)),
       ]);
       expect(outcome).toMatchObject({ code: 'invalid_request' });
     } finally {

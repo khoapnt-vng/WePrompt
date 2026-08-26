@@ -1055,6 +1055,10 @@
         }
       },
       "proposals": {
+        "mutationCount": "Önerilen {{count}} düzenleme",
+        "mutationCount_one": "Önerilen {{count}} düzenleme",
+        "mutationCount_other": "Önerilen {{count}} düzenleme",
+        "reviewDetails": "Öneri ayrıntılarını incele",
         "before": "Önce",
         "after": "Sonra",
         "ownerBeat": "Sahip Beat",
@@ -1717,6 +1721,7 @@
       },
       "errors": {
         "invalidRequest": "Oluşturma isteği geçersiz.",
+        "contentRejected": "Sağlayıcı başlangıç görüntüsünü reddetti. Yeniden denemeden önce kadrajı değiştirin veya durağan görüntüyü yeniden oluşturun.",
         "auth": "Sağlayıcı kimlik bilgilerini reddetti.",
         "quota": "Sağlayıcı hesabında yeterli kota yok.",
         "rateLimited": "Sağlayıcının istek sınırına ulaşıldı. Daha sonra tekrar deneyin.",

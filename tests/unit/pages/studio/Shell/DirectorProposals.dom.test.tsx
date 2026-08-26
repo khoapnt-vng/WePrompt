@@ -191,6 +191,11 @@ describe('DirectorProposals', () => {
   it('renders only pending schema-5 proposals with their main-derived review', () => {
     renderList([proposal('pending'), proposal('accepted', 'accepted'), proposal('rejected', 'rejected')]);
 
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.reviewDetails',
+      })
+    );
     expect(screen.getByTestId('studio-proposal-pending')).toHaveTextContent('A new Brief');
     expect(screen.queryByTestId('studio-proposal-accepted')).toBeNull();
     expect(screen.queryByTestId('studio-proposal-rejected')).toBeNull();

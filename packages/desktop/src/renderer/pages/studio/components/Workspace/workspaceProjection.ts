@@ -456,14 +456,15 @@ const hasOwnedGenerationWithStatus = (
 const ownedAttentionJobs = (project: StudioRendererProjectV2, shot: StudioShot): WorkspaceAttentionJobProjection[] =>
   shot.jobIds.flatMap((jobId) => {
     const job = ownValue(project.jobs, jobId);
+    const recoverableAttention = job?.status === 'needs_attention' && (job.canRetry || job.canCancel);
+    const actionableContentRefusal = job?.status === 'failed' && job.error?.code === 'content_rejected';
     return job?.id === jobId &&
       job.projectId === project.id &&
       job.target.kind === 'shot' &&
       job.target.shotId === shot.id &&
-      job.status === 'needs_attention' &&
       job.error !== null &&
       (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
-      (job.canRetry || job.canCancel)
+      (recoverableAttention || actionableContentRefusal)
       ? [
           {
             id: job.id,

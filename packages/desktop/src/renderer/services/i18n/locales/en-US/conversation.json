@@ -1091,6 +1091,7 @@
       },
       "errors": {
         "invalidRequest": "The generation request is invalid.",
+        "contentRejected": "The provider refused the seed image. Reframe or regenerate the still before trying again.",
         "auth": "The provider rejected the credentials.",
         "quota": "The provider account has insufficient quota.",
         "rateLimited": "The provider rate limit was reached. Try again later.",
@@ -1877,6 +1878,7 @@
         "mutationCount": "{{count}} proposed edits",
         "mutationCount_one": "{{count}} proposed edit",
         "mutationCount_other": "{{count}} proposed edits",
+        "reviewDetails": "Review proposal details",
         "before": "Before",
         "after": "After",
         "ownerBeat": "Owner Beat",

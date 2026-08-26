@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import i18next, { type i18n } from 'i18next';
 import React from 'react';
 import { I18nextProvider } from 'react-i18next';
@@ -312,6 +312,7 @@ describe('Creative Studio workspace accessible copy', () => {
       />
     );
 
+    fireEvent.click(screen.getByRole('button', { name: 'Review proposal details' }));
     const review = screen.getByTestId('studio-proposal-semantic-review');
     expect(review).toHaveTextContent('Story');
     expect(review).toHaveTextContent('Shooting script');

@@ -420,6 +420,7 @@ const authorizationItemForJobV2 = (project: StudioProjectV2, job: StudioJobV2) =
 const errorMessageKey = (code: StudioJobErrorCode): string =>
   ({
     invalid_request: 'conversation.creativeStudio.jobs.errors.invalidRequest',
+    content_rejected: 'conversation.creativeStudio.jobs.errors.contentRejected',
     auth: 'conversation.creativeStudio.jobs.errors.auth',
     quota: 'conversation.creativeStudio.jobs.errors.quota',
     rate_limited: 'conversation.creativeStudio.jobs.errors.rateLimited',
@@ -444,6 +445,7 @@ const providerErrorCode = (error: unknown): StudioJobErrorCode | 'invalid_respon
   const code = (error as { code?: unknown }).code;
   switch (code) {
     case 'invalid_request':
+    case 'content_rejected':
     case 'auth':
     case 'quota':
     case 'rate_limited':
@@ -1365,7 +1367,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
             candidate.authorizationItemId === job.authorizationItemId &&
             candidate.status === 'queued_local'
         )
-        .sort((left, right) => left.id.localeCompare(right.id));
+        .toSorted((left, right) => left.id.localeCompare(right.id));
       const requestedSiblings = candidateJobs.filter(
         (candidate) =>
           candidate.authorizationId === job.authorizationId && candidate.authorizationItemId === job.authorizationItemId

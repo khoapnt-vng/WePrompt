@@ -1053,6 +1053,10 @@
         }
       },
       "proposals": {
+        "mutationCount": "{{count}} 件の編集案",
+        "mutationCount_one": "{{count}} 件の編集案",
+        "mutationCount_other": "{{count}} 件の編集案",
+        "reviewDetails": "提案の詳細を確認",
         "before": "変更前",
         "after": "変更後",
         "ownerBeat": "所属ビート",
@@ -1704,6 +1708,7 @@
       },
       "errors": {
         "invalidRequest": "生成リクエストが無効です。",
+        "contentRejected": "プロバイダーが開始画像を拒否しました。構図を変更するか静止画を再生成してから、もう一度お試しください。",
         "auth": "プロバイダーが認証情報を拒否しました。",
         "quota": "プロバイダーアカウントの利用枠が不足しています。",
         "rateLimited": "プロバイダーのレート制限に達しました。後でもう一度お試しください。",

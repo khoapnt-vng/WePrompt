@@ -569,6 +569,8 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     for (const code of ['provider_unavailable', 'rate_limited', 'quota', 'invalid_request', 'auth'] as const) {
       expect(canRetryJobV2(refused(code)), code).toBe(true);
     }
+
+    expect(canRetryJobV2(refused('content_rejected'))).toBe(false);
   });
 
   it('still refuses a retry once the job has been paid for', async () => {
@@ -1447,6 +1449,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
   it('normalizes malformed, future, and primitive submit failures without leaking provider detail', async () => {
     const cases = [
       ['invalid_request', 'failed', 'invalid_request'],
+      ['content_rejected', 'failed', 'content_rejected'],
       ['invalid_response', 'needs_attention', 'submission_unknown'],
       ['future_provider_code', 'needs_attention', 'submission_unknown'],
     ] as const;

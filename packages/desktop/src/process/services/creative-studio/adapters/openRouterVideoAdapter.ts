@@ -38,6 +38,8 @@ const STUDIO_MAX_DURATION_SECONDS = 15;
 const STUDIO_RESOLUTIONS = ['720p', '1080p'] as const;
 const STUDIO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const;
 const MANAGED_FIRST_FRAME_MODELS = new Set(['bytedance/seedance-2.0']);
+const CONTENT_CLASSIFICATION_DEADLINE_MS = 50;
+const CONTENT_REJECTION_UPSTREAM_CODES = new Set(['InputImageSensitiveContentDetected.PrivacyInformation']);
 
 export type OpenRouterVideoModelSpec = {
   durations: readonly number[];
@@ -227,6 +229,16 @@ const mapStatusError = (status: number): SanitizedProviderError => {
   if (status >= 400) return { code: 'invalid_request' };
   return { code: 'unknown' };
 };
+
+const classifiedHttpErrorCode = (
+  statusCode: SanitizedProviderError['code'],
+  evidence: OpenRouterHttpErrorEvidence
+): SanitizedProviderError['code'] =>
+  statusCode === 'invalid_request' &&
+  evidence.upstreamCode !== null &&
+  CONTENT_REJECTION_UPSTREAM_CODES.has(evidence.upstreamCode)
+    ? 'content_rejected'
+    : statusCode;
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -521,15 +533,35 @@ const requestJson = async (
     throw new OpenRouterVideoAdapterError('provider_unavailable');
   }
   if (response.status < 200 || response.status >= 300) {
-    const stableCode = mapStatusError(response.status).code;
+    const statusCode = mapStatusError(response.status).code;
+    if (statusCode === 'invalid_request') {
+      let evidence: OpenRouterHttpErrorEvidence | null = null;
+      try {
+        evidence = await runWithProviderDeadline(init.signal, CONTENT_CLASSIFICATION_DEADLINE_MS, () =>
+          httpErrorEvidence(response, operation, provider.use_model, statusCode)
+        );
+      } catch {
+        // A slow or malformed provider body cannot delay the already-known HTTP refusal.
+      }
+      const stableCode = evidence === null ? statusCode : classifiedHttpErrorCode(statusCode, evidence);
+      if (evidence !== null) {
+        const classifiedEvidence = { ...evidence, stableCode };
+        setTimeout((): void => {
+          void Promise.resolve()
+            .then(() => emitHttpErrorEvidence(classifiedEvidence))
+            .catch((): undefined => undefined);
+        }, 0);
+      }
+      throw new OpenRouterVideoAdapterError(stableCode);
+    }
     // Provider-controlled error bodies are detached from failure handling so a stalled body or
     // diagnostic sink can never delay or change the already-known HTTP result.
     setTimeout(() => {
-      void httpErrorEvidence(response, operation, provider.use_model, stableCode)
+      void httpErrorEvidence(response, operation, provider.use_model, statusCode)
         .then(emitHttpErrorEvidence)
         .catch((): undefined => undefined);
     }, 0);
-    throw new OpenRouterVideoAdapterError(stableCode);
+    throw new OpenRouterVideoAdapterError(statusCode);
   }
   if (!requireJson || response.status === 204) return undefined;
   return safeJson(response);

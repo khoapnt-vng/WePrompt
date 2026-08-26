@@ -178,15 +178,32 @@ describe('DirectorProposalCard semantic review', () => {
       />
     );
 
+  const openReview = (): void => {
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reviewDetails' })
+    );
+  };
+
+  it('leads with a bounded edit count and keeps the field review collapsed until requested', () => {
+    renderCard();
+
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.mutationCount(count=3)')).toBeVisible();
+    expect(screen.queryByTestId('studio-proposal-semantic-review')).not.toBeInTheDocument();
+
+    openReview();
+    expect(screen.getByTestId('studio-proposal-semantic-review')).toBeVisible();
+  });
+
   it('shows full main-derived Brief, Story, and Shooting script text with human subject/field labels', () => {
     renderCard();
+    openReview();
 
     expect(screen.getByText('Ming and Mei reunite.')).toBeVisible();
     expect(screen.getByText('Ming and Mei reconcile over midnight tea.')).toBeVisible();
     expect(screen.getByText('Ming finds Mei at their old dai pai dong.')).toBeVisible();
     expect(screen.getByText('Slow dolly in. Ming steps beneath the red awning; Mei looks up.')).toBeVisible();
     expect(screen.getByText(/workspace\.proposals\.subject\.beat/)).toHaveTextContent('Reunion');
-    expect(screen.getByText(/workspace\.proposals\.subject\.shot/)).toHaveTextContent('shot_arrival');
+    expect(screen.getByText(/workspace\.proposals\.subject\.shot/)).not.toHaveTextContent('shot_arrival');
     expect(screen.getByText(/workspace\.proposals\.ownerBeat/)).toHaveTextContent('Reunion');
     expect(screen.getByText('conversation.creativeStudio.workspace.proposals.field.story')).toBeVisible();
     expect(screen.getByText('conversation.creativeStudio.workspace.proposals.field.shootingScript')).toBeVisible();
@@ -194,21 +211,55 @@ describe('DirectorProposalCard semantic review', () => {
 
   it('never substitutes raw mutation operation names for the semantic review', () => {
     const { container } = renderCard();
+    openReview();
 
     expect(container).not.toHaveTextContent('set_brief');
     expect(container).not.toHaveTextContent('add_beat');
     expect(container).not.toHaveTextContent('mutation_batch');
+    expect(container).not.toHaveTextContent('project_1');
+    expect(container).not.toHaveTextContent('beat_reunion');
+    expect(container).not.toHaveTextContent('shot_arrival');
+    expect(container.querySelector('[data-proposal-subject-id="beat_reunion"]')).not.toBeNull();
     expect(container.querySelector('[data-proposal-change="added"]')).not.toBeNull();
   });
 
-  it('renders exact before/after labels and authored empty values', () => {
+  it('reserves before/after labels for edits and renders additions as direct values', () => {
     const groups = reviewGroups();
     groups[1]!.fields[1]!.after = { kind: 'text', value: '' };
     renderCard(proposal({ status: 'ready', groups }));
+    openReview();
 
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.before').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.after').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.before')).toHaveLength(1);
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.after')).toHaveLength(1);
     expect(screen.getByText('conversation.creativeStudio.workspace.proposals.emptyAuthoredField')).toBeVisible();
+  });
+
+  it('resolves reorder identifiers to the human titles already present in the review', () => {
+    const groups = reviewGroups();
+    groups.unshift({
+      change: 'reordered',
+      subject: {
+        kind: 'project',
+        id: 'project_1',
+        title: 'Night market film',
+        position: null,
+        ownerBeatId: null,
+        ownerBeatTitle: null,
+      },
+      fields: [
+        {
+          key: 'order',
+          before: { kind: 'text_list', values: [] },
+          after: { kind: 'text_list', values: ['beat_reunion'] },
+        },
+      ],
+    });
+    const { container } = renderCard(proposal({ status: 'ready', groups }));
+    openReview();
+
+    expect(container.querySelector('[data-review-value-id="beat_reunion"]')).toHaveTextContent('Reunion');
+    expect(container).not.toHaveTextContent('beat_reunion');
+    expect(container.querySelector('[data-review-value-id="beat_reunion"]')).not.toBeNull();
   });
 
   it('shows forbidden terms in the exact pinned-rule review', () => {
@@ -240,6 +291,7 @@ describe('DirectorProposalCard semantic review', () => {
         ],
       })
     );
+    openReview();
 
     expect(screen.getByText('Keep brands fictional.')).toBeVisible();
     expect(screen.getByText(/conversation\.creativeStudio\.rules\.proposalTerms/)).toHaveTextContent('Acme, Globex');
@@ -275,6 +327,7 @@ describe('DirectorProposalCard semantic review', () => {
     renderCard(proposal(), {
       acceptBlockedMessageKey: 'conversation.creativeStudio.workspace.proposals.saveBeforeApply',
     });
+    openReview();
 
     expect(screen.getByText('Ming finds Mei at their old dai pai dong.')).toBeVisible();
     expect(
@@ -318,10 +371,12 @@ describe('DirectorProposalCard semantic review', () => {
     const { rerender } = renderCard(proposal({ status: 'ready', groups: edgeGroups }), {
       errorMessageKey: 'conversation.creativeStudio.workspace.errors.storage',
     });
+    openReview();
 
-    expect(screen.getByText('shot_before')).toBeVisible();
+    expect(screen.queryByText('shot_before')).not.toBeInTheDocument();
     expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.emptyAuthoredField')).toHaveLength(1);
-    expect(screen.getAllByText(/beat_edge/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/beat_edge/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-owner-beat-id="beat_edge"]')).not.toBeNull();
     expect(screen.getByRole('alert')).toHaveTextContent('workspace.errors.storage');
 
     rerender(

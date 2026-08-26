@@ -646,6 +646,33 @@ describe('BeatPanel generation recovery', () => {
     );
     await waitFor(() => expect(actions.retryGenerationJob).toHaveBeenCalledWith('job_unknown', true));
   });
+
+  it('explains a terminal seed-image content refusal without offering unchanged retry', () => {
+    const actions = makeActions();
+    const shot = makeShot('shot_1', 0, {
+      attentionJobs: [
+        {
+          id: 'job_content_refused',
+          purpose: 'video_take',
+          error: {
+            code: 'content_rejected',
+            messageKey: 'conversation.creativeStudio.jobs.errors.contentRejected',
+          },
+          canCancel: false,
+          canRetry: false,
+        },
+      ],
+      effectiveSeedAssetId: 'seed_existing',
+      hasEffectiveSeed: true,
+    });
+    const beat = makeBeat('beat_1', [shot]);
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
+
+    const refusal = container.querySelector<HTMLElement>('[data-job-id="job_content_refused"]')!;
+    expect(refusal).toHaveTextContent('conversation.creativeStudio.jobs.errors.contentRejected');
+    expect(within(refusal).queryByRole('button')).toBeNull();
+    expect(actions.retryGenerationJob).not.toHaveBeenCalled();
+  });
 });
 
 const panelProps = (
