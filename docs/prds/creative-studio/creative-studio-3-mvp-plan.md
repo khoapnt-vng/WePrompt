@@ -1436,13 +1436,13 @@ Beat panel shot composer** assignment below (owner ruling §1a: slots are the vi
 becomes the START slot's picker). Do not do further work from this section alone — read the composer
 assignment first. The five owner rulings recorded here **remain binding** and carry over as follows:
 
-| Ruling | Fate under the composer |
-| --- | --- |
-| 1 — takes replace, with retained history | **Carries over unchanged** (store behaviour, not layout) |
-| 2 — staleness is a tag, never a fifth status word | **Carries over** — the composer handoff is silent on it; the `FIRST FRAME CHANGED · NOT RE-RUN` tag must appear under the composer's own "tags are exceptions" rule, not be dropped |
+| Ruling                                                                     | Fate under the composer                                                                                                                                                                                     |
+| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 — takes replace, with retained history                                   | **Carries over unchanged** (store behaviour, not layout)                                                                                                                                                    |
+| 2 — staleness is a tag, never a fifth status word                          | **Carries over** — the composer handoff is silent on it; the `FIRST FRAME CHANGED · NOT RE-RUN` tag must appear under the composer's own "tags are exceptions" rule, not be dropped                         |
 | 3 — current picture gets a full-screen view; its filmstrip is take history | **Carries over but is homeless** — the composer card shows inputs only and has no current-picture region. Open question for design: where do the rendered take and its history live in the composer layout? |
-| 4 — the `⋯` menus, exactly | **Carries over** — the composer's slot and card `⋯` menus are unspecified in its README; use these ruled contents |
-| 5 — panel widens to 1320 | **Done** — verified shipped in `BeatPanel.module.css` |
+| 4 — the `⋯` menus, exactly                                                 | **Carries over** — the composer's slot and card `⋯` menus are unspecified in its README; use these ruled contents                                                                                           |
+| 5 — panel widens to 1320                                                   | **Done** — verified shipped in `BeatPanel.module.css`                                                                                                                                                       |
 
 Original status: designer handoff received 2026-08-26, owner-forwarded for implementation. Full direction
 lives in [the First frames panel](../../design/creative-studio-3-first-frames-panel.md); the two
@@ -1564,12 +1564,12 @@ Four things were found while capturing this handoff. Two are **blocked on a deci
 **already ruled**, one is **a message back to design**. They are listed here because each lives in a
 different section below and the dependency order is easy to miss.
 
-| # | Note | Status | Who acts |
-| --- | --- | --- | --- |
-| 1 | This handoff **replaces the data model** of the First Frames panel already shipped in `42473b5a2`. | **RULED 2026-08-26 night** — slots are the view, the shipped list-with-pin stays the model; the band becomes the START slot's picker. §2 "Current vs pinned" is re-confirmed. See §1a of the design doc. | Codex |
-| 2 | The **queue state has no failure sibling** — `QUEUED` as drawn is indistinguishable from a permanently dead chain (BUG-133/BUG-137). | **RULED** — the dead chain wears `FAILED` with a **Fix — free** button; six words preserved, the button differentiates. Both underlying defects are since fixed (`4e56f8f6f`), so the state covers retry exhaustion. See §1a. | Codex |
-| 3 | The **end slot ships inert**, and **chaining skips already-rendered current Shots**. | **Ruled** — see *Owner rulings* below. Build to it. | Codex |
-| 4 | The panel prototype's margin still reads `SHOT STATUS · FOUR WORDS`; the README and states board specify **six**. The prototype annotation is stale. | **Message back to design** — build the six, and tell design the two files disagree. | Owner relays |
+| #   | Note                                                                                                                                                 | Status                                                                                                                                                                                                                        | Who acts     |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| 1   | This handoff **replaces the data model** of the First Frames panel already shipped in `42473b5a2`.                                                   | **RULED 2026-08-26 night** — slots are the view, the shipped list-with-pin stays the model; the band becomes the START slot's picker. §2 "Current vs pinned" is re-confirmed. See §1a of the design doc.                      | Codex        |
+| 2   | The **queue state has no failure sibling** — `QUEUED` as drawn is indistinguishable from a permanently dead chain (BUG-133/BUG-137).                 | **RULED** — the dead chain wears `FAILED` with a **Fix — free** button; six words preserved, the button differentiates. Both underlying defects are since fixed (`4e56f8f6f`), so the state covers retry exhaustion. See §1a. | Codex        |
+| 3   | The **end slot ships inert**, and **chaining skips already-rendered current Shots**.                                                                 | **Ruled** — see _Owner rulings_ below. Build to it.                                                                                                                                                                           | Codex        |
+| 4   | The panel prototype's margin still reads `SHOT STATUS · FOUR WORDS`; the README and states board specify **six**. The prototype annotation is stale. | **Message back to design** — build the six, and tell design the two files disagree.                                                                                                                                           | Owner relays |
 
 **Carried forward from the First Frames rulings** (see the mapping table in that assignment's
 status block): the takes model (ruling 1) and the `FIRST FRAME CHANGED · NOT RE-RUN` staleness tag
@@ -1600,8 +1600,8 @@ re-derive the frames region from the prototype alone.
 1. **The card never changes shape.** Header, frames row, three slots, prompt, action row — eight rows
    in every state, so states can be compared without re-reading.
 2. **Six status words, one place.** Not ready, ready to render, queued, rendering, rendered, failed —
-   top right of the header, tinted, never bold. *(The panel prototype's margin still says "four
-   words"; it is stale — take the six from the README and states board, and tell design.)*
+   top right of the header, tinted, never bold. _(The panel prototype's margin still says "four
+   words"; it is stale — take the six from the README and states board, and tell design.)_
 3. **The button carries the state.** Inert Generate when inputs are missing, filled Generate when
    ready, Cancel run mid-flight, outlined Regenerate once rendered, filled again the moment the
    prompt drifts from what was fired.
@@ -1614,10 +1614,10 @@ re-derive the frames region from the prototype alone.
 
 ### Owner rulings
 
-1. **End slot: build it now, inert.** *"Use the End slot as a placeholder now. With Seedance 2.5 or
-   MiniMax, we will have that capability."* Render the third cell so the geometry matches, but do
+1. **End slot: build it now, inert.** _"Use the End slot as a placeholder now. With Seedance 2.5 or
+   MiniMax, we will have that capability."_ Render the third cell so the geometry matches, but do
    **not** let it affect a run, and **suppress state 03's `END FRAME SET · THE SHOT HAS TO LAND ON
-   THAT PICTURE` footnote** until the capability is live — that copy must never appear while the run
+THAT PICTURE` footnote** until the capability is live — that copy must never appear while the run
    cannot honour it. Gate the unlock on the **bound route reporting last-frame support**, read the
    way `supportsFirstFrame` already is; do not hard-code a model id, which is the
    `MANAGED_FIRST_FRAME_MODELS` pattern and will need editing for the model after that.
@@ -1674,10 +1674,10 @@ work — it can ship on its own.
 ### Problem
 
 The generation gate asks the user for permission to perform a **free** action. Opening it lands on a
-`choices` step whose body reads *"Preparing an estimate is free. Only the explicit Confirm action can
-submit paid work."* — and then requires a **`Prepare estimate`** click before any number appears.
-The owner's reaction on meeting it mid-run: *"it is redundant that WP keep asking users for
-permission to generate an estimate… duh? Just give them the number."*
+`choices` step whose body reads _"Preparing an estimate is free. Only the explicit Confirm action can
+submit paid work."_ — and then requires a **`Prepare estimate`** click before any number appears.
+The owner's reaction on meeting it mid-run: _"it is redundant that WP keep asking users for
+permission to generate an estimate… duh? Just give them the number."_
 
 That is two clicks and a modal step to reach a figure that costs nothing to compute, and the copy
 explaining the step is longer than the number it is withholding.
@@ -1745,18 +1745,18 @@ the prototype are committed beside this plan. This section is the assignment, no
 - `creative-studio-3-references-panel.html.txt` — sha256 `fd2c57db3656ddf1…89ba8ce8`
 
 Fidelity is **high**. The designer states this shares a design language with the beat panel composer
-handoff — *"same card shape, same status vocabulary, same accent. Build them as one family"* — so
+handoff — _"same card shape, same status vocabulary, same accent. Build them as one family"_ — so
 build it alongside that assignment, not independently.
 
 ### Notes for the implementer — read in this order
 
-| # | Note | Status | Who acts |
-| --- | --- | --- | --- |
-| 1 | **`Bind to all shots` overflows the conditioning budget at three references** (`maxConditioningImages: 2`, characters and background counted together; the prototype's own `2 / 3 SET` is already over). | **RULED 2026-08-26 night — binding is per-Shot.** The bulk push is removed; the completion button becomes a handoff into the Table's per-Shot binding flow; Director sweeps cover bulk assignment (`set_shot_reference_binding` is `direct` for it); over-budget bindings are refused at save. See §2 of the design doc. | Codex |
-| 2 | **`+ Add character` has no supported mutation.** `amend_reference_plan` rejects non-background additions (`payloadSchemas.ts:429`); the only alternative replaces the entire plan. | **Ruled** — ship `+ Add place`, and omit or disable `+ Add character` with a reason. Do **not** implement it via `set_reference_plan`. | Codex |
-| 3 | **Handles renumber when the current take changes.** `select_reference_image` pushes the outgoing current to the end of `supersededAssetIds`, so array order is recency-of-demotion, not creation. | **Ruled** — derive the ordinal from `asset.createdAt`, which no mutation rewrites. See §4. | Codex |
-| 4 | **Naming a photo in a prompt does not make the engine use it.** Conditioning comes from the binding and the first frame, not from prose. | **Ruled** — do not ship copy claiming a named photo wins over the bound one until `@handle` resolves to a binding change. | Codex |
-| 5 | The README claims *"same status vocabulary"* as the composer, but uses three different words (`NO PHOTO` / `CURRENT SET` / `GENERATING`) against the composer's six. Different object, so likely intentional — but the claim as written is false. | **Message back to design**, alongside the composer's four-vs-six note. | Owner relays |
+| #   | Note                                                                                                                                                                                                                                              | Status                                                                                                                                                                                                                                                                                                                   | Who acts     |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------ |
+| 1   | **`Bind to all shots` overflows the conditioning budget at three references** (`maxConditioningImages: 2`, characters and background counted together; the prototype's own `2 / 3 SET` is already over).                                          | **RULED 2026-08-26 night — binding is per-Shot.** The bulk push is removed; the completion button becomes a handoff into the Table's per-Shot binding flow; Director sweeps cover bulk assignment (`set_shot_reference_binding` is `direct` for it); over-budget bindings are refused at save. See §2 of the design doc. | Codex        |
+| 2   | **`+ Add character` has no supported mutation.** `amend_reference_plan` rejects non-background additions (`payloadSchemas.ts:429`); the only alternative replaces the entire plan.                                                                | **Ruled** — ship `+ Add place`, and omit or disable `+ Add character` with a reason. Do **not** implement it via `set_reference_plan`.                                                                                                                                                                                   | Codex        |
+| 3   | **Handles renumber when the current take changes.** `select_reference_image` pushes the outgoing current to the end of `supersededAssetIds`, so array order is recency-of-demotion, not creation.                                                 | **Ruled** — derive the ordinal from `asset.createdAt`, which no mutation rewrites. See §4.                                                                                                                                                                                                                               | Codex        |
+| 4   | **Naming a photo in a prompt does not make the engine use it.** Conditioning comes from the binding and the first frame, not from prose.                                                                                                          | **Ruled** — do not ship copy claiming a named photo wins over the bound one until `@handle` resolves to a binding change.                                                                                                                                                                                                | Codex        |
+| 5   | The README claims _"same status vocabulary"_ as the composer, but uses three different words (`NO PHOTO` / `CURRENT SET` / `GENERATING`) against the composer's six. Different object, so likely intentional — but the claim as written is false. | **Message back to design**, alongside the composer's four-vs-six note.                                                                                                                                                                                                                                                   | Owner relays |
 
 ### Required product behavior
 

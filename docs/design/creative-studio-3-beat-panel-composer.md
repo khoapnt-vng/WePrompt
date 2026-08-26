@@ -26,18 +26,18 @@ designer's own README names its sources as `First Frames Panel - Hi-fi.dc.html` 
 **Codex has already implemented the earlier one** (`42473b5a2 feat(studio): implement First Frames
 panel`). This revision is not a restyle of it — it changes the data model:
 
-| | First Frames (built) | Beat Panel Composer (this handoff) |
-| --- | --- | --- |
-| Frames region | an **open list** of candidate stills, horizontally scrolling, N per Shot | **three fixed slots**: start frame, end frame, image refs |
-| Which one is used | newest eligible is current; **pin** holds it | the **start** slot is the input, by position |
-| Height behaviour | fixed 178px band, strip scrolls sideways | three equal cells, region height constant "whatever is filled" |
-| Status words | **four** | **six** (adds `QUEUED`, `FAILED`) |
-| Beat-level action | none | **`Generate all 3 · chained`** above the shot strip |
+|                   | First Frames (built)                                                     | Beat Panel Composer (this handoff)                             |
+| ----------------- | ------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| Frames region     | an **open list** of candidate stills, horizontally scrolling, N per Shot | **three fixed slots**: start frame, end frame, image refs      |
+| Which one is used | newest eligible is current; **pin** holds it                             | the **start** slot is the input, by position                   |
+| Height behaviour  | fixed 178px band, strip scrolls sideways                                 | three equal cells, region height constant "whatever is filled" |
+| Status words      | **four**                                                                 | **six** (adds `QUEUED`, `FAILED`)                              |
+| Beat-level action | none                                                                     | **`Generate all 3 · chained`** above the shot strip            |
 
 This apparent conflict is resolved by the owner's ruling below (§1a): the slot geometry is adopted
 as the **view**, and the shipped list-with-pin remains the **model**. §2 "Current vs pinned" in
 [the First Frames panel doc](creative-studio-3-first-frames-panel.md#2--current-vs-pinned--read-this-before-implementing)
-is **re-confirmed**, not retired. (That is §2 of the design doc, *not* owner ruling 2 — the
+is **re-confirmed**, not retired. (That is §2 of the design doc, _not_ owner ruling 2 — the
 staleness tag — which this handoff leaves unaffected.)
 
 ## 1a · Owner ruling, 2026-08-26 night — slots are the view, the list is the model
@@ -73,12 +73,12 @@ The other two slots follow the same view-over-model principle:
 Flexibility between chain-the-Beat and one-shot-at-a-time is not a mode switch; it falls out of the
 START slot telling the truth for follower shots:
 
-| START slot shows | Meaning | Serves |
-| --- | --- | --- |
-| the frame, badge `FROM SHOT N` | predecessor rendered, extraction ready | either flow — the shot is independently generatable |
-| `ARRIVES WHEN SHOT N FINISHES` | healthy queue behind an in-flight predecessor | the chain flow (composer state 07 as drawn) |
-| `START FRAME FAILED` + a **Fix — free** button | extraction failed and auto-retry exhausted its bounded attempts | both — recovery is `retry-conditioning-frame`, measured free and reliable |
-| a pinned or imported still | a deliberate **hard cut** — priced through the `continuityChange` prepare shape | one-at-a-time, intentionally breaking the chain |
+| START slot shows                               | Meaning                                                                         | Serves                                                                    |
+| ---------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| the frame, badge `FROM SHOT N`                 | predecessor rendered, extraction ready                                          | either flow — the shot is independently generatable                       |
+| `ARRIVES WHEN SHOT N FINISHES`                 | healthy queue behind an in-flight predecessor                                   | the chain flow (composer state 07 as drawn)                               |
+| `START FRAME FAILED` + a **Fix — free** button | extraction failed and auto-retry exhausted its bounded attempts                 | both — recovery is `retry-conditioning-frame`, measured free and reliable |
+| a pinned or imported still                     | a deliberate **hard cut** — priced through the `continuityChange` prepare shape | one-at-a-time, intentionally breaking the chain                           |
 
 Because every successful take now **atomically creates its endpoint extraction** (BUG-133's fix,
 landed in `4e56f8f6f`), shots rendered one at a time compose into chains after the fact, and a
@@ -98,11 +98,10 @@ RECOVERY IS FREE` versus `NOTHING WAS CHARGED`. With BUG-137's bounded auto-retr
 case should now be rare — the state exists for retry exhaustion, and for the honesty of never
 showing a permanent wait as a queue.
 
-
 ## 2 · The end frame — owner ruling: build the slot now as a placeholder
 
-**Owner ruling, 2026-08-26:** *"Use the End slot as a placeholder now. With Seedance 2.5 or MiniMax,
-we will have that capability."* Build the three-cell geometry as drawn, with the end slot present and
+**Owner ruling, 2026-08-26:** _"Use the End slot as a placeholder now. With Seedance 2.5 or MiniMax,
+we will have that capability."_ Build the three-cell geometry as drawn, with the end slot present and
 inert, and light it up when a capable model is bound. The recommendation this section originally
 carried — omit the slot — is withdrawn.
 
@@ -138,7 +137,7 @@ So the slot ships **visible and clearly not yet active**:
 3. **Say why, once, in the slot**: the end frame needs an engine that supports it, and the bound
    engine does not. Name the condition, not the model, so the copy survives a new binding.
 4. **Suppress state 03's footnote** until the capability is live. `END FRAME SET · THE SHOT HAS TO
-   LAND ON THAT PICTURE` must never appear while the run cannot honour it.
+LAND ON THAT PICTURE` must never appear while the run cannot honour it.
 5. **Gate on capability, not on a model list.** The unlock condition is the bound route reporting
    last-frame support, read the same way `supportsFirstFrame` already is. Hard-coding
    `seedance-2.5` or a MiniMax id repeats the `MANAGED_FIRST_FRAME_MODELS` pattern and will need
@@ -158,8 +157,8 @@ The **states board** and the README both specify **six** words — not ready, re
 rendering, rendered, failed — and the board renders all eight cards against them.
 
 The **panel prototype** still carries the previous rule, annotated in its own margin:
-*"SHOT STATUS · FOUR WORDS — Not ready. Ready to render. Rendering. Rendered. Nothing else appears
-in the slots."*
+_"SHOT STATUS · FOUR WORDS — Not ready. Ready to render. Rendering. Rendered. Nothing else appears
+in the slots."_
 
 Take the **six**, since the README is the newer authority and the states board implements it. The
 panel prototype's annotation is stale; flag it back to design so the two files agree.
@@ -204,7 +203,7 @@ First Frames panel.
 
 ## 5 · The designer's open question, answered from run data
 
-> *"Does chaining skip already-rendered shots or re-run the whole beat?"*
+> _"Does chaining skip already-rendered shots or re-run the whole beat?"_
 
 Today it **re-runs, and it charges.** Re-authorising a chain whose head is already rendered prices
 the head again — measured at 60 minor units per 12-second take — because `estimate.ts:688-703`

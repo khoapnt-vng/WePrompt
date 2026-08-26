@@ -10,8 +10,8 @@
 >
 > Fidelity is **high** — colours, type, spacing, radii and copy are final unless design says
 > otherwise — and the HTML is a reference to rebuild with WePrompt's components, not code to copy.
-> The designer states it shares a design language with the beat panel composer handoff: *"same card
-> shape, same status vocabulary, same accent. Build them as one family."*
+> The designer states it shares a design language with the beat panel composer handoff: _"same card
+> shape, same status vocabulary, same accent. Build them as one family."_
 >
 > This document records what the handoff gets **right against the shipped model**, what **conflicts
 > with engine limits**, and what has **no supported mutation** today.
@@ -25,14 +25,14 @@ projects. Recording them so nobody "corrects" them during implementation.
   reason — references arrive in every aspect ratio, so the picture is matted whole onto the parchment
   ground. **This is the fix for BUG-138**, filed the same day after a 768×1376 portrait reference was
   cover-cropped into a landscape box so hard that the four figures in it were invisible. The
-  designer's added instruction — *"never use a dark ground here, which reads as a void"* — is a real
+  designer's added instruction — _"never use a dark ground here, which reads as a void"_ — is a real
   distinction: the mat must read as matting.
 - **Generate appends a take and makes it current, rather than overwriting.** This is exactly the
   shipped model: `approvedAssetId` plus `supersededAssetIds`, with the newest generation becoming
   current. It also matches the owner's References ruling — newest is current, current is approved,
   no separate approval act — and the takes model settled for Shots in the First Frames rulings.
-- **Characters before backgrounds.** The panel's intro sentence — *"Characters are generated first,
-  then the backgrounds that recur"* — is not a stylistic preference; it is enforced.
+- **Characters before backgrounds.** The panel's intro sentence — _"Characters are generated first,
+  then the backgrounds that recur"_ — is not a stylistic preference; it is enforced.
   `estimate.ts:1095` refuses a background reference while any character reference lacks an
   `approvedAssetId`, returning `invalid_reference`. The design and the engine agree, which is worth
   saying because the error message does not explain the rule.
@@ -41,7 +41,7 @@ projects. Recording them so nobody "corrects" them during implementation.
 
 ## 2 · `Bind to all shots` — ruled: binding is per-Shot
 
-The panel's headline action *"pushes the current set to every shot"*, and is inert until every
+The panel's headline action _"pushes the current set to every shot"_, and is inert until every
 reference has a photo. On the current engine that action is **impossible for most projects**.
 
 The image route reports **`maxConditioningImages: 2`**, and that budget is counted across characters
@@ -71,14 +71,14 @@ binding lives on the Shot.
 1. **The bulk push is removed.** No action in the References panel writes bindings to every Shot.
 2. **The completion affordance becomes a handoff, not a write.** The button keeps its inert-until-
    complete behaviour and its position as the panel's finish line, but when every reference has a
-   photo it reads as navigation into per-Shot binding (e.g. *"Bind shots…"*, opening the Table's
+   photo it reads as navigation into per-Shot binding (e.g. _"Bind shots…"_, opening the Table's
    binding flow) rather than performing a project-wide write. Copy is design's to settle; the
    contract is that it navigates, it does not bind.
 3. **Bulk assignment at scale is the Director's job, not a button's.** `set_shot_reference_binding`
    is a `direct` operation for the Director (`directorCommandContracts.ts`), so "bind the cast to
    the right shots" is exactly the kind of sweep it performs on request — with the owner's per-Shot
    editor as the override. The panel does not need to replicate that capability.
-4. **The intro copy survives.** *"The one marked current is what every shot inherits"* stays true
+4. **The intro copy survives.** _"The one marked current is what every shot inherits"_ stays true
    under per-Shot binding: bindings point at the reference, not at a take, so switching the current
    take still flows to every bound Shot.
 5. **Over-budget bindings are refused at the point of binding** — never discovered later as a
@@ -100,8 +100,8 @@ The only way to add a character to a planned project is `set_reference_plan`, wh
 whole plan**. That is not an append, and doing it behind an innocuous `+ Add character` button would
 put every existing character reference — and its takes — at risk.
 
-This asymmetry is not accidental: BUG-122 was *"a project cannot add a newly discovered background
-after approving its character references"*, and the fix added the background-only append. Characters
+This asymmetry is not accidental: BUG-122 was _"a project cannot add a newly discovered background
+after approving its character references"_, and the fix added the background-only append. Characters
 were left out. Adding one now is a schema-and-validation task, not a button.
 
 **Recommended:** ship `+ Add place` (supported today) and either omit `+ Add character` or show it
@@ -114,13 +114,13 @@ The naming rule is `slug(name) + '-' + zeroPadded(index + 1)` → `@wren-01`, `@
 **derived, never stored**, so a rename re-slugs every photo immediately. That is a good rule and the
 right storage decision.
 
-The problem is *which* index. The design means creation order — *"the order it was made"*. The store
+The problem is _which_ index. The design means creation order — _"the order it was made"_. The store
 does not preserve it. `select_reference_image` (`mutations/index.ts:1366-1372`) does:
 
     const supersededAssetIds = reference.supersededAssetIds.filter((id) => id !== operation.assetId);
     if (reference.approvedAssetId !== null) supersededAssetIds.push(reference.approvedAssetId);
 
-so the outgoing current is **pushed to the end**. The array records *recency of demotion*, not
+so the outgoing current is **pushed to the end**. The array records _recency of demotion_, not
 creation. Takes made A, B, C give `superseded=[A,B], approved=C`; switching current to A gives
 `superseded=[B,C], approved=A`. Any index derived from that ordering renumbers the photos **every
 time the user switches current take** — which would silently repoint `@wren-02` in a prompt written
@@ -139,11 +139,11 @@ The README raises three. Two can be answered now.
    constraint that matters: **naming a photo in a prompt does not make the engine use it.**
    Conditioning comes from the binding and the first frame, not from prose. If `@wren-02` is to
    genuinely select that image, it must resolve to a binding change, not a string in the prompt.
-   Until then, the README's rule — *"a prompt that names a photo outright should win over the bound
-   one"* — is aspirational and must not be stated in UI copy as though it works.
+   Until then, the README's rule — _"a prompt that names a photo outright should win over the bound
+   one"_ — is aspirational and must not be stated in UI copy as though it works.
 2. **Collision rule for duplicate names.** Refuse the duplicate at entry rather than suffixing.
    Reference labels are already required to be unique per kind by
-   `studioV2ReferencePlanAdditionsSchema` (*"duplicate reference label"*), so refusing at entry
+   `studioV2ReferencePlanAdditionsSchema` (_"duplicate reference label"_), so refusing at entry
    matches an invariant that exists; `@wren-2-01` would invent a second naming scheme to work around
    a rule the schema already enforces.
 3. **Persisted handles and renames.** Moot while handles are display-only. It becomes real the moment

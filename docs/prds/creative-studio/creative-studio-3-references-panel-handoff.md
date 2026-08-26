@@ -1,6 +1,7 @@
 # Handoff: References panel
 
 ## Overview
+
 The References panel is where a director builds the canonical images a story reuses: one
 reference per named character, one per background that recurs. Each reference holds several
 photos ("takes"); one is current, and every photo is auto-named so it can be called by name
@@ -10,6 +11,7 @@ This panel runs before the board and before any first frame. Nothing generates d
 the references are bound.
 
 ## About the design file
+
 `References Panel (standalone).html` is a **design reference created in HTML** — a prototype of
 the intended look and behaviour, not production code to copy. Recreate it in WePrompt using its
 existing components and patterns. If a value here conflicts with an existing component, prefer
@@ -28,12 +30,15 @@ Panel card: max 1000px wide, white `#FFFFFF`, 1px `#E4D9C6`, radius 14px,
 shadow `0 30px 60px -30px rgba(20,24,31,0.35)`.
 
 ### Title bar
+
 Padding 12/18, bottom border `#EFE7D8`. `References` 13.5px/700 ·
 `CANONICAL IMAGES` mono 8.5px `#8C7F6C` nowrap · spacer · `✕`.
 
 ### Intro row (padding 16/18)
+
 Left: one sentence, Source Sans 3 13px/1.55 `#4A5262`, max-width 520px.
 Right column, 230px fixed:
+
 - Progress bar — 5px track `#EFE7D8` radius 3, fill `#C9431A`, width = share of references
   that have a photo, 200ms ease.
 - Below it: counter `2 / 3 SET` (mono 8.5px `#8C7F6C`, nowrap) · spacer ·
@@ -43,6 +48,7 @@ Right column, 230px fixed:
   - Bound → `Bound to all shots`, `#2E7D5B` on `#EAF3ED`, border `#C3DFCE`.
 
 ### Groups
+
 Two groups, `Characters` then `Places`. Group header: 12px top padding, top border `#EFE7D8`,
 title 12.5px/700 nowrap · note mono 8.5px `#8C7F6C` (`ONE REFERENCE PER NAMED CHARACTER ·
 SEVERAL PHOTOS EACH`) · `+ Add character` / `+ Add place` (11px/700 `#6E6553`, 1px `#CBD0D8`,
@@ -82,17 +88,19 @@ Background `#FBF7F0`, 1px `#E4D9C6`, radius 12px, padding 13px 16px, 11px gap,
 4. **Prompt** — full-width textarea, 2 rows, no resize, Source Sans 3 12.5px/1.5 `#2A303B`,
    white, 1px `#E4D9C6`, radius 9, padding 8/10, focus border `#C9431A`.
    Placeholders: characters — `Describe the character once — build, age, clothing, and nothing
-   about the scene.`; places — `Describe the place once — light, weather, and what is always in
-   frame.`
+about the scene.`; places — `Describe the place once — light, weather, and what is always in
+frame.`
 5. **Action row** — state tag · spacer · `Import photo` (outlined 11px/700) ·
    primary button. Labels: `Generate` (no photo) → `Generate another` (has one) →
    `Generate again` (prompt edited) → `Cancel run` (in flight).
 
 ### Status words
+
 `NO PHOTO` `#8A6A18` · `CURRENT SET` `#2E7D5B` · `GENERATING` `#2A5FA8`.
 One place: right of the identity row, mono 8.5px, never bold.
 
 ### Tags
+
 Beside the button, and only for exceptions: `RUNNING · ADDS A NEW PHOTO`
 (`#2A5FA8` on `#EDF2FA`, border `#C9D8EE`) and `EDITED · NOT YET RUN`
 (`#B4380F` on `#FDF0E9`, border `#F0C6B0`). Empty in ordinary states.
@@ -113,6 +121,7 @@ Every photo gets a handle from **the reference's name plus the order it was made
 
 **Open for dev/product:** handles are display-only in this prototype — nothing parses `@wren-02`
 out of a shot prompt yet. Two decisions needed:
+
 1. Autocomplete in the shot prompt (trigger on `@`, list current references and their photos).
 2. Collision rule — two references both named "Wren" currently both produce `@wren-01`.
    Suggest suffixing the later one (`@wren-2-01`) or refusing the duplicate name at entry.
@@ -148,6 +157,7 @@ Panel: `characters[]`, `places[]`, `bound`, `runningId`, `openPhoto`.
 ## Design tokens
 
 Colours
+
 - Page `#F1EADC` · card `#FBF7F0` · white `#FFFFFF` · mat / empty `#EFE7D8`, `#F1EADC`
 - Borders `#E4D9C6`, `#EFE7D8` (inner rules), `#CBD0D8` (outlined buttons), `#D6C9B2` (dashed)
 - Accent `#C9431A`, dark text `#8C2B0B`, tint fill `#FDF0E9`, tint border `#F0C6B0`
@@ -157,6 +167,7 @@ Colours
   border `#C9D8EE`) · missing `#8A6A18`
 
 Type
+
 - Manrope — UI. 13.5/700 card title and name input, 12.5/700 group title, 11.5/700 button,
   11/700 small button.
 - Source Sans 3 — prose and prompts. 13/1.55, 12.5/1.5.
@@ -168,11 +179,13 @@ Spacing 3 · 6 · 7 · 8 · 10 · 11 · 12 · 14 · 16 · 18 · 34
 Transitions 140ms ease on hover affordances · 200ms ease on the progress bar and generating state
 
 ## Assets
+
 Placeholder stills in `assets/` — do not ship them. They are also why the band mats rather than
 crops: `harbour-figure.png` is 256×130 and `harbour-wide.png` is 520×136, and neither matches the
 band's ratio. Real references will vary just as much.
 
 ## Files
+
 - `References Panel (standalone).html` — the panel, plus the notes explaining the rules.
 - Source in the design project: `References Panel - Hi-fi.dc.html`.
 - Companion: `design_handoff_beat_panel_composer/` — the beat panel and shot composer states.

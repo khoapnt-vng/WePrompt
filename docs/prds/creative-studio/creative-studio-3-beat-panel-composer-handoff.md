@@ -1,6 +1,7 @@
 # Handoff: Beat panel — shot composer
 
 ## Overview
+
 The beat panel is where a director works a single beat of a story: watch the beat, then build
 its shots one at a time. Each shot is one card that holds its frame inputs, its prompt, and its
 generate action. The whole beat can also be generated in one pass, chained, from the shot strip
@@ -12,6 +13,7 @@ This handoff covers two things:
 2. **Shot Composer States** — the same shot card in all eight states it can be in.
 
 ## About the design files
+
 The HTML files in this bundle are **design references created in HTML** — prototypes showing the
 intended look and behaviour. They are not production code to copy. Recreate them in WePrompt's
 existing environment using its established components and patterns. If a value here conflicts
@@ -20,6 +22,7 @@ with an existing WePrompt component, prefer the component and tell design.
 Both files open offline in a browser, no server needed.
 
 ## Fidelity
+
 **High fidelity.** Colours, type, spacing, radii and copy are final unless design says otherwise.
 Recreate the UI to match; the values below are exact.
 
@@ -33,12 +36,14 @@ Panel card: 1320px wide, white `#FFFFFF`, 1px border `#E4D9C6`, radius 14px,
 shadow `0 30px 60px -30px rgba(20,24,31,0.35)`.
 
 ### Title bar
+
 Row, 12px/18px padding, bottom border `#EFE7D8`. Left: beat name, 13.5px/700.
 Right: `✕` close, mono 11px, `#8C7F6C`.
 
 ### Body — two columns, 16px gap, padding 16px 18px 12px
 
 **Left column, 376px fixed:**
+
 - Beat player. 212px tall, radius 11px, 1px `#E4D9C6`, image cover on `#14181F`.
 - Control row: `Play beat` (11.5px/700, white on `#C9431A`, radius 8, padding 7/12,
   hover `#B03A14`), time `0:00 / 0:11` (mono 11px `#2A303B`), `PICTURE ONLY`
@@ -73,6 +78,7 @@ radius 12px, padding 13px 16px, column, 11px gap. Rows, in order:
    with a `#F0C6B0` border.
 
 ### Shot strip (bottom of the panel)
+
 Card `#FBF7F0`, 1px `#E4D9C6`, radius 12, margin 0 18 18, padding 12/14, 9px gap.
 
 - **Header row**: `Shots in this beat` (12.5px/700, nowrap) · rule line (mono 8.5px `#8C7F6C`):
@@ -89,6 +95,7 @@ Card `#FBF7F0`, 1px `#E4D9C6`, radius 12, margin 0 18 18, padding 12/14, 9px gap
   others `#F1EADC`/`#6E6553`.
 
 ### Full-screen frame viewer
+
 Opens from a filled slot, from `⛶` on a slot hover, or from `⛶ FULL SCREEN VIEW`.
 Fixed overlay, `rgba(12,14,18,0.94)`, column layout.
 
@@ -118,18 +125,19 @@ Eight cards, identical row structure, `repeat(auto-fill,minmax(430px,1fr))`, 18p
 The shape never changes between states — only the status word, the slots, the tag beside the
 button, the button itself, and an optional mono footnote.
 
-| # | State | Status word (tint) | Slots | Button | Footnote |
-|---|---|---|---|---|---|
-| 01 | Not ready | `NOT READY` `#8A6A18` | all empty | `Generate Shot 1`, inert (`#A79C89` on `#F1EADC`, `not-allowed`) | `A START FRAME IS REQUIRED BEFORE THE SHOT CAN RUN` |
-| 02 | Ready to render | `READY TO RENDER` `#6E6553` | start only | `Generate Shot 1`, filled | — |
-| 03 | All three filled | `READY TO RENDER` `#6E6553` | start + end + refs | `Generate Shot 2`, filled | `END FRAME SET · THE SHOT HAS TO LAND ON THAT PICTURE` |
-| 04 | Rendering | `RENDERING · 40%` `#2A5FA8` | start only | `Cancel run` | `RUNNING WITH THE PROMPT AS FIRED · EDITS APPLY NEXT RUN` |
-| 05 | Rendered | `RENDERED` `#2E7D5B` | start only | `Regenerate`, outlined | `ITS LAST FRAME IS NOW SHOT 2’S START FRAME` |
-| 06 | Edited after a run | `RENDERED` `#2E7D5B` | start only | `Regenerate`, filled | tag `EDITED · NOT YET RUN` |
-| 07 | Queued in a chain | `QUEUED` `#2A5FA8` | all empty | `Remove from chain`, outlined | `START FRAME ARRIVES WHEN SHOT 1 FINISHES` |
-| 08 | Failed | `FAILED` `#8C2B0B` | start only | `Try again`, filled | tag `NOTHING WAS CHARGED`, footnote `THE ENGINE RETURNED NOTHING · THE CHAIN STOPPED HERE` in `#8C2B0B` |
+| #   | State              | Status word (tint)          | Slots              | Button                                                           | Footnote                                                                                                |
+| --- | ------------------ | --------------------------- | ------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| 01  | Not ready          | `NOT READY` `#8A6A18`       | all empty          | `Generate Shot 1`, inert (`#A79C89` on `#F1EADC`, `not-allowed`) | `A START FRAME IS REQUIRED BEFORE THE SHOT CAN RUN`                                                     |
+| 02  | Ready to render    | `READY TO RENDER` `#6E6553` | start only         | `Generate Shot 1`, filled                                        | —                                                                                                       |
+| 03  | All three filled   | `READY TO RENDER` `#6E6553` | start + end + refs | `Generate Shot 2`, filled                                        | `END FRAME SET · THE SHOT HAS TO LAND ON THAT PICTURE`                                                  |
+| 04  | Rendering          | `RENDERING · 40%` `#2A5FA8` | start only         | `Cancel run`                                                     | `RUNNING WITH THE PROMPT AS FIRED · EDITS APPLY NEXT RUN`                                               |
+| 05  | Rendered           | `RENDERED` `#2E7D5B`        | start only         | `Regenerate`, outlined                                           | `ITS LAST FRAME IS NOW SHOT 2’S START FRAME`                                                            |
+| 06  | Edited after a run | `RENDERED` `#2E7D5B`        | start only         | `Regenerate`, filled                                             | tag `EDITED · NOT YET RUN`                                                                              |
+| 07  | Queued in a chain  | `QUEUED` `#2A5FA8`          | all empty          | `Remove from chain`, outlined                                    | `START FRAME ARRIVES WHEN SHOT 1 FINISHES`                                                              |
+| 08  | Failed             | `FAILED` `#8C2B0B`          | start only         | `Try again`, filled                                              | tag `NOTHING WAS CHARGED`, footnote `THE ENGINE RETURNED NOTHING · THE CHAIN STOPPED HERE` in `#8C2B0B` |
 
 Rules across the set:
+
 - **Six status words only**: not ready, ready to render, queued, rendering, rendered, failed.
   One place — top right of the header. Tinted, never bold.
 - **The button carries the state.** Inert Generate when inputs are missing, filled Generate when
@@ -174,6 +182,7 @@ Viewer: `openFrameIndex`, `pinnedFrameId`, `regenerating`.
 ## Design tokens
 
 Colours
+
 - Page `#F1EADC` · card `#FBF7F0` · white `#FFFFFF` · empty slot `#F1EADC` · picture ground `#14181F`
 - Borders `#E4D9C6`, `#EFE7D8` (inner rules), `#CBD0D8` (outlined buttons), `#D6C9B2` (dashed)
 - Accent `#C9431A`, hover `#B03A14`, dark text `#8C2B0B`, tint fill `#FDF0E9`, tint border `#F0C6B0`
@@ -181,6 +190,7 @@ Colours
 - Status: rendered `#2E7D5B` · rendering/queued `#2A5FA8` · not ready `#8A6A18` · failed `#8C2B0B`
 
 Type
+
 - Manrope — UI and headings. 24/800 page title, 13.5/700 card title, 12.5/700 section, 11.5/700 button, 11/700 small button.
 - Source Sans 3 — prose and prompts. 14/1.6, 13/1.55, 12.5/1.5.
 - IBM Plex Mono — labels, status, badges. 9px tracking 0.09–0.12em, 8.5px, 8px, 7.5px on slot badges.
@@ -191,10 +201,12 @@ Shadows panel `0 30px 60px -30px rgba(20,24,31,0.35)` · hovered thumb `0 14px 2
 Transitions 140ms ease on hover affordances, 200ms ease on the viewer stage.
 
 ## Assets
+
 Placeholder stills in `assets/` (`shot-01`, `shot-03`, `shot-04`, `harbour-wide`, `harbour-figure`).
 They stand in for generated frames — do not ship them.
 
 ## Files
+
 - `Beat Panel Composer (standalone).html` — the panel plus the full-screen viewer.
 - `Shot Composer States (standalone).html` — the eight-state board.
 - Sources in the design project: `First Frames Panel - Hi-fi.dc.html`, `First Frames Panel - States.dc.html`.
