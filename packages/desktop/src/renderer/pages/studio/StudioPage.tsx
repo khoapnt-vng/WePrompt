@@ -48,6 +48,7 @@ import {
   countStoredWorkspaceDrafts,
   projectWorkspace,
   filmRenderBatchShotIds,
+  seedRegenerationGateDraft,
   selectionGateDraft,
   spendGateRouteIssue,
   useSpendGate,
@@ -1488,6 +1489,30 @@ const StudioProjectPage: React.FC<{
           })
         );
       },
+      dismissSeedStill: async (shotId, assetId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'dismiss_seed_still', shotId, assetId }],
+          })
+        ),
+      selectVideoTake: async (shotId, assetId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'select_video_take', shotId, assetId }],
+          })
+        ),
+      removeVideoTake: async (shotId, assetId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'remove_video_take', shotId, assetId }],
+          })
+        ),
       trimShot: async (shotId, trimInSeconds, trimOutSeconds) =>
         runWorkspaceCommit((current) =>
           ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
@@ -1646,6 +1671,54 @@ const StudioProjectPage: React.FC<{
           disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
         );
       },
+      reviewSeedStill: (shotId) => {
+        const current = projectRef.current;
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision ||
+          beatPanelReviewBlockedMessageKey !== null ||
+          spendGateLocked
+        ) {
+          if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
+          return;
+        }
+        const projectedShot = currentProjection.activeBeats
+          .flatMap((beat) => beat.shots)
+          .find((shot) => shot.id === shotId);
+        if (projectedShot?.seedAuthorizationLock) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked');
+          return;
+        }
+        const draft = seedRegenerationGateDraft({ project: current, projection: currentProjection, shotId });
+        if (draft === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+          return;
+        }
+        if (
+          currentGenerationCapability === null &&
+          (routeCatalog?.image.status !== 'ready' || routeCatalog.video.status !== 'ready')
+        ) {
+          setActionErrorMessageKey(
+            routeCatalog?.image.status !== 'ready'
+              ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+              : 'conversation.creativeStudio.workspace.controls.videoRouteBlocked'
+          );
+          return;
+        }
+        const disclosureGroups = generationBlockGroupsForItems(
+          currentGenerationCapability,
+          shotCapabilityItemsForDraft(draft)
+        );
+        setActionErrorMessageKey(null);
+        spendGate.open(
+          draft,
+          undefined,
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
+      },
       reviewContinuity: openContinuityReview,
       resolveGenerationBlock: (shotId, block: StudioGenerationBlockV2) => {
         if (block.code === 'reference_binding') {
@@ -1682,7 +1755,12 @@ const StudioProjectPage: React.FC<{
           jobId,
           (job) =>
             (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
-            job.status === 'needs_attention' &&
+            (job.status === 'waiting_for_conditioning' ||
+              job.status === 'queued_local' ||
+              job.status === 'submitting' ||
+              job.status === 'queued_remote' ||
+              job.status === 'running' ||
+              job.status === 'needs_attention') &&
             job.canCancel,
           (current) =>
             ipcBridge.creativeStudio.cancelJob.invoke({

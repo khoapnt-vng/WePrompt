@@ -1113,6 +1113,47 @@
           "authorizationLocked": "已授权的视频工作已锁定此镜头的首帧。导入的候选仍会保留，但不能替换已审核报价中的种子帧。",
           "authorizationIncompatible": "不可用于已授权工作"
         },
+        "firstFrames": {
+          "title": "首帧",
+          "shotChip": "镜头 {{shot}}",
+          "on": "当前",
+          "status": { "notReady": "未就绪", "ready": "可渲染", "rendering": "渲染中", "rendered": "已渲染" },
+          "frameLabel": "帧 {{index}}",
+          "origin": { "generated": "已生成", "imported": "已导入", "board": "分镜", "inherited": "来自镜头 {{shot}}" },
+          "current": "当前",
+          "unavailable": "不可用",
+          "previewAlt": "预览 · {{label}}",
+          "openFrame": "全屏打开 {{label}}",
+          "pinned": "已固定为首帧",
+          "pin": "固定为首帧",
+          "firstFrameChanged": "首帧已更改 · 尚未重跑",
+          "promptChanged": "已编辑 · 尚未运行",
+          "import": "导入首帧",
+          "empty": "没有可用的首帧",
+          "currentPicture": "当前画面",
+          "pictureEmpty": "尚无画面",
+          "pictureAlt": "镜头 {{shot}} 的当前画面",
+          "sendLastFrame": "将最后一帧发送到镜头 {{shot}}",
+          "cancelRun": "取消运行",
+          "generateShot": "生成镜头 {{shot}}",
+          "promptLabel": "镜头提示词",
+          "regenerate": "重新生成",
+          "menu": {
+            "download": "下载",
+            "copyPrompt": "复制提示词",
+            "remove": "移除",
+            "previousTakes": "历史片段",
+            "removeTake": "移除片段"
+          },
+          "viewer": {
+            "currentFirstFrame": "当前首帧",
+            "counter": "第 {{current}} 个，共 {{total}} 个",
+            "take": "片段 {{index}}",
+            "previous": "上一个",
+            "next": "下一个",
+            "useTake": "使用此片段"
+          }
+        },
         "picture": {
           "title": "当前画面",
           "label": "镜头 {{index}} 的当前画面",

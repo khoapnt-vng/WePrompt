@@ -84,6 +84,7 @@ const makeShot = (id: string, shootingScript: string, chainBreak: 'none' | 'hard
     backgroundReferenceId: null,
   },
   seedStillId: null,
+  dismissedSeedStillIds: [],
   boardAssetId: null,
   supersededBoardAssetIds: [] as string[],
   videoAssetId: null,
@@ -480,27 +481,63 @@ describe('projectWorkspace', () => {
     });
   });
 
-  it('projects one current picture and no video Take gallery or rendered-count facts', () => {
+  it('projects one current picture plus its current-first take history without rendered-count facts', () => {
     const project = makeProject();
     const superseded = makeAsset('video_superseded', 'shot_1', 'video', 'assets', '2026-08-19T01:00:00.000Z', 9);
     project.assets[superseded.id] = superseded;
     project.shots.shot_1!.assetIds.push(superseded.id);
     addCurrentVideo(project, 'shot_1', 'video_current', 10);
+    const currentJob = makeJob('job_video_current', 'shot_1', {
+      outputAssetIds: ['video_current'],
+      outputAssetIdsByRole: { primary: 'video_current', poster: null },
+      composition: {
+        inputs: {
+          schemaVersion: 1,
+          projectRevision: project.revision,
+          brief: project.brief,
+          rules: project.rules,
+          source: {
+            kind: 'shot',
+            beatId: 'beat_1',
+            story: project.beats.beat_1!.story,
+            shotId: 'shot_1',
+            shootingScript: 'First',
+          },
+          purpose: 'video_take',
+          referenceInputs: [],
+          aspectRatio: project.aspectRatio,
+          resolution: project.resolution,
+          route: {
+            providerId: 'provider_safe',
+            adapterId: 'openrouter-video-v1',
+            model: 'model_safe',
+          },
+          boardStyle: null,
+          instructionProfile: 'openrouter-video-v1.video-take.v1',
+        },
+        prompt: 'First',
+      },
+    });
+    project.jobs[currentJob.id] = currentJob;
+    project.shots.shot_1!.jobIds.push(currentJob.id);
+    project.shots.shot_1!.shootingScript = 'Edited after the take fired';
 
     const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
 
     expect(shot).toEqual(
       expect.objectContaining({
-        currentPicture: {
+        currentPicture: expect.objectContaining({
           assetId: 'video_current',
           posterAssetId: null,
+          prompt: 'First',
+          promptChanged: true,
           sourceDurationSeconds: 10,
-        },
+        }),
         displayState: 'rendered',
         segmentState: { kind: 'rendered' },
       })
     );
-    expect(shot).not.toHaveProperty('videoTakes');
+    expect(shot.videoTakes).toMatchObject([{ assetId: 'video_current', current: true }]);
     expect(shot).not.toHaveProperty('takeCount');
   });
 
@@ -563,7 +600,7 @@ describe('projectWorkspace', () => {
     });
   });
 
-  it('orders seed stills newest-first and surfaces only the current video picture', () => {
+  it('orders seed stills newest-first and projects current-first retained take history', () => {
     const project = makeProject();
     const older = makeAsset('seed_older', 'shot_1', 'image', 'assets', '2026-08-19T00:00:00.000Z');
     const newer = makeAsset('seed_newer', 'shot_1', 'image', 'imports', '2026-08-19T02:00:00.000Z');
@@ -583,7 +620,54 @@ describe('projectWorkspace', () => {
       { assetId: 'seed_older', explicitSeed: true, effectiveSeed: true },
     ]);
     expect(shot.currentPicture).toMatchObject({ assetId: 'video_current', sourceDurationSeconds: 10 });
-    expect(shot).not.toHaveProperty('videoTakes');
+    expect(shot.videoTakes).toMatchObject([
+      { assetId: 'video_current', current: true },
+      { assetId: 'video_old', current: false },
+    ]);
+  });
+
+  it('keeps dismissed seed media retained while excluding it from the strip and automatic current choice', () => {
+    const project = makeProject();
+    const older = makeAsset('seed_retained', 'shot_1', 'image', 'assets', '2026-08-19T01:00:00.000Z');
+    const dismissed = makeAsset('seed_dismissed', 'shot_1', 'image', 'imports', '2026-08-19T02:00:00.000Z');
+    for (const asset of [older, dismissed]) {
+      project.assets[asset.id] = asset;
+      project.shots.shot_1!.assetIds.push(asset.id);
+    }
+    project.shots.shot_1!.dismissedSeedStillIds = [dismissed.id];
+
+    const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+
+    expect(shot.firstFrames).toMatchObject([{ assetId: older.id, effectiveSeed: true }]);
+    expect(project.assets[dismissed.id]).toBe(dismissed);
+    expect(project.shots.shot_1!.assetIds).toContain(dismissed.id);
+  });
+
+  it('projects a stale inherited boundary frame as the effective first frame without inventing a pin', () => {
+    const project = makeProject();
+    const inherited = makeAsset('frame_from_shot_1', 'shot_1', 'image', 'conditioningFrames');
+    project.assets[inherited.id] = inherited;
+    project.shots.shot_1!.assetIds.push(inherited.id);
+    const chain = cleanChainStatus();
+    chain.boundaries[0] = {
+      upstreamShotId: 'shot_1',
+      dependentShotId: 'shot_2',
+      status: 'on_disk',
+      frameAssetId: inherited.id,
+    };
+
+    const shot = projectWorkspace(project, workspaceStatus(), chain).activeBeats[0]!.shots[1]!;
+
+    expect(shot.firstFrames).toMatchObject([
+      {
+        assetId: inherited.id,
+        effectiveSeed: true,
+        explicitSeed: false,
+        firstFrameChanged: true,
+        origin: 'inherited',
+        sourceShotNumber: 1,
+      },
+    ]);
   });
 
   it('keeps a newer imported first frame visible but non-current while exact authorized seed work is waiting', () => {
@@ -626,7 +710,7 @@ describe('projectWorkspace', () => {
           waitingReason: 'choose_seed',
         },
       });
-      expect(shot.seedStills).toEqual([
+      expect(shot.seedStills).toMatchObject([
         { assetId: imported.id, createdAt: imported.createdAt, explicitSeed: false, effectiveSeed: false },
         { assetId: authorized.id, createdAt: authorized.createdAt, explicitSeed: false, effectiveSeed: false },
       ]);

@@ -1072,6 +1072,54 @@ export const selectionGateDraft = (input: {
   };
 };
 
+/** Builds the exact paid wave for regenerating a segment head's first frame and every dependent picture. */
+export const seedRegenerationGateDraft = (input: {
+  project: StudioRendererProjectV2;
+  projection: WorkspaceProjection;
+  shotId: string;
+}): StudioPrepareSubmissionRequestV2 | null => {
+  const locations = activeShotLocations(input.project);
+  const location = locations.get(input.shotId);
+  const beat = location === undefined ? undefined : input.project.beats[location.beatId];
+  const projected = input.projection.activeBeats.flatMap((candidate) => candidate.shots);
+  const projectedById = new Map(projected.map((shot) => [shot.id, shot] as const));
+  const head = projectedById.get(input.shotId);
+  if (
+    input.projection.projectId !== input.project.id ||
+    input.projection.projectRevision !== input.project.revision ||
+    !input.projection.workspaceStatusReady ||
+    !input.projection.chainStatusReady ||
+    location === undefined ||
+    beat?.id !== location.beatId ||
+    location.shotIndex !== location.segmentHeadIndex ||
+    head === undefined ||
+    head.seedGenerationBlocked ||
+    head.seedAuthorizationLock !== null
+  ) {
+    return null;
+  }
+
+  const cascadeChoices: StudioPrepareGenerationChoiceV2[] = [];
+  for (let shotIndex = location.shotIndex; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+    const shotId = beat.shotOrder[shotIndex]!;
+    const shot = Object.hasOwn(input.project.shots, shotId) ? input.project.shots[shotId] : undefined;
+    const projectedShot = projectedById.get(shotId);
+    if (shot?.id !== shotId || projectedShot === undefined) return null;
+    if (shotIndex > location.shotIndex && shot.chainBreak === 'hard_cut') break;
+    if (projectedShot.videoGenerationBlocked || projectedShot.seedAuthorizationLock !== null) return null;
+    cascadeChoices.push(shotGenerationChoice(shotId, 'video_take'));
+  }
+  const baseChoices = [shotGenerationChoice(input.shotId, 'seed_still')];
+  if (!withinNativeSubmissionBounds(baseChoices, cascadeChoices)) return null;
+  return {
+    projectId: input.project.id,
+    expectedRevision: input.project.revision,
+    originReferenceHandoffId: null,
+    baseChoices,
+    cascadeChoices,
+  };
+};
+
 export const handoffGateDraft = (
   project: StudioRendererProjectV2,
   projection: WorkspaceProjection,

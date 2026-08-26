@@ -65,6 +65,7 @@ const makeShot = (shotId: string): StudioShot => ({
   chainBreak: 'none',
   referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
+  dismissedSeedStillIds: [],
   boardAssetId: null,
   supersededBoardAssetIds: [],
   videoAssetId: null,

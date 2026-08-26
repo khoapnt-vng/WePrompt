@@ -23,6 +23,7 @@ export {
   majorUnitsToMinorUnits,
   selectedSpendGateQuote,
   filmRenderBatchShotIds,
+  seedRegenerationGateDraft,
   selectionGateDraft,
   spendGateReducer,
   spendGateBoardPromotion,

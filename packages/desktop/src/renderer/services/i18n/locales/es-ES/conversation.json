@@ -1114,6 +1114,57 @@
           "authorizationLocked": "El trabajo de vídeo autorizado ha bloqueado el primer fotograma de este plano. Los candidatos importados permanecen guardados, pero no pueden sustituir la imagen de referencia de la cotización revisada.",
           "authorizationIncompatible": "No disponible para el trabajo autorizado"
         },
+        "firstFrames": {
+          "title": "Primeros fotogramas",
+          "shotChip": "Plano {{shot}}",
+          "on": "Activo",
+          "status": {
+            "notReady": "No listo",
+            "ready": "Listo para renderizar",
+            "rendering": "Renderizando",
+            "rendered": "Renderizado"
+          },
+          "frameLabel": "Fotograma {{index}}",
+          "origin": {
+            "generated": "Generado",
+            "imported": "Importado",
+            "board": "Guion gráfico",
+            "inherited": "Del plano {{shot}}"
+          },
+          "current": "Actual",
+          "unavailable": "No disponible",
+          "previewAlt": "Vista previa · {{label}}",
+          "openFrame": "Abrir {{label}} a pantalla completa",
+          "pinned": "Fijado como primer fotograma",
+          "pin": "Fijar como primer fotograma",
+          "firstFrameChanged": "Primer fotograma cambiado · Sin volver a ejecutar",
+          "promptChanged": "Editado · Aún no ejecutado",
+          "import": "Importar primer fotograma",
+          "empty": "No hay un primer fotograma válido",
+          "currentPicture": "Imagen actual",
+          "pictureEmpty": "Aún no hay imagen",
+          "pictureAlt": "Imagen actual del plano {{shot}}",
+          "sendLastFrame": "Enviar su último fotograma al plano {{shot}}",
+          "cancelRun": "Cancelar ejecución",
+          "generateShot": "Generar plano {{shot}}",
+          "promptLabel": "Prompt del plano",
+          "regenerate": "Volver a generar",
+          "menu": {
+            "download": "Descargar",
+            "copyPrompt": "Copiar prompt",
+            "remove": "Eliminar",
+            "previousTakes": "Tomas anteriores",
+            "removeTake": "Eliminar toma"
+          },
+          "viewer": {
+            "currentFirstFrame": "Primer fotograma actual",
+            "counter": "{{current}} de {{total}}",
+            "take": "Toma {{index}}",
+            "previous": "Anterior",
+            "next": "Siguiente",
+            "useTake": "Usar esta toma"
+          }
+        },
         "picture": {
           "title": "Imagen actual",
           "label": "Imagen actual del plano {{index}}",

@@ -282,6 +282,7 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       chainBreak: 'none',
       referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
       seedStillId: 'seed_1',
+      dismissedSeedStillIds: [],
       boardAssetId: null,
       supersededBoardAssetIds: [],
       videoAssetId: 'take_1',

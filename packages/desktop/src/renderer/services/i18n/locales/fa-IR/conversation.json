@@ -1113,6 +1113,57 @@
           "authorizationLocked": "کار ویدیویی مجاز، فریم نخست این شات را قفل کرده است. گزینه‌های واردشده ذخیره می‌مانند، اما نمی‌توانند بذر موجود در برآورد بازبینی‌شده را جایگزین کنند.",
           "authorizationIncompatible": "برای کار مجاز در دسترس نیست"
         },
+        "firstFrames": {
+          "title": "فریم‌های نخست",
+          "shotChip": "نما {{shot}}",
+          "on": "فعال",
+          "status": {
+            "notReady": "آماده نیست",
+            "ready": "آماده رندر",
+            "rendering": "در حال رندر",
+            "rendered": "رندر شده"
+          },
+          "frameLabel": "فریم {{index}}",
+          "origin": {
+            "generated": "تولیدشده",
+            "imported": "واردشده",
+            "board": "استوری‌بورد",
+            "inherited": "از نمای {{shot}}"
+          },
+          "current": "فعلی",
+          "unavailable": "در دسترس نیست",
+          "previewAlt": "پیش‌نمایش · {{label}}",
+          "openFrame": "باز کردن تمام‌صفحه {{label}}",
+          "pinned": "به‌عنوان فریم نخست سنجاق شد",
+          "pin": "سنجاق به‌عنوان فریم نخست",
+          "firstFrameChanged": "فریم نخست تغییر کرد · دوباره اجرا نشده",
+          "promptChanged": "ویرایش شد · هنوز اجرا نشده",
+          "import": "وارد کردن فریم نخست",
+          "empty": "فریم نخست واجد شرایطی نیست",
+          "currentPicture": "تصویر فعلی",
+          "pictureEmpty": "هنوز تصویری نیست",
+          "pictureAlt": "تصویر فعلی نمای {{shot}}",
+          "sendLastFrame": "ارسال آخرین فریم به نمای {{shot}}",
+          "cancelRun": "لغو اجرا",
+          "generateShot": "تولید نمای {{shot}}",
+          "promptLabel": "پرامپت نما",
+          "regenerate": "تولید دوباره",
+          "menu": {
+            "download": "دانلود",
+            "copyPrompt": "کپی پرامپت",
+            "remove": "حذف",
+            "previousTakes": "برداشت‌های قبلی",
+            "removeTake": "حذف برداشت"
+          },
+          "viewer": {
+            "currentFirstFrame": "فریم نخست فعلی",
+            "counter": "{{current}} از {{total}}",
+            "take": "برداشت {{index}}",
+            "previous": "قبلی",
+            "next": "بعدی",
+            "useTake": "استفاده از این برداشت"
+          }
+        },
         "picture": {
           "title": "تصویر فعلی",
           "label": "تصویر فعلی برای شات {{index}}",

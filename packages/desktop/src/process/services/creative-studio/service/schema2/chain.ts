@@ -102,8 +102,11 @@ const eligibleExplicitSeed = (project: StudioProjectV2, shot: StudioShot, assetI
   eligibleSeed(project, shot, assetId) ?? resolveStudioCanonicalBoardAssetV2(project, shot, assetId)?.asset ?? null;
 
 const effectiveSeed = (project: StudioProjectV2, shot: StudioShot): StudioAssetV2 | null => {
-  if (shot.seedStillId !== null) return eligibleExplicitSeed(project, shot, shot.seedStillId);
+  if (shot.seedStillId !== null && !shot.dismissedSeedStillIds.includes(shot.seedStillId)) {
+    return eligibleExplicitSeed(project, shot, shot.seedStillId);
+  }
   const candidates = shot.assetIds.flatMap((assetId) => {
+    if (shot.dismissedSeedStillIds.includes(assetId)) return [];
     const asset = eligibleSeed(project, shot, assetId);
     return asset === null ? [] : [asset];
   });
@@ -379,7 +382,7 @@ export const deriveStudioInboundShotReferencesV2 = (
       owner === undefined || beat === undefined ? null : (beat.shotOrder[owner.shotIndex + 1] ?? null);
     if (dependentShotId !== null) add(extraction.shotId, dependentShotId, 'downstream_pending_frame');
   }
-  return result.sort((left, right) => {
+  return result.toSorted((left, right) => {
     const byShot =
       (targetOrder.get(left.shotId) ?? Number.MAX_SAFE_INTEGER) -
       (targetOrder.get(right.shotId) ?? Number.MAX_SAFE_INTEGER);

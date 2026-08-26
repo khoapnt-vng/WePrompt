@@ -165,6 +165,7 @@ const SHOT_KEYS = new Set([
   'chainBreak',
   'referenceBinding',
   'seedStillId',
+  'dismissedSeedStillIds',
   'boardAssetId',
   'supersededBoardAssetIds',
   'videoAssetId',
@@ -646,6 +647,7 @@ const validateShotRecord = (
   (value.chainBreak === 'none' || value.chainBreak === 'hard_cut') &&
   validateReferenceBinding(value.referenceBinding) &&
   isNullableSafeId(value.seedStillId) &&
+  isUniqueSafeIdArray(value.dismissedSeedStillIds) &&
   isNullableSafeId(value.boardAssetId) &&
   isUniqueSafeIdArray(value.supersededBoardAssetIds) &&
   isNullableSafeId(value.videoAssetId) &&
@@ -2040,7 +2042,22 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   };
 
   for (const shot of Object.values(project.shots)) {
-    if (shot.seedStillId !== null && !isCanonicalSeedSelection(ownValue(project.assets, shot.seedStillId), shot.id)) {
+    if (
+      (shot.seedStillId !== null &&
+        (shot.dismissedSeedStillIds.includes(shot.seedStillId) ||
+          !isCanonicalSeedSelection(ownValue(project.assets, shot.seedStillId), shot.id))) ||
+      shot.dismissedSeedStillIds.some((assetId) => {
+        const asset = ownValue(project.assets, assetId);
+        return (
+          asset === undefined ||
+          asset.shotId !== shot.id ||
+          asset.mediaKind !== 'image' ||
+          (asset.managedAsset.collection !== 'assets' &&
+            asset.managedAsset.collection !== 'imports' &&
+            asset.managedAsset.collection !== 'boardStills')
+        );
+      })
+    ) {
       return false;
     }
     const successfulBoardAssetIds = shot.jobIds.flatMap((jobId) => {
@@ -2070,10 +2087,9 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         ? [job.outputAssetIdsByRole.primary]
         : [];
     });
-    const expectedVideoAssetId = successfulVideoAssetIds.at(-1) ?? null;
-    const expectedSupersededVideoAssetIds = successfulVideoAssetIds.slice(0, -1);
+    const expectedSupersededVideoAssetIds = successfulVideoAssetIds.filter((assetId) => assetId !== shot.videoAssetId);
     if (
-      shot.videoAssetId !== expectedVideoAssetId ||
+      (shot.videoAssetId !== null && !successfulVideoAssetIds.includes(shot.videoAssetId)) ||
       shot.supersededVideoAssetIds.length !== expectedSupersededVideoAssetIds.length ||
       shot.supersededVideoAssetIds.some((assetId, index) => assetId !== expectedSupersededVideoAssetIds[index])
     ) {

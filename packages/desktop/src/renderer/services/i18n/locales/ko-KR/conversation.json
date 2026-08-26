@@ -1113,6 +1113,52 @@
           "authorizationLocked": "승인된 비디오 작업이 이 샷의 첫 프레임을 잠갔습니다. 가져온 후보는 저장되지만 검토된 견적의 시드를 대체할 수 없습니다.",
           "authorizationIncompatible": "승인된 작업에 사용할 수 없음"
         },
+        "firstFrames": {
+          "title": "첫 프레임",
+          "shotChip": "샷 {{shot}}",
+          "on": "선택됨",
+          "status": {
+            "notReady": "준비 안 됨",
+            "ready": "렌더링 준비됨",
+            "rendering": "렌더링 중",
+            "rendered": "렌더링됨"
+          },
+          "frameLabel": "프레임 {{index}}",
+          "origin": { "generated": "생성됨", "imported": "가져옴", "board": "보드", "inherited": "샷 {{shot}}에서" },
+          "current": "현재",
+          "unavailable": "사용할 수 없음",
+          "previewAlt": "미리보기 · {{label}}",
+          "openFrame": "{{label}} 전체 화면으로 열기",
+          "pinned": "첫 프레임으로 고정됨",
+          "pin": "첫 프레임으로 고정",
+          "firstFrameChanged": "첫 프레임 변경됨 · 다시 실행하지 않음",
+          "promptChanged": "편집됨 · 아직 실행되지 않음",
+          "import": "첫 프레임 가져오기",
+          "empty": "사용 가능한 첫 프레임 없음",
+          "currentPicture": "현재 영상",
+          "pictureEmpty": "아직 영상 없음",
+          "pictureAlt": "샷 {{shot}}의 현재 영상",
+          "sendLastFrame": "마지막 프레임을 샷 {{shot}}에 보내기",
+          "cancelRun": "실행 취소",
+          "generateShot": "샷 {{shot}} 생성",
+          "promptLabel": "샷 프롬프트",
+          "regenerate": "다시 생성",
+          "menu": {
+            "download": "다운로드",
+            "copyPrompt": "프롬프트 복사",
+            "remove": "제거",
+            "previousTakes": "이전 테이크",
+            "removeTake": "테이크 제거"
+          },
+          "viewer": {
+            "currentFirstFrame": "현재 첫 프레임",
+            "counter": "{{total}}개 중 {{current}}",
+            "take": "테이크 {{index}}",
+            "previous": "이전",
+            "next": "다음",
+            "useTake": "이 테이크 사용"
+          }
+        },
         "picture": {
           "title": "현재 사진",
           "label": "샷 {{index}}의 현재 사진",

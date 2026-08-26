@@ -442,6 +442,27 @@ const studioMutationOperationSchemasV2 = {
       assetId: studioDirectorIdSchemaV2.nullable(),
     })
     .strict(),
+  dismissSeedStill: z4
+    .object({
+      kind: z4.literal('dismiss_seed_still'),
+      shotId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  selectVideoTake: z4
+    .object({
+      kind: z4.literal('select_video_take'),
+      shotId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  removeVideoTake: z4
+    .object({
+      kind: z4.literal('remove_video_take'),
+      shotId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
   promoteBoardPanel: z4
     .object({
       kind: z4.literal('promote_board_panel'),
@@ -516,6 +537,9 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.applyCoverage,
   studioMutationOperationSchemasV2.setHardCut,
   studioMutationOperationSchemasV2.setSeedStill,
+  studioMutationOperationSchemasV2.dismissSeedStill,
+  studioMutationOperationSchemasV2.selectVideoTake,
+  studioMutationOperationSchemasV2.removeVideoTake,
   studioMutationOperationSchemasV2.promoteBoardPanel,
   studioMutationOperationSchemasV2.trimShot,
   studioMutationOperationSchemasV2.reorderBin,

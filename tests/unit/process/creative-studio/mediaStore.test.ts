@@ -193,6 +193,7 @@ const makeStoreV2 = async (
           backgroundReferenceId: null,
         },
         seedStillId: null,
+        dismissedSeedStillIds: [],
         boardAssetId: null,
         supersededBoardAssetIds: [],
         videoAssetId: null,
@@ -215,6 +216,7 @@ const makeStoreV2 = async (
                 backgroundReferenceId: null,
               },
               seedStillId: null,
+              dismissedSeedStillIds: [],
               boardAssetId: null,
               supersededBoardAssetIds: [],
               videoAssetId: null,
@@ -934,6 +936,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         shots: {
           shot_1: {
             seedStillId: null,
+            dismissedSeedStillIds: [],
             videoAssetId: null,
             supersededVideoAssetIds: [],
             assetIds: ['seed_output_1'],
@@ -993,6 +996,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
               backgroundReferenceId: null,
             },
             seedStillId: null,
+            dismissedSeedStillIds: [],
             boardAssetId: null,
             assetIds: [],
           },
@@ -1147,6 +1151,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         shots: {
           shot_1: {
             seedStillId: null,
+            dismissedSeedStillIds: [],
             boardAssetId: 'board_output_1',
             supersededBoardAssetIds: [],
             videoAssetId: null,
@@ -1894,6 +1899,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         shot_1: {
           assetIds: ['human_seed_1'],
           seedStillId: null,
+          dismissedSeedStillIds: [],
           videoAssetId: null,
           supersededVideoAssetIds: [],
           jobIds: [],
@@ -3340,6 +3346,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     );
     expect(promoted.project.shots.shot_1).toMatchObject({
       seedStillId: 'board_output_owned',
+      dismissedSeedStillIds: [],
       boardAssetId: 'board_output_owned',
       chainBreak: 'none',
     });
@@ -3384,6 +3391,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         shots: {
           shot_1: {
             seedStillId: 'board_output_owned',
+            dismissedSeedStillIds: [],
             boardAssetId: 'board_output_redraw',
             supersededBoardAssetIds: ['board_output_owned'],
             chainBreak: 'none',

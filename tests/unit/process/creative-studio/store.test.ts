@@ -582,6 +582,7 @@ describe('schema-2 creative studio project store', () => {
       chainBreak: 'none',
       referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
       seedStillId: 'asset_seed',
+      dismissedSeedStillIds: [],
       boardAssetId: null,
       supersededBoardAssetIds: [],
       videoAssetId: 'asset_video',

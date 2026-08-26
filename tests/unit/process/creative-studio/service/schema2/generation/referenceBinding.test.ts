@@ -32,6 +32,7 @@ const shot = (overrides: Partial<StudioShot> = {}): StudioShot => ({
     backgroundReferenceId: 'reference_dai_pai_dong',
   },
   seedStillId: null,
+  dismissedSeedStillIds: [],
   boardAssetId: null,
   supersededBoardAssetIds: [],
   videoAssetId: null,

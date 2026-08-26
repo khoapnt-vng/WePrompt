@@ -1,7 +1,7 @@
 .modal {
   box-sizing: border-box;
-  inline-size: min(1100px, calc(100vw - 32px));
-  max-inline-size: 1100px;
+  inline-size: min(1320px, calc(100vw - 32px));
+  max-inline-size: 1320px;
   overflow: hidden;
   border: 1px solid var(--color-border-1);
   border-radius: 16px;
@@ -82,6 +82,61 @@
   display: grid;
   gap: 18px;
   padding: 18px 22px;
+}
+
+.shotHeader {
+  display: grid;
+  grid-template-columns: minmax(150px, auto) minmax(240px, 1fr) auto;
+  align-items: start;
+  padding-inline-start: 10px;
+  border-inline-start: 3px solid var(--color-primary-6);
+}
+
+.shotHeading {
+  display: grid;
+  min-inline-size: 0;
+  gap: 3px;
+}
+
+.shotTitle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.onTag,
+.shotStatus {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.onTag {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--color-bg-1);
+  background: var(--color-primary-6);
+}
+
+.shotStatus {
+  color: var(--text-primary);
+}
+
+.shotPromptInput {
+  min-inline-size: 0;
+}
+
+@media (max-width: 760px) {
+  .shotHeader {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .shotPromptInput {
+    grid-row: 2;
+    grid-column: 1 / -1;
+  }
 }
 
 .shotCard[hidden] {

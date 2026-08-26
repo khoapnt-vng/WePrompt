@@ -358,6 +358,7 @@ const projectWithHandoffShot = (): StudioRendererProjectV2 => {
     chainBreak: 'hard_cut',
     referenceBinding: unassignedReferenceBinding(),
     seedStillId: null,
+    dismissedSeedStillIds: [],
     boardAssetId: null,
     supersededBoardAssetIds: [],
     videoAssetId: null,
@@ -453,6 +454,7 @@ const projectWithDraftBatch = (beatCount: number): StudioRendererProjectV2 => {
       chainBreak: index === 0 ? 'hard_cut' : 'none',
       referenceBinding: unassignedReferenceBinding(),
       seedStillId: null,
+      dismissedSeedStillIds: [],
       boardAssetId: null,
       supersededBoardAssetIds: [],
       videoAssetId: null,
@@ -574,6 +576,7 @@ const projectWithBoardJobs = (shotCount: number, includeJobs = true): StudioRend
         chainBreak: 'hard_cut',
         referenceBinding: unassignedReferenceBinding(),
         seedStillId: null,
+        dismissedSeedStillIds: [],
         boardAssetId: null,
         supersededBoardAssetIds: [],
         videoAssetId: null,
@@ -819,6 +822,7 @@ const projectWithRecovery = (revision = 3): StudioRendererProjectV2 => {
       chainBreak: index === 0 || index === 2 ? 'hard_cut' : 'none',
       referenceBinding: unassignedReferenceBinding(),
       seedStillId: null,
+      dismissedSeedStillIds: [],
       boardAssetId: null,
       supersededBoardAssetIds: [],
       videoAssetId: null,
@@ -848,6 +852,7 @@ const projectWithAuthorizedSeedLock = (revision = 3): StudioRendererProjectV2 =>
     shootingScript: 'Authorized locked Shot',
     chainBreak: 'hard_cut',
     seedStillId: null,
+    dismissedSeedStillIds: [],
     boardAssetId: null,
     supersededBoardAssetIds: [],
     videoAssetId: null,
@@ -4999,6 +5004,10 @@ describe('StudioPage schema-5 cutover', () => {
       invoke: (actions: BeatPanelActions) =>
         actions.reviewShot('shot_locked', [{ shotId: 'shot_locked', purpose: 'seed_still' }]),
     },
+    {
+      path: 'first-frame regeneration',
+      invoke: (actions: BeatPanelActions) => actions.reviewSeedStill('shot_locked'),
+    },
   ])('blocks the ordinary $path review path while authorized work owns the seed', async ({ invoke }) => {
     const authority = projectWithAuthorizedSeedLock(3);
     mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
@@ -5017,6 +5026,59 @@ describe('StudioPage schema-5 cutover', () => {
     expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('opens first-frame regeneration only for an exact payable segment head', async () => {
+    mockSupportedProject(projectWithHandoffShot());
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+
+    act(() => actions.reviewSeedStill('missing_shot'));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+
+    act(() => actions.reviewSeedStill('shot_3'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'generation');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails first-frame regeneration closed while image capability refreshes against an unavailable route', async () => {
+    const initial = projectWithHandoffShot();
+    const changed = structuredClone(initial);
+    changed.revision = 4;
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'unavailable',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [],
+        },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    mockSupportedProject(initial);
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledOnce());
+
+    const capability = deferred<ReturnType<typeof supportedCapabilityResult>>();
+    mocks.bridge.getGenerationCapability.invoke.mockReturnValueOnce(capability.promise);
+    mockSupportedProject(changed);
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(2));
+
+    act(() => capturedBeatPanelActions().reviewSeedStill('shot_3'));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.imageRouteBlocked')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+
+    const request = mocks.bridge.getGenerationCapability.invoke.mock.calls[1]![0];
+    await act(async () => capability.resolve(supportedCapabilityResult(request)));
   });
 
   it('cancels an exact authorized seed wait once and rebuilds rejoin review from the committed revision', async () => {
@@ -5149,7 +5211,7 @@ describe('StudioPage schema-5 cutover', () => {
     const seedCard = document.querySelector<HTMLElement>('article[data-shot-id="upstream_seed"]');
     expect(seedCard).not.toBeNull();
     const importButton = within(seedCard!).getByRole('button', {
-      name: 'conversation.creativeStudio.workspace.beatPanel.seeds.import',
+      name: 'conversation.creativeStudio.workspace.beatPanel.firstFrames.import',
     });
 
     fireEvent.click(importButton);
@@ -5471,6 +5533,9 @@ describe('StudioPage schema-5 cutover', () => {
     );
     expect(actions).not.toHaveProperty('setHardCut');
     await expectSuccessfulBeatPanelAction(() => actions.setSeedStill('shot_0', 'seed_asset'));
+    await expectSuccessfulBeatPanelAction(() => actions.dismissSeedStill('shot_0', 'seed_asset'));
+    await expectSuccessfulBeatPanelAction(() => actions.selectVideoTake('shot_0', 'video_old'));
+    await expectSuccessfulBeatPanelAction(() => actions.removeVideoTake('shot_0', 'video_old'));
     await expectSuccessfulBeatPanelAction(() => actions.trimShot('shot_0', 1, 2));
     await expectSuccessfulBeatPanelAction(() => actions.reorderShots('beat_0', ['shot_1', 'shot_0']));
     expect(actions).not.toHaveProperty('redetachLine');
@@ -5523,50 +5588,65 @@ describe('StudioPage schema-5 cutover', () => {
       {
         projectId: 'project_1',
         expectedRevision: 6,
-        operations: [{ kind: 'trim_shot', shotId: 'shot_0', trimInSeconds: 1, trimOutSeconds: 2 }],
+        operations: [{ kind: 'dismiss_seed_still', shotId: 'shot_0', assetId: 'seed_asset' }],
       },
       {
         projectId: 'project_1',
         expectedRevision: 7,
-        operations: [{ kind: 'reorder_shots', beatId: 'beat_0', shotOrder: ['shot_1', 'shot_0'] }],
+        operations: [{ kind: 'select_video_take', shotId: 'shot_0', assetId: 'video_old' }],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 8,
+        operations: [{ kind: 'remove_video_take', shotId: 'shot_0', assetId: 'video_old' }],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 9,
+        operations: [{ kind: 'trim_shot', shotId: 'shot_0', trimInSeconds: 1, trimOutSeconds: 2 }],
       },
       {
         projectId: 'project_1',
         expectedRevision: 10,
+        operations: [{ kind: 'reorder_shots', beatId: 'beat_0', shotOrder: ['shot_1', 'shot_0'] }],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 13,
         operations: [{ kind: 'reorder_beats', beatOrder: ['beat_1', 'beat_0'] }],
       },
     ]);
     expect(mocks.bridge.parkShot.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 8,
+      expectedRevision: 11,
       shotId: 'shot_0',
     });
     expect(mocks.bridge.parkBeat.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 9,
+      expectedRevision: 12,
       beatId: 'beat_0',
     });
     expect(mocks.bridge.restoreBeat.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 11,
+      expectedRevision: 14,
       beatId: 'beat_2',
       beforeBeatId: 'beat_1',
     });
     expect(mocks.bridge.restoreShot.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 12,
+      expectedRevision: 15,
       shotId: 'shot_2',
       beforeShotId: 'shot_1',
     });
     expect(mocks.bridge.reorderBin.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 13,
+      expectedRevision: 16,
       bin: [
         { kind: 'beat', beatId: 'beat_2', reason: 'lifted' },
         { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
       ],
     });
-    expect(revision).toBe(14);
+    expect(revision).toBe(17);
   });
 
   it('projects malformed topology defensively through both render and close-save traversal', async () => {

@@ -20,6 +20,7 @@ const makeShot = (overrides: Partial<StudioShot> = {}): StudioShot => ({
   chainBreak: 'none',
   referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
+  dismissedSeedStillIds: [],
   boardAssetId: null,
   supersededBoardAssetIds: [],
   videoAssetId: null,

@@ -18,8 +18,6 @@ import {
   type StudioRendererParkBlockerCodeV2,
   type StudioRendererParkEligibilityV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
-import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../workspaceProjection';
@@ -28,6 +26,7 @@ import styles from './BeatPanel.module.css';
 import { BeatPlayer } from './BeatPlayer';
 import { CoverageBar } from './CoverageBar';
 import type { CoveragePlanningPairChange } from './coverageGeometry';
+import { FirstFrames, firstFramesStatus } from './FirstFrames';
 
 const KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel';
 const JOB_KEY_ROOT = 'conversation.creativeStudio.jobs';
@@ -64,12 +63,16 @@ export type BeatPanelActions = {
   saveBeat: (beatId: string, changes: StudioEditableBeatChanges) => Promise<boolean>;
   saveShot: (updates: readonly [BeatPanelShotSave, ...BeatPanelShotSave[]]) => Promise<boolean>;
   setSeedStill: (shotId: string, assetId: string | null) => Promise<boolean>;
+  dismissSeedStill: (shotId: string, assetId: string) => Promise<boolean>;
+  selectVideoTake: (shotId: string, assetId: string) => Promise<boolean>;
+  removeVideoTake: (shotId: string, assetId: string) => Promise<boolean>;
   trimShot: (shotId: string, trimInSeconds: number | null, trimOutSeconds: number | null) => Promise<boolean>;
   reorderShots: (beatId: string, shotOrder: readonly string[]) => Promise<boolean>;
   importSeedStill: (shotId: string) => Promise<BeatPanelImportResult>;
   parkShot: (shotId: string, onCommitted?: () => void) => Promise<boolean>;
   parkBeat: (beatId: string) => Promise<boolean>;
   reviewShot: (triggerShotId: string, choices: readonly [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]) => void;
+  reviewSeedStill: (shotId: string) => void;
   reviewContinuity: (shotId: string, hardCut: boolean) => void;
   resolveGenerationBlock: (shotId: string, block: StudioGenerationBlockV2) => void;
   retryGenerationJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
@@ -208,89 +211,6 @@ const useLatestDrafts = (drafts: UseWorkspaceDraftsResult): React.MutableRefObje
   return ref;
 };
 
-type SeedStillCardProps = {
-  actions: BeatPanelActions;
-  canManageSeed: boolean;
-  disabled: boolean;
-  projectId: string;
-  shot: WorkspaceShotProjection;
-  shotIndex: number;
-  still: WorkspaceShotProjection['seedStills'][number];
-  stillIndex: number;
-};
-
-const SeedStillCard: React.FC<SeedStillCardProps> = ({
-  actions,
-  canManageSeed,
-  disabled,
-  projectId,
-  shot,
-  shotIndex,
-  still,
-  stillIndex,
-}) => {
-  const { t } = useTranslation();
-  const assetUrl = createManagedStudioAssetUrl(projectId, still.assetId);
-  const pinBlockedByAuthorization =
-    shot.seedAuthorizationLock !== null && !shot.seedAuthorizationLock.compatibleAssetIds.includes(still.assetId);
-  const canClearSeed = shot.seedAuthorityStatusReady && shot.seedAuthorizationLock === null && still.explicitSeed;
-  const canPinSeed = shot.seedAuthorityStatusReady && !still.explicitSeed && !pinBlockedByAuthorization;
-  const stillLabel = t(`${KEY_ROOT}.seeds.stillLabel`, {
-    shotIndex: shotIndex + 1,
-    stillIndex: stillIndex + 1,
-  });
-  if (assetUrl === null) {
-    return (
-      <article className={styles.mediaCard} data-asset-id={still.assetId}>
-        <p className={styles.warning} role='alert'>
-          {t(`${KEY_ROOT}.picture.unavailable`)}
-        </p>
-      </article>
-    );
-  }
-  return (
-    <article
-      aria-label={stillLabel}
-      className={styles.mediaCard}
-      data-asset-id={still.assetId}
-      data-effective-seed={still.effectiveSeed}
-      data-explicit-seed={still.explicitSeed}
-      data-seed-still
-    >
-      <FullscreenMediaFrame className={styles.mediaPreviewFrame}>
-        <img
-          alt={t(`${KEY_ROOT}.seeds.previewAlt`, { label: stillLabel })}
-          className={styles.mediaPreview}
-          src={assetUrl}
-        />
-      </FullscreenMediaFrame>
-      <div className={styles.mediaDetails}>
-        <span className={styles.mediaIdentity} dir='auto'>
-          {stillLabel}
-        </span>
-        <div className={styles.badges}>
-          {still.effectiveSeed ? <span>{t(`${KEY_ROOT}.seeds.effective`)}</span> : null}
-          {still.explicitSeed ? <span>{t(`${KEY_ROOT}.seeds.pinnedBadge`)}</span> : null}
-          {pinBlockedByAuthorization ? <span>{t(`${KEY_ROOT}.seeds.authorizationIncompatible`)}</span> : null}
-        </div>
-      </div>
-      {canManageSeed ? (
-        <div className={styles.actions}>
-          {canClearSeed ? (
-            <Button disabled={disabled} onClick={() => void actions.setSeedStill(shot.id, null)} size='small'>
-              {t(`${KEY_ROOT}.seeds.clearPin`)}
-            </Button>
-          ) : canPinSeed ? (
-            <Button disabled={disabled} onClick={() => void actions.setSeedStill(shot.id, still.assetId)} size='small'>
-              {t(`${KEY_ROOT}.seeds.pin`)}
-            </Button>
-          ) : null}
-        </div>
-      ) : null}
-    </article>
-  );
-};
-
 type ShotCardProps = {
   actions: BeatPanelActions;
   beat: WorkspaceBeatProjection;
@@ -335,7 +255,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const { t } = useTranslation();
   const draftsRef = useLatestDrafts(drafts);
   const [saving, setSaving] = useState(false);
-  const [importing, setImporting] = useState(false);
   const [lifting, setLifting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [recoveringJobId, setRecoveringJobId] = useState<string | null>(null);
@@ -363,9 +282,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
   // Planned duration leaves the Shot editor and is revealed from that Shot's overflow menu.
   const [durationOpen, setDurationOpen] = useState(false);
   const durationFieldRef = useRef<HTMLLabelElement | null>(null);
-  // The Shooting script reads on hover from the header control and opens to edit.
-  const [scriptOpen, setScriptOpen] = useState(false);
-  const scriptFieldRef = useRef<HTMLLabelElement | null>(null);
   const shootingScript = draftString(drafts, shootingScriptKey, shot.shootingScript);
   const durationSeconds = draftNumber(drafts, durationKey, shot.durationSeconds);
   const draftKeys = [shootingScriptKey, durationKey] as const;
@@ -428,8 +344,9 @@ const ShotCard: React.FC<ShotCardProps> = ({
           : 'segment_head'
         : 'continuous';
 
-  const save = async (): Promise<void> => {
-    if (!dirty || saving || disabled || drafts.staleRevision) return;
+  const save = async (): Promise<boolean> => {
+    if (!dirty) return true;
+    if (saving || disabled || drafts.staleRevision) return false;
     const submitted = [
       [shootingScriptKey, shootingScript],
       [durationKey, durationSeconds],
@@ -439,12 +356,13 @@ const ShotCard: React.FC<ShotCardProps> = ({
     if (durationSeconds !== shot.durationSeconds) changes.durationSeconds = durationSeconds;
     if (Object.keys(changes).length === 0) {
       submitted.forEach(([key, value]) => draftsRef.current.resetIfValue(key, value));
-      return;
+      return true;
     }
     setSaving(true);
     try {
       const saved = await actions.saveShot([{ shotId: shot.id, changes: changes as StudioEditableShotChanges }]);
       if (saved) submitted.forEach(([key, value]) => draftsRef.current.resetIfValue(key, value));
+      return saved;
     } finally {
       setSaving(false);
     }
@@ -452,16 +370,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
 
   const reset = (): void => {
     draftKeys.forEach(drafts.reset);
-  };
-
-  const importSeed = async (): Promise<void> => {
-    if (importing || disabled) return;
-    setImporting(true);
-    try {
-      await actions.importSeedStill(shot.id);
-    } finally {
-      setImporting(false);
-    }
   };
 
   useEffect(() => {
@@ -602,11 +510,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
     durationFieldRef.current?.querySelector('input')?.focus();
   }, [durationOpen]);
 
-  useEffect(() => {
-    if (!scriptOpen) return;
-    scriptFieldRef.current?.querySelector('textarea')?.focus();
-  }, [scriptOpen]);
-
   const shotMenu = (
     <Menu data-shot-id={shot.id} data-shot-overflow-menu>
       <Menu.Item
@@ -654,22 +557,33 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </Menu.Item>
     </Menu>
   );
-  const pictureLabel = t(`${KEY_ROOT}.picture.label`, { index: index + 1 });
-  const currentPictureUrl =
-    shot.currentPicture === null ? null : createManagedStudioAssetUrl(projectId, shot.currentPicture.assetId);
-  const currentPicturePosterUrl =
-    shot.currentPicture?.posterAssetId === null || shot.currentPicture?.posterAssetId === undefined
-      ? null
-      : createManagedStudioAssetUrl(projectId, shot.currentPicture.posterAssetId);
-  const currentPictureAvailable =
-    shot.currentPicture !== null &&
-    currentPictureUrl !== null &&
-    (shot.currentPicture.posterAssetId === null || currentPicturePosterUrl !== null);
+  const normalizedStatus = firstFramesStatus(shot);
+  const generationDisabled =
+    disabled ||
+    reviewBlocked ||
+    reviewedGenerationBlocked ||
+    reviewPreferences === null ||
+    reviewBlock !== null ||
+    shot.seedAuthorizationLock !== null;
+  const generateVideo = async (): Promise<void> => {
+    if (generationDisabled || reviewPreferences === null || reviewPreferences.length === 0) return;
+    if (!(await save())) return;
+    actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
+  };
+  const regenerateFrame = async (): Promise<void> => {
+    if (disabled || reviewBlocked || !shot.segmentHead || shot.seedAuthorizationLock !== null) return;
+    if (!(await save())) return;
+    actions.reviewSeedStill(shot.id);
+  };
   return (
     <article ref={shotCardRef} className={styles.shotCard} data-shot-card data-shot-id={shot.id} hidden={hidden}>
-      <header className={styles.shotHeader}>
-        <div>
-          <h3 className={styles.shotTitle}>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
+      <header className={styles.shotHeader} data-shot-header>
+        <div className={styles.shotHeading}>
+          <h3 className={styles.shotTitle}>
+            {t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}
+            <span className={styles.onTag}>{t(`${KEY_ROOT}.firstFrames.on`)}</span>
+          </h3>
+          <span className={styles.shotStatus}>{t(`${KEY_ROOT}.firstFrames.status.${normalizedStatus}`)}</span>
           <p className={styles.chainState} data-chain-state={chainState}>
             <bdi dir='auto'>
               {chainState === 'segment_head'
@@ -686,18 +600,15 @@ const ShotCard: React.FC<ShotCardProps> = ({
             <p className={styles.warning}>{t(`${KEY_ROOT}.chain.generationOutOfDate`)}</p>
           ) : null}
         </div>
+        <Input
+          aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
+          className={styles.shotPromptInput}
+          data-shot-field='shooting-script'
+          disabled={disabled}
+          onChange={(value) => drafts.setValue(shootingScriptKey, value)}
+          value={shootingScript}
+        />
         <div className={styles.actions}>
-          <Button
-            aria-expanded={scriptOpen}
-            aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
-            data-shot-script-toggle
-            icon={<Notes aria-hidden='true' />}
-            onClick={() => setScriptOpen((open) => !open)}
-            shape='circle'
-            size='small'
-            title={shootingScript}
-            type='text'
-          />
           <Dropdown
             droplist={shotMenu}
             getPopupContainer={() => document.body}
@@ -727,18 +638,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </header>
 
       <div className={styles.editorGrid}>
-        {scriptOpen ? (
-          <label data-shot-field='shooting-script' ref={scriptFieldRef}>
-            <span>{t(`${KEY_ROOT}.fields.shootingScript`)}</span>
-            <Input.TextArea
-              aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
-              autoSize={{ minRows: 3, maxRows: 6 }}
-              disabled={disabled}
-              onChange={(value) => drafts.setValue(shootingScriptKey, value)}
-              value={shootingScript}
-            />
-          </label>
-        ) : null}
         {durationOpen ? (
           <label data-shot-duration-field ref={durationFieldRef}>
             <span>{t(`${KEY_ROOT}.fields.duration`)}</span>
@@ -756,7 +655,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
           </label>
         ) : null}
       </div>
-      <div className={styles.shotActionCluster}>
+      <div className={styles.shotActionCluster} data-shot-footer>
         <div className={styles.shotActionBand} data-shot-action-band>
           <div className={styles.editorActions} data-shot-actions>
             {index > 0 ? (
@@ -792,147 +691,62 @@ const ShotCard: React.FC<ShotCardProps> = ({
         ) : null}
       </div>
 
-      <div className={styles.mediaRegions} data-shot-media-regions>
-        {shot.segmentHead || shot.seedStills.length > 0 ? (
-          <section aria-label={t(`${KEY_ROOT}.seeds.label`, { index: index + 1 })} className={styles.subsection}>
-            {shot.segmentHead ? (
-              <div className={styles.subsectionHeader}>
-                <div>
-                  <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
-                  <p className={styles.muted}>
-                    {t(
-                      shot.effectiveSeedAssetId === null
-                        ? `${KEY_ROOT}.seeds.pending`
-                        : shot.explicitSeedAssetId === null
-                          ? `${KEY_ROOT}.seeds.latestDefault`
-                          : `${KEY_ROOT}.seeds.pinned`
-                    )}
-                  </p>
-                </div>
-                <Button disabled={disabled || importing} loading={importing} onClick={() => void importSeed()}>
-                  {t(`${KEY_ROOT}.seeds.import`)}
-                </Button>
-              </div>
-            ) : (
-              <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
-            )}
-            <div className={styles.mediaStrip}>
-              {shot.seedStills.map((still, stillIndex) => (
-                <SeedStillCard
-                  key={still.assetId}
-                  actions={actions}
-                  canManageSeed={shot.segmentHead}
-                  disabled={disabled}
-                  projectId={projectId}
-                  shot={shot}
-                  shotIndex={index}
-                  still={still}
-                  stillIndex={stillIndex}
-                />
-              ))}
-            </div>
-            {shot.seedAuthorizationLock !== null ? (
-              <Alert content={t(`${KEY_ROOT}.seeds.authorizationLocked`)} showIcon type='warning' />
-            ) : null}
-            {shot.seedStills.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.seeds.empty`)}</p> : null}
-          </section>
-        ) : null}
+      <FirstFrames
+        actions={actions}
+        disabled={disabled}
+        generationDescriptionId={reviewBlockCopy === null ? undefined : generationBlockDescriptionId}
+        generateVideoDisabled={generationDisabled}
+        importDisabled={!shot.segmentHead || shot.seedAuthorizationLock !== null}
+        onGenerateVideo={generateVideo}
+        onImport={() => actions.importSeedStill(shot.id)}
+        onPromptChange={(value) => drafts.setValue(shootingScriptKey, value)}
+        onRegenerateFrame={regenerateFrame}
+        onSendLastFrame={
+          beat.shots[index + 1]?.chainBreak === 'hard_cut'
+            ? () => actions.reviewContinuity(beat.shots[index + 1]!.id, false)
+            : null
+        }
+        projectId={projectId}
+        prompt={shootingScript}
+        shot={shot}
+        shotIndex={index}
+      />
 
-        <section aria-label={pictureLabel} className={styles.subsection}>
-          <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.picture.title`)}</h4>
-          {shot.currentPicture === null ? (
-            <p className={styles.muted}>{t(`${KEY_ROOT}.picture.empty`)}</p>
-          ) : !currentPictureAvailable ? (
-            <p className={styles.warning} role='alert'>
-              {t(`${KEY_ROOT}.picture.unavailable`)}
-            </p>
-          ) : (
-            <article className={styles.mediaCard} data-asset-id={shot.currentPicture.assetId} data-current-picture>
-              <FullscreenMediaFrame className={styles.mediaPreviewFrame}>
-                <video
-                  aria-label={t(`${KEY_ROOT}.picture.videoPreview`, { label: pictureLabel })}
-                  className={styles.mediaPreview}
-                  controls
-                  poster={currentPicturePosterUrl ?? undefined}
-                  preload='metadata'
-                  src={currentPictureUrl!}
-                />
-              </FullscreenMediaFrame>
-              <div className={styles.mediaDetails}>
-                <span className={styles.mediaIdentity} dir='auto'>
-                  {pictureLabel}
-                </span>
-                <span>
-                  <bdi>
-                    {t(`${KEY_ROOT}.picture.sourceDuration`, {
-                      seconds: shot.currentPicture.sourceDurationSeconds,
-                    })}
-                  </bdi>
-                </span>
-              </div>
-            </article>
-          )}
-          <div className={styles.shotFooter} data-shot-footer>
-            {reviewBlockCopy === null && reviewPreferences === null ? (
-              <p className={styles.blocker} role='status'>
-                {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
-              </p>
-            ) : reviewBlockCopy === null ? null : (
-              <div>
-                <p className={styles.blocker} id={generationBlockDescriptionId} role='status'>
-                  {t(reviewBlockCopy.key, reviewBlockCopy.values)}
-                </p>
-                {reviewBlockRemedy === 'none' ? null : (
-                  <Button
-                    onClick={() => {
-                      if (reviewBlock === null) return;
-                      if (reviewBlockRemedy === 'duration') {
-                        // The field is revealed from the Shot's menu, so the remedy opens it rather
-                        // than reaching for an input that is not on screen. The card focuses it.
-                        onRevealDuration(blockedShotId);
-                        return;
-                      }
-                      actions.resolveGenerationBlock(blockedShotId, reviewBlock);
-                    }}
-                    size='small'
-                  >
-                    {t(
-                      reviewBlockRemedy === 'routes'
-                        ? 'conversation.creativeStudio.models.blocked.actionSetEngines'
-                        : reviewBlockRemedy === 'references'
-                          ? 'conversation.creativeStudio.workspace.gate.reviewShotBinding'
-                          : 'conversation.creativeStudio.models.blocked.actionShorten'
-                    )}
-                  </Button>
-                )}
-              </div>
-            )}
+      {shot.seedAuthorizationLock !== null ? (
+        <Alert content={t(`${KEY_ROOT}.seeds.authorizationLocked`)} showIcon type='warning' />
+      ) : null}
+      {reviewBlockCopy === null && reviewPreferences === null ? (
+        <p className={styles.blocker} role='status'>
+          {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
+        </p>
+      ) : reviewBlockCopy === null ? null : (
+        <div>
+          <p className={styles.blocker} id={generationBlockDescriptionId} role='status'>
+            {t(reviewBlockCopy.key, reviewBlockCopy.values)}
+          </p>
+          {reviewBlockRemedy === 'none' ? null : (
             <Button
-              aria-describedby={reviewBlock === null ? undefined : generationBlockDescriptionId}
-              disabled={
-                disabled ||
-                reviewBlocked ||
-                reviewedGenerationBlocked ||
-                reviewPreferences === null ||
-                reviewBlock !== null ||
-                shot.seedAuthorizationLock !== null
-              }
               onClick={() => {
-                if (reviewPreferences !== null && reviewPreferences.length > 0) {
-                  actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
+                if (reviewBlock === null) return;
+                if (reviewBlockRemedy === 'duration') {
+                  onRevealDuration(blockedShotId);
+                  return;
                 }
+                actions.resolveGenerationBlock(blockedShotId, reviewBlock);
               }}
-              type='primary'
+              size='small'
             >
               {t(
-                shot.segmentHead && shot.effectiveSeedAssetId === null
-                  ? `${KEY_ROOT}.generation.generateSeed`
-                  : `${KEY_ROOT}.generation.renderVideo`
+                reviewBlockRemedy === 'routes'
+                  ? 'conversation.creativeStudio.models.blocked.actionSetEngines'
+                  : reviewBlockRemedy === 'references'
+                    ? 'conversation.creativeStudio.workspace.gate.reviewShotBinding'
+                    : 'conversation.creativeStudio.models.blocked.actionShorten'
               )}
             </Button>
-          </div>
-        </section>
-      </div>
+          )}
+        </div>
+      )}
 
       {shot.attentionJobs.length > 0 ? (
         <section

@@ -748,11 +748,12 @@ const canonicalCutCoverAssetV2 = (project: StudioProjectV2, shotId: string): Stu
     }
   }
   if (!segmentHead) return null;
-  if (activeShot.seedStillId !== null) {
+  if (activeShot.seedStillId !== null && !activeShot.dismissedSeedStillIds.includes(activeShot.seedStillId)) {
     const explicit = eligibleExplicitSeedAssetV2(project, activeShot, activeShot.seedStillId);
     if (explicit !== null) return explicit;
   }
   const candidates = activeShot.assetIds.flatMap((assetId) => {
+    if (activeShot.dismissedSeedStillIds.includes(assetId)) return [];
     const candidate = eligibleSeedAssetV2(project, activeShot!, assetId);
     return candidate === null ? [] : [candidate];
   });
@@ -1846,6 +1847,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     if (
       authority === null ||
       (authority.shotIndex !== 0 && authority.shot.chainBreak !== 'hard_cut') ||
+      authority.shot.dismissedSeedStillIds.includes(promotion.boardAssetId) ||
       authority.shot.seedStillId === promotion.boardAssetId
     ) {
       return null;
@@ -1995,7 +1997,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         throw invalid('Invalid Studio confirmation binding');
       }
       const targetKey = studioGenerationTargetKey(item.target);
-      const retryPredecessors = [...owner.jobIds].reverse().flatMap((jobId) => {
+      const retryPredecessors = [...owner.jobIds].toReversed().flatMap((jobId) => {
         const candidate = ownValue(project.jobs, jobId);
         if (
           candidate === undefined ||

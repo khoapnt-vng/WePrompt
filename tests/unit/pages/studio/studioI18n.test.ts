@@ -59,6 +59,50 @@ const localizedAuthorizedSeedRecoveryKeys = [
   'beatPanel.recovery.cancelAndReviewRejoinOutcomeUnknown',
 ] as const;
 
+const localizedFirstFramesPanelKeys = [
+  'beatPanel.firstFrames.title',
+  'beatPanel.firstFrames.shotChip',
+  'beatPanel.firstFrames.on',
+  'beatPanel.firstFrames.status.notReady',
+  'beatPanel.firstFrames.status.ready',
+  'beatPanel.firstFrames.status.rendering',
+  'beatPanel.firstFrames.status.rendered',
+  'beatPanel.firstFrames.frameLabel',
+  'beatPanel.firstFrames.origin.generated',
+  'beatPanel.firstFrames.origin.imported',
+  'beatPanel.firstFrames.origin.board',
+  'beatPanel.firstFrames.origin.inherited',
+  'beatPanel.firstFrames.current',
+  'beatPanel.firstFrames.unavailable',
+  'beatPanel.firstFrames.previewAlt',
+  'beatPanel.firstFrames.openFrame',
+  'beatPanel.firstFrames.pinned',
+  'beatPanel.firstFrames.pin',
+  'beatPanel.firstFrames.firstFrameChanged',
+  'beatPanel.firstFrames.promptChanged',
+  'beatPanel.firstFrames.import',
+  'beatPanel.firstFrames.empty',
+  'beatPanel.firstFrames.currentPicture',
+  'beatPanel.firstFrames.pictureEmpty',
+  'beatPanel.firstFrames.pictureAlt',
+  'beatPanel.firstFrames.sendLastFrame',
+  'beatPanel.firstFrames.cancelRun',
+  'beatPanel.firstFrames.generateShot',
+  'beatPanel.firstFrames.promptLabel',
+  'beatPanel.firstFrames.regenerate',
+  'beatPanel.firstFrames.menu.download',
+  'beatPanel.firstFrames.menu.copyPrompt',
+  'beatPanel.firstFrames.menu.remove',
+  'beatPanel.firstFrames.menu.previousTakes',
+  'beatPanel.firstFrames.menu.removeTake',
+  'beatPanel.firstFrames.viewer.currentFirstFrame',
+  'beatPanel.firstFrames.viewer.counter',
+  'beatPanel.firstFrames.viewer.take',
+  'beatPanel.firstFrames.viewer.previous',
+  'beatPanel.firstFrames.viewer.next',
+  'beatPanel.firstFrames.viewer.useTake',
+] as const;
+
 const loadConversation = (locale: string): JsonObject =>
   JSON.parse(readFileSync(join(localeRoot, locale, 'conversation.json'), 'utf8')) as JsonObject;
 
@@ -86,6 +130,7 @@ const flattenLeaves = (value: JsonObject, prefix = ''): Record<string, string> =
 };
 
 const expectedLeaves = [
+  ...localizedFirstFramesPanelKeys,
   'director.title',
   'director.show',
   'director.hide',
@@ -1063,6 +1108,7 @@ const localizedOnePicturePresentationKeys = [
 ] as const;
 
 const localizedWorkspaceKeys = [
+  ...localizedFirstFramesPanelKeys,
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
@@ -1782,6 +1828,7 @@ describe('Creative Studio workspace translations', () => {
         ...localizedBeatPlaybackKeys,
         ...localizedBeatSegmentKeys,
         ...localizedCurrentPictureKeys,
+        ...localizedFirstFramesPanelKeys,
         ...localizedAuthorizedSeedRecoveryKeys,
         'library.pictureCount',
         'library.pictureCount_one',

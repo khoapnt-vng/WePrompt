@@ -38,6 +38,11 @@ const timestamp = '2026-08-17T00:00:00.000Z';
 const laterTimestamp = '2026-08-17T00:00:01.000Z';
 const digest = 'a'.repeat(64);
 const provider = { providerId: 'provider_image', adapterId: 'weprompt-image-v1', model: 'model_1' } as const;
+const videoProvider = {
+  providerId: 'provider_video',
+  adapterId: 'openrouter-video-v1',
+  model: 'video_model_1',
+} as const;
 
 const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   id,
@@ -48,6 +53,7 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   chainBreak: 'none',
   referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
+  dismissedSeedStillIds: [],
   boardAssetId: null,
   supersededBoardAssetIds: [],
   videoAssetId: null,
@@ -130,6 +136,147 @@ const importImage = (project: StudioProjectV2, shotId: string, assetId: string):
   };
   project.assets[assetId] = asset;
   project.shots[shotId]!.assetIds.push(assetId);
+  return asset;
+};
+
+const addSucceededVideoTake = (project: StudioProjectV2, shotId: string, assetId: string): StudioAssetV2 => {
+  const shot = project.shots[shotId]!;
+  shot.shootingScript ||= shotId;
+  const seed = project.assets[`seed_${shotId}`] ?? importImage(project, shotId, `seed_${shotId}`);
+  shot.seedStillId = seed.id;
+  const composition = composeStudioGenerationV2({
+    projectRevision: project.revision,
+    brief: project.brief,
+    rules: project.rules,
+    source: {
+      kind: 'shot',
+      beatId: 'beat_1',
+      story: project.beats.beat_1!.story,
+      shotId,
+      shootingScript: shot.shootingScript,
+    },
+    purpose: 'video_take',
+    referenceInputs: [],
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+    route: videoProvider,
+    boardStyle: null,
+    instructionProfile: deriveStudioInstructionProfileV2(videoProvider, 'video_take', {
+      kind: 'shot',
+      beatId: 'beat_1',
+      story: project.beats.beat_1!.story,
+      shotId,
+      shootingScript: shot.shootingScript,
+    }),
+  });
+  const target = { kind: 'shot' as const, shotId };
+  const requestPlan = {
+    kind: 'resolved' as const,
+    snapshot: {
+      composition,
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      durationSeconds: shot.durationSeconds,
+      referenceInputs: [],
+      conditioningInput: { kind: 'seed_still' as const, assetId: seed.id },
+    },
+  };
+  const item = {
+    id: createStudioQuotedGenerationId({
+      projectId: project.id,
+      projectRevision: project.revision,
+      target,
+      purpose: 'video_take',
+    }),
+    target,
+    purpose: 'video_take' as const,
+    routeId: 'video_route',
+    generationCount: 1,
+    requestPlan,
+    rateUnit: 'second' as const,
+    rateMinorUnits: 2,
+  };
+  const totals = calculateStudioQuoteTotals([item]);
+  if (!totals) throw new Error('video fixture quote is invalid');
+  const authorization = {
+    id: `auth_${assetId}`,
+    projectId: project.id,
+    projectRevision: project.revision,
+    originReferenceHandoffId: null,
+    rateCardDigest: 'b'.repeat(64),
+    currency: 'USD',
+    baseItems: [item],
+    cascadeItems: [],
+    ...totals,
+    expiresAt: '2026-08-17T00:05:00.000Z',
+    confirmedAt: laterTimestamp,
+    providerBindings: [{ itemId: item.id, provider: videoProvider }],
+    idempotencyKeys: [{ itemId: item.id, key: `idem_${assetId}` }],
+  };
+  const jobId = `job_${assetId}`;
+  const asset: StudioAssetV2 = {
+    id: assetId,
+    projectId: project.id,
+    shotId,
+    mediaKind: 'video',
+    mimeType: 'video/mp4',
+    managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
+    byteSize: 1,
+    sha256: digest,
+    durationSeconds: shot.durationSeconds,
+    projectReferenceId: null,
+    generationReferenceAssetIds: [],
+    producerJobId: jobId,
+    compositionDigest: studioGenerationCompositionDigestV2(composition),
+    createdAt: laterTimestamp,
+  };
+  project.assets[assetId] = asset;
+  project.jobs[jobId] = {
+    id: jobId,
+    projectId: project.id,
+    target,
+    status: 'succeeded',
+    provider: videoProvider,
+    idempotencyKey: `idem_${assetId}`,
+    providerJobId: `remote_${assetId}`,
+    remoteStartedAt: timestamp,
+    cancellationPolicy: 'queued_and_running',
+    outputAssetIds: [assetId],
+    error: null,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: timestamp,
+    updatedAt: laterTimestamp,
+    purpose: 'video_take',
+    authorizationId: authorization.id,
+    authorizationItemId: item.id,
+    composition,
+    requestPlan,
+    requestSnapshot: requestPlan.snapshot,
+    spendReceipt: {
+      authorizationId: authorization.id,
+      itemId: item.id,
+      jobId,
+      purpose: 'video_take',
+      routeId: item.routeId,
+      currency: authorization.currency,
+      rateUnit: item.rateUnit,
+      rateMinorUnits: item.rateMinorUnits,
+      durationSeconds: shot.durationSeconds,
+      generationCount: 1,
+      totalMinorUnits: totals.upperMinorUnits,
+    },
+    outputAssetIdsByRole: { primary: assetId, poster: null },
+  };
+  project.spendAuthorizations.push(authorization);
+  shot.assetIds.push(assetId);
+  shot.jobIds.push(jobId);
+  if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+  shot.videoAssetId = assetId;
+  project.revision += 1;
+  expect(validateStudioProjectV2(project)).toBe(true);
   return asset;
 };
 
@@ -301,6 +448,9 @@ const operationSamples: StudioMutationOperationV2[] = [
   { kind: 'apply_coverage', beatId: 'beat_1', shots: [], fixedShots: [] },
   { kind: 'set_hard_cut', shotId: 'shot_2', hardCut: true },
   { kind: 'set_seed_still', shotId: 'shot_1', assetId: null },
+  { kind: 'dismiss_seed_still', shotId: 'shot_1', assetId: 'seed_1' },
+  { kind: 'select_video_take', shotId: 'shot_1', assetId: 'video_1' },
+  { kind: 'remove_video_take', shotId: 'shot_1', assetId: 'video_1' },
   { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_1' },
   { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: null, trimOutSeconds: null },
   { kind: 'reorder_bin', bin: [] },
@@ -311,9 +461,9 @@ const operationSamples: StudioMutationOperationV2[] = [
 ];
 
 describe('schema-5 mutation operation contract', () => {
-  it('contains exactly the 30 current operations and validates each exact envelope', () => {
-    expect(operationSamples).toHaveLength(30);
-    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(30);
+  it('contains exactly the 33 current operations and validates each exact envelope', () => {
+    expect(operationSamples).toHaveLength(33);
+    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(33);
     for (const operation of operationSamples) expect(validateStudioMutationOperationV2(operation)).toBe(true);
   });
 
@@ -454,6 +604,12 @@ describe('schema-5 mutation operation contract', () => {
       { kind: 'set_hard_cut', shotId: 'shot_1', hardCut: 'yes' },
       { kind: 'set_seed_still', shotId: '', assetId: null },
       { kind: 'set_seed_still', shotId: 'shot_1', assetId: '' },
+      { kind: 'dismiss_seed_still', shotId: '', assetId: 'seed_1' },
+      { kind: 'dismiss_seed_still', shotId: 'shot_1', assetId: '' },
+      { kind: 'select_video_take', shotId: '', assetId: 'video_1' },
+      { kind: 'select_video_take', shotId: 'shot_1', assetId: '' },
+      { kind: 'remove_video_take', shotId: '', assetId: 'video_1' },
+      { kind: 'remove_video_take', shotId: 'shot_1', assetId: '' },
       { kind: 'promote_board_panel', shotId: '', boardAssetId: 'asset_1' },
       { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: '' },
       { kind: 'trim_shot', shotId: '', trimInSeconds: null, trimOutSeconds: null },
@@ -468,7 +624,9 @@ describe('schema-5 mutation operation contract', () => {
       { kind: 'undo_last', entryId: '' },
     ];
 
-    for (const operation of malformed) expect(validateStudioMutationOperationV2(operation)).toBe(false);
+    for (const operation of malformed) {
+      expect(validateStudioMutationOperationV2(operation), JSON.stringify(operation)).toBe(false);
+    }
   });
 
   it('accepts every schema-5 settings and optional-field variant at the parser boundary', () => {
@@ -981,6 +1139,53 @@ describe('schema-5 coverage, park, and deterministic controls', () => {
       spendPolicy: { currency: 'USD', maxPerBatchMinorUnits: 2500 },
     });
     expect(result.shots.shot_1!.seedStillId).toBe('seed_import');
+  });
+
+  it('dismisses a seed candidate without deleting its retained media provenance', () => {
+    const project = makeProject();
+    const imported = importImage(project, 'shot_1', 'seed_import');
+    project.shots.shot_1!.seedStillId = imported.id;
+
+    const result = apply(project, [{ kind: 'dismiss_seed_still', shotId: 'shot_1', assetId: imported.id }]).project;
+
+    expect(result.shots.shot_1).toMatchObject({
+      seedStillId: null,
+      dismissedSeedStillIds: [imported.id],
+      assetIds: [imported.id],
+    });
+    expect(result.assets[imported.id]).toEqual(imported);
+  });
+
+  it('restores an older successful take for free and removes only the current pointer', () => {
+    const project = makeProject();
+    const older = addSucceededVideoTake(project, 'shot_1', 'video_older');
+    const newer = addSucceededVideoTake(project, 'shot_1', 'video_newer');
+
+    const restored = persist(
+      apply(project, [{ kind: 'select_video_take', shotId: 'shot_1', assetId: older.id }]).project
+    );
+    expect(restored.shots.shot_1).toMatchObject({
+      videoAssetId: older.id,
+      supersededVideoAssetIds: [newer.id],
+      trimInSeconds: null,
+      trimOutSeconds: null,
+    });
+    expect(restored.assets[older.id]).toEqual(older);
+    expect(restored.assets[newer.id]).toEqual(newer);
+    expect(restored.spendAuthorizations).toEqual(project.spendAuthorizations);
+
+    const removed = apply(
+      restored,
+      [{ kind: 'remove_video_take', shotId: 'shot_1', assetId: older.id }],
+      'remove_take'
+    ).project;
+    expect(removed.shots.shot_1).toMatchObject({
+      videoAssetId: null,
+      supersededVideoAssetIds: [older.id, newer.id],
+    });
+    expect(removed.assets[older.id]).toEqual(older);
+    expect(removed.assets[newer.id]).toEqual(newer);
+    expect(removed.spendAuthorizations).toEqual(project.spendAuthorizations);
   });
 
   it('rejects missing identities, invalid placements, and exact no-op reducer requests', () => {

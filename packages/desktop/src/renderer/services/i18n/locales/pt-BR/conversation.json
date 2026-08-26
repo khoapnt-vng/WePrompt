@@ -1119,6 +1119,57 @@
           "authorizationLocked": "O trabalho de vídeo autorizado bloqueou o primeiro quadro deste plano. Os candidatos importados continuam armazenados, mas não podem substituir a imagem-semente da cotação revisada.",
           "authorizationIncompatible": "Indisponível para o trabalho autorizado"
         },
+        "firstFrames": {
+          "title": "Primeiros quadros",
+          "shotChip": "Plano {{shot}}",
+          "on": "Ativo",
+          "status": {
+            "notReady": "Não pronto",
+            "ready": "Pronto para renderizar",
+            "rendering": "Renderizando",
+            "rendered": "Renderizado"
+          },
+          "frameLabel": "Quadro {{index}}",
+          "origin": {
+            "generated": "Gerado",
+            "imported": "Importado",
+            "board": "Storyboard",
+            "inherited": "Do plano {{shot}}"
+          },
+          "current": "Atual",
+          "unavailable": "Indisponível",
+          "previewAlt": "Prévia · {{label}}",
+          "openFrame": "Abrir {{label}} em tela cheia",
+          "pinned": "Fixado como primeiro quadro",
+          "pin": "Fixar como primeiro quadro",
+          "firstFrameChanged": "Primeiro quadro alterado · Não reexecutado",
+          "promptChanged": "Editado · Ainda não executado",
+          "import": "Importar primeiro quadro",
+          "empty": "Nenhum primeiro quadro elegível",
+          "currentPicture": "Imagem atual",
+          "pictureEmpty": "Ainda não há imagem",
+          "pictureAlt": "Imagem atual do plano {{shot}}",
+          "sendLastFrame": "Enviar o último quadro ao plano {{shot}}",
+          "cancelRun": "Cancelar execução",
+          "generateShot": "Gerar plano {{shot}}",
+          "promptLabel": "Prompt do plano",
+          "regenerate": "Gerar novamente",
+          "menu": {
+            "download": "Baixar",
+            "copyPrompt": "Copiar prompt",
+            "remove": "Remover",
+            "previousTakes": "Tomadas anteriores",
+            "removeTake": "Remover tomada"
+          },
+          "viewer": {
+            "currentFirstFrame": "Primeiro quadro atual",
+            "counter": "{{current}} de {{total}}",
+            "take": "Tomada {{index}}",
+            "previous": "Anterior",
+            "next": "Próximo",
+            "useTake": "Usar esta tomada"
+          }
+        },
         "picture": {
           "title": "Imagem atual",
           "label": "Imagem atual da tomada {{index}}",

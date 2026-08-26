@@ -108,6 +108,7 @@ const makeShot = (id: string): StudioProjectV2['shots'][string] => ({
   chainBreak: 'none',
   referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
+  dismissedSeedStillIds: [],
   boardAssetId: null,
   supersededBoardAssetIds: [],
   videoAssetId: null,

@@ -48,7 +48,10 @@ import {
   type StudioUndoPatch,
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioInboundShotReferencesV2 } from '../chain';
-import { resolveStudioCurrentBoardPanelAuthorityV2 } from '../generation/boardPanel';
+import {
+  resolveStudioCanonicalBoardAssetV2,
+  resolveStudioCurrentBoardPanelAuthorityV2,
+} from '../generation/boardPanel';
 import { validateStudioFixedShotReviewsV2, validateStudioProjectV2, validateStudioProposedShotV2 } from '../validation';
 
 export type StudioMutationReasonV2 =
@@ -128,6 +131,9 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   apply_coverage: new Set(['kind', 'beatId', 'shots', 'fixedShots']),
   set_hard_cut: new Set(['kind', 'shotId', 'hardCut']),
   set_seed_still: new Set(['kind', 'shotId', 'assetId']),
+  dismiss_seed_still: new Set(['kind', 'shotId', 'assetId']),
+  select_video_take: new Set(['kind', 'shotId', 'assetId']),
+  remove_video_take: new Set(['kind', 'shotId', 'assetId']),
   promote_board_panel: new Set(['kind', 'shotId', 'boardAssetId']),
   trim_shot: new Set(['kind', 'shotId', 'trimInSeconds', 'trimOutSeconds']),
   reorder_bin: new Set(['kind', 'bin']),
@@ -550,6 +556,11 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
     case 'set_seed_still':
       if (!isSafeId(operation.shotId) || !isSafeAnchor(operation.assetId)) fail('invalid_operation');
       return;
+    case 'dismiss_seed_still':
+    case 'select_video_take':
+    case 'remove_video_take':
+      if (!isSafeId(operation.shotId) || !isSafeId(operation.assetId)) fail('invalid_operation');
+      return;
     case 'promote_board_panel':
       if (!isSafeId(operation.shotId) || !isSafeId(operation.boardAssetId)) fail('invalid_operation');
       return;
@@ -717,6 +728,18 @@ const assertCanonicalVideoTake = (
   if (result[1].mediaKind !== 'video' || result[1].managedAsset.collection !== 'assets') fail('invalid_operation');
   return result;
 };
+
+const successfulVideoAssetIds = (project: StudioProjectV2, shot: StudioShot): string[] =>
+  shot.jobIds.flatMap((jobId) => {
+    const job = ownValue(project.jobs, jobId);
+    return job?.status === 'succeeded' &&
+      job.purpose === 'video_take' &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
+      job.outputAssetIdsByRole.primary !== null
+      ? [job.outputAssetIdsByRole.primary]
+      : [];
+  });
 
 const assertCanonicalSeed = (
   project: StudioProjectV2,
@@ -1538,6 +1561,7 @@ export const applyStudioMutationBatchV2 = (
             backgroundReferenceId: null,
           },
           seedStillId: null,
+          dismissedSeedStillIds: [],
           boardAssetId: null,
           supersededBoardAssetIds: [],
           videoAssetId: null,
@@ -1745,6 +1769,7 @@ export const applyStudioMutationBatchV2 = (
                 backgroundReferenceId: null,
               },
               seedStillId: null,
+              dismissedSeedStillIds: [],
               boardAssetId: null,
               supersededBoardAssetIds: [],
               videoAssetId: null,
@@ -1791,6 +1816,9 @@ export const applyStudioMutationBatchV2 = (
         const shot = ownValue(draft.shots, operation.shotId);
         if (shot === undefined || findActiveShotOwner(draft, shot.id) === undefined) fail('invalid_operation');
         if (operation.assetId !== null) assertCanonicalSeed(draft, shot.id, operation.assetId);
+        if (operation.assetId !== null && shot.dismissedSeedStillIds.includes(operation.assetId)) {
+          fail('invalid_operation');
+        }
         if (shot.seedStillId === operation.assetId) fail('invalid_operation');
         if (!seedMatchesWaitingAuthorizedDependencies(draft, shot.id, operation.assetId)) {
           fail('dependency_blocked');
@@ -1801,11 +1829,96 @@ export const applyStudioMutationBatchV2 = (
         break;
       }
 
+      case 'dismiss_seed_still': {
+        const shot = ownValue(draft.shots, operation.shotId);
+        const ordinary = shot === undefined ? null : ownValue(draft.assets, operation.assetId);
+        const board =
+          shot === undefined
+            ? null
+            : (resolveStudioCanonicalBoardAssetV2(draft, shot, operation.assetId)?.asset ?? null);
+        const asset =
+          ordinary?.projectId === draft.id &&
+          ordinary.shotId === operation.shotId &&
+          ordinary.mediaKind === 'image' &&
+          (ordinary.managedAsset.collection === 'assets' || ordinary.managedAsset.collection === 'imports') &&
+          shot?.assetIds.includes(ordinary.id)
+            ? ordinary
+            : board;
+        if (
+          shot === undefined ||
+          asset === null ||
+          findActiveShotOwner(draft, shot.id) === undefined ||
+          shot.dismissedSeedStillIds.includes(asset.id)
+        ) {
+          fail('invalid_operation');
+        }
+        if (
+          hasBoundNonterminalJob(draft, (job) => jobTargetsShot(job, shot.id) || jobReferencesShot(draft, job, shot.id))
+        ) {
+          fail('dependency_blocked');
+        }
+        touchShot(tracker, draft, shot.id);
+        defineOwn(draft.shots, shot.id, {
+          ...shot,
+          seedStillId: shot.seedStillId === asset.id ? null : shot.seedStillId,
+          dismissedSeedStillIds: [...shot.dismissedSeedStillIds, asset.id],
+        });
+        break;
+      }
+
+      case 'select_video_take': {
+        const [shot] = assertCanonicalVideoTake(draft, operation.shotId, operation.assetId);
+        const successful = successfulVideoAssetIds(draft, shot);
+        if (
+          findActiveShotOwner(draft, shot.id) === undefined ||
+          shot.videoAssetId === operation.assetId ||
+          !successful.includes(operation.assetId)
+        ) {
+          fail('invalid_operation');
+        }
+        if (
+          hasBoundNonterminalJob(draft, (job) => jobTargetsShot(job, shot.id) || jobReferencesShot(draft, job, shot.id))
+        ) {
+          fail('dependency_blocked');
+        }
+        touchShot(tracker, draft, shot.id);
+        defineOwn(draft.shots, shot.id, {
+          ...shot,
+          videoAssetId: operation.assetId,
+          supersededVideoAssetIds: successful.filter((assetId) => assetId !== operation.assetId),
+          trimInSeconds: null,
+          trimOutSeconds: null,
+        });
+        break;
+      }
+
+      case 'remove_video_take': {
+        const [shot] = assertCanonicalVideoTake(draft, operation.shotId, operation.assetId);
+        if (findActiveShotOwner(draft, shot.id) === undefined || shot.videoAssetId !== operation.assetId) {
+          fail('invalid_operation');
+        }
+        if (
+          hasBoundNonterminalJob(draft, (job) => jobTargetsShot(job, shot.id) || jobReferencesShot(draft, job, shot.id))
+        ) {
+          fail('dependency_blocked');
+        }
+        touchShot(tracker, draft, shot.id);
+        defineOwn(draft.shots, shot.id, {
+          ...shot,
+          videoAssetId: null,
+          supersededVideoAssetIds: successfulVideoAssetIds(draft, shot),
+          trimInSeconds: null,
+          trimOutSeconds: null,
+        });
+        break;
+      }
+
       case 'promote_board_panel': {
         const authority = resolveStudioCurrentBoardPanelAuthorityV2(draft, operation.shotId, operation.boardAssetId);
         if (
           authority === null ||
           (authority.shotIndex !== 0 && authority.shot.chainBreak !== 'hard_cut') ||
+          authority.shot.dismissedSeedStillIds.includes(operation.boardAssetId) ||
           authority.shot.seedStillId === operation.boardAssetId
         ) {
           fail('invalid_operation');

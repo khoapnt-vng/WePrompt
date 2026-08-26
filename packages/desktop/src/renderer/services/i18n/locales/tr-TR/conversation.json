@@ -1115,6 +1115,57 @@
           "authorizationLocked": "Yetkilendirilmiş video işi bu çekimin ilk karesini kilitledi. İçe aktarılan adaylar saklanır, ancak incelenmiş teklifteki başlangıç karesinin yerini alamaz.",
           "authorizationIncompatible": "Yetkilendirilmiş iş için kullanılamaz"
         },
+        "firstFrames": {
+          "title": "İlk kareler",
+          "shotChip": "Çekim {{shot}}",
+          "on": "Açık",
+          "status": {
+            "notReady": "Hazır değil",
+            "ready": "Rendera hazır",
+            "rendering": "Renderlanıyor",
+            "rendered": "Renderlandı"
+          },
+          "frameLabel": "Kare {{index}}",
+          "origin": {
+            "generated": "Üretildi",
+            "imported": "İçe aktarıldı",
+            "board": "Storyboard",
+            "inherited": "Çekim {{shot}} kaynağından"
+          },
+          "current": "Geçerli",
+          "unavailable": "Kullanılamıyor",
+          "previewAlt": "Önizleme · {{label}}",
+          "openFrame": "{{label}} tam ekran aç",
+          "pinned": "İlk kare olarak sabitlendi",
+          "pin": "İlk kare olarak sabitle",
+          "firstFrameChanged": "İlk kare değişti · Yeniden çalıştırılmadı",
+          "promptChanged": "Düzenlendi · Henüz çalıştırılmadı",
+          "import": "İlk kareyi içe aktar",
+          "empty": "Uygun ilk kare yok",
+          "currentPicture": "Geçerli görüntü",
+          "pictureEmpty": "Henüz görüntü yok",
+          "pictureAlt": "Çekim {{shot}} için geçerli görüntü",
+          "sendLastFrame": "Son karesini Çekim {{shot}} için gönder",
+          "cancelRun": "Çalışmayı iptal et",
+          "generateShot": "Çekim {{shot}} üret",
+          "promptLabel": "Çekim istemi",
+          "regenerate": "Yeniden üret",
+          "menu": {
+            "download": "İndir",
+            "copyPrompt": "İstemi kopyala",
+            "remove": "Kaldır",
+            "previousTakes": "Önceki çekimler",
+            "removeTake": "Çekimi kaldır"
+          },
+          "viewer": {
+            "currentFirstFrame": "Geçerli ilk kare",
+            "counter": "{{total}} içinde {{current}}",
+            "take": "Çekim {{index}}",
+            "previous": "Önceki",
+            "next": "Sonraki",
+            "useTake": "Bu çekimi kullan"
+          }
+        },
         "picture": {
           "title": "Geçerli görüntü",
           "label": "{{index}}. Çekimin geçerli görüntüsü",

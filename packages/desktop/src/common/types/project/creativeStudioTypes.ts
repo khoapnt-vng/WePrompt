@@ -311,6 +311,8 @@ export type StudioShot = {
   chainBreak: 'none' | 'hard_cut';
   referenceBinding: StudioShotReferenceBindingV2;
   seedStillId: string | null;
+  /** Retained seed media hidden from the First frames strip without deleting provenance. */
+  dismissedSeedStillIds: string[];
   boardAssetId: string | null;
   supersededBoardAssetIds: string[];
   videoAssetId: string | null;
@@ -842,6 +844,9 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'reorder_shots'
       | 'set_hard_cut'
       | 'set_seed_still'
+      | 'dismiss_seed_still'
+      | 'select_video_take'
+      | 'remove_video_take'
       | 'set_reference_plan'
       | 'amend_reference_plan'
       | 'set_reference_prompt'
@@ -1389,6 +1394,9 @@ export type StudioMutationOperationV2 =
   | { kind: 'apply_coverage'; beatId: string; shots: StudioProposedShot[]; fixedShots: StudioFixedShotReviewV2[] }
   | { kind: 'set_hard_cut'; shotId: string; hardCut: boolean }
   | { kind: 'set_seed_still'; shotId: string; assetId: string | null }
+  | { kind: 'dismiss_seed_still'; shotId: string; assetId: string }
+  | { kind: 'select_video_take'; shotId: string; assetId: string }
+  | { kind: 'remove_video_take'; shotId: string; assetId: string }
   | { kind: 'promote_board_panel'; shotId: string; boardAssetId: string }
   | { kind: 'trim_shot'; shotId: string; trimInSeconds: number | null; trimOutSeconds: number | null }
   | { kind: 'reorder_bin'; bin: StudioBinItem[] }

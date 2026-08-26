@@ -54,6 +54,7 @@ const makeShot = (id: string, chainBreak: StudioShot['chainBreak']): StudioShot 
   chainBreak,
   referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
   seedStillId: null,
+  dismissedSeedStillIds: [],
   boardAssetId: null,
   supersededBoardAssetIds: [],
   videoAssetId: null,
@@ -385,6 +386,7 @@ const makeMaximumCapacityProject = (): StudioProjectV2 => {
     project.shots[shotId] = {
       ...makeShot(shotId, 'hard_cut'),
       seedStillId: seedId,
+      dismissedSeedStillIds: [],
       videoAssetId: assetId,
       assetIds: [seedId, assetId],
       jobIds: [jobId],

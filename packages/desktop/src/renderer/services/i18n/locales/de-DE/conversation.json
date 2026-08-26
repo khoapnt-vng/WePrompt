@@ -1114,6 +1114,57 @@
           "authorizationLocked": "Autorisierte Videoarbeit hat das erste Bild dieses Shots gesperrt. Importierte Kandidaten bleiben gespeichert, können aber den Seed im geprüften Angebot nicht ersetzen.",
           "authorizationIncompatible": "Für autorisierte Arbeit nicht verfügbar"
         },
+        "firstFrames": {
+          "title": "Erste Frames",
+          "shotChip": "Shot {{shot}}",
+          "on": "Aktiv",
+          "status": {
+            "notReady": "Nicht bereit",
+            "ready": "Bereit zum Rendern",
+            "rendering": "Wird gerendert",
+            "rendered": "Gerendert"
+          },
+          "frameLabel": "Frame {{index}}",
+          "origin": {
+            "generated": "Generiert",
+            "imported": "Importiert",
+            "board": "Storyboard",
+            "inherited": "Aus Shot {{shot}}"
+          },
+          "current": "Aktuell",
+          "unavailable": "Nicht verfügbar",
+          "previewAlt": "Vorschau · {{label}}",
+          "openFrame": "{{label}} im Vollbild öffnen",
+          "pinned": "Als erster Frame angeheftet",
+          "pin": "Als ersten Frame anheften",
+          "firstFrameChanged": "Erster Frame geändert · Nicht neu ausgeführt",
+          "promptChanged": "Bearbeitet · Noch nicht ausgeführt",
+          "import": "Ersten Frame importieren",
+          "empty": "Kein geeigneter erster Frame",
+          "currentPicture": "Aktuelles Bild",
+          "pictureEmpty": "Noch kein Bild",
+          "pictureAlt": "Aktuelles Bild für Shot {{shot}}",
+          "sendLastFrame": "Letztes Bild an Shot {{shot}} senden",
+          "cancelRun": "Durchlauf abbrechen",
+          "generateShot": "Shot {{shot}} generieren",
+          "promptLabel": "Shot-Prompt",
+          "regenerate": "Neu generieren",
+          "menu": {
+            "download": "Herunterladen",
+            "copyPrompt": "Prompt kopieren",
+            "remove": "Entfernen",
+            "previousTakes": "Frühere Takes",
+            "removeTake": "Take entfernen"
+          },
+          "viewer": {
+            "currentFirstFrame": "Aktueller erster Frame",
+            "counter": "{{current}} von {{total}}",
+            "take": "Take {{index}}",
+            "previous": "Zurück",
+            "next": "Weiter",
+            "useTake": "Diesen Take verwenden"
+          }
+        },
         "picture": {
           "title": "Aktuelles Bild",
           "label": "Aktuelles Bild für Shot {{index}}",

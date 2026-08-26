@@ -1765,6 +1765,7 @@ test.describe('Creative Studio workspace', () => {
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table', { timeout: 30_000 });
     const proposalCard = page.getByTestId(`studio-proposal-${proposalId}`);
     await expect(proposalCard).toBeVisible({ timeout: 10_000 });
+    await proposalCard.getByRole('button', { name: 'Review proposal details', exact: true }).click();
     const proposalReview = proposalCard.getByTestId('studio-proposal-semantic-review');
     await expect(proposalReview.locator('[data-proposal-field="story"]')).toContainText(beatStory);
     const scriptReviewFields = proposalReview.locator('[data-proposal-field="shootingScript"]');
@@ -2021,6 +2022,7 @@ test.describe('Creative Studio workspace', () => {
     await beatRow.locator('[data-grid-column-name="beat"]').click();
     const beatDialog = page.getByRole('dialog', { name: `Beat panel — ${beatTitle}`, exact: true });
     await expect(beatDialog).toBeVisible();
+    await beatDialog.getByRole('button', { name: 'Story', exact: true }).click();
     await expect(beatDialog.getByRole('textbox', { name: 'Story', exact: true })).toHaveValue(beatStory);
     await expect(beatDialog.getByRole('textbox', { name: 'Shooting script for Shot 1', exact: true })).toHaveValue(
       firstShootingScript
@@ -2033,7 +2035,7 @@ test.describe('Creative Studio workspace', () => {
       secondShootingScript
     );
     await expect(beatDialog.locator('textarea[aria-label="Story"]')).toHaveCount(1);
-    await expect(beatDialog.locator('textarea[aria-label^="Shooting script for Shot "]')).toHaveCount(2);
+    await expect(beatDialog.locator('input[aria-label^="Shooting script for Shot "]')).toHaveCount(2);
     await beatDialog.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(beatDialog).toBeHidden();
     await page.reload({ waitUntil: 'domcontentloaded' });

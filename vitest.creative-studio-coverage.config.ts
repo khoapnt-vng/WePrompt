@@ -79,6 +79,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/studio/components/Shell/DirectorProposals.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/BeatPlayer.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/CoverageBar.tsx',
+  'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/FirstFrames/index.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/beatPlaybackSequence.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/coverageGeometry.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/segmentState.ts',

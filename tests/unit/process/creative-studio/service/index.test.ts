@@ -4396,6 +4396,7 @@ describe('CreativeStudioServiceV2', () => {
     const committed = harness.getProject();
     expect(committed.shots.clip_1).toMatchObject({
       seedStillId: board.id,
+      dismissedSeedStillIds: [],
       boardAssetId: boardBefore.pointer,
       supersededBoardAssetIds: boardBefore.history,
       chainBreak: 'none',
@@ -4781,6 +4782,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(committed.shots.clip_2).toMatchObject({
       chainBreak: 'hard_cut',
       seedStillId: reuseSeed ? 'seed_sever_2' : null,
+      dismissedSeedStillIds: [],
     });
     expect(committed.undoHistory).toEqual(project.undoHistory);
     expect(
@@ -5760,6 +5762,7 @@ describe('CreativeStudioServiceV2', () => {
       trimInSeconds: null,
       trimOutSeconds: null,
       seedStillId: null,
+      dismissedSeedStillIds: [],
       boardAssetId: null,
       supersededBoardAssetIds: [],
       videoAssetId: null,
@@ -6237,6 +6240,9 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
   },
   { kind: 'set_hard_cut', shotId: 'clip_1', hardCut: true },
   { kind: 'set_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
+  { kind: 'dismiss_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
+  { kind: 'select_video_take', shotId: 'clip_1', assetId: 'asset_take' },
+  { kind: 'remove_video_take', shotId: 'clip_1', assetId: 'asset_take' },
   {
     kind: 'set_shot_reference_binding',
     shotId: 'clip_1',
@@ -6790,7 +6796,7 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(30);
+      expect(operationKinds).toHaveLength(33);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds

@@ -118,6 +118,7 @@ import {
   initialSpendGateState,
   majorUnitsToMinorUnits,
   projectWorkspace,
+  seedRegenerationGateDraft,
   selectedSpendGateQuote,
   filmRenderBatchShotIds,
   selectionGateDraft,
@@ -246,6 +247,7 @@ const makeProject = (): StudioRendererProjectV2 =>
           chainBreak,
           referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
           seedStillId: null,
+          dismissedSeedStillIds: [],
           boardAssetId: null,
           supersededBoardAssetIds: [],
           videoAssetId: null,
@@ -289,6 +291,7 @@ const makeBoardProject = (shotCount: number): StudioRendererProjectV2 => {
         shootingScript: `Panel ${shotNumber}`,
         chainBreak: 'hard_cut',
         seedStillId: null,
+        dismissedSeedStillIds: [],
         boardAssetId: null,
         supersededBoardAssetIds: [],
         videoAssetId: null,
@@ -1214,6 +1217,44 @@ describe('spend gate draft graph', () => {
         hardCut: false,
       })?.continuityChange
     ).toEqual({ shotId: 'shot_2', hardCut: false, requiresSeedGeneration: false });
+  });
+
+  it('builds the exact segment-head frame regeneration and dependent-picture wave', () => {
+    const project = makeProject();
+    const projection = readyProjection(project);
+
+    expect(seedRegenerationGateDraft({ project, projection, shotId: 'shot_1' })).toEqual({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+      cascadeChoices: [
+        { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
+        { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
+      ],
+    });
+    expect(seedRegenerationGateDraft({ project, projection, shotId: 'shot_2' })).toBeNull();
+    expect(seedRegenerationGateDraft({ project, projection, shotId: 'shot_3' })).toEqual({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_3' }, purpose: 'seed_still' }],
+      cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_3' }, purpose: 'video_take' }],
+    });
+
+    expect(
+      seedRegenerationGateDraft({
+        project,
+        projection: { ...projection, projectRevision: projection.projectRevision + 1 },
+        shotId: 'shot_1',
+      })
+    ).toBeNull();
+    projection.activeBeats[0]!.shots[0]!.seedAuthorizationLock = {
+      compatibleAssetIds: [],
+      canCancelWaiting: true,
+      waitingReason: 'choose_seed',
+    };
+    expect(seedRegenerationGateDraft({ project, projection, shotId: 'shot_1' })).toBeNull();
   });
 });
 

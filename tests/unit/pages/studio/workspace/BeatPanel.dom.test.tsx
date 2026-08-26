@@ -27,6 +27,9 @@ import type {
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 
 const modalConfirm = vi.hoisted(() => vi.fn());
+const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+
+vi.mock('@/renderer/utils/ui/clipboard', () => ({ copyText: copyTextMock }));
 
 vi.mock('@arco-design/web-react', async () => {
   const ReactModule = await import('react');
@@ -93,18 +96,24 @@ vi.mock('@arco-design/web-react', async () => {
     popupVisible?: boolean;
   };
   const Dropdown = ({ children, droplist, onVisibleChange, popupVisible }: MockDropdownProps) => {
-    const visible = Boolean(popupVisible);
+    const [internalVisible, setInternalVisible] = ReactModule.useState(false);
+    const controlled = popupVisible !== undefined;
+    const visible = controlled ? Boolean(popupVisible) : internalVisible;
+    const setVisible = (next: boolean): void => {
+      if (!controlled) setInternalVisible(next);
+      onVisibleChange?.(next);
+    };
     const child = children.props;
     const trigger = ReactModule.cloneElement(children, {
       onClick: (event: React.MouseEvent<HTMLButtonElement>) => {
         child.onClick?.(event);
-        if (!child.disabled) onVisibleChange?.(!visible);
+        if (!child.disabled) setVisible(!visible);
       },
       onKeyDown: (event: React.KeyboardEvent<HTMLButtonElement>) => {
         child.onKeyDown?.(event);
         if (!child.disabled && (event.key === 'Enter' || event.key === ' ')) {
           event.preventDefault();
-          onVisibleChange?.(!visible);
+          setVisible(!visible);
         }
       },
     });
@@ -185,10 +194,17 @@ vi.mock('@arco-design/web-react', async () => {
 });
 
 vi.mock('@icon-park/react', () => ({
+  Copy: (props: Record<string, unknown>) => <span data-icon='copy' {...props} />,
+  Delete: (props: Record<string, unknown>) => <span data-icon='delete' {...props} />,
+  Download: (props: Record<string, unknown>) => <span data-icon='download' {...props} />,
   FullScreen: (props: Record<string, unknown>) => <span data-icon='fullscreen' {...props} />,
+  Left: (props: Record<string, unknown>) => <span data-icon='left' {...props} />,
   MoreOne: (props: Record<string, unknown>) => <span data-icon='more' {...props} />,
   Notes: (props: Record<string, unknown>) => <span data-icon='notes' {...props} />,
   OffScreen: (props: Record<string, unknown>) => <span data-icon='offscreen' {...props} />,
+  Pin: (props: Record<string, unknown>) => <span data-icon='pin' {...props} />,
+  Plus: (props: Record<string, unknown>) => <span data-icon='plus' {...props} />,
+  Right: (props: Record<string, unknown>) => <span data-icon='right' {...props} />,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -233,6 +249,38 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.generation.renderVideo': 'Generate again',
         'conversation.creativeStudio.workspace.beatPanel.generation.reviewUnavailable':
           'Generation review is unavailable',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.title': 'First frames',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.on': 'On',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.status.notReady': 'Not ready',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.status.ready': 'Ready to render',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.status.rendering': 'Rendering',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.status.rendered': 'Rendered',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.origin.generated': 'Generated',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.origin.imported': 'Imported',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.origin.board': 'Board',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.current': 'Current',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.unavailable': 'Unavailable',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.pinned': 'Pinned as first frame',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.pin': 'Pin as first frame',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.firstFrameChanged':
+          'First frame changed · Not re-run',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.promptChanged': 'Edited · Not yet run',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.import': 'Import first frame',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.empty': 'No eligible first frame',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.currentPicture': 'Current picture',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.pictureEmpty': 'No picture yet',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.cancelRun': 'Cancel run',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.promptLabel': 'Shot prompt',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.regenerate': 'Regenerate',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.download': 'Download',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.copyPrompt': 'Copy prompt',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.remove': 'Remove',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.previousTakes': 'Previous takes',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.removeTake': 'Remove take',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.viewer.currentFirstFrame': 'Current first frame',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.viewer.previous': 'Previous',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.viewer.next': 'Next',
+        'conversation.creativeStudio.workspace.beatPanel.firstFrames.viewer.useTake': 'Use this take',
         'conversation.creativeStudio.models.blocked.catalogUnloaded': 'The engine list has not loaded yet.',
         'conversation.creativeStudio.models.blocked.duration': 'This engine cannot make a shot {{seconds}}s long.',
         'conversation.creativeStudio.models.blocked.notAnswering': 'The engine is not answering.',
@@ -361,6 +409,20 @@ vi.mock('react-i18next', () => ({
         return `First frame ${String(values?.stillIndex)} for Shot ${String(values?.shotIndex)}`;
       }
       if (key.endsWith('.seeds.previewAlt')) return `Preview · ${String(values?.label)}`;
+      if (key.endsWith('.firstFrames.shotChip')) return `Shot ${String(values?.shot)}`;
+      if (key.endsWith('.firstFrames.frameLabel')) return `Frame ${String(values?.index)}`;
+      if (key.endsWith('.firstFrames.origin.inherited')) return `From Shot ${String(values?.shot)}`;
+      if (key.endsWith('.firstFrames.previewAlt')) return `Preview · ${String(values?.label)}`;
+      if (key.endsWith('.firstFrames.openFrame')) return `Open ${String(values?.label)} full screen`;
+      if (key.endsWith('.firstFrames.pictureAlt')) return `Current picture for Shot ${String(values?.shot)}`;
+      if (key.endsWith('.firstFrames.sendLastFrame')) {
+        return `Send its last frame to Shot ${String(values?.shot)}`;
+      }
+      if (key.endsWith('.firstFrames.generateShot')) return `Generate Shot ${String(values?.shot)}`;
+      if (key.endsWith('.firstFrames.viewer.counter')) {
+        return `${String(values?.current)} of ${String(values?.total)}`;
+      }
+      if (key.endsWith('.firstFrames.viewer.take')) return `Take ${String(values?.index)}`;
       if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
       if (key.endsWith('.preview.videoLabel')) {
         return `Shot ${String(values?.position)} video · ${String(values?.shootingScript)}`;
@@ -444,54 +506,75 @@ const makeSeedStill = (
   createdAt: '2026-08-20T00:00:00.000Z',
   explicitSeed: false,
   effectiveSeed: false,
+  firstFrameChanged: false,
+  origin: 'generated',
+  prompt: 'Generated first frame prompt',
+  promptChanged: false,
+  sourceShotNumber: null,
   ...overrides,
 });
 
 const makeCurrentPicture = (assetId: string, sourceDurationSeconds = 8, posterAssetId: string | null = null) => ({
   assetId,
+  createdAt: '2026-08-20T00:00:00.000Z',
+  firstFrameChanged: false,
   sourceDurationSeconds,
   posterAssetId,
+  prompt: 'Canonical shooting script',
+  promptChanged: false,
 });
 
 const makeShot = (
   id: string,
   index: number,
   overrides: Partial<WorkspaceShotProjection> = {}
-): WorkspaceShotProjection => ({
-  id,
-  shootingScript: `Canonical shooting script ${index + 1}`,
-  durationSeconds: 8,
-  chainBreak: index === 0 ? 'none' : 'none',
-  trimInSeconds: null,
-  trimOutSeconds: null,
-  currentPicture: null,
-  playedDurationSeconds: 8,
-  explicitSeedAssetId: null,
-  effectiveSeedAssetId: null,
-  segmentHead: index === 0,
-  planningBoundary: { shotId: id, startSeconds: index * 8, endSeconds: (index + 1) * 8 },
-  frameBoundary: null,
-  segmentState:
-    overrides.segmentState ??
-    (overrides.currentPicture === undefined || overrides.currentPicture === null
-      ? { kind: 'no_picture' }
-      : { kind: 'rendered' }),
-  dirtyCauses: [],
-  downstreamShotIds: [],
-  seedStills: [],
-  coverAssetId: null,
-  displayState: 'draft',
-  retainedWork: false,
-  videoGenerationInFlight: false,
-  seedGenerationInFlight: false,
-  videoGenerationBlocked: false,
-  seedGenerationBlocked: false,
-  seedAuthorityStatusReady: true,
-  seedAuthorizationLock: null,
-  attentionJobs: [],
-  hasEffectiveSeed: false,
-  ...overrides,
-});
+): WorkspaceShotProjection => {
+  const seedStills = overrides.seedStills ?? [];
+  const currentPicture = overrides.currentPicture ?? null;
+  return {
+    id,
+    shootingScript: `Canonical shooting script ${index + 1}`,
+    durationSeconds: 8,
+    chainBreak: index === 0 ? 'none' : 'none',
+    trimInSeconds: null,
+    trimOutSeconds: null,
+    currentPicture,
+    playedDurationSeconds: 8,
+    explicitSeedAssetId: null,
+    effectiveSeedAssetId: null,
+    segmentHead: index === 0,
+    planningBoundary: { shotId: id, startSeconds: index * 8, endSeconds: (index + 1) * 8 },
+    frameBoundary: null,
+    segmentState: overrides.segmentState ?? (currentPicture === null ? { kind: 'no_picture' } : { kind: 'rendered' }),
+    dirtyCauses: [],
+    downstreamShotIds: [],
+    seedStills,
+    firstFrames: seedStills,
+    videoTakes:
+      currentPicture === null
+        ? []
+        : [
+            {
+              ...currentPicture,
+              current: true,
+            },
+          ],
+    generationProgressPercent: null,
+    activeGenerationJob: null,
+    coverAssetId: null,
+    displayState: 'draft',
+    retainedWork: false,
+    videoGenerationInFlight: false,
+    seedGenerationInFlight: false,
+    videoGenerationBlocked: false,
+    seedGenerationBlocked: false,
+    seedAuthorityStatusReady: true,
+    seedAuthorizationLock: null,
+    attentionJobs: [],
+    hasEffectiveSeed: seedStills.some((frame) => frame.effectiveSeed),
+    ...overrides,
+  };
+};
 
 const makeBeat = (
   id = 'beat_1',
@@ -582,12 +665,16 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   saveBeat: vi.fn().mockResolvedValue(true),
   saveShot: vi.fn().mockResolvedValue(true),
   setSeedStill: vi.fn().mockResolvedValue(true),
+  dismissSeedStill: vi.fn().mockResolvedValue(true),
+  selectVideoTake: vi.fn().mockResolvedValue(true),
+  removeVideoTake: vi.fn().mockResolvedValue(true),
   trimShot: vi.fn().mockResolvedValue(true),
   reorderShots: vi.fn().mockResolvedValue(true),
   importSeedStill: vi.fn().mockResolvedValue('cancelled' as const),
   parkShot: vi.fn().mockResolvedValue(true),
   parkBeat: vi.fn().mockResolvedValue(true),
   reviewShot: vi.fn(),
+  reviewSeedStill: vi.fn(),
   reviewContinuity: vi.fn(),
   resolveGenerationBlock: vi.fn(),
   retryGenerationJob: vi.fn().mockResolvedValue(true),
@@ -633,7 +720,7 @@ describe('BeatPanel generation recovery', () => {
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
 
     const remote = container.querySelector<HTMLElement>('[data-job-id="job_remote"]')!;
-    expect(screen.getByRole('button', { name: 'Generate again' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate Shot 1' })).toBeDisabled();
     fireEvent.click(within(remote).getByRole('button', { name: 'conversation.creativeStudio.jobs.retry' }));
     await waitFor(() => expect(actions.retryGenerationJob).toHaveBeenCalledWith('job_remote', false));
     fireEvent.click(within(remote).getByRole('button', { name: 'conversation.creativeStudio.jobs.cancel' }));
@@ -1720,13 +1807,10 @@ describe('BeatPanel', () => {
     expect(within(continuation).getByText('Generated work is out of date')).toBeVisible();
 
     inspectShot(container, 'shot_private_1');
-    // The Shooting script reads from its header control and opens to edit.
-    fireEvent.click(naturalHead.querySelector<HTMLButtonElement>('[data-shot-script-toggle]')!);
+    // The Shooting script is always visible and editable in the Shot header.
     const shootingScript = within(naturalHead).getByRole('textbox', { name: 'Shooting script for Shot 1' });
     expect(shootingScript).toHaveValue('Canonical shooting script 1');
-    expect(shootingScript).toHaveAttribute('data-min-rows', '3');
-    expect(shootingScript).toHaveAttribute('data-max-rows', '6');
-    expect(naturalHead.querySelectorAll('textarea')).toHaveLength(1);
+    expect(naturalHead.querySelectorAll('input')).toHaveLength(1);
 
     inspectShot(container, 'shot_private_4');
     expect(within(authoredHead).getByRole('button', { name: 'Review rejoin…' })).toHaveAttribute(
@@ -1738,9 +1822,8 @@ describe('BeatPanel', () => {
       'data-chain-change-intent',
       'rejoin'
     );
-    expect(container.querySelector('video')).toHaveProperty('controls', true);
-    expect(within(naturalHead).getByLabelText('First frame 1 for Shot 1')).toBeInTheDocument();
-    expect(within(continuation).getByLabelText('Player · Current picture for Shot 2')).toBeInTheDocument();
+    expect(within(naturalHead).getByLabelText('Frame 1')).toBeInTheDocument();
+    expect(continuation.querySelector('[role="region"][aria-label="Current picture for Shot 2"]')).toBeInTheDocument();
     expect(container.textContent).not.toContain('asset_private');
     expect(container.textContent).not.toContain('shot_private');
   });
@@ -1975,9 +2058,7 @@ describe('BeatPanel', () => {
     const card = shotCard(container, 'shot_1');
     const shot = within(card);
 
-    // Nothing is authored on screen until asked for.
-    expect(shot.queryAllByRole('textbox')).toHaveLength(0);
-    fireEvent.click(card.querySelector<HTMLButtonElement>('[data-shot-script-toggle]')!);
+    // The one canonical Shooting script is always visible in the Shot header.
     expect(shot.getAllByRole('textbox')).toHaveLength(1);
     expect(shot.getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
       'Canonical shooting script 1'
@@ -1985,11 +2066,14 @@ describe('BeatPanel', () => {
     expect(shot.queryByRole('button', { name: /detach|restore|re-derive/iu })).toBeNull();
   });
 
-  it('shows one current picture with Generate again and no Take selection or overflow surface', () => {
+  it('shows one current picture with a target-named generation action and a bounded history menu', async () => {
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const seed = makeSeedStill('seed_existing', { effectiveSeed: true });
     const shot = makeShot('shot_1', 0, {
       currentPicture: makeCurrentPicture('video_current', 10, 'poster_current'),
       effectiveSeedAssetId: 'seed_existing',
       hasEffectiveSeed: true,
+      seedStills: [seed],
     });
     const beat = makeBeat('beat_1', [shot]);
     const actions = makeActions();
@@ -1997,19 +2081,164 @@ describe('BeatPanel', () => {
 
     const shotRegion = within(shotCard(container, shot.id));
     const picture = shotRegion.getByRole('region', { name: 'Current picture for Shot 1' });
-    expect(within(picture).getByLabelText('Player · Current picture for Shot 1')).toHaveAttribute(
+    expect(within(picture).getByAltText('Current picture for Shot 1')).toHaveAttribute(
+      'src',
+      'weprompt-studio://asset/project_1/poster_current'
+    );
+    expect(container.querySelector('[data-asset-id="video_superseded"]')).toBeNull();
+    fireEvent.click(within(picture).getByRole('button', { name: 'More actions' }));
+    expect(within(picture).getByRole('menuitem', { name: 'Previous takes' })).toBeDisabled();
+    expect(
+      within(picture)
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent?.trim())
+    ).toEqual(['Download', 'Previous takes', 'Remove take']);
+    fireEvent.click(within(picture).getByRole('menuitem', { name: 'Download' }));
+    fireEvent.click(within(picture).getByRole('menuitem', { name: 'Remove take' }));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    expect(actions.removeVideoTake).toHaveBeenCalledWith(shot.id, 'video_current');
+    expect(shotRegion.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
+
+    fireEvent.click(within(picture).getByRole('button', { name: 'Generate Shot 1' }));
+    await waitFor(() =>
+      expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [{ shotId: 'shot_1', purpose: 'video_take' }])
+    );
+    anchorClick.mockRestore();
+  });
+
+  it('keeps retained takes in the picture viewer, restores one for free, and shows staleness as a tag', () => {
+    const seed = makeSeedStill('seed_existing', { effectiveSeed: true });
+    const current = {
+      ...makeCurrentPicture('video_current', 8, 'poster_current'),
+      current: true,
+      firstFrameChanged: true,
+      promptChanged: true,
+    };
+    const older = {
+      ...makeCurrentPicture('video_older', 8, 'poster_older'),
+      current: false,
+    };
+    const shot = makeShot('shot_1', 0, {
+      currentPicture: current,
+      effectiveSeedAssetId: seed.assetId,
+      firstFrames: [seed],
+      hasEffectiveSeed: true,
+      seedStills: [seed],
+      videoTakes: [current, older],
+    });
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+    const picture = within(shotCard(container, shot.id)).getByRole('region', {
+      name: 'Current picture for Shot 1',
+    });
+
+    expect(within(picture).getByText('First frame changed · Not re-run')).toBeVisible();
+    expect(within(picture).getByText('Edited · Not yet run')).toBeVisible();
+    fireEvent.click(within(picture).getByRole('button', { name: 'Current picture for Shot 1' }));
+    const viewer = container.querySelector<HTMLElement>('[data-viewer-kind="picture"]');
+    if (viewer === null) throw new Error('Missing picture viewer');
+    expect(within(viewer).getByRole('button', { name: 'Take 1' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Take 2' }));
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Use this take' }));
+    expect(actions.selectVideoTake).toHaveBeenCalledWith(shot.id, older.assetId);
+  });
+
+  it('judges video takes full screen, removes only current, and offers the explicit last-frame handoff', async () => {
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const current = {
+      ...makeCurrentPicture('video_current', 8, null),
+      current: true,
+    };
+    const older = {
+      ...makeCurrentPicture('video_older', 8, 'poster_older'),
+      current: false,
+    };
+    const shot = makeShot('shot_1', 0, {
+      currentPicture: current,
+      videoTakes: [current, older],
+    });
+    const next = makeShot('shot_2', 1, { chainBreak: 'hard_cut', segmentHead: true });
+    const beat = makeBeat('beat_1', [shot, next]);
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
+    const picture = within(shotCard(container, shot.id)).getByRole('region', {
+      name: 'Current picture for Shot 1',
+    });
+
+    expect(within(picture).getByLabelText('Current picture for Shot 1')).toHaveAttribute(
       'src',
       'weprompt-studio://asset/project_1/video_current'
     );
-    expect(container.querySelector('[data-asset-id="video_superseded"]')).toBeNull();
-    expect(within(picture).queryByRole('button', { name: /Select Take|More actions/u })).toBeNull();
-    expect(shotRegion.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
+    fireEvent.click(within(picture).getByRole('button', { name: 'Send its last frame to Shot 2' }));
+    expect(actions.reviewContinuity).toHaveBeenCalledWith(next.id, false);
 
-    fireEvent.click(within(picture).getByRole('button', { name: 'Generate again' }));
-    expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [{ shotId: 'shot_1', purpose: 'video_take' }]);
+    fireEvent.click(within(picture).getByRole('button', { name: 'Current picture for Shot 1' }));
+    const viewer = container.querySelector<HTMLElement>('[data-viewer-kind="picture"]');
+    if (viewer === null) throw new Error('Missing picture viewer');
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Next' }));
+    expect(within(viewer).getByRole('button', { name: 'Take 2' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Previous' }));
+    expect(within(viewer).getByRole('button', { name: 'Take 1' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Download' }));
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Remove take' }));
+
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(actions.removeVideoTake).toHaveBeenCalledWith(shot.id, current.assetId));
+    await waitFor(() => expect(container.querySelector('[data-viewer-kind="picture"]')).toBeNull());
+    anchorClick.mockRestore();
   });
 
-  it('opens the Beat player, first-frame image, and current Shot video from their exact fullscreen frames', () => {
+  it('keeps retained take history reachable after the current pointer is removed', () => {
+    const retained = {
+      ...makeCurrentPicture('video_retained', 8, 'poster_retained'),
+      current: false,
+    };
+    const shot = makeShot('shot_1', 0, {
+      currentPicture: null,
+      videoTakes: [retained],
+    });
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+    const picture = within(shotCard(container, shot.id)).getByRole('region', {
+      name: 'Current picture for Shot 1',
+    });
+
+    expect(within(picture).getByText('No picture yet')).toBeVisible();
+    fireEvent.click(within(picture).getByRole('button', { name: 'Previous takes' }));
+    const viewer = container.querySelector<HTMLElement>('[data-viewer-kind="picture"]');
+    if (viewer === null) throw new Error('Missing retained-take viewer');
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Use this take' }));
+    expect(actions.selectVideoTake).toHaveBeenCalledWith(shot.id, retained.assetId);
+  });
+
+  it('persists the exact edited prompt before opening paid Shot review', async () => {
+    let resolveSave: ((saved: boolean) => void) | null = null;
+    const saveShot = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveSave = resolve;
+        })
+    );
+    const actions = makeActions({ saveShot });
+    const seed = makeSeedStill('seed_existing', { effectiveSeed: true });
+    const shot = makeShot('shot_1', 0, {
+      effectiveSeedAssetId: seed.assetId,
+      hasEffectiveSeed: true,
+      seedStills: [seed],
+    });
+    const drafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Edited prompt as fired' });
+    render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), drafts, actions)} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Shot 1' }));
+    expect(saveShot).toHaveBeenCalledWith([{ shotId: shot.id, changes: { shootingScript: 'Edited prompt as fired' } }]);
+    expect(actions.reviewSeedStill).not.toHaveBeenCalled();
+    await act(async () => resolveSave?.(true));
+    await waitFor(() =>
+      expect(actions.reviewShot).toHaveBeenCalledWith(shot.id, [{ shotId: shot.id, purpose: 'video_take' }])
+    );
+  });
+
+  it('opens the Beat player plus the frame and current-picture judgement views', () => {
     const seed = makeSeedStill('image_current', { effectiveSeed: true });
     const shot = makeShot('shot_1', 0, {
       currentPicture: makeCurrentPicture('video_current', 8, 'poster_current'),
@@ -2035,52 +2264,133 @@ describe('BeatPanel', () => {
     expect(within(beatFrame).getByRole('group', { name: 'Beat transport' })).toBeInTheDocument();
 
     const seedCard = assetCard(container, seed.assetId);
-    const seedExpand = within(seedCard).getByRole('button', { name: 'Expand' });
-    const seedFrame = seedExpand.closest<HTMLElement>('[data-fullscreen-media-frame]');
-    if (seedFrame === null) throw new Error('Missing first-frame image fullscreen frame');
-    const requestSeedFullscreen = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(seedFrame, 'requestFullscreen', {
-      configurable: true,
-      value: requestSeedFullscreen,
-    });
-    fireEvent.click(seedExpand);
-    expect(requestSeedFullscreen).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(seedCard).getByRole('button', { name: 'Open Frame 1 full screen' }));
+    expect(container.querySelector('[data-viewer-kind="frame"]')).toBeInTheDocument();
+    fireEvent.keyDown(document, { key: 'Escape' });
 
     const picture = within(shotCard(container, shot.id)).getByRole('region', {
       name: 'Current picture for Shot 1',
     });
-    const pictureExpand = within(picture).getByRole('button', { name: 'Expand' });
-    const pictureFrame = pictureExpand.closest<HTMLElement>('[data-fullscreen-media-frame]');
-    if (pictureFrame === null) throw new Error('Missing current Shot video fullscreen frame');
-    const requestPictureFullscreen = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(pictureFrame, 'requestFullscreen', {
-      configurable: true,
-      value: requestPictureFullscreen,
-    });
-    fireEvent.click(pictureExpand);
-    expect(requestPictureFullscreen).toHaveBeenCalledTimes(1);
+    fireEvent.click(within(picture).getByRole('button', { name: 'Current picture for Shot 1' }));
+    expect(container.querySelector('[data-viewer-kind="picture"]')).toBeInTheDocument();
   });
 
-  it('keeps seed still pinning reachable without any video selection or overflow surface', () => {
-    const effective = makeSeedStill('image_1', { effectiveSeed: true });
-    const pinned = makeSeedStill('image_2', { explicitSeed: true });
+  it('keeps seed pinning free and exposes only the exact frame menu actions', () => {
+    const effective = makeSeedStill('image_1', { effectiveSeed: true, explicitSeed: true });
+    const candidate = makeSeedStill('image_2');
     const shot = makeShot('shot_1', 0, {
-      seedStills: [effective, pinned],
+      seedStills: [effective, candidate],
       segmentHead: true,
     });
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
 
     fireEvent.click(
-      within(assetCard(container, effective.assetId)).getByRole('button', { name: 'Pin as first frame' })
+      within(assetCard(container, candidate.assetId)).getByRole('button', { name: 'Pin as first frame' })
     );
-    expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', effective.assetId);
+    expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', candidate.assetId);
+    fireEvent.click(within(assetCard(container, effective.assetId)).getByRole('button', { name: 'More actions' }));
+    expect(
+      within(assetCard(container, effective.assetId))
+        .getAllByRole('menuitem')
+        .map((item) => item.textContent?.trim())
+    ).toEqual(['Download', 'Copy prompt', 'Remove']);
+  });
+
+  it('runs the complete free frame menu and keyboard judgement flow', async () => {
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const current = makeSeedStill('image_current', { effectiveSeed: true, explicitSeed: true });
+    const candidate = makeSeedStill('image_candidate', { origin: 'imported', prompt: null });
+    const shot = makeShot('shot_1', 0, {
+      effectiveSeedAssetId: current.assetId,
+      firstFrames: [current, candidate],
+      hasEffectiveSeed: true,
+      seedStills: [current, candidate],
+    });
+    const actions = makeActions({ importSeedStill: vi.fn().mockResolvedValue('imported') });
+    const drafts = makeDrafts();
+    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), drafts, actions)} />);
+    const currentCard = assetCard(container, current.assetId);
+
+    fireEvent.click(within(currentCard).getByRole('button', { name: 'More actions' }));
+    fireEvent.click(within(currentCard).getByRole('menuitem', { name: 'Download' }));
+    fireEvent.click(within(currentCard).getByRole('menuitem', { name: 'Copy prompt' }));
+    fireEvent.click(within(currentCard).getByRole('menuitem', { name: 'Remove' }));
+    expect(anchorClick).toHaveBeenCalledTimes(1);
+    expect(copyTextMock).toHaveBeenCalledWith(current.prompt);
+    expect(actions.dismissSeedStill).toHaveBeenCalledWith(shot.id, current.assetId);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Import first frame' }));
+    await waitFor(() => expect(actions.importSeedStill).toHaveBeenCalledWith(shot.id));
+
+    fireEvent.click(within(assetCard(container, candidate.assetId)).getByRole('button', { name: 'Preview · Frame 2' }));
+    const viewer = container.querySelector<HTMLElement>('[data-viewer-kind="frame"]');
+    if (viewer === null) throw new Error('Missing frame viewer');
+    fireEvent.keyDown(document, { key: 'ArrowLeft' });
+    expect(within(viewer).getByRole('button', { name: 'Frame 1' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.keyDown(document, { key: 'ArrowRight' });
+    fireEvent.keyDown(document, { key: 'p' });
+    expect(actions.setSeedStill).toHaveBeenCalledWith(shot.id, candidate.assetId);
+
+    const prompt = within(viewer).getByRole('textbox', { name: 'Shot prompt' });
+    fireEvent.change(prompt, { target: { value: 'Edited while judging' } });
+    expect(drafts.setValue).toHaveBeenCalledWith('shot.shot_1.shootingScript', 'Edited while judging');
+    fireEvent.focus(prompt);
+    fireEvent.keyDown(document, { key: 'r' });
+    expect(actions.reviewShot).not.toHaveBeenCalled();
+    fireEvent.blur(prompt);
+    fireEvent.keyDown(document, { key: 'r' });
+    await waitFor(() => expect(actions.reviewSeedStill).toHaveBeenCalledWith(shot.id));
+
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Download' }));
+    expect(anchorClick).toHaveBeenCalledTimes(2);
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(container.querySelector('[data-viewer-kind="frame"]')).toBeNull());
+    anchorClick.mockRestore();
+  });
+
+  it('renders reported progress and cancels the exact active generation job', async () => {
+    const seed = makeSeedStill('seed_current', { effectiveSeed: true });
+    const shot = makeShot('shot_1', 0, {
+      activeGenerationJob: { id: 'job_running', purpose: 'video_take', canCancel: true },
+      firstFrames: [seed],
+      generationProgressPercent: 42.4,
+      seedStills: [seed],
+      videoGenerationInFlight: true,
+    });
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+
+    expect(screen.getAllByText('Rendering · 42%').length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel run' }));
+    await waitFor(() => expect(actions.cancelGenerationJob).toHaveBeenCalledWith('job_running'));
+
     fireEvent.click(
-      within(assetCard(container, pinned.assetId)).getByRole('button', { name: 'Clear first-frame pin' })
+      within(assetCard(container, seed.assetId)).getByRole('button', { name: 'Open Frame 1 full screen' })
     );
-    expect(actions.setSeedStill).toHaveBeenCalledWith('shot_1', null);
-    expect(container.querySelector('[data-take-overflow-trigger]')).toBeNull();
-    expect(container.querySelector('[data-take-overflow-menu]')).toBeNull();
+    const viewer = container.querySelector<HTMLElement>('[data-viewer-kind="frame"]');
+    if (viewer === null) throw new Error('Missing running frame viewer');
+    fireEvent.click(within(viewer).getByRole('button', { name: 'Cancel run' }));
+    await waitFor(() => expect(actions.cancelGenerationJob).toHaveBeenCalledTimes(2));
+  });
+
+  it('fails stale unsafe frame snapshots closed without exposing a paid or download path', () => {
+    const unsafe = makeSeedStill('../unsafe', { effectiveSeed: true });
+    const shot = makeShot('shot_1', 0, {
+      effectiveSeedAssetId: unsafe.assetId,
+      firstFrames: [unsafe],
+      hasEffectiveSeed: true,
+      seedStills: [unsafe],
+    });
+    const { container } = render(
+      <BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), makeActions())} />
+    );
+    const card = assetCard(container, unsafe.assetId);
+
+    expect(within(card).getByText('Unavailable')).toBeVisible();
+    expect(within(card).getByRole('button', { name: 'Open Frame 1 full screen' })).toBeDisabled();
+    fireEvent.click(within(card).getByRole('button', { name: 'More actions' }));
+    expect(within(card).getByRole('menuitem', { name: 'Download' })).toBeDisabled();
   });
 
   it('closes and invalidates Beat confirmations on identity or project drift and owner unmount', async () => {
@@ -2141,27 +2451,37 @@ describe('BeatPanel', () => {
   });
 
   it('keeps retained seed stills reachable on continuity Shots without exposing seed controls', () => {
-    const retainedSeed = makeSeedStill('image_continuity');
+    const retainedSeed = makeSeedStill('image_continuity', {
+      origin: 'inherited',
+      prompt: null,
+      sourceShotNumber: 1,
+    });
     const beat = makeBeat('beat_1', [
       makeShot('shot_1', 0),
       makeShot('shot_2', 1, { seedStills: [retainedSeed], segmentHead: false }),
     ]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const card = within(inspectShot(container, 'shot_2')).getByLabelText('First frame 1 for Shot 2');
+    const card = within(inspectShot(container, 'shot_2')).getByLabelText('Frame 1');
 
     expect(card).toBeVisible();
-    expect(within(card).queryByRole('button', { name: 'Pin as first frame' })).toBeNull();
-    expect(within(card).queryByRole('button', { name: 'Clear first-frame pin' })).toBeNull();
+    expect(within(card).getByRole('button', { name: 'Pin as first frame' })).toBeDisabled();
   });
 
-  it('reviews the complete ordered seed-and-video graph without the retired per-Shot reference picker', () => {
-    const beat = makeBeat();
+  it('reviews the complete ordered seed-and-video graph without the retired per-Shot reference picker', async () => {
+    const currentFrame = makeSeedStill('frame_current', { effectiveSeed: true });
+    const beat = makeBeat('beat_1', [
+      makeShot('shot_1', 0, {
+        effectiveSeedAssetId: currentFrame.assetId,
+        hasEffectiveSeed: true,
+        seedStills: [currentFrame],
+      }),
+      makeShot('shot_2', 1),
+    ]);
     const drafts = makeDrafts();
     const actions = makeActions();
     const reviewGraph: BeatPanelReviewGraph = {
       triggerShotId: 'shot_1',
       choices: [
-        { shotId: 'shot_1', purpose: 'seed_still' },
         { shotId: 'shot_1', purpose: 'video_take' },
         { shotId: 'shot_2', purpose: 'video_take' },
       ],
@@ -2186,12 +2506,15 @@ describe('BeatPanel', () => {
     expect(triggerCard.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
     expect(triggerCard.queryByRole('combobox', { name: /Brief reference/u })).toBeNull();
 
-    fireEvent.click(triggerCard.getByRole('button', { name: 'Review first-frame generation' }));
-    expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [
-      { shotId: 'shot_1', purpose: 'seed_still' },
-      { shotId: 'shot_1', purpose: 'video_take' },
-      { shotId: 'shot_2', purpose: 'video_take' },
-    ]);
+    const generate = triggerCard.getByRole('button', { name: 'Generate Shot 1' });
+    expect(generate).toBeEnabled();
+    fireEvent.click(generate);
+    await waitFor(() =>
+      expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [
+        { shotId: 'shot_1', purpose: 'video_take' },
+        { shotId: 'shot_2', purpose: 'video_take' },
+      ])
+    );
     expect(drafts.setValue).not.toHaveBeenCalledWith('gate.choices', expect.any(String));
   });
 
@@ -2205,9 +2528,9 @@ describe('BeatPanel', () => {
         })}
       />
     );
-    expect(screen.getByRole('button', { name: 'Review first-frame generation' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate Shot 1' })).toBeDisabled();
     expect(screen.getByText('Generation review is unavailable')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Review first-frame generation' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Generate Shot 1' }));
     expect(actions.reviewShot).not.toHaveBeenCalled();
   });
 
@@ -2229,7 +2552,7 @@ describe('BeatPanel', () => {
       />
     );
 
-    const renderButton = screen.getByRole('button', { name: 'Review first-frame generation' });
+    const renderButton = screen.getByRole('button', { name: 'Generate Shot 1' });
     expect(renderButton).toBeVisible();
     expect(renderButton).toBeDisabled();
     expect(renderButton).toHaveAccessibleDescription('This engine cannot make a shot 8s long.');
@@ -2380,7 +2703,7 @@ describe('BeatPanel', () => {
     );
 
     expect(screen.getByText(reason)).toHaveAttribute('role', 'status');
-    expect(screen.getByRole('button', { name: 'Review first-frame generation' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate Shot 1' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Set engines' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Adjust shot length' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Review Shot binding' })).toBeNull();
@@ -2589,7 +2912,7 @@ describe('BeatPanel', () => {
     const lockedCard = inspectShot(container, locked.id);
     const ordinaryRejoin = within(lockedCard).getByRole('button', { name: 'Review rejoin…' });
     const ordinaryGeneration = within(lockedCard).getByRole('button', {
-      name: 'Review first-frame generation',
+      name: 'Generate Shot 2',
     });
     expect(ordinaryRejoin).toBeDisabled();
     expect(ordinaryGeneration).toBeDisabled();
@@ -2599,9 +2922,8 @@ describe('BeatPanel', () => {
     expect(actions.reviewShot).not.toHaveBeenCalled();
 
     const importedCard = assetCard(container, imported.assetId);
-    expect(importedCard).not.toHaveTextContent('Current first frame');
-    expect(importedCard).toHaveTextContent('Not available to authorized work');
-    expect(within(importedCard).queryByRole('button', { name: 'Pin as first frame' })).toBeNull();
+    expect(importedCard).not.toHaveTextContent('Current');
+    expect(within(importedCard).getByRole('button', { name: 'Pin as first frame' })).toBeDisabled();
 
     const authorizedCard = assetCard(container, authorized.assetId);
     fireEvent.click(within(authorizedCard).getByRole('button', { name: 'Pin as first frame' }));

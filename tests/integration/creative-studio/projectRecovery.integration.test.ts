@@ -130,6 +130,7 @@ describe('Creative Studio project recovery integration', () => {
             trimOutSeconds: null,
             chainBreak: 'none',
             seedStillId: null,
+            dismissedSeedStillIds: [],
             boardAssetId: null,
             supersededBoardAssetIds: [],
             videoAssetId: null,

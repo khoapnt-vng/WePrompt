@@ -332,6 +332,7 @@ const editorFolderProject = (includeCanonicalVideo = true): StudioRendererProjec
     chainBreak: 'none' as const,
     referenceBinding: { status: 'unassigned' as const, characterReferenceIds: [], backgroundReferenceId: null },
     seedStillId: null,
+    dismissedSeedStillIds: [],
     boardAssetId: null,
     supersededBoardAssetIds: [],
     videoAssetId: null,

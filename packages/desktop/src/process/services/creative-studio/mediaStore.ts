@@ -4035,7 +4035,14 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           if (shot === undefined) throw new CreativeStudioMediaError('job_inactive');
           shot.assetIds.push(asset.id);
           if (job.purpose === 'video_take') {
-            if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+            shot.supersededVideoAssetIds = shot.jobIds.flatMap((jobId) => {
+              const completed = ownRecordValue(current.jobs, jobId);
+              return completed?.status === 'succeeded' &&
+                completed.purpose === 'video_take' &&
+                completed.outputAssetIdsByRole.primary !== null
+                ? [completed.outputAssetIdsByRole.primary]
+                : [];
+            });
             shot.videoAssetId = asset.id;
           } else if (job.purpose === 'board_still') {
             if (shot.boardAssetId !== null) shot.supersededBoardAssetIds.push(shot.boardAssetId);

@@ -500,8 +500,11 @@ const eligibleExplicitSeedAsset = (project: StudioProjectV2, shotId: string, ass
 const effectiveSeedAsset = (project: StudioProjectV2, shotId: string): StudioAssetV2 | null => {
   const shot = ownValue(project.shots, shotId);
   if (shot === undefined) return null;
-  if (shot.seedStillId !== null) return eligibleExplicitSeedAsset(project, shot.id, shot.seedStillId);
+  if (shot.seedStillId !== null && !shot.dismissedSeedStillIds.includes(shot.seedStillId)) {
+    return eligibleExplicitSeedAsset(project, shot.id, shot.seedStillId);
+  }
   const candidates = shot.assetIds.flatMap((assetId) => {
+    if (shot.dismissedSeedStillIds.includes(assetId)) return [];
     const asset = eligibleSeedAsset(project, shot.id, assetId);
     return asset === null ? [] : [asset];
   });
@@ -957,6 +960,7 @@ const deriveBoardPromotionSubmissionQuoteGraphV2 = (
   if (
     authority === null ||
     (authority.shotIndex !== 0 && authority.shot.chainBreak !== 'hard_cut') ||
+    authority.shot.dismissedSeedStillIds.includes(promotion.boardAssetId) ||
     authority.shot.seedStillId === promotion.boardAssetId
   ) {
     return fail('invalid_prepare_request');

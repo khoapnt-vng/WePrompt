@@ -1113,6 +1113,57 @@
           "authorizationLocked": "承認済みの動画作業により、このショットの最初のフレームはロックされています。読み込んだ候補は保存されますが、確認済み見積もりのシードを置き換えることはできません。",
           "authorizationIncompatible": "承認済み作業には使用できません"
         },
+        "firstFrames": {
+          "title": "ファーストフレーム",
+          "shotChip": "ショット {{shot}}",
+          "on": "選択中",
+          "status": {
+            "notReady": "未準備",
+            "ready": "レンダー可能",
+            "rendering": "レンダリング中",
+            "rendered": "レンダー済み"
+          },
+          "frameLabel": "フレーム {{index}}",
+          "origin": {
+            "generated": "生成",
+            "imported": "読み込み",
+            "board": "絵コンテ",
+            "inherited": "ショット {{shot}} から"
+          },
+          "current": "現在",
+          "unavailable": "利用不可",
+          "previewAlt": "プレビュー · {{label}}",
+          "openFrame": "{{label}}を全画面で開く",
+          "pinned": "ファーストフレームに固定済み",
+          "pin": "ファーストフレームに固定",
+          "firstFrameChanged": "ファーストフレーム変更済み · 未再実行",
+          "promptChanged": "編集済み · 未実行",
+          "import": "ファーストフレームを読み込む",
+          "empty": "使用可能なファーストフレームがありません",
+          "currentPicture": "現在の映像",
+          "pictureEmpty": "映像はまだありません",
+          "pictureAlt": "ショット {{shot}} の現在の映像",
+          "sendLastFrame": "最終フレームをショット {{shot}} に送る",
+          "cancelRun": "実行をキャンセル",
+          "generateShot": "ショット {{shot}} を生成",
+          "promptLabel": "ショットプロンプト",
+          "regenerate": "再生成",
+          "menu": {
+            "download": "ダウンロード",
+            "copyPrompt": "プロンプトをコピー",
+            "remove": "削除",
+            "previousTakes": "以前のテイク",
+            "removeTake": "テイクを削除"
+          },
+          "viewer": {
+            "currentFirstFrame": "現在のファーストフレーム",
+            "counter": "{{total}}件中{{current}}件",
+            "take": "テイク {{index}}",
+            "previous": "前へ",
+            "next": "次へ",
+            "useTake": "このテイクを使用"
+          }
+        },
         "picture": {
           "title": "現在の画像",
           "label": "ショット{{index}}の現在の画像",
