@@ -30,6 +30,7 @@ import {
 import { STUDIO_MANAGED_ASSET_COLLECTIONS_V2 } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
   applyStudioMutationBatchV2,
+  createStudioFrameExtractionId,
   studioGenerationCompositionDigestV2,
   type StudioVerifiedConditioningFrameV2,
 } from './service/schema2';
@@ -447,6 +448,8 @@ export type StudioMediaStoreDeps = {
   afterV2ManagedDirectorySync?: (directory: string) => void | Promise<void>;
   /** V2 video duration is decoded from the finalized managed bytes, never trusted from provider metadata. */
   probeVideoDurationSecondsV2?: (input: { filePath: string; byteSize: number; sha256: string }) => Promise<number>;
+  /** Rejects multi-panel provider images before they can become a current first frame or reference. */
+  detectImageVariationGridV2?: (input: { filePath: string }) => Promise<boolean>;
   /** V2 bed metadata is decoded from finalized managed bytes and must describe one audio-only stream. */
   probeBedAudioV2?: (input: {
     filePath: string;
@@ -461,6 +464,74 @@ export type StudioMediaStoreDeps = {
 };
 
 type FileIdentity = { dev: string; ino: string };
+
+const VARIATION_GRID_SEAM_EXCESS_THRESHOLD = 48;
+
+/**
+ * Detects the repeated full-height separators characteristic of a four-panel generation sheet.
+ * A single strong central edge is ordinary composition, so two of the three quartile seams must
+ * exceed the image's own median adjacent-column change by the calibrated margin.
+ */
+export const studioImageHasVariationGridV2 = (input: {
+  data: Uint8Array;
+  width: number;
+  height: number;
+  channels: number;
+}): boolean => {
+  const { data, width, height, channels } = input;
+  if (
+    !Number.isSafeInteger(width) ||
+    !Number.isSafeInteger(height) ||
+    !Number.isSafeInteger(channels) ||
+    width < 8 ||
+    height < 8 ||
+    channels < 3 ||
+    channels > 4 ||
+    data.length !== width * height * channels
+  ) {
+    return false;
+  }
+  const columnDifference = (column: number): number => {
+    let total = 0;
+    for (let row = 0; row < height; row += 1) {
+      const right = (row * width + column) * channels;
+      const left = right - channels;
+      total +=
+        Math.abs(data[right]! - data[left]!) +
+        Math.abs(data[right + 1]! - data[left + 1]!) +
+        Math.abs(data[right + 2]! - data[left + 2]!);
+    }
+    return total / (height * 3);
+  };
+  const adjacentDifferences = Array.from({ length: width - 1 }, (_, index) => columnDifference(index + 1)).toSorted(
+    (left, right) => left - right
+  );
+  const middle = Math.floor(adjacentDifferences.length / 2);
+  const median =
+    adjacentDifferences.length % 2 === 0
+      ? (adjacentDifferences[middle - 1]! + adjacentDifferences[middle]!) / 2
+      : adjacentDifferences[middle]!;
+  const seams = [0.25, 0.5, 0.75].map((ratio) => Math.min(width - 1, Math.max(1, Math.round(width * ratio))));
+  return (
+    seams.filter((column) => columnDifference(column) - median >= VARIATION_GRID_SEAM_EXCESS_THRESHOLD).length >= 2
+  );
+};
+
+const detectImageVariationGridV2 = async (input: { filePath: string }): Promise<boolean> => {
+  const sharp = (await import('sharp')).default;
+  const { data, info } = await sharp(input.filePath, { limitInputPixels: 40_000_000, sequentialRead: true })
+    .rotate()
+    .resize({ width: 512, height: 512, fit: 'inside', withoutEnlargement: true })
+    .removeAlpha()
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+  return studioImageHasVariationGridV2({
+    data,
+    width: info.width,
+    height: info.height,
+    channels: info.channels,
+  });
+};
 
 type VerifiedDirectory = {
   directory: string;
@@ -3631,6 +3702,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     authority: StudioProjectPathAuthorityV2;
     capacity: WriteCapacity;
     collection: 'assets' | 'thumbnails' | 'boardStills';
+    rejectVariationGrid: boolean;
   };
 
   const validateProviderOutputMetadataV2 = (input: ProviderJobOutputMetadataV2 | ProviderJobPosterMetadataV2): void => {
@@ -3697,6 +3769,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       authority,
       capacity: await planWriteCapacity(project, projectDir, perAssetMaxBytes, input.declaredByteSize),
       collection: providerPrimaryCollectionV2(job.purpose),
+      rejectVariationGrid: job.purpose === 'seed_still' || job.purpose === 'reference_image',
     };
   };
 
@@ -3747,6 +3820,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       authority,
       capacity: await planWriteCapacity(project, projectDir, limits.imageOutputMaxBytes, input.declaredByteSize),
       collection: 'thumbnails',
+      rejectVariationGrid: false,
     };
   };
 
@@ -3807,6 +3881,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       authority,
       capacity: await planWriteCapacity(project, projectDir, limits.imageOutputMaxBytes, input.declaredByteSize),
       collection: 'thumbnails',
+      rejectVariationGrid: false,
     };
   };
 
@@ -3919,6 +3994,17 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         if (!Number.isFinite(durationSeconds) || durationSeconds <= 0 || durationSeconds > Number.MAX_SAFE_INTEGER) {
           throw new CreativeStudioMediaError('invalid_media');
         }
+      }
+      if (input.mediaKind === 'image' && plan.rejectVariationGrid) {
+        let isVariationGrid: boolean;
+        try {
+          isVariationGrid = await (deps.detectImageVariationGridV2 ?? detectImageVariationGridV2)({
+            filePath: finalPath,
+          });
+        } catch {
+          throw new CreativeStudioMediaError('invalid_media');
+        }
+        if (isVariationGrid) throw new CreativeStudioMediaError('seed_still_variation_grid');
       }
       const asset: StudioAssetV2 = {
         id: assetId,
@@ -4044,6 +4130,24 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
                 : [];
             });
             shot.videoAssetId = asset.id;
+            if (asset.durationSeconds === undefined) throw new CreativeStudioMediaError('invalid_media');
+            const endpointSeconds = asset.durationSeconds - (shot.trimOutSeconds ?? 0);
+            const extractionId = createStudioFrameExtractionId({
+              shotId: shot.id,
+              videoAssetId: asset.id,
+              endpointSeconds,
+            });
+            if (ownRecordValue(current.frameExtractions, extractionId) === undefined) {
+              defineRecordValue(current.frameExtractions, extractionId, {
+                id: extractionId,
+                shotId: shot.id,
+                videoAssetId: asset.id,
+                endpointSeconds,
+                frameAssetId: null,
+                status: 'pending',
+                errorCode: null,
+              });
+            }
           } else if (job.purpose === 'board_still') {
             if (shot.boardAssetId !== null) shot.supersededBoardAssetIds.push(shot.boardAssetId);
             shot.boardAssetId = asset.id;

@@ -50,6 +50,7 @@ import {
   filmRenderBatchShotIds,
   seedRegenerationGateDraft,
   selectionGateDraft,
+  spendGateDraftIdentity,
   spendGateRouteIssue,
   useSpendGate,
   useWorkspaceDrafts,
@@ -571,6 +572,23 @@ const StudioProjectPage: React.FC<{
     onConfirmed: afterPaidConfirm,
     onPromoteOnly: promoteBoardPanelOnly,
   });
+  const spendGateDisclosureRef = useRef(spendGate.state.generationDisclosure);
+  spendGateDisclosureRef.current = spendGate.state.generationDisclosure;
+  const spendGateIdentity = spendGate.state.draft === null ? null : spendGateDraftIdentity(spendGate.state.draft);
+  useEffect(() => {
+    if (spendGate.state.phase !== 'choices' || spendGateIdentity === null) return;
+    void refetchRoutes();
+  }, [refetchRoutes, spendGate.state.phase, spendGateIdentity]);
+  useEffect(() => {
+    if (spendGate.state.phase !== 'choices' || spendGateIdentity === null) return;
+    const disclosure = spendGateDisclosureRef.current;
+    if (disclosure === null) return;
+    const items = disclosure.groups.flatMap((group) => group.items);
+    const groups = generationBlockGroupsForItems(currentGenerationCapability, items);
+    spendGate.updateGenerationDisclosure(
+      groups.length === 0 ? undefined : { groups, blocksPrepare: disclosure.blocksPrepare }
+    );
+  }, [currentGenerationCapability, spendGate.state.phase, spendGate.updateGenerationDisclosure, spendGateIdentity]);
   const spendGateLocked =
     spendGate.state.phase === 'promoting' ||
     spendGate.state.phase === 'confirming' ||

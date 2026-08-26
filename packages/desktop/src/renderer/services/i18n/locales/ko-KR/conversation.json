@@ -931,7 +931,8 @@
           "shot": "Shot {{position}}",
           "unassigned": "이 Shot에는 아직 참조 결정이 없습니다.",
           "invalid": "저장된 바인딩이 더 이상 유효하지 않습니다. 현재 참조를 선택해 다시 저장하세요.",
-          "capacity": "{{count}}개를 선택했지만 이미지 경로는 {{limit}}개를 지원합니다.",
+          "capacity": "캐릭터와 배경에서 총 {{count}}개를 선택했지만 공유 이미지 경로 한도는 {{limit}}개입니다.",
+          "capacityUsage": "공유 이미지 참조 슬롯 {{count}} / {{limit}}개 사용 중 (캐릭터 + 배경)",
           "characters": "캐릭터",
           "background": "배경",
           "save": "바인딩 저장",
@@ -1765,7 +1766,7 @@
         "submissionUnknown": "제출 결과를 알 수 없습니다. 다시 시도하기 전에 중복 요금 경고를 검토하세요.",
         "downloadFailed": "생성은 완료되었지만 결과를 다운로드할 수 없습니다.",
         "unsupported": "이 제공업체는 요청한 작업을 지원하지 않습니다.",
-        "seedStillVariationGrid": "생성된 첫 프레임에 다중 패널 변형 그리드가 포함되어 있어 비디오에 사용할 수 없습니다.",
+        "seedStillVariationGrid": "생성된 이미지에 다중 패널 변형 그리드가 포함되어 있어 현재 첫 프레임이나 참조 이미지로 사용할 수 없습니다.",
         "unknown": "알 수 없는 이유로 생성 작업이 실패했습니다."
       }
     },

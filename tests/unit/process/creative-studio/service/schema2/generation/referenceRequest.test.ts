@@ -71,7 +71,8 @@ describe('reference-image request composition', () => {
       },
     });
     expect(plan.snapshot.composition.prompt).toContain('REFERENCE DESCRIPTION\nMing, late 20s');
-    expect(plan.snapshot.composition.prompt).toContain('front, three-quarter, side, and back views');
+    expect(plan.snapshot.composition.prompt).toContain('ONE SINGLE clean character reference photograph');
+    expect(plan.snapshot.composition.prompt).toContain('not a character sheet, not a turnaround');
     expect(plan.snapshot.composition.prompt).not.toContain('BOARD STYLE');
   });
 
@@ -88,7 +89,9 @@ describe('reference-image request composition', () => {
     });
 
     expect(plan.snapshot.composition.inputs.instructionProfile).toBe('weprompt-image-v1.reference-background.v1');
-    expect(plan.snapshot.composition.prompt).toContain('environment reference image with no characters');
+    expect(plan.snapshot.composition.prompt).toContain(
+      'ONE SINGLE clean environment reference photograph with no characters'
+    );
     expect(plan.snapshot.referenceInputs).toEqual([]);
   });
 

@@ -1173,6 +1173,29 @@ describe('spend gate draft graph', () => {
     expect(selectedSpendGateQuote(refusedSiblingQuote)).toBeNull();
   });
 
+  it('refreshes capability disclosure only while an unprepared gate is open', () => {
+    const disclosure: SpendGateGenerationDisclosure = {
+      groups: [
+        {
+          block: { code: 'catalog_unloaded', role: 'image' },
+          items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+        },
+      ],
+      blocksPrepare: true,
+    };
+    const opened = spendGateReducer(initialSpendGateState(), {
+      type: 'open',
+      draft,
+      generationDisclosure: disclosure,
+    });
+    expect(opened.generationDisclosure).toEqual(disclosure);
+    const refreshed = spendGateReducer(opened, { type: 'generation_disclosure_changed' });
+    expect(refreshed.generationDisclosure).toBeNull();
+
+    const reviewed = spendGateReducer(opened, { type: 'prepare_succeeded', options: options() });
+    expect(spendGateReducer(reviewed, { type: 'generation_disclosure_changed' })).toBe(reviewed);
+  });
+
   it('builds only exact non-first continuity drafts and diagnoses their required video route', () => {
     const project = makeProject();
     const projection = readyProjection(project);

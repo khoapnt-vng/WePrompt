@@ -9,6 +9,7 @@ import { createReadStream, promises as fs } from 'node:fs';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
+  type StudioAssetV2,
   type StudioJobV2,
   type StudioJobError,
   type StudioJobErrorCode,
@@ -41,6 +42,7 @@ import {
   type StudioVerifiedConditioningFrameV2,
   type StudioWaitingBindingAdvanceV2,
 } from './service/schema2/lifecycle';
+import { createStudioFrameExtractionId } from './service/schema2/generation';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 /** Longest value this log will print. A cap costs a truncated line; the alternative costs a leak. */
@@ -989,11 +991,11 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       return transitionFailureV2(context.projectId, context.jobId, 'failed', 'no_output');
     }
     try {
-      let primaryAssetId: string;
+      let primaryAsset: StudioAssetV2;
       if (output.source.kind === 'url') {
         if (!output.mimeType) throw new CreativeStudioMediaError('invalid_media');
         const budget = resolveRemoteMediaBudget({ byteSize: output.byteSize, mediaKind: output.mediaKind });
-        const primaryAsset = await deps.mediaStore.persistProviderOutputFromUrlForJobV2({
+        primaryAsset = await deps.mediaStore.persistProviderOutputFromUrlForJobV2({
           projectId: context.projectId,
           shotId: context.shotId,
           jobId: context.jobId,
@@ -1006,7 +1008,6 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           url: output.source.url,
           downloader: outputDownloader(context.provider, context.adapter.id, signal, budget),
         });
-        primaryAssetId = primaryAsset.id;
       } else {
         const stats = await fs.lstat(output.source.path);
         if (!stats.isFile() || stats.isSymbolicLink()) throw new CreativeStudioMediaError('invalid_media');
@@ -1017,7 +1018,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         signal.addEventListener('abort', abortBody, { once: true });
         if (signal.aborted) abortBody();
         try {
-          const primaryAsset = await deps.mediaStore.persistProviderOutputForJobV2({
+          primaryAsset = await deps.mediaStore.persistProviderOutputForJobV2({
             projectId: context.projectId,
             shotId: context.shotId,
             jobId: context.jobId,
@@ -1029,14 +1030,51 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
             ...(output.durationSeconds === undefined ? {} : { durationSeconds: output.durationSeconds }),
             body,
           });
-          primaryAssetId = primaryAsset.id;
         } finally {
           signal.removeEventListener('abort', abortBody);
           if (signal.aborted && !body.destroyed) body.destroy(abortError());
         }
       }
       if (context.mediaKind === 'video' && !disposed && !signal.aborted) {
-        await persistPosterOutputV2(context, outputs, primaryAssetId, signal);
+        await persistPosterOutputV2(context, outputs, primaryAsset.id, signal);
+      }
+      if (
+        context.mediaKind === 'video' &&
+        context.shotId !== null &&
+        primaryAsset.durationSeconds !== undefined &&
+        !disposed
+      ) {
+        let extractionId = primaryAsset.id;
+        try {
+          const loaded = await loadSupportedProjectV2(context.projectId);
+          const shot = loaded === null ? undefined : ownValueV2(loaded.shots, context.shotId);
+          if (shot !== undefined) {
+            const endpointSeconds = primaryAsset.durationSeconds - (shot.trimOutSeconds ?? 0);
+            extractionId = createStudioFrameExtractionId({
+              shotId: shot.id,
+              videoAssetId: primaryAsset.id,
+              endpointSeconds,
+            });
+            const extraction = await deps.mediaStore.extractConditioningFrameV2({
+              projectId: context.projectId,
+              extractionId,
+            });
+            if (extraction.status === 'ready') {
+              const verification = await deps.mediaStore.verifyConditioningFrameV2({
+                projectId: context.projectId,
+                extractionId,
+              });
+              if (verification !== null) {
+                await advanceWaitingBindingsForRecoveryV2(
+                  context.projectId,
+                  new Map([[verification.extractionId, verification]])
+                );
+              }
+            }
+          }
+        } catch (error) {
+          logStudioConditioningFrameFailure(context.projectId, extractionId, error);
+        }
       }
       notify(context.projectId);
       const project = await loadSupportedProjectV2(context.projectId);
@@ -1715,7 +1753,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     }
   };
 
-  const advanceWaitingBindingsForRecoveryV2 = async (projectId: string): Promise<void> => {
+  const advanceWaitingBindingsForRecoveryV2 = async (
+    projectId: string,
+    initialVerifiedReadyExtractions: ReadonlyMap<string, StudioVerifiedConditioningFrameV2> = new Map()
+  ): Promise<void> => {
     const advanceOnce = async (
       verifiedReadyExtractions: ReadonlyMap<string, StudioVerifiedConditioningFrameV2> = new Map()
     ): Promise<StudioWaitingBindingAdvanceV2 | null> => {
@@ -1751,8 +1792,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       return committedAdvance;
     };
 
-    let advance = await advanceOnce();
-    if (advance === null) advance = await advanceOnce();
+    let advance = await advanceOnce(initialVerifiedReadyExtractions);
+    if (advance === null) advance = await advanceOnce(initialVerifiedReadyExtractions);
     if (advance === null || disposed) return;
     const verifiedReadyExtractions = new Map<string, StudioVerifiedConditioningFrameV2>();
     for (const extractionId of advance.extractionIds) {

@@ -932,7 +932,8 @@
           "shot": "Shot {{position}}",
           "unassigned": "Für diesen Shot wurde noch keine Referenzentscheidung getroffen.",
           "invalid": "Diese gespeicherte Zuordnung ist nicht mehr gültig. Wähle aktuelle Referenzen und speichere erneut.",
-          "capacity": "{{count}} Referenzen sind gewählt, aber die Bildroute unterstützt {{limit}}.",
+          "capacity": "Über Figuren und Hintergrund sind {{count}} Referenzen gewählt, aber ihr gemeinsames Bildrouten-Budget unterstützt {{limit}}.",
+          "capacityUsage": "{{count}} / {{limit}} gemeinsame Bildreferenz-Plätze belegt (Figuren + Hintergrund)",
           "characters": "Figuren",
           "background": "Hintergrund",
           "save": "Zuordnung speichern",
@@ -1782,7 +1783,7 @@
         "submissionUnknown": "Das Übermittlungsergebnis ist unbekannt. Prüfe vor einer Wiederholung die Warnung vor einer Doppelbelastung.",
         "downloadFailed": "Die Generierung wurde abgeschlossen, aber die Ausgabe konnte nicht heruntergeladen werden.",
         "unsupported": "Der Anbieter unterstützt den angeforderten Vorgang nicht.",
-        "seedStillVariationGrid": "Das generierte erste Bild enthält ein mehrteiliges Variationsraster und kann nicht für Videos verwendet werden.",
+        "seedStillVariationGrid": "Das generierte Bild enthält ein mehrteiliges Variationsraster und kann weder als aktuelles erstes Bild noch als Referenz verwendet werden.",
         "unknown": "Der Generierungsauftrag ist aus unbekanntem Grund fehlgeschlagen."
       }
     },

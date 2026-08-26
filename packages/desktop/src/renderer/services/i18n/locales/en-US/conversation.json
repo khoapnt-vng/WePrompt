@@ -1103,7 +1103,7 @@
         "downloadFailed": "Generation completed, but the output could not be downloaded.",
         "unsupported": "This provider does not support the requested operation.",
         "unknown": "The generation job failed for an unknown reason.",
-        "seedStillVariationGrid": "The generated first frame contains a multi-panel variation grid and cannot be used for video."
+        "seedStillVariationGrid": "The generated image contains a multi-panel variation grid and cannot be used as a current first frame or reference."
       }
     },
     "preview": {
@@ -1352,7 +1352,8 @@
           "shot": "Shot {{position}}",
           "unassigned": "This Shot has no reference decision yet.",
           "invalid": "This saved binding is no longer valid. Choose current references and save it again.",
-          "capacity": "{{count}} references are selected, but the image route supports {{limit}}.",
+          "capacity": "{{count}} references are selected across characters and background, but their shared image-route budget supports {{limit}}.",
+          "capacityUsage": "{{count}} / {{limit}} shared image-reference slots used (characters + background)",
           "characters": "Characters",
           "background": "Background",
           "save": "Save binding",

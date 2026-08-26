@@ -931,7 +931,8 @@
           "shot": "Shot {{position}}",
           "unassigned": "此 Shot 尚未作出参考选择。",
           "invalid": "已保存的绑定不再有效。请选择当前参考并重新保存。",
-          "capacity": "已选择 {{count}} 个参考，但图像路由最多支持 {{limit}} 个。",
+          "capacity": "角色和背景共选择了 {{count}} 个参考，但共享的图像路由额度最多支持 {{limit}} 个。",
+          "capacityUsage": "已使用 {{count}} / {{limit}} 个共享图像参考位（角色 + 背景）",
           "characters": "角色",
           "background": "背景",
           "save": "保存绑定",
@@ -1760,7 +1761,7 @@
         "submissionUnknown": "提交结果未知。重试前请查看重复扣费警告。",
         "downloadFailed": "生成已完成，但无法下载输出。",
         "unsupported": "此服务商不支持请求的操作。",
-        "seedStillVariationGrid": "生成的首帧包含多面板变体网格，无法用于视频。",
+        "seedStillVariationGrid": "生成的图像包含多面板变体网格，不能用作当前首帧或参考图。",
         "unknown": "生成任务因未知原因失败。"
       }
     },

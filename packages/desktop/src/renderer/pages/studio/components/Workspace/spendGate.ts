@@ -163,6 +163,7 @@ export type SpendGateAction =
       boardPromotionImpact?: SpendGateBoardPromotionImpact;
       generationDisclosure?: SpendGateGenerationDisclosure;
     }
+  | { type: 'generation_disclosure_changed'; generationDisclosure?: SpendGateGenerationDisclosure }
   | { type: 'close' }
   | { type: 'promote_started' }
   | { type: 'promote_succeeded' }
@@ -220,6 +221,16 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
       pricingRefusalReason: null,
       pricingRefusalDetails: null,
       routeIssue: null,
+    };
+  }
+  if (action.type === 'generation_disclosure_changed') {
+    if (state.phase !== 'choices' || state.draft === null) return state;
+    return {
+      ...state,
+      generationDisclosure:
+        action.generationDisclosure === undefined || action.generationDisclosure.groups.length === 0
+          ? null
+          : action.generationDisclosure,
     };
   }
   if (action.type === 'close') return initialSpendGateState();

@@ -41,6 +41,7 @@ import {
   getAvailableStudioDiskBytes,
   openVerifiedReadStream,
   STUDIO_BED_MEDIA_INTENT_SCHEMA_VERSION,
+  studioImageHasVariationGridV2,
 } from '@process/services/creative-studio/mediaStore';
 
 const { createHashSpy, spawnCalls } = vi.hoisted(() => ({
@@ -606,6 +607,25 @@ afterEach(async () => {
 });
 
 describe('createStudioMediaStore schema 2 final lifecycle', () => {
+  it('detects repeated quartile sheet seams without rejecting one strong central edge', () => {
+    const image = (panelValues: readonly number[]): Uint8Array => {
+      const width = 40;
+      const height = 12;
+      const channels = 3;
+      return Uint8Array.from({ length: width * height * channels }, (_, byteIndex) => {
+        const pixel = Math.floor(byteIndex / channels);
+        const column = pixel % width;
+        return panelValues[Math.min(panelValues.length - 1, Math.floor(column / 10))]!;
+      });
+    };
+    expect(studioImageHasVariationGridV2({ data: image([10, 230, 20, 240]), width: 40, height: 12, channels: 3 })).toBe(
+      true
+    );
+    expect(studioImageHasVariationGridV2({ data: image([10, 10, 230, 230]), width: 40, height: 12, channels: 3 })).toBe(
+      false
+    );
+  });
+
   it('rejects stale expected read proofs both before open and after content verification', async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-read-proof-v2-'));
     created.push(rootDir);
@@ -1010,6 +1030,43 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         },
       },
     });
+  });
+
+  it.each([
+    { label: 'first frame', options: {} },
+    { label: 'project reference', options: { projectReferenceId: 'reference_character' } },
+  ])('rejects a detected variation grid before it becomes the current $label', async ({ options }) => {
+    const { rootDir, store, project } = await makeStoreV2(options);
+    const detectImageVariationGridV2 = vi.fn(async () => true);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'refused_grid_output',
+      detectImageVariationGridV2,
+    });
+
+    await expect(
+      media.persistProviderOutputForJobV2({
+        projectId: project.id,
+        shotId: 'projectReferenceId' in options ? null : 'shot_1',
+        jobId: 'job_1',
+        mediaKind: 'image',
+        declaredMimeType: 'image/png',
+        declaredByteSize: png.length,
+        body: Readable.from([png]),
+      })
+    ).rejects.toMatchObject({ code: 'seed_still_variation_grid' });
+
+    expect(detectImageVariationGridV2).toHaveBeenCalledOnce();
+    const loaded = await store.getProjectV2(project.id);
+    if (loaded.status !== 'supported') throw new Error('Grid-refusal project disappeared');
+    expect(loaded.project.assets).not.toHaveProperty('refused_grid_output');
+    expect(loaded.project.jobs.job_1).toMatchObject({ status: 'running', outputAssetIds: [] });
+    if ('projectReferenceId' in options) {
+      expect(loaded.project.references.reference_character!.approvedAssetId).toBeNull();
+    } else {
+      expect(loaded.project.shots.shot_1!.seedStillId).toBeNull();
+    }
+    await expect(fs.readdir(path.join(rootDir, project.id, 'assets'))).resolves.toEqual([]);
   });
 
   it('commits an exact live project-reference candidate after an unrelated Shot changes', async () => {
@@ -1517,6 +1574,11 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       sha256: createHash('sha256').update(mp4).digest('hex'),
     });
     const committed = await store.getProjectV2(project.id);
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      videoAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
     expect(committed).toMatchObject({
       status: 'supported',
       project: {
@@ -1524,6 +1586,17 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
           shot_1: {
             videoAssetId: 'take_1',
             supersededVideoAssetIds: [],
+          },
+        },
+        frameExtractions: {
+          [extractionId]: {
+            id: extractionId,
+            shotId: 'shot_1',
+            videoAssetId: 'take_1',
+            endpointSeconds: 10,
+            frameAssetId: null,
+            status: 'pending',
+            errorCode: null,
           },
         },
       },

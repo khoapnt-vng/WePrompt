@@ -134,8 +134,8 @@ const instructionProfile = (
 
 const referenceOutputInstruction = (kind: 'character' | 'background'): string =>
   kind === 'character'
-    ? 'Create one clean character reference sheet in a single image with front, three-quarter, side, and back views. Keep identity, age, wardrobe, proportions, and art style consistent. Do not add captions, borders, UI, or multiple alternative identities.'
-    : 'Create one clean environment reference image with no characters. Establish the recurring location, layout, materials, palette, period, and art style. Do not add captions, borders, UI, or a contact-sheet grid.';
+    ? 'Create ONE SINGLE clean character reference photograph showing one figure in one unified scene. Keep identity, age, wardrobe, proportions, and art style precise. Not a grid, not a contact sheet, not a character sheet, not a turnaround: no panels, split screen, repeated figures, captions, borders, or UI.'
+    : 'Create ONE SINGLE clean environment reference photograph with no characters, establishing the recurring location, layout, materials, palette, period, and art style. Not a grid or contact sheet: no panels, split screen, captions, borders, or UI.';
 
 const shotOutputInstruction = (purpose: Exclude<StudioJobPurpose, 'reference_image'>): string => {
   if (purpose === 'board_still') {

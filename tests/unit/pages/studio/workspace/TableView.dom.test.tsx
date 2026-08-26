@@ -97,6 +97,9 @@ vi.mock('react-i18next', () => ({
       if (key === 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.capacity') {
         return `${String(values?.count)} references exceeds the ${String(values?.limit)}-image route limit.`;
       }
+      if (key === 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.capacityUsage') {
+        return `${String(values?.count)} / ${String(values?.limit)} shared image-reference slots used (characters + background)`;
+      }
       if (key === 'conversation.creativeStudio.workspace.table.board.staleCount') {
         return `${String(values?.count)} stale`;
       }
@@ -321,6 +324,7 @@ describe('TableView', () => {
         references={references}
         referenceBindings={[makeBinding({ characterReferenceIds: ['reference_ming'] })]}
         bindingActions={bindingActions}
+        referenceMaxConditioningImages={2}
         selectedBeatId={null}
         onSelectBeat={vi.fn()}
       />
@@ -340,6 +344,9 @@ describe('TableView', () => {
     const popup = document.getElementById(background.getAttribute('aria-controls') ?? '');
     if (popup === null) throw new Error('Missing background reference popup');
     fireEvent.click(within(popup).getByRole('option', { name: 'Dai pai dong' }));
+    expect(
+      within(shot!).getByText('2 / 2 shared image-reference slots used (characters + background)')
+    ).toHaveAttribute('data-over-capacity', 'false');
 
     await user.click(within(shot!).getByRole('button', { name: 'Save references' }));
     await waitFor(() =>
@@ -385,6 +392,9 @@ describe('TableView', () => {
       'This Shot binding is no longer valid. Review and save it again.'
     );
     expect(within(shot!).getAllByRole('alert')[1]).toHaveTextContent('3 references exceeds the 2-image route limit.');
+    expect(
+      within(shot!).getByText('3 / 2 shared image-reference slots used (characters + background)')
+    ).toHaveAttribute('data-over-capacity', 'true');
     expect(within(shot!).getByRole('button', { name: 'Save references' })).toBeDisabled();
   });
 

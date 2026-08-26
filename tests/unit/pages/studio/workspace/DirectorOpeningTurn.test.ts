@@ -114,9 +114,10 @@ describe('the Director preset rules', () => {
       'Call read_storyboard at the agreed revision',
       'set_reference_plan through studio_apply_edits',
       'Request character reference images first',
-      'confirm character generation spend',
+      'character requests are ready in References',
+      '5. Read the fresh storyboard',
       'request background reference images',
-      'confirm background generation spend',
+      'background requests are ready in References',
       'Call read_storyboard again',
       'set_shot_reference_binding through studio_apply_edits',
     ];
@@ -131,6 +132,10 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/recurring background.*discovered[\s\S]*amend_reference_plan/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/never replace or repeat set_reference_plan/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/request only records work for human review; it does not\s+generate media/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/successful generation automatically makes the newest image current/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/approvedAssetId[\s\S]*means the reference already has a current image/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never ask[\s\S]*approve or confirm a current image in chat/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/free-text acknowledgement performs no UI action/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/choosing a different current image are human-only/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/once for\s+each active Shot/i);
   });

@@ -3338,6 +3338,58 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
+  it('refreshes an open generation gate and clears a stale catalog blocker without reopening it', async () => {
+    const authority = projectWithDraftBatch(1);
+    mockSupportedProject(authority);
+    const refreshedCapability = deferred<ReturnType<typeof supportedCapabilityResult>>();
+    let capabilityCall = 0;
+    mocks.bridge.getGenerationCapability.invoke.mockImplementation(
+      async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) => {
+        capabilityCall += 1;
+        if (capabilityCall > 1) return refreshedCapability.promise;
+        const imageItems = input.items.filter((item) => item.purpose !== 'video_take');
+        const videoItems = input.items.filter((item) => item.purpose === 'video_take');
+        return ok({
+          projectId: input.projectId,
+          projectRevision: input.expectedRevision,
+          catalogVersion: 'catalog_1',
+          supportedItems: [],
+          blocks: [
+            ...(imageItems.length === 0
+              ? []
+              : [{ block: { code: 'catalog_unloaded' as const, role: 'image' as const }, items: imageItems }]),
+            ...(videoItems.length === 0
+              ? []
+              : [{ block: { code: 'catalog_unloaded' as const, role: 'video' as const }, items: videoItems }]),
+          ],
+        });
+      }
+    );
+    renderStudio();
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() =>
+      capturedBeatPanelActions().reviewShot('shot_0', [
+        { shotId: 'shot_0', purpose: 'seed_still' },
+        { shotId: 'shot_0', purpose: 'video_take' },
+      ])
+    );
+    const modal = await screen.findByTestId('studio-spend-gate');
+    const prepare = within(modal).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.gate.prepare',
+    });
+    expect(prepare).toBeDisabled();
+    expect(modal.querySelector('[data-generation-block-code="catalog_unloaded"]')).toBeVisible();
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(2));
+
+    const refreshInput = mocks.bridge.getGenerationCapability.invoke.mock.calls[1]![0];
+    await act(async () => refreshedCapability.resolve(supportedCapabilityResult(refreshInput)));
+    await waitFor(() => expect(prepare).toBeEnabled());
+    expect(modal.querySelector('[data-generation-block-code="catalog_unloaded"]')).toBeNull();
+    expect(screen.getByTestId('studio-spend-gate')).toBe(modal);
+  });
+
   it('uses the exact Main blocker for continuity even when the generic route catalog is unavailable', async () => {
     const authority = projectWithDraftBatch(1);
     authority.beats.beat_0!.shotOrder.push('shot_1');

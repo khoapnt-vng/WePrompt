@@ -158,7 +158,7 @@ const messageCases: ReadonlyArray<readonly [StudioGenerationBlockV2, StudioGener
       selectedCount: 0,
       limit: 3,
     },
-    { key: 'conversation.creativeStudio.references.bindings.unassigned' },
+    { key: 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.unassigned' },
   ],
   [
     {
@@ -169,7 +169,7 @@ const messageCases: ReadonlyArray<readonly [StudioGenerationBlockV2, StudioGener
       limit: 4,
     },
     {
-      key: 'conversation.creativeStudio.references.bindings.capacity',
+      key: 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.capacity',
       values: { count: 5, limit: 4 },
     },
   ],
@@ -196,7 +196,7 @@ describe('generation blocker messages', () => {
         limit: 4,
       };
       expect(generationBlockMessage(block)).toEqual({
-        key: 'conversation.creativeStudio.references.bindings.invalid',
+        key: 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.invalid',
       });
     }
   );

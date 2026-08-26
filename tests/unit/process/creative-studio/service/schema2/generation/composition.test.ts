@@ -235,10 +235,11 @@ describe('canonical schema-5 generation composition', () => {
 
     const character = composeReference(characterSource);
     const background = composeReference(backgroundSource);
-    expect(character.prompt).toContain('front, three-quarter, side, and back views');
+    expect(character.prompt).toContain('ONE SINGLE clean character reference photograph');
+    expect(character.prompt).toContain('not a character sheet, not a turnaround');
     expect(character.prompt).not.toContain('with no characters');
-    expect(background.prompt).toContain('environment reference image with no characters');
-    expect(background.prompt).not.toContain('three-quarter');
+    expect(background.prompt).toContain('ONE SINGLE clean environment reference photograph with no characters');
+    expect(background.prompt).toContain('Not a grid or contact sheet');
     expect(character.inputs.instructionProfile).toBe('weprompt-image-v1.reference-character.v1');
     expect(background.inputs.instructionProfile).toBe('weprompt-image-v1.reference-background.v1');
   });

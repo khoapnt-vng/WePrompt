@@ -59,6 +59,7 @@ export type UseSpendGateResult = {
     boardPromotionImpact?: SpendGateBoardPromotionImpact,
     generationDisclosure?: SpendGateGenerationDisclosure
   ) => void;
+  updateGenerationDisclosure: (generationDisclosure?: SpendGateGenerationDisclosure) => void;
   close: () => void;
   promoteOnly: () => Promise<void>;
   prepare: () => Promise<void>;
@@ -114,6 +115,12 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
     preparingRef.current = false;
     terminalSuccessRef.current = false;
     dispatch({ type: 'close' });
+  }, []);
+  const updateGenerationDisclosure = useCallback((generationDisclosure?: SpendGateGenerationDisclosure): void => {
+    dispatch({
+      type: 'generation_disclosure_changed',
+      ...(generationDisclosure === undefined ? {} : { generationDisclosure }),
+    });
   }, []);
 
   const selectOption = useCallback((option: SpendGateSelectedOption) => {
@@ -270,7 +277,7 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
     }
   }, [onConfirmed]);
 
-  return { state, open, close, promoteOnly, prepare, selectOption, confirm };
+  return { state, open, updateGenerationDisclosure, close, promoteOnly, prepare, selectOption, confirm };
 };
 
 export type SpendGateModalProps = Pick<

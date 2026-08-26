@@ -38,6 +38,10 @@ const listenerWrappers = new Map<string, Map<EventHandler, Set<EventHandler>>>()
 const noop = (): void => {};
 const DEFAULT_RENDERER_QUERY_TIMEOUT_MS = 3_000;
 const REQUEST_ID_SUFFIX_PATTERN = /^[a-f0-9]{8}$/;
+const isPromiseLike = (value: unknown): value is PromiseLike<unknown> =>
+  (typeof value === 'object' || typeof value === 'function') &&
+  value !== null &&
+  typeof (value as { then?: unknown }).then === 'function';
 
 let emitToAdapter: BridgeAdapter['emit'] = () => undefined;
 let disconnectAdapter: (() => void) | undefined;
@@ -187,12 +191,28 @@ export const invoke = <Data = unknown>(name: string, data?: unknown): Promise<Da
   const id = createRequestId(name);
   const callbackName = `subscribe.callback-${name}${id}`;
 
-  return new Promise<Data>((resolve) => {
+  return new Promise<Data>((resolve, reject) => {
+    let settled = false;
     const dispose = on(callbackName, (result) => {
+      if (settled) return;
+      settled = true;
       dispose();
       resolve(result as Data);
     });
-    emit(`subscribe-${name}`, { id, data });
+    const rejectTransport = (error: unknown): void => {
+      if (settled) return;
+      settled = true;
+      dispose();
+      reject(error);
+    };
+    try {
+      const delivery = emitToAdapter(`subscribe-${name}`, { id, data });
+      if (isPromiseLike(delivery)) {
+        void Promise.resolve(delivery).catch(rejectTransport);
+      }
+    } catch (error) {
+      rejectTransport(error);
+    }
   });
 };
 
@@ -223,7 +243,16 @@ const invokeWithTimeout = <Data>(name: string, data: unknown, timeoutMs: number)
     });
 
     try {
-      emit(`subscribe-${name}`, { id, data });
+      const delivery = emitToAdapter(`subscribe-${name}`, { id, data });
+      if (isPromiseLike(delivery)) {
+        void Promise.resolve(delivery).catch((error: unknown) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timeout);
+          dispose();
+          reject(error);
+        });
+      }
     } catch (error) {
       if (settled) return;
       settled = true;

@@ -300,6 +300,14 @@ const ShotReferenceBindingEditor: React.FC<ShotReferenceBindingEditorProps> = ({
           content={t(`${REFERENCE_ROOT}.bindings.capacity`, { count: selectedCount, limit: maxConditioningImages })}
         />
       ) : null}
+      {maxConditioningImages === null ? null : (
+        <span className={styles.bindingCapacity} data-over-capacity={overCapacity ? 'true' : 'false'}>
+          {t(`${REFERENCE_ROOT}.bindings.capacityUsage`, {
+            count: selectedCount,
+            limit: maxConditioningImages,
+          })}
+        </span>
+      )}
       <label className={styles.bindingField}>
         <span>{t(`${REFERENCE_ROOT}.bindings.characters`)}</span>
         <Select

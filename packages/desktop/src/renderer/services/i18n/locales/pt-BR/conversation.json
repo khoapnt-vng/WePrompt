@@ -937,7 +937,8 @@
           "shot": "Shot {{position}}",
           "unassigned": "Este Shot ainda não tem uma decisão de referências.",
           "invalid": "Este vínculo salvo não é mais válido. Escolha as referências atuais e salve novamente.",
-          "capacity": "{{count}} referências selecionadas, mas a rota de imagem aceita {{limit}}.",
+          "capacity": "Há {{count}} referências selecionadas entre personagens e fundo, mas o orçamento compartilhado da rota de imagem aceita {{limit}}.",
+          "capacityUsage": "{{count}} / {{limit}} espaços compartilhados de referência usados (personagens + fundo)",
           "characters": "Personagens",
           "background": "Fundo",
           "save": "Salvar vínculo",
@@ -1798,7 +1799,7 @@
         "submissionUnknown": "O resultado do envio é desconhecido. Revise o aviso de cobrança duplicada antes de tentar novamente.",
         "downloadFailed": "A geração foi concluída, mas não foi possível baixar a saída.",
         "unsupported": "Este provedor não aceita a operação solicitada.",
-        "seedStillVariationGrid": "O primeiro quadro gerado contém uma grade de variações com vários painéis e não pode ser usado para vídeo.",
+        "seedStillVariationGrid": "A imagem gerada contém uma grade de variações com vários painéis e não pode ser usada como primeiro quadro atual nem como referência.",
         "unknown": "O trabalho de geração falhou por um motivo desconhecido."
       }
     },

@@ -933,7 +933,8 @@
           "shot": "Shot {{position}}",
           "unassigned": "Bu Shot için henüz referans kararı verilmedi.",
           "invalid": "Kaydedilen bu bağlama artık geçerli değil. Güncel referansları seçip yeniden kaydedin.",
-          "capacity": "{{count}} referans seçildi, ancak görüntü rotası {{limit}} destekliyor.",
+          "capacity": "Karakterler ve arka plan için toplam {{count}} referans seçildi, ancak paylaşılan görüntü rotası bütçesi {{limit}}.",
+          "capacityUsage": "{{count}} / {{limit}} paylaşılan görüntü referansı yuvası kullanılıyor (karakterler + arka plan)",
           "characters": "Karakterler",
           "background": "Arka plan",
           "save": "Bağlamayı kaydet",
@@ -1783,7 +1784,7 @@
         "submissionUnknown": "Gönderimin sonucu bilinmiyor. Tekrar denemeden önce mükerrer ücret uyarısını gözden geçirin.",
         "downloadFailed": "Oluşturma tamamlandı ancak çıktı indirilemedi.",
         "unsupported": "Bu sağlayıcı istenen işlemi desteklemiyor.",
-        "seedStillVariationGrid": "Oluşturulan ilk kare çok panelli bir varyasyon ızgarası içeriyor ve video için kullanılamaz.",
+        "seedStillVariationGrid": "Oluşturulan görüntü çok panelli bir varyasyon ızgarası içeriyor ve geçerli ilk kare veya referans olarak kullanılamaz.",
         "unknown": "Oluşturma işi bilinmeyen bir nedenle başarısız oldu."
       }
     },

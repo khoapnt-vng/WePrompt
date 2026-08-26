@@ -72,6 +72,28 @@ describe('local bridge', () => {
     expect(outbound[1]?.name).toMatch(/^subscribe\.callback-test\.echo/);
   });
 
+  it('rejects an invoke and disposes its callback when the native transport rejects the request', async () => {
+    vi.resetModules();
+    const { bridge } = await import('@/common/platform/bridge');
+    let incoming: TransportEmitter | undefined;
+    let requestId = '';
+    const transportError = new Error('invalid operation payload');
+    bridge.adapter({
+      emit(name, data) {
+        requestId = (data as { id: string }).id;
+        expect(name).toBe('subscribe-test.invalid-native-payload');
+        return Promise.reject(transportError);
+      },
+      on(emitter) {
+        incoming = emitter;
+      },
+    });
+    const endpoint = bridge.buildProvider<string, { expectedRevision: number }>('test.invalid-native-payload');
+
+    await expect(endpoint.invoke({ expectedRevision: undefined as unknown as number })).rejects.toBe(transportError);
+    expect(incoming?.emit(`subscribe.callback-test.invalid-native-payload${requestId}`, 'too late')).toBe(false);
+  });
+
   it('replaces the previous provider for the same key', async () => {
     const { bridge } = await loadLoopbackBridge();
     const endpoint = bridge.buildProvider<string, void>('test.replace');

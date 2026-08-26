@@ -511,6 +511,17 @@
   font-size: 9px;
 }
 
+.bindingCapacity {
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.bindingCapacity[data-over-capacity='true'] {
+  color: var(--color-danger-6);
+}
+
 .bindingField {
   display: grid;
   min-inline-size: 0;

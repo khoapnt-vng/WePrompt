@@ -12,11 +12,12 @@ import type {
   StudioMediaKind,
   StudioRendererProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
+import type { I18nKey } from '@/renderer/services/i18n';
 
 export type StudioGenerationBlockAction = 'routes' | 'duration' | 'references' | 'none';
 
 export type StudioGenerationBlockMessage = {
-  key: string;
+  key: I18nKey;
   values?: Record<string, string | number>;
 };
 
@@ -126,13 +127,13 @@ export const generationBlockMessage = (block: StudioGenerationBlockV2): StudioGe
       return { key: 'conversation.creativeStudio.models.blocked.firstFrame' };
     case 'reference_binding':
       return block.reason === 'unassigned'
-        ? { key: 'conversation.creativeStudio.references.bindings.unassigned' }
+        ? { key: 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.unassigned' }
         : block.reason === 'capacity_exceeded'
           ? {
-              key: 'conversation.creativeStudio.references.bindings.capacity',
+              key: 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.capacity',
               values: { count: block.selectedCount, limit: block.limit },
             }
-          : { key: 'conversation.creativeStudio.references.bindings.invalid' };
+          : { key: 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.invalid' };
   }
 };
 

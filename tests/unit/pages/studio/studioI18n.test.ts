@@ -224,6 +224,7 @@ const expectedLeaves = [
   'referenceWorkflow.bindings.unassigned',
   'referenceWorkflow.bindings.invalid',
   'referenceWorkflow.bindings.capacity',
+  'referenceWorkflow.bindings.capacityUsage',
   'referenceWorkflow.bindings.characters',
   'referenceWorkflow.bindings.background',
   'referenceWorkflow.bindings.save',
@@ -1218,6 +1219,7 @@ const localizedWorkspaceKeys = [
   'referenceWorkflow.bindings.unassigned',
   'referenceWorkflow.bindings.invalid',
   'referenceWorkflow.bindings.capacity',
+  'referenceWorkflow.bindings.capacityUsage',
   'referenceWorkflow.bindings.characters',
   'referenceWorkflow.bindings.background',
   'referenceWorkflow.bindings.save',
@@ -1422,7 +1424,9 @@ describe('Creative Studio workspace translations', () => {
       'referenceWorkflow.bindings.invalid':
         'This saved binding is no longer valid. Choose current references and save it again.',
       'referenceWorkflow.bindings.capacity':
-        '{{count}} references are selected, but the image route supports {{limit}}.',
+        '{{count}} references are selected across characters and background, but their shared image-route budget supports {{limit}}.',
+      'referenceWorkflow.bindings.capacityUsage':
+        '{{count}} / {{limit}} shared image-reference slots used (characters + background)',
       'gate.reviewShotBinding': 'Review Shot binding',
       'gate.readout.prompt': 'Exact prompt',
       'gate.readout.rendersAs': 'Renders as',
@@ -1433,6 +1437,7 @@ describe('Creative Studio workspace translations', () => {
       'gate.readout.referenceFact': '{{kind}} · {{referenceId}} → {{assetId}}',
     });
     expect(placeholders(leaves['referenceWorkflow.bindings.capacity']!)).toEqual(['count', 'limit']);
+    expect(placeholders(leaves['referenceWorkflow.bindings.capacityUsage']!)).toEqual(['count', 'limit']);
     expect(placeholders(leaves['gate.readout.referenceFact']!)).toEqual(['assetId', 'kind', 'referenceId']);
   });
 
@@ -1889,7 +1894,7 @@ describe('Creative Studio workspace translations', () => {
     const jobs = asObject(creativeStudio.jobs, 'creativeStudio.jobs');
     const errors = asObject(jobs.errors, 'creativeStudio.jobs.errors');
     expect(errors.seedStillVariationGrid).toBe(
-      'The generated first frame contains a multi-panel variation grid and cannot be used for video.'
+      'The generated image contains a multi-panel variation grid and cannot be used as a current first frame or reference.'
     );
   });
 

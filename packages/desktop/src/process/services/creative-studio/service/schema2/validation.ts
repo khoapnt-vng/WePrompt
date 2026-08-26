@@ -2403,17 +2403,17 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       }
     }
 
-    const seedStillVariationGridFailure = job.status === 'failed' && job.error?.code === 'seed_still_variation_grid';
+    const variationGridFailure = job.status === 'failed' && job.error?.code === 'seed_still_variation_grid';
     if (
       job.error?.code === 'seed_still_variation_grid' &&
-      (!seedStillVariationGridFailure || job.purpose !== 'seed_still')
+      (!variationGridFailure || (job.purpose !== 'seed_still' && job.purpose !== 'reference_image'))
     ) {
       return false;
     }
     const receiptRequired =
       job.status === 'succeeded' ||
       (job.status === 'failed' &&
-        (job.error?.code === 'no_output' || seedStillVariationGridFailure || job.error?.code === 'download_failed'));
+        (job.error?.code === 'no_output' || variationGridFailure || job.error?.code === 'download_failed'));
     const receiptAllowed = receiptRequired || job.status === 'running';
     if (
       (receiptRequired && job.spendReceipt === null) ||

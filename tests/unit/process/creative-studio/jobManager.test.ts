@@ -1638,6 +1638,46 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     });
   });
 
+  it('fails a paid reference grid without publishing it as the current canonical image', async () => {
+    let outputPath = '';
+    const submit = vi.fn(async () => ({
+      kind: 'complete' as const,
+      outputs: [
+        {
+          mediaKind: 'image' as const,
+          role: 'primary' as const,
+          source: { kind: 'file' as const, path: outputPath },
+          mimeType: 'image/png' as const,
+        },
+      ],
+    }));
+    const persistProviderOutputForJobV2 = vi.fn(async () => {
+      throw new CreativeStudioMediaError('seed_still_variation_grid');
+    });
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      purpose: 'reference_image',
+      decorateMediaStore: (mediaStore) => ({ ...mediaStore, persistProviderOutputForJobV2 }),
+    });
+    outputPath = path.join(harness.rootDir, 'provider-reference-grid.png');
+    await writeFile(outputPath, png);
+
+    await dispatchV2(harness);
+    await expectV2Job(harness, {
+      status: 'failed',
+      purpose: 'reference_image',
+      error: {
+        code: 'seed_still_variation_grid',
+        messageKey: 'conversation.creativeStudio.jobs.errors.seedStillVariationGrid',
+      },
+      spendReceipt: { jobId: 'job_v2_1' },
+      outputAssetIds: [],
+    });
+    const loaded = await harness.store.getProjectV2(harness.project.id);
+    if (loaded.status !== 'supported') throw new Error('Reference-grid project disappeared');
+    expect(loaded.project.references.reference_character!.approvedAssetId).toBeNull();
+    expect(Object.keys(loaded.project.assets)).toEqual([]);
+  });
+
   it('refuses adapter normalization that would change the immutable paid request snapshot', async () => {
     const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
     const adapter = controllableAdapter('weprompt-image-v1', { submit });
