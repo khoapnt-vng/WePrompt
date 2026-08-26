@@ -1683,6 +1683,7 @@ test.describe('Creative Studio workspace', () => {
     const beatId = `beat_dai_pai_dong_${Date.now()}`;
     const firstShotId = `shot_ming_arrives_${Date.now()}`;
     const secondShotId = `shot_mei_answers_${Date.now()}`;
+    const beatTitle = 'Rain at the dai pai dong';
     const mingPrompt = 'Ming, a middle-aged cook in a white apron and round glasses.';
     const meiPrompt = 'Mei, a young journalist in a red raincoat carrying a notebook.';
     const backgroundPrompt = 'A rain-soaked Hong Kong dai pai dong at night, green awning and warm tungsten light.';
@@ -1718,7 +1719,7 @@ test.describe('Creative Studio workspace', () => {
           kind: 'add_beat',
           beatId,
           beat: {
-            title: 'Rain at the dai pai dong',
+            title: beatTitle,
             story: 'Director proposal pending.',
             targetSeconds: 12,
           },
@@ -2017,8 +2018,9 @@ test.describe('Creative Studio workspace', () => {
     await expect(beatRow.locator('[data-grid-column-name="story"]')).toContainText(beatStory);
     await page.getByRole('button', { name: `Open Board panels for ${beatTitle}`, exact: true }).click();
     await expect(page.locator('[data-shot-binding-status="ready"]')).toHaveCount(2);
-    await beatRow.click();
-    const beatDialog = page.getByRole('dialog');
+    await beatRow.locator('[data-grid-column-name="beat"]').click();
+    const beatDialog = page.getByRole('dialog', { name: `Beat panel — ${beatTitle}`, exact: true });
+    await expect(beatDialog).toBeVisible();
     await expect(beatDialog.getByRole('textbox', { name: 'Story', exact: true })).toHaveValue(beatStory);
     await expect(beatDialog.getByRole('textbox', { name: 'Shooting script for Shot 1', exact: true })).toHaveValue(
       firstShootingScript

@@ -35,13 +35,39 @@ export type SettingsTab = keyof typeof ROUTES.settings;
 // ── Navigation helpers ───────────────────────────────────────────────────────
 
 async function ensureRendererReady(page: Page, timeout = 30_000): Promise<void> {
-  await page.waitForFunction(
-    () =>
-      window.location.href !== 'about:blank' &&
-      window.location.hash.startsWith('#/') &&
-      typeof (window as unknown as { __backendPort?: number }).__backendPort === 'number',
+  const stateHandle = await page.waitForFunction(
+    () => {
+      const runtime = window as unknown as {
+        __backendPort?: number;
+        __backendStartupFailed?: boolean;
+      };
+      if (runtime.__backendStartupFailed === true) return 'backend-failed';
+      return window.location.href !== 'about:blank' &&
+        window.location.hash.startsWith('#/') &&
+        Number.isInteger(runtime.__backendPort) &&
+        runtime.__backendPort! > 0
+        ? 'ready'
+        : false;
+    },
     { timeout }
   );
+  const state = await stateHandle.jsonValue();
+  await stateHandle.dispose();
+  if (state !== 'backend-failed') return;
+
+  const snapshot = await page.evaluate(() => {
+    const runtime = window as unknown as {
+      __backendPort?: number;
+      __backendStartupFailure?: { reason?: unknown };
+    };
+    return {
+      href: window.location.href,
+      backendPort: runtime.__backendPort,
+      reason: runtime.__backendStartupFailure?.reason,
+      bodyText: document.body?.innerText?.trim().slice(0, 500) ?? '',
+    };
+  });
+  throw new Error(`Electron backend startup failed before navigation: ${JSON.stringify(snapshot)}`);
 }
 
 /**
