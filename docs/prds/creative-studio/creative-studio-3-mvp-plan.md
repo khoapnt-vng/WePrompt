@@ -1466,20 +1466,29 @@ inputs, one output card, and a full-screen view where a frame is judged, pinned 
    `EDITED · NOT YET RUN`. Primary buttons become _Cancel run_ while working, and the Shot button
    names its target — "Generate Shot 1", never "Generate again".
 
-### Decide before building
+### Decided — owner rulings, 2026-08-26
 
-Five questions are open; four are the designer's and one is ours. **Do not resolve them by
-implementation default** — three touch decisions already taken elsewhere.
+The five questions below were open at handoff and are now **ruled**. The full rulings, with their
+code evidence, live in [the design doc](../../design/creative-studio-3-first-frames-panel.md#9--settled--owner-rulings-2026-08-26);
+this is the binding summary. Do not re-open them by implementation default.
 
-1. **Takes.** Does generating a Shot replace the previous take or add one alongside? An accumulating
-   model contradicts the committed take-removal spec (`1750f9627`: one Shot → one `videoAssetId`).
-   Reconcile before building the switcher the designer describes.
-2. **Staleness.** Cut from the status vocabulary by the designer, who flagged that the downstream
-   "your inherited frame changed" signal must live somewhere else. It currently lives nowhere.
-3. **Current picture full screen.** Recommended by the designer for symmetry; not drawn.
-4. **The `⋯` menu.** The control is in the hi-fi; its contents are unspecified.
-5. **The 178px band against the shipped layout.** The designer's 1320 panel width is measured on
-   their canvas, not against the Table view's 176px panel column and 1040px minimum grid.
+1. **Takes: replace, with retained history.** One Shot → one `videoAssetId` stands (`1750f9627`);
+   the outgoing current is already pushed into `supersededVideoAssetIds` (`mediaStore.ts:4038`,
+   invariant-guarded). No switcher and no take number on the card; history lives in the full-screen
+   picture view, and re-pointing to an older take is free.
+2. **Staleness is the prompt rule, generalized.** Divergence is an attribute tag —
+   `FIRST FRAME CHANGED · NOT RE-RUN` — never a fifth status word. Consume the existing main-side
+   machinery (`continuity_stale`, `staleCauses`, `studioConditioningInputsEqual`); the renderer must
+   not recompute freshness.
+3. **The current picture gets its own full-screen view.** Symmetric with the frame view, Shot prompt
+   underneath, "Generate Shot N" behind the existing spend gate — and its filmstrip navigates takes,
+   which is where Ruling 1's history surfaces.
+4. **The `⋯` menus, exactly.** Frame: Download · Copy prompt (generated only) · Remove. Current
+   picture: Download · Previous takes · Remove take. Duplicate, Replace and Reveal-in-library are
+   rejected with reasons. Menu items never spend.
+5. **The panel widens to 1320.** `BeatPanel.module.css:3-4` moves from a 1100 cap to
+   `min(1320px, calc(100vw - 32px))`; the 178px band height is adopted exactly. Verify the existing
+   panel content still renders correctly at 1320.
 
 ### Do not weaken
 
@@ -1503,7 +1512,8 @@ implementation default** — three touch decisions already taken elsewhere.
    costs nothing.
 4. A run fired before a prompt edit completes against the text as fired, and the field afterwards
    reads `EDITED · NOT YET RUN`.
-5. Each of the five open questions above is answered in writing — in the design doc or this section —
-   before the code that depends on it lands.
+5. The implementation matches the five rulings above: an older take is restorable for free from the
+   full-screen picture view, a diverged first frame is tagged rather than given a fifth status word,
+   the menus contain exactly the ruled items, and the panel measures 1320 at full width.
 6. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
    full test suite, format, lint, and `git diff --check` pass from the exact final head.

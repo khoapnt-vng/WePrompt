@@ -135,25 +135,86 @@ header, beside the status. Both primary buttons become _Cancel run_ while workin
 labelled by its target — **"Generate Shot 1"**, not "Generate again" — so it is clear what will be
 spent.
 
-## 9 · Open questions
+## 9 · Settled — owner rulings, 2026-08-26
 
-Four are the designer's, carried verbatim in intent. The fifth is engineering's.
+The designer's four questions and engineering's fifth were put to the owner with code evidence and
+ruled on together. The through-line, and the reason the rulings read alike: **newest is current,
+pinning is a hold, history is free, divergence is a tag, and spending is always the same gate.** A
+user learns that rule once — on references — and it now holds for frames, takes, and prompts.
 
-1. **Takes** — does generating a Shot replace the previous take or add one alongside it? If takes
-   accumulate, the current picture card needs a switcher and the caption gains a take number.
-   _Engineering note:_ the committed take-removal spec (`1750f9627`) settled deletion as one Shot →
-   one `videoAssetId`, so an accumulating model contradicts a decision already taken. Reconcile before
-   building the switcher.
-2. **Staleness** — how is a downstream Shot told its inherited first frame has changed, now that
-   staleness is out of the status vocabulary? The designer explicitly cut it and flagged that the
-   signal "has to live somewhere other than the status word".
-3. **Current picture full screen** — does it get its own view with the Shot prompt underneath,
-   mirroring the frame view? Recommended by the designer for symmetry, not yet designed.
-4. **The `⋯` menu** — replace, duplicate, reveal in library, copy prompt? The control exists in the
-   hi-fi; its menu is unspecified.
-5. **Engineering:** does the band's fixed 178px survive the existing Beat panel, whose Table view was
-   already widened to a 176px panel column and a 1040px minimum grid? The designer's 1320 panel width
-   is stated against their own canvas, not against the shipped layout.
+### Ruling 1 — Takes: replace, with retained history
+
+Generating a Shot **replaces** the current picture; it never accumulates takes beside it. One Shot →
+one `videoAssetId` stands, exactly as the take-removal spec (`1750f9627`) settled. But replacement is
+not destruction: the store already pushes the outgoing current into `supersededVideoAssetIds` on
+every completed take (`mediaStore.ts:4038`), and a validation invariant guards that list
+(`validation.ts:2076`). So the designer's "replace or add?" was a false choice — the answer is the
+References model verbatim: **one current pointer plus a superseded history.**
+
+Consequences: the current picture card gets **no switcher and no take number** — the card stays
+"picture first, words last". Previous takes are reachable in the full-screen picture view (Ruling 3),
+and re-pointing to an older take is **free**, like reverting to an older reference image. Re-pointing
+changes the last frame that feeds the next Shot, which downstream surfaces report through Ruling 2 —
+not by blocking the revert.
+
+### Ruling 2 — Staleness is the prompt rule, generalized
+
+The designer already invented the pattern for text: _a run uses the prompt as fired; if the field no
+longer matches, it is tagged `EDITED · NOT YET RUN`._ The same rule now covers pictures. A rendered
+Shot whose effective first frame no longer matches the one its take was fired from carries a tag of
+the same family — **`FIRST FRAME CHANGED · NOT RE-RUN`** — on the current picture card; a downstream
+inherited-frame tile whose source's last frame has changed carries the same treatment on the tile.
+
+Divergence is an **attribute tag, never a fifth status word**. `RENDERED` plus a stale tag coexist;
+the four-word vocabulary is untouched.
+
+Implementation must consume the existing main-side machinery, not recompute freshness in the
+renderer: `studioConditioningInputsEqual` and the `continuity_stale` cause already exist
+(`chain.ts:292-296`), the board-panel status already ships typed `staleCauses`
+(`workspaceStatus.ts:246-256`), and the workspace projection already maps them to
+`current | stale`. Extend that pattern to the video take; do not invent a parallel one.
+
+### Ruling 3 — The current picture gets its own full-screen view, and it is where history lives
+
+Symmetric with the frame view: 94% black overlay, media contained never cropped, the **Shot prompt**
+underneath (editable under the one prompt rule), primary action **"Generate Shot N"** behind the
+existing spend gate, becoming _Cancel run_ mid-flight. The clip plays in the frame; reuse
+`FullscreenMediaFrame.tsx`.
+
+The filmstrip along the bottom navigates **takes** — current first, then `supersededVideoAssetIds`,
+newest to oldest — instead of frames. Choosing an older take re-points `videoAssetId` and costs
+nothing. This is deliberately the same gesture as choosing an older reference image, and it is what
+lets Ruling 1 keep the card clean: history exists, but it lives where judgement happens.
+
+### Ruling 4 — The `⋯` menus, exactly
+
+Menu items never spend. Anything paid goes through the prepare/confirm gate; the menus are free
+actions only.
+
+**Frame `⋯`:** `Download` · `Copy prompt` (generated frames only — imported and inherited frames have
+none) · `Remove` (the warm-tinted destructive action, consistent with the full-screen view).
+
+**Rejected from the designer's candidates:** _Duplicate_ — a frame has no mutable state of its own,
+so a duplicate is an indistinguishable tile, pure clutter. _Replace_ — the import tile plus Remove
+already compose it. _Reveal in library_ — no such surface exists in Studio; if a jump to the Assets
+drawer is wanted later, that is a separate ask.
+
+**Current picture `⋯`** (composed from Rulings 1 and 3, same no-spend rule): `Download` ·
+`Previous takes` (opens the full-screen view on the history strip) · `Remove take` (per the
+take-removal spec: clears the one `videoAssetId` its write registered).
+
+### Ruling 5 — The panel widens to 1320
+
+The shipped Beat panel is `min(1100px, calc(100vw - 32px))`, capped at 1100
+(`BeatPanel.module.css:3-4`). At 1100, the frames region sitting beside the beat player fits **three**
+tiles before scrolling, not the designed four. The designer justified 1320 on measured grounds — 1180
+truncated the shot prompt and left no room for a fourth frame — so the cap moves to **1320**:
+`min(1320px, calc(100vw - 32px))`.
+
+The band's fixed **178px height** is adopted exactly as drawn. Below a 1320 viewport the strip simply
+shows fewer tiles and scrolls; no layout jump, no height change. One check owed at implementation:
+the widening affects the whole Beat panel, so verify the existing content — coverage bar, shots list,
+player — renders correctly at 1320, since nothing else may silently assume 1100.
 
 ## What this does not change
 
