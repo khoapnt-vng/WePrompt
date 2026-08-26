@@ -18,12 +18,21 @@ import { createStudioMediaStore } from '@process/services/creative-studio/mediaS
 import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
 import { createCreativeStudioServiceV2 } from '@process/services/creative-studio/service';
 import { createStudioRateCardV2 } from '@process/services/creative-studio/service/schema2/pricing';
-import { createCreativeStudioStore } from '@process/services/creative-studio/store';
+import { CreativeStudioStoreError, createCreativeStudioStore } from '@process/services/creative-studio/store';
 import { describe, expect, it, vi } from 'vitest';
 
-const waitFor = async <T>(read: () => Promise<T | null>, attemptsRemaining = 200): Promise<T> => {
-  const value = await read();
-  if (value !== null) return value;
+const waitFor = async <T>(read: () => Promise<T | null>, attemptsRemaining = 2_000): Promise<T> => {
+  try {
+    const value = await read();
+    if (value !== null) return value;
+  } catch (error) {
+    // The integration probe deliberately reads while a multi-record media publication is in
+    // flight. The store fails closed until that authority transaction settles, then becomes
+    // readable again; only that bounded transient state is retryable here.
+    if (!(error instanceof CreativeStudioStoreError) || error.code !== 'storage_error' || attemptsRemaining <= 1) {
+      throw error;
+    }
+  }
   if (attemptsRemaining <= 1) throw new Error('Timed out waiting for Creative Studio integration state');
   await new Promise<void>((resolve) => setTimeout(resolve, 5));
   return waitFor(read, attemptsRemaining - 1);

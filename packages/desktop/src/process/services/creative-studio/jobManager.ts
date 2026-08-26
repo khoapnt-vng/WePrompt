@@ -535,6 +535,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     video: new FifoSemaphore(STUDIO_MAX_CONCURRENT_GENERATIONS.video),
   };
   const projectSemaphores = new Map<string, FifoSemaphore>();
+  // Provider work may run concurrently, but publishing two media outputs against the same
+  // project snapshot must remain a single deterministic authority transaction at a time.
+  const projectOutputPersistenceSemaphores = new Map<string, FifoSemaphore>();
   const controllers = new Map<string, AbortController>();
   const executionReservations = new Set<string>();
   const operationControllers = new Set<AbortController>();
@@ -570,6 +573,15 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       releaseProject();
       throw error;
     }
+  };
+
+  const acquireOutputPersistenceSlot = (projectId: string, signal: AbortSignal): Promise<() => void> => {
+    let projectSemaphore = projectOutputPersistenceSemaphores.get(projectId);
+    if (!projectSemaphore) {
+      projectSemaphore = new FifoSemaphore(1);
+      projectOutputPersistenceSemaphores.set(projectId, projectSemaphore);
+    }
+    return projectSemaphore.acquire(signal);
   };
 
   const admitOperation = <T>(operation: () => Promise<T>): Promise<T> => {
@@ -990,6 +1002,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     if (output.mediaKind !== context.mediaKind) {
       return transitionFailureV2(context.projectId, context.jobId, 'failed', 'no_output');
     }
+    const releaseOutputPersistence = await acquireOutputPersistenceSlot(context.projectId, signal);
     try {
       let primaryAsset: StudioAssetV2;
       if (output.source.kind === 'url') {
@@ -1106,6 +1119,8 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         return transitionFailureV2(context.projectId, context.jobId, 'failed', 'seed_still_variation_grid');
       }
       return transitionFailureV2(context.projectId, context.jobId, 'failed', 'download_failed');
+    } finally {
+      releaseOutputPersistence();
     }
   };
 
@@ -1935,6 +1950,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       cancellationFlightsV2.clear();
       activeRunByKey.clear();
       projectSemaphores.clear();
+      projectOutputPersistenceSemaphores.clear();
     })();
     return disposePromise;
   };
