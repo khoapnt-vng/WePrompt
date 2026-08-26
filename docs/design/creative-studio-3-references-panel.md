@@ -39,7 +39,7 @@ projects. Recording them so nobody "corrects" them during implementation.
 - **Three status words, one place.** `NO PHOTO` / `CURRENT SET` / `GENERATING` map cleanly to
   `approvedAssetId === null` / non-null / a running `reference_image` job.
 
-## 2 · `Bind to all shots` cannot do what it says — this is the blocker
+## 2 · `Bind to all shots` — ruled: binding is per-Shot
 
 The panel's headline action *"pushes the current set to every shot"*, and is inert until every
 reference has a photo. On the current engine that action is **impossible for most projects**.
@@ -59,19 +59,31 @@ exercising the pipeline, and they are not evidence of production reference count
 said as much. They are recorded only to show that three-or-more is an easy shape to reach, not to
 claim a rate.
 
-**This needs a product decision, not an implementation.** Options, in the order they seem defensible:
+**Owner ruling, 2026-08-26 night: binding is per-Shot.** A Shot takes the background plus the
+characters that actually appear in it — which is what the owner did by hand on the real films (the
+two dinner Beats got cook + guests; the rest got cook + kitchen), it is the only model that scales
+past two references, and it is what the shipped binding editor already does, budget counter included.
+This also re-affirms the standing ruling from the References-redesign assignment (2026-08-25):
+binding lives on the Shot.
 
-1. **Bind per Shot, not per project** — a Shot takes the background plus the characters that appear
-   in it, which is what the owner did by hand today (the two dinner Beats got cook + guests; the rest
-   got cook + kitchen). This is the only option that scales past two references and it is what the
-   binding editor already models.
-2. **Bind the background plus one character** and let Shot-level editing add the rest — honest, but
-   makes the headline button a partial action, which the copy would have to admit.
-3. **Keep bind-all and gate it** on the project holding ≤ `maxConditioningImages` references —
-   correct, but disables the button for most real projects and does not tell the user why.
+**What this means for the panel as drawn:**
 
-Whatever is chosen, the button must **not** silently produce over-budget bindings: today that
-surfaces later as a per-Shot error at the generation gate, far from the action that caused it.
+1. **The bulk push is removed.** No action in the References panel writes bindings to every Shot.
+2. **The completion affordance becomes a handoff, not a write.** The button keeps its inert-until-
+   complete behaviour and its position as the panel's finish line, but when every reference has a
+   photo it reads as navigation into per-Shot binding (e.g. *"Bind shots…"*, opening the Table's
+   binding flow) rather than performing a project-wide write. Copy is design's to settle; the
+   contract is that it navigates, it does not bind.
+3. **Bulk assignment at scale is the Director's job, not a button's.** `set_shot_reference_binding`
+   is a `direct` operation for the Director (`directorCommandContracts.ts`), so "bind the cast to
+   the right shots" is exactly the kind of sweep it performs on request — with the owner's per-Shot
+   editor as the override. The panel does not need to replicate that capability.
+4. **The intro copy survives.** *"The one marked current is what every shot inherits"* stays true
+   under per-Shot binding: bindings point at the reference, not at a take, so switching the current
+   take still flows to every bound Shot.
+5. **Over-budget bindings are refused at the point of binding** — never discovered later as a
+   per-Shot error at the generation gate. The shipped `count / limit` counter is the surface for
+   this; saving past the limit must be impossible, not merely warned.
 
 ## 3 · `+ Add character` has no supported mutation
 
