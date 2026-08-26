@@ -48,20 +48,16 @@ The image route reports **`maxConditioningImages: 2`**, and that budget is count
 **and** background together — the constraint behind BUG-134. Binding "the current set" therefore
 overflows the moment a project holds three references.
 
-Measured across every project on the owner's machine:
+**The evidence that matters is the design's own example**, not usage data: the prototype's progress
+counter reads **`2 / 3 SET`** — three references — so the completion state the panel is built around
+is already one where its primary action cannot legally run. That conflict is structural and holds
+regardless of how many references a real project turns out to need.
 
-| Project | References | `Bind to all shots` would send |
-| --- | --- | --- |
-| The Keeper | 2 | 2 — fits |
-| The Potter | 2 | 2 — fits |
-| Asian dinner | 3 | **3 — over limit** |
-| Trung Thu (`MY MY Studio`) | 3 | **3 — over limit** |
-| French Sunday Kitchen | 4 | **4 — over limit** |
-| VNG storyboard | 5 | **5 — over limit** |
-
-**Four of six real projects overflow**, and the prototype's own progress counter reads `2 / 3 SET` —
-three references, already over. So the design's completion state is a state in which its primary
-action cannot legally run.
+For colour rather than proof, the projects on the owner's machine at the time of writing held 2, 2,
+3, 3, 4 and 5 references. **These were same-day throwaway test projects, most of them created while
+exercising the pipeline, and they are not evidence of production reference counts** — the owner has
+said as much. They are recorded only to show that three-or-more is an easy shape to reach, not to
+claim a rate.
 
 **This needs a product decision, not an implementation.** Options, in the order they seem defensible:
 
