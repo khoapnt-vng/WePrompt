@@ -1545,10 +1545,11 @@ this is the binding summary. Do not re-open them by implementation default.
 
 ## Assignable follow-on — the Beat panel shot composer
 
-**Status:** designer handoff received 2026-08-26 evening, owner-forwarded. Full direction lives in
-[the Beat panel shot composer](../../design/creative-studio-3-beat-panel-composer.md); the
-designer's own README is committed verbatim beside this plan, along with both prototypes. This
-section is the assignment, not the specification.
+**Status:** implemented and verified 2026-08-27. The fixed eight-row composer, exact START and REFS
+drill-ins, inert END slot, six-state action model, chained Beat run/stop controls, and continuity
+review gates now use the existing schema-5 authority and spend flow. Full direction remains in [the
+Beat panel shot composer](../../design/creative-studio-3-beat-panel-composer.md); the designer's own
+README is committed verbatim beside this plan, along with both prototypes.
 
 - `creative-studio-3-beat-panel-composer-handoff.md` — the designer's README
 - `creative-studio-3-beat-panel-composer.html.txt` — sha256 `c1875fae52a9e604…85c3b488`

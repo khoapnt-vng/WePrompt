@@ -1770,6 +1770,7 @@ const StudioProjectPage: React.FC<{
         );
       },
       reviewContinuity: openContinuityReview,
+      reviewReferences: (shotId) => openReferenceFocus({ shotIds: [shotId] }),
       resolveGenerationBlock: (shotId, block: StudioGenerationBlockV2) => {
         if (block.code === 'reference_binding') {
           openReferenceFocus({ shotIds: [shotId] });

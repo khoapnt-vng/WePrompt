@@ -1141,6 +1141,322 @@ div.previewMedia {
   border: 0;
 }
 
+/* Shot Composer: the fixed rows stay stable while only state copy and actions change. */
+.shotCard {
+  display: flex;
+  min-inline-size: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 11px;
+  padding: 13px 16px;
+  border: 1px solid var(--color-border-2);
+  border-inline-start: 3px solid var(--color-primary-6);
+  border-radius: 12px;
+  background: var(--color-bg-2);
+}
+
+.shotHeader {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 11px;
+  padding: 0;
+  border: 0;
+}
+
+.shotHeader .shotTitle {
+  flex: none;
+  font-size: 13.5px;
+  white-space: nowrap;
+}
+
+.shotHeader .chainState {
+  min-inline-size: 0;
+  flex: 1;
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shotHeader .shotStatus {
+  flex: none;
+  color: var(--color-text-3);
+  font-size: 8.5px;
+  font-weight: var(--fw-regular);
+  white-space: nowrap;
+}
+
+.shotStatus[data-composer-status-word='notReady'] {
+  color: var(--color-warning-6);
+}
+
+.shotStatus[data-composer-status-word='queued'],
+.shotStatus[data-composer-status-word='rendering'] {
+  color: var(--color-link-6);
+}
+
+.shotStatus[data-composer-status-word='rendered'] {
+  color: var(--color-success-6);
+}
+
+.shotStatus[data-composer-status-word='failed'] {
+  color: var(--color-danger-6);
+}
+
+.shotHeader > .actions {
+  flex: none;
+  flex-wrap: nowrap;
+}
+
+.onTag {
+  flex: none;
+  padding: 3px 6px;
+  border-radius: 5px;
+  font-size: 8px;
+  letter-spacing: 0.09em;
+}
+
+.framesHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-block-start: 11px;
+  border-block-start: 1px solid var(--color-border-1);
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.frameSlots {
+  display: grid;
+  min-inline-size: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.frameSlot {
+  position: relative;
+  display: grid;
+  min-inline-size: 0;
+  block-size: 66px;
+  place-items: center;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border-2);
+  border-radius: 9px;
+  color: var(--color-text-3);
+  background: var(--color-fill-1);
+  cursor: pointer;
+}
+
+.frameSlot:hover:not(:disabled) {
+  border-color: var(--color-primary-6);
+  color: var(--color-primary-7);
+  background: var(--color-fill-2);
+}
+
+.frameSlot:disabled {
+  cursor: not-allowed;
+}
+
+.frameSlot[data-composer-start-slot][data-filled='true'] {
+  border: 2px solid var(--color-primary-6);
+  background: var(--color-fill-4);
+}
+
+.frameSlot img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.emptySlotCopy {
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  white-space: nowrap;
+}
+
+.slotBadge {
+  position: absolute;
+  inset-block-end: 5px;
+  inset-inline-start: 5px;
+  max-inline-size: calc(100% - 10px);
+  padding: 2px 5px;
+  overflow: hidden;
+  border-radius: 4px;
+  color: var(--color-bg-1);
+  background: color-mix(in srgb, var(--color-fill-4) 72%, transparent);
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  letter-spacing: 0.09em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frameSlot[data-composer-start-slot] .slotBadge {
+  background: var(--color-primary-6);
+}
+
+.slotReason {
+  max-inline-size: 20ch;
+  color: var(--color-text-3);
+  font-size: 8px;
+  line-height: 1.2;
+}
+
+.shotPromptInput textarea,
+textarea.shotPromptInput {
+  min-block-size: 58px;
+  resize: none;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.composerActionRow {
+  display: flex;
+  min-block-size: 30px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.composerAttentionTag {
+  margin-inline-end: auto;
+  color: var(--color-danger-6);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.composerAttentionTag[data-visible='false'] {
+  visibility: hidden;
+}
+
+.composerAction[data-action-kind='cancelRun'] {
+  border-color: var(--color-danger-3);
+  color: var(--color-danger-7);
+  background: var(--color-danger-1);
+}
+
+.composerFootnote {
+  min-block-size: 13px;
+  margin: 0;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.composerFootnote[data-visible='false'] {
+  visibility: hidden;
+}
+
+.shotStrip {
+  display: grid;
+  min-inline-size: 0;
+  gap: 9px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  background: var(--color-bg-2);
+}
+
+.shotStripHeader {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.shotStripHeader h3 {
+  flex: none;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12.5px;
+}
+
+.shotStripHeader > span {
+  min-inline-size: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chainAction {
+  flex: none;
+}
+
+.shotChips {
+  display: flex;
+  min-inline-size: 0;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.shotChip {
+  display: grid;
+  min-inline-size: 0;
+  flex: 1;
+  grid-template-columns: 1fr auto;
+  gap: 2px 6px;
+  padding: 7px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 7px;
+  color: var(--text-primary);
+  background: var(--color-bg-1);
+  text-align: start;
+}
+
+.shotChip[data-active='true'] {
+  border-color: var(--color-primary-3);
+  border-inline-start: 3px solid var(--color-primary-6);
+  color: var(--color-primary-7);
+  background: var(--color-primary-1);
+}
+
+.shotChip b,
+.shotChip small {
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: var(--fw-regular);
+  text-transform: uppercase;
+}
+
+.shotChip small {
+  grid-column: 1 / -1;
+  color: var(--color-text-3);
+}
+
+.joinButton {
+  align-self: center;
+  flex: none;
+  inline-size: 22px;
+  min-inline-size: 22px;
+  padding: 0;
+}
+
+.shotStrip .coverageRoot {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.previewColumn {
+  inline-size: 376px;
+}
+
 @media (max-width: 900px) {
   .workingRow {
     align-items: stretch;

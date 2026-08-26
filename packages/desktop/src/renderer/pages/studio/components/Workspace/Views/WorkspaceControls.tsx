@@ -218,6 +218,10 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       setOpenPanel(null);
       beatPanelActions.requestResplit(beatId);
     },
+    reviewReferences: (shotId: string): void => {
+      setOpenPanel(null);
+      beatPanelActions.reviewReferences(shotId);
+    },
   };
 
   return (
@@ -308,6 +312,8 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           projection={projection}
           reviewGraphs={beatPanelReviewGraphs}
           reviewBlockedMessageKey={beatPanelReviewBlockedMessageKey}
+          referenceBindings={referenceBindings}
+          referenceMaxConditioningImages={referenceMaxConditioningImages}
         />
       )}
       {activeView === 'board' ? null : (

@@ -49,6 +49,7 @@ type FirstFramesProps = {
   prompt: string;
   shot: WorkspaceShotProjection;
   shotIndex: number;
+  showGenerationAction?: boolean;
 };
 
 const safeDownloadName = (kind: 'frame' | 'take', shotIndex: number, index: number): string =>
@@ -108,6 +109,7 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   prompt,
   shot,
   shotIndex,
+  showGenerationAction = true,
 }) => {
   const { t } = useTranslation();
   const [viewer, setViewer] = useState<ViewerState>(null);
@@ -449,21 +451,23 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
             ) : null}
           </article>
         )}
-        <Button
-          aria-describedby={generationDescriptionId}
-          disabled={
-            status === 'rendering'
-              ? shot.activeGenerationJob?.canCancel !== true
-              : disabled || generateVideoDisabled || frames.every((frame) => !frame.effectiveSeed)
-          }
-          loading={working}
-          onClick={() => void run(status === 'rendering' ? cancelRun : onGenerateVideo)}
-          type='primary'
-        >
-          {t(status === 'rendering' ? `${KEY_ROOT}.cancelRun` : `${KEY_ROOT}.generateShot`, {
-            shot: shotIndex + 1,
-          })}
-        </Button>
+        {showGenerationAction ? (
+          <Button
+            aria-describedby={generationDescriptionId}
+            disabled={
+              status === 'rendering'
+                ? shot.activeGenerationJob?.canCancel !== true
+                : disabled || generateVideoDisabled || frames.every((frame) => !frame.effectiveSeed)
+            }
+            loading={working}
+            onClick={() => void run(status === 'rendering' ? cancelRun : onGenerateVideo)}
+            type='primary'
+          >
+            {t(status === 'rendering' ? `${KEY_ROOT}.cancelRun` : `${KEY_ROOT}.generateShot`, {
+              shot: shotIndex + 1,
+            })}
+          </Button>
+        ) : null}
       </div>
 
       <Modal

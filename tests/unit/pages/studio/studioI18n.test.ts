@@ -103,6 +103,42 @@ const localizedFirstFramesPanelKeys = [
   'beatPanel.firstFrames.viewer.useTake',
 ] as const;
 
+const localizedShotComposerKeys = [
+  'beatPanel.composer.status.notReady',
+  'beatPanel.composer.status.ready',
+  'beatPanel.composer.status.queued',
+  'beatPanel.composer.status.rendering',
+  'beatPanel.composer.status.rendered',
+  'beatPanel.composer.status.failed',
+  'beatPanel.composer.framesSet',
+  'beatPanel.composer.start',
+  'beatPanel.composer.end',
+  'beatPanel.composer.references',
+  'beatPanel.composer.startPreview',
+  'beatPanel.composer.fromShot',
+  'beatPanel.composer.endUnavailable',
+  'beatPanel.composer.referencesBudget',
+  'beatPanel.composer.promptPlaceholder',
+  'beatPanel.composer.action.generate',
+  'beatPanel.composer.action.regenerate',
+  'beatPanel.composer.action.cancelRun',
+  'beatPanel.composer.action.removeFromChain',
+  'beatPanel.composer.action.tryAgain',
+  'beatPanel.composer.action.fixStartFrame',
+  'beatPanel.composer.tag.notCharged',
+  'beatPanel.composer.tag.startFrameFailed',
+  'beatPanel.composer.footnote.startRequired',
+  'beatPanel.composer.footnote.startArrives',
+  'beatPanel.composer.footnote.promptAsFired',
+  'beatPanel.composer.footnote.lastFrameStartsNext',
+  'beatPanel.composer.footnote.engineFailed',
+  'beatPanel.composer.footnote.startFrameFailed',
+  'beatPanel.composer.chain.rule',
+  'beatPanel.composer.chain.runningRule',
+  'beatPanel.composer.chain.generate',
+  'beatPanel.composer.chain.stop',
+] as const;
+
 const loadConversation = (locale: string): JsonObject =>
   JSON.parse(readFileSync(join(localeRoot, locale, 'conversation.json'), 'utf8')) as JsonObject;
 
@@ -131,6 +167,7 @@ const flattenLeaves = (value: JsonObject, prefix = ''): Record<string, string> =
 
 const expectedLeaves = [
   ...localizedFirstFramesPanelKeys,
+  ...localizedShotComposerKeys,
   'director.title',
   'director.show',
   'director.hide',
@@ -1110,6 +1147,7 @@ const localizedOnePicturePresentationKeys = [
 
 const localizedWorkspaceKeys = [
   ...localizedFirstFramesPanelKeys,
+  ...localizedShotComposerKeys,
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
@@ -1834,6 +1872,7 @@ describe('Creative Studio workspace translations', () => {
         ...localizedBeatSegmentKeys,
         ...localizedCurrentPictureKeys,
         ...localizedFirstFramesPanelKeys,
+        ...localizedShotComposerKeys,
         ...localizedAuthorizedSeedRecoveryKeys,
         'library.pictureCount',
         'library.pictureCount_one',

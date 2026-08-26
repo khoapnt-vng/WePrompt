@@ -419,6 +419,23 @@ vi.mock('react-i18next', () => ({
         return `Send its last frame to Shot ${String(values?.shot)}`;
       }
       if (key.endsWith('.firstFrames.generateShot')) return `Generate Shot ${String(values?.shot)}`;
+      if (key.endsWith('.composer.action.generate')) return `Generate Shot ${String(values?.shot)}`;
+      if (key.endsWith('.composer.action.regenerate')) return 'Regenerate';
+      if (key.endsWith('.composer.action.cancelRun')) return 'Cancel run';
+      if (key.endsWith('.composer.action.removeFromChain')) return 'Remove from chain';
+      if (key.endsWith('.composer.action.tryAgain')) return 'Try again';
+      if (key.endsWith('.composer.action.fixStartFrame')) return 'Fix start frame — free';
+      if (key.endsWith('.composer.status.notReady')) return 'Not ready';
+      if (key.endsWith('.composer.status.ready')) return 'Ready to render';
+      if (key.endsWith('.composer.status.queued')) return 'Queued';
+      if (key.endsWith('.composer.status.rendering')) return 'Rendering';
+      if (key.endsWith('.composer.status.rendered')) return 'Rendered';
+      if (key.endsWith('.composer.status.failed')) return 'Failed';
+      if (key.endsWith('.composer.chain.generate')) return `Generate all ${String(values?.count)} · chained`;
+      if (key.endsWith('.composer.chain.stop')) return 'Stop the chain';
+      if (key.endsWith('.composer.referencesBudget')) {
+        return `Refs ${String(values?.count)} / ${String(values?.limit)}`;
+      }
       if (key.endsWith('.firstFrames.viewer.counter')) {
         return `${String(values?.current)} of ${String(values?.total)}`;
       }
@@ -677,6 +694,7 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   reviewShot: vi.fn(),
   reviewSeedStill: vi.fn(),
   reviewContinuity: vi.fn(),
+  reviewReferences: vi.fn(),
   resolveGenerationBlock: vi.fn(),
   retryGenerationJob: vi.fn().mockResolvedValue(true),
   cancelGenerationJob: vi.fn().mockResolvedValue(true),
@@ -721,7 +739,7 @@ describe('BeatPanel generation recovery', () => {
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
 
     const remote = container.querySelector<HTMLElement>('[data-job-id="job_remote"]')!;
-    expect(screen.getByRole('button', { name: 'Generate Shot 1' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeDisabled();
     fireEvent.click(within(remote).getByRole('button', { name: 'conversation.creativeStudio.jobs.retry' }));
     await waitFor(() => expect(actions.retryGenerationJob).toHaveBeenCalledWith('job_remote', false));
     fireEvent.click(within(remote).getByRole('button', { name: 'conversation.creativeStudio.jobs.cancel' }));
@@ -805,9 +823,32 @@ const shotCard = (container: HTMLElement, shotId: string): HTMLElement => {
   return card;
 };
 
+const chainChangeButton = (container: HTMLElement, shotId: string): HTMLButtonElement => {
+  const button = container.querySelector<HTMLButtonElement>(
+    `[data-shot-strip] [data-chain-change-trigger][data-shot-id="${shotId}"]`
+  );
+  if (button === null) throw new Error(`Missing chain-change control for ${shotId}`);
+  return button;
+};
+
 const assetCard = (container: HTMLElement, assetId: string): HTMLElement => {
-  const card = container.querySelector<HTMLElement>(`[data-asset-id="${assetId}"]`);
+  let card = container.querySelector<HTMLElement>(`[data-asset-id="${assetId}"]`);
+  if (card === null) {
+    const startSlot = container.querySelector<HTMLButtonElement>(
+      '[data-shot-card]:not([hidden]) [data-composer-start-slot]'
+    );
+    if (startSlot !== null && startSlot.getAttribute('aria-expanded') !== 'true') fireEvent.click(startSlot);
+    card = container.querySelector<HTMLElement>(`[data-asset-id="${assetId}"]`);
+  }
   if (card === null) throw new Error(`Missing asset card ${assetId}`);
+  return card;
+};
+
+const openFirstFramePicker = (container: HTMLElement, shotId: string): HTMLElement => {
+  const card = shotCard(container, shotId);
+  const startSlot = card.querySelector<HTMLButtonElement>('[data-composer-start-slot]');
+  if (startSlot === null) throw new Error(`Missing START slot for ${shotId}`);
+  if (startSlot.getAttribute('aria-expanded') !== 'true') fireEvent.click(startSlot);
   return card;
 };
 
@@ -1757,6 +1798,210 @@ describe('BeatPanel', () => {
     vi.stubGlobal('ResizeObserver', NoopResizeObserver);
   });
 
+  it.each([
+    ['not ready', makeShot('shot_state', 0), 'notReady', 'Generate Shot 1'],
+    [
+      'ready',
+      makeShot('shot_state', 0, {
+        effectiveSeedAssetId: 'seed_ready',
+        firstFrames: [makeSeedStill('seed_ready', { effectiveSeed: true })],
+        hasEffectiveSeed: true,
+      }),
+      'ready',
+      'Generate Shot 1',
+    ],
+    [
+      'ready with references',
+      makeShot('shot_state', 0, {
+        effectiveSeedAssetId: 'seed_refs',
+        firstFrames: [makeSeedStill('seed_refs', { effectiveSeed: true })],
+        hasEffectiveSeed: true,
+      }),
+      'ready',
+      'Generate Shot 1',
+    ],
+    [
+      'rendering',
+      makeShot('shot_state', 0, {
+        activeGenerationJob: { id: 'job_running', purpose: 'video_take', canCancel: true },
+        generationProgressPercent: 40,
+        segmentState: { kind: 'rendering', progressPercent: 40, showingStill: false },
+        videoGenerationInFlight: true,
+      }),
+      'rendering',
+      'Cancel run',
+    ],
+    [
+      'rendered',
+      makeShot('shot_state', 0, { currentPicture: makeCurrentPicture('video_rendered') }),
+      'rendered',
+      'Regenerate',
+    ],
+    [
+      'edited after a run',
+      makeShot('shot_state', 0, {
+        currentPicture: { ...makeCurrentPicture('video_dirty'), promptChanged: true },
+      }),
+      'rendered',
+      'Regenerate',
+    ],
+    [
+      'queued',
+      makeShot('shot_state', 0, {
+        activeGenerationJob: { id: 'job_queued', purpose: 'video_take', canCancel: true },
+        segmentState: { kind: 'queued' },
+        videoGenerationInFlight: true,
+      }),
+      'queued',
+      'Remove from chain',
+    ],
+    ['failed', makeShot('shot_state', 0, { segmentState: { kind: 'failed_unbilled' } }), 'failed', 'Try again'],
+  ] as const)('keeps the same eight composer rows in the %s state', (_name, shot, status, actionLabel) => {
+    const beat = makeBeat('beat_state', [shot]);
+    const referenceBindings =
+      _name === 'ready with references'
+        ? [
+            {
+              shotId: shot.id,
+              status: 'ready' as const,
+              characterReferenceIds: ['ming'],
+              backgroundReferenceId: 'dai_pai_dong',
+            },
+          ]
+        : [];
+    const { container } = render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), {
+          referenceBindings,
+          referenceMaxConditioningImages: 2,
+        })}
+      />
+    );
+    const card = shotCard(container, shot.id);
+
+    expect(card).toHaveAttribute('data-composer-status', status);
+    expect(card.querySelectorAll('[data-composer-row]')).toHaveLength(8);
+    expect(card.querySelectorAll('[data-composer-status-word]')).toHaveLength(1);
+    expect(within(card).getByRole('button', { name: actionLabel })).toBeVisible();
+    expect(card.querySelector('[data-composer-end-slot]')).toBeDisabled();
+    expect(card).not.toHaveTextContent('THE SHOT HAS TO LAND ON THAT PICTURE');
+  });
+
+  it('opens the shipped candidate picker from START and routes REFS through the exact binding editor', () => {
+    const seed = makeSeedStill('seed_picker', { effectiveSeed: true });
+    const shot = makeShot('shot_1', 0, {
+      effectiveSeedAssetId: seed.assetId,
+      firstFrames: [seed],
+      hasEffectiveSeed: true,
+    });
+    const beat = makeBeat('beat_1', [shot]);
+    const actions = makeActions();
+    const { container } = render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), {
+          referenceBindings: [
+            {
+              shotId: shot.id,
+              status: 'ready',
+              characterReferenceIds: ['ming'],
+              backgroundReferenceId: 'dai_pai_dong',
+            },
+          ],
+          referenceMaxConditioningImages: 2,
+        })}
+      />
+    );
+    const card = shotCard(container, shot.id);
+
+    expect(card.querySelector('[data-first-frames-band]')).toBeNull();
+    fireEvent.click(card.querySelector<HTMLButtonElement>('[data-composer-start-slot]')!);
+    expect(card.querySelector('[data-first-frames-band]')).toBeVisible();
+    expect(card.querySelector('[data-composer-reference-slot]')).toHaveTextContent('2');
+    fireEvent.click(card.querySelector<HTMLButtonElement>('[data-composer-reference-slot]')!);
+    expect(actions.reviewReferences).toHaveBeenCalledWith(shot.id);
+  });
+
+  it('marks an exhausted conditioning frame as FAILED with one free recovery action', async () => {
+    const shot = makeShot('shot_2', 1, { segmentHead: false, segmentState: { kind: 'never_dispatched' } });
+    const beat = makeBeat('beat_1', [makeShot('shot_1', 0), shot]);
+    const actions = makeActions();
+    const projection = makeProjection([beat], {
+      conditioningFailures: [{ dependentShotId: shot.id, reason: 'conditioning_failed', canRetry: true }],
+    });
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions, projection)} />);
+    inspectShot(container, shot.id);
+    const card = shotCard(container, shot.id);
+
+    expect(card).toHaveAttribute('data-composer-status', 'failed');
+    fireEvent.click(within(card).getByRole('button', { name: 'Fix start frame — free' }));
+    await waitFor(() => expect(actions.retryConditioning).toHaveBeenCalledWith(shot.id));
+  });
+
+  it('starts a chained Beat at its first non-current Shot and states the exact run count', () => {
+    const rendered = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_current') });
+    const seed = makeSeedStill('seed_2', { effectiveSeed: true, origin: 'inherited', sourceShotNumber: 1 });
+    const missing = makeShot('shot_2', 1, {
+      effectiveSeedAssetId: seed.assetId,
+      firstFrames: [seed],
+      hasEffectiveSeed: true,
+      segmentHead: false,
+    });
+    const beat = makeBeat('beat_1', [rendered, missing]);
+    const actions = makeActions();
+    const { container } = render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), {
+          reviewGraphs: [
+            { triggerShotId: rendered.id, choices: [{ shotId: rendered.id, purpose: 'video_take' }], block: null },
+            { triggerShotId: missing.id, choices: [{ shotId: missing.id, purpose: 'video_take' }], block: null },
+          ],
+        })}
+      />
+    );
+
+    fireEvent.click(
+      within(container.querySelector<HTMLElement>('[data-shot-strip]')!).getByRole('button', {
+        name: 'Generate all 1 · chained',
+      })
+    );
+    expect(actions.reviewShot).toHaveBeenCalledWith(missing.id, [{ shotId: missing.id, purpose: 'video_take' }]);
+  });
+
+  it('stops a chain at its waiting follower without cancelling the Shot already in flight', () => {
+    const running = makeShot('shot_1', 0, {
+      activeGenerationJob: { id: 'job_running', purpose: 'video_take', canCancel: true },
+      segmentState: { kind: 'rendering', progressPercent: null, showingStill: false },
+      videoGenerationInFlight: true,
+    });
+    const waiting = makeShot('shot_2', 1, {
+      segmentHead: false,
+      segmentState: { kind: 'waiting_on_shot', upstreamShotNumber: 1 },
+    });
+    const beat = makeBeat('beat_1', [running, waiting]);
+    const actions = makeActions();
+    const projection = makeProjection([beat], {
+      cascadeProgress: [
+        {
+          dependentShotId: waiting.id,
+          upstreamShotId: running.id,
+          eligiblePrimaryAssetIds: [],
+          canRetryConditioningFrame: false,
+          canCancelWaiting: true,
+          waitingReason: 'upstream_running',
+        },
+      ],
+    });
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions, projection)} />);
+
+    fireEvent.click(
+      within(container.querySelector<HTMLElement>('[data-shot-strip]')!).getByRole('button', {
+        name: 'Stop the chain',
+      })
+    );
+    expect(actions.cancelWaiting).toHaveBeenCalledWith(waiting.id);
+    expect(actions.cancelGenerationJob).not.toHaveBeenCalled();
+  });
+
   it('keeps chain authority and continuity warnings separate from the one Shooting script editor', () => {
     const image = makeSeedStill('asset_private_image', { effectiveSeed: true });
     const beat = makeBeat('beat_private', [
@@ -1804,26 +2049,24 @@ describe('BeatPanel', () => {
     const chainChangeControl = continuation.querySelector<HTMLElement>('[data-chain-change-control]');
     expect(continuityWarning).toBeVisible();
     expect(continuationState).not.toContainElement(continuityWarning);
-    expect(chainChangeControl).not.toContainElement(continuityWarning);
+    expect(chainChangeControl).toBeNull();
     expect(within(continuation).getByText('Generated work is out of date')).toBeVisible();
 
     inspectShot(container, 'shot_private_1');
     // The Shooting script is always visible and editable in the Shot header.
     const shootingScript = within(naturalHead).getByRole('textbox', { name: 'Shooting script for Shot 1' });
     expect(shootingScript).toHaveValue('Canonical shooting script 1');
-    expect(naturalHead.querySelectorAll('input')).toHaveLength(1);
+    expect(naturalHead.querySelectorAll('textarea')).toHaveLength(1);
 
     inspectShot(container, 'shot_private_4');
-    expect(within(authoredHead).getByRole('button', { name: 'Review rejoin…' })).toHaveAttribute(
-      'data-chain-change-intent',
-      'rejoin'
-    );
+    expect(chainChangeButton(container, 'shot_private_4')).toHaveAttribute('data-chain-change-intent', 'rejoin');
     inspectShot(container, 'shot_private_5');
-    expect(within(defensiveContinuation).getByRole('button', { name: 'Review rejoin…' })).toHaveAttribute(
-      'data-chain-change-intent',
-      'rejoin'
-    );
+    expect(chainChangeButton(container, 'shot_private_5')).toHaveAttribute('data-chain-change-intent', 'rejoin');
+    inspectShot(container, 'shot_private_1');
+    openFirstFramePicker(container, 'shot_private_1');
     expect(within(naturalHead).getByLabelText('Frame 1')).toBeInTheDocument();
+    inspectShot(container, 'shot_private_2');
+    openFirstFramePicker(container, 'shot_private_2');
     expect(continuation.querySelector('[role="region"][aria-label="Current picture for Shot 2"]')).toBeInTheDocument();
     expect(container.textContent).not.toContain('asset_private');
     expect(container.textContent).not.toContain('shot_private');
@@ -1855,13 +2098,9 @@ describe('BeatPanel', () => {
     const { container, rerender } = render(<BeatPanel {...props} />);
     expect(shotCard(container, 'shot_natural_head').querySelector('[data-chain-change-trigger]')).toBeNull();
     inspectShot(container, 'shot_continuous');
-    const continuousControl = within(shotCard(container, 'shot_continuous')).getByRole('button', {
-      name: 'Review hard cut…',
-    });
+    const continuousControl = chainChangeButton(container, 'shot_continuous');
     inspectShot(container, 'shot_hard_cut');
-    const hardCutControl = within(shotCard(container, 'shot_hard_cut')).getByRole('button', {
-      name: 'Review rejoin…',
-    });
+    const hardCutControl = chainChangeButton(container, 'shot_hard_cut');
 
     for (const control of [continuousControl, hardCutControl]) {
       expect(control).toBeEnabled();
@@ -1905,9 +2144,7 @@ describe('BeatPanel', () => {
     for (const props of assertions) {
       const view = render(<BeatPanel {...props} />);
       inspectShot(view.container, 'shot_continuous');
-      expect(
-        within(shotCard(view.container, 'shot_continuous')).getByRole('button', { name: 'Review hard cut…' })
-      ).toBeDisabled();
+      expect(chainChangeButton(view.container, 'shot_continuous')).toBeDisabled();
       view.unmount();
     }
   });
@@ -2041,9 +2278,7 @@ describe('BeatPanel', () => {
     fireEvent.click(stale.container.querySelector<HTMLButtonElement>('[data-beat-story-toggle]')!);
     expect(screen.getByRole('textbox', { name: 'Story' })).toBeDisabled();
     inspectShot(stale.container, 'shot_2');
-    expect(
-      within(shotCard(stale.container, 'shot_2')).getByRole('button', { name: 'Review hard cut…' })
-    ).toBeDisabled();
+    expect(chainChangeButton(stale.container, 'shot_2')).toBeDisabled();
     expect(screen.getByRole('slider', { name: 'Boundary after Shot 1' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Play Beat' })).toBeEnabled();
     expect(screen.getByRole('slider', { name: 'Beat seek rail' })).toBeEnabled();
@@ -2080,7 +2315,7 @@ describe('BeatPanel', () => {
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
 
-    const shotRegion = within(shotCard(container, shot.id));
+    const shotRegion = within(openFirstFramePicker(container, shot.id));
     const picture = shotRegion.getByRole('region', { name: 'Current picture for Shot 1' });
     expect(within(picture).getByAltText('Current picture for Shot 1')).toHaveAttribute(
       'src',
@@ -2100,7 +2335,7 @@ describe('BeatPanel', () => {
     expect(actions.removeVideoTake).toHaveBeenCalledWith(shot.id, 'video_current');
     expect(shotRegion.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
 
-    fireEvent.click(within(picture).getByRole('button', { name: 'Generate Shot 1' }));
+    fireEvent.click(shotRegion.getByRole('button', { name: 'Regenerate' }));
     await waitFor(() =>
       expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [{ shotId: 'shot_1', purpose: 'video_take' }])
     );
@@ -2120,6 +2355,7 @@ describe('BeatPanel', () => {
     });
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+    openFirstFramePicker(container, shot.id);
     const video = container.querySelector<HTMLVideoElement>('[data-current-picture] video');
     if (video === null) throw new Error('Missing posterless current picture');
     Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1280 });
@@ -2166,7 +2402,7 @@ describe('BeatPanel', () => {
     });
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
-    const picture = within(shotCard(container, shot.id)).getByRole('region', {
+    const picture = within(openFirstFramePicker(container, shot.id)).getByRole('region', {
       name: 'Current picture for Shot 1',
     });
 
@@ -2199,7 +2435,7 @@ describe('BeatPanel', () => {
     const beat = makeBeat('beat_1', [shot, next]);
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
-    const picture = within(shotCard(container, shot.id)).getByRole('region', {
+    const picture = within(openFirstFramePicker(container, shot.id)).getByRole('region', {
       name: 'Current picture for Shot 1',
     });
 
@@ -2237,7 +2473,7 @@ describe('BeatPanel', () => {
     });
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
-    const picture = within(shotCard(container, shot.id)).getByRole('region', {
+    const picture = within(openFirstFramePicker(container, shot.id)).getByRole('region', {
       name: 'Current picture for Shot 1',
     });
 
@@ -2306,7 +2542,7 @@ describe('BeatPanel', () => {
     expect(container.querySelector('[data-viewer-kind="frame"]')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'Escape' });
 
-    const picture = within(shotCard(container, shot.id)).getByRole('region', {
+    const picture = within(openFirstFramePicker(container, shot.id)).getByRole('region', {
       name: 'Current picture for Shot 1',
     });
     fireEvent.click(within(picture).getByRole('button', { name: 'Current picture for Shot 1' }));
@@ -2358,7 +2594,9 @@ describe('BeatPanel', () => {
     expect(copyTextMock).toHaveBeenCalledWith(current.prompt);
     expect(actions.dismissSeedStill).toHaveBeenCalledWith(shot.id, current.assetId);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Import first frame' }));
+    const firstFramesBand = container.querySelector<HTMLElement>('[data-first-frames-band]');
+    if (firstFramesBand === null) throw new Error('Missing first-frames picker');
+    fireEvent.click(within(firstFramesBand).getByRole('button', { name: 'Import first frame' }));
     await waitFor(() => expect(actions.importSeedStill).toHaveBeenCalledWith(shot.id));
 
     fireEvent.click(within(assetCard(container, candidate.assetId)).getByRole('button', { name: 'Preview · Frame 2' }));
@@ -2499,7 +2737,8 @@ describe('BeatPanel', () => {
       makeShot('shot_2', 1, { seedStills: [retainedSeed], segmentHead: false }),
     ]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const card = within(inspectShot(container, 'shot_2')).getByLabelText('Frame 1');
+    inspectShot(container, 'shot_2');
+    const card = within(openFirstFramePicker(container, 'shot_2')).getByLabelText('Frame 1');
 
     expect(card).toBeVisible();
     expect(within(card).getByRole('button', { name: 'Pin as first frame' })).toBeDisabled();
@@ -2772,14 +3011,12 @@ describe('BeatPanel', () => {
 
     const firstShotCard = shotCard(result.container, 'shot_1');
     const shotHeader = firstShotCard.querySelector('header');
-    const shotFooter = firstShotCard.querySelector<HTMLElement>('[data-shot-footer]');
     const shotOverflow = firstShotCard.querySelector<HTMLButtonElement>('[data-shot-overflow-trigger]');
-    if (shotHeader === null || shotFooter === null || shotOverflow === null) {
+    if (shotHeader === null || shotOverflow === null) {
       throw new Error('Missing Shot header overflow placement hooks');
     }
     expect(shotHeader).toContainElement(shotOverflow);
-    expect(shotFooter.querySelector('[data-shot-overflow-trigger]')).toBeNull();
-    expect(shotFooter.querySelector('[data-shot-move-to-bin]')).toBeNull();
+    expect(firstShotCard.querySelector('[data-shot-footer]')).toBeNull();
     expect(shotOverflow).toHaveAccessibleName('More actions · Shot 1');
     expect(shotOverflow).toHaveAttribute('aria-haspopup', 'menu');
     act(() => shotOverflow.focus());
@@ -2948,7 +3185,7 @@ describe('BeatPanel', () => {
     );
 
     const lockedCard = inspectShot(container, locked.id);
-    const ordinaryRejoin = within(lockedCard).getByRole('button', { name: 'Review rejoin…' });
+    const ordinaryRejoin = chainChangeButton(container, locked.id);
     const ordinaryGeneration = within(lockedCard).getByRole('button', {
       name: 'Generate Shot 2',
     });

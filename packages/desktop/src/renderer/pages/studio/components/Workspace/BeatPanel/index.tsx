@@ -19,6 +19,8 @@ import {
   type StudioRendererParkEligibilityV2,
 } from '@/common/types/project/creativeStudioTypes';
 
+import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
+
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../workspaceProjection';
 import { generationBlockAction, generationBlockMessage } from '../Gate/generationBlockers';
@@ -26,7 +28,7 @@ import styles from './BeatPanel.module.css';
 import { BeatPlayer } from './BeatPlayer';
 import { CoverageBar } from './CoverageBar';
 import type { CoveragePlanningPairChange } from './coverageGeometry';
-import { FirstFrames, firstFramesStatus } from './FirstFrames';
+import { FirstFrames } from './FirstFrames';
 
 const KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel';
 const JOB_KEY_ROOT = 'conversation.creativeStudio.jobs';
@@ -81,6 +83,7 @@ export type BeatPanelActions = {
   reviewShot: (triggerShotId: string, choices: readonly [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]) => void;
   reviewSeedStill: (shotId: string) => void;
   reviewContinuity: (shotId: string, hardCut: boolean) => void;
+  reviewReferences: (shotId: string) => void;
   resolveGenerationBlock: (shotId: string, block: StudioGenerationBlockV2) => void;
   retryGenerationJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   cancelGenerationJob: (jobId: string) => Promise<boolean>;
@@ -102,6 +105,13 @@ export type BeatPanelProps = {
   pending: boolean;
   gateLocked: boolean;
   reviewBlockedMessageKey: string | null;
+  referenceBindings?: readonly {
+    shotId: string;
+    status: 'unassigned' | 'ready' | 'invalid';
+    characterReferenceIds: readonly string[];
+    backgroundReferenceId: string | null;
+  }[];
+  referenceMaxConditioningImages?: number | null;
   onParkShotSuccess: (shotId: string) => void;
   onSelectBeat: (beatId: string) => void;
   onClose: () => void;
@@ -218,6 +228,32 @@ const useLatestDrafts = (drafts: UseWorkspaceDraftsResult): React.MutableRefObje
   return ref;
 };
 
+type ShotComposerStatus = 'notReady' | 'ready' | 'queued' | 'rendering' | 'rendered' | 'failed';
+
+const shotComposerStatus = (shot: WorkspaceShotProjection, conditioningFailed: boolean): ShotComposerStatus => {
+  if (conditioningFailed || shot.segmentState.kind === 'never_dispatched') return 'failed';
+  if (
+    shot.segmentState.kind === 'failed_unbilled' ||
+    shot.segmentState.kind === 'needs_attention' ||
+    shot.attentionJobs.length > 0
+  ) {
+    return 'failed';
+  }
+  if (shot.segmentState.kind === 'rendering') {
+    return 'rendering';
+  }
+  if (
+    shot.segmentState.kind === 'queued' ||
+    shot.segmentState.kind === 'waiting_on_shot' ||
+    shot.segmentState.kind === 'waiting_on_frame'
+  ) {
+    return 'queued';
+  }
+  if (shot.videoGenerationInFlight || shot.seedGenerationInFlight) return 'rendering';
+  if (shot.currentPicture !== null) return 'rendered';
+  return shot.hasEffectiveSeed ? 'ready' : 'notReady';
+};
+
 type ShotCardProps = {
   actions: BeatPanelActions;
   beat: WorkspaceBeatProjection;
@@ -233,6 +269,8 @@ type ShotCardProps = {
   projection: WorkspaceProjection;
   reviewBlocked: boolean;
   reviewGraph: BeatPanelReviewGraph | null;
+  referenceBinding: NonNullable<BeatPanelProps['referenceBindings']>[number] | null;
+  referenceMaxConditioningImages: number | null;
   /** Set when a duration blocker's remedy points at this Shot, so the hidden field is revealed. */
   revealDuration: boolean;
   /** A duration blocker can point at a downstream Shot, so the reveal is raised to the Beat. */
@@ -256,6 +294,8 @@ const ShotCard: React.FC<ShotCardProps> = ({
   onRevealDuration,
   reviewBlocked,
   reviewGraph,
+  referenceBinding,
+  referenceMaxConditioningImages,
   revealDuration,
   shot,
 }) => {
@@ -265,7 +305,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const [lifting, setLifting] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [recoveringJobId, setRecoveringJobId] = useState<string | null>(null);
-  const chainChangeDescriptionId = useId();
+  const [firstFramePickerOpen, setFirstFramePickerOpen] = useState(false);
   const generationRecoveryId = useId();
   const generationBlockDescriptionId = useId();
   const liftButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -339,9 +379,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
         (choice.purpose === 'seed_still' ? reviewedShot.seedGenerationBlocked : reviewedShot.videoGenerationBlocked)
       );
     });
-  const chainChangeIntent = shot.chainBreak === 'hard_cut' ? 'rejoin' : 'sever';
-  const chainChangeBlocked =
-    disabled || drafts.staleRevision || dirty || reviewBlocked || shot.seedAuthorizationLock !== null;
   const chainState =
     index === 0
       ? 'segment_head'
@@ -564,7 +601,22 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </Menu.Item>
     </Menu>
   );
-  const normalizedStatus = firstFramesStatus(shot);
+  const conditioningFailure = projection.conditioningFailures.find((failure) => failure.dependentShotId === shot.id);
+  const composerStatus = shotComposerStatus(shot, conditioningFailure !== undefined);
+  const effectiveFrame = shot.firstFrames.find((frame) => frame.effectiveSeed) ?? null;
+  const effectiveFrameUrl =
+    effectiveFrame === null ? null : createManagedStudioAssetUrl(projectId, effectiveFrame.assetId);
+  const referenceCount =
+    referenceBinding === null
+      ? 0
+      : referenceBinding.characterReferenceIds.length + (referenceBinding.backgroundReferenceId === null ? 0 : 1);
+  const referenceLimit = referenceMaxConditioningImages;
+  const promptChanged =
+    shot.currentPicture !== null &&
+    (shot.currentPicture.prompt !== shootingScript ||
+      shot.currentPicture.promptChanged ||
+      shot.currentPicture.firstFrameChanged);
+  const cascadeRow = projection.cascadeProgress.find((row) => row.dependentShotId === shot.id) ?? null;
   const generationDisabled =
     disabled ||
     reviewBlocked ||
@@ -582,39 +634,84 @@ const ShotCard: React.FC<ShotCardProps> = ({
     if (!(await save())) return;
     actions.reviewSeedStill(shot.id);
   };
+  const cancelComposerRun = async (): Promise<void> => {
+    if (shot.activeGenerationJob?.canCancel) {
+      await actions.cancelGenerationJob(shot.activeGenerationJob.id);
+      return;
+    }
+    if (cascadeRow?.canCancelWaiting) await actions.cancelWaiting(shot.id);
+  };
+  const composerAction = async (): Promise<void> => {
+    if (composerStatus === 'rendering' || composerStatus === 'queued') {
+      await cancelComposerRun();
+      return;
+    }
+    if (composerStatus === 'failed' && conditioningFailure !== undefined) {
+      await actions.retryConditioning(shot.id);
+      return;
+    }
+    await generateVideo();
+  };
+  const composerActionDisabled =
+    composerStatus === 'notReady' ||
+    (composerStatus === 'failed' && conditioningFailure !== undefined
+      ? disabled || !conditioningFailure.canRetry
+      : composerStatus === 'rendering' || composerStatus === 'queued'
+        ? disabled || (shot.activeGenerationJob?.canCancel !== true && cascadeRow?.canCancelWaiting !== true)
+        : generationDisabled);
+  const composerActionKey =
+    composerStatus === 'rendering'
+      ? 'cancelRun'
+      : composerStatus === 'queued'
+        ? 'removeFromChain'
+        : composerStatus === 'failed'
+          ? conditioningFailure === undefined
+            ? 'tryAgain'
+            : 'fixStartFrame'
+          : composerStatus === 'rendered'
+            ? 'regenerate'
+            : 'generate';
+  const composerFootnoteKey =
+    composerStatus === 'notReady'
+      ? 'startRequired'
+      : composerStatus === 'queued'
+        ? 'startArrives'
+        : composerStatus === 'rendering'
+          ? 'promptAsFired'
+          : composerStatus === 'rendered' && index < beat.shots.length - 1
+            ? 'lastFrameStartsNext'
+            : composerStatus === 'failed'
+              ? conditioningFailure === undefined
+                ? 'engineFailed'
+                : 'startFrameFailed'
+              : null;
   return (
-    <article ref={shotCardRef} className={styles.shotCard} data-shot-card data-shot-id={shot.id} hidden={hidden}>
-      <header className={styles.shotHeader} data-shot-header>
-        <div className={styles.shotHeading}>
-          <h3 className={styles.shotTitle}>
-            {t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}
-            <span className={styles.onTag}>{t(`${KEY_ROOT}.firstFrames.on`)}</span>
-          </h3>
-          <span className={styles.shotStatus}>{t(`${KEY_ROOT}.firstFrames.status.${normalizedStatus}`)}</span>
-          <p className={styles.chainState} data-chain-state={chainState}>
-            <bdi dir='auto'>
-              {chainState === 'segment_head'
-                ? t(`${KEY_ROOT}.chain.segmentHead`)
-                : chainState === 'hard_cut'
-                  ? t(`${KEY_ROOT}.chain.hardCutState`)
-                  : t(`${KEY_ROOT}.chain.continuous`, { position: String(index).padStart(2, '0') })}
-            </bdi>
-          </p>
-          {shot.dirtyCauses.includes('continuity_stale') && shot.chainBreak !== 'hard_cut' ? (
-            <p className={styles.warning}>{t(`${KEY_ROOT}.chain.systemContinuityStale`)}</p>
-          ) : null}
-          {shot.dirtyCauses.includes('generation_out_of_date') ? (
-            <p className={styles.warning}>{t(`${KEY_ROOT}.chain.generationOutOfDate`)}</p>
-          ) : null}
-        </div>
-        <Input
-          aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
-          className={styles.shotPromptInput}
-          data-shot-field='shooting-script'
-          disabled={disabled}
-          onChange={(value) => drafts.setValue(shootingScriptKey, value)}
-          value={shootingScript}
-        />
+    <article
+      ref={shotCardRef}
+      className={styles.shotCard}
+      data-composer-status={composerStatus}
+      data-shot-card
+      data-shot-id={shot.id}
+      hidden={hidden}
+    >
+      <header className={styles.shotHeader} data-composer-row='identity' data-shot-header>
+        <span className={styles.onTag}>{t(`${KEY_ROOT}.firstFrames.on`)}</span>
+        <h3 className={styles.shotTitle}>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</h3>
+        <p className={styles.chainState} data-chain-state={chainState}>
+          <bdi dir='auto'>
+            {chainState === 'segment_head'
+              ? t(`${KEY_ROOT}.chain.segmentHead`)
+              : chainState === 'hard_cut'
+                ? t(`${KEY_ROOT}.chain.hardCutState`)
+                : t(`${KEY_ROOT}.chain.continuous`, { position: String(index).padStart(2, '0') })}
+          </bdi>
+        </p>
+        <span className={styles.shotStatus} data-composer-status-word={composerStatus}>
+          {t(`${KEY_ROOT}.composer.status.${composerStatus}`)}
+          {composerStatus === 'rendering' && shot.generationProgressPercent !== null
+            ? ` · ${Math.round(shot.generationProgressPercent)}%`
+            : ''}
+        </span>
         <div className={styles.actions}>
           <Dropdown
             droplist={shotMenu}
@@ -644,6 +741,156 @@ const ShotCard: React.FC<ShotCardProps> = ({
         </div>
       </header>
 
+      <div className={styles.framesHeader} data-composer-row='frames'>
+        <span>
+          {t(`${KEY_ROOT}.composer.framesSet`, { count: (effectiveFrame === null ? 0 : 1) + referenceCount })}
+        </span>
+        <Button
+          disabled={disabled || !shot.segmentHead || shot.seedAuthorizationLock !== null}
+          onClick={() => {
+            setFirstFramePickerOpen(true);
+            void actions.importSeedStill(shot.id);
+          }}
+          size='mini'
+        >
+          {t(`${KEY_ROOT}.firstFrames.import`)}
+        </Button>
+      </div>
+
+      <div className={styles.frameSlots}>
+        <button
+          aria-expanded={firstFramePickerOpen}
+          className={styles.frameSlot}
+          data-composer-start-slot
+          data-composer-row='start-slot'
+          data-filled={effectiveFrame === null ? 'false' : 'true'}
+          onClick={() => setFirstFramePickerOpen((open) => !open)}
+          type='button'
+        >
+          {effectiveFrameUrl === null ? (
+            <span className={styles.emptySlotCopy}>▣ {t(`${KEY_ROOT}.composer.start`)}</span>
+          ) : (
+            <img alt={t(`${KEY_ROOT}.composer.startPreview`)} src={effectiveFrameUrl} />
+          )}
+          <span className={styles.slotBadge}>
+            {effectiveFrame?.origin === 'inherited' && effectiveFrame.sourceShotNumber !== null
+              ? t(`${KEY_ROOT}.composer.fromShot`, { shot: effectiveFrame.sourceShotNumber })
+              : t(`${KEY_ROOT}.composer.start`)}
+          </span>
+        </button>
+        <button
+          aria-describedby={`${generationBlockDescriptionId}-end-frame`}
+          className={styles.frameSlot}
+          data-composer-end-slot
+          data-composer-row='end-slot'
+          disabled
+          type='button'
+        >
+          <span className={styles.emptySlotCopy}>▣ {t(`${KEY_ROOT}.composer.end`)}</span>
+          <span className={styles.slotBadge}>{t(`${KEY_ROOT}.composer.end`)}</span>
+          <span className={styles.slotReason} id={`${generationBlockDescriptionId}-end-frame`}>
+            {t(`${KEY_ROOT}.composer.endUnavailable`)}
+          </span>
+        </button>
+        <button
+          className={styles.frameSlot}
+          data-composer-reference-slot
+          data-composer-row='references-slot'
+          data-filled={referenceCount === 0 ? 'false' : 'true'}
+          onClick={() => actions.reviewReferences(shot.id)}
+          type='button'
+        >
+          <span className={styles.emptySlotCopy}>▣ {t(`${KEY_ROOT}.composer.references`)}</span>
+          <span className={styles.slotBadge}>
+            {t(`${KEY_ROOT}.composer.referencesBudget`, {
+              count: referenceCount,
+              limit: referenceLimit === null ? '—' : referenceLimit,
+            })}
+          </span>
+        </button>
+      </div>
+
+      {firstFramePickerOpen ? (
+        <FirstFrames
+          actions={actions}
+          disabled={disabled}
+          generationDescriptionId={reviewBlockCopy === null ? undefined : generationBlockDescriptionId}
+          generateVideoDisabled={generationDisabled}
+          importDisabled={!shot.segmentHead || shot.seedAuthorizationLock !== null}
+          onGenerateVideo={generateVideo}
+          onImport={() => actions.importSeedStill(shot.id)}
+          onPromptChange={(value) => drafts.setValue(shootingScriptKey, value)}
+          onRegenerateFrame={regenerateFrame}
+          onSendLastFrame={
+            beat.shots[index + 1]?.chainBreak === 'hard_cut'
+              ? () => actions.reviewContinuity(beat.shots[index + 1]!.id, false)
+              : null
+          }
+          projectId={projectId}
+          prompt={shootingScript}
+          shot={shot}
+          shotIndex={index}
+          showGenerationAction={false}
+        />
+      ) : null}
+
+      <Input.TextArea
+        aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
+        autoSize={{ minRows: 2, maxRows: 2 }}
+        className={styles.shotPromptInput}
+        data-composer-row='prompt'
+        data-shot-field='shooting-script'
+        disabled={disabled}
+        onChange={(value) => drafts.setValue(shootingScriptKey, value)}
+        placeholder={t(`${KEY_ROOT}.composer.promptPlaceholder`)}
+        value={shootingScript}
+      />
+
+      <div className={styles.composerActionRow} data-composer-row='action'>
+        <span className={styles.composerAttentionTag} data-visible={promptChanged || composerStatus === 'failed'}>
+          {composerStatus === 'failed'
+            ? t(
+                conditioningFailure === undefined
+                  ? `${KEY_ROOT}.composer.tag.notCharged`
+                  : `${KEY_ROOT}.composer.tag.startFrameFailed`
+              )
+            : promptChanged
+              ? t(`${KEY_ROOT}.firstFrames.promptChanged`)
+              : ''}
+        </span>
+        <Button
+          aria-describedby={reviewBlockCopy === null ? undefined : generationBlockDescriptionId}
+          className={styles.composerAction}
+          data-action-kind={composerActionKey}
+          disabled={composerActionDisabled}
+          onClick={() => void composerAction()}
+          type={composerStatus === 'rendered' && !promptChanged ? 'secondary' : 'primary'}
+        >
+          {t(`${KEY_ROOT}.composer.action.${composerActionKey}`, { shot: index + 1 })}
+        </Button>
+      </div>
+
+      <p
+        aria-hidden={composerFootnoteKey === null}
+        className={styles.composerFootnote}
+        data-composer-row='footnote'
+        data-visible={composerFootnoteKey === null ? 'false' : 'true'}
+      >
+        {composerFootnoteKey === null
+          ? '\u00a0'
+          : t(`${KEY_ROOT}.composer.footnote.${composerFootnoteKey}`, {
+              next: index + 2,
+              previous: Math.max(1, index),
+            })}
+      </p>
+
+      {shot.dirtyCauses.includes('continuity_stale') && shot.chainBreak !== 'hard_cut' ? (
+        <p className={styles.warning}>{t(`${KEY_ROOT}.chain.systemContinuityStale`)}</p>
+      ) : null}
+      {shot.dirtyCauses.includes('generation_out_of_date') ? (
+        <p className={styles.warning}>{t(`${KEY_ROOT}.chain.generationOutOfDate`)}</p>
+      ) : null}
+
       <div className={styles.editorGrid}>
         {durationOpen ? (
           <label data-shot-duration-field ref={durationFieldRef}>
@@ -662,63 +909,6 @@ const ShotCard: React.FC<ShotCardProps> = ({
           </label>
         ) : null}
       </div>
-      <div className={styles.shotActionCluster} data-shot-footer>
-        <div className={styles.shotActionBand} data-shot-action-band>
-          <div className={styles.editorActions} data-shot-actions>
-            {index > 0 ? (
-              <div className={styles.chainChangeControl} data-chain-change-control>
-                <Button
-                  aria-describedby={chainChangeDescriptionId}
-                  aria-haspopup='dialog'
-                  data-chain-change-intent={chainChangeIntent}
-                  data-chain-change-trigger
-                  data-shot-id={shot.id}
-                  disabled={chainChangeBlocked}
-                  onClick={() => actions.reviewContinuity(shot.id, chainChangeIntent === 'sever')}
-                >
-                  <span>
-                    {t(
-                      chainChangeIntent === 'sever' ? `${KEY_ROOT}.chain.reviewSever` : `${KEY_ROOT}.chain.reviewRejoin`
-                    )}
-                  </span>
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-        {index > 0 ? (
-          <p className={styles.chainChangeDescription} data-chain-change-description id={chainChangeDescriptionId}>
-            {t(
-              chainChangeIntent === 'sever'
-                ? `${KEY_ROOT}.chain.reviewSeverDescription`
-                : `${KEY_ROOT}.chain.reviewRejoinDescription`,
-              { shot: index + 1, previous: index }
-            )}
-          </p>
-        ) : null}
-      </div>
-
-      <FirstFrames
-        actions={actions}
-        disabled={disabled}
-        generationDescriptionId={reviewBlockCopy === null ? undefined : generationBlockDescriptionId}
-        generateVideoDisabled={generationDisabled}
-        importDisabled={!shot.segmentHead || shot.seedAuthorizationLock !== null}
-        onGenerateVideo={generateVideo}
-        onImport={() => actions.importSeedStill(shot.id)}
-        onPromptChange={(value) => drafts.setValue(shootingScriptKey, value)}
-        onRegenerateFrame={regenerateFrame}
-        onSendLastFrame={
-          beat.shots[index + 1]?.chainBreak === 'hard_cut'
-            ? () => actions.reviewContinuity(beat.shots[index + 1]!.id, false)
-            : null
-        }
-        projectId={projectId}
-        prompt={shootingScript}
-        shot={shot}
-        shotIndex={index}
-      />
-
       {shot.seedAuthorizationLock !== null ? (
         <Alert content={t(`${KEY_ROOT}.seeds.authorizationLocked`)} showIcon type='warning' />
       ) : null}
@@ -942,6 +1132,8 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   pending,
   gateLocked,
   reviewBlockedMessageKey,
+  referenceBindings = [],
+  referenceMaxConditioningImages = null,
   onParkShotSuccess,
   onSelectBeat,
   onClose,
@@ -1034,6 +1226,53 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const inspectedShotId = beat.shots.some((shot) => shot.id === requestedInspectedShotId)
     ? requestedInspectedShotId
     : (beat.shots[0]?.id ?? null);
+  const chainRunning = beat.shots.some(
+    (shot) =>
+      shot.videoGenerationInFlight ||
+      shot.segmentState.kind === 'queued' ||
+      shot.segmentState.kind === 'waiting_on_shot' ||
+      shot.segmentState.kind === 'waiting_on_frame'
+  );
+  const chainTriggerShot =
+    beat.shots.find(
+      (shot) =>
+        shot.currentPicture === null ||
+        shot.dirtyCauses.includes('generation_out_of_date') ||
+        shot.dirtyCauses.includes('continuity_stale')
+    ) ?? null;
+  const chainReviewGraph =
+    chainTriggerShot === null
+      ? null
+      : exactReviewGraph(
+          projection,
+          reviewGraphs,
+          chainTriggerShot.id,
+          chainTriggerShot.segmentHead && chainTriggerShot.effectiveSeedAssetId === null ? 'seed_still' : 'video_take'
+        );
+  const chainShotCount =
+    chainReviewGraph === null ? 0 : new Set(chainReviewGraph.choices.map((choice) => choice.shotId)).size;
+  const chainCancelableJob =
+    beat.shots.map((shot) => shot.activeGenerationJob).find((job) => job?.canCancel === true) ?? null;
+  const chainCancelableWait =
+    projection.cascadeProgress.find(
+      (row) => beat.shots.some((shot) => shot.id === row.dependentShotId) && row.canCancelWaiting
+    ) ?? null;
+
+  const runOrStopChain = (): void => {
+    if (chainRunning) {
+      if (chainCancelableWait !== null) {
+        void actions.cancelWaiting(chainCancelableWait.dependentShotId);
+      } else if (chainCancelableJob !== null) {
+        void actions.cancelGenerationJob(chainCancelableJob.id);
+      }
+      return;
+    }
+    if (chainTriggerShot === null || chainReviewGraph === null) return;
+    actions.reviewShot(
+      chainTriggerShot.id,
+      chainReviewGraph.choices.map((choice) => ({ ...choice })) as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]
+    );
+  };
 
   const inspectShot = (shotId: string): void => {
     if (!beat.shots.some((shot) => shot.id === shotId)) return;
@@ -1386,6 +1625,8 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                     shot.id,
                     shot.segmentHead && shot.effectiveSeedAssetId === null ? 'seed_still' : 'video_take'
                   )}
+                  referenceBinding={referenceBindings.find((binding) => binding.shotId === shot.id) ?? null}
+                  referenceMaxConditioningImages={referenceMaxConditioningImages}
                   shot={shot}
                 />
               ))}
@@ -1396,16 +1637,103 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           projection={projection}
         >
           {(playback) => (
-            <CoverageBar
-              disabled={coverageDisabled}
-              inspectedShotId={inspectedShotId}
-              onCommitPlanningDurations={commitPlanningDurations}
-              onCommitTrim={commitTrim}
-              onInspectShot={inspectShot}
-              playback={playback}
-              projectId={projectId}
-              shots={beat.shots}
-            />
+            <section className={styles.shotStrip} data-chain-running={chainRunning} data-shot-strip>
+              <header className={styles.shotStripHeader}>
+                <h3>{t(`${KEY_ROOT}.shots.label`)}</h3>
+                <span>
+                  {t(chainRunning ? `${KEY_ROOT}.composer.chain.runningRule` : `${KEY_ROOT}.composer.chain.rule`)}
+                </span>
+                <Button
+                  className={styles.chainAction}
+                  data-chain-action
+                  disabled={
+                    mutationLocked ||
+                    drafts.staleRevision ||
+                    coverageDraftDirty ||
+                    (chainRunning
+                      ? chainCancelableJob === null && chainCancelableWait === null
+                      : chainReviewGraph === null || chainReviewGraph.block !== null || chainShotCount === 0)
+                  }
+                  onClick={runOrStopChain}
+                  type={chainRunning ? 'secondary' : 'primary'}
+                >
+                  {chainRunning
+                    ? t(`${KEY_ROOT}.composer.chain.stop`)
+                    : t(`${KEY_ROOT}.composer.chain.generate`, { count: chainShotCount })}
+                </Button>
+              </header>
+              <div className={styles.shotChips}>
+                {beat.shots.map((shot, index) => (
+                  <React.Fragment key={shot.id}>
+                    {index === 0 ? null : (
+                      <>
+                        <Button
+                          aria-describedby={`${shot.id}-chain-change-description`}
+                          aria-haspopup='dialog'
+                          aria-label={t(
+                            shot.chainBreak === 'hard_cut'
+                              ? `${KEY_ROOT}.chain.reviewRejoin`
+                              : `${KEY_ROOT}.chain.reviewSever`
+                          )}
+                          className={styles.joinButton}
+                          data-chain-change-intent={shot.chainBreak === 'hard_cut' ? 'rejoin' : 'sever'}
+                          data-chain-change-trigger
+                          data-shot-id={shot.id}
+                          disabled={
+                            mutationLocked ||
+                            drafts.staleRevision ||
+                            coverageDraftDirty ||
+                            reviewBlockedMessageKey !== null ||
+                            shot.seedAuthorizationLock !== null
+                          }
+                          onClick={() => actions.reviewContinuity(shot.id, shot.chainBreak !== 'hard_cut')}
+                          size='mini'
+                        >
+                          ×
+                        </Button>
+                        <span className={styles.srOnly} id={`${shot.id}-chain-change-description`}>
+                          {t(
+                            shot.chainBreak === 'hard_cut'
+                              ? `${KEY_ROOT}.chain.reviewRejoinDescription`
+                              : `${KEY_ROOT}.chain.reviewSeverDescription`,
+                            { shot: index + 1, previous: index }
+                          )}
+                        </span>
+                      </>
+                    )}
+                    <button
+                      aria-pressed={shot.id === inspectedShotId}
+                      className={styles.shotChip}
+                      data-active={shot.id === inspectedShotId}
+                      data-shot-id={shot.id}
+                      onClick={() => inspectShot(shot.id)}
+                      type='button'
+                    >
+                      <span>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</span>
+                      {shot.id === inspectedShotId ? <b>{t(`${KEY_ROOT}.firstFrames.on`)}</b> : null}
+                      <small>
+                        {t(
+                          `${KEY_ROOT}.composer.status.${shotComposerStatus(
+                            shot,
+                            projection.conditioningFailures.some((failure) => failure.dependentShotId === shot.id)
+                          )}`
+                        )}
+                      </small>
+                    </button>
+                  </React.Fragment>
+                ))}
+              </div>
+              <CoverageBar
+                disabled={coverageDisabled}
+                inspectedShotId={inspectedShotId}
+                onCommitPlanningDurations={commitPlanningDurations}
+                onCommitTrim={commitTrim}
+                onInspectShot={inspectShot}
+                playback={playback}
+                projectId={projectId}
+                shots={beat.shots}
+              />
+            </section>
           )}
         </BeatPlayer>
 
