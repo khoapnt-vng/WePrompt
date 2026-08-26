@@ -1517,3 +1517,101 @@ this is the binding summary. Do not re-open them by implementation default.
    the menus contain exactly the ruled items, and the panel measures 1320 at full width.
 6. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
    full test suite, format, lint, and `git diff --check` pass from the exact final head.
+
+## Assignable follow-on — the Beat panel shot composer
+
+**Status:** designer handoff received 2026-08-26 evening, owner-forwarded. Full direction lives in
+[the Beat panel shot composer](../../design/creative-studio-3-beat-panel-composer.md); the
+designer's own README is committed verbatim beside this plan, along with both prototypes. This
+section is the assignment, not the specification.
+
+- `creative-studio-3-beat-panel-composer-handoff.md` — the designer's README
+- `creative-studio-3-beat-panel-composer.html.txt` — sha256 `c1875fae52a9e604…85c3b488`
+- `creative-studio-3-shot-composer-states.html.txt` — sha256 `f879f1cf53f0424f…9db04e6b`
+
+Both prototypes open offline. Fidelity is **high** — colours, type, spacing, radii and copy are
+final unless design says otherwise — but the HTML is a reference to rebuild with WePrompt's existing
+components, not code to copy.
+
+### Do not start before reading this
+
+**This supersedes a design already shipped.** It is the next revision of the First Frames panel
+handoff, which Codex implemented in `42473b5a2`. It is **not a restyle**: the frames region changes
+from an open list of candidate stills with newest-is-current and a pin, to **three fixed slots**
+(start, end, image refs) selected by position. Owner ruling 2 in
+[the First Frames doc](../../design/creative-studio-3-first-frames-panel.md) aligned first frames
+with the References model; three fixed slots is a different model. **Get that ruling re-confirmed or
+retired before building — do not contradict it silently.**
+
+### Required product behavior
+
+1. **The card never changes shape.** Header, frames row, three slots, prompt, action row — eight rows
+   in every state, so states can be compared without re-reading.
+2. **Six status words, one place.** Not ready, ready to render, queued, rendering, rendered, failed —
+   top right of the header, tinted, never bold. *(The panel prototype's margin still says "four
+   words"; it is stale — take the six from the README and states board, and tell design.)*
+3. **The button carries the state.** Inert Generate when inputs are missing, filled Generate when
+   ready, Cancel run mid-flight, outlined Regenerate once rendered, filled again the moment the
+   prompt drifts from what was fired.
+4. **Tags are exceptions.** The area beside the button stays empty in ordinary states and fills only
+   for `EDITED · NOT YET RUN` and for a failure, so a tag always means something needs attention.
+5. **`Generate all N · chained`** above the shot strip runs the beat in order, each Shot starting on
+   the last frame of the one before; `Stop the chain` halts after the Shot in flight and finished
+   Shots keep their pictures.
+6. **The end slot ships as a placeholder** — see the ruling below.
+
+### Owner rulings
+
+1. **End slot: build it now, inert.** *"Use the End slot as a placeholder now. With Seedance 2.5 or
+   MiniMax, we will have that capability."* Render the third cell so the geometry matches, but do
+   **not** let it affect a run, and **suppress state 03's `END FRAME SET · THE SHOT HAS TO LAND ON
+   THAT PICTURE` footnote** until the capability is live — that copy must never appear while the run
+   cannot honour it. Gate the unlock on the **bound route reporting last-frame support**, read the
+   way `supportsFirstFrame` already is; do not hard-code a model id, which is the
+   `MANAGED_FIRST_FRAME_MODELS` pattern and will need editing for the model after that.
+2. **Chaining should skip Shots already rendered and current** (answering the designer's open
+   question). Today a re-run re-prices and re-renders the head — measured at 60 minor units per
+   12-second take, and $1.80 of pure repeat work across three chains in one session — and replaces a
+   take the owner had already reviewed. `Generate all N · chained` must state how many Shots will run
+   and what it will cost before it is pressed.
+
+### Decide before building
+
+- **The queue state needs a failure sibling.** State 07 promises `START FRAME ARRIVES WHEN SHOT 1
+  FINISHES`. Measured reality: the start frame sometimes never arrives — **5 failed extractions in 70**,
+  three of six Beats in one film (BUG-137), plus the never-created case (BUG-133). `QUEUED` as drawn
+  is indistinguishable from a permanently dead chain, which is exactly how both defects went
+  unnoticed. Add a distinct state with an action; the failed-join case recovers for free.
+- **States 07 and 08 are design proposals, not observed behaviour** — the designer says so. Confirm
+  queue and failure semantics against the real job states (`queued_local`, `queued_remote`,
+  `waiting_for_conditioning`, `needs_attention`, `failed`) before drawing them as final.
+
+### Do not weaken
+
+- **Spend governance is untouched.** Generate, Regenerate, Try again and Generate-chained all enter
+  the existing prepare/confirm quote path. Filling a slot, pinning, removing a join and editing a
+  prompt stay free. `Cancel run` and `Stop the chain` must never be able to spend.
+- **`RENDERING · 40%` is optional, not assumed.** `openRouterVideoAdapter` returns bare
+  `{status:'queued'}` / `{status:'running'}` with no progress; only `mediaGatewayAdapter` parses
+  0–100. Render the number when present and a determinate-free state otherwise.
+- **Respect the two-image conditioning budget.** `maxConditioningImages: 2` counts characters **and**
+  background together; a `REFS 2` badge plus a background binding is already at the limit. Show the
+  budget rather than let the user meet it as an error (BUG-134).
+- **The `✕` between chips is `set_hard_cut`**, an owner-only control the Director may not call. Route
+  it through the existing `continuityChange` prepare shape so the consequences — possible new seed
+  and re-renders — are priced, not applied silently.
+
+### Acceptance
+
+1. Every one of the eight states renders with the same eight rows, one tinted status word, and the
+   button carrying the state.
+2. A Shot with no start frame reads `NOT READY`, shows the inert Generate, and cannot reach paid
+   generation from any surface.
+3. The end slot is visible, never affects a run, and never displays the end-frame footnote while the
+   bound engine lacks last-frame support.
+4. `Generate all N · chained` skips already-rendered current Shots, and states the count and cost
+   before running.
+5. A chain stalled behind a failed or missing conditioning frame is visually distinct from a healthy
+   queue and offers the recovery.
+6. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
+   full test suite, format, lint, and `git diff --check` pass from the exact final head.
