@@ -207,14 +207,18 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
         ? null
         : exactBoardPromotionImpact(action.draft, action.boardPromotionImpact);
     if (promotion !== null && boardPromotionImpact === null) return state;
+    const generationDisclosure =
+      action.generationDisclosure === undefined || action.generationDisclosure.groups.length === 0
+        ? null
+        : action.generationDisclosure;
     return {
-      phase: 'choices',
+      // Ordinary generation has no free permission step: opening starts the read-only estimate.
+      // Board promotion keeps its genuine $0-vs-paid choice, and exact capability blockers remain
+      // visible without attempting work the renderer already knows is impossible.
+      phase: promotion !== null || generationDisclosure?.blocksPrepare === true ? 'choices' : 'preparing',
       draft: action.draft,
       boardPromotionImpact,
-      generationDisclosure:
-        action.generationDisclosure === undefined || action.generationDisclosure.groups.length === 0
-          ? null
-          : action.generationDisclosure,
+      generationDisclosure,
       options: null,
       selectedOption: 'baseOnly',
       errorCode: null,
@@ -225,12 +229,17 @@ export const spendGateReducer = (state: SpendGateState, action: SpendGateAction)
   }
   if (action.type === 'generation_disclosure_changed') {
     if (state.phase !== 'choices' || state.draft === null) return state;
+    const generationDisclosure =
+      action.generationDisclosure === undefined || action.generationDisclosure.groups.length === 0
+        ? null
+        : action.generationDisclosure;
     return {
       ...state,
-      generationDisclosure:
-        action.generationDisclosure === undefined || action.generationDisclosure.groups.length === 0
-          ? null
-          : action.generationDisclosure,
+      phase:
+        spendGateBoardPromotion(state.draft) === null && generationDisclosure?.blocksPrepare !== true
+          ? 'preparing'
+          : state.phase,
+      generationDisclosure,
     };
   }
   if (action.type === 'close') return initialSpendGateState();

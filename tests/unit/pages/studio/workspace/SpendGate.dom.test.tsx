@@ -600,7 +600,6 @@ const openPreparedGate = async (preparedOptions: StudioRendererPreparedSubmissio
   mocks.prepare.mockResolvedValue({ ok: true, data: preparedOptions });
   render(<Harness />);
   fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-  fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
   const modal = await screen.findByTestId('studio-spend-gate');
   await within(modal).findByRole('button', {
     name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
@@ -1189,8 +1188,10 @@ describe('spend gate draft graph', () => {
       draft,
       generationDisclosure: disclosure,
     });
+    expect(opened.phase).toBe('choices');
     expect(opened.generationDisclosure).toEqual(disclosure);
     const refreshed = spendGateReducer(opened, { type: 'generation_disclosure_changed' });
+    expect(refreshed.phase).toBe('preparing');
     expect(refreshed.generationDisclosure).toBeNull();
 
     const reviewed = spendGateReducer(opened, { type: 'prepare_succeeded', options: options() });
@@ -2048,18 +2049,47 @@ describe('SpendGateModal', () => {
     mocks.confirm.mockResolvedValue({ ok: true, data: { projectId: 'project_1', projectRevision: 4 } });
   });
 
-  it('does no native work on open/close and invokes prepare only from the explicit action', async () => {
+  it('automatically prepares a read-only estimate on open and never confirms on open or close', async () => {
+    let resolvePrepare!: (value: unknown) => void;
+    mocks.prepare.mockReturnValue(new Promise((resolve) => (resolvePrepare = resolve)));
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const gate = await screen.findByTestId('studio-spend-gate');
     expect(gate.closest('.arco-modal-wrapper')).toHaveStyle({ zIndex: '1101' });
     expect(document.querySelector('.arco-modal-mask')).toHaveStyle({ zIndex: '1100' });
-    expect(mocks.prepare).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(draft));
     expect(mocks.confirm).not.toHaveBeenCalled();
+    expect(
+      within(gate).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
-    expect(mocks.prepare).not.toHaveBeenCalled();
+    resolvePrepare({ ok: true, data: options() });
+    await waitFor(() => expect(screen.queryByTestId('studio-spend-gate')).not.toBeVisible());
+    expect(mocks.prepare).toHaveBeenCalledTimes(1);
     expect(mocks.confirm).not.toHaveBeenCalled();
+  });
+
+  it('shows the estimate directly and requires a deliberate click instead of Enter to confirm', async () => {
+    render(<Harness />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    const confirm = await within(modal).findByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.gate\.confirm/,
+    });
+
+    expect(modal.querySelector('[data-free-estimate-note]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.gate.reviewBeforeSpend'
+    );
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    expect(confirm).not.toHaveFocus();
+    fireEvent.keyDown(modal, { key: 'Enter', code: 'Enter' });
+    expect(mocks.confirm).not.toHaveBeenCalled();
+
+    fireEvent.click(confirm);
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledTimes(1));
   });
 
   it('discloses a blocked exact intent and refuses both visible and direct prepare attempts', async () => {
@@ -2082,8 +2112,8 @@ describe('SpendGateModal', () => {
     expect(exactScope).toHaveTextContent('shot_1');
     expect(exactScope).not.toHaveTextContent('conversation.creativeStudio.phase.produce.batchExcluded');
     expect(
-      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
-    ).toBeDisabled();
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
 
     fireEvent.click(screen.getByRole('button', { name: 'Invoke prepare directly' }));
     expect(mocks.prepare).not.toHaveBeenCalled();
@@ -2102,11 +2132,6 @@ describe('SpendGateModal', () => {
     render(<Harness generationDisclosure={generationDisclosure} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = await screen.findByTestId('studio-spend-gate');
-    const prepareButton = within(modal).getByRole('button', {
-      name: 'conversation.creativeStudio.workspace.gate.prepare',
-    });
-    expect(prepareButton).toBeEnabled();
-    fireEvent.click(prepareButton);
 
     await waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(1));
     expect(modal.querySelector('[data-generation-block-code="duration"]')).toBeVisible();
@@ -2126,9 +2151,6 @@ describe('SpendGateModal', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'project_references');
-    expect(modal.querySelector('[data-project-reference-scope]')).toHaveTextContent('Ming');
-
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     await waitFor(() =>
       expect(mocks.prepareReferences).toHaveBeenCalledWith({
         projectId: 'project_1',
@@ -2137,6 +2159,7 @@ describe('SpendGateModal', () => {
       })
     );
     expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(modal.querySelector('[data-project-reference-scope]')).toHaveTextContent('Ming');
 
     showGateBreakdown(modal);
     const row = modal.querySelector('[data-project-reference-id="reference_ming"]');
@@ -2148,7 +2171,6 @@ describe('SpendGateModal', () => {
     mocks.prepareReferences.mockResolvedValue({ ok: true, data: options() });
     render(<Harness gateDraft={{ projectId: 'project_1', expectedRevision: 3, referenceIds: ['reference_ming'] }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.gate.errors.generic')).toBeVisible();
     expect(mocks.confirm).not.toHaveBeenCalled();
@@ -2287,8 +2309,11 @@ describe('SpendGateModal', () => {
     expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
   });
 
-  it('retains the free promotion when a paid quote expires at confirmation', async () => {
-    mocks.prepare.mockResolvedValue({ ok: true, data: { baseOnly: promotionQuote(), withCascade: null } });
+  it('silently refreshes an expired paid-promotion quote while retaining the free choice', async () => {
+    const refreshedPromotionQuote = { ...promotionQuote(), id: 'quote_promotion_refreshed' };
+    mocks.prepare
+      .mockResolvedValueOnce({ ok: true, data: { baseOnly: promotionQuote(), withCascade: null } })
+      .mockResolvedValueOnce({ ok: true, data: { baseOnly: refreshedPromotionQuote, withCascade: null } });
     mocks.confirm.mockResolvedValue({ ok: false, error: { code: 'quote_not_found' } });
     render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
@@ -2297,14 +2322,16 @@ describe('SpendGateModal', () => {
     fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
     fireEvent.click(await within(modal).findByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' }));
 
-    expect(await within(modal).findByText('conversation.creativeStudio.errors.quoteNotFound')).toBeVisible();
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(2));
+    expect(within(modal).queryByText('conversation.creativeStudio.errors.quoteNotFound')).toBeNull();
+    expect(within(modal).getByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' })).toBeEnabled();
     expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(mocks.confirm).toHaveBeenCalledTimes(1);
   });
 
   it('starts the generation breakdown closed again on every gate opening', async () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     const modal = await screen.findByTestId('studio-spend-gate');
     await within(modal).findByRole('button', {
       name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
@@ -2314,7 +2341,6 @@ describe('SpendGateModal', () => {
 
     fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.close' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     const toggle = await within(modal).findByRole('button', {
       name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
@@ -2354,7 +2380,6 @@ describe('SpendGateModal', () => {
     });
     render(<Harness gateDraft={continuityDraft} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     const modal = await screen.findByTestId('studio-spend-gate');
 
     expect(await within(modal).findByRole('heading', { name: headline })).toBeVisible();
@@ -2473,7 +2498,6 @@ describe('SpendGateModal', () => {
     const imageOnlyDraft = { ...draft, cascadeChoices: [] };
     render(<Harness gateDraft={imageOnlyDraft} onEditRoutes={onEditRoutes} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.controls.imageRouteBlocked')).toBeVisible();
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
@@ -2488,7 +2512,6 @@ describe('SpendGateModal', () => {
     mocks.prepare.mockResolvedValue({ ok: false, error: { code: 'invalid_route' } });
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(
       await screen.findByText('conversation.creativeStudio.workspace.gate.errors.routesUnavailable')
@@ -2502,7 +2525,6 @@ describe('SpendGateModal', () => {
     const videoOnlyDraft = { ...draft, baseChoices: [], cascadeChoices: draft.cascadeChoices };
     render(<Harness gateDraft={videoOnlyDraft} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.controls.videoRouteBlocked')).toBeVisible();
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
@@ -2514,7 +2536,6 @@ describe('SpendGateModal', () => {
     mocks.prepare.mockResolvedValue({ ok: false, error: { code: 'invalid_route' } });
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.gate.errors.generic')).toBeVisible();
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
@@ -2525,9 +2546,8 @@ describe('SpendGateModal', () => {
     mocks.prepare.mockReturnValue(new Promise((resolve) => (resolvePrepare = resolve)));
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    const prepare = screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' });
-    fireEvent.click(prepare);
-    fireEvent.click(prepare);
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Invoke prepare directly' }));
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
     resolvePrepare({ ok: true, data: options() });
 
@@ -2572,9 +2592,7 @@ describe('SpendGateModal', () => {
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
     expect(modal).toHaveAttribute('data-chain-change-intent', 'sever');
-    expect(within(modal).getByTestId('studio-chain-change-summary')).toBeVisible();
     expect(within(modal).queryByRole('radio')).toBeNull();
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     await waitFor(() =>
       expect(
@@ -2629,7 +2647,6 @@ describe('SpendGateModal', () => {
     render(<Harness gateDraft={continuityDraft} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = await screen.findByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(await within(modal).findByText('conversation.creativeStudio.workspace.gate.errors.generic')).toBeVisible();
     expect(within(modal).queryByRole('radio')).toBeNull();
@@ -2645,7 +2662,6 @@ describe('SpendGateModal', () => {
     mocks.prepare.mockResolvedValue({ ok: false, error: { code, messageKey: `native.${key}` } });
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(await screen.findByText(`conversation.creativeStudio.errors.${key}`)).toBeVisible();
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
@@ -2663,7 +2679,6 @@ describe('SpendGateModal', () => {
     });
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(
       await screen.findByText('conversation.creativeStudio.workspace.gate.errors.pricing.missingConditioning')
@@ -2684,7 +2699,6 @@ describe('SpendGateModal', () => {
     });
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.gate.errors.generic')).toBeVisible();
     expect(document.body).not.toHaveTextContent('route_secret_apiKey');
@@ -2693,26 +2707,39 @@ describe('SpendGateModal', () => {
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 
-  it('refreshes explicitly after an expired quote without retaining or auto-confirming it', async () => {
-    mocks.confirm.mockResolvedValue({
-      ok: false,
-      error: { code: 'quote_not_found', messageKey: 'native.quoteNotFound' },
+  it('silently refreshes an expired quote and requires a fresh explicit confirmation', async () => {
+    const refreshed = options();
+    refreshed.baseOnly = { ...refreshed.baseOnly, id: 'quote_base_refreshed' };
+    mocks.prepare.mockResolvedValueOnce({ ok: true, data: options() }).mockResolvedValueOnce({
+      ok: true,
+      data: refreshed,
     });
+    mocks.confirm
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'quote_not_found', messageKey: 'native.quoteNotFound' },
+      })
+      .mockResolvedValueOnce({ ok: true, data: { projectId: 'project_1', projectRevision: 4 } });
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     const modal = await screen.findByTestId('studio-spend-gate');
+    const confirm = await within(modal).findByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.gate\.confirm/,
+    });
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(2));
+    expect(within(modal).queryByText('conversation.creativeStudio.errors.quoteNotFound')).toBeNull();
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepareAgain' })
+    ).toBeNull();
+    expect(mocks.confirm).toHaveBeenCalledTimes(1);
+
     fireEvent.click(
       within(modal).getByRole('button', { name: /conversation\.creativeStudio\.workspace\.gate\.confirm/ })
     );
-
-    expect(await within(modal).findByText('conversation.creativeStudio.errors.quoteNotFound')).toBeVisible();
-    expect(
-      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepareAgain' })
-    ).toBeEnabled();
-    expect(within(modal).queryByText(/safe_provider/)).not.toBeInTheDocument();
-    expect(mocks.prepare).toHaveBeenCalledTimes(1);
-    expect(mocks.confirm).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.confirm).toHaveBeenCalledTimes(2));
+    expect(mocks.confirm.mock.calls[1]?.[0]).toMatchObject({ quoteId: 'quote_base_refreshed' });
   });
 
   it('freezes the selected reviewed quote after confirm reports quote in use', async () => {
@@ -2722,7 +2749,6 @@ describe('SpendGateModal', () => {
     });
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     const modal = await screen.findByTestId('studio-spend-gate');
     fireEvent.click(within(modal).getByText('conversation.creativeStudio.workspace.gate.withCascade'));
     fireEvent.click(
@@ -2752,7 +2778,6 @@ describe('SpendGateModal', () => {
   it('prevents a reentrant callback from confirming the same paid quote twice', async () => {
     render(<Harness reenterOnConfirmed />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     const modal = await screen.findByTestId('studio-spend-gate');
     fireEvent.click(
       within(modal).getByRole('button', { name: /conversation\.creativeStudio\.workspace\.gate\.confirm/ })
@@ -2764,7 +2789,6 @@ describe('SpendGateModal', () => {
   it('keeps a successful paid commit terminal when its renderer refresh fails', async () => {
     render(<Harness rejectOnConfirmed />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     const modal = await screen.findByTestId('studio-spend-gate');
     fireEvent.click(
       within(modal).getByRole('button', { name: /conversation\.creativeStudio\.workspace\.gate\.confirm/ })

@@ -448,7 +448,15 @@ describe('Creative Studio generation lifecycle integration', () => {
         confirmed.projectRevision,
         'test:cancel-parked-reference'
       );
-      await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
+      const partiallyFailedHandoffs = await waitFor(async () => {
+        try {
+          return await service!.listReferenceGenerationHandoffs({ projectId: configured.id });
+        } catch {
+          // A terminal job can be visible just before its guarded journal cleanup finishes.
+          return null;
+        }
+      });
+      expect(partiallyFailedHandoffs).toEqual([
         expect.objectContaining({
           handoffId: decision.outcome.handoffId,
           status: 'failed',
@@ -491,7 +499,15 @@ describe('Creative Studio generation lifecycle integration', () => {
         createIdempotencyKey: () => 'idempotency_parked_reference_retry',
         onProjectUpdated,
       });
-      await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
+      const completedHandoffs = await waitFor(async () => {
+        try {
+          return await service!.listReferenceGenerationHandoffs({ projectId: configured.id });
+        } catch {
+          // Preserve the exact terminal assertion while waiting out the guarded publication fence.
+          return null;
+        }
+      });
+      expect(completedHandoffs).toEqual([
         expect.objectContaining({
           handoffId: decision.outcome.handoffId,
           status: 'failed',

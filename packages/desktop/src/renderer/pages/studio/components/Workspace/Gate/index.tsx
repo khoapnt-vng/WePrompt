@@ -67,7 +67,7 @@ export type UseSpendGateResult = {
   confirm: () => Promise<void>;
 };
 
-/** Owns one reviewed submission attempt. Opening and closing never call native paid seams. */
+/** Owns one reviewed submission attempt. Opening estimates; only explicit confirmation can spend. */
 export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput): UseSpendGateResult => {
   const [state, dispatch] = useReducer(spendGateReducer, undefined, initialSpendGateState);
   const stateRef = useRef(state);
@@ -229,6 +229,14 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
     }
   }, []);
 
+  useEffect(() => {
+    // `open` enters `preparing` for every ordinary paid intent. The only `choices` phase left is a
+    // real product choice (Board promotion) or an exact capability refusal. Manual paid promotion
+    // preparation also enters this phase with `preparingRef` already held, so this cannot duplicate it.
+    if (state.phase !== 'preparing' || state.draft === null || preparingRef.current) return;
+    void prepare();
+  }, [prepare, state.draft, state.phase]);
+
   const confirm = useCallback(async (): Promise<void> => {
     const current = stateRef.current;
     const quote = selectedSpendGateQuote(current);
@@ -247,6 +255,7 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
     const operation = ++confirmOperationRef.current;
     dispatch({ type: 'confirm_started' });
     let confirmed: StudioConfirmSubmissionResultV2 | null = null;
+    let refreshExpiredQuote = false;
     try {
       const result = await ipcBridge.creativeStudio.confirmSubmission.invoke({
         projectId: quote.projectId,
@@ -256,17 +265,27 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
       if (gateGenerationRef.current !== generation || confirmOperationRef.current !== operation) return;
       if (result.ok === false) {
         dispatch({ type: 'confirm_failed', error: result.error });
-        return;
+        refreshExpiredQuote = result.error.code === 'quote_not_found';
+      } else {
+        terminalSuccessRef.current = true;
+        dispatch({ type: 'confirmed' });
+        confirmed = result.data;
       }
-      terminalSuccessRef.current = true;
-      dispatch({ type: 'confirmed' });
-      confirmed = result.data;
     } catch {
       if (gateGenerationRef.current === generation && confirmOperationRef.current === operation) {
         dispatch({ type: 'confirm_failed', error: { code: 'storage_error' } });
       }
     } finally {
       if (confirmOperationRef.current === operation) confirmingRef.current = false;
+    }
+    if (
+      refreshExpiredQuote &&
+      gateGenerationRef.current === generation &&
+      confirmOperationRef.current === operation &&
+      !terminalSuccessRef.current
+    ) {
+      await prepare();
+      return;
     }
     if (confirmed !== null) {
       try {
@@ -275,7 +294,7 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
         // The paid commit is already terminal. A refresh failure must never reopen confirmation.
       }
     }
-  }, [onConfirmed]);
+  }, [onConfirmed, prepare]);
 
   return { state, open, updateGenerationDisclosure, close, promoteOnly, prepare, selectOption, confirm };
 };
@@ -533,9 +552,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                   <p>{t('conversation.creativeStudio.workspace.gate.promotion.paidUnavailable')}</p>
                 ) : null}
               </>
-            ) : (
-              <p>{t('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')}</p>
-            )}
+            ) : null}
             {projectReferenceIds !== null ? (
               <p data-project-reference-scope>
                 {t('conversation.creativeStudio.workspace.referenceWorkflow.generationScope')}:{' '}
@@ -667,6 +684,9 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                 }
               )}
             </h3>
+            <p className={styles.freeEstimateNote} data-free-estimate-note>
+              {t('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')}
+            </p>
             {projectReferenceIds === null ? null : (
               <p data-project-reference-scope>
                 {t('conversation.creativeStudio.workspace.referenceWorkflow.generationScope')}:{' '}
@@ -921,8 +941,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               {t('conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction')}
             </Button>
           ) : null}
-          {boardPromotion === null &&
-          (state.phase === 'choices' || state.phase === 'refresh_required' || state.phase === 'quote_cache_full') ? (
+          {boardPromotion === null && state.phase === 'quote_cache_full' ? (
             <Button
               type='primary'
               disabled={generationPrepareBlocked}
@@ -931,16 +950,13 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
                 void prepare();
               }}
             >
-              {t(
-                state.phase === 'choices'
-                  ? 'conversation.creativeStudio.workspace.gate.prepare'
-                  : 'conversation.creativeStudio.workspace.gate.prepareAgain'
-              )}
+              {t('conversation.creativeStudio.workspace.gate.prepareAgain')}
             </Button>
           ) : null}
           {(state.phase === 'review' || state.phase === 'confirming' || state.phase === 'quote_in_use') &&
           summary !== null ? (
             <Button
+              autoFocus={false}
               data-chain-change-confirm={continuityIntent === null ? undefined : true}
               data-board-promotion-confirm={boardPromotion === null ? undefined : true}
               type='primary'

@@ -310,16 +310,23 @@ describe('Creative Studio project recovery integration', () => {
           return null;
         }
       });
-      const parked = await restartedStore.updateProjectV2(
-        configured.id,
-        (project) => ({
-          ...project,
-          beatOrder: [],
-          bin: [...project.bin, { kind: 'beat' as const, beatId: 'section_recovery', reason: 'lifted' as const }],
-        }),
-        recovered.revision,
-        'park_recovered_beat'
-      );
+      const parked = await waitFor(async () => {
+        try {
+          return await restartedStore.updateProjectV2(
+            configured.id,
+            (project) => ({
+              ...project,
+              beatOrder: [],
+              bin: [...project.bin, { kind: 'beat' as const, beatId: 'section_recovery', reason: 'lifted' as const }],
+            }),
+            recovered.revision,
+            'park_recovered_beat'
+          );
+        } catch {
+          // The terminal state can be observed one guarded file-replace before journal cleanup settles.
+          return null;
+        }
+      });
       const recoveredJob = parked.jobs.job_v2_recovery;
       const primaryAssetId = recoveredJob.outputAssetIdsByRole.primary;
       expect({

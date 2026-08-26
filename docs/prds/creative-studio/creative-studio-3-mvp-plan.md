@@ -1668,8 +1668,9 @@ THAT PICTURE` footnote** until the capability is live — that copy must never a
 
 ## Assignable follow-on — show the estimate, ask only for the spend
 
-**Status:** owner-directed 2026-08-26 night. Small, self-contained, and independent of the composer
-work — it can ship on its own.
+**Status:** implemented and verified 2026-08-26. Ordinary generation, continuity, Board-draw and
+reference gates now prepare their read-only estimate on open; exact capability blockers remain
+fail-closed, and Board promotion retains its genuine `$0` versus paid-rerender choice.
 
 ### Problem
 

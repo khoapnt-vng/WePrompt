@@ -9,6 +9,11 @@
   margin: 0;
 }
 
+.freeEstimateNote {
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
 .loading,
 .actions {
   display: flex;

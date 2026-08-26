@@ -40,6 +40,8 @@ export default defineConfig({
             'tests/unit/**/*.dom.test.ts',
             'tests/unit/**/*.dom.test.tsx',
             'tests/integration/creative-studio/directorCommandLatency.integration.test.ts',
+            'tests/integration/creative-studio/generationLifecycle.integration.test.ts',
+            'tests/integration/creative-studio/projectRecovery.integration.test.ts',
             'tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts',
           ],
           setupFiles: ['./tests/vitest.setup.ts'],
@@ -67,6 +69,11 @@ export default defineConfig({
           environment: 'node',
           include: [
             'tests/integration/creative-studio/directorCommandLatency.integration.test.ts',
+            // These lifecycle tests coordinate multiple asynchronous stores and fake-provider clocks.
+            // Coverage instrumentation makes their fail-closed record fences race under the general
+            // worker pool, so keep them isolated from unrelated repository IO.
+            'tests/integration/creative-studio/generationLifecycle.integration.test.ts',
+            'tests/integration/creative-studio/projectRecovery.integration.test.ts',
             'tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts',
           ],
           setupFiles: ['./tests/vitest.setup.ts'],

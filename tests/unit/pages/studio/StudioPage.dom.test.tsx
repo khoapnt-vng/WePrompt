@@ -2082,8 +2082,6 @@ describe('StudioPage schema-5 cutover', () => {
     );
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'project_references');
-    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     await waitFor(() =>
       expect(mocks.bridge.prepareProjectReferences.invoke).toHaveBeenCalledExactlyOnceWith({
@@ -2127,7 +2125,13 @@ describe('StudioPage schema-5 cutover', () => {
       ],
     });
     expect(await screen.findByTestId('studio-spend-gate')).toBeVisible();
-    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(mocks.bridge.prepareProjectReferences.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        referenceIds: ['reference_3'],
+      })
+    );
   });
 
   it('discloses and blocks an exact project-reference request outside Main route capability', async () => {
@@ -2165,8 +2169,8 @@ describe('StudioPage schema-5 cutover', () => {
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="duration"]')).toBeVisible();
     expect(
-      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
-    ).toBeDisabled();
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
     expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
   });
 
@@ -2253,8 +2257,8 @@ describe('StudioPage schema-5 cutover', () => {
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
     expect(
-      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
-    ).toBeDisabled();
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
     expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
   });
 
@@ -2363,7 +2367,6 @@ describe('StudioPage schema-5 cutover', () => {
 
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'project_references');
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     await waitFor(() =>
       expect(mocks.bridge.prepareProjectReferences.invoke).toHaveBeenCalledExactlyOnceWith({
         projectId: 'project_1',
@@ -2461,8 +2464,12 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('opens one reviewed spend gate from the app-bar Render action without spending automatically', async () => {
-    mockSupportedProject(projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] }));
+  it('opens one automatically estimated spend gate from the app-bar Render action without spending', async () => {
+    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockResolvedValue(
+      ok({ baseOnly: boardPromotionQuote(authority, ['shot_0']), withCascade: null })
+    );
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
 
@@ -2470,7 +2477,7 @@ describe('StudioPage schema-5 cutover', () => {
 
     expect(await screen.findByTestId('studio-spend-gate')).toBeVisible();
     expect(screen.getByText('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')).toBeVisible();
-    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledTimes(1));
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
@@ -2518,7 +2525,6 @@ describe('StudioPage schema-5 cutover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
@@ -2545,8 +2551,8 @@ describe('StudioPage schema-5 cutover', () => {
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
     expect(
-      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
-    ).toBeDisabled();
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
@@ -2571,7 +2577,6 @@ describe('StudioPage schema-5 cutover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="duration"]')).toBeVisible();
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
@@ -2601,7 +2606,6 @@ describe('StudioPage schema-5 cutover', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
     const modal = await screen.findByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     expect(
       await within(modal).findByText('conversation.creativeStudio.workspace.gate.errors.pricing.invalidReference')
@@ -2620,7 +2624,6 @@ describe('StudioPage schema-5 cutover', () => {
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-background-choice-plan]')).toBeNull();
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith(
@@ -2630,7 +2633,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
   });
 
-  it('opens an exact paid Board gate for the next 24 missing panels without spending automatically', async () => {
+  it('automatically estimates the exact next 24 missing Board panels without spending', async () => {
     const authority = projectWithBoardJobs(30, false);
     mockSupportedProject(authority);
     mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
@@ -2638,9 +2641,7 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
 
     act(() => capturedTableBoardActions().drawNext());
-    const modal = await screen.findByTestId('studio-spend-gate');
-    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+    await screen.findByTestId('studio-spend-gate');
 
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
@@ -2685,7 +2686,6 @@ describe('StudioPage schema-5 cutover', () => {
     act(() => capturedTableBoardActions().drawNext());
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="reference_binding"]')).toBeVisible();
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
 
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
@@ -2886,7 +2886,6 @@ describe('StudioPage schema-5 cutover', () => {
 
     act(() => capturedTableBoardActions().drawNext());
     const modal = await screen.findByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     const confirm = await within(modal).findByRole('button', {
       name: /conversation\.creativeStudio\.workspace\.gate\.confirm/,
     });
@@ -2921,8 +2920,7 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
 
     act(() => capturedTableBoardActions().drawBeat('board_beat_2'));
-    const modal = await screen.findByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+    await screen.findByTestId('studio-spend-gate');
 
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
@@ -2994,8 +2992,7 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
 
     act(() => capturedTableBoardActions().redrawShot('board_shot_02'));
-    const modal = await screen.findByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
+    await screen.findByTestId('studio-spend-gate');
 
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
@@ -3074,8 +3071,8 @@ describe('StudioPage schema-5 cutover', () => {
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
     expect(
-      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
-    ).toBeDisabled();
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
@@ -3288,10 +3285,8 @@ describe('StudioPage schema-5 cutover', () => {
     act(() => capturedBeatPanelActions().reviewContinuity('shot_1', true));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
-    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
 
-    fireEvent.click(within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' }));
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
         projectId: 'project_1',
@@ -3334,8 +3329,8 @@ describe('StudioPage schema-5 cutover', () => {
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="first_frame"]')).toBeVisible();
     expect(
-      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
-    ).toBeDisabled();
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
@@ -3377,17 +3372,16 @@ describe('StudioPage schema-5 cutover', () => {
       ])
     );
     const modal = await screen.findByTestId('studio-spend-gate');
-    const prepare = within(modal).getByRole('button', {
-      name: 'conversation.creativeStudio.workspace.gate.prepare',
-    });
-    expect(prepare).toBeDisabled();
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
     expect(modal.querySelector('[data-generation-block-code="catalog_unloaded"]')).toBeVisible();
     await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(2));
 
     const refreshInput = mocks.bridge.getGenerationCapability.invoke.mock.calls[1]![0];
     await act(async () => refreshedCapability.resolve(supportedCapabilityResult(refreshInput)));
-    await waitFor(() => expect(prepare).toBeEnabled());
-    expect(modal.querySelector('[data-generation-block-code="catalog_unloaded"]')).toBeNull();
+    await waitFor(() => expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(modal.querySelector('[data-generation-block-code="catalog_unloaded"]')).toBeNull());
     expect(screen.getByTestId('studio-spend-gate')).toBe(modal);
   });
 
@@ -3434,8 +3428,8 @@ describe('StudioPage schema-5 cutover', () => {
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
     expect(
-      within(modal).getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
-    ).toBeDisabled();
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
     expect(screen.queryByText('conversation.creativeStudio.workspace.gate.errors.routesUnavailable')).toBeNull();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
@@ -3788,16 +3782,24 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('opens choices for an exact project-reference handoff without preparing paid work', async () => {
+  it('automatically estimates an exact project-reference handoff without spending', async () => {
     mockSupportedProject(projectWithReferenceHandoff());
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
     renderStudio();
     const card = within(await screen.findByTestId('studio-handoff-handoff_awaiting_spend'));
     fireEvent.click(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' }));
 
-    expect(await screen.findByTestId('studio-spend-gate')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })).toBeEnabled();
-    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    await waitFor(() =>
+      expect(mocks.bridge.prepareProjectReferences.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        referenceIds: ['reference_3'],
+      })
+    );
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
@@ -5095,7 +5097,7 @@ describe('StudioPage schema-5 cutover', () => {
     act(() => actions.reviewSeedStill('shot_3'));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'generation');
-    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledTimes(1));
   });
 
   it('fails first-frame regeneration closed while image capability refreshes against an unavailable route', async () => {
@@ -5162,14 +5164,8 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
-    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
 
-    const prepare = within(modal).getByRole('button', {
-      name: 'conversation.creativeStudio.workspace.gate.prepare',
-    });
-    expect(prepare).toBeEnabled();
-    fireEvent.click(prepare);
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledExactlyOnceWith({
         projectId: 'project_1',
