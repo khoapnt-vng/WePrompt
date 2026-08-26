@@ -1404,3 +1404,92 @@ nothing anyone reads.
    on the fixed tree.
 5. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
    full test suite, format, lint, and `git diff --check` pass from the exact final head.
+
+## Assignable follow-on — the First frames panel
+
+**Status:** designer handoff received 2026-08-26, owner-forwarded for implementation. Full direction
+lives in [the First frames panel](../../design/creative-studio-3-first-frames-panel.md); the two
+source bundles are committed beside this plan and are the authority for anything that document
+paraphrases. This section is the assignment, not the specification.
+
+- `creative-studio-3-first-frames-handoff-notes.html.txt` — sha256 `a854abf83b0ffba2…ea340879`
+- `creative-studio-3-first-frames-reference.html.txt` — sha256 `0f95a879778b7043…bc8430f9`
+
+Both are JS-bundled: they render nothing with scripts disabled. Read them in a browser; stripping
+tags yields the string "This page requires JavaScript to display."
+
+### Problem and goal
+
+The Beat panel has no surface for the stills a Shot begins on. First frames arrive from three places
+— imported, generated, or inherited as the previous Shot's last frame — and today the choice among
+them is implicit, invisible, and only inspectable through the store.
+
+The goal: **frames feed in on the left, the picture comes out on the right.** One horizontal band of
+inputs, one output card, and a full-screen view where a frame is judged, pinned and re-run.
+
+### Required product behavior
+
+1. **Two halves, one divider.** First frames (inputs) left, Current picture (output) right. The
+   picture card carries a `→` control that sends its last frame to the next Shot. Nothing else lives
+   in this region.
+2. **Current is automatic; pinning is a hold.** The newest eligible frame is current by default;
+   pinning freezes it against future arrivals. **This is what the code already does** —
+   `chain.ts:104` falls back to the newest eligible asset when `seedStillId` is `null`. Build on
+   `seedStillId` as the explicit hold; do not introduce a second notion of currency.
+3. **A fixed 178px band that scrolls sideways.** Eight frames must be the same height as two, so the
+   timeline rail keeps its place. Frame tile 132×74 in-panel, current picture 190×107, import tile
+   64×74 doubling as the drop target.
+4. **Picture first, words last.** One 9px mono caption line — frame identity left, origin right.
+   Pinned state is three wordless signals: 2px orange border, `CURRENT` badge, lit pin. Hover
+   controls (full screen, pin, more) float on the thumbnail at 140ms.
+5. **Four status words, no fifth.** `NOT READY` / `READY TO RENDER` / `RENDERING` / `RENDERED`, and
+   the rail and Shot header must say the same word.
+6. **Full-screen frame view.** 94% black, image contained never cropped, filmstrip and arrows to
+   navigate, pin as primary action, regenerate with a live prompt, download and remove secondary.
+   Keyboard `← → P R Esc`, with `R` suppressed while the prompt field has focus.
+7. **One prompt rule, applied everywhere a render is fired.** Always visible, always editable
+   including mid-run; a run uses the text as fired; afterwards a divergent field is tagged
+   `EDITED · NOT YET RUN`. Primary buttons become _Cancel run_ while working, and the Shot button
+   names its target — "Generate Shot 1", never "Generate again".
+
+### Decide before building
+
+Five questions are open; four are the designer's and one is ours. **Do not resolve them by
+implementation default** — three touch decisions already taken elsewhere.
+
+1. **Takes.** Does generating a Shot replace the previous take or add one alongside? An accumulating
+   model contradicts the committed take-removal spec (`1750f9627`: one Shot → one `videoAssetId`).
+   Reconcile before building the switcher the designer describes.
+2. **Staleness.** Cut from the status vocabulary by the designer, who flagged that the downstream
+   "your inherited frame changed" signal must live somewhere else. It currently lives nowhere.
+3. **Current picture full screen.** Recommended by the designer for symmetry; not drawn.
+4. **The `⋯` menu.** The control is in the hi-fi; its contents are unspecified.
+5. **The 178px band against the shipped layout.** The designer's 1320 panel width is measured on
+   their canvas, not against the Table view's 176px panel column and 1040px minimum grid.
+
+### Do not weaken
+
+- **Spend governance is untouched.** Regenerate and Generate Shot enter the existing prepare/confirm
+  quote path. This panel is a surface over that flow, never a new way to spend. Pinning stays free.
+- **`RENDERING` percentage is optional, not assumed.** `openRouterVideoAdapter` returns bare
+  `{status:'queued'}` / `{status:'running'}` with no progress (lines 686, 690); only
+  `mediaGatewayAdapter` parses 0–100. Render the number **when present** and a determinate-free state
+  otherwise. Do not design a bar that needs a value the provider never sends.
+- **Respect the existing seed eligibility rule.** A `boardStills` asset is not auto-eligible as
+  current (`chain.ts:94` accepts only `assets` and `imports`) but _can_ be pinned explicitly. Decide
+  deliberately whether the strip surfaces that asymmetry; do not discover it mid-build.
+- **No scope expansion.** This is the frames region of the Beat panel. It is not a Cut change, not a
+  References change, and not a schema migration.
+
+### Acceptance
+
+1. The frames band holds its height at any frame count, and the timeline rail does not move.
+2. A Shot with no eligible frame reads `NOT READY` and cannot reach paid generation from any surface.
+3. Pinning a frame updates the card, the full-screen badge and the Shot status without a render, and
+   costs nothing.
+4. A run fired before a prompt edit completes against the text as fired, and the field afterwards
+   reads `EDITED · NOT YET RUN`.
+5. Each of the five open questions above is answered in writing — in the design doc or this section —
+   before the code that depends on it lands.
+6. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
+   full test suite, format, lint, and `git diff --check` pass from the exact final head.
