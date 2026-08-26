@@ -220,12 +220,17 @@ describe('Creative Studio project recovery integration', () => {
       });
       for (const delayMs of [2_000, 4_000, 8_000]) (await beforeClock.take(delayMs)).release();
       const referenceCompleted = await waitFor(async () => {
-        const loaded = await store.getProjectV2(configured.id);
-        if (loaded.status !== 'supported') return null;
-        const job = loaded.project.jobs.job_v2_recovery_reference;
-        return job?.status === 'succeeded' && job.outputAssetIdsByRole.primary !== null
-          ? { project: loaded.project, assetId: job.outputAssetIdsByRole.primary }
-          : null;
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          if (loaded.status !== 'supported') return null;
+          const job = loaded.project.jobs.job_v2_recovery_reference;
+          return job?.status === 'succeeded' && job.outputAssetIdsByRole.primary !== null
+            ? { project: loaded.project, assetId: job.outputAssetIdsByRole.primary }
+            : null;
+        } catch {
+          // The active writer can replace project.json between the guarded lstat/open steps.
+          return null;
+        }
       });
       const approved = await beforeService.applyMutations(
         {
