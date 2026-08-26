@@ -72,6 +72,32 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           reference.approvedAssetId !== null && Object.hasOwn(project.assets, reference.approvedAssetId)
             ? project.assets[reference.approvedAssetId]
             : undefined;
+        const generatedAssetIds = [
+          ...(reference.approvedAssetId === null ? [] : [reference.approvedAssetId]),
+          ...reference.supersededAssetIds,
+        ].filter((assetId, index, assetIds) => assetIds.indexOf(assetId) === index);
+        const assetCreatedAt = Object.fromEntries(
+          generatedAssetIds.flatMap((assetId) => {
+            const asset = Object.hasOwn(project.assets, assetId) ? project.assets[assetId] : undefined;
+            return asset?.id === assetId && asset.projectReferenceId === reference.id
+              ? ([[assetId, asset.createdAt]] as const)
+              : [];
+          })
+        );
+        const approvedProducerJob =
+          currentAsset?.projectReferenceId === reference.id &&
+          currentAsset.producerJobId !== null &&
+          Object.hasOwn(project.jobs, currentAsset.producerJobId)
+            ? project.jobs[currentAsset.producerJobId]
+            : undefined;
+        const approvedSource = approvedProducerJob?.composition.inputs.source;
+        const lastRunPrompt =
+          approvedProducerJob?.target.kind === 'reference' &&
+          approvedProducerJob.target.referenceId === reference.id &&
+          approvedSource?.kind === 'project_reference' &&
+          approvedSource.referenceId === reference.id
+            ? approvedSource.prompt
+            : null;
         const latestReferenceJobId =
           currentAsset?.projectReferenceId === reference.id && currentAsset.producerJobId !== null
             ? currentAsset.producerJobId
@@ -113,11 +139,10 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
             kind: reference.kind,
             label: reference.label,
             prompt: reference.prompt,
+            lastRunPrompt,
             approvedAssetId: reference.approvedAssetId,
-            generatedAssetIds: [
-              ...(reference.approvedAssetId === null ? [] : [reference.approvedAssetId]),
-              ...reference.supersededAssetIds,
-            ],
+            generatedAssetIds,
+            assetCreatedAt,
             generationStatus,
             candidateJob: candidateJobValid
               ? {
@@ -231,11 +256,13 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           actions={
             referenceActions ?? {
               addBackground: async () => false,
+              updateDetails: async () => false,
               selectImage: async () => false,
               regenerate: async () => false,
               retryJob: async () => false,
               retryDownload: async () => false,
               cancelJob: async () => false,
+              openBindings: () => {},
             }
           }
           errorMessageKey={referenceErrorMessageKey}

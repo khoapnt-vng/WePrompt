@@ -6,13 +6,10 @@
 
 import type { ReferenceWorkspaceItem } from './index';
 
-export type ReferenceWorkspaceStatus = 'idle' | 'queued' | 'running' | 'failed' | 'current';
+export type ReferenceWorkspaceStatus = 'noPhoto' | 'current' | 'generating';
 
-/** Derives the status of the one current image plus any active replacement job. */
+/** Keeps the three ruled reference states in one identity-row location. */
 export const referenceWorkspaceStatus = (item: ReferenceWorkspaceItem): ReferenceWorkspaceStatus => {
-  if (item.generationStatus === 'queued' || item.generationStatus === 'running' || item.generationStatus === 'failed') {
-    return item.generationStatus;
-  }
-  if (item.approvedAssetId !== null) return 'current';
-  return 'idle';
+  if (item.generationStatus === 'queued' || item.generationStatus === 'running') return 'generating';
+  return item.approvedAssetId === null ? 'noPhoto' : 'current';
 };

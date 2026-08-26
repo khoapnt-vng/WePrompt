@@ -1739,7 +1739,7 @@ session, including on quotes never confirmed, and charged nothing.
 
 ## Assignable follow-on — the References panel
 
-**Status:** designer handoff received 2026-08-26 night, owner-forwarded. Full direction lives in
+**Status:** implemented and verified 2026-08-27. Full direction lives in
 [the References panel](../../design/creative-studio-3-references-panel.md); the designer's README and
 the prototype are committed beside this plan. This section is the assignment, not the specification.
 

@@ -6211,6 +6211,7 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
       },
     ],
   },
+  { kind: 'set_reference_label', referenceId: 'ref_ming', label: 'Ming Wong' },
   { kind: 'set_reference_prompt', referenceId: 'ref_ming', prompt: 'Updated Ming prompt.' },
   { kind: 'select_reference_image', referenceId: 'ref_ming', assetId: 'asset_ming' },
   { kind: 'add_beat', beatId: 'section_new', beat: editableBeatV2(), beforeBeatId: null },
@@ -6796,7 +6797,7 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(33);
+      expect(operationKinds).toHaveLength(34);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds

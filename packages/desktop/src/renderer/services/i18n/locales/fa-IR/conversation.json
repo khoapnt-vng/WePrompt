@@ -883,6 +883,55 @@
         "references": "مرجع‌ها"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "تصاویر مرجع اصلی",
+          "intro": "برای هر شخصیت و مکان تکرارشونده یک تصویر فعلی بسازید. این تصاویر تا زمانی که برداشت دیگری را انتخاب کنید مرجع اصلی می‌مانند.",
+          "progress": "{{current}} از {{total}} فعلی",
+          "bindShots": "اتصال شات‌ها",
+          "characterRule": "ابتدا شخصیت‌ها",
+          "placeRule": "سپس مکان‌های تکرارشونده",
+          "addCharacter": "افزودن شخصیت",
+          "addCharacterUnavailable": "هویت شخصیت از طرح مرجع تأییدشدهٔ کارگردان می‌آید.",
+          "places": "مکان‌ها",
+          "addPlace": "افزودن مکان",
+          "kind": {
+            "character": "شخصیت",
+            "background": "مکان"
+          },
+          "nameLabel": "نام {{kind}}",
+          "meta": {
+            "character": "شخصیت · {{count}} عکس",
+            "background": "مکان · {{count}} عکس"
+          },
+          "status": {
+            "noPhoto": "بدون عکس",
+            "current": "فعلی تنظیم شد",
+            "generating": "در حال تولید"
+          },
+          "duplicateName": "این نام برای این نوع مرجع قبلاً استفاده شده است.",
+          "emptyPhoto": "تولید اولین عکس",
+          "currentHandle": "{{handle}} · فعلی",
+          "currentReference": "مرجع اصلی فعلی",
+          "download": "دانلود {{handle}}",
+          "choosePhoto": "تنظیم {{handle}} به‌عنوان فعلی",
+          "addPhoto": "تولید عکس دیگر",
+          "photoCount": "{{count}} عکس",
+          "promptLabel": "پرامپت برای {{label}}",
+          "promptPlaceholder": {
+            "character": "هویت ثابت، پوشش و ویژگی‌های بصری را توصیف کنید.",
+            "background": "مکان تکرارشونده و ویژگی‌های بصری ثابت آن را توصیف کنید."
+          },
+          "action": {
+            "generate": "تولید",
+            "generateAnother": "تولید یکی دیگر",
+            "generateAgain": "تولید دوباره",
+            "cancelRun": "لغو اجرا"
+          },
+          "tag": {
+            "running": "در حال اجرا",
+            "edited": "پرامپت ویرایش شد"
+          }
+        },
         "description": "ابتدا تصویر مرجع اصلی شخصیت‌ها و سپس تصویر پس‌زمینه‌های تکرارشونده را تولید کنید. پیش از تولید بورد یا فریم نخست، مرجع‌های فعلی را دقیقاً به هر نما متصل کنید.",
         "generationScope": "دامنهٔ تولید",
         "characters": {
@@ -1319,6 +1368,7 @@
           "promote_board_panel": "استفاده از پنل به‌عنوان فریم اول",
           "set_reference_plan": "برنامهٔ مراجع",
           "amend_reference_plan": "افزودن پس‌زمینه",
+          "set_reference_label": "نام مرجع",
           "set_reference_prompt": "پرامپت مرجع",
           "select_reference_image": "تصویر مرجع فعلی",
           "set_shot_reference_binding": "اتصال مرجع Shot"

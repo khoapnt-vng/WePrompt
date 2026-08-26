@@ -884,6 +884,55 @@
         "references": "Referenzen"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Kanonische Bilder",
+          "intro": "Erstelle ein aktuelles Bild für jede Figur und jeden wiederkehrenden Ort. Diese Bilder bleiben kanonisch, bis du eine andere Aufnahme auswählst.",
+          "progress": "{{current}} von {{total}} aktuell",
+          "bindShots": "Shots zuordnen",
+          "characterRule": "Figuren zuerst",
+          "placeRule": "Danach wiederkehrende Orte",
+          "addCharacter": "Figur hinzufügen",
+          "addCharacterUnavailable": "Figurenidentitäten stammen aus dem genehmigten Referenzplan des Directors.",
+          "places": "Orte",
+          "addPlace": "Ort hinzufügen",
+          "kind": {
+            "character": "Figur",
+            "background": "Ort"
+          },
+          "nameLabel": "Name der {{kind}}",
+          "meta": {
+            "character": "Figur · {{count}} Fotos",
+            "background": "Ort · {{count}} Fotos"
+          },
+          "status": {
+            "noPhoto": "KEIN FOTO",
+            "current": "AKTUELL GESETZT",
+            "generating": "WIRD ERZEUGT"
+          },
+          "duplicateName": "Dieser Name wird bereits für diesen Referenztyp verwendet.",
+          "emptyPhoto": "Erstes Foto erzeugen",
+          "currentHandle": "{{handle}} · Aktuell",
+          "currentReference": "Aktuelle kanonische Referenz",
+          "download": "{{handle}} herunterladen",
+          "choosePhoto": "{{handle}} als aktuell festlegen",
+          "addPhoto": "Weiteres Foto erzeugen",
+          "photoCount": "{{count}} Fotos",
+          "promptLabel": "Prompt für {{label}}",
+          "promptPlaceholder": {
+            "character": "Beschreibe stabile Identität, Kleidung und visuelle Merkmale.",
+            "background": "Beschreibe den wiederkehrenden Ort und seine stabilen visuellen Merkmale."
+          },
+          "action": {
+            "generate": "Erzeugen",
+            "generateAnother": "Weiteres erzeugen",
+            "generateAgain": "Erneut erzeugen",
+            "cancelRun": "Lauf abbrechen"
+          },
+          "tag": {
+            "running": "Läuft",
+            "edited": "Prompt bearbeitet"
+          }
+        },
         "description": "Erzeugen Sie zuerst kanonische Charakterbilder und danach Bilder wiederkehrender Hintergründe. Binden Sie die aktuellen Referenzen an jeden Shot, bevor Sie das Board oder das erste Bild generieren.",
         "generationScope": "Generierungsumfang",
         "characters": {
@@ -1320,6 +1369,7 @@
           "promote_board_panel": "Panel als erstes Bild verwenden",
           "set_reference_plan": "Referenzplan",
           "amend_reference_plan": "Hintergrund hinzufügen",
+          "set_reference_label": "Referenzname",
           "set_reference_prompt": "Referenzprompt",
           "select_reference_image": "aktuelles Referenzbild",
           "set_shot_reference_binding": "Shot-Referenzzuordnung"

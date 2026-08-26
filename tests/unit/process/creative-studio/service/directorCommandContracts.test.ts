@@ -219,6 +219,7 @@ describe('Studio Director V2 command contracts', () => {
       set_rules: 'operation_not_permitted',
       set_reference_plan: 'direct',
       amend_reference_plan: 'direct',
+      set_reference_label: 'operation_not_permitted',
       set_reference_prompt: 'operation_not_permitted',
       select_reference_image: 'operation_not_permitted',
       set_shot_reference_binding: 'direct',
@@ -252,7 +253,7 @@ describe('Studio Director V2 command contracts', () => {
     >;
 
     expect(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2).toEqual(expected);
-    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(33);
+    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(34);
     expect(Object.isFrozen(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toBe(true);
     for (const [kind, disposition] of Object.entries(expected)) {
       expect(classifyStudioDirectorOperationV2(kind), kind).toBe(disposition);
@@ -265,6 +266,7 @@ describe('Studio Director V2 command contracts', () => {
   it.each([
     { kind: 'edit_project', changes: { name: 'Not direct' } },
     { kind: 'park_beat', beatId: 'section_1' },
+    { kind: 'set_reference_label', referenceId: 'reference_1', label: 'Human name' },
     { kind: 'set_reference_prompt', referenceId: 'reference_1', prompt: 'A human edit' },
     { kind: 'select_reference_image', referenceId: 'reference_1', assetId: 'asset_1' },
     { kind: 'set_routes', imageRouteId: null, videoRouteId: null },

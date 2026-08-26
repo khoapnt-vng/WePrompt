@@ -1810,18 +1810,32 @@ describe('StudioPage schema-5 cutover', () => {
     expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
   });
 
-  it('keeps an empty, coherent reference plan navigable without a References-owned continuation action', async () => {
+  it('keeps an empty, coherent reference plan navigable with completion disabled until references are current', async () => {
     renderStudio('/studio/project_1/references');
 
     await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
     expect(
-      screen.queryByRole('button', {
-        name: 'conversation.creativeStudio.workspace.referenceWorkflow.continueToTable',
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.bindShots',
       })
-    ).toBeNull();
+    ).toBeDisabled();
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+  });
+
+  it('hands a complete References panel to the per-Shot Table binding flow without writing a binding', async () => {
+    mockSupportedProject(projectWithCandidateReference());
+    renderStudio('/studio/project_1/references');
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.bindShots',
+      })
+    );
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
   });
 
   it('adds a background from References through the shared typed amendment operation', async () => {
@@ -1832,7 +1846,7 @@ describe('StudioPage schema-5 cutover', () => {
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.add',
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.addPlace',
       })
     );
     fireEvent.change(
@@ -1885,8 +1899,8 @@ describe('StudioPage schema-5 cutover', () => {
         ],
       })
     );
-    expect(await screen.findByText('Dai pai dong')).toBeVisible();
-    expect(screen.getAllByText('Hero')).not.toHaveLength(0);
+    expect(await screen.findByDisplayValue('Dai pai dong')).toBeVisible();
+    expect(screen.getAllByDisplayValue('Hero')).not.toHaveLength(0);
     expect(amended.shots.shot_3!.referenceBinding).toEqual(authority.shots.shot_3!.referenceBinding);
   });
 
@@ -1899,7 +1913,7 @@ describe('StudioPage schema-5 cutover', () => {
       error: { code: 'stale_revision', messageKey: 'native.amendReferencePlanFailed' },
     });
     renderStudio('/studio/project_1/references');
-    await screen.findAllByText('Hero');
+    await screen.findAllByDisplayValue('Hero');
     const references = capturedReferenceActions();
 
     await expect(
@@ -1949,14 +1963,12 @@ describe('StudioPage schema-5 cutover', () => {
     const candidate = projectWithCandidateReference();
     mockSupportedProject(candidate);
     renderStudio('/studio/project_1/references');
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.workspace.referenceWorkflow.chooseGenerated',
+    const choose = (
+      await screen.findAllByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.choosePhoto/u,
       })
-    );
-    const choose = await screen.findByRole('button', {
-      name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.historyChoose/u,
-    });
+    ).find((button) => !button.hasAttribute('disabled'));
+    expect(choose).toBeDefined();
     const approved = structuredClone(candidate);
     approved.revision = 4;
     approved.references.reference_3!.approvedAssetId = 'asset_reference_3_old';
@@ -1964,7 +1976,7 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
     mockSupportedProject(approved);
 
-    fireEvent.click(choose);
+    fireEvent.click(choose!);
 
     await waitFor(() =>
       expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
@@ -1980,7 +1992,7 @@ describe('StudioPage schema-5 cutover', () => {
       })
     );
     expect(
-      await screen.findByText('conversation.creativeStudio.workspace.referenceWorkflow.status.current')
+      await screen.findByText('conversation.creativeStudio.workspace.referenceWorkflow.panel.status.current')
     ).toBeVisible();
   });
 
@@ -2072,12 +2084,7 @@ describe('StudioPage schema-5 cutover', () => {
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.workspace.referenceWorkflow.regenerate',
-      })
-    );
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.workspace.referenceWorkflow.reviewGeneration',
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.action.generateAnother',
       })
     );
     const modal = await screen.findByTestId('studio-spend-gate');
@@ -2134,6 +2141,46 @@ describe('StudioPage schema-5 cutover', () => {
     );
   });
 
+  it('saves an inline reference name and prompt in one renderer-only typed batch', async () => {
+    const authority = projectWithCandidateReference();
+    const updated = structuredClone(authority);
+    updated.revision = 4;
+    updated.updatedAt = '2026-01-01T00:00:01.000Z';
+    updated.references.reference_3!.label = 'Hero Wong';
+    updated.references.reference_3!.prompt = 'Hero character sheet with a blue rain jacket';
+    updated.references.reference_3!.updatedAt = updated.updatedAt;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(updated));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().updateDetails('reference_3', {
+          label: '  Hero Wong  ',
+          prompt: '  Hero character sheet with a blue rain jacket  ',
+        })
+      )
+    ).resolves.toBe(true);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        { kind: 'set_reference_label', referenceId: 'reference_3', label: 'Hero Wong' },
+        {
+          kind: 'set_reference_prompt',
+          referenceId: 'reference_3',
+          prompt: 'Hero character sheet with a blue rain jacket',
+        },
+      ],
+    });
+    expect(updated.references.reference_3!.approvedAssetId).toBe(authority.references.reference_3!.approvedAssetId);
+    expect(updated.shots.shot_3!.referenceBinding).toEqual(authority.shots.shot_3!.referenceBinding);
+  });
+
   it('discloses and blocks an exact project-reference request outside Main route capability', async () => {
     const authority = projectWithCandidateReference();
     mockSupportedProject(authority);
@@ -2158,12 +2205,7 @@ describe('StudioPage schema-5 cutover', () => {
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.workspace.referenceWorkflow.regenerate',
-      })
-    );
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.workspace.referenceWorkflow.reviewGeneration',
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.action.generateAnother',
       })
     );
     const modal = await screen.findByTestId('studio-spend-gate');
@@ -2291,7 +2333,9 @@ describe('StudioPage schema-5 cutover', () => {
     );
     await waitFor(() => expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(2));
     expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.jobs.retry' })).toBeNull();
-    expect(screen.getByText('conversation.creativeStudio.workspace.referenceWorkflow.status.queued')).toBeVisible();
+    expect(
+      screen.getByText('conversation.creativeStudio.workspace.referenceWorkflow.panel.status.generating')
+    ).toBeVisible();
   });
 
   it('rejects refused, mismatched, stale, and missing reference-job recovery authority', async () => {

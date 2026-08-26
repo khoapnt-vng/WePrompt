@@ -885,6 +885,55 @@
         "references": "Referanslar"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Kanonik görseller",
+          "intro": "Her karakter ve yinelenen mekân için bir güncel görsel oluşturun. Başka bir çekim seçene kadar bu görseller kanonik kalır.",
+          "progress": "{{total}} içinde {{current}} güncel",
+          "bindShots": "Çekimlere bağla",
+          "characterRule": "Önce karakterler",
+          "placeRule": "Sonra yinelenen mekânlar",
+          "addCharacter": "Karakter ekle",
+          "addCharacterUnavailable": "Karakter kimliği, onaylanmış Yönetmen referans planından gelir.",
+          "places": "Mekânlar",
+          "addPlace": "Mekân ekle",
+          "kind": {
+            "character": "karakter",
+            "background": "mekân"
+          },
+          "nameLabel": "{{kind}} adı",
+          "meta": {
+            "character": "Karakter · {{count}} fotoğraf",
+            "background": "Mekân · {{count}} fotoğraf"
+          },
+          "status": {
+            "noPhoto": "FOTOĞRAF YOK",
+            "current": "GÜNCEL AYARLI",
+            "generating": "OLUŞTURULUYOR"
+          },
+          "duplicateName": "Bu ad, bu referans türü için zaten kullanılıyor.",
+          "emptyPhoto": "İlk fotoğrafı oluştur",
+          "currentHandle": "{{handle}} · Güncel",
+          "currentReference": "Güncel kanonik referans",
+          "download": "{{handle}} indir",
+          "choosePhoto": "{{handle}} görselini güncel yap",
+          "addPhoto": "Başka fotoğraf oluştur",
+          "photoCount": "{{count}} fotoğraf",
+          "promptLabel": "{{label}} istemi",
+          "promptPlaceholder": {
+            "character": "Sabit kimliği, kıyafeti ve görsel özellikleri açıklayın.",
+            "background": "Yinelenen mekânı ve sabit görsel özelliklerini açıklayın."
+          },
+          "action": {
+            "generate": "Oluştur",
+            "generateAnother": "Başka oluştur",
+            "generateAgain": "Yeniden oluştur",
+            "cancelRun": "Çalışmayı iptal et"
+          },
+          "tag": {
+            "running": "Çalışıyor",
+            "edited": "İstem düzenlendi"
+          }
+        },
         "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka plan görsellerini oluşturun. Board veya ilk kare oluşturulmadan önce güncel referansları her Shot'a bağlayın.",
         "generationScope": "Oluşturma kapsamı",
         "characters": {
@@ -1321,6 +1370,7 @@
           "promote_board_panel": "Paneli ilk kare olarak kullan",
           "set_reference_plan": "referans planı",
           "amend_reference_plan": "arka plan ekle",
+          "set_reference_label": "referans adı",
           "set_reference_prompt": "referans istemi",
           "select_reference_image": "geçerli referans görseli",
           "set_shot_reference_binding": "Shot referans bağlaması"

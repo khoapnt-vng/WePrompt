@@ -883,6 +883,55 @@
         "references": "リファレンス"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "正規画像",
+          "intro": "各キャラクターと繰り返し登場する場所に、現在の画像を1枚ずつ用意します。別のテイクを選ぶまで、この画像が正規画像です。",
+          "progress": "{{total}}件中{{current}}件が現在",
+          "bindShots": "ショットに割り当て",
+          "characterRule": "キャラクターを先に",
+          "placeRule": "次に繰り返し登場する場所",
+          "addCharacter": "キャラクターを追加",
+          "addCharacterUnavailable": "キャラクターの識別情報は、承認済みのDirector参照プランから取得されます。",
+          "places": "場所",
+          "addPlace": "場所を追加",
+          "kind": {
+            "character": "キャラクター",
+            "background": "場所"
+          },
+          "nameLabel": "{{kind}}名",
+          "meta": {
+            "character": "キャラクター · {{count}}枚",
+            "background": "場所 · {{count}}枚"
+          },
+          "status": {
+            "noPhoto": "写真なし",
+            "current": "現在に設定",
+            "generating": "生成中"
+          },
+          "duplicateName": "この参照タイプでは、その名前はすでに使用されています。",
+          "emptyPhoto": "最初の写真を生成",
+          "currentHandle": "{{handle}} · 現在",
+          "currentReference": "現在の正規参照",
+          "download": "{{handle}}をダウンロード",
+          "choosePhoto": "{{handle}}を現在に設定",
+          "addPhoto": "別の写真を生成",
+          "photoCount": "{{count}}枚",
+          "promptLabel": "{{label}}のプロンプト",
+          "promptPlaceholder": {
+            "character": "変わらない人物像、衣装、視覚的特徴を記述します。",
+            "background": "繰り返し登場する場所と、変わらない視覚的特徴を記述します。"
+          },
+          "action": {
+            "generate": "生成",
+            "generateAnother": "別の画像を生成",
+            "generateAgain": "再生成",
+            "cancelRun": "実行をキャンセル"
+          },
+          "tag": {
+            "running": "実行中",
+            "edited": "プロンプト編集済み"
+          }
+        },
         "description": "まずキャラクターの正規画像を生成し、次に繰り返し登場する背景画像を生成します。Board または最初のフレームを生成する前に、現在のリファレンスを各 Shot に割り当ててください。",
         "generationScope": "生成範囲",
         "characters": {
@@ -1319,6 +1368,7 @@
           "promote_board_panel": "パネルを最初のフレームに使用",
           "set_reference_plan": "リファレンス計画",
           "amend_reference_plan": "背景を追加",
+          "set_reference_label": "リファレンス名",
           "set_reference_prompt": "リファレンスプロンプト",
           "select_reference_image": "現在のリファレンス画像",
           "set_shot_reference_binding": "Shot リファレンスのバインド"

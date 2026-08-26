@@ -889,6 +889,55 @@
         "references": "Referências"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Imagens canônicas",
+          "intro": "Crie uma imagem atual para cada personagem e lugar recorrente. Essas imagens permanecem canônicas até você escolher outra tomada.",
+          "progress": "{{current}} de {{total}} atuais",
+          "bindShots": "Vincular tomadas",
+          "characterRule": "Personagens primeiro",
+          "placeRule": "Depois, lugares recorrentes",
+          "addCharacter": "Adicionar personagem",
+          "addCharacterUnavailable": "A identidade do personagem vem do plano de referências aprovado pelo Diretor.",
+          "places": "Lugares",
+          "addPlace": "Adicionar lugar",
+          "kind": {
+            "character": "personagem",
+            "background": "lugar"
+          },
+          "nameLabel": "Nome de {{kind}}",
+          "meta": {
+            "character": "Personagem · {{count}} fotos",
+            "background": "Lugar · {{count}} fotos"
+          },
+          "status": {
+            "noPhoto": "SEM FOTO",
+            "current": "ATUAL DEFINIDA",
+            "generating": "GERANDO"
+          },
+          "duplicateName": "Esse nome já é usado para este tipo de referência.",
+          "emptyPhoto": "Gerar primeira foto",
+          "currentHandle": "{{handle}} · Atual",
+          "currentReference": "Referência canônica atual",
+          "download": "Baixar {{handle}}",
+          "choosePhoto": "Definir {{handle}} como atual",
+          "addPhoto": "Gerar outra foto",
+          "photoCount": "{{count}} fotos",
+          "promptLabel": "Prompt para {{label}}",
+          "promptPlaceholder": {
+            "character": "Descreva identidade, figurino e traços visuais estáveis.",
+            "background": "Descreva o lugar recorrente e seus traços visuais estáveis."
+          },
+          "action": {
+            "generate": "Gerar",
+            "generateAnother": "Gerar outra",
+            "generateAgain": "Gerar novamente",
+            "cancelRun": "Cancelar execução"
+          },
+          "tag": {
+            "running": "Em execução",
+            "edited": "Prompt editado"
+          }
+        },
         "description": "Gere primeiro as imagens canônicas dos personagens e depois as imagens dos cenários recorrentes. Vincule as referências atuais a cada Shot antes de gerar o Board ou o primeiro quadro.",
         "generationScope": "Escopo da geração",
         "characters": {
@@ -1325,6 +1374,7 @@
           "promote_board_panel": "Usar painel como primeiro quadro",
           "set_reference_plan": "plano de referências",
           "amend_reference_plan": "adicionar cenário",
+          "set_reference_label": "nome da referência",
           "set_reference_prompt": "prompt da referência",
           "select_reference_image": "imagem de referência atual",
           "set_shot_reference_binding": "vínculo de referências do Shot"

@@ -113,6 +113,7 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   set_rules: new Set(['kind', 'rules']),
   set_reference_plan: new Set(['kind', 'references']),
   amend_reference_plan: new Set(['kind', 'additions']),
+  set_reference_label: new Set(['kind', 'referenceId', 'label']),
   set_reference_prompt: new Set(['kind', 'referenceId', 'prompt']),
   select_reference_image: new Set(['kind', 'referenceId', 'assetId']),
   set_shot_reference_binding: new Set(['kind', 'shotId', 'characterReferenceIds', 'backgroundReferenceId']),
@@ -469,6 +470,16 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
         !isProjectReferenceDraftArray(operation.additions) ||
         operation.additions.length === 0 ||
         operation.additions.some((reference) => reference.kind !== 'background')
+      ) {
+        fail('invalid_operation');
+      }
+      return;
+    case 'set_reference_label':
+      if (
+        !isSafeId(operation.referenceId) ||
+        !isStringWithin(operation.label, STUDIO_MAX_REFERENCE_LABEL_LENGTH) ||
+        operation.label.length === 0 ||
+        operation.label !== operation.label.trim()
       ) {
         fail('invalid_operation');
       }
@@ -1367,6 +1378,33 @@ export const applyStudioMutationBatchV2 = (
         defineOwn(draft.references, reference.id, {
           ...reference,
           prompt: operation.prompt,
+          updatedAt: reducerContext.capturedAt,
+        });
+        break;
+      }
+
+      case 'set_reference_label': {
+        const reference = ownValue(draft.references, operation.referenceId);
+        if (draft.referencePlanStatus !== 'planned' || reference === undefined || reference.label === operation.label) {
+          fail('invalid_operation');
+        }
+        const candidateDrafts = draft.referenceOrder.map((referenceId) => {
+          const candidate = ownValue(draft.references, referenceId);
+          if (candidate === undefined) fail('invalid_operation');
+          return {
+            kind: candidate.kind,
+            label: candidate.id === reference.id ? operation.label : candidate.label,
+            prompt: candidate.prompt,
+          };
+        });
+        if (!isProjectReferenceDraftArray(candidateDrafts)) fail('invalid_operation');
+        if (hasBoundNonterminalJob(draft, (job) => jobTargetsReference(job, reference.id))) {
+          fail('dependency_blocked');
+        }
+        touchReferenceCatalog(tracker, draft);
+        defineOwn(draft.references, reference.id, {
+          ...reference,
+          label: operation.label,
           updatedAt: reducerContext.capturedAt,
         });
         break;

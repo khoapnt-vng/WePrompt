@@ -419,6 +419,7 @@ const operationSamples: StudioMutationOperationV2[] = [
     kind: 'amend_reference_plan',
     additions: [{ kind: 'background', label: 'Market', prompt: 'A recurring night market.' }],
   },
+  { kind: 'set_reference_label', referenceId: 'ref_1', label: 'Updated name' },
   { kind: 'set_reference_prompt', referenceId: 'ref_1', prompt: 'Updated prompt' },
   { kind: 'select_reference_image', referenceId: 'ref_1', assetId: 'asset_1' },
   { kind: 'set_shot_reference_binding', shotId: 'shot_1', characterReferenceIds: [], backgroundReferenceId: null },
@@ -461,9 +462,9 @@ const operationSamples: StudioMutationOperationV2[] = [
 ];
 
 describe('schema-5 mutation operation contract', () => {
-  it('contains exactly the 33 current operations and validates each exact envelope', () => {
-    expect(operationSamples).toHaveLength(33);
-    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(33);
+  it('contains exactly the 34 current operations and validates each exact envelope', () => {
+    expect(operationSamples).toHaveLength(34);
+    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(34);
     for (const operation of operationSamples) expect(validateStudioMutationOperationV2(operation)).toBe(true);
   });
 
@@ -523,6 +524,8 @@ describe('schema-5 mutation operation contract', () => {
         kind: 'amend_reference_plan',
         additions: [{ id: 'director_id', kind: 'background', label: 'Market', prompt: 'Market.' }],
       },
+      { kind: 'set_reference_label', referenceId: '', label: 'Updated name' },
+      { kind: 'set_reference_label', referenceId: 'ref_1', label: '' },
       { kind: 'set_reference_prompt', referenceId: '', prompt: 'Updated prompt' },
       { kind: 'set_reference_prompt', referenceId: 'ref_1', prompt: '' },
       { kind: 'select_reference_image', referenceId: '', assetId: 'asset_1' },
@@ -938,6 +941,72 @@ describe('schema-5 reference lifecycle mutations', () => {
       approvedAssetId: 'asset_candidate_1',
       supersededAssetIds: ['asset_candidate_2'],
     });
+  });
+
+  it('renames a semantic reference without replacing identity, approval, provenance, or Shot bindings', () => {
+    let project = apply(makeProject(), [
+      {
+        kind: 'set_reference_plan',
+        references: [
+          { kind: 'character', label: 'Ming', prompt: 'Ming character sheet.' },
+          { kind: 'character', label: 'Mei', prompt: 'Mei character sheet.' },
+        ],
+      },
+    ]).project;
+    const [mingId, meiId] = project.referenceOrder;
+    if (mingId === undefined || meiId === undefined) throw new Error('Expected two reference identities');
+    project = persist(project);
+    addReferenceCandidate(project, mingId, 'asset_ming_1');
+    project = persist(project);
+    addReferenceCandidate(project, mingId, 'asset_ming_2');
+    project = persist(
+      apply(
+        project,
+        [
+          {
+            kind: 'set_shot_reference_binding',
+            shotId: 'shot_1',
+            characterReferenceIds: [mingId],
+            backgroundReferenceId: null,
+          },
+        ],
+        'bind_reference_before_rename'
+      ).project
+    );
+    const approvalBefore = structuredClone(project.references[mingId]);
+    const bindingBefore = structuredClone(project.shots.shot_1!.referenceBinding);
+    const assetsBefore = structuredClone(project.assets);
+    const jobsBefore = structuredClone(project.jobs);
+
+    const renamed = persist(
+      apply(
+        project,
+        [
+          { kind: 'set_reference_label', referenceId: mingId, label: 'Ming Wong' },
+          { kind: 'set_reference_prompt', referenceId: mingId, prompt: 'Updated Ming character sheet.' },
+        ],
+        'rename_reference'
+      ).project
+    );
+
+    expect(renamed.referenceOrder).toEqual(project.referenceOrder);
+    expect(renamed.references[mingId]).toMatchObject({
+      id: mingId,
+      kind: 'character',
+      label: 'Ming Wong',
+      prompt: 'Updated Ming character sheet.',
+      approvedAssetId: approvalBefore?.approvedAssetId,
+      supersededAssetIds: approvalBefore?.supersededAssetIds,
+      jobIds: approvalBefore?.jobIds,
+    });
+    expect(renamed.shots.shot_1!.referenceBinding).toEqual(bindingBefore);
+    expect(renamed.assets).toEqual(assetsBefore);
+    expect(renamed.jobs).toEqual(jobsBefore);
+    expectReason(
+      renamed,
+      [{ kind: 'set_reference_label', referenceId: mingId, label: renamed.references[meiId]!.label }],
+      'invalid_operation'
+    );
   });
 
   it('mints replay-stable app-owned identities that vary by mutation and position', () => {

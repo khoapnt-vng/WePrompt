@@ -884,6 +884,55 @@
         "references": "Referencias"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Imágenes canónicas",
+          "intro": "Crea una imagen actual para cada personaje y lugar recurrente. Estas imágenes seguirán siendo canónicas hasta que elijas otra toma.",
+          "progress": "{{current}} de {{total}} actuales",
+          "bindShots": "Vincular planos",
+          "characterRule": "Primero los personajes",
+          "placeRule": "Después, los lugares recurrentes",
+          "addCharacter": "Añadir personaje",
+          "addCharacterUnavailable": "La identidad de los personajes procede del plan de referencias aprobado por el Director.",
+          "places": "Lugares",
+          "addPlace": "Añadir lugar",
+          "kind": {
+            "character": "personaje",
+            "background": "lugar"
+          },
+          "nameLabel": "Nombre de {{kind}}",
+          "meta": {
+            "character": "Personaje · {{count}} fotos",
+            "background": "Lugar · {{count}} fotos"
+          },
+          "status": {
+            "noPhoto": "SIN FOTO",
+            "current": "ACTUAL FIJADA",
+            "generating": "GENERANDO"
+          },
+          "duplicateName": "Ese nombre ya se usa para este tipo de referencia.",
+          "emptyPhoto": "Generar primera foto",
+          "currentHandle": "{{handle}} · Actual",
+          "currentReference": "Referencia canónica actual",
+          "download": "Descargar {{handle}}",
+          "choosePhoto": "Hacer actual {{handle}}",
+          "addPhoto": "Generar otra foto",
+          "photoCount": "{{count}} fotos",
+          "promptLabel": "Prompt para {{label}}",
+          "promptPlaceholder": {
+            "character": "Describe la identidad estable, el vestuario y los rasgos visuales.",
+            "background": "Describe el lugar recurrente y sus rasgos visuales estables."
+          },
+          "action": {
+            "generate": "Generar",
+            "generateAnother": "Generar otra",
+            "generateAgain": "Generar de nuevo",
+            "cancelRun": "Cancelar ejecución"
+          },
+          "tag": {
+            "running": "En curso",
+            "edited": "Prompt editado"
+          }
+        },
         "description": "Genera primero las imágenes canónicas de los personajes y después las imágenes de los fondos recurrentes. Vincula las referencias actuales a cada Shot antes de generar el Board o el primer fotograma.",
         "generationScope": "Alcance de la generación",
         "characters": {
@@ -1320,6 +1369,7 @@
           "promote_board_panel": "Usar panel como primer fotograma",
           "set_reference_plan": "plan de referencias",
           "amend_reference_plan": "añadir fondo",
+          "set_reference_label": "nombre de referencia",
           "set_reference_prompt": "prompt de referencia",
           "select_reference_image": "imagen de referencia actual",
           "set_shot_reference_binding": "vínculo de referencias del Shot"

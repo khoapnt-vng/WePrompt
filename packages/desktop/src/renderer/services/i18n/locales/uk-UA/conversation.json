@@ -883,6 +883,55 @@
         "references": "Референси"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Канонічні зображення",
+          "intro": "Створіть по одному поточному зображенню для кожного персонажа й повторюваного місця. Вони залишатимуться канонічними, доки ви не виберете інший дубль.",
+          "progress": "Поточних: {{current}} з {{total}}",
+          "bindShots": "Прив’язати шоти",
+          "characterRule": "Спочатку персонажі",
+          "placeRule": "Потім повторювані місця",
+          "addCharacter": "Додати персонажа",
+          "addCharacterUnavailable": "Образ персонажа визначається затвердженим планом референсів режисера.",
+          "places": "Місця",
+          "addPlace": "Додати місце",
+          "kind": {
+            "character": "персонаж",
+            "background": "місце"
+          },
+          "nameLabel": "Назва: {{kind}}",
+          "meta": {
+            "character": "Персонаж · фото: {{count}}",
+            "background": "Місце · фото: {{count}}"
+          },
+          "status": {
+            "noPhoto": "НЕМАЄ ФОТО",
+            "current": "ПОТОЧНЕ ЗАДАНО",
+            "generating": "СТВОРЮЄТЬСЯ"
+          },
+          "duplicateName": "Ця назва вже використовується для референсу такого типу.",
+          "emptyPhoto": "Створити перше фото",
+          "currentHandle": "{{handle}} · Поточне",
+          "currentReference": "Поточний канонічний референс",
+          "download": "Завантажити {{handle}}",
+          "choosePhoto": "Зробити {{handle}} поточним",
+          "addPhoto": "Створити ще фото",
+          "photoCount": "Фото: {{count}}",
+          "promptLabel": "Промпт для {{label}}",
+          "promptPlaceholder": {
+            "character": "Опишіть сталу зовнішність, одяг і візуальні риси.",
+            "background": "Опишіть повторюване місце та його сталі візуальні риси."
+          },
+          "action": {
+            "generate": "Створити",
+            "generateAnother": "Створити ще",
+            "generateAgain": "Створити знову",
+            "cancelRun": "Скасувати запуск"
+          },
+          "tag": {
+            "running": "Виконується",
+            "edited": "Промпт змінено"
+          }
+        },
         "description": "Спочатку створіть канонічні зображення персонажів, потім зображення повторюваних фонів. Прив’яжіть поточні референси до кожного кадру перед створенням розкадрування або першого кадру.",
         "generationScope": "Обсяг створення",
         "characters": {
@@ -1319,6 +1368,7 @@
           "promote_board_panel": "Використати панель як перший кадр",
           "set_reference_plan": "план референсів",
           "amend_reference_plan": "додати фон",
+          "set_reference_label": "назва референсу",
           "set_reference_prompt": "промпт референсу",
           "select_reference_image": "поточне зображення референсу",
           "set_shot_reference_binding": "прив’язка референсів шоту"

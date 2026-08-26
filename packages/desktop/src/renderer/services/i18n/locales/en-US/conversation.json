@@ -1304,6 +1304,55 @@
         "cut": "Cut"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Canonical images",
+          "intro": "Make one current image for every character and recurring place. These images stay canonical until you choose another take.",
+          "progress": "{{current}} of {{total}} current",
+          "bindShots": "Bind shots",
+          "characterRule": "Characters come first",
+          "placeRule": "Then recurring places",
+          "addCharacter": "Add character",
+          "addCharacterUnavailable": "Character identity comes from the approved Director reference plan.",
+          "places": "Places",
+          "addPlace": "Add place",
+          "kind": {
+            "character": "character",
+            "background": "place"
+          },
+          "nameLabel": "{{kind}} name",
+          "meta": {
+            "character": "Character · {{count}} photos",
+            "background": "Place · {{count}} photos"
+          },
+          "status": {
+            "noPhoto": "NO PHOTO",
+            "current": "CURRENT SET",
+            "generating": "GENERATING"
+          },
+          "duplicateName": "That name is already used for this reference type.",
+          "emptyPhoto": "Generate first photo",
+          "currentHandle": "{{handle}} · Current",
+          "currentReference": "Current canonical reference",
+          "download": "Download {{handle}}",
+          "choosePhoto": "Make {{handle}} current",
+          "addPhoto": "Generate another photo",
+          "photoCount": "{{count}} photos",
+          "promptLabel": "Prompt for {{label}}",
+          "promptPlaceholder": {
+            "character": "Describe stable identity, wardrobe, and visual traits.",
+            "background": "Describe the recurring place and its stable visual traits."
+          },
+          "action": {
+            "generate": "Generate",
+            "generateAnother": "Generate another",
+            "generateAgain": "Generate again",
+            "cancelRun": "Cancel run"
+          },
+          "tag": {
+            "running": "Running",
+            "edited": "Prompt edited"
+          }
+        },
         "description": "Generate canonical character images first, then recurring-background images. Bind the current references to each Shot before Board or first-frame generation.",
         "generationScope": "Generation scope",
         "characters": {
@@ -2121,6 +2170,7 @@
           "unknown": "last authoring change",
           "set_reference_plan": "reference plan",
           "amend_reference_plan": "add background",
+          "set_reference_label": "reference name",
           "set_reference_prompt": "reference prompt",
           "select_reference_image": "current reference image",
           "set_shot_reference_binding": "Shot reference binding"

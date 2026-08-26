@@ -850,6 +850,7 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'remove_video_take'
       | 'set_reference_plan'
       | 'amend_reference_plan'
+      | 'set_reference_label'
       | 'set_reference_prompt'
       | 'select_reference_image'
       | 'set_shot_reference_binding'
@@ -1361,6 +1362,7 @@ export type StudioMutationOperationV2 =
   | { kind: 'set_rules'; rules: StudioBriefRuleDraft[] }
   | { kind: 'set_reference_plan'; references: StudioReferenceDraftV2[] }
   | { kind: 'amend_reference_plan'; additions: StudioBackgroundReferenceDraftV2[] }
+  | { kind: 'set_reference_label'; referenceId: string; label: string }
   | { kind: 'set_reference_prompt'; referenceId: string; prompt: string }
   | { kind: 'select_reference_image'; referenceId: string; assetId: string }
   | {
@@ -1418,6 +1420,7 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   set_rules: 'operation_not_permitted',
   set_reference_plan: 'direct',
   amend_reference_plan: 'direct',
+  set_reference_label: 'operation_not_permitted',
   set_reference_prompt: 'operation_not_permitted',
   select_reference_image: 'operation_not_permitted',
   set_shot_reference_binding: 'direct',

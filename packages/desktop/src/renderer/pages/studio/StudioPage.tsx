@@ -2346,6 +2346,64 @@ const StudioProjectPage: React.FC<{
         }
         return true;
       },
+      updateDetails: async (referenceId, { label, prompt }): Promise<boolean> => {
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        const trimmedLabel = typeof label === 'string' ? label.trim() : '';
+        const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+        if (
+          current === null ||
+          current.referencePlanStatus !== 'planned' ||
+          reference?.id !== referenceId ||
+          trimmedLabel.length === 0 ||
+          trimmedLabel.length > STUDIO_MAX_REFERENCE_LABEL_LENGTH ||
+          trimmedPrompt.length === 0 ||
+          trimmedPrompt.length > STUDIO_MAX_REFERENCE_PROMPT_LENGTH ||
+          current.referenceOrder.some((candidateId) => {
+            const candidate = Object.hasOwn(current.references, candidateId)
+              ? current.references[candidateId]
+              : undefined;
+            return (
+              candidate?.id !== referenceId && candidate?.kind === reference.kind && candidate.label === trimmedLabel
+            );
+          }) ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        const operations: StudioRendererAuthoringOperationV2[] = [];
+        if (trimmedLabel !== reference.label) {
+          operations.push({ kind: 'set_reference_label', referenceId, label: trimmedLabel });
+        }
+        if (trimmedPrompt !== reference.prompt) {
+          operations.push({ kind: 'set_reference_prompt', referenceId, prompt: trimmedPrompt });
+        }
+        if (operations.length === 0) return true;
+        setPendingReferenceId(referenceId);
+        try {
+          const committed = await runWorkspaceCommit((latest) =>
+            ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+              projectId: latest.id,
+              expectedRevision: latest.revision,
+              operations,
+            })
+          );
+          if (!committed) return false;
+          const refreshed = projectRef.current;
+          const updated =
+            refreshed !== null && Object.hasOwn(refreshed.references, referenceId)
+              ? refreshed.references[referenceId]
+              : undefined;
+          return updated?.label === trimmedLabel && updated.prompt === trimmedPrompt;
+        } finally {
+          setPendingReferenceId(null);
+        }
+      },
       selectImage: async (referenceId, assetId): Promise<boolean> => {
         const current = projectRef.current;
         const reference =
@@ -2541,6 +2599,9 @@ const StudioProjectPage: React.FC<{
               expectedRevision: current.revision,
             })
         ),
+      openBindings: (): void => {
+        navigate(studioViewPath(projectId, 'table'));
+      },
       saveBinding: async (shotId, characterReferenceIds, backgroundReferenceId): Promise<boolean> => {
         const current = projectRef.current;
         const shot = current !== null && Object.hasOwn(current.shots, shotId) ? current.shots[shotId] : undefined;
@@ -2577,6 +2638,7 @@ const StudioProjectPage: React.FC<{
     [
       currentGenerationCapability,
       generationDraftsBlockReview,
+      navigate,
       pendingReferenceId,
       projectId,
       referenceGenerationHandoffs,

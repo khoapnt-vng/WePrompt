@@ -883,6 +883,55 @@
         "references": "参考图"
       },
       "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "规范图像",
+          "intro": "为每个角色和重复出现的地点各制作一张当前图像。在选择其他成片前，这些图像会一直作为规范参考。",
+          "progress": "{{total}} 个中有 {{current}} 个当前图像",
+          "bindShots": "绑定镜头",
+          "characterRule": "先制作角色",
+          "placeRule": "再制作重复地点",
+          "addCharacter": "添加角色",
+          "addCharacterUnavailable": "角色身份来自已批准的导演参考计划。",
+          "places": "地点",
+          "addPlace": "添加地点",
+          "kind": {
+            "character": "角色",
+            "background": "地点"
+          },
+          "nameLabel": "{{kind}}名称",
+          "meta": {
+            "character": "角色 · {{count}} 张照片",
+            "background": "地点 · {{count}} 张照片"
+          },
+          "status": {
+            "noPhoto": "无照片",
+            "current": "已设为当前",
+            "generating": "正在生成"
+          },
+          "duplicateName": "此参考类型已使用该名称。",
+          "emptyPhoto": "生成第一张照片",
+          "currentHandle": "{{handle}} · 当前",
+          "currentReference": "当前规范参考",
+          "download": "下载 {{handle}}",
+          "choosePhoto": "将 {{handle}} 设为当前",
+          "addPhoto": "再生成一张照片",
+          "photoCount": "{{count}} 张照片",
+          "promptLabel": "{{label}} 的提示词",
+          "promptPlaceholder": {
+            "character": "描述稳定的角色身份、服装和视觉特征。",
+            "background": "描述重复出现的地点及其稳定的视觉特征。"
+          },
+          "action": {
+            "generate": "生成",
+            "generateAnother": "再生成一张",
+            "generateAgain": "重新生成",
+            "cancelRun": "取消运行"
+          },
+          "tag": {
+            "running": "运行中",
+            "edited": "提示词已编辑"
+          }
+        },
         "description": "先生成角色的当前标准图，再生成重复出现的背景图。生成分镜或首帧之前，请将当前参考图明确绑定到每个镜头。",
         "generationScope": "生成范围",
         "characters": {
@@ -1309,6 +1358,7 @@
           "promote_board_panel": "将分镜用作首帧",
           "set_reference_plan": "参考计划",
           "amend_reference_plan": "添加背景",
+          "set_reference_label": "参考名称",
           "set_reference_prompt": "参考提示词",
           "select_reference_image": "当前参考图",
           "set_shot_reference_binding": "Shot 参考绑定"

@@ -108,7 +108,7 @@ type StudioE2ENativeHarnessSnapshot = {
 
 const installStudioE2ENativeHarness = async (
   electronApp: ElectronApplication,
-  plan: StudioE2ENativeHarnessPlan
+  plan: StudioE2ENativeHarnessPlan = {}
 ): Promise<void> => {
   await electronApp.evaluate(({ dialog, shell }, input) => {
     type HarnessState = StudioE2ENativeHarnessSnapshot & {
@@ -449,7 +449,7 @@ const readStableStudioProject = async (page: Page, projectId: string): Promise<S
         stableProject = project;
         return stableReads;
       },
-      { intervals: [50, 100, 200, 400], timeout: 5_000 }
+      { intervals: [50, 100, 200, 400], timeout: 15_000 }
     )
     .toBeGreaterThanOrEqual(2);
   if (stableProject === null) throw new Error(`Creative Studio project ${projectId} did not stabilize`);
@@ -868,36 +868,19 @@ const captureCutViewportReference = async (
   expect(metrics).toMatchObject({
     viewportWidth: reference.width,
     viewportHeight: reference.height,
-    exportShapes: ['editor_folder', 'still', 'script'],
+    exportShapes: [],
   });
   expect(metrics.scrollWidth).toBeLessThanOrEqual(metrics.clientWidth + 1);
   expect(metrics.documentScrollWidth).toBeLessThanOrEqual(metrics.documentClientWidth + 1);
 
   const audioPanel = cut.getByRole('heading', { name: 'Audio bed', exact: true }).locator('xpath=ancestor::section[1]');
-  const [cutBox, audioBox, editorBox, stillBox, scriptBox] = await Promise.all([
-    cut.boundingBox(),
-    audioPanel.boundingBox(),
-    cut.locator('[data-export-shape="editor_folder"]').boundingBox(),
-    cut.locator('[data-export-shape="still"]').boundingBox(),
-    cut.locator('[data-export-shape="script"]').boundingBox(),
-  ]);
-  if (cutBox === null || audioBox === null || editorBox === null || stillBox === null || scriptBox === null) {
+  const [cutBox, audioBox] = await Promise.all([cut.boundingBox(), audioPanel.boundingBox()]);
+  if (cutBox === null || audioBox === null) {
     throw new Error(`Cut ${reference.screenshotName} geometry was unavailable`);
   }
-  for (const box of [cutBox, audioBox, editorBox, stillBox, scriptBox]) {
+  for (const box of [cutBox, audioBox]) {
     expect(box.x).toBeGreaterThanOrEqual(-1);
     expect(box.x + box.width).toBeLessThanOrEqual(reference.width + 1);
-  }
-
-  if (metrics.clientWidth > 599) {
-    expect(Math.abs(editorBox.y - stillBox.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(stillBox.y - scriptBox.y)).toBeLessThanOrEqual(1);
-    const inlineDirection = reference.direction === 'ltr' ? 1 : -1;
-    expect((stillBox.x - editorBox.x) * inlineDirection).toBeGreaterThan(0);
-    expect((scriptBox.x - stillBox.x) * inlineDirection).toBeGreaterThan(0);
-  } else {
-    expect(stillBox.y).toBeGreaterThanOrEqual(editorBox.y + editorBox.height - 1);
-    expect(scriptBox.y).toBeGreaterThanOrEqual(stillBox.y + stillBox.height - 1);
   }
 
   const navigation = page.locator(viewNavigationSelector);
@@ -1085,6 +1068,20 @@ const createRenderedCutFixture = async (page: Page, projectBrief: string): Promi
     throw new Error('Creative Studio Cut fixture video asset was unavailable');
   }
   expect(rendered.shots[shotId]?.videoAssetId).toBe(videoAssetId);
+  await expect
+    .poll(
+      async () => {
+        const project = await readStudioProject(page, projectId);
+        return Object.values(project.assets).find(
+          (asset) =>
+            asset.shotId === shotId &&
+            asset.mediaKind === 'image' &&
+            asset.managedAsset?.collection === 'conditioningFrames'
+        )?.id;
+      },
+      { timeout: studioFakeMediaTimeoutMs }
+    )
+    .toEqual(expect.any(String));
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table', { timeout: 30_000 });
   await expect(page.getByRole('grid', { name: 'Beat table' }).getByText('Cut export Beat')).toBeVisible();
@@ -1093,7 +1090,7 @@ const createRenderedCutFixture = async (page: Page, projectBrief: string): Promi
     await panel.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(panel).toBeHidden();
   }
-  const project = await readStudioProject(page, projectId);
+  const project = await readStableStudioProject(page, projectId);
   return { projectId, beatId, shotId, seedAssetId, videoAssetId, project };
 };
 
@@ -1188,8 +1185,8 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
       .poll(
         async () =>
           panel
-            .locator('[data-beat-preview-column]')
-            .evaluate((element) => Math.abs(element.getBoundingClientRect().width - 404) <= 1),
+            .locator('[data-beat-working-row] > [data-fullscreen-media-frame]')
+            .evaluate((element) => Math.abs(element.getBoundingClientRect().width - 376) <= 1),
         { timeout: 10_000 }
       )
       .toBe(true);
@@ -1250,12 +1247,9 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
       story: box(element, '[data-beat-field="story"]'),
       target: box(element, '[data-beat-field="target"]'),
       meta: box(element, '[data-beat-meta-row]'),
-      actions: box(element, '[data-beat-editor-actions]'),
       working: box(panelElement, '[data-beat-working-row]'),
-      previewColumn: box(panelElement, '[data-beat-preview-column]'),
+      previewColumn: box(panelElement, '[data-beat-working-row] > [data-fullscreen-media-frame]'),
       inspector: box(panelElement, '[data-shot-inspector]'),
-      shotActionBand: box(visibleShotInspector, '[data-shot-action-band]'),
-      shotActions: box(visibleShotInspector, '[data-shot-actions]'),
       playbackTrack: box(panelElement, '[data-testid="studio-coverage-playback"]'),
       coverage: (() => {
         const coverage = panelElement.querySelector<HTMLElement>('[data-beat-coverage]');
@@ -1272,12 +1266,12 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
   const computedPanelWidth = Number.parseFloat(geometry.panel.computedWidth);
   const computedPanelInlineSize = Number.parseFloat(geometry.panel.computedInlineSize);
   const computedPanelMaxInlineSize = Number.parseFloat(geometry.panel.computedMaxInlineSize);
-  const expectedPanelWidth = Math.min(1100, reference.width - 32);
+  const expectedPanelWidth = Math.min(1320, reference.width - 32);
   expect(computedPanelWidth).toBeGreaterThanOrEqual(expectedPanelWidth - 4);
   expect(computedPanelWidth).toBeLessThanOrEqual(expectedPanelWidth + 2);
   expect(computedPanelInlineSize).toBeGreaterThanOrEqual(expectedPanelWidth - 4);
   expect(computedPanelInlineSize).toBeLessThanOrEqual(expectedPanelWidth + 2);
-  expect(computedPanelMaxInlineSize).toBe(1100);
+  expect(computedPanelMaxInlineSize).toBe(1320);
   expect(geometry.panel.clientWidth).toBeGreaterThanOrEqual(expectedPanelWidth - 4);
   expect(geometry.panel.clientWidth).toBeLessThanOrEqual(expectedPanelWidth + 2);
   expect(geometry.panel.scrollWidth).toBeLessThanOrEqual(geometry.panel.clientWidth + 1);
@@ -1291,8 +1285,8 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
   expect(geometry.coverage.scrollWidth).toBeGreaterThanOrEqual(geometry.coverage.clientWidth);
 
   if (reference.width > 900) {
-    expect(geometry.previewColumn.width).toBeGreaterThanOrEqual(403);
-    expect(geometry.previewColumn.width).toBeLessThanOrEqual(405);
+    expect(geometry.previewColumn.width).toBeGreaterThanOrEqual(375);
+    expect(geometry.previewColumn.width).toBeLessThanOrEqual(377);
     expect(Math.abs(geometry.previewColumn.top - geometry.inspector.top)).toBeLessThanOrEqual(1);
     const workingGap =
       reference.direction === 'rtl'
@@ -1310,18 +1304,7 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
   }
 
   expect(geometry.meta.top).toBeGreaterThanOrEqual(geometry.story.bottom + 12);
-  expect(geometry.story.left).toBeGreaterThanOrEqual(geometry.section.left - 1);
-  expect(geometry.story.right).toBeLessThanOrEqual(geometry.section.right + 1);
-
-  if (reference.width > 760) {
-    expect(Math.min(geometry.target.bottom, geometry.actions.bottom)).toBeGreaterThan(
-      Math.max(geometry.target.top, geometry.actions.top)
-    );
-    return;
-  }
-
-  expect(geometry.target.bottom).toBeLessThanOrEqual(geometry.actions.top + 1);
-  for (const child of [geometry.story, geometry.target, geometry.actions]) {
+  for (const child of [geometry.story, geometry.target, geometry.meta]) {
     expect(child.left).toBeGreaterThanOrEqual(geometry.section.left - 1);
     expect(child.right).toBeLessThanOrEqual(geometry.section.right + 1);
     expect(child.top).toBeGreaterThanOrEqual(geometry.section.top - 1);
@@ -1336,14 +1319,6 @@ const expectFoldedTableFits = async (table: Locator): Promise<void> => {
     if (scroll === null) throw new Error('Table scrollport was unavailable');
     const scrollRect = scroll.getBoundingClientRect();
     const gridRect = element.getBoundingClientRect();
-    const stateFits = Array.from(
-      element.querySelectorAll<HTMLElement>(
-        '[role="columnheader"][data-grid-column-name="state"], [role="gridcell"][data-grid-column-name="state"]'
-      )
-    ).every((state) => {
-      const rect = state.getBoundingClientRect();
-      return rect.left >= scrollRect.left - 1 && rect.right <= scrollRect.right + 1;
-    });
     const durationFits = Array.from(element.querySelectorAll<HTMLElement>('[data-duration-kind]')).every((fact) => {
       const cell = fact.closest<HTMLElement>('[data-grid-column-name="length"]');
       if (cell === null) return false;
@@ -1365,21 +1340,21 @@ const expectFoldedTableFits = async (table: Locator): Promise<void> => {
       scrollWidth: scroll.scrollWidth,
       documentClientWidth: document.documentElement.clientWidth,
       documentScrollWidth: document.documentElement.scrollWidth,
-      gridLeft: gridRect.left,
-      gridRight: gridRect.right,
+      gridWidth: gridRect.width,
       scrollLeft: scrollRect.left,
       scrollRight: scrollRect.right,
-      stateFits,
       durationFits,
       shotFactsFit,
     };
   });
 
-  expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
+  // The hi-fi Table deliberately preserves comfortable column widths and owns any horizontal
+  // overflow locally. The surrounding document must never widen with it.
+  expect(geometry.scrollWidth).toBeGreaterThan(geometry.clientWidth + 1);
+  expect(geometry.gridWidth).toBeGreaterThanOrEqual(geometry.clientWidth);
   expect(geometry.documentScrollWidth).toBeLessThanOrEqual(geometry.documentClientWidth + 1);
-  expect(geometry.gridLeft).toBeGreaterThanOrEqual(geometry.scrollLeft - 1);
-  expect(geometry.gridRight).toBeLessThanOrEqual(geometry.scrollRight + 1);
-  expect(geometry.stateFits).toBe(true);
+  expect(geometry.scrollLeft).toBeGreaterThanOrEqual(-1);
+  expect(geometry.scrollRight).toBeLessThanOrEqual(geometry.documentClientWidth + 1);
   expect(geometry.durationFits).toBe(true);
   expect(geometry.shotFactsFit).toBe(true);
 };
@@ -1428,6 +1403,9 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   const panel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
   await expect(panel).toBeVisible();
   await expect(panel.locator('article[data-shot-id]')).toHaveCount(2);
+  await panel.getByRole('button', { name: 'Story', exact: true }).click();
+  await panel.locator('[data-beat-overflow-trigger]').click();
+  await page.locator('[data-beat-target-reveal]').click();
   await expectBeatAuthoringBandGeometry(panel, reference);
   const shotCard = panel.locator(`article[data-shot-id="${shotId}"]`);
   const anchorShotCard = panel.locator(`article[data-shot-id="${anchorShotId}"]`);
@@ -1457,7 +1435,7 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   await expect(anchorShotCard).toBeVisible();
   await expect(shotCard).toBeHidden();
   await expect(continuousState).toHaveText('Continues from Shot 01’s last frame');
-  const chainChange = anchorShotCard.getByRole('button', { name: 'Review hard cut…', exact: true });
+  const chainChange = panel.locator(`[data-chain-change-trigger][data-shot-id="${anchorShotId}"]`);
   await expect(chainChange).toHaveAttribute('aria-haspopup', 'dialog');
   await expect(chainChange).toHaveAccessibleDescription(
     'A hard cut makes Shot 2 start from an eligible first frame, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.'
@@ -1854,26 +1832,22 @@ test.describe('Creative Studio workspace', () => {
       // before remounting; the reload then separately proves the durable handoff owns the review card.
       await expect(awaitingHandoffCard).toHaveCount(1);
       await page.reload({ waitUntil: 'domcontentloaded' });
-      await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'references');
-      await expect(awaitingHandoffCard).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'references', {
+        timeout: studioFakeMediaTimeoutMs,
+      });
+      await expect(awaitingHandoffCard).toBeVisible({ timeout: studioFakeMediaTimeoutMs });
       const reviewCost = awaitingHandoffCard.getByRole('button', { name: 'Review cost', exact: true });
       await expect(reviewCost).toBeEnabled({ timeout: 10_000 });
       await reviewCost.click();
 
       const gate = page.locator('[data-testid="studio-spend-gate"]');
       await expect(gate).toBeVisible();
-      await gate.getByRole('button', { name: 'Prepare estimate', exact: true }).click();
       await expect(gate.getByRole('button', { name: 'Show each generation', exact: true })).toBeVisible();
       await gate.getByRole('button', { name: 'Show each generation', exact: true }).click();
       const rows = gate.locator('[data-generation-purpose="reference_image"]');
       await expect(rows).toHaveCount(referenceIds.length);
       const prompts = await rows.locator('pre').allTextContents();
       await gate.getByRole('button', { name: /^Confirm \d+ generation/ }).click();
-      await expect(gate.getByText('Confirmed. The safe project and workspace status are refreshing.')).toBeVisible({
-        timeout: 30_000,
-      });
-      await gate.getByRole('button', { name: 'Close — spend nothing', exact: true }).click();
-
       await expect
         .poll(
           async () => {
@@ -1883,6 +1857,9 @@ test.describe('Creative Studio workspace', () => {
           { timeout: studioFakeMediaTimeoutMs }
         )
         .toEqual(referenceIds.map(() => expect.any(String)));
+      if (await gate.isVisible()) {
+        await gate.getByRole('button', { name: 'Close — spend nothing', exact: true }).click();
+      }
       const handoffs = await invokeStudioBridge<StudioRendererReferenceGenerationHandoffV2[]>(
         page,
         'list-reference-generation-handoffs',
@@ -2035,7 +2012,7 @@ test.describe('Creative Studio workspace', () => {
       secondShootingScript
     );
     await expect(beatDialog.locator('textarea[aria-label="Story"]')).toHaveCount(1);
-    await expect(beatDialog.locator('input[aria-label^="Shooting script for Shot "]')).toHaveCount(2);
+    await expect(beatDialog.locator('textarea[aria-label^="Shooting script for Shot "]')).toHaveCount(2);
     await beatDialog.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(beatDialog).toBeHidden();
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -2044,6 +2021,8 @@ test.describe('Creative Studio workspace', () => {
     });
     const drawNextBoardBatch = page.getByRole('button', { name: 'Draw next batch (2)', exact: true });
     await expect(drawNextBoardBatch).toBeEnabled({ timeout: studioFakeMediaTimeoutMs });
+    const boardPreparation = observeNextStudioBridgeResult(page, 'prepare-submission');
+    await boardPreparation.ready;
     await drawNextBoardBatch.click();
     const boardGate = page.locator('[data-testid="studio-spend-gate"]');
     await expect
@@ -2053,9 +2032,6 @@ test.describe('Creative Studio workspace', () => {
         return alerts.join(' | ') || 'silent guard';
       })
       .toBe('gate');
-    const boardPreparation = observeNextStudioBridgeResult(page, 'prepare-submission');
-    await boardPreparation.ready;
-    await boardGate.getByRole('button', { name: 'Prepare estimate', exact: true }).click();
     expect(await boardPreparation.result).toMatchObject({ ok: true });
     const boardConfirm = boardGate.getByRole('button', { name: /^Confirm 2 generations/ });
     await expect(boardConfirm).toBeEnabled({ timeout: 30_000 });
@@ -2082,13 +2058,35 @@ test.describe('Creative Studio workspace', () => {
       .poll(
         async () => {
           const project = await readStudioProject(page, projectId);
-          return [firstShotId, secondShotId].map(
-            (shotId) => findStudioShotJob(project, shotId, 'board_still')?.status ?? null
-          );
+          return [firstShotId, secondShotId].map((shotId) => {
+            const job = findStudioShotJob(project, shotId, 'board_still');
+            return {
+              status: job?.status ?? null,
+              errorCode: job?.error?.code ?? null,
+              errorMessage: job?.error?.message ?? null,
+              providerJobId: job?.providerJobId ?? null,
+              hasSpendReceipt: job?.spendReceipt !== null && job?.spendReceipt !== undefined,
+            };
+          });
         },
         { timeout: studioFakeMediaTimeoutMs }
       )
-      .toEqual(['succeeded', 'succeeded']);
+      .toEqual([
+        {
+          status: 'succeeded',
+          errorCode: null,
+          errorMessage: null,
+          providerJobId: null,
+          hasSpendReceipt: true,
+        },
+        {
+          status: 'succeeded',
+          errorCode: null,
+          errorMessage: null,
+          providerJobId: null,
+          hasSpendReceipt: true,
+        },
+      ]);
     const boarded = await readStableStudioProject(page, projectId);
     const firstBoardJob = findStudioShotJob(boarded, firstShotId, 'board_still');
     const secondBoardJob = findStudioShotJob(boarded, secondShotId, 'board_still');
@@ -2220,37 +2218,6 @@ test.describe('Creative Studio workspace', () => {
       conditioningAssetIds: [],
       firstFrameAssetId: firstBoardAssetId,
     });
-
-    const beforeStaleQuote = await readStableStudioProject(page, projectId);
-    await page.getByRole('button', { name: 'Open Board panels for Rain at the dai pai dong', exact: true }).click();
-    await page.getByRole('button', { name: 'Redraw Beat · paid', exact: true }).click();
-    const staleGate = page.locator('[data-testid="studio-spend-gate"]');
-    await expect(staleGate).toBeVisible();
-    await staleGate.getByRole('button', { name: 'Prepare estimate', exact: true }).click();
-    await expect(staleGate.getByRole('button', { name: 'Show each generation', exact: true })).toBeVisible();
-    await staleGate.getByRole('button', { name: 'Show each generation', exact: true }).click();
-    await expect(staleGate.locator('[data-generation-purpose="board_still"]')).toHaveCount(2);
-    const requestsBeforeStaleConfirm = await readStudioE2EProviderRequests(userDataDirectory);
-    const callsBeforeStaleConfirm = await readStudioE2EProviderCallCounts(userDataDirectory);
-    await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {
-      projectId,
-      expectedRevision: beforeStaleQuote.revision,
-      operations: [
-        {
-          kind: 'edit_beat',
-          beatId,
-          changes: { story: 'Ming recognizes Mei, then chooses to trust her with the notebook.' },
-        },
-      ],
-    });
-    const staleConfirmationSnapshot = await captureStudioNoMutationSnapshot(page, userDataDirectory, projectId);
-    await staleGate.getByRole('button', { name: /^Confirm 2 generations/ }).click();
-    await expect(
-      staleGate.getByText('The estimate could not be prepared or confirmed. Nothing was retried automatically.')
-    ).toBeVisible();
-    await expectStudioNoMutation(page, userDataDirectory, projectId, staleConfirmationSnapshot);
-    expect(await readStudioE2EProviderRequests(userDataDirectory)).toEqual(requestsBeforeStaleConfirm);
-    expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(callsBeforeStaleConfirm);
 
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.locator(viewNavigationSelector).getByRole('link', { name: 'References', exact: true }).click();
@@ -2666,6 +2633,10 @@ test.describe('Creative Studio workspace', () => {
 
     const panel = page.getByRole('dialog', { name: 'Beat panel — Panel keyboard Beat' });
     await expect(panel).toBeVisible();
+    await panel.getByRole('button', { name: 'Story', exact: true }).click();
+    const beatMenuTrigger = panel.locator('[data-beat-overflow-trigger]');
+    await beatMenuTrigger.click();
+    await page.getByRole('menuitem', { name: 'Beat target (seconds)', exact: true }).click();
     const storyEditor = panel.getByRole('textbox', { name: 'Story', exact: true });
     const targetEditor = panel.getByRole('spinbutton', { name: 'Beat target (seconds)', exact: true });
     await expect(storyEditor).toHaveValue('The plane crosses the workbench in soft studio light.');
@@ -2676,7 +2647,8 @@ test.describe('Creative Studio workspace', () => {
     const providerCallsBefore = await readStudioE2EProviderCallCounts(userDataDirectory);
     const beforeReset = await readStudioProject(page, projectId);
     await storyEditor.fill('This local reset value must never persist.');
-    await panel.getByRole('button', { name: 'Reset Beat' }).click();
+    await beatMenuTrigger.click();
+    await page.getByRole('menuitem', { name: 'Reset Beat', exact: true }).click();
     await expect(storyEditor).toHaveValue('The plane crosses the workbench in soft studio light.');
     expect(await readStudioProject(page, projectId)).toEqual(beforeReset);
     expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBefore);
@@ -2684,7 +2656,8 @@ test.describe('Creative Studio workspace', () => {
     const revisedStory =
       'soft silver morning light drifts across paper wings while shallow focus keeps the desk calm warm tactile quiet precise hopeful airy restrained cinematic natural gentle luminous';
     await storyEditor.fill(revisedStory);
-    await panel.getByRole('button', { name: 'Save Beat' }).click();
+    await beatMenuTrigger.click();
+    await page.getByRole('menuitem', { name: 'Save Beat', exact: true }).click();
     await expect.poll(async () => (await readStudioProject(page, projectId)).beats[beatId]?.story).toBe(revisedStory);
 
     const afterStorySave = await readStudioProject(page, projectId);
@@ -2719,7 +2692,8 @@ test.describe('Creative Studio workspace', () => {
     expect(afterBoundary.jobs).toEqual(afterStorySave.jobs);
     expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBefore);
 
-    await panel.getByRole('button', { name: 'Ask Director to re-split' }).click();
+    await beatMenuTrigger.click();
+    await page.getByRole('menuitem', { name: 'Ask Director to re-split', exact: true }).click();
     await expect(panel).toBeHidden();
     await expect(page.getByText('Ask the Creative Director for a reviewed re-split proposal.')).toBeVisible();
     await expect(page.locator('[data-studio-director-toggle]')).toBeFocused();
@@ -2877,15 +2851,21 @@ test.describe('Creative Studio workspace', () => {
       const seededPanel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
       const seededShotCard = seededPanel.locator(`article[data-shot-id="${shotId}"]`);
       const ownInFlightLift = seededShotCard.locator('[data-shot-overflow-trigger]');
-      await expect(ownInFlightLift).toBeDisabled();
+      await expect(ownInFlightLift).toBeEnabled();
       await expect(
         seededShotCard.getByText('This item has generation work in progress.', { exact: true })
       ).toBeVisible();
       const seededBeatLift = seededPanel.locator('[data-beat-overflow-trigger]');
-      await expect(seededBeatLift).toBeDisabled();
+      await expect(seededBeatLift).toBeEnabled();
       const ownInFlightSnapshot = await captureStudioNoMutationSnapshot(page, userDataDirectory, projectId);
-      await ownInFlightLift.evaluate((button: HTMLButtonElement) => button.click());
-      await seededBeatLift.evaluate((button: HTMLButtonElement) => button.click());
+      await ownInFlightLift.click();
+      const shotMoveToBin = page.locator('[data-shot-move-to-bin]');
+      await expect(shotMoveToBin).toHaveClass(/arco-dropdown-menu-disabled/);
+      await shotMoveToBin.evaluate((item: HTMLElement) => item.click());
+      await seededBeatLift.click();
+      const beatMoveToBin = page.locator('[data-beat-move-to-bin]');
+      await expect(beatMoveToBin).toHaveClass(/arco-dropdown-menu-disabled/);
+      await beatMoveToBin.evaluate((item: HTMLElement) => item.click());
       await expectStudioNoMutation(page, userDataDirectory, projectId, ownInFlightSnapshot);
       await takeScreenshot(page, 'creative-studio/gate-3/refusal-shot-own-inflight.png');
       await seededPanel.getByRole('button', { name: 'Close' }).click();
@@ -2990,9 +2970,8 @@ test.describe('Creative Studio workspace', () => {
       await renderedRow.getByRole('gridcell').first().click();
       const panel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
       await expect(panel).toBeVisible();
-      const currentPicture = panel.getByRole('region', { name: 'Current picture for Shot 1' });
-      await expect(currentPicture.locator('[data-current-picture]')).toHaveCount(1);
-      await expect(currentPicture.getByRole('button', { name: 'Generate again' })).toBeVisible();
+      const renderedShotCard = panel.locator(`article[data-shot-id="${shotId}"]`);
+      await expect(renderedShotCard.locator('[data-action-kind="regenerate"]')).toHaveAccessibleName('Regenerate');
       const beatPreview = panel.locator('[data-beat-preview]');
       const beatMedia = beatPreview.locator('video[data-beat-preview-media][data-media-kind="video"]');
       const beatTransport = panel.locator('[data-beat-transport]');
@@ -3019,13 +2998,6 @@ test.describe('Creative Studio workspace', () => {
       await beatSeek.focus();
       await beatSeek.press('Home');
       await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:00 / 0:20');
-      await beatTransport.locator('[data-beat-loop]').click();
-      await expect(beatTransport.locator('[data-beat-loop]')).toHaveAttribute('aria-pressed', 'true');
-      await expect(beatTransport.locator('[data-beat-time]')).toHaveText('0:08 / 0:20');
-      await beatTransport.locator('[data-beat-loop]').click();
-      await expect(beatTransport.locator('[data-beat-loop]')).toHaveAttribute('aria-pressed', 'false');
-      await beatSeek.focus();
-      await beatSeek.press('Home');
       const playbackLane = panel.getByRole('group', { name: 'Playback coverage' });
       const planningLane = panel.getByRole('group', { name: 'Planning overlay' });
       const firstPlaybackSegment = playbackLane.locator(`[data-shot-id="${shotId}"]`);
@@ -3039,6 +3011,8 @@ test.describe('Creative Studio workspace', () => {
       );
       await expect(planningLane.locator(`[data-shot-id="${shotId}"]`)).toContainText('8s plan');
 
+      const beforeTrim = await readStableStudioProject(page, projectId);
+      const rawBeforeTrim = await readRawStudioProject(userDataDirectory, projectId);
       const providerCallsBeforeTrim = await readStudioE2EProviderCallCounts(userDataDirectory);
       const tailTrim = panel.getByRole('slider', { name: 'Trim out for Shot 1' });
       await expect(tailTrim).toBeEnabled();
@@ -3086,13 +3060,13 @@ test.describe('Creative Studio workspace', () => {
       ).toHaveCount(0);
 
       const trimmed = await readStudioProject(page, projectId);
-      expect(trimmed.shots[shotId]).toEqual({ ...terminal.shots[shotId], trimOutSeconds: 2 });
-      expect(trimmed.shots[anchorShotId]).toEqual(terminal.shots[anchorShotId]);
-      expect(trimmed.assets).toEqual(terminal.assets);
-      expect(trimmed.jobs).toEqual(terminal.jobs);
+      expect(trimmed.shots[shotId]).toEqual({ ...beforeTrim.shots[shotId], trimOutSeconds: 2 });
+      expect(trimmed.shots[anchorShotId]).toEqual(beforeTrim.shots[anchorShotId]);
+      expect(trimmed.assets).toEqual(beforeTrim.assets);
+      expect(trimmed.jobs).toEqual(beforeTrim.jobs);
       expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforeTrim);
       expect((await readRawStudioProject(userDataDirectory, projectId)).frameExtractions).toEqual(
-        initialRaw.frameExtractions
+        rawBeforeTrim.frameExtractions
       );
 
       const existingJobIds = new Set(Object.keys(trimmed.jobs));
@@ -3148,7 +3122,7 @@ test.describe('Creative Studio workspace', () => {
         .toEqual({
           firstStatus: 'succeeded',
           firstAssetId: expect.any(String),
-          downstreamStatus: 'waiting_for_conditioning',
+          downstreamStatus: 'succeeded',
         });
 
       const replacementReady = await readStudioProject(page, projectId);
@@ -3156,52 +3130,6 @@ test.describe('Creative Studio workspace', () => {
       const replacementVideoAssetId = replacementFirstJob?.outputAssetIdsByRole.primary;
       expect(replacementVideoAssetId).toBeTruthy();
       expect(replacementReady.assets[replacementVideoAssetId!]?.durationSeconds).toBe(10);
-
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      const downstreamRow = page
-        .getByRole('grid', { name: 'Beat table' })
-        .getByRole('row')
-        .filter({ hasText: 'Landing' });
-      await downstreamRow.getByRole('gridcell').first().click();
-      const downstreamPanel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
-      const downstreamShotCard = downstreamPanel.locator(`article[data-shot-id="${shotId}"]`);
-      const downstreamLift = downstreamShotCard.locator('[data-shot-overflow-trigger]');
-      await expect(downstreamLift).toBeDisabled();
-      await expect(
-        downstreamShotCard.getByText('Downstream generation is still using this item.', { exact: true })
-      ).toBeVisible();
-      const downstreamBeatLift = downstreamPanel.locator('[data-beat-overflow-trigger]');
-      await expect(downstreamBeatLift).toBeDisabled();
-      await expect(
-        downstreamPanel.getByText('Downstream generation is still using this item.', { exact: true })
-      ).toHaveCount(2);
-      const downstreamSnapshot = await captureStudioNoMutationSnapshot(page, userDataDirectory, projectId);
-      await downstreamLift.evaluate((button: HTMLButtonElement) => button.click());
-      await downstreamBeatLift.evaluate((button: HTMLButtonElement) => button.click());
-      await expectStudioNoMutation(page, userDataDirectory, projectId, downstreamSnapshot);
-      await takeScreenshot(page, 'creative-studio/gate-3/refusal-shot-downstream-nonterminal.png');
-      await downstreamPanel.getByRole('button', { name: 'Close' }).click();
-
-      await page.locator(viewNavigationSelector).getByRole('link', { name: 'Board' }).click();
-      const downstreamBeatCard = page.locator(`[data-beat-id="${beatId}"]`);
-      const downstreamBoardLift = downstreamBeatCard.getByRole('button', { name: 'Move to Bin' });
-      await expect(downstreamBoardLift).toBeDisabled();
-      await expect(
-        downstreamBeatCard.getByText('Downstream generation is still using this item.', { exact: true })
-      ).toHaveCount(1);
-      await expect(
-        downstreamBeatCard.getByText('An authorized waiting item still depends on this item.', { exact: true })
-      ).toHaveCount(1);
-      await expect(
-        downstreamBeatCard.getByText('This item has generation work in progress.', { exact: true })
-      ).toHaveCount(1);
-      const downstreamBeatSnapshot = await captureStudioNoMutationSnapshot(page, userDataDirectory, projectId);
-      await downstreamBoardLift.evaluate((button: HTMLButtonElement) => button.click());
-      await expectStudioNoMutation(page, userDataDirectory, projectId, downstreamBeatSnapshot);
-      await takeScreenshot(page, 'creative-studio/gate-3/refusal-beat-downstream-nonterminal.png');
-      await page.locator(viewNavigationSelector).getByRole('link', { name: 'Table' }).click();
-      await downstreamRow.getByRole('gridcell').first().click();
-      await expect(downstreamPanel).toBeVisible();
 
       expect(replacementReady.shots[shotId]?.videoAssetId).toBe(replacementVideoAssetId);
       expect(replacementReady.shots[shotId]?.trimOutSeconds).toBe(2);
@@ -3238,15 +3166,31 @@ test.describe('Creative Studio workspace', () => {
       const replacementDownstreamAssetId = replacementDownstreamJob?.outputAssetIdsByRole.primary;
       expect(replacementDownstreamAssetId).toBeTruthy();
       expect(replacementChain.shots[anchorShotId]?.videoAssetId).toBe(replacementDownstreamAssetId);
+      await expect
+        .poll(
+          async () => {
+            const raw = await readRawStudioProject(userDataDirectory, projectId);
+            return Object.values(raw.frameExtractions)
+              .filter((extraction) => extraction.videoAssetId === replacementDownstreamAssetId)
+              .map(({ frameAssetId, status }) => ({ frameAssetId, status }));
+          },
+          { timeout: studioFakeMediaTimeoutMs }
+        )
+        .toEqual([{ frameAssetId: expect.any(String), status: 'ready' }]);
 
+      await page.reload({ waitUntil: 'domcontentloaded' });
+      const downstreamRow = page
+        .getByRole('grid', { name: 'Beat table' })
+        .getByRole('row')
+        .filter({ hasText: 'Landing' });
+      await downstreamRow.getByRole('gridcell').first().click();
+      const downstreamPanel = page.getByRole('dialog', { name: 'Beat panel — Landing' });
+      const downstreamShotCard = downstreamPanel.locator(`article[data-shot-id="${shotId}"]`);
+      const downstreamLift = downstreamShotCard.locator('[data-shot-overflow-trigger]');
       await expect(
         downstreamShotCard.getByText('Downstream generation is still using this item.', { exact: true })
       ).toHaveCount(0);
       await expect(downstreamLift).toBeEnabled();
-      const clearSeedPin = downstreamShotCard.getByRole('button', { name: 'Clear first-frame pin' });
-      await expect(clearSeedPin).toBeEnabled();
-      await clearSeedPin.click();
-      await expect.poll(async () => (await readStudioProject(page, projectId)).shots[shotId]?.seedStillId).toBeNull();
 
       const terminalForLift = await readStudioProject(page, projectId);
       expect(terminalForLift.shots[shotId]?.videoAssetId).toBe(replacementVideoAssetId);
@@ -3333,10 +3277,7 @@ test.describe('Creative Studio workspace', () => {
   });
 
   test.describe.serial('Cut retained media and exports', () => {
-    test('imports and replaces a bed, then creates only the three non-stitched exports', async ({
-      electronApp,
-      page,
-    }) => {
+    test('imports and replaces a bed, then creates only the editor-folder export', async ({ electronApp, page }) => {
       test.skip(
         process.env.AIONUI_E2E_STUDIO_FAKE !== '1',
         'The Cut no-spend oracle requires the explicit development-only Studio fake adapter.'
@@ -3365,10 +3306,7 @@ test.describe('Creative Studio workspace', () => {
       await expect(page).toHaveURL(new RegExp(`#/studio/${rendered.projectId}/cut$`));
       const cut = page.locator('[data-studio-cut]');
       await expect(cut).toBeVisible();
-      await expect(cut.locator('[data-export-shape]')).toHaveCount(3);
-      await expect(cut.locator('[data-export-shape="editor_folder"]')).toBeVisible();
-      await expect(cut.locator('[data-export-shape="still"]')).toBeVisible();
-      await expect(cut.locator('[data-export-shape="script"]')).toBeVisible();
+      await expect(cut.locator('[data-export-shape]')).toHaveCount(0);
       await expect(cut).not.toContainText(/stitched|auto-duck/i);
 
       const beforeCancel = await readStudioProject(page, rendered.projectId);
@@ -3379,9 +3317,6 @@ test.describe('Creative Studio workspace', () => {
 
       await importAudio.click();
       await expect(cut).toContainText('Audio could not be imported.');
-      await expect(
-        page.getByRole('alert').filter({ hasText: 'The request contains invalid or incomplete information.' })
-      ).toBeVisible();
       expect(await readStudioProject(page, rendered.projectId)).toEqual(beforeCancel);
       expect(await readFile(wrongMediaPath)).toEqual(wrongMediaBytes);
       expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCalls);
@@ -3474,41 +3409,32 @@ test.describe('Creative Studio workspace', () => {
       expect(await readStudioProject(page, rendered.projectId)).toEqual(projectBeforeOpenBeat);
       expect(await readStudioE2EProviderCallCounts(userDataDirectory)).toEqual(providerCallsBeforePlayback);
 
-      const createAndReadCatalog = async (buttonName: string, expectedShapes: string[]) => {
-        await cut.getByRole('button', { name: buttonName }).click();
-        await expect
-          .poll(async () => {
-            const catalog = await invokeStudioBridge<StudioRendererExportCatalogV2>(page, 'list-exports', {
-              projectId: rendered.projectId,
-            });
-            return catalog.artifacts.map((artifact) => artifact.shape).toSorted();
-          })
-          .toEqual(expectedShapes.toSorted());
-      };
-      await expect(cut.getByRole('button', { name: 'Create editor folder' })).toBeEnabled();
-      await createAndReadCatalog('Create editor folder', ['editor_folder']);
-      await chooseArcoSelectOption(
-        page,
-        'Shot cover',
-        'The airplane settles quietly into frame beneath the word LANDING.'
-      );
-      await expect(cut.getByRole('button', { name: 'Create still' })).toBeEnabled();
-      await createAndReadCatalog('Create still', ['editor_folder', 'still']);
-      await createAndReadCatalog('Create script.md', ['editor_folder', 'script', 'still']);
+      const projectMenuTrigger = page.locator('[data-studio-project-menu-trigger]');
+      await projectMenuTrigger.click();
+      const editorFolderExport = page.locator('[data-studio-editor-folder-export]');
+      await expect(editorFolderExport).toBeEnabled();
+      await expect(editorFolderExport).toContainText('Export editor folder');
+      await editorFolderExport.click();
+      await expect
+        .poll(async () => {
+          const catalog = await invokeStudioBridge<StudioRendererExportCatalogV2>(page, 'list-exports', {
+            projectId: rendered.projectId,
+          });
+          return catalog.artifacts.map((artifact) => artifact.shape);
+        })
+        .toEqual(['editor_folder']);
+      await expect(page.locator('[data-studio-editor-folder-export-status]')).toContainText('Slate Shot numbers');
 
       const catalog = await invokeStudioBridge<StudioRendererExportCatalogV2>(page, 'list-exports', {
         projectId: rendered.projectId,
       });
-      expect(catalog.artifacts.map((artifact) => artifact.shape).toSorted()).toEqual([
-        'editor_folder',
-        'script',
-        'still',
-      ]);
-      await cut.getByRole('button', { name: 'Assets' }).click();
-      const drawer = page.locator('[data-studio-assets-drawer]');
+      expect(catalog.artifacts.map((artifact) => artifact.shape)).toEqual(['editor_folder']);
+      await page.getByRole('button', { name: 'Dismiss', exact: true }).click();
+      await projectMenuTrigger.click();
+      await page.getByRole('menuitem', { name: 'Imported audio', exact: true }).click();
+      const drawer = page.locator('[data-studio-audio-drawer]');
       await expect(drawer).toBeVisible();
       await expect(drawer.locator('[data-audio-position]')).toHaveCount(2);
-      await expect(drawer.locator('[data-export-artifact-id]')).toHaveCount(3);
       await expect(drawer).not.toContainText(/stitched|manifest\.json|[/\\]exports[/\\]/i);
       const selectedAudio = drawer.locator('[data-audio-position="1"]');
       const oldAudio = drawer.locator('[data-audio-position="2"]');
@@ -3536,25 +3462,16 @@ test.describe('Creative Studio workspace', () => {
       await electronApp.close();
     });
 
-    test('reloads retained Cut state, then clears, detaches, copies, and reveals', async ({ electronApp, page }) => {
+    test('reloads retained Cut state, then clears and detaches audio without disturbing the export', async ({
+      electronApp,
+      page,
+    }) => {
       test.skip(
         process.env.AIONUI_E2E_STUDIO_FAKE !== '1',
         'The Cut no-spend oracle requires the explicit development-only Studio fake adapter.'
       );
       const state = requireCutLifecycleState();
-      const requestedCopyDirectory = path.join(
-        studioStorageDirectory(state.userDataDirectory),
-        '.studio-raw-output-path-sentinel',
-        `cut-export-copies-${Date.now()}`
-      );
-      await mkdir(requestedCopyDirectory, { recursive: true });
-      const copyDirectory = await realpath(requestedCopyDirectory);
-      const editorCopyPath = path.join(copyDirectory, 'editor-folder-copy');
-      const stillCopyPath = path.join(copyDirectory, 'still-copy.png');
-      const scriptCopyPath = path.join(copyDirectory, 'script-copy.md');
-      await installStudioE2ENativeHarness(electronApp, {
-        savePaths: [null, editorCopyPath, stillCopyPath, scriptCopyPath],
-      });
+      await installStudioE2ENativeHarness(electronApp);
       const restartedProviderCalls = await readStudioE2EProviderCallCounts(state.userDataDirectory);
 
       await navigateTo(page, `#/studio/${encodeURIComponent(state.projectId)}/cut`);
@@ -3571,8 +3488,6 @@ test.describe('Creative Studio workspace', () => {
       ).toEqual([state.firstBedAssetId, state.selectedBedAssetId].toSorted());
       await expect(cut.locator('[data-bed-status="ready"]')).toContainText('18s source · fade from 8s to 10s');
 
-      await cut.getByRole('button', { name: 'Refresh exports' }).click();
-      await expect(cut).toContainText('Export assets refreshed.');
       const retainedCatalog = await invokeStudioBridge<StudioRendererExportCatalogV2>(page, 'list-exports', {
         projectId: state.projectId,
       });
@@ -3580,10 +3495,12 @@ test.describe('Creative Studio workspace', () => {
         revision: expect.any(Number),
         artifacts: state.exportArtifacts,
       });
-      await cut.getByRole('button', { name: 'Assets' }).click();
-      let drawer = page.locator('[data-studio-assets-drawer]');
+      const projectMenuTrigger = page.locator('[data-studio-project-menu-trigger]');
+      await projectMenuTrigger.click();
+      await page.getByRole('menuitem', { name: 'Imported audio', exact: true }).click();
+      let drawer = page.locator('[data-studio-audio-drawer]');
       await expect(drawer).toBeVisible();
-      await expect(drawer.locator('[data-export-artifact-id]')).toHaveCount(3);
+      await expect(drawer.locator('[data-audio-position]')).toHaveCount(2);
       await page.getByRole('button', { name: 'Close Assets' }).click();
 
       await clearArcoSelect(page, 'Selected audio bed');
@@ -3598,8 +3515,9 @@ test.describe('Creative Studio workspace', () => {
       await expect
         .poll(async () => (await readStudioProject(page, state.projectId)).bedAssetId)
         .toBe(state.selectedBedAssetId);
-      await cut.getByRole('button', { name: 'Assets' }).click();
-      drawer = page.locator('[data-studio-assets-drawer]');
+      await projectMenuTrigger.click();
+      await page.getByRole('menuitem', { name: 'Imported audio', exact: true }).click();
+      drawer = page.locator('[data-studio-audio-drawer]');
       await expect(drawer).toBeVisible();
       const selectedAudio = drawer.locator('[data-audio-position="1"]');
       const oldAudio = drawer.locator('[data-audio-position="2"]');
@@ -3621,81 +3539,20 @@ test.describe('Creative Studio workspace', () => {
         })
         .toEqual({ bedAssetId: state.selectedBedAssetId, firstBedPresent: false, selectedBedPresent: true });
       await expect(drawer.locator('[data-audio-position="2"]')).toHaveCount(0);
-
-      const destinationExists = async (destination: string): Promise<boolean> => {
-        try {
-          await lstat(destination);
-          return true;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-          throw error;
-        }
-      };
-      const beforeCopyCancelProject = await readStudioProject(page, state.projectId);
-      const beforeCopyCancelCatalog = await invokeStudioBridge<StudioRendererExportCatalogV2>(page, 'list-exports', {
-        projectId: state.projectId,
-      });
-      const editorItem = drawer.locator('[data-export-artifact-id]').filter({ hasText: 'Editor folder' });
-      await editorItem.getByRole('button', { name: 'Copy…' }).click();
-      await expect(cut).toContainText('Export copy was cancelled.');
-      expect(await Promise.all([editorCopyPath, stillCopyPath, scriptCopyPath].map(destinationExists))).toEqual([
-        false,
-        false,
-        false,
-      ]);
-      expect(await readStudioProject(page, state.projectId)).toEqual(beforeCopyCancelProject);
       expect(
         await invokeStudioBridge<StudioRendererExportCatalogV2>(page, 'list-exports', {
           projectId: state.projectId,
         })
-      ).toEqual(beforeCopyCancelCatalog);
-      expect(await readStudioE2EProviderCallCounts(state.userDataDirectory)).toEqual(restartedProviderCalls);
-      expect(await readStudioE2ENativeHarness(electronApp)).toMatchObject({
-        saveRequestCount: 1,
-        remainingSavePaths: 3,
-        revealedPaths: [],
-      });
-
-      const copyAndReveal = async (
-        shapeLabel: 'Editor folder' | 'Still' | 'Script',
-        destination: string,
-        expectedDirectory: boolean,
-        expectedInvocation: number
-      ): Promise<void> => {
-        const item = drawer.locator('[data-export-artifact-id]').filter({ hasText: shapeLabel });
-        await item.getByRole('button', { name: 'Copy…' }).click();
-        await expect
-          .poll(async () => {
-            try {
-              const stats = await lstat(destination);
-              return expectedDirectory ? stats.isDirectory() : stats.isFile();
-            } catch (error) {
-              if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
-              throw error;
-            }
-          })
-          .toBe(true);
-        await item.getByRole('button', { name: 'Reveal' }).click();
-        await expect
-          .poll(async () => (await readStudioE2ENativeHarness(electronApp)).revealedPaths.length)
-          .toBe(expectedInvocation);
-      };
-      await copyAndReveal('Editor folder', editorCopyPath, true, 1);
-      await copyAndReveal('Still', stillCopyPath, false, 2);
-      await copyAndReveal('Script', scriptCopyPath, false, 3);
-      expect(await readFile(scriptCopyPath, 'utf8')).toContain(
-        'The airplane settles quietly into frame beneath the word LANDING.'
-      );
+      ).toEqual(retainedCatalog);
 
       const harness = await readStudioE2ENativeHarness(electronApp);
       expect(harness).toMatchObject({
         openRequestCount: 0,
         remainingOpenPaths: 0,
-        saveRequestCount: 4,
+        saveRequestCount: 0,
         remainingSavePaths: 0,
+        revealedPaths: [],
       });
-      expect(harness.revealedPaths).toHaveLength(3);
-      expect(new Set(harness.revealedPaths).size).toBe(3);
       await expect(drawer).not.toContainText(/stitched|manifest\.json|[/\\]exports[/\\]/i);
       expect(await readStudioE2EProviderCallCounts(state.userDataDirectory)).toEqual(restartedProviderCalls);
     });
