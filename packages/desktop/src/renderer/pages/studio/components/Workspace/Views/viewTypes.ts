@@ -72,6 +72,8 @@ export type WorkspaceProjectMenuProps = Pick<
     { ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }
   >;
   revealEditorFolder: (artifactId: string) => Promise<{ ok: true } | { ok: false; messageKey: string }>;
+  /** Imported audio is project housekeeping, so its drawer opens from the project menu. */
+  detachBedAudio: (assetId: string) => Promise<boolean>;
   routeCatalog: StudioRouteCatalogV2 | null;
   generationCapability?: StudioGenerationCapabilityV2 | null;
   briefDialogRequest?: number;

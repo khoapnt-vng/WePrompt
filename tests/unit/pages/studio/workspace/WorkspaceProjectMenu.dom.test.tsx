@@ -215,6 +215,7 @@ type MenuHarnessProps = {
     { ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }
   >;
   revealEditorFolder?: (artifactId: string) => Promise<{ ok: true } | { ok: false; messageKey: string }>;
+  detachBedAudio?: (assetId: string) => Promise<boolean>;
   mutations: WorkspaceMutationCallbacks;
 };
 
@@ -236,6 +237,7 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
     messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.storage',
   })),
   revealEditorFolder = vi.fn(async () => ({ ok: true as const })),
+  detachBedAudio = vi.fn(async () => true),
   mutations,
 }) => {
   const projected = projectWorkspace(project, workspaceStatus(project), chainStatus(project));
@@ -267,6 +269,7 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
       exportCatalog={exportCatalog}
       createEditorFolder={createEditorFolder}
       revealEditorFolder={revealEditorFolder}
+      detachBedAudio={detachBedAudio}
       briefDialogRequest={briefDialogRequest}
       briefRouteFocusRole={briefRouteFocusRole}
       drafts={staleRevision === undefined ? drafts : { ...drafts, staleRevision }}
@@ -740,6 +743,74 @@ describe('WorkspaceProjectMenu', () => {
 
     expect(dialog.querySelectorAll('[data-generation-block-role="image"]')).toHaveLength(1);
     expect(dialog.querySelectorAll('[data-generation-block-role="video"]')).toHaveLength(1);
+  });
+
+  it('opens imported audio from the menu, refuses to detach the selected bed, and announces a failure', async () => {
+    const project = makeProject();
+    const audio = (id: string, seconds: number) => ({
+      id,
+      projectId: project.id,
+      shotId: null,
+      mediaKind: 'audio' as const,
+      mimeType: 'audio/wav',
+      managedAsset: { collection: 'imports' as const, fileName: `${id}.wav` },
+      byteSize: 2048,
+      sha256: 'a'.repeat(64),
+      durationSeconds: seconds,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    });
+    project.assets.audio_bed = audio('audio_bed', 30) as (typeof project.assets)[string];
+    project.assets.audio_spare = audio('audio_spare', 20) as (typeof project.assets)[string];
+    project.bedAssetId = 'audio_bed';
+    const detachBedAudio = vi.fn(async () => false);
+    render(<MenuHarness project={project} detachBedAudio={detachBedAudio} mutations={makeMutations()} />);
+
+    const menu = await openMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'conversation.creativeStudio.workspace.assets.show' }));
+    const drawer = await waitFor(() => {
+      const node = document.querySelector<HTMLElement>('[data-studio-audio-drawer]');
+      expect(node).not.toBeNull();
+      return node!;
+    });
+
+    const detachButtons = within(drawer).getAllByRole('button', {
+      name: 'conversation.creativeStudio.workspace.assets.detach',
+    });
+    expect(detachButtons).toHaveLength(2);
+    // Exactly one is refused: the bed the film is using.
+    expect(detachButtons.filter((button) => button.hasAttribute('disabled'))).toHaveLength(1);
+
+    const spare = detachButtons.find((button) => !button.hasAttribute('disabled'))!;
+    fireEvent.click(spare);
+    // Arco's Popconfirm raises its own confirm button carrying the same label; the second one is it.
+    const confirm = await waitFor(() => {
+      const all = screen.getAllByRole('button', { name: 'conversation.creativeStudio.workspace.assets.detach' });
+      expect(all.length).toBeGreaterThan(2);
+      return all[all.length - 1]!;
+    });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(detachBedAudio).toHaveBeenCalledWith('audio_spare'));
+    // A refused detach is announced rather than failing silently.
+    await waitFor(() =>
+      expect(within(drawer).getByRole('status')).toHaveTextContent(
+        'conversation.creativeStudio.workspace.assets.detachFailed'
+      )
+    );
+  });
+
+  it('states an empty audio library rather than inventing imports', async () => {
+    render(<MenuHarness mutations={makeMutations()} />);
+
+    const menu = await openMenu();
+    fireEvent.click(within(menu).getByRole('menuitem', { name: 'conversation.creativeStudio.workspace.assets.show' }));
+    const drawer = await waitFor(() => {
+      const node = document.querySelector<HTMLElement>('[data-studio-audio-drawer]');
+      expect(node).not.toBeNull();
+      return node!;
+    });
+    expect(within(drawer).getByText('conversation.creativeStudio.workspace.assets.audioEmpty')).toBeVisible();
+    // The drawer no longer promises export records it does not show.
+    expect(drawer.textContent).not.toMatch(/export/i);
   });
 
   it('ignores a stale capability projection and focuses the requested route selector', async () => {

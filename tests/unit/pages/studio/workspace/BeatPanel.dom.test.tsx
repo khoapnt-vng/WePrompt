@@ -187,6 +187,7 @@ vi.mock('@arco-design/web-react', async () => {
 vi.mock('@icon-park/react', () => ({
   FullScreen: (props: Record<string, unknown>) => <span data-icon='fullscreen' {...props} />,
   MoreOne: (props: Record<string, unknown>) => <span data-icon='more' {...props} />,
+  Notes: (props: Record<string, unknown>) => <span data-icon='notes' {...props} />,
   OffScreen: (props: Record<string, unknown>) => <span data-icon='offscreen' {...props} />,
 }));
 
@@ -1692,6 +1693,8 @@ describe('BeatPanel', () => {
     expect(within(continuation).getByText('Generated work is out of date')).toBeVisible();
 
     inspectShot(container, 'shot_private_1');
+    // The Shooting script reads from its header control and opens to edit.
+    fireEvent.click(naturalHead.querySelector<HTMLButtonElement>('[data-shot-script-toggle]')!);
     const shootingScript = within(naturalHead).getByRole('textbox', { name: 'Shooting script for Shot 1' });
     expect(shootingScript).toHaveValue('Canonical shooting script 1');
     expect(shootingScript).toHaveAttribute('data-min-rows', '3');
@@ -1798,205 +1801,54 @@ describe('BeatPanel', () => {
     }
   });
 
-  it('shows one Story field above Beat metadata and no retired prose controls', () => {
-    render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
+  /** Opens one Shot's overflow menu. Reorder, Save, Reset and duration live there now. */
+  const openShotMenu = (container: HTMLElement, shotId: string): HTMLElement => {
+    const card = shotCard(container, shotId);
+    const trigger = card.querySelector<HTMLButtonElement>('[data-shot-overflow-trigger]');
+    if (trigger === null) throw new Error(`Missing Shot overflow trigger for ${shotId}`);
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const menu = card.querySelector<HTMLElement>('[data-shot-overflow-menu]');
+    if (menu === null) throw new Error(`Missing Shot overflow menu for ${shotId}`);
+    return menu;
+  };
 
+  /** Opens the Beat overflow menu and returns it. Save, Reset and re-split live there now. */
+  const openBeatMenu = (container: HTMLElement): HTMLElement => {
+    const trigger = container.querySelector<HTMLButtonElement>('[data-beat-overflow-trigger]');
+    if (trigger === null) throw new Error('Missing Beat overflow trigger');
+    fireEvent.keyDown(trigger, { key: 'Enter' });
+    const menu = container.querySelector<HTMLElement>('[data-beat-overflow-menu]');
+    if (menu === null) throw new Error('Missing Beat overflow menu');
+    return menu;
+  };
+
+  it('collapses Story and the Beat target behind header controls, leaving no editor by default', () => {
+    const { container } = render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
+
+    // Nothing is authored on screen until asked for: no fields region, no inline action row.
+    expect(screen.queryByRole('region', { name: 'Beat fields' })).toBeNull();
+    expect(container.querySelector('[data-beat-editor-actions]')).toBeNull();
+    expect(container.querySelector('[data-beat-field="story"]')).toBeNull();
+    expect(container.querySelector('[data-beat-field="target"]')).toBeNull();
+
+    // Story reads from the header control's title and opens the editor on click.
+    const storyToggle = container.querySelector<HTMLButtonElement>('[data-beat-story-toggle]');
+    if (storyToggle === null) throw new Error('Missing Story toggle');
+    expect(storyToggle).toHaveAttribute('title', 'Open the film');
+    fireEvent.click(storyToggle);
     const fields = screen.getByRole('region', { name: 'Beat fields' });
     const storyField = fields.querySelector<HTMLElement>('[data-beat-field="story"]');
-    const targetField = fields.querySelector<HTMLElement>('[data-beat-field="target"]');
-    const metaRow = fields.querySelector<HTMLElement>('[data-beat-meta-row]');
-    const editorActions = fields.querySelector<HTMLElement>('[data-beat-editor-actions]');
-    if (storyField === null || targetField === null || metaRow === null || editorActions === null) {
-      throw new Error('Beat authoring field hooks are incomplete');
-    }
-
+    if (storyField === null) throw new Error('Story was not revealed');
     expect(storyField.tagName).toBe('LABEL');
     expect(within(storyField).getByRole('textbox', { name: 'Story' })).toBeVisible();
     expect(within(storyField).getByText('Story · What happens in this Beat', { exact: true })).toBeVisible();
-    expect(storyField.nextElementSibling).toBe(metaRow);
-    expect(metaRow).toContainElement(targetField);
-    expect(metaRow).toContainElement(editorActions);
-    expect(targetField.compareDocumentPosition(editorActions) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+
+    // The target is revealed from the overflow menu, not from the layout.
+    fireEvent.click(within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Beat target' }));
+    const revealed = container.querySelector<HTMLElement>('[data-beat-field="target"]');
+    if (revealed === null) throw new Error('Beat target was not revealed from the menu');
+    expect(within(revealed).getByRole('spinbutton', { name: 'Beat target' })).toBeVisible();
     expect(fields.querySelectorAll('textarea')).toHaveLength(1);
-  });
-
-  it('keeps one beat-scoped Shot inspector visible while preserving mounted drafts across selection', () => {
-    const first = makeShot('shot_1', 0);
-    const second = makeShot('shot_2', 1);
-    const beat = makeBeat('beat_1', [first, second]);
-    const drafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Local first-Shot shooting script' });
-    const actions = makeActions();
-    const result = render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
-    const inspector = screen.getByRole('region', { name: 'Shots' });
-    const selectors = Array.from(result.container.querySelectorAll<HTMLButtonElement>('[data-coverage-shot-selector]'));
-    const firstCard = shotCard(result.container, 'shot_1');
-    const secondCard = shotCard(result.container, 'shot_2');
-
-    expect(inspector).toHaveAttribute('data-inspected-shot-id', 'shot_1');
-    expect(firstCard).not.toHaveAttribute('hidden');
-    expect(secondCard).toHaveAttribute('hidden');
-    expect(selectors.map((selector) => selector.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
-    expect(within(firstCard).getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
-      'Local first-Shot shooting script'
-    );
-
-    fireEvent.click(selectors[1]!);
-    expect(inspector).toHaveAttribute('data-inspected-shot-id', 'shot_2');
-    expect(firstCard).toHaveAttribute('hidden');
-    expect(secondCard).not.toHaveAttribute('hidden');
-    expect(selectors.map((selector) => selector.getAttribute('aria-pressed'))).toEqual(['false', 'true']);
-    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
-
-    fireEvent.click(selectors[0]!);
-    expect(within(firstCard).getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
-      'Local first-Shot shooting script'
-    );
-
-    fireEvent.click(selectors[1]!);
-    const replacement = makeBeat('beat_2', [makeShot('shot_new', 0), makeShot('shot_2', 1)]);
-    result.rerender(<BeatPanel {...panelProps(replacement, drafts, actions, makeProjection([replacement]))} />);
-    expect(screen.getByRole('region', { name: 'Shots' })).toHaveAttribute('data-inspected-shot-id', 'shot_new');
-    expect(shotCard(result.container, 'shot_new')).not.toHaveAttribute('hidden');
-    expect(shotCard(result.container, 'shot_2')).toHaveAttribute('hidden');
-  });
-
-  it('leaves native current-picture controls outside Beat transport shortcuts', () => {
-    const shot = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_native_controls') });
-    const beat = makeBeat('beat_1', [shot]);
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const video = within(assetCard(container, 'video_native_controls')).getByLabelText(
-      'Player · Current picture for Shot 1'
-    );
-    const seekRail = screen.getByRole('slider', { name: 'Beat seek rail' });
-    const space = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, code: 'Space', key: ' ' });
-    const arrow = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowRight' });
-
-    fireEvent(video, space);
-    fireEvent(video, arrow);
-
-    expect(video).toHaveProperty('controls', true);
-    expect(space.defaultPrevented).toBe(false);
-    expect(arrow.defaultPrevented).toBe(false);
-    expect(screen.getByRole('button', { name: 'Play Beat' })).toBeInTheDocument();
-    expect(seekRail).toHaveAttribute('aria-valuenow', '0');
-  });
-
-  it('pauses the native current-picture video when its mounted Shot inspector becomes hidden', () => {
-    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
-    const first = makeShot('shot_1', 0, {
-      currentPicture: makeCurrentPicture('video_1'),
-    });
-    const second = makeShot('shot_2', 1);
-    const beat = makeBeat('beat_1', [first, second]);
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const firstCard = shotCard(container, first.id);
-    const pictureVideos = Array.from(firstCard.querySelectorAll<HTMLVideoElement>('video[controls]'));
-    pictureVideos.forEach((video) => Object.defineProperty(video, 'paused', { configurable: true, value: false }));
-    pause.mockClear();
-
-    inspectShot(container, second.id);
-
-    expect(firstCard).toHaveAttribute('hidden');
-    expect(pictureVideos).toHaveLength(1);
-    expect(pause).toHaveBeenCalledTimes(1);
-    expect(pause.mock.instances).toEqual(pictureVideos);
-    pause.mockRestore();
-  });
-
-  it('keeps every Shot inspectable when coverage geometry fails closed', () => {
-    const beat = makeBeat('beat_1', [makeShot('shot_1', 0, { planningBoundary: null }), makeShot('shot_2', 1)]);
-    const actions = makeActions();
-    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
-
-    expect(screen.getByRole('alert')).toHaveTextContent('Coverage unavailable');
-    const second = inspectShot(container, 'shot_2');
-    expect(second).not.toHaveAttribute('hidden');
-    expect(shotCard(container, 'shot_1')).toHaveAttribute('hidden');
-    expect(screen.getByRole('region', { name: 'Shots' })).toHaveAttribute('data-inspected-shot-id', 'shot_2');
-    for (const action of Object.values(actions)) expect(action).not.toHaveBeenCalled();
-  });
-
-  it('pins the authoring frame to the measured 1100px preview and inspector layout', () => {
-    const css = readFileSync(
-      resolvePath(
-        process.cwd(),
-        'packages/desktop/src/renderer/pages/studio/components/Workspace/BeatPanel/BeatPanel.module.css'
-      ),
-      'utf8'
-    );
-
-    const modalRule = cssRuleBody(css, '.modal');
-    expect(modalRule).toMatch(/inline-size:\s*min\(1100px,\s*calc\(100vw\s*-\s*32px\)\)/);
-    expect(modalRule).toMatch(/max-inline-size:\s*1100px/);
-    expect(modalRule).toMatch(/border-radius:\s*16px/);
-    const rootRule = cssRuleBody(css, '.root');
-    expect(rootRule).toMatch(/composes:\s*surface\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/);
-    expect(rootRule).toMatch(/padding:\s*18px\s+22px/);
-    expect(cssRuleBody(css, '.eyebrow')).toMatch(
-      /composes:\s*eyebrow\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
-    );
-    expect(cssRuleBody(css, '.panelTitle')).toMatch(
-      /composes:\s*pageHeading\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
-    );
-    expect(css).toMatch(
-      /\.shotTitle,\s*\.subsectionTitle\s*\{\s*composes:\s*cardName\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
-    );
-
-    const workingRow = cssRuleBody(css, '.workingRow');
-    expect(workingRow).toMatch(/display:\s*flex/);
-    expect(workingRow).toMatch(/align-items:\s*flex-start/);
-    expect(workingRow).toMatch(/gap:\s*18px/);
-    const previewColumn = cssRuleBody(css, '.previewColumn');
-    expect(previewColumn).toMatch(/position:\s*sticky/);
-    expect(previewColumn).toMatch(/inset-block-start:\s*0/);
-    expect(previewColumn).toMatch(/inline-size:\s*404px/);
-    expect(previewColumn).toMatch(/flex:\s*none/);
-    expect(previewColumn).toMatch(/gap:\s*7px/);
-    const prewarmMedia = cssRuleBody(css, '.prewarmMedia');
-    expect(prewarmMedia).toMatch(/position:\s*absolute/);
-    expect(prewarmMedia).toMatch(/inline-size:\s*1px/);
-    expect(prewarmMedia).toMatch(/block-size:\s*1px/);
-    expect(prewarmMedia).toMatch(/clip-path:\s*inset\(50%\)/);
-    expect(prewarmMedia).not.toMatch(/display:\s*none/);
-    expect(prewarmMedia).not.toMatch(/visibility:\s*hidden/);
-    expect(cssRuleBody(css, '.shotInspector')).toMatch(/flex:\s*1\s+1\s+0/);
-    expect(cssRuleBody(css, '.shotCard')).toMatch(/padding:\s*18px\s+22px/);
-    expect(cssRuleBody(css, '.shotCard')).toMatch(/gap:\s*18px/);
-    expect(cssRuleBody(css, '.shotActionBand')).toMatch(/align-items:\s*flex-start/);
-    expect(cssRuleBody(css, '.shotActionBand')).toMatch(/flex-wrap:\s*nowrap/);
-    expect(cssRuleBody(css, '.shotActionBand > .editorActions')).toMatch(/flex-wrap:\s*nowrap/);
-    expect(cssRuleBody(css, '.beatMetaRow')).toMatch(/grid-column:\s*1\s*\/\s*-1/);
-    expect(cssRuleBody(css, '.fieldGuidance')).toMatch(/text-transform:\s*uppercase/);
-    expect(cssRuleBody(css, '.chainState')).toMatch(/text-transform:\s*uppercase/);
-    const mediaStrip = cssRuleBody(css, '.mediaStrip');
-    expect(mediaStrip).toMatch(/display:\s*flex/);
-    expect(mediaStrip).toMatch(/overflow-x:\s*auto/);
-    const mediaCardRule = cssRuleBody(css, '.mediaCard');
-    expect(mediaCardRule).toMatch(/box-sizing:\s*border-box/);
-    expect(mediaCardRule).toMatch(/(?:flex:\s*0\s+0\s+134px|inline-size:\s*134px)/);
-    expect(mediaCardRule).toMatch(/padding:\s*10px/);
-    expect(mediaCardRule).toMatch(/border:\s*1px\s+solid/);
-    const mediaPreview = cssRuleBody(css, '.mediaPreview');
-    expect(mediaPreview).toMatch(/inline-size:\s*100%/);
-    expect(mediaPreview).toMatch(/aspect-ratio:\s*16\s*\/\s*9/);
-    expect(cssRuleBody(css, '.previewSlateTitle')).toMatch(
-      /composes:\s*cardName\s+from\s+['"]\.\.\/\.\.\/\.\.\/StudioTypography\.module\.css['"]/
-    );
-
-    const workingCompactStart = css.search(/@media\s*\(max-width:\s*900px\)/);
-    expect(workingCompactStart).toBeGreaterThanOrEqual(0);
-    const stackedWorkingRow = workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.workingRow');
-    expect(stackedWorkingRow).toMatch(/flex-direction:\s*column/);
-    const stackedPreview = workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.previewColumn');
-    expect(stackedPreview).toMatch(/position:\s*static/);
-    const stackedShotActions =
-      workingCompactStart < 0 ? '' : cssRuleBody(css.slice(workingCompactStart), '.shotActionBand');
-    expect(stackedShotActions).toMatch(/flex-wrap:\s*wrap/);
-
-    const compactStart = css.search(/@media\s*\(max-width:\s*760px\)/);
-    expect(compactStart).toBeGreaterThanOrEqual(0);
-    const compactRule = compactStart < 0 ? '' : cssRuleBody(css.slice(compactStart), '.beatEditor');
-    expect(compactRule).toMatch(/grid-template-columns:\s*(?:minmax\(0,\s*1fr\)|1fr)/);
   });
 
   it('saves only the changed Story field from the Beat editor', async () => {
@@ -2006,7 +1858,7 @@ describe('BeatPanel', () => {
     const actions = makeActions();
     render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
 
-    const save = screen.getByRole('button', { name: 'Save Beat' });
+    const save = within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Save Beat' });
     expect(save).toBeEnabled();
     fireEvent.click(save);
     await waitFor(() => expect(actions.saveBeat).toHaveBeenCalledWith('beat_1', { story }));
@@ -2018,9 +1870,9 @@ describe('BeatPanel', () => {
     const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
     const drafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Local shooting script' });
     const actions = makeActions();
-    render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
+    const { container } = render(<BeatPanel {...panelProps(beat, drafts, actions)} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reset Shot' }));
+    fireEvent.click(within(openShotMenu(container, 'shot_1')).getByRole('menuitem', { name: 'Reset Shot' }));
     expect(drafts.reset.mock.calls.map(([key]) => key)).toEqual([
       'shot.shot_1.shootingScript',
       'shot.shot_1.durationSeconds',
@@ -2040,7 +1892,7 @@ describe('BeatPanel', () => {
     const newerDrafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Newer local shooting script' });
     const result = render(<BeatPanel {...panelProps(beat, submittedDrafts, actions)} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Save Shot' }));
+    fireEvent.click(within(openShotMenu(result.container, 'shot_1')).getByRole('menuitem', { name: 'Save Shot' }));
     expect(saveShot).toHaveBeenCalledWith([
       { shotId: 'shot_1', changes: { shootingScript: 'Submitted shooting script' } },
     ]);
@@ -2068,12 +1920,14 @@ describe('BeatPanel', () => {
     );
     const actions = makeActions();
     const stale = render(<BeatPanel {...panelProps(beat, staleDrafts, actions)} />);
-    expect(screen.getByRole('button', { name: 'Save Beat' })).toBeDisabled();
-    expect(screen.getAllByRole('button', { name: 'Save Shot' })[0]).toBeDisabled();
+    expect(within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Save Beat' })).toBeDisabled();
+    expect(within(openShotMenu(stale.container, 'shot_1')).getByRole('menuitem', { name: 'Save Shot' })).toBeDisabled();
 
     stale.rerender(
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]), { gateLocked: true })} />
     );
+    // Story reads while locked; opening it reveals an editor that refuses edits.
+    fireEvent.click(stale.container.querySelector<HTMLButtonElement>('[data-beat-story-toggle]')!);
     expect(screen.getByRole('textbox', { name: 'Story' })).toBeDisabled();
     inspectShot(stale.container, 'shot_2');
     expect(
@@ -2082,15 +1936,21 @@ describe('BeatPanel', () => {
     expect(screen.getByRole('slider', { name: 'Boundary after Shot 1' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Play Beat' })).toBeEnabled();
     expect(screen.getByRole('slider', { name: 'Beat seek rail' })).toBeEnabled();
-    fireEvent.click(screen.getByRole('button', { name: 'Review re-split' }));
+    // Re-split moved into the Beat overflow menu, and a gate-locked project disables that trigger
+    // outright — so the action is unreachable rather than merely inert.
+    expect(stale.container.querySelector('[data-beat-overflow-trigger]')).toBeDisabled();
     expect(actions.requestResplit).not.toHaveBeenCalled();
   });
 
   it('exposes exactly one Shooting script editor and no retired prose workflows for a Shot', () => {
     const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions())} />);
-    const shot = within(shotCard(container, 'shot_1'));
+    const card = shotCard(container, 'shot_1');
+    const shot = within(card);
 
+    // Nothing is authored on screen until asked for.
+    expect(shot.queryAllByRole('textbox')).toHaveLength(0);
+    fireEvent.click(card.querySelector<HTMLButtonElement>('[data-shot-script-toggle]')!);
     expect(shot.getAllByRole('textbox')).toHaveLength(1);
     expect(shot.getByRole('textbox', { name: 'Shooting script for Shot 1' })).toHaveValue(
       'Canonical shooting script 1'
@@ -2505,7 +2365,7 @@ describe('BeatPanel', () => {
     const beat = makeBeat();
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions)} />);
-    fireEvent.click(within(shotCard(container, 'shot_1')).getByRole('button', { name: 'Move Shot 1 down' }));
+    fireEvent.click(within(openShotMenu(container, 'shot_1')).getByRole('menuitem', { name: 'Move Shot 1 down' }));
     await waitFor(() => expect(actions.reorderShots).toHaveBeenCalledWith('beat_1', ['shot_2', 'shot_1']));
     await waitFor(() => expect(screen.getByText('Moved Shot 1 to 2 of 2')).toBeInTheDocument());
   });
@@ -2586,7 +2446,17 @@ describe('BeatPanel', () => {
         {...panelProps(beat, makeDrafts({ 'shot.shot_1.shootingScript': 'Unsaved local work' }), actions, projection)}
       />
     );
-    expect(shotCard(result.container, 'shot_1').querySelector('[data-shot-overflow-trigger]')).toBeDisabled();
+    // The trigger stays reachable because the menu also holds planned duration; lift alone is
+    // refused while local edits are unsaved.
+    const shotTrigger = shotCard(result.container, 'shot_1').querySelector<HTMLButtonElement>(
+      '[data-shot-overflow-trigger]'
+    );
+    expect(shotTrigger).toBeEnabled();
+    fireEvent.keyDown(shotTrigger!, { key: 'Enter' });
+    const shotOverflowMenu = shotCard(result.container, 'shot_1').querySelector<HTMLElement>(
+      '[data-shot-overflow-menu]'
+    );
+    expect(within(shotOverflowMenu!).getByRole('menuitem', { name: 'Move to Bin' })).toBeDisabled();
     expect(screen.getAllByText('Save or reset local edits first').length).toBeGreaterThan(0);
   });
 

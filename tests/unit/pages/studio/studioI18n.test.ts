@@ -374,21 +374,6 @@ const expectedLeaves = [
   'assets.detached',
   'assets.detachFailed',
   'assets.cancel',
-  'assets.exportsTitle',
-  'assets.exportsEmpty',
-  'assets.shape.editor_folder',
-  'assets.shape.still',
-  'assets.shape.script',
-  'assets.exportFacts',
-  'assets.exportFacts_one',
-  'assets.exportFacts_other',
-  'assets.copy',
-  'assets.reveal',
-  'assets.copied',
-  'assets.copyCancelled',
-  'assets.copyFailed',
-  'assets.revealed',
-  'assets.revealFailed',
   'bin.title',
   'bin.description',
   'bin.empty',
@@ -1578,7 +1563,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(19);
+    expect(pluralBases).toHaveLength(18);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));

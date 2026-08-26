@@ -1144,3 +1144,18 @@ div.previewMedia {
     flex-direction: column;
   }
 }
+
+/* First frames and the current picture are one idea shown twice — what the Shot starts from and
+   what it currently is. They sit side by side so the frames get the width instead of stacking. */
+.mediaRegions {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.mediaRegions > * {
+  min-inline-size: 0;
+  flex: 1 1 280px;
+}

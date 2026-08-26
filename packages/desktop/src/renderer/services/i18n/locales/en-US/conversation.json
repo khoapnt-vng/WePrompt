@@ -1562,10 +1562,10 @@
         "openBeat": "Open Beat"
       },
       "assets": {
-        "show": "Assets",
-        "title": "Cut Assets",
+        "show": "Imported audio",
+        "title": "Imported audio",
         "close": "Close Assets",
-        "description": "Project-owned audio imports and sanitized export records. Managed file names and locations stay private.",
+        "description": "Audio files imported into this project. Managed file names and locations stay private.",
         "audioTitle": "Imported audio",
         "audioEmpty": "No audio has been imported.",
         "audioItem": "Imported bed {{position}}",
@@ -1576,24 +1576,7 @@
         "detachContent": "Only this unselected audio import is removed. The selected bed cannot be detached.",
         "detached": "Audio import detached.",
         "detachFailed": "Audio import was not detached.",
-        "cancel": "Cancel",
-        "exportsTitle": "Created exports",
-        "exportsEmpty": "No exports have been created.",
-        "shape": {
-          "editor_folder": "Editor folder",
-          "still": "Still",
-          "script": "Script"
-        },
-        "exportFacts": "{{bytes}} bytes · {{count}} files · source revision {{revision}}",
-        "exportFacts_one": "{{bytes}} bytes · {{count}} file · source revision {{revision}}",
-        "exportFacts_other": "{{bytes}} bytes · {{count}} files · source revision {{revision}}",
-        "copy": "Copy…",
-        "reveal": "Reveal",
-        "copied": "Export copied.",
-        "copyCancelled": "Export copy was cancelled.",
-        "copyFailed": "Export could not be copied.",
-        "revealed": "Export revealed.",
-        "revealFailed": "Export could not be revealed."
+        "cancel": "Cancel"
       },
       "bin": {
         "title": "Bin",
