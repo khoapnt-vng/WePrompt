@@ -492,7 +492,9 @@ const messageKeyFromError = (error: unknown, fallback: string): string =>
   error instanceof Error && SAFE_DIRECTOR_REJECTION_MESSAGE_KEYS.has(error.message) ? error.message : fallback;
 
 type DirectorAuthorityOutcome =
-  { kind: 'trusted' } | { kind: 'mismatch' } | { kind: 'unavailable'; messageKey: string };
+  | { kind: 'trusted' }
+  | { kind: 'mismatch' }
+  | { kind: 'unavailable'; messageKey: string };
 type DirectorAuthorityCheck = { snapshot: string; promise: Promise<DirectorAuthorityOutcome> };
 const directorAuthorityChecks = new Map<string, DirectorAuthorityCheck>();
 
@@ -513,10 +515,12 @@ const checkPersistedDirectorAuthority = (
         ? { kind: 'trusted' }
         : { kind: 'mismatch' };
     })
-    .catch((error): DirectorAuthorityOutcome => ({
-      kind: 'unavailable',
-      messageKey: messageKeyFromError(error, DIRECTOR_SESSION_VERIFICATION_KEY),
-    }))
+    .catch(
+      (error): DirectorAuthorityOutcome => ({
+        kind: 'unavailable',
+        messageKey: messageKeyFromError(error, DIRECTOR_SESSION_VERIFICATION_KEY),
+      })
+    )
     .then((outcome) => {
       if (outcome.kind === 'unavailable' && directorAuthorityChecks.get(key)?.promise === promise) {
         directorAuthorityChecks.delete(key);

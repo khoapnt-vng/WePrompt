@@ -25,7 +25,8 @@ const harness = vi.hoisted(() => ({
   chatUnmounts: 0,
   renderedChatConversation: undefined as TChatConversation | undefined,
   beforeSend: undefined as
-    ((input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>) | undefined,
+    | ((input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>)
+    | undefined,
   uuid: vi.fn(),
   descriptor: vi.fn(),
   authority: vi.fn(),
