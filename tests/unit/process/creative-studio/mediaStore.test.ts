@@ -138,6 +138,7 @@ const makeStoreV2 = async (
     includeAuthorizedJob?: boolean;
     includeSeedAsset?: boolean;
     projectReferenceId?: string;
+    projectReferenceKind?: 'character' | 'background';
     adapterId?: StudioJobV2['provider']['adapterId'];
     prompt?: string;
   } = {}
@@ -236,7 +237,7 @@ const makeStoreV2 = async (
           references: {
             [options.projectReferenceId]: {
               id: options.projectReferenceId,
-              kind: 'character' as const,
+              kind: options.projectReferenceKind ?? ('character' as const),
               label: 'Ming',
               prompt: 'A careful engineer',
               approvedAssetId: null,
@@ -624,6 +625,37 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     expect(studioImageHasVariationGridV2({ data: image([10, 10, 230, 230]), width: 40, height: 12, channels: 3 })).toBe(
       false
     );
+  });
+
+  it('detects repeated subject layouts on a continuous background only when repetition analysis is requested', () => {
+    const width = 120;
+    const height = 72;
+    const channels = 3;
+    const render = (repeatAcrossQuarters: boolean): Uint8Array => {
+      const bytes = new Uint8Array(width * height * channels);
+      for (let row = 0; row < height; row += 1) {
+        for (let column = 0; column < width; column += 1) {
+          const localColumn = repeatAcrossQuarters ? column % 30 : column;
+          const subjectCenter = repeatAcrossQuarters ? 15 : 60;
+          const body = row >= 24 && row <= 62 && Math.abs(localColumn - subjectCenter) <= 6;
+          const head = (row - 16) ** 2 + (localColumn - subjectCenter) ** 2 <= 36;
+          const value = body || head ? 32 : 172 + Math.floor(column / 24) + (row >= 50 ? 8 : 0);
+          const offset = (row * width + column) * channels;
+          bytes[offset] = value;
+          bytes[offset + 1] = value;
+          bytes[offset + 2] = value;
+        }
+      }
+      return bytes;
+    };
+    const repeated = render(true);
+    const single = render(false);
+
+    expect(studioImageHasVariationGridV2({ data: repeated, width, height, channels })).toBe(true);
+    expect(
+      studioImageHasVariationGridV2({ data: repeated, width, height, channels, detectRepeatedSubjects: false })
+    ).toBe(false);
+    expect(studioImageHasVariationGridV2({ data: single, width, height, channels })).toBe(false);
   });
 
   it('rejects stale expected read proofs both before open and after content verification', async () => {
@@ -1033,41 +1065,56 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
   });
 
   it.each([
-    { label: 'first frame', options: {} },
-    { label: 'project reference', options: { projectReferenceId: 'reference_character' } },
-  ])('rejects a detected variation grid before it becomes the current $label', async ({ options }) => {
-    const { rootDir, store, project } = await makeStoreV2(options);
-    const detectImageVariationGridV2 = vi.fn(async () => true);
-    const media = createStudioMediaStore({
-      store,
-      createId: () => 'refused_grid_output',
-      detectImageVariationGridV2,
-    });
+    { label: 'first frame', options: {}, detectRepeatedSubjects: false },
+    {
+      label: 'project reference',
+      options: { projectReferenceId: 'reference_character' },
+      detectRepeatedSubjects: true,
+    },
+    {
+      label: 'background reference',
+      options: { projectReferenceId: 'reference_background', projectReferenceKind: 'background' as const },
+      detectRepeatedSubjects: false,
+    },
+  ])(
+    'rejects a detected variation grid before it becomes the current $label',
+    async ({ options, detectRepeatedSubjects }) => {
+      const { rootDir, store, project } = await makeStoreV2(options);
+      const detectImageVariationGridV2 = vi.fn(async () => true);
+      const media = createStudioMediaStore({
+        store,
+        createId: () => 'refused_grid_output',
+        detectImageVariationGridV2,
+      });
 
-    await expect(
-      media.persistProviderOutputForJobV2({
-        projectId: project.id,
-        shotId: 'projectReferenceId' in options ? null : 'shot_1',
-        jobId: 'job_1',
-        mediaKind: 'image',
-        declaredMimeType: 'image/png',
-        declaredByteSize: png.length,
-        body: Readable.from([png]),
-      })
-    ).rejects.toMatchObject({ code: 'seed_still_variation_grid' });
+      await expect(
+        media.persistProviderOutputForJobV2({
+          projectId: project.id,
+          shotId: 'projectReferenceId' in options ? null : 'shot_1',
+          jobId: 'job_1',
+          mediaKind: 'image',
+          declaredMimeType: 'image/png',
+          declaredByteSize: png.length,
+          body: Readable.from([png]),
+        })
+      ).rejects.toMatchObject({ code: 'seed_still_variation_grid' });
 
-    expect(detectImageVariationGridV2).toHaveBeenCalledOnce();
-    const loaded = await store.getProjectV2(project.id);
-    if (loaded.status !== 'supported') throw new Error('Grid-refusal project disappeared');
-    expect(loaded.project.assets).not.toHaveProperty('refused_grid_output');
-    expect(loaded.project.jobs.job_1).toMatchObject({ status: 'running', outputAssetIds: [] });
-    if ('projectReferenceId' in options) {
-      expect(loaded.project.references.reference_character!.approvedAssetId).toBeNull();
-    } else {
-      expect(loaded.project.shots.shot_1!.seedStillId).toBeNull();
+      expect(detectImageVariationGridV2).toHaveBeenCalledExactlyOnceWith({
+        filePath: expect.stringMatching(/[/\\]assets[/\\]refused_grid_output\.png$/),
+        detectRepeatedSubjects,
+      });
+      const loaded = await store.getProjectV2(project.id);
+      if (loaded.status !== 'supported') throw new Error('Grid-refusal project disappeared');
+      expect(loaded.project.assets).not.toHaveProperty('refused_grid_output');
+      expect(loaded.project.jobs.job_1).toMatchObject({ status: 'running', outputAssetIds: [] });
+      if ('projectReferenceId' in options) {
+        expect(loaded.project.references[options.projectReferenceId]!.approvedAssetId).toBeNull();
+      } else {
+        expect(loaded.project.shots.shot_1!.seedStillId).toBeNull();
+      }
+      await expect(fs.readdir(path.join(rootDir, project.id, 'assets'))).resolves.toEqual([]);
     }
-    await expect(fs.readdir(path.join(rootDir, project.id, 'assets'))).resolves.toEqual([]);
-  });
+  );
 
   it('commits an exact live project-reference candidate after an unrelated Shot changes', async () => {
     const { store, project } = await makeStoreV2({ projectReferenceId: 'reference_character' });
@@ -1597,6 +1644,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
             frameAssetId: null,
             status: 'pending',
             errorCode: null,
+            attemptCount: 0,
           },
         },
       },
@@ -3264,6 +3312,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
       status: 'ready',
       frameAssetId: frameId,
       errorCode: null,
+      attemptCount: 1,
       createdAt: base.createdAt,
       updatedAt: base.updatedAt,
     };
@@ -3736,6 +3785,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });
@@ -3845,6 +3895,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });
@@ -3865,6 +3916,124 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
     await expect(fs.access(path.join(rootDir, project.id, 'parts', 'frame_asset_1.part'))).rejects.toMatchObject({
       code: 'ENOENT',
+    });
+  });
+
+  it('retries a failed continuity frame on resume with durable bounded backoff', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const conditioningFrameExtractor = vi
+      .fn<(input: { destinationPath: string }) => Promise<{ source: 'local_decode' }>>()
+      .mockRejectedValueOnce(new StudioConditioningFrameError('decode_failed'))
+      .mockImplementation(async ({ destinationPath }) => {
+        await fs.writeFile(destinationPath, png);
+        return { source: 'local_decode' };
+      });
+    const sleepConditioningFrameRetry = vi.fn(async () => undefined);
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'frame_failed', 'frame_recovered'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor,
+      sleepConditioningFrameRetry,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      videoAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.videoAssetId = 'take_1';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        videoAssetId: 'take_1',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+        attemptCount: 0,
+      };
+      return current;
+    });
+
+    await expect(media.extractConditioningFrameV2({ projectId: project.id, extractionId })).rejects.toMatchObject({
+      code: 'decode_failed',
+    });
+    await media.resumeConditioningFramesV2([project.id]);
+
+    expect(sleepConditioningFrameRetry).toHaveBeenCalledExactlyOnceWith(250);
+    expect(conditioningFrameExtractor).toHaveBeenCalledTimes(2);
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        frameExtractions: {
+          [extractionId]: { status: 'ready', frameAssetId: 'frame_recovered', errorCode: null, attemptCount: 2 },
+        },
+      },
+    });
+  });
+
+  it('stops retrying a permanently failed continuity frame after three durable attempts', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const conditioningFrameExtractor = vi.fn(async () => {
+      throw new StudioConditioningFrameError('decode_failed');
+    });
+    const sleepConditioningFrameRetry = vi.fn(async () => undefined);
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_1', 'frame_attempt_1', 'frame_attempt_2', 'frame_attempt_3'),
+      probeVideoDurationSecondsV2: async () => 10,
+      conditioningFrameExtractor,
+      sleepConditioningFrameRetry,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'shot_1',
+      videoAssetId: 'take_1',
+      endpointSeconds: 10,
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.videoAssetId = 'take_1';
+      current.frameExtractions[extractionId] = {
+        id: extractionId,
+        shotId: 'shot_1',
+        videoAssetId: 'take_1',
+        endpointSeconds: 10,
+        frameAssetId: null,
+        status: 'pending',
+        errorCode: null,
+        attemptCount: 0,
+      };
+      return current;
+    });
+
+    await media.resumeConditioningFramesV2([project.id]);
+    await media.resumeConditioningFramesV2([project.id]);
+
+    expect(conditioningFrameExtractor).toHaveBeenCalledTimes(3);
+    expect(sleepConditioningFrameRetry.mock.calls).toEqual([[250], [1_000]]);
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: {
+        frameExtractions: {
+          [extractionId]: { status: 'failed', frameAssetId: null, errorCode: 'decode_failed', attemptCount: 3 },
+        },
+      },
     });
   });
 
@@ -3898,6 +4067,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });
@@ -3960,6 +4130,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         expect(extraction).toMatchObject({ status: 'failed', frameAssetId: null });
         extraction.status = 'pending';
         extraction.errorCode = null;
+        extraction.attemptCount = 0;
         return current;
       });
       expect(conditioningFrameExtractor).toHaveBeenCalledTimes(scenario.id.startsWith('../') ? 0 : 1);
@@ -4013,6 +4184,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });
@@ -4065,6 +4237,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });
@@ -4121,6 +4294,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });
@@ -4185,6 +4359,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });
@@ -4241,6 +4416,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });
@@ -4311,6 +4487,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return current;
     });

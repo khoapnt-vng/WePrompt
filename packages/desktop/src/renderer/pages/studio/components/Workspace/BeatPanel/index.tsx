@@ -69,6 +69,13 @@ export type BeatPanelActions = {
   trimShot: (shotId: string, trimInSeconds: number | null, trimOutSeconds: number | null) => Promise<boolean>;
   reorderShots: (beatId: string, shotOrder: readonly string[]) => Promise<boolean>;
   importSeedStill: (shotId: string) => Promise<BeatPanelImportResult>;
+  persistCapturedPoster: (input: {
+    shotId: string;
+    videoAssetId: string;
+    dataUrl: string;
+    width: number;
+    height: number;
+  }) => Promise<boolean>;
   parkShot: (shotId: string, onCommitted?: () => void) => Promise<boolean>;
   parkBeat: (beatId: string) => Promise<boolean>;
   reviewShot: (triggerShotId: string, choices: readonly [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]) => void;

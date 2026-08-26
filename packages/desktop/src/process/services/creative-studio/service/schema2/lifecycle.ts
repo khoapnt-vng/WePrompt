@@ -276,6 +276,7 @@ export const advanceStudioWaitingBindingsV2 = (
             frameAssetId: null,
             status: 'pending',
             errorCode: null,
+            attemptCount: 0,
           };
           defineOwn(project.frameExtractions, extractionId, extraction);
           projectChanged = true;

@@ -671,6 +671,7 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   trimShot: vi.fn().mockResolvedValue(true),
   reorderShots: vi.fn().mockResolvedValue(true),
   importSeedStill: vi.fn().mockResolvedValue('cancelled' as const),
+  persistCapturedPoster: vi.fn().mockResolvedValue(true),
   parkShot: vi.fn().mockResolvedValue(true),
   parkBeat: vi.fn().mockResolvedValue(true),
   reviewShot: vi.fn(),
@@ -2104,6 +2105,43 @@ describe('BeatPanel', () => {
       expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [{ shotId: 'shot_1', purpose: 'video_take' }])
     );
     anchorClick.mockRestore();
+  });
+
+  it('captures and persists one poster when the current video becomes readable', async () => {
+    const drawImage = vi.fn();
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+    const toDataUrl = vi
+      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,cG9zdGVy');
+    const shot = makeShot('shot_1', 0, {
+      currentPicture: makeCurrentPicture('video_current', 8),
+    });
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+    const video = container.querySelector<HTMLVideoElement>('[data-current-picture] video');
+    if (video === null) throw new Error('Missing posterless current picture');
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1280 });
+    Object.defineProperty(video, 'videoHeight', { configurable: true, value: 720 });
+
+    expect(video).toHaveAttribute('preload', 'auto');
+    fireEvent.loadedData(video);
+    await waitFor(() =>
+      expect(actions.persistCapturedPoster).toHaveBeenCalledWith({
+        shotId: 'shot_1',
+        videoAssetId: 'video_current',
+        dataUrl: 'data:image/png;base64,cG9zdGVy',
+        width: 1280,
+        height: 720,
+      })
+    );
+    fireEvent.canPlay(video);
+    expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+    expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 1280, 720);
+
+    getContext.mockRestore();
+    toDataUrl.mockRestore();
   });
 
   it('keeps retained takes in the picture viewer, restores one for free, and shows staleness as a tag', () => {

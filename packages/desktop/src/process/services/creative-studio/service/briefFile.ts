@@ -37,6 +37,32 @@ const isBriefMetadata = (value: unknown): value is StudioBriefFileMetadataV2 =>
   typeof value.sha256 === 'string' &&
   SHA256_HEX.test(value.sha256);
 
+const normalizeLegacyShotFieldsV2 = (project: Record<string, unknown>): Record<string, unknown> => {
+  if (!isRecord(project.shots)) return project;
+  let changed = false;
+  const shots = Object.fromEntries(
+    Object.entries(project.shots).map(([shotId, shot]) => {
+      if (!isRecord(shot) || Object.hasOwn(shot, 'dismissedSeedStillIds')) return [shotId, shot];
+      changed = true;
+      return [shotId, { ...shot, dismissedSeedStillIds: [] }];
+    })
+  );
+  return changed ? { ...project, shots } : project;
+};
+
+const normalizeLegacyFrameExtractionFieldsV2 = (project: Record<string, unknown>): Record<string, unknown> => {
+  if (!isRecord(project.frameExtractions)) return project;
+  let changed = false;
+  const frameExtractions = Object.fromEntries(
+    Object.entries(project.frameExtractions).map(([extractionId, extraction]) => {
+      if (!isRecord(extraction) || Object.hasOwn(extraction, 'attemptCount')) return [extractionId, extraction];
+      changed = true;
+      return [extractionId, { ...extraction, attemptCount: extraction.status === 'pending' ? 0 : 1 }];
+    })
+  );
+  return changed ? { ...project, frameExtractions } : project;
+};
+
 export const studioBriefSha256 = (brief: string): string =>
   crypto.createHash('sha256').update(brief, 'utf8').digest('hex');
 
@@ -61,7 +87,10 @@ export const decodeStudioProjectManifestV2 = (
   if (!isRecord(value) || Object.hasOwn(value, 'brief') || !isBriefMetadata(value.briefFile)) return null;
   if (briefFileText === null) return null;
   const { briefFile, ...persistedProject } = value;
-  const project = { ...persistedProject, brief: briefFileText };
+  const project = {
+    ...normalizeLegacyFrameExtractionFieldsV2(normalizeLegacyShotFieldsV2(persistedProject)),
+    brief: briefFileText,
+  };
   if (!validateStudioProjectV2(project)) return null;
   return {
     project,

@@ -1074,6 +1074,18 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           }
         } catch (error) {
           logStudioConditioningFrameFailure(context.projectId, extractionId, error);
+          await deps.mediaStore.resumeConditioningFramesV2([context.projectId]).catch((retryError: unknown): void => {
+            logStudioConditioningFrameFailure(context.projectId, extractionId, retryError);
+          });
+          const verification = await deps.mediaStore
+            .verifyConditioningFrameV2({ projectId: context.projectId, extractionId })
+            .catch((): null => null);
+          if (verification !== null) {
+            await advanceWaitingBindingsForRecoveryV2(
+              context.projectId,
+              new Map([[verification.extractionId, verification]])
+            );
+          }
         }
       }
       notify(context.projectId);

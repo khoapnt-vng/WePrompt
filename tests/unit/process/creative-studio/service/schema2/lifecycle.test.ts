@@ -536,6 +536,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
       frameAssetId: null,
       status: 'pending',
       errorCode: null,
+      attemptCount: 0,
     });
     expect(advanceStudioWaitingBindingsV2(project, capturedAt)).toEqual({
       dispatchJobIds: [],
@@ -656,6 +657,7 @@ describe('advanceStudioWaitingBindingsV2', () => {
       frameAssetId: null,
       status: 'failed',
       errorCode: 'decode_failed',
+      attemptCount: 1,
     };
     expect(advanceStudioWaitingBindingsV2(failedFrame, capturedAt).projectChanged).toBe(false);
 

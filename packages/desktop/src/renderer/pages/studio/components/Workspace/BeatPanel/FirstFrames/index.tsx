@@ -7,7 +7,7 @@
 import { Button, Dropdown, Input, Menu, Modal } from '@arco-design/web-react';
 import { Copy, Delete, Download, Left, MoreOne, Pin, Plus, Right } from '@icon-park/react';
 import classNames from 'classnames';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
@@ -63,6 +63,36 @@ const downloadManagedAsset = (url: string, fileName: string): void => {
   document.body.removeChild(link);
 };
 
+export const captureStudioVideoPoster = (
+  video: Pick<HTMLVideoElement, 'videoWidth' | 'videoHeight'>,
+  createCanvas: () => HTMLCanvasElement = () => document.createElement('canvas')
+): { dataUrl: string; width: number; height: number } | null => {
+  const width = video.videoWidth;
+  const height = video.videoHeight;
+  if (
+    !Number.isSafeInteger(width) ||
+    width < 1 ||
+    width > 16_384 ||
+    !Number.isSafeInteger(height) ||
+    height < 1 ||
+    height > 16_384
+  ) {
+    return null;
+  }
+  const canvas = createCanvas();
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (context === null) return null;
+  try {
+    context.drawImage(video as CanvasImageSource, 0, 0, width, height);
+    const dataUrl = canvas.toDataURL('image/png');
+    return dataUrl.startsWith('data:image/png;base64,') ? { dataUrl, width, height } : null;
+  } catch {
+    return null;
+  }
+};
+
 export const FirstFrames: React.FC<FirstFramesProps> = ({
   actions,
   disabled,
@@ -83,6 +113,7 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   const [viewer, setViewer] = useState<ViewerState>(null);
   const [importing, setImporting] = useState(false);
   const [working, setWorking] = useState(false);
+  const posterCapturesRef = useRef(new Set<string>());
   // Workspace projection is authoritative. Empty fallbacks keep a stale renderer
   // snapshot fail-closed while Main refreshes it after a schema cutover.
   const frames = shot.firstFrames ?? [];
@@ -155,6 +186,20 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
     const job = shot.activeGenerationJob ?? null;
     if (job === null || !job.canCancel) return;
     await actions.cancelGenerationJob(job.id);
+  };
+
+  const persistPoster = async (video: HTMLVideoElement, take: WorkspaceVideoTakeProjection): Promise<void> => {
+    const captureKey = `${projectId}:${shot.id}:${take.assetId}`;
+    if (posterCapturesRef.current.has(captureKey)) return;
+    const captured = captureStudioVideoPoster(video);
+    if (captured === null) return;
+    posterCapturesRef.current.add(captureKey);
+    const persisted = await actions.persistCapturedPoster({
+      shotId: shot.id,
+      videoAssetId: take.assetId,
+      ...captured,
+    });
+    if (!persisted) posterCapturesRef.current.delete(captureKey);
   };
 
   const frameMenu = (frame: WorkspaceSeedStillProjection, index: number): React.ReactNode => {
@@ -362,7 +407,9 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
               {currentTake.posterAssetId === null ? (
                 <video
                   aria-label={t(`${KEY_ROOT}.pictureAlt`, { shot: shotIndex + 1 })}
-                  preload='metadata'
+                  onCanPlay={(event) => void persistPoster(event.currentTarget, currentTake)}
+                  onLoadedData={(event) => void persistPoster(event.currentTarget, currentTake)}
+                  preload='auto'
                   src={createManagedStudioAssetUrl(projectId, currentTake.assetId) ?? undefined}
                 />
               ) : (

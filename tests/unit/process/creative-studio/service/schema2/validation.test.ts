@@ -655,6 +655,7 @@ const addReadyFrame = (project: StudioProjectV2, takeId = 'take_1', endpointSeco
     frameAssetId,
     status: 'ready',
     errorCode: null,
+    attemptCount: 1,
   };
   return frameAssetId;
 };
@@ -1737,6 +1738,7 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
       frameAssetId: null,
       status: 'pending',
       errorCode: null,
+      attemptCount: 0,
     };
     addAuthorizationWithJobs(project, authorization, [dependent]);
 

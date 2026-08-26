@@ -1579,6 +1579,38 @@ const StudioProjectPage: React.FC<{
           setWorkspacePending(false);
         }
       },
+      persistCapturedPoster: async (input) => {
+        const current = projectRef.current;
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision
+        ) {
+          return false;
+        }
+        const matches = currentProjection.activeBeats.flatMap((beat) =>
+          beat.shots.filter(
+            (shot) =>
+              shot.id === input.shotId &&
+              shot.currentPicture?.assetId === input.videoAssetId &&
+              shot.currentPicture.posterAssetId === null
+          )
+        );
+        if (matches.length !== 1) return false;
+        try {
+          const result = await ipcBridge.creativeStudio.persistCapturedPoster.invoke({
+            projectId: current.id,
+            ...input,
+          });
+          if (result.ok === false) return false;
+          const refreshed = await refetchProjectWorkspace();
+          return refreshed?.id === current.id && refreshed.revision >= current.revision;
+        } catch {
+          return false;
+        }
+      },
       parkShot: async (shotId, onCommitted) =>
         runWorkspaceCommit(
           (current) =>

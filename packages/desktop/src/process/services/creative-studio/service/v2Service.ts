@@ -2131,11 +2131,13 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           frameAssetId: null,
           status: 'pending',
           errorCode: null,
+          attemptCount: 0,
         });
       } else if (existing.status === 'failed') {
         existing.status = 'pending';
         existing.frameAssetId = null;
         existing.errorCode = null;
+        existing.attemptCount = 0;
       }
       extractionIds.push(extractionId);
       bindingItemIds.push(targetVideo.id);
@@ -3289,6 +3291,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
             extraction.status = 'pending';
             extraction.frameAssetId = null;
             extraction.errorCode = null;
+            extraction.attemptCount = 0;
           }
           return project;
         },

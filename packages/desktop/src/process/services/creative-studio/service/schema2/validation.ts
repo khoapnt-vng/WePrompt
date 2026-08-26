@@ -321,6 +321,7 @@ const FRAME_EXTRACTION_KEYS = new Set([
   'frameAssetId',
   'status',
   'errorCode',
+  'attemptCount',
 ]);
 const RECEIPT_KEYS = new Set([
   'authorizationId',
@@ -1395,7 +1396,8 @@ const validateFrameExtractionShape = (frameId: string, value: unknown): boolean 
     !isNullableSafeId(value.frameAssetId) ||
     typeof value.status !== 'string' ||
     !FRAME_STATUSES.has(value.status) ||
-    (value.errorCode !== null && (typeof value.errorCode !== 'string' || !FRAME_ERROR_CODES.has(value.errorCode)))
+    (value.errorCode !== null && (typeof value.errorCode !== 'string' || !FRAME_ERROR_CODES.has(value.errorCode))) ||
+    !isIntegerInRange(value.attemptCount, 0, 3)
   ) {
     return false;
   }
@@ -1409,9 +1411,16 @@ const validateFrameExtractionShape = (frameId: string, value: unknown): boolean 
   ) {
     return false;
   }
-  if (value.status === 'ready') return value.frameAssetId !== null && value.errorCode === null;
-  if (value.status === 'failed') return value.frameAssetId === null && value.errorCode !== null;
-  return value.frameAssetId === null && value.errorCode === null;
+  if (value.status === 'ready') {
+    return value.frameAssetId !== null && value.errorCode === null && (value.attemptCount as number) >= 1;
+  }
+  if (value.status === 'failed') {
+    return value.frameAssetId === null && value.errorCode !== null && (value.attemptCount as number) >= 1;
+  }
+  if (value.status === 'extracting') {
+    return value.frameAssetId === null && value.errorCode === null && (value.attemptCount as number) >= 1;
+  }
+  return value.frameAssetId === null && value.errorCode === null && (value.attemptCount as number) < 3;
 };
 
 const validateProjectPatchReferences = (order: unknown, references: unknown): boolean => {

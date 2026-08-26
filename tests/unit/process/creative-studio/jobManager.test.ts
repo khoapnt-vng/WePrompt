@@ -1987,6 +1987,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         frameAssetId: null,
         status: 'pending',
         errorCode: null,
+        attemptCount: 0,
       };
       return project;
     });

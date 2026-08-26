@@ -449,7 +449,7 @@ export type StudioMediaStoreDeps = {
   /** V2 video duration is decoded from the finalized managed bytes, never trusted from provider metadata. */
   probeVideoDurationSecondsV2?: (input: { filePath: string; byteSize: number; sha256: string }) => Promise<number>;
   /** Rejects multi-panel provider images before they can become a current first frame or reference. */
-  detectImageVariationGridV2?: (input: { filePath: string }) => Promise<boolean>;
+  detectImageVariationGridV2?: (input: { filePath: string; detectRepeatedSubjects: boolean }) => Promise<boolean>;
   /** V2 bed metadata is decoded from finalized managed bytes and must describe one audio-only stream. */
   probeBedAudioV2?: (input: {
     filePath: string;
@@ -461,24 +461,41 @@ export type StudioMediaStoreDeps = {
   conditioningFrameExtractor?: (
     input: StudioConditioningFrameExtractionInput
   ) => Promise<StudioConditioningFrameExtractionResult>;
+  /** Test seam for bounded local continuity-frame retry backoff. */
+  sleepConditioningFrameRetry?: (delayMs: number) => Promise<void>;
 };
 
 type FileIdentity = { dev: string; ino: string };
 
 const VARIATION_GRID_SEAM_EXCESS_THRESHOLD = 48;
+const CONDITIONING_FRAME_MAX_ATTEMPTS = 3;
+const CONDITIONING_FRAME_RETRY_DELAYS_MS = [250, 1_000] as const;
+
+const cosineSimilarity = (left: readonly number[], right: readonly number[]): number => {
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    dot += left[index]! * right[index]!;
+    leftMagnitude += left[index]! ** 2;
+    rightMagnitude += right[index]! ** 2;
+  }
+  return leftMagnitude === 0 || rightMagnitude === 0 ? 0 : dot / Math.sqrt(leftMagnitude * rightMagnitude);
+};
 
 /**
- * Detects the repeated full-height separators characteristic of a four-panel generation sheet.
- * A single strong central edge is ordinary composition, so two of the three quartile seams must
- * exceed the image's own median adjacent-column change by the calibrated margin.
+ * Detects both full-height panel separators and repeated subject layouts across thirds or quarters.
+ * Seam detection stays relative to the image's own adjacent-column baseline; the repeated-layout
+ * pass is opt-in so ordinary background repetition is not treated as a character sheet.
  */
 export const studioImageHasVariationGridV2 = (input: {
   data: Uint8Array;
   width: number;
   height: number;
   channels: number;
+  detectRepeatedSubjects?: boolean;
 }): boolean => {
-  const { data, width, height, channels } = input;
+  const { data, width, height, channels, detectRepeatedSubjects = true } = input;
   if (
     !Number.isSafeInteger(width) ||
     !Number.isSafeInteger(height) ||
@@ -512,12 +529,65 @@ export const studioImageHasVariationGridV2 = (input: {
       ? (adjacentDifferences[middle - 1]! + adjacentDifferences[middle]!) / 2
       : adjacentDifferences[middle]!;
   const seams = [0.25, 0.5, 0.75].map((ratio) => Math.min(width - 1, Math.max(1, Math.round(width * ratio))));
-  return (
-    seams.filter((column) => columnDifference(column) - median >= VARIATION_GRID_SEAM_EXCESS_THRESHOLD).length >= 2
-  );
+  if (seams.filter((column) => columnDifference(column) - median >= VARIATION_GRID_SEAM_EXCESS_THRESHOLD).length >= 2) {
+    return true;
+  }
+  if (!detectRepeatedSubjects || width < 48 || height < 24) return false;
+
+  const luminance = (row: number, column: number): number => {
+    const offset = (row * width + column) * channels;
+    return data[offset]! * 0.299 + data[offset + 1]! * 0.587 + data[offset + 2]! * 0.114;
+  };
+  const bandFeature = (divisionCount: number, bandIndex: number): number[] | null => {
+    const start = Math.floor((bandIndex * width) / divisionCount);
+    const end = Math.floor(((bandIndex + 1) * width) / divisionCount);
+    const bandWidth = end - start;
+    if (bandWidth < 12) return null;
+    const rowBins = 12;
+    const columnBins = 6;
+    const cells = Array.from({ length: rowBins * columnBins }, () => 0);
+    const rows = Array.from({ length: rowBins }, () => 0);
+    const columns = Array.from({ length: columnBins }, () => 0);
+    let total = 0;
+    let samples = 0;
+    for (let row = 1; row < height - 1; row += 1) {
+      for (let column = start + 1; column < end - 1; column += 1) {
+        const gradient =
+          Math.abs(luminance(row, column + 1) - luminance(row, column - 1)) +
+          Math.abs(luminance(row + 1, column) - luminance(row - 1, column));
+        const rowBin = Math.min(rowBins - 1, Math.floor((row * rowBins) / height));
+        const columnBin = Math.min(columnBins - 1, Math.floor(((column - start) * columnBins) / bandWidth));
+        cells[rowBin * columnBins + columnBin]! += gradient;
+        rows[rowBin]! += gradient;
+        columns[columnBin]! += gradient;
+        total += gradient;
+        samples += 1;
+      }
+    }
+    if (samples === 0 || total / samples < 6) return null;
+    const activeRows = rows.filter((value) => value >= total / rowBins / 3).length;
+    const activeColumns = columns.filter((value) => value >= total / columnBins / 3).length;
+    if (activeRows < 4 || activeColumns < 2) return null;
+    return cells.map((value) => Math.sqrt(value / total));
+  };
+  const hasRepeatedBands = (divisionCount: 3 | 4): boolean => {
+    const features = Array.from({ length: divisionCount }, (_, bandIndex) => bandFeature(divisionCount, bandIndex));
+    if (features.some((feature) => feature === null)) return false;
+    let similarPairs = 0;
+    for (let left = 0; left < divisionCount; left += 1) {
+      for (let right = left + 1; right < divisionCount; right += 1) {
+        if (cosineSimilarity(features[left]!, features[right]!) >= 0.9) similarPairs += 1;
+      }
+    }
+    return similarPairs >= (divisionCount === 4 ? 4 : 3);
+  };
+  return hasRepeatedBands(4) || hasRepeatedBands(3);
 };
 
-const detectImageVariationGridV2 = async (input: { filePath: string }): Promise<boolean> => {
+const detectImageVariationGridV2 = async (input: {
+  filePath: string;
+  detectRepeatedSubjects: boolean;
+}): Promise<boolean> => {
   const sharp = (await import('sharp')).default;
   const { data, info } = await sharp(input.filePath, { limitInputPixels: 40_000_000, sequentialRead: true })
     .rotate()
@@ -530,6 +600,7 @@ const detectImageVariationGridV2 = async (input: { filePath: string }): Promise<
     width: info.width,
     height: info.height,
     channels: info.channels,
+    detectRepeatedSubjects: input.detectRepeatedSubjects,
   });
 };
 
@@ -3344,7 +3415,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (loaded.status !== 'supported') throw new CreativeStudioMediaError('not_found');
     const initial = ownRecordValue(loaded.project.frameExtractions, input.extractionId);
     if (initial === undefined) throw new CreativeStudioMediaError('not_found');
-    if (initial.status === 'failed') throw new CreativeStudioMediaError('job_inactive');
+    if (initial.status === 'failed' && initial.attemptCount >= CONDITIONING_FRAME_MAX_ATTEMPTS) {
+      throw new CreativeStudioMediaError('job_inactive');
+    }
 
     let repairingReadyAsset: StudioAssetV2 | null = null;
     if (initial.status === 'ready') {
@@ -3360,14 +3433,20 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       }
       if ((await resolveAssetV2(input.projectId, frameAsset.id)) !== null) return structuredClone(initial);
       repairingReadyAsset = frameAsset;
-    } else if (initial.status === 'pending') {
+    } else if (initial.status === 'pending' || initial.status === 'failed') {
       await deps.store.updateProjectV2(input.projectId, (project) => {
         const extraction = ownRecordValue(project.frameExtractions, input.extractionId);
-        if (extraction?.status !== 'pending' || extraction.frameAssetId !== null) {
+        if (
+          extraction === undefined ||
+          (extraction.status !== 'pending' && extraction.status !== 'failed') ||
+          extraction.frameAssetId !== null ||
+          extraction.attemptCount >= CONDITIONING_FRAME_MAX_ATTEMPTS
+        ) {
           throw new CreativeStudioMediaError('job_inactive');
         }
         extraction.status = 'extracting';
         extraction.errorCode = null;
+        extraction.attemptCount += 1;
         return project;
       });
     }
@@ -3687,9 +3766,25 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const loadedProject = await deps.store.getProjectV2(projectId);
       if (loadedProject.status !== 'supported') continue;
       for (const extraction of Object.values(loadedProject.project.frameExtractions)) {
-        if (extraction.status === 'failed') continue;
-        // eslint-disable-next-line no-await-in-loop -- One decoder bounds local CPU and memory use during recovery.
-        await extractConditioningFrameV2({ projectId, extractionId: extraction.id }).catch((): undefined => undefined);
+        let current = extraction;
+        while (current.status !== 'failed' || current.attemptCount < CONDITIONING_FRAME_MAX_ATTEMPTS) {
+          if (current.status === 'failed') {
+            const delayMs = CONDITIONING_FRAME_RETRY_DELAYS_MS[current.attemptCount - 1] ?? 1_000;
+            // eslint-disable-next-line no-await-in-loop -- Bounded backoff prevents a broken local decoder loop.
+            await (
+              deps.sleepConditioningFrameRetry ?? ((delay) => new Promise((resolve) => setTimeout(resolve, delay)))
+            )(delayMs);
+          }
+          // eslint-disable-next-line no-await-in-loop -- One decoder bounds local CPU and memory use during recovery.
+          await extractConditioningFrameV2({ projectId, extractionId: current.id }).catch((): undefined => undefined);
+          // eslint-disable-next-line no-await-in-loop -- Recovery re-reads durable attempt authority after each try.
+          const refreshed = await deps.store.getProjectV2(projectId);
+          if (refreshed.status !== 'supported') break;
+          const next = ownRecordValue(refreshed.project.frameExtractions, current.id);
+          if (next === undefined || next.status === 'ready' || next.status === 'extracting') break;
+          current = next;
+          if (current.status !== 'failed' || current.attemptCount >= CONDITIONING_FRAME_MAX_ATTEMPTS) break;
+        }
       }
     }
   };
@@ -3703,6 +3798,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     capacity: WriteCapacity;
     collection: 'assets' | 'thumbnails' | 'boardStills';
     rejectVariationGrid: boolean;
+    detectRepeatedSubjects: boolean;
   };
 
   const validateProviderOutputMetadataV2 = (input: ProviderJobOutputMetadataV2 | ProviderJobPosterMetadataV2): void => {
@@ -3770,6 +3866,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       capacity: await planWriteCapacity(project, projectDir, perAssetMaxBytes, input.declaredByteSize),
       collection: providerPrimaryCollectionV2(job.purpose),
       rejectVariationGrid: job.purpose === 'seed_still' || job.purpose === 'reference_image',
+      detectRepeatedSubjects: job.purpose === 'reference_image' && reference?.kind === 'character',
     };
   };
 
@@ -3821,6 +3918,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       capacity: await planWriteCapacity(project, projectDir, limits.imageOutputMaxBytes, input.declaredByteSize),
       collection: 'thumbnails',
       rejectVariationGrid: false,
+      detectRepeatedSubjects: false,
     };
   };
 
@@ -3882,6 +3980,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       capacity: await planWriteCapacity(project, projectDir, limits.imageOutputMaxBytes, input.declaredByteSize),
       collection: 'thumbnails',
       rejectVariationGrid: false,
+      detectRepeatedSubjects: false,
     };
   };
 
@@ -4000,6 +4099,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         try {
           isVariationGrid = await (deps.detectImageVariationGridV2 ?? detectImageVariationGridV2)({
             filePath: finalPath,
+            detectRepeatedSubjects: plan.detectRepeatedSubjects,
           });
         } catch {
           throw new CreativeStudioMediaError('invalid_media');
@@ -4146,6 +4246,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
                 frameAssetId: null,
                 status: 'pending',
                 errorCode: null,
+                attemptCount: 0,
               });
             }
           } else if (job.purpose === 'board_still') {

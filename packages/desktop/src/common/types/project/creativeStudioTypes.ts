@@ -491,6 +491,7 @@ export type StudioFrameExtraction = {
   frameAssetId: string | null;
   status: 'pending' | 'extracting' | 'ready' | 'failed';
   errorCode: 'decode_failed' | 'source_missing' | 'storage_error' | null;
+  attemptCount: number;
 };
 
 export type StudioSpendPolicy = {

@@ -643,6 +643,7 @@ const beatPanelActions = (): BeatPanelActions => ({
   trimShot: vi.fn(async () => true),
   reorderShots: vi.fn(async () => true),
   importSeedStill: vi.fn(async () => 'cancelled'),
+  persistCapturedPoster: vi.fn(async () => true),
   parkShot: vi.fn(async () => true),
   parkBeat: vi.fn(async () => true),
   reviewShot: vi.fn(),

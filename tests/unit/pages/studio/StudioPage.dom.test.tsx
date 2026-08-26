@@ -99,6 +99,7 @@ const mocks = vi.hoisted(() => {
       editProject: { invoke: vi.fn() },
       setRules: { invoke: vi.fn() },
       importSeedStill: { invoke: vi.fn() },
+      persistCapturedPoster: { invoke: vi.fn() },
       parkShot: { invoke: vi.fn() },
       parkBeat: { invoke: vi.fn() },
       restoreBeat: { invoke: vi.fn() },
@@ -5897,6 +5898,36 @@ describe('StudioPage schema-5 cutover', () => {
       pendingImport.resolve(ok({ status: 'cancelled' as const }));
       await expect(firstImport).resolves.toBe('cancelled');
     });
+  });
+
+  it('persists a captured poster only for the exact projected current video', async () => {
+    const authority = projectWithRecovery();
+    mockSupportedProject(authority);
+    mocks.bridge.persistCapturedPoster.invoke.mockResolvedValue(
+      ok(recoveryAsset('captured_poster', 'upstream_take', 'image'))
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+    const capture = {
+      shotId: 'upstream_take',
+      videoAssetId: 'take_asset',
+      dataUrl: 'data:image/png;base64,cG9zdGVy',
+      width: 1280,
+      height: 720,
+    };
+
+    await expect(invokeStudioAction(() => actions.persistCapturedPoster(capture))).resolves.toBe(true);
+    expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledWith({
+      projectId: authority.id,
+      ...capture,
+    });
+
+    await expect(
+      invokeStudioAction(() => actions.persistCapturedPoster({ ...capture, videoAssetId: 'superseded_video' }))
+    ).resolves.toBe(false);
+    expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledTimes(1);
   });
 
   it('rejects malformed reviewed choice graphs at the captured Beat Panel boundary', async () => {
