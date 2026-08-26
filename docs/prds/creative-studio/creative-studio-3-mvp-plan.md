@@ -1533,6 +1533,26 @@ Both prototypes open offline. Fidelity is **high** — colours, type, spacing, r
 final unless design says otherwise — but the HTML is a reference to rebuild with WePrompt's existing
 components, not code to copy.
 
+### Notes for the implementer — read in this order
+
+Four things were found while capturing this handoff. Two are **blocked on a decision**, one is
+**already ruled**, one is **a message back to design**. They are listed here because each lives in a
+different section below and the dependency order is easy to miss.
+
+| # | Note | Status | Who acts |
+| --- | --- | --- | --- |
+| 1 | This handoff **replaces the data model** of the First Frames panel already shipped in `42473b5a2` — open list with newest-is-current and a pin, becomes three fixed slots by position. It directly contradicts **owner ruling 2** in the First Frames doc. | **Blocked** — do not build the frames region until the owner re-confirms or retires that ruling. | Owner |
+| 2 | The **queue state has no failure sibling**. State 07 promises `START FRAME ARRIVES WHEN SHOT 1 FINISHES`; measured reality is 5 failed extractions in 70, three of six Beats in one film (BUG-137), plus the never-created case (BUG-133). `QUEUED` as drawn is indistinguishable from a permanently dead chain. | **Blocked** — needs a state and an action designed before the strip is built. | Owner + design |
+| 3 | The **end slot ships inert**, and **chaining skips already-rendered current Shots**. | **Ruled** — see *Owner rulings* below. Build to it. | Codex |
+| 4 | The panel prototype's margin still reads `SHOT STATUS · FOUR WORDS`; the README and states board specify **six**. The prototype annotation is stale. | **Message back to design** — build the six, and tell design the two files disagree. | Owner relays |
+
+**Why 1 and 2 are blockers rather than notes.** Item 1 decides whether the frames region is a list or
+three slots, which is the whole surface — building either way before the ruling risks discarding the
+work. Item 2 is the defect that let BUG-133 and BUG-137 go unnoticed for a full session: a healthy
+queue and a dead chain look identical in the product today, and this handoff as drawn would ship that
+same ambiguity into the new panel. Everything else in this assignment can proceed while they are
+resolved.
+
 ### Do not start before reading this
 
 **This supersedes a design already shipped.** It is the next revision of the First Frames panel
