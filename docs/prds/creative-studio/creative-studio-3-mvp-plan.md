@@ -1541,30 +1541,27 @@ different section below and the dependency order is easy to miss.
 
 | # | Note | Status | Who acts |
 | --- | --- | --- | --- |
-| 1 | This handoff **replaces the data model** of the First Frames panel already shipped in `42473b5a2` — open list with newest-is-current and a pin, becomes three fixed slots by position. It directly contradicts **§2 "Current vs pinned"** in the First Frames doc — not owner ruling 2, which is the staleness tag and is unaffected. | **Blocked** — do not build the frames region until the owner re-confirms or retires that ruling. | Owner |
-| 2 | The **queue state has no failure sibling**. State 07 promises `START FRAME ARRIVES WHEN SHOT 1 FINISHES`; measured reality is 5 failed extractions in 70, three of six Beats in one film (BUG-137), plus the never-created case (BUG-133). `QUEUED` as drawn is indistinguishable from a permanently dead chain. | **Blocked** — needs a state and an action designed before the strip is built. | Owner + design |
+| 1 | This handoff **replaces the data model** of the First Frames panel already shipped in `42473b5a2`. | **RULED 2026-08-26 night** — slots are the view, the shipped list-with-pin stays the model; the band becomes the START slot's picker. §2 "Current vs pinned" is re-confirmed. See §1a of the design doc. | Codex |
+| 2 | The **queue state has no failure sibling** — `QUEUED` as drawn is indistinguishable from a permanently dead chain (BUG-133/BUG-137). | **RULED** — the dead chain wears `FAILED` with a **Fix — free** button; six words preserved, the button differentiates. Both underlying defects are since fixed (`4e56f8f6f`), so the state covers retry exhaustion. See §1a. | Codex |
 | 3 | The **end slot ships inert**, and **chaining skips already-rendered current Shots**. | **Ruled** — see *Owner rulings* below. Build to it. | Codex |
 | 4 | The panel prototype's margin still reads `SHOT STATUS · FOUR WORDS`; the README and states board specify **six**. The prototype annotation is stale. | **Message back to design** — build the six, and tell design the two files disagree. | Owner relays |
 
-**Why 1 and 2 are blockers rather than notes.** Item 1 decides whether the frames region is a list or
-three slots, which is the whole surface — building either way before the ruling risks discarding the
-work. Item 2 is the defect that let BUG-133 and BUG-137 go unnoticed for a full session: a healthy
-queue and a dead chain look identical in the product today, and this handoff as drawn would ship that
-same ambiguity into the new panel. Everything else in this assignment can proceed while they are
-resolved.
+**Both former blockers are resolved** — the owner ruled the same evening, and Codex's
+`4e56f8f6f` independently landed the two pipeline fixes the ruling leans on (extraction created
+atomically with every successful take; failed extractions auto-retried with a bounded attempt
+count). Nothing in this assignment is blocked. The frames-region design of record is §1a of
+[the design doc](../../design/creative-studio-3-beat-panel-composer.md).
 
 ### Do not start before reading this
 
 **This supersedes a design already shipped.** It is the next revision of the First Frames panel
 handoff, which Codex implemented in `42473b5a2`. It is **not a restyle**: the frames region changes
 from an open list of candidate stills with newest-is-current and a pin, to **three fixed slots**
-(start, end, image refs) selected by position. **§2 "Current vs pinned"** in
-[the First Frames doc](../../design/creative-studio-3-first-frames-panel.md) established that the
-newest eligible frame is current automatically and pinning is a *hold*, matching the References model
-and the behaviour `chain.ts:104` already implements; three fixed slots by position is a different
-model. **Get that finding re-confirmed or retired before building — do not contradict it silently.**
-This is §2 of the design doc, *not* owner ruling 2 (the staleness tag), which this handoff leaves
-untouched.
+(start, end, image refs) selected by position. **Resolved by owner ruling — see §1a of the design
+doc:** the slot geometry is the view, the shipped list-with-pin is the model, and the band is
+re-parented as the START slot's picker. §2 "Current vs pinned" in
+[the First Frames doc](../../design/creative-studio-3-first-frames-panel.md) is re-confirmed; do not
+re-derive the frames region from the prototype alone.
 
 ### Required product behavior
 
@@ -1600,11 +1597,9 @@ untouched.
 
 ### Decide before building
 
-- **The queue state needs a failure sibling.** State 07 promises `START FRAME ARRIVES WHEN SHOT 1
-  FINISHES`. Measured reality: the start frame sometimes never arrives — **5 failed extractions in 70**,
-  three of six Beats in one film (BUG-137), plus the never-created case (BUG-133). `QUEUED` as drawn
-  is indistinguishable from a permanently dead chain, which is exactly how both defects went
-  unnoticed. Add a distinct state with an action; the failed-join case recovers for free.
+- ~~The queue state needs a failure sibling~~ — **ruled** (see §1a): the dead chain wears `FAILED`
+  with a `Fix start frame — free` action, distinct from the paid `Try again`; `QUEUED` is reserved
+  for genuinely healthy waits. The underlying pipeline defects are fixed in `4e56f8f6f`.
 - **States 07 and 08 are design proposals, not observed behaviour** — the designer says so. Confirm
   queue and failure semantics against the real job states (`queued_local`, `queued_remote`,
   `waiting_for_conditioning`, `needs_attention`, `failed`) before drawing them as final.

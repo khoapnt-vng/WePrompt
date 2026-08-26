@@ -34,16 +34,70 @@ panel`). This revision is not a restyle of it — it changes the data model:
 | Status words | **four** | **six** (adds `QUEUED`, `FAILED`) |
 | Beat-level action | none | **`Generate all 3 · chained`** above the shot strip |
 
-Nothing here is unreasonable, but it should not be built as an increment on top of the shipped
-panel without the owner deciding what happens to the pin/newest-is-current model — which was itself
-an owner ruling recorded in
-[the First Frames panel doc](creative-studio-3-first-frames-panel.md#2--current-vs-pinned--read-this-before-implementing).
-**§2 there** — "Current vs pinned" — established that the newest eligible frame is current
-automatically and that pinning is a *hold*, matching the References model and the behaviour
-`chain.ts:104` already implements. Three fixed slots selected by position is a different model.
-**That finding needs re-confirming or retiring; it should not be contradicted silently.**
-(Note: this is §2 of the design doc, *not* owner ruling 2, which is the staleness tag and is
-unaffected by this handoff.)
+This apparent conflict is resolved by the owner's ruling below (§1a): the slot geometry is adopted
+as the **view**, and the shipped list-with-pin remains the **model**. §2 "Current vs pinned" in
+[the First Frames panel doc](creative-studio-3-first-frames-panel.md#2--current-vs-pinned--read-this-before-implementing)
+is **re-confirmed**, not retired. (That is §2 of the design doc, *not* owner ruling 2 — the
+staleness tag — which this handoff leaves unaffected.)
+
+## 1a · Owner ruling, 2026-08-26 night — slots are the view, the list is the model
+
+The owner's direction: **preserve as much of the shipped implementation as possible, improve the
+UX, and make the panel serve both flows equally — chaining a whole Beat, and generating shots one
+at a time.** The reconciliation that satisfies all three:
+
+**The three-slot card is adopted as the shot's at-a-glance surface. The START slot _displays_ the
+shot's effective start frame — computed exactly as today** (`effectiveSeed`, `chain.ts:104`: the
+pinned `seedStillId` wins, else the newest eligible asset, else the inherited predecessor frame).
+**Clicking the slot opens the candidate picker, which is the shipped First Frames band re-parented**
+— the same open list, the same newest-is-current default, the same pin-to-hold, the same import
+tile, the same full-screen viewer. Nothing in the store changes: `seedStillId`, `assetIds`
+eligibility, `referenceBinding` and extraction records all keep their meanings and their tests.
+
+What this preserves of the shipped work: the entire model layer, the projection, the full-screen
+viewer, the prompt-as-fired rule, import plumbing, and every main-side test. What gets rebuilt is
+renderer-only: the always-visible band becomes the slot's picker, and the card takes the eight-row
+composer layout. (The alternative — keeping the band always visible under the slots — was
+considered and declined: the handoff's fixed-height rationale is sound, and the band survives
+intact one click away.)
+
+The other two slots follow the same view-over-model principle:
+
+- **END** — inert placeholder per the earlier ruling in §2 below; lights up when the bound route
+  reports last-frame support.
+- **REFS** — a view of the existing `referenceBinding`, showing the live `count / limit` budget
+  (the BUG-134 counter Codex has since shipped); clicking opens the existing binding editor.
+
+### Both flows, one mechanism
+
+Flexibility between chain-the-Beat and one-shot-at-a-time is not a mode switch; it falls out of the
+START slot telling the truth for follower shots:
+
+| START slot shows | Meaning | Serves |
+| --- | --- | --- |
+| the frame, badge `FROM SHOT N` | predecessor rendered, extraction ready | either flow — the shot is independently generatable |
+| `ARRIVES WHEN SHOT N FINISHES` | healthy queue behind an in-flight predecessor | the chain flow (composer state 07 as drawn) |
+| `START FRAME FAILED` + a **Fix — free** button | extraction failed and auto-retry exhausted its bounded attempts | both — recovery is `retry-conditioning-frame`, measured free and reliable |
+| a pinned or imported still | a deliberate **hard cut** — priced through the `continuityChange` prepare shape | one-at-a-time, intentionally breaking the chain |
+
+Because every successful take now **atomically creates its endpoint extraction** (BUG-133's fix,
+landed in `4e56f8f6f`), shots rendered one at a time compose into chains after the fact, and a
+chain can be entered or left per-shot. Rendering Shot 1 alone immediately gives Shot 2 a real
+`FROM SHOT 1` start frame; pinning a fresh still onto Shot 4 mid-Beat cuts the chain there, priced,
+and the chips show the cut.
+
+### The dead chain wears FAILED, and the button differentiates
+
+This resolves the queue-state blocker without breaking the handoff's six-word rule. A chain whose
+start frame will never arrive is not `QUEUED` — that label would lie — it is **`FAILED`**, which is
+honest ("the chain stopped here" is the handoff's own framing for state 08). The **button carries
+the state**, per the handoff's own principle: a conditioning-frame failure gets **`Fix start frame —
+free`** (one click, no spend, no re-render); an engine failure keeps **`Try again`** (a paid
+re-render). The tag beside the button distinguishes them the same way: `START FRAME FAILED ·
+RECOVERY IS FREE` versus `NOTHING WAS CHARGED`. With BUG-137's bounded auto-retry landed, the free
+case should now be rare — the state exists for retry exhaustion, and for the honesty of never
+showing a permanent wait as a queue.
+
 
 ## 2 · The end frame — owner ruling: build the slot now as a placeholder
 
@@ -134,11 +188,12 @@ path, and the Shot waits permanently (**BUG-137**; measured **5 failures in 70 e
 three of six Beats affected in a single film). A separate failure mode strands the chain when a head
 is rendered alone and no extraction is ever created (**BUG-133**).
 
-The design has **no state for "the start frame will never arrive"**, and `QUEUED` as drawn is
-indistinguishable from it. This is the single most valuable thing the composer could fix: today a
-healthy queue and a dead chain look identical in the product, which is how both defects went
-unnoticed until a Beat panel was opened by chance. **Add a distinct state** — the failed-join case
-already has a free recovery, so it wants an action, not just a label.
+The design as drawn has **no state for "the start frame will never arrive"**, and `QUEUED` is
+indistinguishable from it — which is how both defects went unnoticed until a Beat panel was opened
+by chance. **Resolved in §1a:** the dead chain wears `FAILED` with a `Fix start frame — free`
+action. Since this was written, both pipeline defects were fixed (`4e56f8f6f`): extractions are
+created atomically with every successful take and auto-retried with a bounded attempt count, so the
+state now covers retry exhaustion rather than a routine occurrence.
 
 **Unavailable on the current route.**
 
