@@ -5,11 +5,13 @@
  */
 
 import { Alert, Button, Dropdown, Input, InputNumber, Menu, Modal, Popconfirm } from '@arco-design/web-react';
-import { MoreOne } from '@icon-park/react';
+import { MoreOne, Notes } from '@icon-park/react';
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
   type StudioEditableBeatChanges,
   type StudioEditableShotChanges,
   type StudioGenerationBlockV2,
@@ -304,6 +306,10 @@ type ShotCardProps = {
   projection: WorkspaceProjection;
   reviewBlocked: boolean;
   reviewGraph: BeatPanelReviewGraph | null;
+  /** Set when a duration blocker's remedy points at this Shot, so the hidden field is revealed. */
+  revealDuration: boolean;
+  /** A duration blocker can point at a downstream Shot, so the reveal is raised to the Beat. */
+  onRevealDuration: (shotId: string) => void;
   shot: WorkspaceShotProjection;
 };
 
@@ -320,8 +326,10 @@ const ShotCard: React.FC<ShotCardProps> = ({
   onParkSettled,
   projectId,
   projection,
+  onRevealDuration,
   reviewBlocked,
   reviewGraph,
+  revealDuration,
   shot,
 }) => {
   const { t } = useTranslation();
@@ -352,6 +360,12 @@ const ShotCard: React.FC<ShotCardProps> = ({
   const shotCardRef = useRef<HTMLElement | null>(null);
   const shootingScriptKey = shotDraftKey(shot.id, 'shootingScript');
   const durationKey = shotDraftKey(shot.id, 'durationSeconds');
+  // Planned duration leaves the Shot editor and is revealed from that Shot's overflow menu.
+  const [durationOpen, setDurationOpen] = useState(false);
+  const durationFieldRef = useRef<HTMLLabelElement | null>(null);
+  // The Shooting script reads on hover from the header control and opens to edit.
+  const [scriptOpen, setScriptOpen] = useState(false);
+  const scriptFieldRef = useRef<HTMLLabelElement | null>(null);
   const shootingScript = draftString(drafts, shootingScriptKey, shot.shootingScript);
   const durationSeconds = draftNumber(drafts, durationKey, shot.durationSeconds);
   const draftKeys = [shootingScriptKey, durationKey] as const;
@@ -579,8 +593,57 @@ const ShotCard: React.FC<ShotCardProps> = ({
       title: t(`${KEY_ROOT}.lift.shotTitle`, { index: index + 1 }),
     });
   };
+  useEffect(() => {
+    if (revealDuration) setDurationOpen(true);
+  }, [revealDuration]);
+
+  useEffect(() => {
+    if (!durationOpen) return;
+    durationFieldRef.current?.querySelector('input')?.focus();
+  }, [durationOpen]);
+
+  useEffect(() => {
+    if (!scriptOpen) return;
+    scriptFieldRef.current?.querySelector('textarea')?.focus();
+  }, [scriptOpen]);
+
   const shotMenu = (
     <Menu data-shot-id={shot.id} data-shot-overflow-menu>
+      <Menu.Item
+        key='move-earlier'
+        data-shot-move-earlier
+        disabled={disabled || !canMovePrevious}
+        onClick={() => onMove(index, -1)}
+      >
+        {t(`${KEY_ROOT}.reorder.previous`, { index: index + 1 })}
+      </Menu.Item>
+      <Menu.Item
+        key='move-later'
+        data-shot-move-later
+        disabled={disabled || !canMoveNext}
+        onClick={() => onMove(index, 1)}
+      >
+        {t(`${KEY_ROOT}.reorder.next`, { index: index + 1 })}
+      </Menu.Item>
+      <Menu.Item
+        key='save-shot'
+        data-shot-save
+        disabled={disabled || drafts.staleRevision || saving || !dirty}
+        onClick={() => void save()}
+      >
+        {t(`${KEY_ROOT}.common.saveShot`)}
+      </Menu.Item>
+      <Menu.Item key='reset-shot' data-shot-reset disabled={disabled || saving || !dirty} onClick={reset}>
+        {t(`${KEY_ROOT}.common.resetShot`)}
+      </Menu.Item>
+      <Menu.Item
+        key='planned-duration'
+        data-shot-duration-reveal
+        disabled={disabled}
+        onClick={() => setDurationOpen(true)}
+      >
+        {t(`${KEY_ROOT}.fields.duration`)}
+      </Menu.Item>
       <Menu.Item
         key='move-to-bin'
         data-shot-move-to-bin
@@ -625,21 +688,16 @@ const ShotCard: React.FC<ShotCardProps> = ({
         </div>
         <div className={styles.actions}>
           <Button
-            aria-label={t(`${KEY_ROOT}.reorder.previous`, { index: index + 1 })}
-            disabled={disabled || !canMovePrevious}
-            onClick={() => onMove(index, -1)}
+            aria-expanded={scriptOpen}
+            aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
+            data-shot-script-toggle
+            icon={<Notes aria-hidden='true' />}
+            onClick={() => setScriptOpen((open) => !open)}
+            shape='circle'
             size='small'
-          >
-            {t(`${KEY_ROOT}.reorder.previousShort`)}
-          </Button>
-          <Button
-            aria-label={t(`${KEY_ROOT}.reorder.next`, { index: index + 1 })}
-            disabled={disabled || !canMoveNext}
-            onClick={() => onMove(index, 1)}
-            size='small'
-          >
-            {t(`${KEY_ROOT}.reorder.nextShort`)}
-          </Button>
+            title={shootingScript}
+            type='text'
+          />
           <Dropdown
             droplist={shotMenu}
             getPopupContainer={() => document.body}
@@ -657,7 +715,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
               aria-label={`${t('common.more')} · ${t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}`}
               data-shot-id={shot.id}
               data-shot-overflow-trigger
-              disabled={disabled || lifting || !liftAllowed}
+              disabled={disabled || lifting}
               icon={<MoreOne aria-hidden='true' />}
               loading={lifting}
               shape='circle'
@@ -669,45 +727,38 @@ const ShotCard: React.FC<ShotCardProps> = ({
       </header>
 
       <div className={styles.editorGrid}>
-        <label data-shot-field='shooting-script'>
-          <span>{t(`${KEY_ROOT}.fields.shootingScript`)}</span>
-          <Input.TextArea
-            aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
-            autoSize={{ minRows: 3, maxRows: 6 }}
-            disabled={disabled}
-            onChange={(value) => drafts.setValue(shootingScriptKey, value)}
-            value={shootingScript}
-          />
-        </label>
-        <label data-shot-duration-field>
-          <span>{t(`${KEY_ROOT}.fields.duration`)}</span>
-          <InputNumber
-            aria-label={t(`${KEY_ROOT}.fields.durationFor`, { index: index + 1 })}
-            disabled={disabled}
-            max={15}
-            min={4}
-            onChange={(value) => {
-              if (typeof value === 'number' && Number.isSafeInteger(value)) drafts.setValue(durationKey, value);
-            }}
-            precision={0}
-            value={durationSeconds}
-          />
-        </label>
+        {scriptOpen ? (
+          <label data-shot-field='shooting-script' ref={scriptFieldRef}>
+            <span>{t(`${KEY_ROOT}.fields.shootingScript`)}</span>
+            <Input.TextArea
+              aria-label={t(`${KEY_ROOT}.fields.shootingScriptFor`, { index: index + 1 })}
+              autoSize={{ minRows: 3, maxRows: 6 }}
+              disabled={disabled}
+              onChange={(value) => drafts.setValue(shootingScriptKey, value)}
+              value={shootingScript}
+            />
+          </label>
+        ) : null}
+        {durationOpen ? (
+          <label data-shot-duration-field ref={durationFieldRef}>
+            <span>{t(`${KEY_ROOT}.fields.duration`)}</span>
+            <InputNumber
+              aria-label={t(`${KEY_ROOT}.fields.durationFor`, { index: index + 1 })}
+              disabled={disabled}
+              max={STUDIO_MAX_SHOT_SECONDS}
+              min={STUDIO_MIN_SHOT_SECONDS}
+              onChange={(value) => {
+                if (typeof value === 'number' && Number.isSafeInteger(value)) drafts.setValue(durationKey, value);
+              }}
+              precision={0}
+              value={durationSeconds}
+            />
+          </label>
+        ) : null}
       </div>
       <div className={styles.shotActionCluster}>
         <div className={styles.shotActionBand} data-shot-action-band>
           <div className={styles.editorActions} data-shot-actions>
-            <Button
-              disabled={disabled || drafts.staleRevision || saving || !dirty}
-              loading={saving}
-              onClick={() => void save()}
-              type='primary'
-            >
-              {t(`${KEY_ROOT}.common.saveShot`)}
-            </Button>
-            <Button disabled={disabled || saving || !dirty} onClick={reset}>
-              {t(`${KEY_ROOT}.common.resetShot`)}
-            </Button>
             {index > 0 ? (
               <div className={styles.chainChangeControl} data-chain-change-control>
                 <Button
@@ -741,146 +792,147 @@ const ShotCard: React.FC<ShotCardProps> = ({
         ) : null}
       </div>
 
-      {shot.segmentHead || shot.seedStills.length > 0 ? (
-        <section aria-label={t(`${KEY_ROOT}.seeds.label`, { index: index + 1 })} className={styles.subsection}>
-          {shot.segmentHead ? (
-            <div className={styles.subsectionHeader}>
-              <div>
-                <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
-                <p className={styles.muted}>
-                  {t(
-                    shot.effectiveSeedAssetId === null
-                      ? `${KEY_ROOT}.seeds.pending`
-                      : shot.explicitSeedAssetId === null
-                        ? `${KEY_ROOT}.seeds.latestDefault`
-                        : `${KEY_ROOT}.seeds.pinned`
-                  )}
-                </p>
-              </div>
-              <Button disabled={disabled || importing} loading={importing} onClick={() => void importSeed()}>
-                {t(`${KEY_ROOT}.seeds.import`)}
-              </Button>
-            </div>
-          ) : (
-            <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
-          )}
-          <div className={styles.mediaStrip}>
-            {shot.seedStills.map((still, stillIndex) => (
-              <SeedStillCard
-                key={still.assetId}
-                actions={actions}
-                canManageSeed={shot.segmentHead}
-                disabled={disabled}
-                projectId={projectId}
-                shot={shot}
-                shotIndex={index}
-                still={still}
-                stillIndex={stillIndex}
-              />
-            ))}
-          </div>
-          {shot.seedAuthorizationLock !== null ? (
-            <Alert content={t(`${KEY_ROOT}.seeds.authorizationLocked`)} showIcon type='warning' />
-          ) : null}
-          {shot.seedStills.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.seeds.empty`)}</p> : null}
-        </section>
-      ) : null}
-
-      <section aria-label={pictureLabel} className={styles.subsection}>
-        <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.picture.title`)}</h4>
-        {shot.currentPicture === null ? (
-          <p className={styles.muted}>{t(`${KEY_ROOT}.picture.empty`)}</p>
-        ) : !currentPictureAvailable ? (
-          <p className={styles.warning} role='alert'>
-            {t(`${KEY_ROOT}.picture.unavailable`)}
-          </p>
-        ) : (
-          <article className={styles.mediaCard} data-asset-id={shot.currentPicture.assetId} data-current-picture>
-            <FullscreenMediaFrame className={styles.mediaPreviewFrame}>
-              <video
-                aria-label={t(`${KEY_ROOT}.picture.videoPreview`, { label: pictureLabel })}
-                className={styles.mediaPreview}
-                controls
-                poster={currentPicturePosterUrl ?? undefined}
-                preload='metadata'
-                src={currentPictureUrl!}
-              />
-            </FullscreenMediaFrame>
-            <div className={styles.mediaDetails}>
-              <span className={styles.mediaIdentity} dir='auto'>
-                {pictureLabel}
-              </span>
-              <span>
-                <bdi>
-                  {t(`${KEY_ROOT}.picture.sourceDuration`, {
-                    seconds: shot.currentPicture.sourceDurationSeconds,
-                  })}
-                </bdi>
-              </span>
-            </div>
-          </article>
-        )}
-        <div className={styles.shotFooter} data-shot-footer>
-          {reviewBlockCopy === null && reviewPreferences === null ? (
-            <p className={styles.blocker} role='status'>
-              {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
-            </p>
-          ) : reviewBlockCopy === null ? null : (
-            <div>
-              <p className={styles.blocker} id={generationBlockDescriptionId} role='status'>
-                {t(reviewBlockCopy.key, reviewBlockCopy.values)}
-              </p>
-              {reviewBlockRemedy === 'none' ? null : (
-                <Button
-                  onClick={() => {
-                    if (reviewBlock === null) return;
-                    if (reviewBlockRemedy === 'duration') {
-                      const fields = document.querySelectorAll<HTMLInputElement>(
-                        `[data-shot-card][data-shot-id="${blockedShotId}"] [data-shot-duration-field] input`
-                      );
-                      if (fields.length === 1) fields[0]!.focus();
-                      return;
-                    }
-                    actions.resolveGenerationBlock(blockedShotId, reviewBlock);
-                  }}
-                  size='small'
-                >
-                  {t(
-                    reviewBlockRemedy === 'routes'
-                      ? 'conversation.creativeStudio.models.blocked.actionSetEngines'
-                      : reviewBlockRemedy === 'references'
-                        ? 'conversation.creativeStudio.workspace.gate.reviewShotBinding'
-                        : 'conversation.creativeStudio.models.blocked.actionShorten'
-                  )}
+      <div className={styles.mediaRegions} data-shot-media-regions>
+        {shot.segmentHead || shot.seedStills.length > 0 ? (
+          <section aria-label={t(`${KEY_ROOT}.seeds.label`, { index: index + 1 })} className={styles.subsection}>
+            {shot.segmentHead ? (
+              <div className={styles.subsectionHeader}>
+                <div>
+                  <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
+                  <p className={styles.muted}>
+                    {t(
+                      shot.effectiveSeedAssetId === null
+                        ? `${KEY_ROOT}.seeds.pending`
+                        : shot.explicitSeedAssetId === null
+                          ? `${KEY_ROOT}.seeds.latestDefault`
+                          : `${KEY_ROOT}.seeds.pinned`
+                    )}
+                  </p>
+                </div>
+                <Button disabled={disabled || importing} loading={importing} onClick={() => void importSeed()}>
+                  {t(`${KEY_ROOT}.seeds.import`)}
                 </Button>
-              )}
-            </div>
-          )}
-          <Button
-            aria-describedby={reviewBlock === null ? undefined : generationBlockDescriptionId}
-            disabled={
-              disabled ||
-              reviewBlocked ||
-              reviewedGenerationBlocked ||
-              reviewPreferences === null ||
-              reviewBlock !== null ||
-              shot.seedAuthorizationLock !== null
-            }
-            onClick={() => {
-              if (reviewPreferences !== null && reviewPreferences.length > 0) {
-                actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
-              }
-            }}
-            type='primary'
-          >
-            {t(
-              shot.segmentHead && shot.effectiveSeedAssetId === null
-                ? `${KEY_ROOT}.generation.generateSeed`
-                : `${KEY_ROOT}.generation.renderVideo`
+              </div>
+            ) : (
+              <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.seeds.title`)}</h4>
             )}
-          </Button>
-        </div>
-      </section>
+            <div className={styles.mediaStrip}>
+              {shot.seedStills.map((still, stillIndex) => (
+                <SeedStillCard
+                  key={still.assetId}
+                  actions={actions}
+                  canManageSeed={shot.segmentHead}
+                  disabled={disabled}
+                  projectId={projectId}
+                  shot={shot}
+                  shotIndex={index}
+                  still={still}
+                  stillIndex={stillIndex}
+                />
+              ))}
+            </div>
+            {shot.seedAuthorizationLock !== null ? (
+              <Alert content={t(`${KEY_ROOT}.seeds.authorizationLocked`)} showIcon type='warning' />
+            ) : null}
+            {shot.seedStills.length === 0 ? <p className={styles.muted}>{t(`${KEY_ROOT}.seeds.empty`)}</p> : null}
+          </section>
+        ) : null}
+
+        <section aria-label={pictureLabel} className={styles.subsection}>
+          <h4 className={styles.subsectionTitle}>{t(`${KEY_ROOT}.picture.title`)}</h4>
+          {shot.currentPicture === null ? (
+            <p className={styles.muted}>{t(`${KEY_ROOT}.picture.empty`)}</p>
+          ) : !currentPictureAvailable ? (
+            <p className={styles.warning} role='alert'>
+              {t(`${KEY_ROOT}.picture.unavailable`)}
+            </p>
+          ) : (
+            <article className={styles.mediaCard} data-asset-id={shot.currentPicture.assetId} data-current-picture>
+              <FullscreenMediaFrame className={styles.mediaPreviewFrame}>
+                <video
+                  aria-label={t(`${KEY_ROOT}.picture.videoPreview`, { label: pictureLabel })}
+                  className={styles.mediaPreview}
+                  controls
+                  poster={currentPicturePosterUrl ?? undefined}
+                  preload='metadata'
+                  src={currentPictureUrl!}
+                />
+              </FullscreenMediaFrame>
+              <div className={styles.mediaDetails}>
+                <span className={styles.mediaIdentity} dir='auto'>
+                  {pictureLabel}
+                </span>
+                <span>
+                  <bdi>
+                    {t(`${KEY_ROOT}.picture.sourceDuration`, {
+                      seconds: shot.currentPicture.sourceDurationSeconds,
+                    })}
+                  </bdi>
+                </span>
+              </div>
+            </article>
+          )}
+          <div className={styles.shotFooter} data-shot-footer>
+            {reviewBlockCopy === null && reviewPreferences === null ? (
+              <p className={styles.blocker} role='status'>
+                {t(`${KEY_ROOT}.generation.reviewUnavailable`)}
+              </p>
+            ) : reviewBlockCopy === null ? null : (
+              <div>
+                <p className={styles.blocker} id={generationBlockDescriptionId} role='status'>
+                  {t(reviewBlockCopy.key, reviewBlockCopy.values)}
+                </p>
+                {reviewBlockRemedy === 'none' ? null : (
+                  <Button
+                    onClick={() => {
+                      if (reviewBlock === null) return;
+                      if (reviewBlockRemedy === 'duration') {
+                        // The field is revealed from the Shot's menu, so the remedy opens it rather
+                        // than reaching for an input that is not on screen. The card focuses it.
+                        onRevealDuration(blockedShotId);
+                        return;
+                      }
+                      actions.resolveGenerationBlock(blockedShotId, reviewBlock);
+                    }}
+                    size='small'
+                  >
+                    {t(
+                      reviewBlockRemedy === 'routes'
+                        ? 'conversation.creativeStudio.models.blocked.actionSetEngines'
+                        : reviewBlockRemedy === 'references'
+                          ? 'conversation.creativeStudio.workspace.gate.reviewShotBinding'
+                          : 'conversation.creativeStudio.models.blocked.actionShorten'
+                    )}
+                  </Button>
+                )}
+              </div>
+            )}
+            <Button
+              aria-describedby={reviewBlock === null ? undefined : generationBlockDescriptionId}
+              disabled={
+                disabled ||
+                reviewBlocked ||
+                reviewedGenerationBlocked ||
+                reviewPreferences === null ||
+                reviewBlock !== null ||
+                shot.seedAuthorizationLock !== null
+              }
+              onClick={() => {
+                if (reviewPreferences !== null && reviewPreferences.length > 0) {
+                  actions.reviewShot(shot.id, reviewPreferences as [BeatPanelReviewChoice, ...BeatPanelReviewChoice[]]);
+                }
+              }}
+              type='primary'
+            >
+              {t(
+                shot.segmentHead && shot.effectiveSeedAssetId === null
+                  ? `${KEY_ROOT}.generation.generateSeed`
+                  : `${KEY_ROOT}.generation.renderVideo`
+              )}
+            </Button>
+          </div>
+        </section>
+      </div>
 
       {shot.attentionJobs.length > 0 ? (
         <section
@@ -1081,6 +1133,15 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const [reorderAnnouncement, setReorderAnnouncement] = useState('');
   const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
   const beatMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  // The target leaves the layout but stays reachable: the overflow menu reveals it on demand rather
+  // than a nested Modal, which this panel — itself a Modal — would have to trap focus inside.
+  const [targetOpen, setTargetOpen] = useState(false);
+  const targetFieldRef = useRef<HTMLLabelElement | null>(null);
+  // Story is context for this screen rather than its work: it reads on hover and opens to edit.
+  const [storyOpen, setStoryOpen] = useState(false);
+  const storyFieldRef = useRef<HTMLLabelElement | null>(null);
+  // A duration blocker's remedy may point at a downstream Shot, so the reveal lives at Beat level.
+  const [durationRevealShotId, setDurationRevealShotId] = useState<string | null>(null);
   const confirmationHandleRef = useRef<ModalConfirmationHandle | null>(null);
   const restoreMenuFocusAfterCloseRef = useRef(false);
   const beatLiftAuthorityRef = useRef({
@@ -1261,6 +1322,38 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const beatMenu = (
     <Menu data-beat-id={beat.id} data-beat-overflow-menu>
       <Menu.Item
+        key='save-beat'
+        data-beat-save
+        disabled={mutationLocked || drafts.staleRevision || savingBeat || !beatDirty}
+        onClick={() => void saveBeat()}
+      >
+        {t(`${KEY_ROOT}.common.saveBeat`)}
+      </Menu.Item>
+      <Menu.Item
+        key='reset-beat'
+        data-beat-reset
+        disabled={mutationLocked || savingBeat || !beatDirty}
+        onClick={() => beatDraftKeys.forEach(drafts.reset)}
+      >
+        {t(`${KEY_ROOT}.common.resetBeat`)}
+      </Menu.Item>
+      <Menu.Item
+        key='beat-target'
+        data-beat-target-reveal
+        disabled={mutationLocked}
+        onClick={() => setTargetOpen(true)}
+      >
+        {t(`${KEY_ROOT}.fields.targetSeconds`)}
+      </Menu.Item>
+      <Menu.Item
+        key='resplit'
+        data-beat-resplit
+        disabled={mutationLocked}
+        onClick={() => actions.requestResplit(beat.id)}
+      >
+        {t(`${KEY_ROOT}.coverage.reviewResplit`)}
+      </Menu.Item>
+      <Menu.Item
         key='move-to-bin'
         data-beat-move-to-bin
         disabled={mutationLocked || !beatLiftAllowed}
@@ -1272,14 +1365,29 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   );
 
   useEffect(() => {
-    if (mutationLocked || !beatLiftAllowed) {
-      setMenuOpen(false);
+    // A Beat that cannot be lifted still has a reachable menu; only the pending park confirmation
+    // is retracted. Closing the menu here would hide Save exactly while drafts are dirty.
+    if (!beatLiftAllowed) {
       confirmationHandleRef.current?.close();
       confirmationHandleRef.current = null;
     }
+    if (mutationLocked) setMenuOpen(false);
   }, [beatLiftAllowed, mutationLocked]);
 
   useEffect(() => {
+    if (!targetOpen) return;
+    targetFieldRef.current?.querySelector('input')?.focus();
+  }, [targetOpen]);
+
+  useEffect(() => {
+    if (!storyOpen) return;
+    storyFieldRef.current?.querySelector('textarea')?.focus();
+  }, [storyOpen]);
+
+  useEffect(() => {
+    setTargetOpen(false);
+    setStoryOpen(false);
+    setDurationRevealShotId(null);
     setMenuOpen(false);
     confirmationHandleRef.current?.close();
     confirmationHandleRef.current = null;
@@ -1323,6 +1431,16 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           </div>
           <div className={styles.actions}>
             <Button
+              aria-expanded={storyOpen}
+              aria-label={t(`${KEY_ROOT}.fields.story`)}
+              data-beat-story-toggle
+              icon={<Notes aria-hidden='true' />}
+              onClick={() => setStoryOpen((open) => !open)}
+              shape='circle'
+              title={story}
+              type='text'
+            />
+            <Button
               aria-label={t(`${KEY_ROOT}.previousBeat`)}
               disabled={pending || previousBeatId === null}
               onClick={() => previousBeatId !== null && onSelectBeat(previousBeatId)}
@@ -1353,7 +1471,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                 aria-label={`${t('common.more')} · ${beatTitle}`}
                 data-beat-id={beat.id}
                 data-beat-overflow-trigger
-                disabled={mutationLocked || !beatLiftAllowed}
+                disabled={mutationLocked}
                 icon={<MoreOne aria-hidden='true' />}
                 shape='circle'
                 type='text'
@@ -1374,52 +1492,39 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
 
         {errorMessageKey === null ? null : <Alert content={t(errorMessageKey)} type='error' />}
 
-        <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
-          <label className={styles.beatField} data-beat-field='story'>
-            <span className={styles.beatFieldHeading}>
-              <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
-            </span>
-            <Input.TextArea
-              aria-label={t(`${KEY_ROOT}.fields.story`)}
-              autoSize={{ minRows: 3, maxRows: 8 }}
-              disabled={mutationLocked}
-              onChange={(value) => drafts.setValue(storyKey, value)}
-              value={story}
-            />
-          </label>
-          <div className={styles.beatMetaRow} data-beat-meta-row>
-            <label className={styles.beatTargetField} data-beat-field='target'>
-              <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
-              <InputNumber
-                aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
-                disabled={mutationLocked}
-                min={1}
-                onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
-                precision={0}
-                value={targetSeconds ?? undefined}
-              />
-            </label>
-            <div className={styles.editorActions} data-beat-editor-actions>
-              <Button
-                disabled={mutationLocked || drafts.staleRevision || savingBeat || !beatDirty}
-                loading={savingBeat}
-                onClick={() => void saveBeat()}
-                type='primary'
-              >
-                {t(`${KEY_ROOT}.common.saveBeat`)}
-              </Button>
-              <Button
-                disabled={mutationLocked || savingBeat || !beatDirty}
-                onClick={() => beatDraftKeys.forEach(drafts.reset)}
-              >
-                {t(`${KEY_ROOT}.common.resetBeat`)}
-              </Button>
-              <Button disabled={mutationLocked} onClick={() => actions.requestResplit(beat.id)}>
-                {t(`${KEY_ROOT}.coverage.reviewResplit`)}
-              </Button>
+        {!storyOpen && !targetOpen ? null : (
+          <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
+            {storyOpen ? (
+              <label className={styles.beatField} data-beat-field='story' ref={storyFieldRef}>
+                <span className={styles.beatFieldHeading}>
+                  <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
+                </span>
+                <Input.TextArea
+                  aria-label={t(`${KEY_ROOT}.fields.story`)}
+                  autoSize={{ minRows: 3, maxRows: 8 }}
+                  disabled={mutationLocked}
+                  onChange={(value) => drafts.setValue(storyKey, value)}
+                  value={story}
+                />
+              </label>
+            ) : null}
+            <div className={styles.beatMetaRow} data-beat-meta-row>
+              {targetOpen ? (
+                <label className={styles.beatTargetField} data-beat-field='target' ref={targetFieldRef}>
+                  <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
+                  <InputNumber
+                    aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
+                    disabled={mutationLocked}
+                    min={1}
+                    onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
+                    precision={0}
+                    value={targetSeconds ?? undefined}
+                  />
+                </label>
+              ) : null}
             </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         <BeatPlayer
           beat={beat}
@@ -1442,6 +1547,8 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                   hidden={shot.id !== inspectedShotId}
                   index={index}
                   onMove={(position, delta) => void moveShot(position, delta)}
+                  onRevealDuration={setDurationRevealShotId}
+                  revealDuration={durationRevealShotId === shot.id}
                   onParkSettled={(shotId, parked) => {
                     if (parked) {
                       onParkShotSuccess(shotId);

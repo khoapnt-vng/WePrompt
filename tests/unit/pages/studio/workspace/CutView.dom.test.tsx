@@ -2029,18 +2029,6 @@ describe('CutView', () => {
     );
     fireEvent.change(bed, { target: { value: 'audio_current' } });
     expect(cutActions.setBed).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.assets.show'));
-    const drawer = screen.getByRole('dialog', { name: 'conversation.creativeStudio.workspace.assets.title' });
-    const oldAudio = drawer.querySelector('[data-audio-position="2"]')!;
-    fireEvent.click(within(oldAudio).getByText('conversation.creativeStudio.workspace.assets.detach'));
-    const confirmation = screen.getByLabelText('conversation.creativeStudio.workspace.assets.detachTitle');
-    fireEvent.click(
-      within(confirmation).getByRole('button', { name: 'conversation.creativeStudio.workspace.assets.detach' })
-    );
-    await waitFor(() =>
-      expect(screen.getByText('conversation.creativeStudio.workspace.assets.detachFailed')).toBeVisible()
-    );
   });
 
   it.each([
@@ -2058,44 +2046,11 @@ describe('CutView', () => {
     expect(screen.getByText(new RegExp(messageKey))).toBeVisible();
   });
 
-  it('renders pending and empty authority without inventing Beat or audio facts', () => {
-    renderCut({
-      cutProjection: cut({
-        beats: [],
-        filmDurationSeconds: null,
-        audioImports: [],
-        bed: { status: 'none', assetId: null },
-        coverCandidates: [],
-      }),
-    });
+  it('offers no Assets surface, which now belongs to the project menu', () => {
+    renderCut();
 
-    expect(screen.getByText('conversation.creativeStudio.workspace.cut.empty')).toBeVisible();
-    expect(screen.getByText('conversation.creativeStudio.workspace.cut.durationPending')).toBeVisible();
-    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.assets.show'));
-    const drawer = screen.getByRole('dialog', { name: 'conversation.creativeStudio.workspace.assets.title' });
-    expect(within(drawer).getByText('conversation.creativeStudio.workspace.assets.audioEmpty')).toBeVisible();
-    fireEvent.click(within(drawer).getByText('conversation.creativeStudio.workspace.assets.close'));
-    expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('keeps the selected bed attached and keeps exports out of Assets', async () => {
-    const cutActions = renderCut();
-    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.assets.show'));
-    const drawer = screen.getByRole('dialog', { name: 'conversation.creativeStudio.workspace.assets.title' });
-    expect(within(drawer).getByText(/workspace\.assets\.audioItem.*"position":1/)).toBeVisible();
-    expect(drawer.textContent).not.toContain('audio_current');
-    expect(drawer.textContent).not.toContain('audio_old');
-    expect(drawer.textContent).not.toContain('workspace.assets.exportsTitle');
-
-    const current = drawer.querySelector('[data-audio-position="1"]')!;
-    expect(within(current).getByText('conversation.creativeStudio.workspace.assets.detach')).toBeDisabled();
-    const old = drawer.querySelector('[data-audio-position="2"]')!;
-    fireEvent.click(within(old).getByText('conversation.creativeStudio.workspace.assets.detach'));
-    const confirmation = screen.getByLabelText('conversation.creativeStudio.workspace.assets.detachTitle');
-    fireEvent.click(
-      within(confirmation).getByRole('button', { name: 'conversation.creativeStudio.workspace.assets.detach' })
-    );
-    await waitFor(() => expect(cutActions.detachBedAudio).toHaveBeenCalledWith('audio_old'));
+    expect(screen.queryByText('conversation.creativeStudio.workspace.assets.show')).toBeNull();
+    expect(document.querySelector('[data-studio-assets-drawer]')).toBeNull();
   });
 
   it('fails closed for malformed order and invalid current selections', () => {

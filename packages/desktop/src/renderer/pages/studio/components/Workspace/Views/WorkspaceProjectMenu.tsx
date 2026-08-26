@@ -7,12 +7,14 @@
 import {
   Alert,
   Button,
+  Drawer,
   Dropdown,
   Input,
   InputNumber,
   InputTag,
   Menu,
   Modal,
+  Popconfirm,
   Select,
   Tag,
 } from '@arco-design/web-react';
@@ -776,6 +778,7 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   exportCatalog,
   createEditorFolder,
   revealEditorFolder,
+  detachBedAudio,
   drafts,
   pending,
   errorMessageKey,
@@ -788,6 +791,9 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
 }) => {
   const { t } = useTranslation();
   const [initialStoredRuleDrafts] = useState(() => loadStoredRuleDrafts(project.id));
+  const [audioOpen, setAudioOpen] = useState(false);
+  const [detachingAssetId, setDetachingAssetId] = useState<string | null>(null);
+  const [audioAnnouncement, setAudioAnnouncement] = useState('');
   const acknowledgeRuleAdoption = mutations.acknowledgeRuleAdoption;
   const currentGenerationCapability = generationCapabilityIsCurrent(project, generationCapability)
     ? generationCapability
@@ -1224,6 +1230,18 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
     setRevealingEditorFolder(false);
     if (result.ok === false) setEditorFolderExportStatus({ kind: 'failure', messageKey: result.messageKey });
   };
+  const audioImports = projection.cut.audioImports;
+  const bedAssetId = projection.cut.bed.assetId;
+  const detachAudio = async (assetId: string): Promise<void> => {
+    if (assetId === bedAssetId || detachingAssetId !== null) return;
+    setDetachingAssetId(assetId);
+    try {
+      const detached = await detachBedAudio(assetId);
+      setAudioAnnouncement(t(`conversation.creativeStudio.workspace.assets.${detached ? 'detached' : 'detachFailed'}`));
+    } finally {
+      setDetachingAssetId(null);
+    }
+  };
   const menu = (
     <Menu>
       <Menu.Item key='settings' onClick={() => openDialog('settings')}>
@@ -1231,6 +1249,9 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
       </Menu.Item>
       <Menu.Item key='brief' onClick={() => openDialog('brief')}>
         {t('conversation.creativeStudio.workspace.controls.briefAndRulesTitle')}
+      </Menu.Item>
+      <Menu.Item key='audio' data-studio-audio-imports onClick={() => setAudioOpen(true)}>
+        {t('conversation.creativeStudio.workspace.assets.show')}
       </Menu.Item>
       <Menu.Item
         key='editor-folder-export'
@@ -1340,6 +1361,64 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
           )}
         </div>
       )}
+
+      <Drawer
+        footer={
+          <Button onClick={() => setAudioOpen(false)}>{t('conversation.creativeStudio.workspace.assets.close')}</Button>
+        }
+        onCancel={() => setAudioOpen(false)}
+        title={t('conversation.creativeStudio.workspace.assets.title')}
+        visible={audioOpen}
+        width={560}
+      >
+        <div className={styles.modalBody} data-studio-audio-drawer>
+          <p>{t('conversation.creativeStudio.workspace.assets.description')}</p>
+          <p aria-atomic='true' aria-live='polite' role='status'>
+            {audioAnnouncement}
+          </p>
+          {audioImports.length === 0 ? (
+            <p>{t('conversation.creativeStudio.workspace.assets.audioEmpty')}</p>
+          ) : (
+            <ul>
+              {audioImports.map((asset) => {
+                const selected = asset.assetId === bedAssetId;
+                return (
+                  <li key={asset.assetId} data-audio-position={asset.position}>
+                    <div>
+                      <strong>
+                        <bdi>
+                          {t('conversation.creativeStudio.workspace.assets.audioItem', { position: asset.position })}
+                        </bdi>
+                      </strong>
+                      <p>
+                        <bdi>
+                          {t('conversation.creativeStudio.workspace.assets.audioFacts', {
+                            seconds: asset.durationSeconds,
+                            bytes: asset.byteSize,
+                          })}
+                        </bdi>
+                      </p>
+                      {selected ? <span>{t('conversation.creativeStudio.workspace.assets.selectedBed')}</span> : null}
+                    </div>
+                    <Popconfirm
+                      cancelText={t('conversation.creativeStudio.workspace.assets.cancel')}
+                      content={t('conversation.creativeStudio.workspace.assets.detachContent')}
+                      disabled={selected}
+                      okText={t('conversation.creativeStudio.workspace.assets.detach')}
+                      onOk={() => void detachAudio(asset.assetId)}
+                      title={t('conversation.creativeStudio.workspace.assets.detachTitle')}
+                    >
+                      <Button disabled={selected} loading={detachingAssetId === asset.assetId} status='danger'>
+                        {t('conversation.creativeStudio.workspace.assets.detach')}
+                      </Button>
+                    </Popconfirm>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      </Drawer>
 
       <Modal
         visible={dialog === 'settings'}
