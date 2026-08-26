@@ -1810,8 +1810,11 @@ build it alongside that assignment, not independently.
 Charter: **diagnose freely · repair freely when free · propose when it costs · never confirm its
 own spend.**
 
-1. **Build `studio_get_generation_state`** — per-Shot status, latest job with cause-specific error,
-   extraction states, active quotes. Read-only; the prerequisite for everything else.
+1. **Build `studio_get_project_status`** — the stage rollup with actionable blockers designed in
+   [Project status](../../design/creative-studio-3-project-status.md), with a `detail: true` mode
+   returning the per-Shot/job/extraction detail originally specified here as
+   `studio_get_generation_state`. One tool, two granularities. Read-only; the prerequisite for
+   everything else.
 2. **Grant two free recoveries as `direct`:** `retry_conditioning_frame`, and terminalizing a
    *refused* submission (never the submission-unknown shape, which keeps its owner-only
    duplicate-charge acknowledgement).
@@ -1827,3 +1830,25 @@ gating and the duplicate-charge acknowledgement stay exactly as they are. Accept
 can, unaided, (a) explain why a given Shot is not rendering with the true cause, (b) clear a
 stalled chain whose recovery is free, and (c) present a priced recovery proposal for one that is
 not — while a typed "yes" in chat still spends nothing.
+
+## Assignable follow-on — Project status
+
+**Status:** owner-directed 2026-08-27. Full design in
+[Project status](../../design/creative-studio-3-project-status.md). Companion to the Director
+troubleshooting assignment above — build them together; the status tool is that charter's item 1.
+
+1. **`projectStudioStatusV2(project, routeCatalog)`** — pure, main-side, derived on read, never
+   persisted. Stages `brief · engines · references · storyboard · bindings · production · cut`,
+   each `not_started | in_progress | complete | blocked` with `blockers[]` carrying
+   `{cause, where, remedy}` where `remedy.kind ∈ free_fix | proposal | owner_only`.
+2. **Serve it over IPC** and expose it to the Director as `studio_get_project_status`
+   (with the `detail: true` per-Shot mode).
+3. **Re-point the library card and app bar** at the same rollup — blocker count in the bar, stage
+   summary on the card. No new ad-hoc rollups after this lands (ratchet).
+4. **Invariants (tested):** a dead chain is never presented as a queue; optional things (boards,
+   the inert end slot) never block; every blocker's cause is a bounded code; the function is
+   recomputed on read.
+
+**Do not weaken:** grants no operation; persists nothing; boards stay advisory; a Director reading
+status still cannot spend. Acceptance: for each of the eight 2026-08-26 stuck moments recorded in
+the design doc, the status output names the true cause and the correct remedy lane.
