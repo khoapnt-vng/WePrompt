@@ -1702,3 +1702,68 @@ session, including on quotes never confirmed, and charged nothing.
    submits against the stale quote.
 5. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
    full test suite, format, lint, and `git diff --check` pass from the exact final head.
+
+## Assignable follow-on — the References panel
+
+**Status:** designer handoff received 2026-08-26 night, owner-forwarded. Full direction lives in
+[the References panel](../../design/creative-studio-3-references-panel.md); the designer's README and
+the prototype are committed beside this plan. This section is the assignment, not the specification.
+
+- `creative-studio-3-references-panel-handoff.md` — the designer's README
+- `creative-studio-3-references-panel.html.txt` — sha256 `fd2c57db3656ddf1…89ba8ce8`
+
+Fidelity is **high**. The designer states this shares a design language with the beat panel composer
+handoff — *"same card shape, same status vocabulary, same accent. Build them as one family"* — so
+build it alongside that assignment, not independently.
+
+### Notes for the implementer — read in this order
+
+| # | Note | Status | Who acts |
+| --- | --- | --- | --- |
+| 1 | **`Bind to all shots` cannot run on most projects.** The image route allows `maxConditioningImages: 2` counted across characters **and** background; the design pushes the whole current set to every Shot. **4 of 6 real projects overflow**, and the prototype's own `2 / 3 SET` counter is already over. | **Blocked** — needs a product decision on per-Shot binding vs a gated bind-all. See §2. | Owner |
+| 2 | **`+ Add character` has no supported mutation.** `amend_reference_plan` rejects non-background additions (`payloadSchemas.ts:429`); the only alternative replaces the entire plan. | **Ruled** — ship `+ Add place`, and omit or disable `+ Add character` with a reason. Do **not** implement it via `set_reference_plan`. | Codex |
+| 3 | **Handles renumber when the current take changes.** `select_reference_image` pushes the outgoing current to the end of `supersededAssetIds`, so array order is recency-of-demotion, not creation. | **Ruled** — derive the ordinal from `asset.createdAt`, which no mutation rewrites. See §4. | Codex |
+| 4 | **Naming a photo in a prompt does not make the engine use it.** Conditioning comes from the binding and the first frame, not from prose. | **Ruled** — do not ship copy claiming a named photo wins over the bound one until `@handle` resolves to a binding change. | Codex |
+
+### Required product behavior
+
+1. **`contain`, not `cover`, on the picture band**, matted on the parchment ground — never a dark
+   ground. This is the BUG-138 fix and is not negotiable; references arrive in every aspect ratio.
+2. **Generate appends a take and makes it current**, never overwrites — matching the shipped
+   `approvedAssetId` + `supersededAssetIds` model and the owner's References ruling.
+3. **Characters before backgrounds.** Already enforced by `estimate.ts:1095`; the panel should make
+   the order legible rather than let the user meet `invalid_reference`.
+4. **Three status words**, one place, never bold: `NO PHOTO`, `CURRENT SET`, `GENERATING`. The
+   generating state is determinate-free — the image route reports no progress, so draw no percentage.
+5. **Handles are derived, never stored**, and re-slug on rename — with the ordinal taken from
+   `asset.createdAt` per note 3.
+
+### Decide before building
+
+- **Removing a take has no mutation.** `✕` on the picture "drops the current take", but the store has
+  only `select_reference_image`, which re-points and never deletes. If removal ships it needs its own
+  operation, plus an explicit rule for a reference whose last take is removed
+  (`approvedAssetId → null`, back to `NO PHOTO`).
+- **Panel width.** 1000px here versus 1320px for the composer, inside the same Studio shell. Confirm
+  the two agree about their container before both are built.
+
+### Do not weaken
+
+- **Spend governance is untouched.** Generate paths enter the existing prepare/confirm quote path at
+  3 minor units per image. Naming, switching current take, importing, binding and editing a prompt
+  stay free; `Cancel run` must never spend.
+- **Do not let bind produce over-budget bindings.** Whatever resolution note 1 takes, an
+  over-`maxConditioningImages` binding must be refused at the point of binding, not discovered later
+  as a per-Shot error at the generation gate.
+- **Do not implement `+ Add character` by replacing the reference plan.** That risks every existing
+  character reference and its takes.
+
+### Acceptance
+
+1. A reference of any aspect ratio displays whole, matted, never cropped — including a 9:16 portrait.
+2. Generating a second photo leaves the first reachable and switchable; switching current does not
+   renumber any handle.
+3. No binding action can produce a Shot carrying more than `maxConditioningImages` references.
+4. A reference with no photo reads `NO PHOTO` and the panel cannot reach a bound-complete state.
+5. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
+   full test suite, format, lint, and `git diff --check` pass from the exact final head.
