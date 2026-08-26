@@ -1633,3 +1633,72 @@ re-derive the frames region from the prototype alone.
    queue and offers the recovery.
 6. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
    full test suite, format, lint, and `git diff --check` pass from the exact final head.
+
+## Assignable follow-on — show the estimate, ask only for the spend
+
+**Status:** owner-directed 2026-08-26 night. Small, self-contained, and independent of the composer
+work — it can ship on its own.
+
+### Problem
+
+The generation gate asks the user for permission to perform a **free** action. Opening it lands on a
+`choices` step whose body reads *"Preparing an estimate is free. Only the explicit Confirm action can
+submit paid work."* — and then requires a **`Prepare estimate`** click before any number appears.
+The owner's reaction on meeting it mid-run: *"it is redundant that WP keep asking users for
+permission to generate an estimate… duh? Just give them the number."*
+
+That is two clicks and a modal step to reach a figure that costs nothing to compute, and the copy
+explaining the step is longer than the number it is withholding.
+
+### The step guards nothing — verified
+
+`v2Service.ts:3043-3073` (`prepareSubmission`) loads the project, preflights, refreshes generation
+routes, derives the quote graph, and returns it. It performs:
+
+- **no project write** — no revision bump, nothing persisted to `project.json`;
+- **no provider call** — pricing is computed from the rate card and the route catalogue;
+- **no spend** — no job, no authorization, no `spendReceipt`.
+
+The only durable effect is an entry in the **in-memory** `preparedSubmissionCache`. Confirmed
+empirically as well: `prepareSubmission` was called dozens of times across six projects in one
+session, including on quotes never confirmed, and charged nothing.
+
+### Required behavior
+
+1. **Open the gate straight into `review`.** Prepare the estimate automatically when the gate opens
+   and show the number, the item count and the per-item breakdown immediately. The `choices` step
+   and the `Prepare estimate` button are removed for the ordinary path.
+2. **Keep exactly one confirmation, and keep it explicit.** `Confirm` remains the only action that
+   spends, keeps its own copy, and must never be the default focus or fire on `Enter`.
+3. **Preserve every refusal path.** Preparation can fail — `missing_conditioning`, `invalid_route`,
+   `missing_route`, `invalid_reference`, `in_flight`, `stale_project`, `invalid_prepare_request`,
+   `quote_too_large`, `quote_cache_full`. Those states stay exactly as they are; the change is that
+   the user reaches them without a click, not that they disappear. A gate that opens onto a refusal
+   should say what is wrong, not show an empty estimate.
+4. **Handle TTL silently.** A prepared quote lives `STUDIO_PREPARED_QUOTE_TTL_SECONDS` (5 minutes)
+   and `confirmSubmission` claims it from the cache. Auto-preparing on open means a quote can expire
+   while the user reads it. On expiry, re-prepare in place and show the refreshed figure — the
+   existing `refresh_required` phase already models this; do not surface it as an error the user has
+   to clear, and never confirm against a stale quote.
+5. **Keep the "free" reassurance, demoted.** The fact that looking costs nothing is worth stating
+   once, quietly, beside the estimate — not as a step the user must acknowledge.
+
+### Do not weaken
+
+- **This is not a relaxation of spend governance.** One explicit, unambiguous confirmation before any
+  paid work remains the rule the owner set; this task removes a confirmation that guards nothing and
+  leaves the one that guards everything untouched.
+- **Do not auto-prepare anything that costs.** The change applies to quote preparation only. Nothing
+  here may pre-warm a provider, pre-generate a seed, or reserve capacity.
+- **Do not collapse `Confirm` into the same click as opening the gate.** Removing the free step must
+  not shorten the paid path.
+
+### Acceptance
+
+1. Opening the generation gate shows a priced estimate with no intermediate click.
+2. No path reaches paid work without one explicit `Confirm` on a currently-valid quote.
+3. Every preparation-refusal state is reachable and explains itself.
+4. A quote that expires while the gate is open refreshes in place; confirming after expiry never
+   submits against the stale quote.
+5. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
+   full test suite, format, lint, and `git diff --check` pass from the exact final head.
