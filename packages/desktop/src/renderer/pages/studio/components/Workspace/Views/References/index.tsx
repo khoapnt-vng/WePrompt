@@ -12,6 +12,7 @@ import {
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_REFERENCE_LABEL_LENGTH,
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
+  type StudioAspectRatio,
   type StudioRendererJobV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
@@ -54,6 +55,7 @@ export type ReferencesViewActions = {
 
 export type ReferencesViewProps = {
   projectId: string;
+  aspectRatio: StudioAspectRatio;
   references: readonly ReferenceWorkspaceItem[];
   pendingReferenceId: string | null;
   gateLocked: boolean;
@@ -70,6 +72,7 @@ const REFERENCE_HIGHLIGHT_MS = 1_600;
 /** Project-level identity and location references, made current before any Shot candidates are made. */
 export const ReferencesView: React.FC<ReferencesViewProps> = ({
   projectId,
+  aspectRatio,
   references,
   pendingReferenceId,
   gateLocked,
@@ -438,7 +441,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
   };
 
   return (
-    <section className={styles.root} data-studio-references-view>
+    <section className={styles.root} data-aspect-ratio={aspectRatio} data-studio-references-view>
       <header className={styles.introduction}>
         <p>{t(`${ROOT}.description`)}</p>
         <div aria-live='polite'>

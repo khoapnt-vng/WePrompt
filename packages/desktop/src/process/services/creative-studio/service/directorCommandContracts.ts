@@ -16,11 +16,13 @@ import {
   STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
   type StudioDirectorOperationV2,
+  type StudioDirectorOperationDispositionV2,
   type StudioMutationOperationV2,
   type StudioProposalDecisionV2,
   type StudioProposalRecordV2,
@@ -279,47 +281,8 @@ const validateOperationListV2 = (value: unknown): value is StudioMutationOperati
   return true;
 };
 
-export type StudioDirectorOperationDispositionV2 = 'direct' | 'proposal' | 'operation_not_permitted';
-
-/**
- * Frozen schema-2 Director capability policy. This is deliberately exhaustive so adding a reducer
- * gesture cannot silently make it callable by either MCP mutation surface.
- */
-export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
-  edit_project: 'operation_not_permitted',
-  set_brief: 'direct',
-  set_rules: 'operation_not_permitted',
-  set_reference_plan: 'direct',
-  amend_reference_plan: 'direct',
-  set_reference_prompt: 'operation_not_permitted',
-  select_reference_image: 'operation_not_permitted',
-  set_shot_reference_binding: 'direct',
-  add_beat: 'proposal',
-  edit_beat: 'proposal',
-  reorder_beats: 'direct',
-  park_beat: 'operation_not_permitted',
-  restore_beat: 'operation_not_permitted',
-  add_binned_beat: 'proposal',
-  add_shot: 'proposal',
-  edit_shot: 'proposal',
-  delete_shot: 'direct',
-  park_shot: 'operation_not_permitted',
-  restore_shot: 'operation_not_permitted',
-  reorder_shots: 'direct',
-  apply_coverage: 'proposal',
-  set_hard_cut: 'operation_not_permitted',
-  set_seed_still: 'operation_not_permitted',
-  dismiss_seed_still: 'operation_not_permitted',
-  select_video_take: 'operation_not_permitted',
-  remove_video_take: 'operation_not_permitted',
-  promote_board_panel: 'operation_not_permitted',
-  trim_shot: 'operation_not_permitted',
-  reorder_bin: 'direct',
-  set_routes: 'operation_not_permitted',
-  set_spend_policy: 'operation_not_permitted',
-  set_bed: 'operation_not_permitted',
-  undo_last: 'operation_not_permitted',
-} as const satisfies Readonly<Record<StudioMutationOperationV2['kind'], StudioDirectorOperationDispositionV2>>);
+export { STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 };
+export type { StudioDirectorOperationDispositionV2 };
 
 /** Returns null for malformed or future operation kinds; known denied kinds stay distinguishable. */
 export const classifyStudioDirectorOperationV2 = (kind: unknown): StudioDirectorOperationDispositionV2 | null =>

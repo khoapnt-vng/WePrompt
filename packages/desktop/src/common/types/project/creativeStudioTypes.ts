@@ -1406,6 +1406,67 @@ export type StudioMutationOperationV2 =
   | { kind: 'set_bed'; assetId: string | null }
   | { kind: 'undo_last'; entryId: string };
 
+export type StudioDirectorOperationDispositionV2 = 'direct' | 'proposal' | 'operation_not_permitted';
+
+/**
+ * Shared, exhaustive Director authority. Main enforces this map and the renderer derives the
+ * Director's capability instructions from the same value so self-description cannot drift.
+ */
+export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
+  edit_project: 'operation_not_permitted',
+  set_brief: 'direct',
+  set_rules: 'operation_not_permitted',
+  set_reference_plan: 'direct',
+  amend_reference_plan: 'direct',
+  set_reference_prompt: 'operation_not_permitted',
+  select_reference_image: 'operation_not_permitted',
+  set_shot_reference_binding: 'direct',
+  add_beat: 'proposal',
+  edit_beat: 'proposal',
+  reorder_beats: 'direct',
+  park_beat: 'operation_not_permitted',
+  restore_beat: 'operation_not_permitted',
+  add_binned_beat: 'proposal',
+  add_shot: 'proposal',
+  edit_shot: 'proposal',
+  delete_shot: 'direct',
+  park_shot: 'operation_not_permitted',
+  restore_shot: 'operation_not_permitted',
+  reorder_shots: 'direct',
+  apply_coverage: 'proposal',
+  set_hard_cut: 'operation_not_permitted',
+  set_seed_still: 'operation_not_permitted',
+  dismiss_seed_still: 'operation_not_permitted',
+  select_video_take: 'operation_not_permitted',
+  remove_video_take: 'operation_not_permitted',
+  promote_board_panel: 'operation_not_permitted',
+  trim_shot: 'operation_not_permitted',
+  reorder_bin: 'direct',
+  set_routes: 'operation_not_permitted',
+  set_spend_policy: 'operation_not_permitted',
+  set_bed: 'operation_not_permitted',
+  undo_last: 'operation_not_permitted',
+} as const satisfies Readonly<Record<StudioMutationOperationV2['kind'], StudioDirectorOperationDispositionV2>>);
+
+const studioDirectorOperationsWithDispositionV2 = (disposition: StudioDirectorOperationDispositionV2): string =>
+  Object.entries(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)
+    .filter((entry) => entry[1] === disposition)
+    .map((entry) => entry[0])
+    .join(', ');
+
+/** English system-prompt rules derived from the exact policy Main enforces. */
+export const studioDirectorCapabilityRulesV2 = (): string =>
+  [
+    'Your Studio authority is exact. Do not generalize one unavailable action into a refusal to author.',
+    `Permitted through propose_storyboard and human review: ${studioDirectorOperationsWithDispositionV2('proposal')}.`,
+    'You are permitted to create and edit Beats and Shots through that proposal path. When the person asks you',
+    'to make the film, author the storyboard with propose_storyboard; do not say Studio denies that permission.',
+    `Permitted directly through studio_apply_edits: ${studioDirectorOperationsWithDispositionV2('direct')}.`,
+    `Unavailable to you: ${studioDirectorOperationsWithDispositionV2('operation_not_permitted')}.`,
+    'Paid generation is separate from authoring. Never start or confirm paid generation; after the reviewed',
+    'storyboard is accepted, explain that the person chooses when to review a quote and spend.',
+  ].join('\n');
+
 export type StudioMutationBatchV2 = {
   schemaVersion: typeof STUDIO_MUTATION_BATCH_SCHEMA_VERSION;
   projectId: string;

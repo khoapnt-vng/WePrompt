@@ -5,6 +5,8 @@
  */
 
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -56,6 +58,7 @@ const renderWorkflow = (props: Partial<React.ComponentProps<typeof ReferencesVie
     actions,
     ...render(
       <ReferencesView
+        aspectRatio='16:9'
         projectId='project_1'
         references={props.references ?? []}
         pendingReferenceId={props.pendingReferenceId ?? null}
@@ -218,6 +221,42 @@ describe('the schema-5 References workspace', () => {
     await waitFor(() => expect(actions.selectImage).toHaveBeenCalledWith('reference_ming', 'asset_ming_previous'));
   });
 
+  it('uses the project aspect ratio for portrait and square reference review', () => {
+    const { container, rerender, actions } = renderWorkflow({
+      aspectRatio: '9:16',
+      references: [workflowReference()],
+    });
+    expect(container.querySelector('[data-studio-references-view]')).toHaveAttribute('data-aspect-ratio', '9:16');
+
+    rerender(
+      <ReferencesView
+        actions={actions}
+        aspectRatio='1:1'
+        errorMessageKey={null}
+        gateLocked={false}
+        pendingReferenceId={null}
+        projectId='project_1'
+        references={[workflowReference()]}
+      />
+    );
+    expect(container.querySelector('[data-studio-references-view]')).toHaveAttribute('data-aspect-ratio', '1:1');
+  });
+
+  it('contains current, historical, and fullscreen reference images without cropping', () => {
+    const css = readFileSync(
+      resolve(
+        process.cwd(),
+        'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/References.module.css'
+      ),
+      'utf8'
+    );
+
+    expect(css).toMatch(/\.preview\s*\{[^}]*aspect-ratio:\s*var\(--studio-reference-aspect-ratio\)/s);
+    expect(css).toMatch(/\.preview img\s*\{[^}]*object-fit:\s*contain/s);
+    expect(css).toMatch(/\.generatedHistory img\s*\{[^}]*object-fit:\s*contain/s);
+    expect(css).toMatch(/\.fullscreenFrame:fullscreen \.preview\s*\{[^}]*aspect-ratio:\s*auto/s);
+  });
+
   it('shows current-image progress without owning the Shot-binding handoff', () => {
     const references = [workflowReference({ approvedAssetId: null, generatedAssetIds: [] })];
     const { actions, rerender } = renderWorkflow({ references });
@@ -225,6 +264,7 @@ describe('the schema-5 References workspace', () => {
     expect(screen.getByText(`${WORKFLOW_KEY}.currentProgress:{"current":0,"total":1}`)).toBeVisible();
     rerender(
       <ReferencesView
+        aspectRatio='16:9'
         projectId='project_1'
         references={[workflowReference()]}
         pendingReferenceId={null}
@@ -327,6 +367,7 @@ describe('the schema-5 References workspace', () => {
     rerender(
       <ReferencesView
         actions={actions}
+        aspectRatio='16:9'
         errorMessageKey={null}
         focusIntent={{
           id: 'focus-2',

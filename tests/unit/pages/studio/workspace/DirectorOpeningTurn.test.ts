@@ -8,6 +8,8 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
+import { STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 } from '@/common/types/project/creativeStudioTypes';
+
 import {
   DIRECTOR_PRESET_RULES,
   directorOpeningTurn,
@@ -101,6 +103,28 @@ describe('the Director preset rules', () => {
 
   it('leaves the free reads free, so asking well is not also blocked', () => {
     expect(DIRECTOR_PRESET_RULES).toContain('read_storyboard');
+  });
+
+  it('describes every governed operation from the exact shared disposition policy', () => {
+    for (const [operation, disposition] of Object.entries(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)) {
+      const heading =
+        disposition === 'proposal'
+          ? 'Permitted through propose_storyboard and human review:'
+          : disposition === 'direct'
+            ? 'Permitted directly through studio_apply_edits:'
+            : 'Unavailable to you:';
+      const section = DIRECTOR_PRESET_RULES.slice(
+        DIRECTOR_PRESET_RULES.indexOf(heading),
+        DIRECTOR_PRESET_RULES.indexOf('\n', DIRECTOR_PRESET_RULES.indexOf(heading))
+      );
+      expect(section, `${operation} must be described as ${disposition}`).toContain(operation);
+    }
+  });
+
+  it('authors Beats and Shots through review without claiming it can spend', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/permitted to create and edit Beats and Shots/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/author the storyboard with propose_storyboard/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never start or confirm paid generation/i);
   });
 
   it('keeps a recorded proposal pending until a later read proves human acceptance', () => {

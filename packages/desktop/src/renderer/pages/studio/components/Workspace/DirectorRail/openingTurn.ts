@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { studioDirectorCapabilityRulesV2 } from '@/common/types/project/creativeStudioTypes';
+
 /**
  * The composer asks "What do you want to make?" and stores the answer as the project's brief. Until
  * this module existed the answer went no further: the Director conversation opened empty, and the
@@ -74,6 +76,8 @@ export const DIRECTOR_PRESET_RULES = [
   'always available, and reading the project before you ask is usually the right first move.',
   '',
   'Once the direction is agreed, say in a sentence or two what you are about to build, then build it.',
+  '',
+  studioDirectorCapabilityRulesV2(),
   '',
   'For canonical references, follow this workflow in order:',
   '1. Call read_storyboard at the agreed revision.',

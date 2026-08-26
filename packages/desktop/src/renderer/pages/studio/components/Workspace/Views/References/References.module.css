@@ -4,6 +4,26 @@
   gap: 24px;
 }
 
+.root[data-aspect-ratio='16:9'] {
+  --studio-reference-aspect-ratio: 16 / 9;
+}
+
+.root[data-aspect-ratio='9:16'] {
+  --studio-reference-aspect-ratio: 9 / 16;
+}
+
+.root[data-aspect-ratio='1:1'] {
+  --studio-reference-aspect-ratio: 1 / 1;
+}
+
+.root[data-aspect-ratio='4:3'] {
+  --studio-reference-aspect-ratio: 4 / 3;
+}
+
+.root[data-aspect-ratio='3:4'] {
+  --studio-reference-aspect-ratio: 3 / 4;
+}
+
 .introduction {
   display: grid;
   max-inline-size: 720px;
@@ -106,7 +126,7 @@
   position: relative;
   display: grid;
   overflow: hidden;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: var(--studio-reference-aspect-ratio);
   place-items: center;
   background: var(--color-fill-2);
 }
@@ -114,7 +134,7 @@
 .preview img {
   inline-size: 100%;
   block-size: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .previewActions {
@@ -210,9 +230,9 @@
 
 .generatedHistory img {
   inline-size: 100%;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: var(--studio-reference-aspect-ratio);
   border-radius: 4px;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .cardTitle {
