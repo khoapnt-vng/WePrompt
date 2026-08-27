@@ -11,6 +11,7 @@ export type {
   BeatPanelReviewGraph,
   BeatPanelReviewPreference,
   BeatPanelShotSave,
+  StudioShotEditFocusIntent,
 } from './BeatPanel';
 export {
   boardGateDraft,

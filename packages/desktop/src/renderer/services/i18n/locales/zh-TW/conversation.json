@@ -1143,7 +1143,32 @@
         "before": "之前",
         "after": "之後",
         "ownerBeat": "所屬節拍",
-        "reviewUnavailable": "此提案包含不支援的變更，無法接受。",
+        "reviewUnavailable": "無法安全審查此提案，因此不能接受。",
+        "refusal": {
+          "applyCoverage": "涵蓋規劃無法取代這些已固定的鏡頭。請改為直接編輯它們的拍攝腳本。",
+          "applyCoverageFixedWork": "涵蓋規劃無法取代已有工作的鏡頭。請查看固定工作原因並直接編輯受影響的鏡頭。",
+          "editShotsDirectly": "直接編輯這些鏡頭",
+          "reason": {
+            "beat_capacity_reached": "專案已達節拍數量上限。",
+            "beat_shot_capacity_reached": "此節拍已達鏡頭數量上限。",
+            "project_shot_capacity_reached": "專案已達鏡頭數量上限。",
+            "invalid_shot_duration": "提議鏡頭的長度超出允許範圍。",
+            "dependency_blocked": "現有工作阻止了此項提議變更。",
+            "identity_collision": "提議的識別碼已被使用。",
+            "invalid_operation": "此項提議變更不適用於目前專案。",
+            "undo_conflict": "此提案與後續編輯衝突。",
+            "validation_failed": "變更後的專案未通過驗證。"
+          },
+          "fixedReason": {
+            "owned_asset": "已儲存的鏡頭媒體",
+            "owned_job": "生成歷程",
+            "video_asset": "目前影片",
+            "seed_still": "已選首幀",
+            "conditioning_frame": "連續性影格",
+            "conditioning_input": "下游條件輸入",
+            "shooting_script": "現有拍攝腳本"
+          }
+        },
         "refreshing": "正在對照目前專案檢查此提案…",
         "authorityUnavailable": "無法驗證提案權限。提案仍保持待處理，其操作目前無法使用。",
         "requestUpdated": "準備更新提案",

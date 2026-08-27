@@ -1149,7 +1149,32 @@
         "before": "Antes",
         "after": "Depois",
         "ownerBeat": "Beat responsável",
-        "reviewUnavailable": "Esta proposta contém uma alteração não compatível e não pode ser aceita.",
+        "reviewUnavailable": "Não foi possível revisar esta proposta com segurança, então ela não pode ser aceita.",
+        "refusal": {
+          "applyCoverage": "A cobertura não pode substituir estes planos fixados. Edite diretamente os roteiros de filmagem deles.",
+          "applyCoverageFixedWork": "A cobertura não pode substituir planos que já contêm trabalho. Revise os motivos de fixação e edite diretamente os planos afetados.",
+          "editShotsDirectly": "Editar estes planos diretamente",
+          "reason": {
+            "beat_capacity_reached": "O projeto atingiu o limite de Beats.",
+            "beat_shot_capacity_reached": "Este Beat atingiu o limite de planos.",
+            "project_shot_capacity_reached": "O projeto atingiu o limite de planos.",
+            "invalid_shot_duration": "A duração de um plano proposto está fora do intervalo permitido.",
+            "dependency_blocked": "O trabalho existente bloqueia esta alteração proposta.",
+            "identity_collision": "Uma identidade proposta já está em uso.",
+            "invalid_operation": "Esta alteração proposta não é válida para o projeto atual.",
+            "undo_conflict": "Esta proposta entra em conflito com edições posteriores.",
+            "validation_failed": "O projeto resultante não passou na validação."
+          },
+          "fixedReason": {
+            "owned_asset": "mídia de plano armazenada",
+            "owned_job": "histórico de geração",
+            "video_asset": "vídeo atual",
+            "seed_still": "primeiro quadro selecionado",
+            "conditioning_frame": "quadro de continuidade",
+            "conditioning_input": "entrada de condicionamento posterior",
+            "shooting_script": "roteiro de filmagem existente"
+          }
+        },
         "refreshing": "Verificando esta proposta com o projeto atual…",
         "authorityUnavailable": "Não foi possível verificar a autoridade da proposta. Ela continua pendente e suas ações estão indisponíveis.",
         "requestUpdated": "Preparar proposta atualizada",

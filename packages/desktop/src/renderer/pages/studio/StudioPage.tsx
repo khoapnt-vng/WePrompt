@@ -67,6 +67,7 @@ import {
   type CutImportResult,
   type ReferencesViewActions,
   type StudioReferenceFocusIntent,
+  type StudioShotEditFocusIntent,
   type SpendGateDraft,
   type SpendGateBoardPromotion,
   type SpendGateRouteIssue,
@@ -395,12 +396,14 @@ const StudioProjectPage: React.FC<{
   const directorDraftRequestSequenceRef = useRef(0);
   const [briefRouteFocusRole, setBriefRouteFocusRole] = useState<'image' | 'video' | null>(null);
   const [referenceFocusIntent, setReferenceFocusIntent] = useState<StudioReferenceFocusIntent | null>(null);
+  const [shotEditFocusIntent, setShotEditFocusIntent] = useState<StudioShotEditFocusIntent | null>(null);
   const [pendingRejoinReview, setPendingRejoinReview] = useState<{
     projectId: string;
     projectRevision: number;
     shotId: string;
   } | null>(null);
   const referenceFocusSequenceRef = useRef(0);
+  const shotEditFocusSequenceRef = useRef(0);
   const referencesAutoOpenedRef = useRef<string | null>(null);
   const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
   const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
@@ -469,6 +472,10 @@ const StudioProjectPage: React.FC<{
     setDirectorDraftRequest(null);
   }, [projectId]);
 
+  useEffect(() => {
+    setShotEditFocusIntent(null);
+  }, [activeView, projectId]);
+
   const openReferenceFocus = useCallback(
     (focus: { referenceIds?: readonly string[]; assetIds?: readonly string[]; shotIds?: readonly string[] }): void => {
       const current = projectRef.current;
@@ -496,6 +503,43 @@ const StudioProjectPage: React.FC<{
   );
   const consumeReferenceFocusIntent = useCallback((intentId: string): void => {
     setReferenceFocusIntent((current) => (current?.id === intentId ? null : current));
+  }, []);
+
+  const openProposalShotEditor = useCallback(
+    (beatId: string, requestedShotIds: readonly string[]): void => {
+      const current = projectRef.current;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        currentProjection.projectId !== current.id ||
+        requestedShotIds.length === 0 ||
+        new Set(requestedShotIds).size !== requestedShotIds.length
+      ) {
+        return;
+      }
+      const shotIds = boundedUniqueIds(requestedShotIds, STUDIO_MAX_SHOTS_PER_PROJECT);
+      const beat = currentProjection.activeBeats.find((candidate) => candidate.id === beatId);
+      if (
+        beat === undefined ||
+        shotIds.length !== requestedShotIds.length ||
+        !shotIds.every((shotId) => beat.shots.some((shot) => shot.id === shotId))
+      ) {
+        return;
+      }
+      shotEditFocusSequenceRef.current += 1;
+      setShotEditFocusIntent({
+        id: `${current.id}:shot-edit:${shotEditFocusSequenceRef.current}`,
+        projectId: current.id,
+        view: activeView,
+        beatId,
+        shotIds,
+      });
+    },
+    [activeView]
+  );
+  const consumeShotEditFocusIntent = useCallback((intentId: string): void => {
+    setShotEditFocusIntent((current) => (current?.id === intentId ? null : current));
   }, []);
 
   const afterPaidConfirm = useCallback(async (): Promise<void> => {
@@ -4121,6 +4165,7 @@ const StudioProjectPage: React.FC<{
       onRejectProposal={rejectProposalFromCard}
       onRequestUpdatedProposal={requestUpdatedProposal}
       onReviewRuleDrafts={reviewRuleDrafts}
+      onEditProposalShots={openProposalShotEditor}
       onGenerateReferences={(requestId) => decideReferences(requestId, { kind: 'generation_gate' })}
       onRejectReferences={(requestId) => decideReferences(requestId, { kind: 'rejected' })}
       onReviewHandoff={reviewHandoff}
@@ -4241,6 +4286,8 @@ const StudioProjectPage: React.FC<{
             }
             referenceFocusIntent={referenceFocusIntent}
             onReferenceFocusIntentConsumed={consumeReferenceFocusIntent}
+            shotEditFocusIntent={shotEditFocusIntent}
+            onShotEditFocusIntentConsumed={consumeShotEditFocusIntent}
           />
         )}
       </WorkspaceShell>

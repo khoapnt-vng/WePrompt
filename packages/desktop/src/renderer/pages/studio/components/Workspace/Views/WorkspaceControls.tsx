@@ -42,6 +42,8 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   referenceErrorMessageKey = null,
   referenceFocusIntent = null,
   onReferenceFocusIntentConsumed,
+  shotEditFocusIntent = null,
+  onShotEditFocusIntentConsumed,
 }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<{
@@ -62,9 +64,20 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   currentProjectId.current = project.id;
   const currentView = useRef(activeView);
   currentView.current = activeView;
+  const openedShotEditFocusIntentRef = useRef<{ projectId: string; intentId: string } | null>(null);
+  const clearedShotEditFocusIntentRef = useRef<{ projectId: string; intentId: string } | null>(null);
   const openBeatId = openPanel?.projectId === project.id && openPanel.view === activeView ? openPanel.beatId : null;
   const openBeatIndex = openBeatId === null ? -1 : projection.activeBeats.findIndex((beat) => beat.id === openBeatId);
   const openBeat = openBeatIndex < 0 ? null : (projection.activeBeats[openBeatIndex] ?? null);
+  const panelShotEditFocusIntent =
+    shotEditFocusIntent !== null &&
+    shotEditFocusIntent.projectId === project.id &&
+    shotEditFocusIntent.view === activeView &&
+    openBeat?.id === shotEditFocusIntent.beatId &&
+    shotEditFocusIntent.shotIds.length > 0 &&
+    shotEditFocusIntent.shotIds.every((shotId) => openBeat.shots.some((shot) => shot.id === shotId))
+      ? shotEditFocusIntent
+      : null;
   const dirtyBeatIds = useMemo(() => {
     const dirtyKeys = new Set(drafts.dirtyKeys);
     return projection.activeBeats.flatMap((beat) => {
@@ -260,6 +273,50 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   useEffect(() => {
     setPendingAuthoringOpen(null);
   }, [activeView, project.id]);
+
+  useEffect(() => {
+    if (
+      shotEditFocusIntent === null ||
+      (clearedShotEditFocusIntentRef.current !== null && clearedShotEditFocusIntentRef.current.projectId !== project.id)
+    ) {
+      openedShotEditFocusIntentRef.current = null;
+      clearedShotEditFocusIntentRef.current = null;
+    }
+  }, [project.id, shotEditFocusIntent]);
+
+  useEffect(() => {
+    if (
+      shotEditFocusIntent === null ||
+      shotEditFocusIntent.projectId !== project.id ||
+      shotEditFocusIntent.view !== activeView
+    ) {
+      return;
+    }
+    const beat = projection.activeBeats.find((candidate) => candidate.id === shotEditFocusIntent.beatId);
+    if (
+      shotEditFocusIntent.shotIds.length === 0 ||
+      beat === undefined ||
+      !shotEditFocusIntent.shotIds.every((shotId) => beat.shots.some((shot) => shot.id === shotId))
+    ) {
+      if (
+        clearedShotEditFocusIntentRef.current?.projectId !== project.id ||
+        clearedShotEditFocusIntentRef.current.intentId !== shotEditFocusIntent.id
+      ) {
+        clearedShotEditFocusIntentRef.current = { projectId: project.id, intentId: shotEditFocusIntent.id };
+        onShotEditFocusIntentConsumed?.(shotEditFocusIntent.id);
+      }
+      return;
+    }
+    if (
+      openedShotEditFocusIntentRef.current?.projectId === project.id &&
+      openedShotEditFocusIntentRef.current.intentId === shotEditFocusIntent.id
+    ) {
+      return;
+    }
+    openedShotEditFocusIntentRef.current = { projectId: project.id, intentId: shotEditFocusIntent.id };
+    drafts.selectBeat(beat.id);
+    setOpenPanel({ projectId: project.id, beatId: beat.id, view: activeView });
+  }, [activeView, drafts, onShotEditFocusIntentConsumed, project.id, projection.activeBeats, shotEditFocusIntent]);
 
   useEffect(() => {
     if (pendingAuthoringOpen === null) return;
@@ -513,6 +570,8 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           reviewBlockedMessageKey={beatPanelReviewBlockedMessageKey}
           referenceBindings={referenceBindings}
           referenceMaxConditioningImages={referenceMaxConditioningImages}
+          shotEditFocusIntent={panelShotEditFocusIntent}
+          onShotEditFocusIntentConsumed={onShotEditFocusIntentConsumed}
         />
       )}
       {activeView === 'board' ? null : (

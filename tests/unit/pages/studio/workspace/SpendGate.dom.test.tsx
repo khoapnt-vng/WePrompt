@@ -133,6 +133,7 @@ import {
   type SpendGateBoardPromotionImpact,
   type SpendGateDraft,
   type SpendGateGenerationDisclosure,
+  type StudioShotEditFocusIntent,
   type TableBoardActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
@@ -801,6 +802,8 @@ const ControlsHarness: React.FC<{
   beatActions?: BeatPanelActions;
   briefDialogRequest?: number;
   activeView?: 'table' | 'board' | 'cut';
+  shotEditFocusIntent?: StudioShotEditFocusIntent | null;
+  onShotEditFocusIntentConsumed?: (intentId: string) => void;
 }> = ({
   routes,
   open: _open,
@@ -814,6 +817,8 @@ const ControlsHarness: React.FC<{
   beatActions = beatPanelActions(),
   briefDialogRequest = 0,
   activeView = 'table',
+  shotEditFocusIntent = null,
+  onShotEditFocusIntentConsumed,
 }) => {
   const project = projectOverride === undefined ? makeProject() : { ...projectOverride };
   if (spendPolicy) project.spendPolicy = { currency: 'USD', maxPerBatchMinorUnits: 1_000 };
@@ -893,6 +898,8 @@ const ControlsHarness: React.FC<{
         beatPanelActions={beatActions}
         beatPanelReviewGraphs={[]}
         beatPanelReviewBlockedMessageKey={null}
+        shotEditFocusIntent={shotEditFocusIntent}
+        onShotEditFocusIntentConsumed={onShotEditFocusIntentConsumed}
       />
     </>
   );
@@ -1747,6 +1754,101 @@ describe('WorkspaceControls', () => {
       expect(screen.queryByRole('dialog')).toBeNull();
     }
   );
+
+  it('opens the exact Beat and consumes a project/view-correlated Shot-edit intent after field focus', async () => {
+    const onConsumed = vi.fn();
+    const intent: StudioShotEditFocusIntent = {
+      id: 'shot_edit_1',
+      projectId: 'project_1',
+      view: 'table',
+      beatId: 'beat_1',
+      shotIds: ['shot_1'],
+    };
+    render(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        shotEditFocusIntent={intent}
+        onShotEditFocusIntentConsumed={onConsumed}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    const field = document.querySelector<HTMLTextAreaElement>('textarea[data-shot-field="shooting-script"]');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(onConsumed).toHaveBeenCalledOnce();
+    expect(onConsumed).toHaveBeenCalledWith(intent.id);
+  });
+
+  it('clears a current-project invalid Shot-edit identity instead of retaining a latent focus', async () => {
+    const onConsumed = vi.fn();
+    render(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        shotEditFocusIntent={{
+          id: 'shot_edit_missing',
+          projectId: 'project_1',
+          view: 'table',
+          beatId: 'beat_1',
+          shotIds: ['shot_missing'],
+        }}
+        onShotEditFocusIntentConsumed={onConsumed}
+      />
+    );
+
+    await waitFor(() => expect(onConsumed).toHaveBeenCalledOnce());
+    expect(onConsumed).toHaveBeenCalledWith('shot_edit_missing');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('does not pass a wrong-project or wrong-view intent into an already-open Beat panel', async () => {
+    const onConsumed = vi.fn();
+    const result = render(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        onShotEditFocusIntentConsumed={onConsumed}
+      />
+    );
+    openFirstBeatPanel();
+    const field = document.querySelector<HTMLTextAreaElement>('textarea[data-shot-field="shooting-script"]');
+    expect(field).not.toBeNull();
+
+    result.rerender(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        shotEditFocusIntent={{
+          id: 'shot_edit_wrong_view',
+          projectId: 'project_1',
+          view: 'board',
+          beatId: 'beat_1',
+          shotIds: ['shot_1'],
+        }}
+        onShotEditFocusIntentConsumed={onConsumed}
+      />
+    );
+    expect(document.activeElement).not.toBe(field);
+    expect(onConsumed).not.toHaveBeenCalled();
+
+    result.rerender(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        shotEditFocusIntent={{
+          id: 'shot_edit_wrong_project',
+          projectId: 'project_other',
+          view: 'table',
+          beatId: 'beat_1',
+          shotIds: ['shot_1'],
+        }}
+        onShotEditFocusIntentConsumed={onConsumed}
+      />
+    );
+    expect(document.activeElement).not.toBe(field);
+    expect(onConsumed).not.toHaveBeenCalled();
+  });
 
   const openFirstBeatPanel = (): HTMLElement => {
     const table = screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' });

@@ -1143,7 +1143,32 @@
         "before": "之前",
         "after": "之后",
         "ownerBeat": "所属节拍",
-        "reviewUnavailable": "此提案包含不支持的更改，无法接受。",
+        "reviewUnavailable": "无法安全审核此提案，因此不能接受。",
+        "refusal": {
+          "applyCoverage": "覆盖规划无法替换这些已固定的镜头。请改为直接编辑它们的拍摄脚本。",
+          "applyCoverageFixedWork": "覆盖规划无法替换已有工作的镜头。请查看固定工作原因并直接编辑受影响的镜头。",
+          "editShotsDirectly": "直接编辑这些镜头",
+          "reason": {
+            "beat_capacity_reached": "项目已达到节拍数量上限。",
+            "beat_shot_capacity_reached": "此节拍已达到镜头数量上限。",
+            "project_shot_capacity_reached": "项目已达到镜头数量上限。",
+            "invalid_shot_duration": "提议镜头的时长超出允许范围。",
+            "dependency_blocked": "现有工作阻止了此项提议更改。",
+            "identity_collision": "提议的标识已被使用。",
+            "invalid_operation": "此项提议更改不适用于当前项目。",
+            "undo_conflict": "此提案与后续编辑冲突。",
+            "validation_failed": "更改后的项目未通过验证。"
+          },
+          "fixedReason": {
+            "owned_asset": "已存储的镜头媒体",
+            "owned_job": "生成历史",
+            "video_asset": "当前视频",
+            "seed_still": "已选首帧",
+            "conditioning_frame": "连续性帧",
+            "conditioning_input": "下游条件输入",
+            "shooting_script": "现有拍摄脚本"
+          }
+        },
         "refreshing": "正在对照当前项目检查此提案…",
         "authorityUnavailable": "无法验证提案权限。提案仍保持待处理，其操作当前不可用。",
         "requestUpdated": "准备更新提案",

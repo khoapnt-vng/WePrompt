@@ -1144,7 +1144,32 @@
         "before": "Antes",
         "after": "Después",
         "ownerBeat": "Beat propietario",
-        "reviewUnavailable": "Esta propuesta contiene un cambio no compatible y no se puede aceptar.",
+        "reviewUnavailable": "Esta propuesta no se pudo revisar de forma segura y no se puede aceptar.",
+        "refusal": {
+          "applyCoverage": "La cobertura no puede reemplazar estos planos fijados. Edita directamente sus guiones de rodaje.",
+          "applyCoverageFixedWork": "La cobertura no puede reemplazar planos que ya contienen trabajo. Revisa los motivos de fijación y edita directamente los planos afectados.",
+          "editShotsDirectly": "Editar estos planos directamente",
+          "reason": {
+            "beat_capacity_reached": "El proyecto ha alcanzado su límite de Beats.",
+            "beat_shot_capacity_reached": "Este Beat ha alcanzado su límite de planos.",
+            "project_shot_capacity_reached": "El proyecto ha alcanzado su límite de planos.",
+            "invalid_shot_duration": "La duración de un plano propuesto está fuera del intervalo permitido.",
+            "dependency_blocked": "El trabajo existente bloquea este cambio propuesto.",
+            "identity_collision": "Una identidad propuesta ya está en uso.",
+            "invalid_operation": "Este cambio propuesto no es válido para el proyecto actual.",
+            "undo_conflict": "Esta propuesta entra en conflicto con trabajo de autoría posterior.",
+            "validation_failed": "El proyecto resultante no superó la validación."
+          },
+          "fixedReason": {
+            "owned_asset": "medios guardados del plano",
+            "owned_job": "historial de generación",
+            "video_asset": "vídeo actual",
+            "seed_still": "primer fotograma seleccionado",
+            "conditioning_frame": "fotograma de continuidad",
+            "conditioning_input": "entrada de condicionamiento posterior",
+            "shooting_script": "guion de rodaje existente"
+          }
+        },
         "refreshing": "Comprobando esta propuesta con el proyecto actual…",
         "authorityUnavailable": "No se pudo verificar la autoridad de la propuesta. La propuesta sigue pendiente y sus acciones no están disponibles.",
         "requestUpdated": "Preparar propuesta actualizada",

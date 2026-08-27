@@ -2061,7 +2061,32 @@
         "before": "Before",
         "after": "After",
         "ownerBeat": "Owner Beat",
-        "reviewUnavailable": "This proposal contains an unsupported change and cannot be accepted.",
+        "reviewUnavailable": "This proposal could not be reviewed safely and cannot be accepted.",
+        "refusal": {
+          "applyCoverage": "Coverage cannot replace these fixed Shots. Edit their Shooting scripts directly instead.",
+          "applyCoverageFixedWork": "Coverage cannot replace Shots that already own work. Review the fixed-work reasons and edit the affected Shots directly.",
+          "editShotsDirectly": "Edit these Shots directly",
+          "reason": {
+            "beat_capacity_reached": "The project has reached its Beat limit.",
+            "beat_shot_capacity_reached": "This Beat has reached its Shot limit.",
+            "project_shot_capacity_reached": "The project has reached its Shot limit.",
+            "invalid_shot_duration": "A proposed Shot duration is outside the allowed range.",
+            "dependency_blocked": "Existing work blocks this proposed change.",
+            "identity_collision": "A proposed identity is already in use.",
+            "invalid_operation": "This proposed change is not valid for the current project.",
+            "undo_conflict": "This proposal conflicts with later authoring work.",
+            "validation_failed": "The resulting project did not pass validation."
+          },
+          "fixedReason": {
+            "owned_asset": "stored Shot media",
+            "owned_job": "generation history",
+            "video_asset": "current video",
+            "seed_still": "selected first frame",
+            "conditioning_frame": "continuity frame",
+            "conditioning_input": "downstream conditioning input",
+            "shooting_script": "existing Shooting script"
+          }
+        },
         "refreshing": "Checking this proposal against the current project…",
         "authorityUnavailable": "Proposal authority could not be verified. The proposal remains pending and its actions are unavailable.",
         "requestUpdated": "Prepare updated proposal",

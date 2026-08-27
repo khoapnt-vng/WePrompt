@@ -1841,10 +1841,27 @@ export type StudioProposalReviewGroupV2 = {
   fields: StudioProposalReviewFieldV2[];
 };
 
+export type StudioProposalReviewRefusalSubjectV2 = {
+  subject: StudioProposalReviewSubjectV2;
+  fixedReasons: StudioFixedShotReasonV2[];
+};
+
+/** Transient main-derived reducer refusal. It is never written into the proposal sidecar. */
+export type StudioProposalReviewRefusalV2 = {
+  reasonCode: StudioMutationReasonV2;
+  operationKind: StudioMutationOperationV2['kind'] | null;
+  subjects: StudioProposalReviewRefusalSubjectV2[];
+};
+
 export type StudioProposalReviewV2 =
   | { status: 'ready'; groups: StudioProposalReviewGroupV2[] }
   | { status: 'stale'; groups: []; currentRevision: number; baseRevision: number }
-  | { status: 'unavailable'; groups: []; reason: 'reducer_rejected' };
+  | {
+      status: 'unavailable';
+      groups: [];
+      reason: 'reducer_rejected';
+      refusal: StudioProposalReviewRefusalV2 | null;
+    };
 
 /** Renderer-safe proposal plus a main-derived review of the exact reducer result. */
 export type StudioRendererProposalV2 = StudioProposalV2 & {

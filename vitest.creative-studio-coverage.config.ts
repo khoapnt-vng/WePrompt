@@ -47,6 +47,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/filmExporter.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/index.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/fixedShots.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/generation/boardPanel.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/generation/boardRequest.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/generation/composition.ts',

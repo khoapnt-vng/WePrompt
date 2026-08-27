@@ -59,6 +59,7 @@ import {
   studioGenerationTargetKey,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from './generation';
+import { STUDIO_FIXED_SHOT_REASON_ORDER_V2 } from './fixedShots';
 import { studioBoardAuthorizationScopeIsValidV2 } from './pricing/authorization';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
@@ -110,16 +111,6 @@ const PURPOSES: ReadonlySet<string> = new Set<StudioJobPurpose>([
 const RATE_UNITS = new Set(['generation', 'second']);
 const FRAME_STATUSES = new Set(['pending', 'extracting', 'ready', 'failed']);
 const FRAME_ERROR_CODES = new Set(['decode_failed', 'source_missing', 'storage_error']);
-const FIXED_SHOT_REASONS = [
-  'owned_asset',
-  'owned_job',
-  'video_asset',
-  'seed_still',
-  'conditioning_frame',
-  'conditioning_input',
-  'shooting_script',
-] as const;
-
 const PROJECT_REQUIRED_KEYS = new Set([
   'schemaVersion',
   'revision',
@@ -691,14 +682,16 @@ const validateFixedShotReviewSnapshot = (value: unknown): boolean => {
     !isRecord(value) ||
     !hasExactKeys(value, FIXED_SHOT_REVIEW_KEYS) ||
     !isSafeId(value.shotId) ||
-    !isDenseArray(value.reasons, FIXED_SHOT_REASONS.length) ||
+    !isDenseArray(value.reasons, STUDIO_FIXED_SHOT_REASON_ORDER_V2.length) ||
     value.reasons.length === 0
   ) {
     return false;
   }
   let priorReasonIndex = -1;
   for (let index = 0; index < value.reasons.length; index += 1) {
-    const reasonIndex = FIXED_SHOT_REASONS.indexOf(value.reasons[index] as (typeof FIXED_SHOT_REASONS)[number]);
+    const reasonIndex = STUDIO_FIXED_SHOT_REASON_ORDER_V2.indexOf(
+      value.reasons[index] as (typeof STUDIO_FIXED_SHOT_REASON_ORDER_V2)[number]
+    );
     if (reasonIndex <= priorReasonIndex) return false;
     priorReasonIndex = reasonIndex;
   }

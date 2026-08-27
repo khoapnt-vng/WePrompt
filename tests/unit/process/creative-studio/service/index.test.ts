@@ -8569,6 +8569,7 @@ describe('Studio MCP schema-2 server', () => {
   it('projects validated Story, Shooting script, semantic references, and exact Shot bindings', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
     const project = makeSchema2ServiceProject();
+    addGeneratedVideosForMcpV2(project, 1);
     project.rules = [
       {
         id: 'rule_context',
@@ -8602,6 +8603,7 @@ describe('Studio MCP schema-2 server', () => {
         string,
         {
           shootingScript: string;
+          fixedReasons: string[];
           hasVideo: boolean;
           videoAssetId: string | null;
           referenceBinding: unknown;
@@ -8616,8 +8618,9 @@ describe('Studio MCP schema-2 server', () => {
     expect(view.beats.section_1.shotOrder).toEqual(['clip_1']);
     expect(view.shots.clip_1).toMatchObject({
       shootingScript: 'A wide establishing shot.',
-      hasVideo: false,
-      videoAssetId: null,
+      fixedReasons: ['owned_asset', 'owned_job', 'video_asset', 'seed_still', 'conditioning_input', 'shooting_script'],
+      hasVideo: true,
+      videoAssetId: 'take_01',
       referenceBinding: {
         status: 'ready',
         characterReferenceIds: [],

@@ -12,6 +12,7 @@ import {
   type StudioBriefRule,
   type StudioMutationOperationV2,
   type StudioProjectV2,
+  type StudioProposalReviewRefusalSubjectV2,
   type StudioProposalReviewFieldKeyV2,
   type StudioProposalReviewFieldV2,
   type StudioProposalReviewGroupV2,
@@ -22,7 +23,7 @@ import {
   type StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
 
-import { applyStudioMutationBatchV2, StudioMutationErrorV2 } from './index';
+import { applyStudioMutationBatchV2, StudioMutationErrorV2, type StudioMutationFailureSubjectV2 } from './index';
 
 const own = <Value>(record: Record<string, Value>, id: string): Value | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
@@ -123,6 +124,42 @@ const subject = (
   ownerBeatId: placement?.ownerBeatId ?? null,
   ownerBeatTitle: placement?.ownerBeatTitle ?? null,
 });
+
+const refusalSubject = (
+  project: StudioProjectV2,
+  kind: StudioProposalReviewSubjectV2['kind'],
+  id: string,
+  fixedReasons: StudioProposalReviewRefusalSubjectV2['fixedReasons'] = []
+): StudioProposalReviewRefusalSubjectV2 => {
+  if (kind === 'project') {
+    return { subject: subject('project', project.id, project.name, null), fixedReasons };
+  }
+  if (kind === 'beat') {
+    const beat = own(project.beats, id);
+    return {
+      subject: subject('beat', id, beat?.title ?? null, beatPlacement(project, id)),
+      fixedReasons,
+    };
+  }
+  return { subject: subject('shot', id, null, shotPlacement(project, id)), fixedReasons };
+};
+
+const refusalSubjects = (
+  project: StudioProjectV2,
+  operation: StudioMutationOperationV2 | null,
+  failureSubjects: readonly StudioMutationFailureSubjectV2[]
+): StudioProposalReviewRefusalSubjectV2[] => {
+  if (failureSubjects.length > 0) {
+    return failureSubjects.map((entry) => refusalSubject(project, 'shot', entry.shotId, entry.fixedReasons));
+  }
+  if (operation !== null && 'shotId' in operation && typeof operation.shotId === 'string') {
+    return [refusalSubject(project, 'shot', operation.shotId)];
+  }
+  if (operation !== null && 'beatId' in operation && typeof operation.beatId === 'string') {
+    return [refusalSubject(project, 'beat', operation.beatId)];
+  }
+  return [refusalSubject(project, 'project', project.id)];
+};
 
 const orderedBeatIds = (before: StudioProjectV2, after: StudioProjectV2): string[] => {
   const result: string[] = [];
@@ -286,8 +323,9 @@ export const deriveStudioProposalReviewV2 = (
   if (project.revision !== proposal.baseRevision) {
     return { status: 'stale', groups: [], currentRevision: project.revision, baseRevision: proposal.baseRevision };
   }
+  let operations: StudioMutationOperationV2[] = [];
   try {
-    const operations = studioProposalOperationsV2(project, proposal);
+    operations = studioProposalOperationsV2(project, proposal);
     const after = applyStudioMutationBatchV2(
       project,
       {
@@ -327,7 +365,23 @@ export const deriveStudioProposalReviewV2 = (
       });
     }
     return { status: 'ready', groups };
-  } catch {
-    return { status: 'unavailable', groups: [], reason: 'reducer_rejected' };
+  } catch (error) {
+    const operation =
+      error instanceof StudioMutationErrorV2 && error.operationIndex !== null
+        ? (operations[error.operationIndex] ?? null)
+        : null;
+    return {
+      status: 'unavailable',
+      groups: [],
+      reason: 'reducer_rejected',
+      refusal:
+        error instanceof StudioMutationErrorV2
+          ? {
+              reasonCode: error.reasonCode,
+              operationKind: operation?.kind ?? null,
+              subjects: refusalSubjects(project, operation, error.subjects),
+            }
+          : null,
+    };
   }
 };

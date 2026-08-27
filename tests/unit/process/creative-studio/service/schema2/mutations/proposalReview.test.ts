@@ -411,6 +411,16 @@ describe('schema-5 semantic proposal review', () => {
       status: 'unavailable',
       groups: [],
       reason: 'reducer_rejected',
+      refusal: {
+        reasonCode: 'invalid_operation',
+        operationKind: null,
+        subjects: [
+          {
+            subject: expect.objectContaining({ kind: 'project', id: project.id }),
+            fixedReasons: [],
+          },
+        ],
+      },
     });
   });
 
@@ -433,6 +443,122 @@ describe('schema-5 semantic proposal review', () => {
     const project = createProject();
     expect(
       deriveStudioProposalReviewV2(project, proposal(project, [{ kind: 'delete_shot', shotId: 'missing_shot' }]))
-    ).toEqual({ status: 'unavailable', groups: [], reason: 'reducer_rejected' });
+    ).toEqual({
+      status: 'unavailable',
+      groups: [],
+      reason: 'reducer_rejected',
+      refusal: {
+        reasonCode: 'invalid_operation',
+        operationKind: 'delete_shot',
+        subjects: [
+          {
+            subject: expect.objectContaining({ kind: 'shot', id: 'missing_shot' }),
+            fixedReasons: [],
+          },
+        ],
+      },
+    });
+  });
+
+  it('reports only the exact partial fixed-review mismatch', () => {
+    const project = createProject();
+    const review = deriveStudioProposalReviewV2(
+      project,
+      proposal(project, [
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_arrival',
+          shots: [
+            {
+              shotId: 'shot_ming',
+              shootingScript: project.shots.shot_ming!.shootingScript,
+              durationSeconds: 5,
+              chainBreak: 'none',
+            },
+            {
+              shotId: 'shot_mei',
+              shootingScript: project.shots.shot_mei!.shootingScript,
+              durationSeconds: 5,
+              chainBreak: 'none',
+            },
+          ],
+          fixedShots: [
+            { shotId: 'shot_ming', reasons: ['shooting_script'] },
+            { shotId: 'shot_mei', reasons: ['owned_asset'] },
+          ],
+        },
+      ])
+    );
+
+    expect(review).toMatchObject({
+      status: 'unavailable',
+      refusal: {
+        reasonCode: 'dependency_blocked',
+        operationKind: 'apply_coverage',
+        subjects: [
+          {
+            subject: { kind: 'shot', id: 'shot_mei', ownerBeatId: 'beat_arrival' },
+            fixedReasons: ['shooting_script'],
+          },
+        ],
+      },
+    });
+  });
+
+  it('captures fixed reasons from the exact sequential draft at the failing operation', () => {
+    const project = createProject();
+    project.shots.shot_ming!.shootingScript = '';
+    project.shots.shot_mei!.shootingScript = '';
+    const review = deriveStudioProposalReviewV2(
+      project,
+      proposal(project, [
+        { kind: 'edit_shot', shotId: 'shot_ming', changes: { shootingScript: 'Newly authored in this batch.' } },
+        {
+          kind: 'apply_coverage',
+          beatId: 'beat_arrival',
+          shots: [
+            {
+              shotId: 'shot_ming',
+              shootingScript: 'Newly authored in this batch.',
+              durationSeconds: 5,
+              chainBreak: 'none',
+            },
+            { shotId: 'shot_mei', shootingScript: '', durationSeconds: 5, chainBreak: 'none' },
+          ],
+          fixedShots: [],
+        },
+      ])
+    );
+
+    expect(review).toMatchObject({
+      status: 'unavailable',
+      refusal: {
+        reasonCode: 'dependency_blocked',
+        operationKind: 'apply_coverage',
+        subjects: [
+          {
+            subject: { kind: 'shot', id: 'shot_ming', ownerBeatId: 'beat_arrival' },
+            fixedReasons: ['shooting_script'],
+          },
+        ],
+      },
+    });
+  });
+
+  it('reserves a null refusal for an unknown exception', () => {
+    const project = createProject();
+    const record = proposal(project, []);
+    Object.defineProperty(record, 'payload', {
+      get: () => {
+        throw new Error('unexpected expansion failure');
+      },
+    });
+
+    expect(deriveStudioProposalReviewV2(project, record)).toEqual({
+      status: 'unavailable',
+      groups: [],
+      reason: 'reducer_rejected',
+      refusal: null,
+    });
   });
 });

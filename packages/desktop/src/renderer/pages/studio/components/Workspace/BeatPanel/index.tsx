@@ -6,7 +6,7 @@
 
 import { Alert, Button, Dropdown, Input, InputNumber, Menu, Modal, Popconfirm } from '@arco-design/web-react';
 import { MoreOne, Notes } from '@icon-park/react';
-import React, { useEffect, useId, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import {
@@ -17,6 +17,7 @@ import {
   type StudioGenerationBlockV2,
   type StudioRendererParkBlockerCodeV2,
   type StudioRendererParkEligibilityV2,
+  type StudioView,
 } from '@/common/types/project/creativeStudioTypes';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
@@ -59,6 +60,14 @@ export type BeatPanelReviewGraph = {
 export type BeatPanelShotSave = {
   shotId: string;
   changes: StudioEditableShotChanges;
+};
+
+export type StudioShotEditFocusIntent = {
+  id: string;
+  projectId: string;
+  view: StudioView;
+  beatId: string;
+  shotIds: readonly string[];
 };
 
 export type BeatPanelActions = {
@@ -113,6 +122,8 @@ export type BeatPanelProps = {
   onParkShotSuccess: (shotId: string) => void;
   onSelectBeat: (beatId: string) => void;
   onClose: () => void;
+  shotEditFocusIntent?: StudioShotEditFocusIntent | null;
+  onShotEditFocusIntentConsumed?: (intentId: string) => void;
   actions: BeatPanelActions;
 };
 
@@ -273,6 +284,8 @@ type ShotCardProps = {
   revealDuration: boolean;
   /** A duration blocker can point at a downstream Shot, so the reveal is raised to the Beat. */
   onRevealDuration: (shotId: string) => void;
+  focusShootingScript: boolean;
+  onShootingScriptFocused: () => void;
   shot: WorkspaceShotProjection;
 };
 
@@ -290,6 +303,8 @@ const ShotCard: React.FC<ShotCardProps> = ({
   projectId,
   projection,
   onRevealDuration,
+  focusShootingScript,
+  onShootingScriptFocused,
   reviewBlocked,
   reviewGraph,
   referenceBinding,
@@ -546,6 +561,18 @@ const ShotCard: React.FC<ShotCardProps> = ({
   useEffect(() => {
     if (revealDuration) setDurationOpen(true);
   }, [revealDuration]);
+
+  useEffect(() => {
+    if (!focusShootingScript || hidden || disabled) return;
+    const field = shotCardRef.current?.querySelector<HTMLTextAreaElement>(
+      'textarea[data-shot-field="shooting-script"]'
+    );
+    if (field === undefined || field === null) return;
+    field.focus({ preventScroll: true });
+    if (document.activeElement !== field) return;
+    field.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+    onShootingScriptFocused();
+  }, [disabled, focusShootingScript, hidden, onShootingScriptFocused]);
 
   useEffect(() => {
     if (!durationOpen) return;
@@ -1135,6 +1162,8 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   onParkShotSuccess,
   onSelectBeat,
   onClose,
+  shotEditFocusIntent = null,
+  onShotEditFocusIntentConsumed,
   actions,
 }) => {
   const { t } = useTranslation();
@@ -1168,6 +1197,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
     beatId: string;
     shotId: string | null;
   }>(() => ({ beatId: beat.id, shotId: beat.shots[0]?.id ?? null }));
+  const consumedShotEditFocusIntentRef = useRef<{ projectId: string; intentId: string } | null>(null);
   const storyKey = beatDraftKey(beat.id, 'story');
   const targetKey = beatDraftKey(beat.id, 'targetSeconds');
   const story = draftString(drafts, storyKey, beat.story);
@@ -1224,6 +1254,45 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const inspectedShotId = beat.shots.some((shot) => shot.id === requestedInspectedShotId)
     ? requestedInspectedShotId
     : (beat.shots[0]?.id ?? null);
+  const shotEditFocusTargetId =
+    shotEditFocusIntent !== null &&
+    shotEditFocusIntent.projectId === projectId &&
+    shotEditFocusIntent.beatId === beat.id &&
+    shotEditFocusIntent.shotIds.length > 0 &&
+    shotEditFocusIntent.shotIds.every((shotId) => beat.shots.some((shot) => shot.id === shotId))
+      ? (shotEditFocusIntent.shotIds[0] ?? null)
+      : null;
+
+  useLayoutEffect(() => {
+    if (
+      shotEditFocusIntent === null ||
+      (consumedShotEditFocusIntentRef.current !== null &&
+        consumedShotEditFocusIntentRef.current.projectId !== projectId)
+    ) {
+      consumedShotEditFocusIntentRef.current = null;
+    }
+  }, [projectId, shotEditFocusIntent]);
+
+  useEffect(() => {
+    if (shotEditFocusTargetId === null) return;
+    setInspectedShotSelection({ beatId: beat.id, shotId: shotEditFocusTargetId });
+  }, [beat.id, shotEditFocusTargetId]);
+
+  const consumeShotEditFocus = useCallback((): void => {
+    if (
+      shotEditFocusIntent === null ||
+      shotEditFocusIntent.projectId !== projectId ||
+      shotEditFocusIntent.beatId !== beat.id ||
+      shotEditFocusTargetId === null ||
+      inspectedShotId !== shotEditFocusTargetId ||
+      (consumedShotEditFocusIntentRef.current?.projectId === projectId &&
+        consumedShotEditFocusIntentRef.current.intentId === shotEditFocusIntent.id)
+    ) {
+      return;
+    }
+    consumedShotEditFocusIntentRef.current = { projectId, intentId: shotEditFocusIntent.id };
+    onShotEditFocusIntentConsumed?.(shotEditFocusIntent.id);
+  }, [beat.id, inspectedShotId, onShotEditFocusIntentConsumed, projectId, shotEditFocusIntent, shotEditFocusTargetId]);
   const chainRunning = beat.shots.some(
     (shot) =>
       shot.videoGenerationInFlight ||
@@ -1606,6 +1675,8 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                   index={index}
                   onMove={(position, delta) => void moveShot(position, delta)}
                   onRevealDuration={setDurationRevealShotId}
+                  focusShootingScript={shot.id === shotEditFocusTargetId && shot.id === inspectedShotId}
+                  onShootingScriptFocused={consumeShotEditFocus}
                   revealDuration={durationRevealShotId === shot.id}
                   onParkSettled={(shotId, parked) => {
                     if (parked) {

@@ -1263,6 +1263,51 @@ const proposal = (): StudioRendererProposalV2 => ({
   },
 });
 
+const fixedCoverageProposal = (): StudioRendererProposalV2 => ({
+  ...proposal(),
+  id: 'proposal_fixed_coverage',
+  payload: {
+    kind: 'mutation_batch',
+    operations: [
+      {
+        kind: 'apply_coverage',
+        beatId: 'beat_0',
+        shots: [
+          {
+            shotId: 'shot_0',
+            shootingScript: 'Replacement coverage.',
+            durationSeconds: 4,
+            chainBreak: 'hard_cut',
+          },
+        ],
+        fixedShots: [],
+      },
+    ],
+  },
+  review: {
+    status: 'unavailable',
+    groups: [],
+    reason: 'reducer_rejected',
+    refusal: {
+      reasonCode: 'dependency_blocked',
+      operationKind: 'apply_coverage',
+      subjects: [
+        {
+          subject: {
+            kind: 'shot',
+            id: 'shot_0',
+            title: null,
+            position: 1,
+            ownerBeatId: 'beat_0',
+            ownerBeatTitle: 'Beat 1',
+          },
+          fixedReasons: ['shooting_script'],
+        },
+      ],
+    },
+  },
+});
+
 const proposalCatalog = (
   proposals: StudioRendererProposalV2[] = [],
   projectRevision = proposals[0]?.review.status === 'stale'
@@ -5261,7 +5306,7 @@ describe('StudioPage schema-5 cutover', () => {
         kind: 'mutation_batch',
         operations: [{ kind: 'set_routes', imageRouteId: 'route_new', videoRouteId: null }],
       },
-      review: { status: 'unavailable', groups: [], reason: 'reducer_rejected' },
+      review: { status: 'unavailable', groups: [], reason: 'reducer_rejected', refusal: null },
     };
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([routeProposal])));
 
@@ -5275,6 +5320,63 @@ describe('StudioPage schema-5 cutover', () => {
     fireEvent.click(accept);
     expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the exact fixed Shot Shooting script from proposal review without mutating, generating, or spending', async () => {
+    const authority = projectWithDraftBatch(1);
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([fixedCoverageProposal()])));
+
+    renderStudio();
+    const directEdit = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.refusal.editShotsDirectly',
+    });
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    fireEvent.click(directEdit);
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    const field = document.querySelector<HTMLTextAreaElement>('textarea[data-shot-field="shooting-script"]');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(field).toHaveValue('Shot 1');
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.directorDraftRequest).toBeNull();
+  });
+
+  it('clears an unconsumed proposal Shot-focus intent on view change instead of replaying it later', async () => {
+    const authority = projectWithDraftBatch(1);
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([fixedCoverageProposal()])));
+    const focus = vi.spyOn(HTMLTextAreaElement.prototype, 'focus').mockImplementation(() => undefined);
+
+    try {
+      renderStudio();
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'conversation.creativeStudio.workspace.proposals.refusal.editShotsDirectly',
+        })
+      );
+      await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+      expect(focus).toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      focus.mockRestore();
+
+      fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    } finally {
+      focus.mockRestore();
+    }
   });
 
   it('invalidates a frame-dependent route after save and refreshes it only from the explicit action', async () => {

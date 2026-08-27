@@ -77,6 +77,10 @@ import {
   type RecordIoFileSystem,
   readBoundedRegularFileWithIdentity,
 } from '@process/services/creative-studio/service/recordIo';
+import {
+  deriveStudioFixedShotReasonsV2,
+  STUDIO_FIXED_SHOT_REASON_ORDER_V2,
+} from '@process/services/creative-studio/service/schema2/fixedShots';
 
 export type StudioServerEnv = {
   projectId: string;
@@ -274,15 +278,6 @@ const studioProjectReferencePlanAdditionsSchemaV2 = z4
   )
   .meta({ minItems: 1 });
 
-const STUDIO_FIXED_SHOT_REASONS_V2 = [
-  'owned_asset',
-  'owned_job',
-  'video_asset',
-  'seed_still',
-  'conditioning_frame',
-  'conditioning_input',
-  'shooting_script',
-] as const;
 const studioProposedShotSchemaV2 = z4
   .object({
     shotId: studioDirectorIdSchemaV2,
@@ -295,15 +290,16 @@ const studioFixedShotReviewSchemaV2 = z4
   .object({
     shotId: studioDirectorIdSchemaV2,
     reasons: z4
-      .array(z4.enum(STUDIO_FIXED_SHOT_REASONS_V2))
+      .array(z4.enum(STUDIO_FIXED_SHOT_REASON_ORDER_V2))
       .min(1)
-      .max(STUDIO_FIXED_SHOT_REASONS_V2.length)
+      .max(STUDIO_FIXED_SHOT_REASON_ORDER_V2.length)
       .refine(
         (reasons) =>
           reasons.every(
             (reason, index) =>
               index === 0 ||
-              STUDIO_FIXED_SHOT_REASONS_V2.indexOf(reasons[index - 1]!) < STUDIO_FIXED_SHOT_REASONS_V2.indexOf(reason)
+              STUDIO_FIXED_SHOT_REASON_ORDER_V2.indexOf(reasons[index - 1]!) <
+                STUDIO_FIXED_SHOT_REASON_ORDER_V2.indexOf(reason)
           ),
         { message: 'Fixed-shot reasons must be unique and canonically ordered.' }
       ),
@@ -940,6 +936,7 @@ export function createReadStoryboardHandlerV2(
               shootingScript: shot.shootingScript,
               durationSeconds: shot.durationSeconds,
               chainBreak: shot.chainBreak,
+              fixedReasons: deriveStudioFixedShotReasonsV2(project, shot),
               hasSeedStill: shot.seedStillId !== null,
               hasVideo: shot.videoAssetId !== null,
               videoAssetId: shot.videoAssetId,

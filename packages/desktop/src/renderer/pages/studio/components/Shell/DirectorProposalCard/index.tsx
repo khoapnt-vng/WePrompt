@@ -9,6 +9,8 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
+  StudioFixedShotReasonV2,
+  StudioMutationReasonV2,
   StudioProposalReviewFieldKeyV2,
   StudioProposalReviewFieldV2,
   StudioProposalReviewGroupV2,
@@ -33,6 +35,31 @@ export type DirectorProposalCardProps = {
   onReject: (proposalId: string) => Promise<void>;
   onRequestUpdated?: (proposalId: string, saveWorkspaceDrafts: boolean) => Promise<void>;
   onReviewRuleDrafts?: () => void;
+  onEditShotsDirectly?: (beatId: string, shotIds: readonly string[]) => void;
+};
+
+const REFUSAL_REASON_KEYS: Readonly<Record<StudioMutationReasonV2, string>> = {
+  beat_capacity_reached: 'conversation.creativeStudio.workspace.proposals.refusal.reason.beat_capacity_reached',
+  beat_shot_capacity_reached:
+    'conversation.creativeStudio.workspace.proposals.refusal.reason.beat_shot_capacity_reached',
+  project_shot_capacity_reached:
+    'conversation.creativeStudio.workspace.proposals.refusal.reason.project_shot_capacity_reached',
+  invalid_shot_duration: 'conversation.creativeStudio.workspace.proposals.refusal.reason.invalid_shot_duration',
+  dependency_blocked: 'conversation.creativeStudio.workspace.proposals.refusal.reason.dependency_blocked',
+  identity_collision: 'conversation.creativeStudio.workspace.proposals.refusal.reason.identity_collision',
+  invalid_operation: 'conversation.creativeStudio.workspace.proposals.refusal.reason.invalid_operation',
+  undo_conflict: 'conversation.creativeStudio.workspace.proposals.refusal.reason.undo_conflict',
+  validation_failed: 'conversation.creativeStudio.workspace.proposals.refusal.reason.validation_failed',
+};
+
+const FIXED_REASON_KEYS: Readonly<Record<StudioFixedShotReasonV2, string>> = {
+  owned_asset: 'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.owned_asset',
+  owned_job: 'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.owned_job',
+  video_asset: 'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.video_asset',
+  seed_still: 'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.seed_still',
+  conditioning_frame: 'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.conditioning_frame',
+  conditioning_input: 'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.conditioning_input',
+  shooting_script: 'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.shooting_script',
 };
 
 const fieldLabelKey = (key: StudioProposalReviewFieldKeyV2): string =>
@@ -161,6 +188,7 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
   onReject,
   onRequestUpdated = async () => undefined,
   onReviewRuleDrafts = () => undefined,
+  onEditShotsDirectly = () => undefined,
 }) => {
   const { t } = useTranslation();
   const acceptBlockId = React.useId();
@@ -178,6 +206,17 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
         ? 'conversation.creativeStudio.workspace.proposals.reviewRuleDraftsFirst'
         : null);
   const reviewGroups = proposal.review.status === 'ready' ? proposal.review.groups : [];
+  const refusal = proposal.review.status === 'unavailable' ? proposal.review.refusal : null;
+  const isCoverageDependencyRefusal =
+    refusal?.reasonCode === 'dependency_blocked' && refusal.operationKind === 'apply_coverage';
+  const coverageRefusalHasShootingScript =
+    isCoverageDependencyRefusal && refusal.subjects.some((entry) => entry.fixedReasons.includes('shooting_script'));
+  const directEditSubjects = isCoverageDependencyRefusal
+    ? refusal.subjects.filter((entry) => entry.subject.kind === 'shot' && entry.subject.ownerBeatId !== null)
+    : [];
+  const directEditBeatIds = new Set(directEditSubjects.map((entry) => entry.subject.ownerBeatId!));
+  const directEditBeatId = directEditBeatIds.size === 1 ? (directEditSubjects[0]?.subject.ownerBeatId ?? null) : null;
+  const directEditShotIds = directEditSubjects.map((entry) => entry.subject.id);
   const reviewLabels = new Map<string, string>([[project.id, project.name]]);
   for (const beatId of project.beatOrder) {
     const beat = project.beats[beatId];
@@ -232,7 +271,38 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
       ) : authorityUnavailable ? (
         <p role='alert'>{t('conversation.creativeStudio.workspace.proposals.authorityUnavailable')}</p>
       ) : authorityState === 'unavailable' || proposal.review.status === 'unavailable' ? (
-        <p role='alert'>{t('conversation.creativeStudio.workspace.proposals.reviewUnavailable')}</p>
+        refusal === null ? (
+          <p role='alert'>{t('conversation.creativeStudio.workspace.proposals.reviewUnavailable')}</p>
+        ) : (
+          <div
+            data-proposal-refusal-code={refusal.reasonCode}
+            data-proposal-refusal-operation={refusal.operationKind}
+            role='alert'
+          >
+            <p>
+              {t(
+                isCoverageDependencyRefusal
+                  ? coverageRefusalHasShootingScript
+                    ? 'conversation.creativeStudio.workspace.proposals.refusal.applyCoverage'
+                    : 'conversation.creativeStudio.workspace.proposals.refusal.applyCoverageFixedWork'
+                  : REFUSAL_REASON_KEYS[refusal.reasonCode]
+              )}
+            </p>
+            <ul data-proposal-refusal-subjects>
+              {refusal.subjects.map((entry) => (
+                <li key={`${entry.subject.kind}:${entry.subject.id}`}>
+                  <ReviewSubject subject={entry.subject} />
+                  {entry.fixedReasons.length === 0 ? null : (
+                    <span>
+                      {' — '}
+                      {entry.fixedReasons.map((reason) => t(FIXED_REASON_KEYS[reason])).join(', ')}
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )
       ) : proposal.review.groups.length === 0 ? (
         <p>{t('conversation.creativeStudio.workspace.proposals.noChanges')}</p>
       ) : (
@@ -297,6 +367,14 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
         <Button disabled={actionsLocked || actionsUnavailable} onClick={() => void onReject(proposal.id)}>
           {t('conversation.creativeStudio.workspace.proposals.reject')}
         </Button>
+        {directEditBeatId === null || directEditShotIds.length === 0 ? null : (
+          <Button
+            disabled={actionsLocked || actionsUnavailable}
+            onClick={() => onEditShotsDirectly(directEditBeatId, directEditShotIds)}
+          >
+            {t('conversation.creativeStudio.workspace.proposals.refusal.editShotsDirectly')}
+          </Button>
+        )}
         {draftBlocker === 'rules' ? (
           <Button disabled={actionsLocked} onClick={onReviewRuleDrafts}>
             {t('conversation.creativeStudio.workspace.proposals.reviewRuleDrafts')}

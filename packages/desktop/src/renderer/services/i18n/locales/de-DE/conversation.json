@@ -1144,7 +1144,32 @@
         "before": "Vorher",
         "after": "Nachher",
         "ownerBeat": "Zugehöriger Beat",
-        "reviewUnavailable": "Dieser Vorschlag enthält eine nicht unterstützte Änderung und kann nicht angenommen werden.",
+        "reviewUnavailable": "Dieser Vorschlag konnte nicht sicher geprüft werden und kann nicht angenommen werden.",
+        "refusal": {
+          "applyCoverage": "Die Abdeckungsplanung kann diese festgelegten Shots nicht ersetzen. Bearbeite stattdessen ihre Drehskripte direkt.",
+          "applyCoverageFixedWork": "Die Abdeckungsplanung kann Shots mit bereits vorhandener Arbeit nicht ersetzen. Prüfe die Gründe für die Fixierung und bearbeite die betroffenen Shots direkt.",
+          "editShotsDirectly": "Diese Shots direkt bearbeiten",
+          "reason": {
+            "beat_capacity_reached": "Das Projekt hat sein Beat-Limit erreicht.",
+            "beat_shot_capacity_reached": "Dieser Beat hat sein Shot-Limit erreicht.",
+            "project_shot_capacity_reached": "Das Projekt hat sein Shot-Limit erreicht.",
+            "invalid_shot_duration": "Die Dauer eines vorgeschlagenen Shots liegt außerhalb des zulässigen Bereichs.",
+            "dependency_blocked": "Vorhandene Arbeit blockiert diese vorgeschlagene Änderung.",
+            "identity_collision": "Eine vorgeschlagene Identität wird bereits verwendet.",
+            "invalid_operation": "Diese vorgeschlagene Änderung ist für das aktuelle Projekt ungültig.",
+            "undo_conflict": "Dieser Vorschlag steht im Konflikt mit späteren Bearbeitungen.",
+            "validation_failed": "Das resultierende Projekt hat die Validierung nicht bestanden."
+          },
+          "fixedReason": {
+            "owned_asset": "gespeicherte Shot-Medien",
+            "owned_job": "Generierungsverlauf",
+            "video_asset": "aktuelles Video",
+            "seed_still": "ausgewähltes erstes Bild",
+            "conditioning_frame": "Kontinuitätsbild",
+            "conditioning_input": "nachgelagerte Konditionierungseingabe",
+            "shooting_script": "vorhandenes Drehskript"
+          }
+        },
         "refreshing": "Dieser Vorschlag wird mit dem aktuellen Projekt abgeglichen…",
         "authorityUnavailable": "Die Autorität des Vorschlags konnte nicht verifiziert werden. Der Vorschlag bleibt ausstehend und seine Aktionen sind nicht verfügbar.",
         "requestUpdated": "Aktualisierten Vorschlag vorbereiten",

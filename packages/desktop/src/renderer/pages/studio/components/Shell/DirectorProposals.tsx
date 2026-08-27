@@ -33,6 +33,7 @@ export type DirectorProposalsProps = {
   onRejectProposal: (proposalId: string) => Promise<void>;
   onRequestUpdatedProposal?: (proposalId: string, saveWorkspaceDrafts: boolean) => Promise<void>;
   onReviewRuleDrafts?: () => void;
+  onEditProposalShots?: (beatId: string, shotIds: readonly string[]) => void;
   onGenerateReferences: (requestId: string) => Promise<void>;
   onRejectReferences: (requestId: string) => Promise<void>;
   onReviewHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
@@ -73,6 +74,7 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   onRejectProposal,
   onRequestUpdatedProposal = async () => undefined,
   onReviewRuleDrafts = () => undefined,
+  onEditProposalShots = () => undefined,
   onGenerateReferences,
   onRejectReferences,
   onReviewHandoff,
@@ -119,6 +121,7 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           onReject={onRejectProposal}
           onRequestUpdated={onRequestUpdatedProposal}
           onReviewRuleDrafts={onReviewRuleDrafts}
+          onEditShotsDirectly={onEditProposalShots}
         />
       ))}
       {referenceRequests.map((request) => (

@@ -1145,7 +1145,32 @@
         "before": "Önce",
         "after": "Sonra",
         "ownerBeat": "Sahip Beat",
-        "reviewUnavailable": "Bu öneri desteklenmeyen bir değişiklik içeriyor ve kabul edilemiyor.",
+        "reviewUnavailable": "Bu öneri güvenli biçimde incelenemediği için kabul edilemiyor.",
+        "refusal": {
+          "applyCoverage": "Kapsam, sabitlenmiş bu Çekimleri değiştiremez. Bunun yerine çekim metinlerini doğrudan düzenleyin.",
+          "applyCoverageFixedWork": "Kapsam, üzerinde çalışma bulunan Çekimleri değiştiremez. Sabitlenme nedenlerini inceleyin ve etkilenen Çekimleri doğrudan düzenleyin.",
+          "editShotsDirectly": "Bu Çekimleri doğrudan düzenle",
+          "reason": {
+            "beat_capacity_reached": "Proje Beat sınırına ulaştı.",
+            "beat_shot_capacity_reached": "Bu Beat Çekim sınırına ulaştı.",
+            "project_shot_capacity_reached": "Proje Çekim sınırına ulaştı.",
+            "invalid_shot_duration": "Önerilen bir Çekim süresi izin verilen aralığın dışında.",
+            "dependency_blocked": "Mevcut çalışma bu değişikliği engelliyor.",
+            "identity_collision": "Önerilen bir kimlik zaten kullanılıyor.",
+            "invalid_operation": "Bu değişiklik mevcut proje için geçerli değil.",
+            "undo_conflict": "Bu öneri daha sonraki düzenlemelerle çakışıyor.",
+            "validation_failed": "Oluşan proje doğrulamayı geçemedi."
+          },
+          "fixedReason": {
+            "owned_asset": "saklanan Çekim medyası",
+            "owned_job": "üretim geçmişi",
+            "video_asset": "geçerli video",
+            "seed_still": "seçili ilk kare",
+            "conditioning_frame": "devamlılık karesi",
+            "conditioning_input": "aşağı akış koşullandırma girdisi",
+            "shooting_script": "mevcut çekim metni"
+          }
+        },
         "refreshing": "Bu öneri mevcut projeye göre denetleniyor…",
         "authorityUnavailable": "Öneri yetkisi doğrulanamadı. Öneri beklemede kalır ve eylemleri kullanılamaz.",
         "requestUpdated": "Güncel öneriyi hazırla",

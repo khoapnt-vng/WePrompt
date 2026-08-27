@@ -50,6 +50,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 export type { StudioMutationReasonV2 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioInboundShotReferencesV2 } from '../chain';
+import { deriveStudioFixedShotReasonsV2, studioJobReferencesShotV2 } from '../fixedShots';
 import {
   resolveStudioCanonicalBoardAssetV2,
   resolveStudioCurrentBoardPanelAuthorityV2,
@@ -63,14 +64,31 @@ export type StudioMutationApplyResultV2 = {
   coverageResults: StudioCoverageApplyResult[];
 };
 
+/** Exact bounded entity evidence captured from the draft at the reducer refusal site. */
+export type StudioMutationFailureSubjectV2 = {
+  shotId: string;
+  fixedReasons: StudioFixedShotReasonV2[];
+};
+
 /** A bounded mutation failure safe for translation by the service boundary. */
 export class StudioMutationErrorV2 extends Error {
   readonly reasonCode: StudioMutationReason;
+  readonly operationIndex: number | null;
+  readonly subjects: StudioMutationFailureSubjectV2[];
 
-  constructor(reasonCode: StudioMutationReason) {
+  constructor(
+    reasonCode: StudioMutationReason,
+    operationIndex: number | null = null,
+    subjects: readonly StudioMutationFailureSubjectV2[] = []
+  ) {
     super(reasonCode);
     this.name = 'StudioMutationErrorV2';
     this.reasonCode = reasonCode;
+    this.operationIndex = operationIndex;
+    this.subjects = subjects.slice(0, STUDIO_MAX_SHOTS_PER_PROJECT).map((subject) => ({
+      shotId: subject.shotId,
+      fixedReasons: [...subject.fixedReasons],
+    }));
   }
 }
 
@@ -134,8 +152,8 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   undo_last: new Set(['kind', 'entryId']),
 };
 
-const fail = (reasonCode: StudioMutationReason): never => {
-  throw new StudioMutationErrorV2(reasonCode);
+const fail = (reasonCode: StudioMutationReason, subjects: readonly StudioMutationFailureSubjectV2[] = []): never => {
+  throw new StudioMutationErrorV2(reasonCode, null, subjects);
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -1012,46 +1030,6 @@ const buildUndoPatches = (tracker: UndoTracker, project: StudioProjectV2): Studi
   return patches;
 };
 
-const FIXED_REASON_ORDER: readonly StudioFixedShotReasonV2[] = [
-  'owned_asset',
-  'owned_job',
-  'video_asset',
-  'seed_still',
-  'conditioning_frame',
-  'conditioning_input',
-  'shooting_script',
-];
-
-const jobReferencesShot = (project: StudioProjectV2, job: StudioJobV2, shotId: string): boolean => {
-  if (job.requestPlan.kind === 'after_take_selection') {
-    const dependency = job.requestPlan.dependency;
-    if (
-      (dependency.kind === 'authorized_seed' && dependency.shotId === shotId) ||
-      (dependency.kind !== 'authorized_seed' && dependency.predecessorShotId === shotId)
-    ) {
-      return true;
-    }
-  }
-  const input = job.requestSnapshot?.conditioningInput;
-  if (input?.kind === 'predecessor_frame' && input.predecessorShotId === shotId) return true;
-  if (input?.kind === 'seed_still') return ownValue(project.assets, input.assetId)?.shotId === shotId;
-  return false;
-};
-
-const fixedReasons = (project: StudioProjectV2, shot: StudioShot): StudioFixedShotReasonV2[] => {
-  const present = new Set<StudioFixedShotReasonV2>();
-  if (shot.assetIds.length > 0) present.add('owned_asset');
-  if (shot.jobIds.length > 0) present.add('owned_job');
-  if (shot.videoAssetId !== null) present.add('video_asset');
-  if (shot.seedStillId !== null) present.add('seed_still');
-  if (Object.values(project.frameExtractions).some((frame) => frame.shotId === shot.id))
-    present.add('conditioning_frame');
-  if (Object.values(project.jobs).some((job) => jobReferencesShot(project, job, shot.id)))
-    present.add('conditioning_input');
-  if (shot.shootingScript.length > 0) present.add('shooting_script');
-  return FIXED_REASON_ORDER.filter((reason) => present.has(reason));
-};
-
 const shotHasDestructiveDependency = (project: StudioProjectV2, shot: StudioShot): boolean =>
   shot.assetIds.length > 0 ||
   shot.jobIds.length > 0 ||
@@ -1223,6 +1201,9 @@ export const applyStudioMutationBatchV2 = (
     assertOperationShape(rawOperation);
     const operation = rawOperation;
 
+    // Keep the long reducer switch aligned with its established shape while adding typed operation context.
+    // oxfmt-ignore
+    try {
     switch (operation.kind) {
       case 'edit_project': {
         const changes = operation.changes;
@@ -1785,10 +1766,38 @@ export const applyStudioMutationBatchV2 = (
         const expectedFixed = beat.shotOrder.flatMap((shotId) => {
           const shot = ownValue(draft.shots, shotId);
           if (shot === undefined) return [];
-          const reasons = fixedReasons(draft, shot);
+          const reasons = deriveStudioFixedShotReasonsV2(draft, shot);
           return reasons.length === 0 ? [] : [{ shotId, reasons }];
         });
-        if (!sameValue(operation.fixedShots, expectedFixed)) fail('dependency_blocked');
+        if (!sameValue(operation.fixedShots, expectedFixed)) {
+          const expectedById = new Map(expectedFixed.map((fixed) => [fixed.shotId, fixed]));
+          const suppliedById = new Map(operation.fixedShots.map((fixed) => [fixed.shotId, fixed]));
+          const mismatchedById = new Map<string, StudioMutationFailureSubjectV2>();
+          const addMismatch = (shotId: string, reasons: StudioFixedShotReasonV2[]): void => {
+            if (!mismatchedById.has(shotId)) {
+              mismatchedById.set(shotId, { shotId, fixedReasons: [...reasons] });
+            }
+          };
+          for (const expected of expectedFixed) {
+            const supplied = suppliedById.get(expected.shotId);
+            if (supplied === undefined || !sameValue(supplied.reasons, expected.reasons)) {
+              addMismatch(expected.shotId, expected.reasons);
+            }
+          }
+          for (const supplied of operation.fixedShots) {
+            if (expectedById.has(supplied.shotId)) continue;
+            const shot = ownValue(draft.shots, supplied.shotId);
+            addMismatch(supplied.shotId, shot === undefined ? [] : deriveStudioFixedShotReasonsV2(draft, shot));
+          }
+          if (mismatchedById.size === 0) {
+            expectedFixed.forEach((fixed, index) => {
+              if (operation.fixedShots[index]?.shotId !== fixed.shotId) {
+                addMismatch(fixed.shotId, fixed.reasons);
+              }
+            });
+          }
+          fail('dependency_blocked', [...mismatchedById.values()]);
+        }
 
         const newIds = proposedIds.filter((shotId) => !currentIds.has(shotId));
         for (const shotId of newIds) {
@@ -1807,7 +1816,8 @@ export const applyStudioMutationBatchV2 = (
           const existing = ownValue(draft.shots, proposed.shotId);
           if (existing !== undefined && !currentIds.has(existing.id)) fail('invalid_operation');
           const proposedEnd = proposedCursor + proposed.durationSeconds;
-          if (expectedFixed.some((fixed) => fixed.shotId === proposed.shotId)) {
+          const fixed = expectedFixed.find((candidate) => candidate.shotId === proposed.shotId);
+          if (fixed !== undefined) {
             const currentBoundary = currentBoundaryById.get(proposed.shotId);
             if (
               currentBoundary === undefined ||
@@ -1818,17 +1828,28 @@ export const applyStudioMutationBatchV2 = (
               existing.durationSeconds !== proposed.durationSeconds ||
               existing.chainBreak !== proposed.chainBreak
             ) {
-              fail('dependency_blocked');
+              fail('dependency_blocked', [{ shotId: fixed.shotId, fixedReasons: [...fixed.reasons] }]);
             }
           }
           proposedCursor = proposedEnd;
         }
-        if (expectedFixed.some((fixed) => !proposedIds.includes(fixed.shotId))) fail('dependency_blocked');
+        const omittedFixed = expectedFixed.filter((fixed) => !proposedIds.includes(fixed.shotId));
+        if (omittedFixed.length > 0) {
+          fail(
+            'dependency_blocked',
+            omittedFixed.map((fixed) => ({ shotId: fixed.shotId, fixedReasons: [...fixed.reasons] }))
+          );
+        }
 
         touchBeat(tracker, draft, beat.id);
         for (const shotId of removedIds) {
           const shot = ownValue(draft.shots, shotId);
-          if (shot === undefined || shotHasDestructiveDependency(draft, shot)) fail('dependency_blocked');
+          if (shot === undefined) fail('dependency_blocked', [{ shotId, fixedReasons: [] }]);
+          if (shotHasDestructiveDependency(draft, shot)) {
+            fail('dependency_blocked', [
+              { shotId: shot.id, fixedReasons: deriveStudioFixedShotReasonsV2(draft, shot) },
+            ]);
+          }
           touchShot(tracker, draft, shotId);
           delete draft.shots[shotId];
         }
@@ -1934,7 +1955,10 @@ export const applyStudioMutationBatchV2 = (
           fail('invalid_operation');
         }
         if (
-          hasBoundNonterminalJob(draft, (job) => jobTargetsShot(job, shot.id) || jobReferencesShot(draft, job, shot.id))
+          hasBoundNonterminalJob(
+            draft,
+            (job) => jobTargetsShot(job, shot.id) || studioJobReferencesShotV2(draft, job, shot.id)
+          )
         ) {
           fail('dependency_blocked');
         }
@@ -1989,7 +2013,7 @@ export const applyStudioMutationBatchV2 = (
         }
         if (
           shot.trimOutSeconds !== operation.trimOutSeconds &&
-          hasBoundNonterminalJob(draft, (job) => jobReferencesShot(draft, job, shot.id))
+          hasBoundNonterminalJob(draft, (job) => studioJobReferencesShotV2(draft, job, shot.id))
         ) {
           fail('dependency_blocked');
         }
@@ -2069,6 +2093,12 @@ export const applyStudioMutationBatchV2 = (
 
       case 'undo_last':
         fail('invalid_operation');
+    }
+    } catch (error) {
+      if (error instanceof StudioMutationErrorV2 && error.operationIndex === null) {
+        throw new StudioMutationErrorV2(error.reasonCode, operationIndex, error.subjects);
+      }
+      throw error;
     }
   }
 

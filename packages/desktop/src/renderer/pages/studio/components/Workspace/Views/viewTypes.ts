@@ -22,7 +22,7 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceProjection } from '../workspaceProjection';
-import type { BeatPanelActions, BeatPanelReviewGraph } from '../BeatPanel';
+import type { BeatPanelActions, BeatPanelReviewGraph, StudioShotEditFocusIntent } from '../BeatPanel';
 import type { BoardActions } from './Board';
 import type { CutActions } from './Cut';
 import type { TableBoardActions, TableReferenceBindingActions } from './Table';
@@ -96,6 +96,8 @@ export type WorkspaceControlsProps = {
   referenceErrorMessageKey?: string | null;
   referenceFocusIntent?: StudioReferenceFocusIntent | null;
   onReferenceFocusIntentConsumed?: (intentId: string) => void;
+  shotEditFocusIntent?: StudioShotEditFocusIntent | null;
+  onShotEditFocusIntentConsumed?: (intentId: string) => void;
 };
 
 export type WorkspaceProjectMenuProps = Pick<

@@ -59,6 +59,36 @@ const project = (): StudioRendererProjectV2 => ({
   updatedAt: timestamp,
 });
 
+const projectWithShot = (shootingScript = ''): StudioRendererProjectV2 => {
+  const value = project();
+  value.beatOrder = ['beat_1'];
+  value.beats.beat_1 = {
+    id: 'beat_1',
+    title: 'Arrival',
+    story: 'Ming arrives.',
+    targetSeconds: null,
+    shotOrder: ['shot_1'],
+  };
+  value.shots.shot_1 = {
+    id: 'shot_1',
+    shootingScript,
+    durationSeconds: 4,
+    trimInSeconds: null,
+    trimOutSeconds: null,
+    chainBreak: 'none',
+    referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
+    seedStillId: null,
+    dismissedSeedStillIds: [],
+    boardAssetId: null,
+    supersededBoardAssetIds: [],
+    videoAssetId: null,
+    supersededVideoAssetIds: [],
+    assetIds: [],
+    jobIds: [],
+  };
+  return value;
+};
+
 const reviewGroups = (): StudioProposalReviewGroupV2[] => [
   {
     change: 'edited',
@@ -326,7 +356,7 @@ describe('DirectorProposalCard semantic review', () => {
     rerender(
       <DirectorProposalCard
         project={project()}
-        proposal={proposal({ status: 'unavailable', groups: [], reason: 'reducer_rejected' })}
+        proposal={proposal({ status: 'unavailable', groups: [], reason: 'reducer_rejected', refusal: null })}
         pending={false}
         onAccept={onAccept}
         onReject={onReject}
@@ -389,7 +419,7 @@ describe('DirectorProposalCard semantic review', () => {
     rerender(
       <DirectorProposalCard
         project={project()}
-        proposal={proposal({ status: 'unavailable', groups: [], reason: 'reducer_rejected' })}
+        proposal={proposal({ status: 'unavailable', groups: [], reason: 'reducer_rejected', refusal: null })}
         pending={false}
         authorityState='unavailable'
         authorityVerified
@@ -422,6 +452,94 @@ describe('DirectorProposalCard semantic review', () => {
     expect(
       screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
     ).toBeEnabled();
+  });
+
+  it('explains owned fixed work truthfully and offers bounded direct Shot editing without accepting', () => {
+    const fixedProject = projectWithShot();
+    fixedProject.shots.shot_1!.assetIds = ['asset_1'];
+    const onEditShotsDirectly = vi.fn();
+    renderCard(
+      proposal({
+        status: 'unavailable',
+        groups: [],
+        reason: 'reducer_rejected',
+        refusal: {
+          reasonCode: 'dependency_blocked',
+          operationKind: 'apply_coverage',
+          subjects: [
+            {
+              subject: {
+                kind: 'shot',
+                id: 'shot_1',
+                title: null,
+                position: 1,
+                ownerBeatId: 'beat_1',
+                ownerBeatTitle: 'Arrival',
+              },
+              fixedReasons: ['owned_asset'],
+            },
+          ],
+        },
+      }),
+      { project: fixedProject, onEditShotsDirectly }
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(
+      screen.getByText('conversation.creativeStudio.workspace.proposals.refusal.applyCoverageFixedWork')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.proposals.refusal.applyCoverage')).toBeNull();
+    expect(alert).toHaveTextContent('workspace.proposals.refusal.fixedReason.owned_asset');
+    expect(alert).not.toHaveTextContent('shot_1');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.refusal.editShotsDirectly',
+      })
+    );
+    expect(onEditShotsDirectly).toHaveBeenCalledOnce();
+    expect(onEditShotsDirectly).toHaveBeenCalledWith('beat_1', ['shot_1']);
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('uses Shooting-script-specific coverage guidance when that is an exact fixed reason', () => {
+    const fixedProject = projectWithShot('An existing authored Shot.');
+    renderCard(
+      proposal({
+        status: 'unavailable',
+        groups: [],
+        reason: 'reducer_rejected',
+        refusal: {
+          reasonCode: 'dependency_blocked',
+          operationKind: 'apply_coverage',
+          subjects: [
+            {
+              subject: {
+                kind: 'shot',
+                id: 'shot_1',
+                title: null,
+                position: 1,
+                ownerBeatId: 'beat_1',
+                ownerBeatTitle: 'Arrival',
+              },
+              fixedReasons: ['shooting_script'],
+            },
+          ],
+        },
+      }),
+      { project: fixedProject }
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.refusal.applyCoverage')).toBeVisible();
+    expect(
+      screen.queryByText('conversation.creativeStudio.workspace.proposals.refusal.applyCoverageFixedWork')
+    ).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.shooting_script'
+    );
   });
 
   it('scopes dirty-draft recovery to saving workspace edits or reviewing rule edits', async () => {

@@ -1143,7 +1143,32 @@
         "before": "変更前",
         "after": "変更後",
         "ownerBeat": "所属ビート",
-        "reviewUnavailable": "この提案には未対応の変更が含まれているため、承認できません。",
+        "reviewUnavailable": "この提案は安全にレビューできなかったため、承認できません。",
+        "refusal": {
+          "applyCoverage": "カバレッジでは、固定されたこれらのショットを置き換えられません。代わりに各ショットの撮影スクリプトを直接編集してください。",
+          "applyCoverageFixedWork": "カバレッジでは、すでに作業を保持しているショットを置き換えられません。固定理由を確認し、対象のショットを直接編集してください。",
+          "editShotsDirectly": "これらのショットを直接編集",
+          "reason": {
+            "beat_capacity_reached": "プロジェクトのビート数が上限に達しています。",
+            "beat_shot_capacity_reached": "このビートのショット数が上限に達しています。",
+            "project_shot_capacity_reached": "プロジェクトのショット数が上限に達しています。",
+            "invalid_shot_duration": "提案されたショットの長さが許容範囲外です。",
+            "dependency_blocked": "既存の作業により、この変更は適用できません。",
+            "identity_collision": "提案された識別子はすでに使用されています。",
+            "invalid_operation": "この変更は現在のプロジェクトには適用できません。",
+            "undo_conflict": "この提案は後続の編集と競合しています。",
+            "validation_failed": "変更後のプロジェクトが検証に失敗しました。"
+          },
+          "fixedReason": {
+            "owned_asset": "保存済みのショットメディア",
+            "owned_job": "生成履歴",
+            "video_asset": "現在の動画",
+            "seed_still": "選択済みの最初のフレーム",
+            "conditioning_frame": "連続性フレーム",
+            "conditioning_input": "後続の条件付け入力",
+            "shooting_script": "既存の撮影スクリプト"
+          }
+        },
         "refreshing": "現在のプロジェクトに対してこの提案を確認しています…",
         "authorityUnavailable": "提案の権限を確認できませんでした。提案は保留のままで、その操作は利用できません。",
         "requestUpdated": "更新した提案を準備",

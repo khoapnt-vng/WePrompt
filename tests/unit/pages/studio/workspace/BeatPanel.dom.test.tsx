@@ -3372,4 +3372,58 @@ describe('BeatPanel', () => {
     );
     expect(within(screen.getByRole('dialog')).getByRole('alert')).toHaveTextContent('native.cas.failed');
   });
+
+  it('consumes Shot-edit focus only after the exact enabled Shooting script field owns focus', async () => {
+    const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
+    const onConsumed = vi.fn();
+    const intent = {
+      id: 'focus_1',
+      projectId: 'project_1',
+      view: 'board' as const,
+      beatId: beat.id,
+      shotIds: ['shot_1'],
+    };
+    const result = render(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), {
+          pending: true,
+          shotEditFocusIntent: intent,
+          onShotEditFocusIntentConsumed: onConsumed,
+        })}
+      />
+    );
+    const disabledField = result.container.querySelector<HTMLTextAreaElement>(
+      'textarea[data-shot-field="shooting-script"]'
+    );
+    expect(disabledField).toBeDisabled();
+    expect(document.activeElement).not.toBe(disabledField);
+    expect(onConsumed).not.toHaveBeenCalled();
+
+    result.rerender(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), {
+          pending: false,
+          shotEditFocusIntent: intent,
+          onShotEditFocusIntentConsumed: onConsumed,
+        })}
+      />
+    );
+    const enabledField = result.container.querySelector<HTMLTextAreaElement>(
+      'textarea[data-shot-field="shooting-script"]'
+    );
+    await waitFor(() => expect(document.activeElement).toBe(enabledField));
+    expect(onConsumed).toHaveBeenCalledOnce();
+    expect(onConsumed).toHaveBeenCalledWith('focus_1');
+
+    result.rerender(
+      <BeatPanel
+        {...panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]), {
+          pending: false,
+          shotEditFocusIntent: intent,
+          onShotEditFocusIntentConsumed: onConsumed,
+        })}
+      />
+    );
+    expect(onConsumed).toHaveBeenCalledOnce();
+  });
 });
