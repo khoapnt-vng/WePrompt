@@ -1019,6 +1019,20 @@
         "dismissed": "未花费并已关闭"
       },
       "table": {
+        "authoring": {
+          "label": "故事编写与恢复",
+          "coverageGap": "{{total}} 个 Beat 中有 {{count}} 个没有 Shot",
+          "coverageGap_one": "{{total}} 个 Beat 中有 {{count}} 个没有 Shot",
+          "coverageGap_other": "{{total}} 个 Beat 中有 {{count}} 个没有 Shot",
+          "unscriptedWarning": "{{count}} 个 Shot 没有拍摄脚本",
+          "unscriptedWarning_one": "{{count}} 个 Shot 没有拍摄脚本",
+          "unscriptedWarning_other": "{{count}} 个 Shot 没有拍摄脚本",
+          "askDirector": "询问 Director",
+          "addBeat": "添加 Beat",
+          "addShot": "添加 Shot",
+          "addShotForBeat": "向 {{title}} 添加 Shot",
+          "unassignedReferenceNote": "手动创建的 Shot 初始未分配参考图，并且必须在付费生成前进行审查。"
+        },
         "columns": {
           "length": "合计",
           "panel": "分镜",
@@ -1049,7 +1063,8 @@
           "drawMissing": "绘制缺失项（{{count}}）",
           "redrawBeat": "重新绘制 Beat · 付费",
           "cardLabel": "Shot {{position}}：{{status}}",
-          "head": "起始",
+          "shotDetails": "镜头 {{position}} 详情",
+          "head": "链首",
           "redrawShot": "重新绘制 Shot {{position}} · 付费",
           "useAsFirstFrame": "将 Shot {{position}} 分镜用作首帧",
           "status": {

@@ -377,6 +377,18 @@ const expectedLeaves = [
   'referenceWorkflow.bindings.background',
   'referenceWorkflow.bindings.save',
   'table.label',
+  'table.authoring.label',
+  'table.authoring.coverageGap',
+  'table.authoring.coverageGap_one',
+  'table.authoring.coverageGap_other',
+  'table.authoring.unscriptedWarning',
+  'table.authoring.unscriptedWarning_one',
+  'table.authoring.unscriptedWarning_other',
+  'table.authoring.askDirector',
+  'table.authoring.addBeat',
+  'table.authoring.addShot',
+  'table.authoring.addShotForBeat',
+  'table.authoring.unassignedReferenceNote',
   'table.columns.position',
   'table.columns.beat',
   'table.columns.story',
@@ -403,6 +415,7 @@ const expectedLeaves = [
   'table.panel.drawMissing',
   'table.panel.redrawBeat',
   'table.panel.cardLabel',
+  'table.panel.shotDetails',
   'table.panel.head',
   'table.panel.redrawShot',
   'table.panel.useAsFirstFrame',
@@ -1173,6 +1186,18 @@ const localizedMoveToBinKeys = [
 ] as const;
 
 const localizedBoardKeys = [
+  'table.authoring.label',
+  'table.authoring.coverageGap',
+  'table.authoring.coverageGap_one',
+  'table.authoring.coverageGap_other',
+  'table.authoring.unscriptedWarning',
+  'table.authoring.unscriptedWarning_one',
+  'table.authoring.unscriptedWarning_other',
+  'table.authoring.askDirector',
+  'table.authoring.addBeat',
+  'table.authoring.addShot',
+  'table.authoring.addShotForBeat',
+  'table.authoring.unassignedReferenceNote',
   'table.columns.panel',
   'table.board.label',
   'table.board.progress',
@@ -1193,6 +1218,7 @@ const localizedBoardKeys = [
   'table.panel.drawMissing',
   'table.panel.redrawBeat',
   'table.panel.cardLabel',
+  'table.panel.shotDetails',
   'table.panel.head',
   'table.panel.redrawShot',
   'table.panel.status.missing',
@@ -1527,6 +1553,19 @@ describe('Creative Studio workspace translations', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
+      'table.authoring.label': 'Story authoring and recovery',
+      'table.authoring.coverageGap': '{{count}} of {{total}} Beats have no Shots',
+      'table.authoring.coverageGap_one': '{{count}} of {{total}} Beats has no Shots',
+      'table.authoring.coverageGap_other': '{{count}} of {{total}} Beats have no Shots',
+      'table.authoring.unscriptedWarning': '{{count}} Shots have no shooting script',
+      'table.authoring.unscriptedWarning_one': '{{count}} Shot has no shooting script',
+      'table.authoring.unscriptedWarning_other': '{{count}} Shots have no shooting script',
+      'table.authoring.askDirector': 'Ask Director',
+      'table.authoring.addBeat': 'Add Beat',
+      'table.authoring.addShot': 'Add Shot',
+      'table.authoring.addShotForBeat': 'Add Shot to {{title}}',
+      'table.authoring.unassignedReferenceNote':
+        'A hand-authored Shot starts with references unassigned and requires review before paid generation.',
       'table.columns.panel': 'Panel',
       'table.board.label': 'Director Board controls',
       'table.board.progress': '{{drawn}} of {{total}} panels drawn',
@@ -1548,7 +1587,8 @@ describe('Creative Studio workspace translations', () => {
       'table.panel.drawMissing': 'Draw missing ({{count}})',
       'table.panel.redrawBeat': 'Redraw Beat · paid',
       'table.panel.cardLabel': 'Shot {{position}}: {{status}}',
-      'table.panel.head': 'Head',
+      'table.panel.shotDetails': 'Shot {{position}} details',
+      'table.panel.head': 'Chain head',
       'table.panel.redrawShot': 'Redraw Shot {{position}} · paid',
       'table.panel.status.missing': 'Not drawn',
       'table.panel.status.current': 'Current',
@@ -1802,7 +1842,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(21);
+    expect(pluralBases).toHaveLength(23);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));

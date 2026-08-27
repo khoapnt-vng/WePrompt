@@ -1019,6 +1019,20 @@
         "dismissed": "費用を使わず破棄"
       },
       "table": {
+        "authoring": {
+          "label": "ストーリーの作成と復旧",
+          "coverageGap": "{{total}} 個の Beat のうち {{count}} 個に Shot がありません",
+          "coverageGap_one": "{{total}} 個の Beat のうち {{count}} 個に Shot がありません",
+          "coverageGap_other": "{{total}} 個の Beat のうち {{count}} 個に Shot がありません",
+          "unscriptedWarning": "{{count}} 個の Shot に撮影台本がありません",
+          "unscriptedWarning_one": "{{count}} 個の Shot に撮影台本がありません",
+          "unscriptedWarning_other": "{{count}} 個の Shot に撮影台本がありません",
+          "askDirector": "Director に依頼",
+          "addBeat": "Beat を追加",
+          "addShot": "Shot を追加",
+          "addShotForBeat": "{{title}} に Shot を追加",
+          "unassignedReferenceNote": "手動で作成した Shot は参照が未割り当ての状態で始まり、有料生成の前に確認が必要です。"
+        },
         "columns": {
           "length": "合計",
           "panel": "パネル",
@@ -1049,7 +1063,8 @@
           "drawMissing": "未作成を描画 ({{count}})",
           "redrawBeat": "Beatを再描画 · 有料",
           "cardLabel": "Shot {{position}}：{{status}}",
-          "head": "先頭",
+          "shotDetails": "ショット{{position}}の詳細",
+          "head": "チェーン先頭",
           "redrawShot": "Shot {{position}}を再描画 · 有料",
           "useAsFirstFrame": "Shot {{position}}のパネルを最初のフレームに使用",
           "status": {

@@ -24,6 +24,13 @@ vi.mock('react-i18next', () => ({
         'common.collapse': 'Collapse',
         'common.expand': 'Expand',
         'conversation.creativeStudio.workspace.table.label': 'Beat table',
+        'conversation.creativeStudio.workspace.table.authoring.label': 'Story authoring and recovery',
+        'conversation.creativeStudio.workspace.table.authoring.askDirector': 'Ask Director',
+        'conversation.creativeStudio.workspace.table.authoring.addBeat': 'Add Beat',
+        'conversation.creativeStudio.workspace.table.authoring.addShot': 'Add Shot',
+        'conversation.creativeStudio.workspace.table.authoring.unassignedReferenceNote':
+          'A hand-authored Shot starts with references unassigned and requires review before paid generation.',
+        'conversation.creativeStudio.workspace.beatPanel.untitledBeat': `Untitled Beat ${String(values?.index)}`,
         'conversation.creativeStudio.workspace.table.columns.position': '#',
         'conversation.creativeStudio.workspace.table.columns.panel': 'Panel',
         'conversation.creativeStudio.workspace.table.columns.beat': 'Beat',
@@ -47,7 +54,8 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.panel.openDetails': `Open Board panels for ${String(values?.title)}`,
         'conversation.creativeStudio.workspace.table.panel.closeDetails': `Close Board panels for ${String(values?.title)}`,
         'conversation.creativeStudio.workspace.table.panel.detailLabel': `Board panels for ${String(values?.title)}`,
-        'conversation.creativeStudio.workspace.table.panel.head': 'Head',
+        'conversation.creativeStudio.workspace.table.panel.shotDetails': `Shot ${String(values?.position)} details`,
+        'conversation.creativeStudio.workspace.table.panel.head': 'Chain head',
         'conversation.creativeStudio.workspace.table.panel.status.missing': 'Not drawn',
         'conversation.creativeStudio.workspace.table.panel.status.current': 'Current',
         'conversation.creativeStudio.workspace.table.panel.status.stale': 'Stale',
@@ -70,6 +78,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.board.styleRequired': 'Choose a Board style before drawing.',
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.characters': 'Characters',
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.background': 'Background',
+        'conversation.creativeStudio.workspace.referenceWorkflow.bindings.shot': `Shot ${String(values?.position)}`,
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.none': 'None',
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.save': 'Save references',
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.unassigned':
@@ -88,6 +97,16 @@ vi.mock('react-i18next', () => ({
       };
       if (key === 'conversation.creativeStudio.workspace.table.panel.cardLabel') {
         return `Shot ${String(values?.position)}: ${String(values?.status)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.table.authoring.coverageGap') {
+        return `${String(values?.count)} of ${String(values?.total)} Beats ${Number(values?.count) === 1 ? 'has' : 'have'} no Shots`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.table.authoring.unscriptedWarning') {
+        const count = Number(values?.count ?? 0);
+        return `${String(count)} ${count === 1 ? 'Shot has' : 'Shots have'} no shooting script`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.table.authoring.addShotForBeat') {
+        return `Add Shot to ${String(values?.title)}`;
       }
       if (key === 'conversation.creativeStudio.workspace.table.board.progress') {
         return `${String(values?.drawn)} of ${String(values?.total)} panels drawn`;
@@ -136,6 +155,7 @@ import type { ReferenceWorkspaceItem } from '@/renderer/pages/studio/components/
 import {
   TableView,
   type ReferenceBindingWorkspaceItem,
+  type TableAuthoringActions,
   type TableBoardActions,
   type TableReferenceBindingActions,
 } from '@/renderer/pages/studio/components/Workspace/Views/Table';
@@ -221,6 +241,12 @@ const makeBindingActions = (): TableReferenceBindingActions => ({
   saveBinding: vi.fn(async () => true),
 });
 
+const makeAuthoringActions = (): TableAuthoringActions => ({
+  addBeat: vi.fn(async () => true),
+  addShot: vi.fn(async () => true),
+  askDirector: vi.fn(),
+});
+
 const makeReference = (overrides: Partial<ReferenceWorkspaceItem> = {}): ReferenceWorkspaceItem => ({
   id: 'reference_ming',
   kind: 'character',
@@ -247,7 +273,12 @@ const makeBinding = (overrides: Partial<ReferenceBindingWorkspaceItem> = {}): Re
 
 const tableBoardProps = (beats: readonly WorkspaceBeatProjection[], onOpenBeat = vi.fn()) => ({
   actions: makeTableBoardActions(),
+  authoringActions: makeAuthoringActions(),
   projectId: 'project_1',
+  coverageGapBeatIds: beats.filter((beat) => beat.shots.length === 0).map((beat) => beat.id),
+  unscriptedShotIds: beats.flatMap((beat) =>
+    beat.shots.filter((shot) => shot.shootingScript.trim() === '').map((shot) => shot.id)
+  ),
   boardStyle: 'grey_tone' as const,
   boardPanels: beats.flatMap((beat) => beat.shots.map((shot) => makeBoardPanel(shot.id))),
   references: [] as readonly ReferenceWorkspaceItem[],
@@ -264,6 +295,12 @@ const tableBoardProps = (beats: readonly WorkspaceBeatProjection[], onOpenBeat =
 const rowForBeat = (beatId: string): HTMLElement => {
   const row = document.querySelector<HTMLElement>(`[role="row"][data-beat-id="${beatId}"]`);
   if (row === null) throw new Error(`Missing Beat row ${beatId}`);
+  return row;
+};
+
+const rowForShot = (shotId: string): HTMLElement => {
+  const row = document.querySelector<HTMLElement>(`[role="row"][data-shot-id="${shotId}"]`);
+  if (row === null) throw new Error(`Missing Shot row ${shotId}`);
   return row;
 };
 
@@ -308,6 +345,135 @@ describe('TableView', () => {
     expect(screen.getByRole('status')).toHaveTextContent('No beats yet');
   });
 
+  it('names authoring gaps exactly and fences every Beat Add Shot control from Beat opening', async () => {
+    const user = userEvent.setup();
+    const onOpenBeat = vi.fn();
+    const authoringActions = makeAuthoringActions();
+    const beats = [
+      makeBeat('opaque_generated_identity', { title: '  ', story: '', shots: [] }),
+      makeBeat('script_gap', { title: 'Market', shots: [makeShot('blank_shot', { shootingScript: ' \n ' })] }),
+    ];
+    render(
+      <TableView
+        {...tableBoardProps(beats, onOpenBeat)}
+        authoringActions={authoringActions}
+        beats={beats}
+        coverageGapBeatIds={['opaque_generated_identity']}
+        onOpenBeat={onOpenBeat}
+        onSelectBeat={vi.fn()}
+        selectedBeatId={null}
+        unscriptedShotIds={['blank_shot']}
+      />
+    );
+
+    const authoring = screen.getByRole('region', { name: 'Story authoring and recovery' });
+    expect(within(authoring).getByText('1 of 2 Beats has no Shots')).toBeVisible();
+    expect(within(authoring).getByText('1 Shot has no shooting script')).toBeVisible();
+    expect(authoring).toHaveTextContent(
+      'A hand-authored Shot starts with references unassigned and requires review before paid generation.'
+    );
+    expect(rowForBeat('opaque_generated_identity')).toHaveTextContent('Untitled Beat 1');
+    expect(rowForBeat('opaque_generated_identity')).not.toHaveTextContent('opaque_generated_identity');
+
+    const addToUntitled = screen.getByRole('button', { name: 'Add Shot to Untitled Beat 1' });
+    const addToMarket = screen.getByRole('button', { name: 'Add Shot to Market' });
+    await user.click(addToUntitled);
+    await user.keyboard('{Enter}');
+    await user.click(addToMarket);
+    expect(authoringActions.addShot).toHaveBeenNthCalledWith(1, 'opaque_generated_identity');
+    expect(authoringActions.addShot).toHaveBeenNthCalledWith(2, 'opaque_generated_identity');
+    expect(authoringActions.addShot).toHaveBeenNthCalledWith(3, 'script_gap');
+    expect(onOpenBeat).not.toHaveBeenCalled();
+
+    await user.click(within(authoring).getByRole('button', { name: 'Ask Director' }));
+    expect(authoringActions.askDirector).toHaveBeenCalledExactlyOnceWith('opaque_generated_identity');
+    await user.click(within(authoring).getByRole('button', { name: 'Add Beat' }));
+    expect(authoringActions.addBeat).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides zero warnings and locks every authoring action while pending or gate locked', () => {
+    const beats = [makeBeat('opening', { title: 'Opening' })];
+    const { rerender } = render(
+      <TableView {...tableBoardProps(beats)} beats={beats} onSelectBeat={vi.fn()} pending selectedBeatId={null} />
+    );
+
+    const authoring = screen.getByRole('region', { name: 'Story authoring and recovery' });
+    expect(authoring.querySelector('[data-coverage-gap-count]')).toBeNull();
+    expect(authoring.querySelector('[data-unscripted-shot-count]')).toBeNull();
+    expect(within(authoring).getByRole('button', { name: 'Add Beat' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add Shot to Opening' })).toBeDisabled();
+
+    rerender(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        coverageGapBeatIds={['opening']}
+        gateLocked
+        onSelectBeat={vi.fn()}
+        selectedBeatId={null}
+      />
+    );
+    expect(within(authoring).getByRole('button', { name: 'Ask Director' })).toBeDisabled();
+    expect(within(authoring).getByRole('button', { name: 'Add Beat' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Add Shot to Opening' })).toBeDisabled();
+  });
+
+  it('routes Ask Director to the Beat owning the first unscripted Shot when coverage is complete', async () => {
+    const user = userEvent.setup();
+    const authoringActions = makeAuthoringActions();
+    const beats = [
+      makeBeat('opening', { title: 'Opening' }),
+      makeBeat('close', { title: 'Close', shots: [makeShot('blank_close', { shootingScript: '' })] }),
+    ];
+    render(
+      <TableView
+        {...tableBoardProps(beats)}
+        authoringActions={authoringActions}
+        beats={beats}
+        coverageGapBeatIds={[]}
+        onSelectBeat={vi.fn()}
+        selectedBeatId={null}
+        unscriptedShotIds={['blank_close']}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Ask Director' }));
+    expect(authoringActions.askDirector).toHaveBeenCalledExactlyOnceWith('close');
+  });
+
+  it('rerenders a new unscripted Shot as unassigned and reviewable without claiming generated work', async () => {
+    const user = userEvent.setup();
+    const emptyBeat = makeBeat('opening', { title: 'Opening', shots: [] });
+    const props = tableBoardProps([emptyBeat]);
+    const { rerender } = render(
+      <TableView {...props} beats={[emptyBeat]} onSelectBeat={vi.fn()} selectedBeatId={null} />
+    );
+
+    const newShot = makeShot('shot_new', { shootingScript: '' });
+    const refreshedBeat = makeBeat('opening', { title: 'Opening', shots: [newShot] });
+    rerender(
+      <TableView
+        {...props}
+        beats={[refreshedBeat]}
+        boardPanels={[makeBoardPanel('shot_new')]}
+        coverageGapBeatIds={[]}
+        onSelectBeat={vi.fn()}
+        referenceBindings={[makeBinding({ shotId: 'shot_new', status: 'unassigned' })]}
+        selectedBeatId={null}
+        unscriptedShotIds={['shot_new']}
+      />
+    );
+
+    expect(screen.getByText('1 Shot has no shooting script')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    await user.click(screen.getByRole('button', { name: 'Expand: Shot 1 details' }));
+    expect(rowForShot('shot_new')).toHaveAttribute('data-shot-binding-status', 'unassigned');
+    expect(within(rowForShot('shot_new')).getByRole('alert')).toHaveTextContent(
+      'Choose the exact references for this Shot.'
+    );
+    expect(rowForShot('shot_new').querySelector('[data-asset-id]')).toBeNull();
+  });
+
   it('owns exact Shot reference binding inside the expanded Beat and reports bound progress', async () => {
     const user = userEvent.setup();
     const beats = [makeBeat('opening', { title: 'Opening' })];
@@ -338,6 +504,7 @@ describe('TableView', () => {
     expect(screen.getByText('0 of 1 Shots bound')).toBeVisible();
     expect(container.querySelector('[data-shot-binding-status]')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    await user.click(screen.getByRole('button', { name: 'Expand: Shot 1 details' }));
 
     const shot = container.querySelector<HTMLElement>('[data-shot-id="opening_shot"]');
     expect(shot).toHaveAttribute('data-shot-binding-status', 'unassigned');
@@ -392,6 +559,7 @@ describe('TableView', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    await user.click(screen.getByRole('button', { name: 'Expand: Shot 1 details' }));
     const shot = container.querySelector<HTMLElement>('[data-shot-id="opening_shot"]');
     expect(within(shot!).getAllByRole('alert')[0]).toHaveTextContent(
       'This Shot binding is no longer valid. Review and save it again.'
@@ -406,7 +574,7 @@ describe('TableView', () => {
   it('opens and highlights the exact Shot when review sends a binding focus intent', async () => {
     const beats = [makeBeat('opening', { title: 'Opening' })];
     const consumed = vi.fn();
-    const { container } = render(
+    const { container, rerender } = render(
       <TableView
         {...tableBoardProps(beats)}
         beats={beats}
@@ -429,7 +597,117 @@ describe('TableView', () => {
         'true'
       )
     );
-    expect(consumed).toHaveBeenCalledWith('focus_1');
+    expect(screen.getByRole('button', { name: 'Collapse: Shot 1 details' })).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByRole('region', { name: 'Shot 1 details' })).toHaveFocus();
+    expect(consumed).toHaveBeenCalledExactlyOnceWith('focus_1');
+    rerender(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        referenceFocusIntent={{
+          id: 'focus_1',
+          projectId: 'project_1',
+          referenceIds: [],
+          assetIds: [],
+          shotIds: ['opening_shot'],
+        }}
+        onReferenceFocusIntentConsumed={consumed}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+    expect(consumed).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        referenceFocusIntent={null}
+        onReferenceFocusIntentConsumed={consumed}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+    rerender(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        referenceFocusIntent={{
+          id: 'focus_1',
+          projectId: 'project_1',
+          referenceIds: [],
+          assetIds: [],
+          shotIds: ['opening_shot'],
+        }}
+        onReferenceFocusIntentConsumed={consumed}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+    await waitFor(() => expect(consumed).toHaveBeenCalledTimes(2));
+    expect(consumed).toHaveBeenNthCalledWith(2, 'focus_1');
+  });
+
+  it('ignores an old-project focus intent even when its Shot ID overlaps the current project', () => {
+    const beats = [makeBeat('opening', { title: 'Opening' })];
+    const consumed = vi.fn();
+    render(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        referenceFocusIntent={{
+          id: 'focus_shared',
+          projectId: 'project_old',
+          referenceIds: [],
+          assetIds: [],
+          shotIds: ['opening_shot'],
+        }}
+        onReferenceFocusIntentConsumed={consumed}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+
+    expect(document.querySelector('[data-shot-id="opening_shot"]')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Shot 1 details' })).toBeNull();
+    expect(consumed).not.toHaveBeenCalled();
+  });
+
+  it('correlates consumed focus intent IDs with the project so the same ID can be used in a new project', async () => {
+    const beats = [makeBeat('opening', { title: 'Opening' })];
+    const consumed = vi.fn();
+    const focusIntent = (projectId: string) => ({
+      id: 'focus_shared',
+      projectId,
+      referenceIds: [],
+      assetIds: [],
+      shotIds: ['opening_shot'],
+    });
+    const { rerender } = render(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        referenceFocusIntent={focusIntent('project_1')}
+        onReferenceFocusIntentConsumed={consumed}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+    await waitFor(() => expect(consumed).toHaveBeenCalledExactlyOnceWith('focus_shared'));
+
+    rerender(
+      <TableView
+        {...tableBoardProps(beats)}
+        beats={beats}
+        projectId='project_2'
+        referenceFocusIntent={focusIntent('project_2')}
+        onReferenceFocusIntentConsumed={consumed}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+    await waitFor(() => expect(consumed).toHaveBeenCalledTimes(2));
+    expect(consumed).toHaveBeenNthCalledWith(2, 'focus_shared');
   });
 
   it('shows a fixed lead Panel thumbnail and the remaining Shot count from exact film-order status', () => {
@@ -463,11 +741,17 @@ describe('TableView', () => {
     expect(disclosure).toHaveTextContent('+2');
   });
 
-  it('opens only one inline Beat detail without opening the BeatPanel and keeps ARIA row geometry exact', async () => {
+  it('opens six semantic Shot rows for one Beat without opening the BeatPanel and keeps ARIA geometry exact', async () => {
     const user = userEvent.setup();
+    const openingShots = Array.from({ length: 6 }, (_, index) =>
+      makeShot(`shot_${String(index + 1)}`, {
+        segmentHead: index === 0,
+        shootingScript: `Shooting script ${String(index + 1)}`,
+      })
+    );
     const beats = [
-      makeBeat('opening', { title: 'Opening', shots: [makeShot('shot_1'), makeShot('shot_2')] }),
-      makeBeat('close', { title: 'Close', shots: [makeShot('shot_3')] }),
+      makeBeat('opening', { title: 'Opening', shots: openingShots }),
+      makeBeat('close', { title: 'Close', shots: [makeShot('shot_7')] }),
     ];
     const onOpenBeat = vi.fn();
     const onSelectBeat = vi.fn();
@@ -482,29 +766,70 @@ describe('TableView', () => {
 
     const grid = screen.getByRole('grid', { name: 'Beat table' });
     const openingDisclosure = screen.getByRole('button', { name: 'Open Board panels for Opening' });
+    const openingStoryBeforeExpansion = cellAt(rowForBeat('opening'), 3).innerHTML;
     await user.click(openingDisclosure);
 
-    const openingDetail = screen.getByRole('region', { name: 'Board panels for Opening' });
+    const openingRows = openingShots.map((shot) => rowForShot(shot.id));
     expect(onSelectBeat).toHaveBeenLastCalledWith('opening');
     expect(onOpenBeat).not.toHaveBeenCalled();
     expect(openingDisclosure).toHaveAttribute('aria-expanded', 'true');
-    expect(openingDisclosure).toHaveAttribute('aria-controls', openingDetail.id);
-    expect(grid).toHaveAttribute('aria-rowcount', '4');
+    expect(openingDisclosure.getAttribute('aria-controls')?.split(' ')).toEqual(openingRows.map((shot) => shot.id));
+    expect(grid).toHaveAttribute('aria-rowcount', '9');
+    expect(within(grid).getAllByRole('row')).toHaveLength(9);
+    expect(grid.querySelectorAll('[data-board-detail-for="opening"]')).toHaveLength(6);
+    expect(grid.querySelector('[colspan]')).toBeNull();
     expect(rowForBeat('opening')).toHaveAttribute('aria-rowindex', '2');
-    expect(openingDetail.closest('[role="row"]')).toHaveAttribute('aria-rowindex', '3');
-    expect(rowForBeat('close')).toHaveAttribute('aria-rowindex', '4');
+    expect(cellAt(rowForBeat('opening'), 3).innerHTML).toBe(openingStoryBeforeExpansion);
+    expect(within(rowForBeat('opening')).queryByRole('toolbar')).toBeNull();
+    expect(within(openingRows[0]!).getByRole('toolbar', { name: 'Board panels for Opening' })).toBeInTheDocument();
+    expect(openingRows.slice(1).every((shot) => within(shot).queryByRole('toolbar') === null)).toBe(true);
+    expect(openingRows.map((shot) => shot.getAttribute('aria-rowindex'))).toEqual(['3', '4', '5', '6', '7', '8']);
+    expect(openingRows.every((shot) => within(shot).getAllByRole('gridcell').length === 7)).toBe(true);
+    expect(rowForBeat('close')).toHaveAttribute('aria-rowindex', '9');
+    await user.click(openingRows[0]!);
+    expect(onOpenBeat).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Close' }));
-    expect(screen.queryByRole('region', { name: 'Board panels for Opening' })).toBeNull();
-    expect(screen.getByRole('region', { name: 'Board panels for Close' })).toBeInTheDocument();
+    expect(document.querySelector('[data-shot-id="shot_1"]')).toBeNull();
+    expect(rowForShot('shot_7')).toBeInTheDocument();
+    expect(grid).toHaveAttribute('aria-rowcount', '4');
     expect(rowForBeat('close')).toHaveAttribute('aria-rowindex', '3');
-    expect(screen.getByRole('region', { name: 'Board panels for Close' }).closest('[role="row"]')).toHaveAttribute(
-      'aria-rowindex',
-      '4'
-    );
+    expect(rowForShot('shot_7')).toHaveAttribute('aria-rowindex', '4');
 
     await user.click(rowForBeat('opening'));
     expect(onOpenBeat).toHaveBeenLastCalledWith('opening');
+  });
+
+  it('keeps at most one Shot control surface open and clears it with the owning Beat expansion', async () => {
+    const user = userEvent.setup();
+    const beats = [
+      makeBeat('opening', {
+        title: 'Opening',
+        shots: [makeShot('shot_1'), makeShot('shot_2')],
+      }),
+    ];
+    render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
+
+    const beatDisclosure = screen.getByRole('button', { name: 'Open Board panels for Opening' });
+    await user.click(beatDisclosure);
+    const first = within(rowForShot('shot_1')).getByRole('button', { name: 'Expand: Shot 1 details' });
+    const second = within(rowForShot('shot_2')).getByRole('button', { name: 'Expand: Shot 2 details' });
+    await user.click(first);
+    expect(screen.getByRole('region', { name: 'Shot 1 details' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Shot 2 details' })).toBeNull();
+
+    await user.click(second);
+    expect(screen.queryByRole('region', { name: 'Shot 1 details' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Shot 2 details' })).toBeInTheDocument();
+    expect(screen.getAllByRole('region', { name: /Shot \d+ details/ })).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'Close Board panels for Opening' }));
+    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    expect(screen.queryByRole('region', { name: /Shot \d+ details/ })).toBeNull();
+    expect(within(rowForShot('shot_2')).getByRole('button', { name: 'Expand: Shot 2 details' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
   });
 
   it('fences disclosure activation from the Beat row and lets arrows leave a pointer-focused button', async () => {
@@ -512,9 +837,11 @@ describe('TableView', () => {
     const beats = [makeBeat('opening', { title: 'Opening' }), makeBeat('close', { title: 'Close' })];
     const onOpenBeat = vi.fn();
     const onSelectBeat = vi.fn();
+    const actions = makeTableBoardActions();
     render(
       <TableView
         {...tableBoardProps(beats, onOpenBeat)}
+        actions={actions}
         beats={beats}
         selectedBeatId={null}
         onSelectBeat={onSelectBeat}
@@ -526,7 +853,14 @@ describe('TableView', () => {
     await user.keyboard('{Enter}');
     expect(onSelectBeat).toHaveBeenCalledTimes(1);
     expect(onOpenBeat).not.toHaveBeenCalled();
-    expect(screen.getByRole('region', { name: 'Board panels for Opening' })).toBeInTheDocument();
+    expect(rowForShot('opening_shot')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Draw missing (1)' }));
+    expect(actions.drawBeat).toHaveBeenCalledExactlyOnceWith('opening');
+    expect(onOpenBeat).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Expand: Shot 1 details' }));
+    expect(onOpenBeat).not.toHaveBeenCalled();
+    act(() => disclosure.focus());
 
     await user.keyboard('{ArrowDown}');
     expect(cellAt(rowForBeat('close'), 1)).toHaveFocus();
@@ -542,29 +876,30 @@ describe('TableView', () => {
     render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
     const disclosure = screen.getByRole('button', { name: 'Open Board panels for Opening' });
     await user.click(disclosure);
-    const detail = screen.getByRole('region', { name: 'Board panels for Opening' });
+    await user.click(screen.getByRole('button', { name: 'Expand: Shot 1 details' }));
+    const detail = screen.getByRole('region', { name: 'Shot 1 details' });
     act(() => detail.focus());
     await user.keyboard('{Escape}');
-    expect(screen.queryByRole('region', { name: 'Board panels for Opening' })).toBeNull();
+    expect(document.querySelector('[data-shot-id="opening_shot"]')).toBeNull();
     expect(disclosure).toHaveFocus();
 
     act(() => cellAt(rowForBeat('opening'), 1).focus());
     await user.keyboard('{Enter}');
-    expect(screen.getByRole('region', { name: 'Board panels for Opening' })).toBeInTheDocument();
+    expect(rowForShot('opening_shot')).toBeInTheDocument();
     await user.keyboard('{Escape}');
-    expect(screen.queryByRole('region', { name: 'Board panels for Opening' })).toBeNull();
+    expect(document.querySelector('[data-shot-id="opening_shot"]')).toBeNull();
     expect(disclosure).toHaveFocus();
   });
 
-  it('renders one large card per Shot with fullscreen access and tags every actual segment head', async () => {
+  it('renders one seven-cell row per Shot with script, chain position, status, duration, and fullscreen access', async () => {
     const user = userEvent.setup();
     const beats = [
       makeBeat('opening', {
         title: 'Opening',
         shots: [
-          makeShot('shot_1', { segmentHead: true }),
-          makeShot('shot_2', { segmentHead: false }),
-          makeShot('shot_3', { segmentHead: true }),
+          makeShot('shot_1', { segmentHead: true, shootingScript: 'Ming enters the market.' }),
+          makeShot('shot_2', { segmentHead: false, shootingScript: 'Mei turns toward Ming.', durationSeconds: 6 }),
+          makeShot('shot_3', { segmentHead: true, shootingScript: 'A new angle begins.' }),
         ],
       }),
     ];
@@ -584,13 +919,21 @@ describe('TableView', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
 
-    expect(screen.getAllByRole('article')).toHaveLength(3);
-    expect(screen.getAllByText('Head')).toHaveLength(2);
-    expect(screen.getByRole('article', { name: 'Shot 2: Stale' })).toHaveTextContent('Stale');
-    expect(screen.getByRole('article', { name: 'Shot 3: Drawing' })).toHaveTextContent('Drawing');
-    expect(tableCss).toMatch(/\.panelFrame\s*{[^}]*inline-size:\s*180px[^}]*block-size:\s*101px/s);
+    const shotRows = ['shot_1', 'shot_2', 'shot_3'].map(rowForShot);
+    expect(screen.queryByRole('toolbar', { name: 'Board panels for Opening' })).toBeNull();
+    expect(shotRows).toHaveLength(3);
+    expect(shotRows.every((shot) => within(shot).getAllByRole('gridcell').length === 7)).toBe(true);
+    expect(screen.getAllByText('Chain head')).toHaveLength(2);
+    expect(rowForShot('shot_1').querySelector('[data-chain-position="head"]')).toHaveTextContent('Chain head');
+    expect(rowForShot('shot_1')).toHaveTextContent('Ming enters the market.');
+    expect(rowForShot('shot_2')).toHaveTextContent('Mei turns toward Ming.');
+    expect(rowForShot('shot_2').querySelector('[data-chain-position="predecessor:1"]')).toHaveTextContent('← Shot 1');
+    expect(rowForShot('shot_2')).toHaveTextContent('6s');
+    expect(screen.getByRole('row', { name: 'Shot 2: Stale' })).toHaveTextContent('Stale');
+    expect(screen.getByRole('row', { name: 'Shot 3: Drawing' })).toHaveTextContent('Drawing');
+    expect(tableCss).toMatch(/\.shotPanelFrame\s*{[^}]*inline-size:\s*144px[^}]*block-size:\s*81px/s);
 
-    const currentPanel = screen.getByRole('article', { name: 'Shot 1: Current' });
+    const currentPanel = screen.getByRole('row', { name: 'Shot 1: Current' });
     const expand = within(currentPanel).getByRole('button', { name: 'Expand' });
     const fullscreenFrame = expand.closest<HTMLElement>('[data-fullscreen-media-frame]');
     if (fullscreenFrame === null) throw new Error('Missing fullscreen frame for current Board panel');
@@ -599,7 +942,7 @@ describe('TableView', () => {
     await user.click(expand);
     expect(requestFullscreen).toHaveBeenCalledTimes(1);
     expect(
-      within(screen.getByRole('article', { name: 'Shot 2: Stale' })).queryByRole('button', { name: 'Expand' })
+      within(screen.getByRole('row', { name: 'Shot 2: Stale' })).queryByRole('button', { name: 'Expand' })
     ).toBeNull();
   });
 
@@ -664,10 +1007,23 @@ describe('TableView', () => {
     );
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
 
+    await user.click(within(rowForShot('shot_head')).getByRole('button', { name: 'Expand: Shot 1 details' }));
     const promote = screen.getByRole('button', { name: 'Use Shot 1 panel as first frame' });
-    expect(screen.queryByRole('button', { name: /Use Shot [2-6] panel as first frame/ })).toBeNull();
     await user.click(promote);
     expect(actions.promotePanel).toHaveBeenCalledExactlyOnceWith('shot_head', 'board_head');
+    for (const [shotId, position] of [
+      ['shot_continuous', 2],
+      ['shot_already_pinned', 3],
+      ['shot_stale_head', 4],
+      ['shot_busy_head', 5],
+      ['shot_attention_head', 6],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- each disclosure replaces the prior Shot detail
+      await user.click(
+        within(rowForShot(shotId)).getByRole('button', { name: `Expand: Shot ${String(position)} details` })
+      );
+      expect(screen.queryByRole('button', { name: /Use Shot \d+ panel as first frame/ })).toBeNull();
+    }
 
     rerender(
       <TableView
@@ -680,6 +1036,7 @@ describe('TableView', () => {
         onSelectBeat={vi.fn()}
       />
     );
+    await user.click(within(rowForShot('shot_head')).getByRole('button', { name: 'Expand: Shot 1 details' }));
     expect(screen.getByRole('button', { name: 'Use Shot 1 panel as first frame' })).toBeDisabled();
   });
 
@@ -874,15 +1231,18 @@ describe('TableView', () => {
     expect(screen.queryByRole('button', { name: 'Stop drawing' })).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    await user.click(within(rowForShot('shot_unknown')).getByRole('button', { name: 'Expand: Shot 1 details' }));
 
     const unknown = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_unknown"]');
-    const retryable = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_retryable"]');
-    if (unknown === null || retryable === null) throw new Error('Missing sanitized Board recovery controls');
+    if (unknown === null) throw new Error('Missing unknown-outcome Board recovery controls');
     expect(within(unknown).queryByRole('button', { name: 'Cancel job' })).toBeNull();
     await user.click(within(unknown).getByRole('button', { name: 'Retry generation' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge and review estimate' }));
     expect(actions.retryJob).toHaveBeenCalledWith('job_unknown', true);
 
+    await user.click(within(rowForShot('shot_retryable')).getByRole('button', { name: 'Expand: Shot 2 details' }));
+    const retryable = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_retryable"]');
+    if (retryable === null) throw new Error('Missing retryable Board recovery controls');
     await user.click(within(retryable).getByRole('button', { name: 'Retry generation' }));
     expect(actions.retryJob).toHaveBeenCalledWith('job_retryable', false);
     await user.click(within(retryable).getByRole('button', { name: 'Cancel job' }));
@@ -947,10 +1307,13 @@ describe('TableView', () => {
     expect(screen.queryByRole('button', { name: 'Redraw Beat · paid' })).toBeNull();
     expect(screen.queryByRole('button', { name: /Redraw Shot/ })).toBeNull();
 
+    await user.click(within(rowForShot('shot_missing')).getByRole('button', { name: 'Expand: Shot 1 details' }));
     const missing = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_missing_download"]');
-    const retained = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_retained_download"]');
-    if (missing === null || retained === null) throw new Error('Missing Board download recovery controls');
+    if (missing === null) throw new Error('Missing Board download recovery controls for missing panel');
     await user.click(within(missing).getByRole('button', { name: 'Retry download' }));
+    await user.click(within(rowForShot('shot_retained')).getByRole('button', { name: 'Expand: Shot 2 details' }));
+    const retained = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_retained_download"]');
+    if (retained === null) throw new Error('Missing Board download recovery controls for retained panel');
     await user.click(within(retained).getByRole('button', { name: 'Retry download' }));
     expect(actions.retryDownload).toHaveBeenNthCalledWith(1, 'job_missing_download');
     expect(actions.retryDownload).toHaveBeenNthCalledWith(2, 'job_retained_download');
@@ -992,6 +1355,7 @@ describe('TableView', () => {
     act(() => drawMissing.focus());
     await user.keyboard('{Enter}');
     expect(actions.drawBeat).toHaveBeenCalledWith('opening');
+    await user.click(within(rowForShot('shot_1')).getByRole('button', { name: 'Expand: Shot 1 details' }));
     const redrawShots = screen.getAllByRole('button', { name: /Redraw Shot/ });
     expect(redrawShots).toHaveLength(1);
     await user.click(screen.getByRole('button', { name: 'Redraw Shot 1 · paid' }));
@@ -1040,7 +1404,23 @@ describe('TableView', () => {
     expect(redrawBeat).toBeEnabled();
     await user.click(redrawBeat);
     expect(actions.redrawBeat).toHaveBeenCalledWith('opening');
-    expect(screen.getAllByRole('button', { name: /Redraw Shot/ })).toHaveLength(3);
+    for (const [shotId, position] of [
+      ['shot_1', 1],
+      ['shot_2', 2],
+      ['shot_3', 3],
+    ] as const) {
+      // eslint-disable-next-line no-await-in-loop -- one Shot detail is intentionally open at a time
+      await user.click(
+        within(rowForShot(shotId)).getByRole('button', { name: `Expand: Shot ${String(position)} details` })
+      );
+      const redrawShot = screen.getByRole('button', { name: `Redraw Shot ${String(position)} · paid` });
+      expect(redrawShot).toBeEnabled();
+      // eslint-disable-next-line no-await-in-loop -- each paid action predicate is exercised independently
+      await user.click(redrawShot);
+    }
+    expect(actions.redrawShot).toHaveBeenNthCalledWith(1, 'shot_1');
+    expect(actions.redrawShot).toHaveBeenNthCalledWith(2, 'shot_2');
+    expect(actions.redrawShot).toHaveBeenNthCalledWith(3, 'shot_3');
 
     rerender(
       <TableView
@@ -1054,9 +1434,7 @@ describe('TableView', () => {
       />
     );
     expect(screen.getByRole('button', { name: 'Redraw Beat · paid' })).toBeDisabled();
-    expect(
-      screen.getAllByRole('button', { name: /Redraw Shot/ }).every((button) => button.hasAttribute('disabled'))
-    ).toBe(true);
+    expect(screen.getByRole('button', { name: 'Redraw Shot 3 · paid' })).toBeDisabled();
   });
 
   it('keeps roving ArrowDown navigation on Beat cells while an inline detail row is open', async () => {
@@ -1477,5 +1855,12 @@ describe('the Table layout contract', () => {
     const durationRule = tableCss.match(/\.durationFact\s*{([^}]*)}/s)?.[1] ?? '';
     expect(durationRule).not.toContain('overflow: hidden');
     expect(durationRule).not.toContain('text-overflow: ellipsis');
+    expect(tableCss).toMatch(
+      /\.shotScript\s*{[^}]*display:\s*-webkit-box[^}]*overflow:\s*hidden[^}]*-webkit-box-orient:\s*vertical[^}]*-webkit-line-clamp:\s*2/s
+    );
+    expect(tableCss).toMatch(
+      /\.shotRow\[data-shot-detail-open='true'\] \.shotScript\s*{[^}]*display:\s*block[^}]*overflow:\s*visible[^}]*-webkit-line-clamp:\s*unset/s
+    );
+    expect(tableCss).not.toContain('.detailPanels');
   });
 });

@@ -8,6 +8,9 @@ import { Alert, Button } from '@arco-design/web-react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { STUDIO_MIN_SHOT_SECONDS } from '@/common/types/project/creativeStudioTypes';
+import { uuid } from '@/common/utils';
+
 import { BeatPanel } from '../BeatPanel';
 import { BoardView, binItemFocusKey } from './Board';
 import { CutView } from './Cut';
@@ -48,8 +51,17 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   } | null>(null);
   const [binFocusIntent, setBinFocusIntent] = useState<{ projectId: string; itemKey: string } | null>(null);
   const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
+  const [pendingAuthoringOpen, setPendingAuthoringOpen] = useState<{
+    projectId: string;
+    view: WorkspaceControlsProps['activeView'];
+    sourceRevision: number;
+    beatId: string;
+    shotId: string | null;
+  } | null>(null);
   const currentProjectId = useRef(project.id);
   currentProjectId.current = project.id;
+  const currentView = useRef(activeView);
+  currentView.current = activeView;
   const openBeatId = openPanel?.projectId === project.id && openPanel.view === activeView ? openPanel.beatId : null;
   const openBeatIndex = openBeatId === null ? -1 : projection.activeBeats.findIndex((beat) => beat.id === openBeatId);
   const openBeat = openBeatIndex < 0 ? null : (projection.activeBeats[openBeatIndex] ?? null);
@@ -245,6 +257,111 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
     setShotLiftAnnouncement('');
   }, [project.id]);
 
+  useEffect(() => {
+    setPendingAuthoringOpen(null);
+  }, [activeView, project.id]);
+
+  useEffect(() => {
+    if (pendingAuthoringOpen === null) return;
+    if (
+      pendingAuthoringOpen.projectId !== project.id ||
+      pendingAuthoringOpen.view !== activeView ||
+      activeView !== 'table'
+    ) {
+      setPendingAuthoringOpen(null);
+      return;
+    }
+    const beat = projection.activeBeats.find((candidate) => candidate.id === pendingAuthoringOpen.beatId);
+    const identityReady =
+      beat !== undefined &&
+      (pendingAuthoringOpen.shotId === null ||
+        beat.shots.some((candidate) => candidate.id === pendingAuthoringOpen.shotId));
+    if (identityReady) {
+      drafts.selectBeat(pendingAuthoringOpen.beatId);
+      setShotLiftAnnouncement('');
+      setOpenPanel({ projectId: project.id, beatId: pendingAuthoringOpen.beatId, view: activeView });
+      setPendingAuthoringOpen(null);
+      return;
+    }
+    if (projection.projectRevision > pendingAuthoringOpen.sourceRevision) setPendingAuthoringOpen(null);
+  }, [activeView, drafts, pendingAuthoringOpen, project.id, projection.activeBeats, projection.projectRevision]);
+
+  const addBeat = async (): Promise<boolean> => {
+    if (pending || gateLocked || activeView !== 'table') return false;
+    const expectedProjectId = project.id;
+    const expectedView = activeView;
+    const sourceRevision = project.revision;
+    const beatId = `beat_${uuid(32)}`;
+    let committed = false;
+    try {
+      committed = await mutations.applyAuthoring([
+        {
+          kind: 'add_beat',
+          beatId,
+          beat: { title: '', story: '', targetSeconds: null },
+          beforeBeatId: null,
+        },
+      ]);
+    } catch {
+      return false;
+    }
+    if (!committed || currentProjectId.current !== expectedProjectId || currentView.current !== expectedView) {
+      return false;
+    }
+    setPendingAuthoringOpen({
+      projectId: expectedProjectId,
+      view: expectedView,
+      sourceRevision,
+      beatId,
+      shotId: null,
+    });
+    return true;
+  };
+
+  const addShot = async (beatId: string): Promise<boolean> => {
+    if (pending || gateLocked || activeView !== 'table' || !projection.activeBeats.some((beat) => beat.id === beatId)) {
+      return false;
+    }
+    const expectedProjectId = project.id;
+    const expectedView = activeView;
+    const sourceRevision = project.revision;
+    const shotId = `shot_${uuid(32)}`;
+    let committed = false;
+    try {
+      committed = await mutations.applyAuthoring([
+        {
+          kind: 'add_shot',
+          beatId,
+          shotId,
+          shot: { shootingScript: '', durationSeconds: STUDIO_MIN_SHOT_SECONDS },
+          beforeShotId: null,
+        },
+      ]);
+    } catch {
+      return false;
+    }
+    if (!committed || currentProjectId.current !== expectedProjectId || currentView.current !== expectedView) {
+      return false;
+    }
+    setPendingAuthoringOpen({
+      projectId: expectedProjectId,
+      view: expectedView,
+      sourceRevision,
+      beatId,
+      shotId,
+    });
+    return true;
+  };
+
+  const askDirector = (beatId: string): void => {
+    if (pending || gateLocked || activeView !== 'table' || !projection.activeBeats.some((beat) => beat.id === beatId)) {
+      return;
+    }
+    drafts.selectBeat(beatId);
+    setOpenPanel(null);
+    beatPanelActions.requestResplit(beatId);
+  };
+
   const selectAndOpenBeat = (beatId: string): void => {
     drafts.selectBeat(beatId);
     setShotLiftAnnouncement('');
@@ -327,7 +444,9 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       {activeView === 'table' ? (
         <TableView
           actions={tableBoardActions}
+          authoringActions={{ addBeat, addShot, askDirector }}
           beats={projection.activeBeats}
+          coverageGapBeatIds={projection.coverageGapBeatIds}
           bindingActions={referenceActions ?? { saveBinding: async () => false }}
           boardStyle={project.boardStyle}
           boardPanels={projection.boardPanels}
@@ -343,6 +462,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           referencePendingId={referencePendingId}
           references={projectReferences}
           selectedBeatId={drafts.selection.selectedBeatId}
+          unscriptedShotIds={projection.unscriptedShotIds}
           onReferenceFocusIntentConsumed={onReferenceFocusIntentConsumed}
         />
       ) : null}

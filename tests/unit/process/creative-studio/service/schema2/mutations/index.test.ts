@@ -980,6 +980,38 @@ describe('schema-5 Story, Shooting script, and undo', () => {
     expect(undone.undoHistory).toEqual([]);
   });
 
+  it('undoes an appended Shot exactly after the persistence revision advances', () => {
+    const original = makeProject();
+    const changed = persist(
+      apply(
+        original,
+        [
+          {
+            kind: 'add_shot',
+            beatId: 'beat_2',
+            shotId: 'shot_added',
+            shot: { shootingScript: '', durationSeconds: 4 },
+            beforeShotId: null,
+          },
+        ],
+        'add_shot_mutation'
+      ).project
+    );
+
+    expect(changed.beats.beat_2!.shotOrder).toEqual(['shot_added']);
+    expect(changed.shots.shot_added).toMatchObject({
+      shootingScript: '',
+      durationSeconds: 4,
+      referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
+    });
+    expect(changed.undoHistory.at(-1)).toMatchObject({ id: 'add_shot_mutation', label: 'add_shot' });
+
+    const undone = apply(changed, [{ kind: 'undo_last', entryId: 'add_shot_mutation' }], 'undo_add_shot').project;
+    expect(undone.beats.beat_2!.shotOrder).toEqual([]);
+    expect(undone.shots).not.toHaveProperty('shot_added');
+    expect(undone.undoHistory).toEqual([]);
+  });
+
   it('rolls back the whole batch when a later operation is invalid', () => {
     const project = makeProject();
     expectReason(

@@ -1020,6 +1020,20 @@
         "dismissed": "Ohne Ausgaben verworfen"
       },
       "table": {
+        "authoring": {
+          "label": "Story-Autorenschaft und Wiederherstellung",
+          "coverageGap": "{{count}} von {{total}} Beats haben keine Shots",
+          "coverageGap_one": "{{count}} von {{total}} Beats hat keine Shots",
+          "coverageGap_other": "{{count}} von {{total}} Beats haben keine Shots",
+          "unscriptedWarning": "{{count}} Shots haben kein Drehbuch",
+          "unscriptedWarning_one": "{{count}} Shot hat kein Drehbuch",
+          "unscriptedWarning_other": "{{count}} Shots haben kein Drehbuch",
+          "askDirector": "Director fragen",
+          "addBeat": "Beat hinzufügen",
+          "addShot": "Shot hinzufügen",
+          "addShotForBeat": "Shot zu {{title}} hinzufügen",
+          "unassignedReferenceNote": "Ein manuell erstellter Shot beginnt mit nicht zugewiesenen Referenzen und muss vor einer kostenpflichtigen Generierung geprüft werden."
+        },
         "columns": {
           "length": "Summe",
           "panel": "Panel",
@@ -1050,7 +1064,8 @@
           "drawMissing": "Fehlende zeichnen ({{count}})",
           "redrawBeat": "Beat neu zeichnen · kostenpflichtig",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "head": "Anfang",
+          "shotDetails": "Details zu Shot {{position}}",
+          "head": "Kettenanfang",
           "redrawShot": "Shot {{position}} neu zeichnen · kostenpflichtig",
           "useAsFirstFrame": "Panel von Shot {{position}} als erstes Bild verwenden",
           "status": {

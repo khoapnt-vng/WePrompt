@@ -6976,7 +6976,10 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(document.activeElement).toBe(toggle));
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(window.localStorage.getItem(railPreferenceKey('project_1', 'table'))).toBe('true');
-    expect(screen.getByText('conversation.creativeStudio.workspace.beatPanel.directorRequestHint')).toBeVisible();
+    expect(mocks.directorDraftRequest).toMatchObject({
+      projectId: 'project_1',
+      prompt: 'conversation.creativeStudio.workspace.beatPanel.directorRequestHint',
+    });
 
     // Now open, a further request waits for the panel-closing commit before moving focus. Focusing
     // synchronously would let Arco's still-mounted modal focus lock pull it back into the panel.
@@ -7011,7 +7014,156 @@ describe('StudioPage schema-5 cutover', () => {
 
     act(() => tableActions.requestResplit('beat_1'));
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(screen.queryByText('conversation.creativeStudio.workspace.beatPanel.directorRequestHint')).toBeNull();
+    expect(mocks.directorDraftRequest).toBeNull();
+  });
+
+  it('routes the Table recovery action to an editable Director draft without sending, proposing, generating, or spending', async () => {
+    const authority = project();
+    authority.beatOrder = ['beat_gap'];
+    authority.beats.beat_gap = {
+      id: 'beat_gap',
+      title: 'Missing coverage',
+      story: 'A story still needs its coverage plan.',
+      targetSeconds: 4,
+      shotOrder: [],
+    };
+    mockSupportedProject(authority);
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.table.authoring.askDirector' })
+    );
+    await waitFor(() =>
+      expect(mocks.directorDraftRequest).toMatchObject({
+        projectId: 'project_1',
+        prompt: 'conversation.creativeStudio.workspace.beatPanel.directorRequestHint',
+      })
+    );
+    expect(mocks.directorDraftRequest?.requestId).toBeGreaterThan(0);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('sends Add Beat through current revision authority and opens only after the atomic refresh contains it', async () => {
+    let authority = project();
+    mocks.bridge.getProject.invoke.mockImplementation(async () =>
+      ok({ status: 'supported' as const, project: authority })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async () => ok(workspaceStatus(authority)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async () => ok(chainStatus(authority)));
+    mocks.bridge.applyAuthoringBatch.invoke.mockImplementation(async (request) => {
+      const operation = request.operations[0];
+      if (operation?.kind !== 'add_beat') throw new Error('Expected add_beat');
+      authority = structuredClone(authority);
+      authority.revision = 4;
+      authority.beatOrder.push(operation.beatId);
+      authority.beats[operation.beatId] = {
+        id: operation.beatId,
+        title: operation.beat.title,
+        story: operation.beat.story,
+        targetSeconds: operation.beat.targetSeconds,
+        shotOrder: [],
+      };
+      return ok({
+        projectId: authority.id,
+        projectRevision: authority.revision,
+        createdBeatIds: [operation.beatId],
+        createdShotIds: [],
+      });
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.table.authoring.addBeat' })
+    );
+
+    await waitFor(() => expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledOnce());
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        {
+          kind: 'add_beat',
+          beatId: expect.stringMatching(/^beat_[a-f0-9]{32}$/),
+          beat: { title: '', story: '', targetSeconds: null },
+          beforeBeatId: null,
+        },
+      ],
+    });
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    expect(mocks.bridge.getProjectWorkspace.invoke.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('sends Add Shot as a four-second append and refreshes its unassigned identity before opening', async () => {
+    let authority = projectWithHandoffShot();
+    mocks.bridge.getProject.invoke.mockImplementation(async () =>
+      ok({ status: 'supported' as const, project: authority })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async () => ok(workspaceStatus(authority)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async () => ok(chainStatus(authority)));
+    mocks.bridge.applyAuthoringBatch.invoke.mockImplementation(async (request) => {
+      const operation = request.operations[0];
+      if (operation?.kind !== 'add_shot') throw new Error('Expected add_shot');
+      authority = structuredClone(authority);
+      authority.revision = 4;
+      authority.beats[operation.beatId]!.shotOrder.push(operation.shotId);
+      authority.shots[operation.shotId] = {
+        id: operation.shotId,
+        shootingScript: operation.shot.shootingScript,
+        durationSeconds: operation.shot.durationSeconds,
+        trimInSeconds: null,
+        trimOutSeconds: null,
+        chainBreak: 'none',
+        referenceBinding: unassignedReferenceBinding(),
+        seedStillId: null,
+        dismissedSeedStillIds: [],
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
+        assetIds: [],
+        jobIds: [],
+      };
+      return ok({
+        projectId: authority.id,
+        projectRevision: authority.revision,
+        createdBeatIds: [],
+        createdShotIds: [operation.shotId],
+      });
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.table\.authoring\.addShotForBeat/,
+      })
+    );
+
+    await waitFor(() => expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledOnce());
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: expect.stringMatching(/^shot_[a-f0-9]{32}$/),
+          shot: { shootingScript: '', durationSeconds: 4 },
+          beforeShotId: null,
+        },
+      ],
+    });
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    expect(mocks.bridge.getProjectWorkspace.invoke.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('keeps captured seed imports fail-closed across native, transport, stale, and concurrent outcomes', async () => {

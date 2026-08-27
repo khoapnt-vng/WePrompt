@@ -273,6 +273,13 @@ export type TableReferenceBindingActions = {
   ) => Promise<boolean>;
 };
 
+/** Free authoring and Director-draft actions. None of these initiate generation or spend. */
+export type TableAuthoringActions = {
+  addBeat: () => Promise<boolean>;
+  addShot: (beatId: string) => Promise<boolean>;
+  askDirector: (beatId: string) => void;
+};
+
 type ShotReferenceBindingEditorProps = {
   item: ReferenceBindingWorkspaceItem;
   characters: readonly ReferenceWorkspaceItem[];
@@ -382,8 +389,11 @@ const ShotReferenceBindingEditor: React.FC<ShotReferenceBindingEditorProps> = ({
 
 export type TableViewProps = {
   actions: TableBoardActions;
+  authoringActions: TableAuthoringActions;
   projectId: string;
   beats: readonly WorkspaceBeatProjection[];
+  coverageGapBeatIds: readonly string[];
+  unscriptedShotIds: readonly string[];
   boardStyle: StudioBoardStyleV2 | null;
   boardPanels: readonly WorkspaceBoardPanelProjection[];
   references: readonly ReferenceWorkspaceItem[];
@@ -404,8 +414,11 @@ export type TableViewProps = {
 /** Beat-level workspace presentation. Selection is supplied by the shared draft owner. */
 export const TableView: React.FC<TableViewProps> = ({
   actions,
+  authoringActions,
   projectId,
   beats,
+  coverageGapBeatIds,
+  unscriptedShotIds,
   boardStyle,
   boardPanels,
   references,
@@ -432,11 +445,14 @@ export const TableView: React.FC<TableViewProps> = ({
   const panelButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const bindingCardRefs = useRef(new Map<string, HTMLElement>());
   const bindingHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const consumedReferenceFocusIntentRef = useRef<{ projectId: string; intentId: string } | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pendingPanelButtonFocusRef = useRef<string | null>(null);
   const [openBoardBeatId, setOpenBoardBeatId] = useState<string | null>(null);
+  const [openShotDetailId, setOpenShotDetailId] = useState<string | null>(null);
   const [highlightedBindingShotId, setHighlightedBindingShotId] = useState<string | null>(null);
   const detailIdBase = useId();
+  const safeDetailIdBase = `studio-table-${detailIdBase.replace(/[^A-Za-z0-9_-]/g, '') || 'details'}`;
   const exactBoardPanels = useMemo(() => exactFilmOrderBoardPanels(beats, boardPanels), [beats, boardPanels]);
   const panelByShotId = useMemo(
     () => new Map(exactBoardPanels.map((panel) => [panel.shotId, panel] as const)),
@@ -481,18 +497,32 @@ export const TableView: React.FC<TableViewProps> = ({
   const generationLocked = interactionLocked || boardStyle === null || boardSummary.statusPending || !imageRouteReady;
   const canDrawNext = !generationLocked && boardSummary.nextBatch > 0;
   const canStop = !interactionLocked && boardSummary.busy > 0;
+  const askDirectorBeatId =
+    coverageGapBeatIds.find((beatId) => beats.some((beat) => beat.id === beatId && beat.shots.length === 0)) ??
+    beats.find((beat) => beat.shots.some((shot) => shot.id === unscriptedShotIds[0]))?.id ??
+    null;
+  const authoringLabelId = `${safeDetailIdBase}-authoring-label`;
 
   const columns: readonly TableColumn[] = COLUMNS;
   const columnCount = columns.length;
   const focusedRow = Math.min(focusedCell.row, Math.max(0, beats.length - 1));
   const focusedColumn = columns.some((column) => column.id === focusedCell.column) ? focusedCell.column : 'story';
   const openBoardBeatIndex = beats.findIndex((beat) => beat.id === openBoardBeatId && beat.shots.length > 0);
+  const openShotCount = openBoardBeatIndex < 0 ? 0 : (beats[openBoardBeatIndex]?.shots.length ?? 0);
 
   useEffect(() => {
     if (openBoardBeatId !== null && !beats.some((beat) => beat.id === openBoardBeatId && beat.shots.length > 0)) {
       setOpenBoardBeatId(null);
+      setOpenShotDetailId(null);
+      return;
     }
-  }, [beats, openBoardBeatId]);
+    if (
+      openShotDetailId !== null &&
+      !beats.some((beat) => beat.id === openBoardBeatId && beat.shots.some((shot) => shot.id === openShotDetailId))
+    ) {
+      setOpenShotDetailId(null);
+    }
+  }, [beats, openBoardBeatId, openShotDetailId]);
 
   useEffect(() => {
     if (referenceFocusIntent === null || referenceFocusIntent.projectId !== projectId) return;
@@ -501,6 +531,7 @@ export const TableView: React.FC<TableViewProps> = ({
       .find(({ shotId }) => referenceFocusIntent.shotIds.includes(shotId));
     if (target === undefined) return;
     setOpenBoardBeatId(target.beatId);
+    setOpenShotDetailId(target.shotId);
     setHighlightedBindingShotId(target.shotId);
     onSelectBeat(target.beatId);
   }, [beats, onSelectBeat, projectId, referenceFocusIntent]);
@@ -508,8 +539,25 @@ export const TableView: React.FC<TableViewProps> = ({
   useLayoutEffect(() => {
     if (
       referenceFocusIntent === null ||
+      (consumedReferenceFocusIntentRef.current !== null &&
+        consumedReferenceFocusIntentRef.current.projectId !== projectId)
+    ) {
+      consumedReferenceFocusIntentRef.current = null;
+    }
+  }, [projectId, referenceFocusIntent]);
+
+  useLayoutEffect(() => {
+    if (
+      referenceFocusIntent === null ||
+      referenceFocusIntent.projectId !== projectId ||
       highlightedBindingShotId === null ||
       !referenceFocusIntent.shotIds.includes(highlightedBindingShotId)
+    ) {
+      return;
+    }
+    if (
+      consumedReferenceFocusIntentRef.current?.projectId === projectId &&
+      consumedReferenceFocusIntentRef.current.intentId === referenceFocusIntent.id
     ) {
       return;
     }
@@ -517,13 +565,14 @@ export const TableView: React.FC<TableViewProps> = ({
     if (node === undefined) return;
     node.scrollIntoView?.({ behavior: 'smooth', block: 'center', inline: 'center' });
     node.focus({ preventScroll: true });
+    consumedReferenceFocusIntentRef.current = { projectId, intentId: referenceFocusIntent.id };
     onReferenceFocusIntentConsumed?.(referenceFocusIntent.id);
     if (bindingHighlightTimerRef.current !== null) clearTimeout(bindingHighlightTimerRef.current);
     bindingHighlightTimerRef.current = setTimeout(() => {
       setHighlightedBindingShotId((current) => (current === highlightedBindingShotId ? null : current));
       bindingHighlightTimerRef.current = null;
     }, REFERENCE_HIGHLIGHT_MS);
-  }, [highlightedBindingShotId, onReferenceFocusIntentConsumed, referenceFocusIntent]);
+  }, [highlightedBindingShotId, onReferenceFocusIntentConsumed, projectId, referenceFocusIntent]);
 
   useEffect(
     () => () => {
@@ -550,18 +599,28 @@ export const TableView: React.FC<TableViewProps> = ({
     cellRefs.current[next.row]?.[nextColumn]?.focus();
   };
 
-  const detailId = (row: number): string => `${detailIdBase}-board-detail-${String(row)}`;
+  const shotRowId = (row: number, shotIndex: number): string =>
+    `${safeDetailIdBase}-beat-${String(row)}-shot-${String(shotIndex)}`;
+
+  const shotDetailId = (row: number, shotIndex: number): string => `${shotRowId(row, shotIndex)}-details`;
 
   const closeBoardDetails = (beatId: string): void => {
     if (openBoardBeatId !== beatId) return;
     pendingPanelButtonFocusRef.current = beatId;
     setOpenBoardBeatId(null);
+    setOpenShotDetailId(null);
   };
 
   const toggleBoardDetails = (beat: WorkspaceBeatProjection): void => {
     if (beat.shots.length === 0) return;
     onSelectBeat(beat.id);
+    setOpenShotDetailId(null);
     setOpenBoardBeatId((current) => (current === beat.id ? null : beat.id));
+  };
+
+  const toggleShotDetails = (beatId: string, shotId: string): void => {
+    if (openBoardBeatId !== beatId) return;
+    setOpenShotDetailId((current) => (current === shotId ? null : shotId));
   };
 
   const handleCellKeyDown = (
@@ -602,6 +661,53 @@ export const TableView: React.FC<TableViewProps> = ({
 
   return (
     <section className={styles.root}>
+      <section
+        aria-labelledby={authoringLabelId}
+        className={styles.authoringRegion}
+        data-studio-table-authoring
+        role='region'
+      >
+        <div className={styles.authoringFacts}>
+          <strong id={authoringLabelId}>{t('conversation.creativeStudio.workspace.table.authoring.label')}</strong>
+          {coverageGapBeatIds.length > 0 ? (
+            <span data-coverage-gap-count={coverageGapBeatIds.length}>
+              {t('conversation.creativeStudio.workspace.table.authoring.coverageGap', {
+                count: coverageGapBeatIds.length,
+                total: beats.length,
+              })}
+            </span>
+          ) : null}
+          {unscriptedShotIds.length > 0 ? (
+            <span data-unscripted-shot-count={unscriptedShotIds.length}>
+              {t('conversation.creativeStudio.workspace.table.authoring.unscriptedWarning', {
+                count: unscriptedShotIds.length,
+              })}
+            </span>
+          ) : null}
+          <span className={styles.authoringNote}>
+            {t('conversation.creativeStudio.workspace.table.authoring.unassignedReferenceNote')}
+          </span>
+        </div>
+        <div className={styles.authoringActions}>
+          <Button
+            disabled={interactionLocked || askDirectorBeatId === null}
+            onClick={() => {
+              if (!interactionLocked && askDirectorBeatId !== null) authoringActions.askDirector(askDirectorBeatId);
+            }}
+          >
+            {t('conversation.creativeStudio.workspace.table.authoring.askDirector')}
+          </Button>
+          <Button
+            disabled={interactionLocked}
+            onClick={() => {
+              if (!interactionLocked) void authoringActions.addBeat();
+            }}
+            type='primary'
+          >
+            {t('conversation.creativeStudio.workspace.table.authoring.addBeat')}
+          </Button>
+        </div>
+      </section>
       <section
         aria-label={t('conversation.creativeStudio.workspace.table.board.label')}
         className={styles.boardStrip}
@@ -668,7 +774,7 @@ export const TableView: React.FC<TableViewProps> = ({
         <table
           aria-colcount={columnCount}
           aria-label={t('conversation.creativeStudio.workspace.table.label')}
-          aria-rowcount={beats.length + 1 + (openBoardBeatIndex < 0 ? 0 : 1)}
+          aria-rowcount={beats.length + 1 + openShotCount}
           className={styles.grid}
           role='grid'
         >
@@ -704,9 +810,13 @@ export const TableView: React.FC<TableViewProps> = ({
           </thead>
           <tbody>
             {beats.map((beat, row) => {
+              const beatDisplayTitle =
+                beat.title.trim() === ''
+                  ? t('conversation.creativeStudio.workspace.beatPanel.untitledBeat', { index: row + 1 })
+                  : beat.title;
               const selected = beat.id === selectedBeatId;
               const hasCoverage = beat.shots.length > 0;
-              const boardDetailsOpen = openBoardBeatId === beat.id && hasCoverage;
+              const boardDetailsOpen = openBoardBeatIndex === row && hasCoverage;
               const boardPanelsForBeat = beat.shots.map(
                 (shot) => panelByShotId.get(shot.id) ?? statusPendingPanel(shot.id)
               );
@@ -722,7 +832,8 @@ export const TableView: React.FC<TableViewProps> = ({
                 boardPanelsForBeat.length <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST &&
                 boardPanelsForBeat.every((panel) => panel.assetId !== null && isDrawableBoardPanel(panel));
               const leadPanel = boardPanelsForBeat[0] ?? null;
-              const beatAriaRowIndex = row + 2 + (openBoardBeatIndex >= 0 && row > openBoardBeatIndex ? 1 : 0);
+              const beatAriaRowIndex =
+                row + 2 + (openBoardBeatIndex >= 0 && row > openBoardBeatIndex ? openShotCount : 0);
               const durationKind = hasCoverage ? 'planned' : 'target';
               const durationSeconds = hasCoverage ? plannedSecondsForBeat(beat) : beat.targetSeconds;
               const duration =
@@ -755,12 +866,17 @@ export const TableView: React.FC<TableViewProps> = ({
                         if (node instanceof HTMLButtonElement) panelButtonRefs.current.set(beat.id, node);
                         else panelButtonRefs.current.delete(beat.id);
                       }}
-                      {...(hasCoverage ? { 'aria-controls': detailId(row), 'aria-expanded': boardDetailsOpen } : {})}
+                      {...(hasCoverage
+                        ? {
+                            'aria-controls': beat.shots.map((_shot, shotIndex) => shotRowId(row, shotIndex)).join(' '),
+                            'aria-expanded': boardDetailsOpen,
+                          }
+                        : {})}
                       aria-label={t(
                         boardDetailsOpen
                           ? 'conversation.creativeStudio.workspace.table.panel.closeDetails'
                           : 'conversation.creativeStudio.workspace.table.panel.openDetails',
-                        { title: beat.title || beat.id }
+                        { title: beatDisplayTitle }
                       )}
                       className={styles.panelThumbButton}
                       disabled={!hasCoverage}
@@ -802,7 +918,7 @@ export const TableView: React.FC<TableViewProps> = ({
                   column: 'beat',
                   content: (
                     <span className={styles.beatTitle} dir='auto'>
-                      {beat.title || beat.id}
+                      {beatDisplayTitle}
                     </span>
                   ),
                 },
@@ -813,11 +929,30 @@ export const TableView: React.FC<TableViewProps> = ({
                 {
                   column: 'shots',
                   content: (
-                    <span className={styles.shotCount}>
-                      <bdi>
-                        {t('conversation.creativeStudio.workspace.table.shotCount', { count: beat.shots.length })}
-                      </bdi>
-                    </span>
+                    <div
+                      className={styles.shotCountActions}
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <span className={styles.shotCount}>
+                        <bdi>
+                          {t('conversation.creativeStudio.workspace.table.shotCount', { count: beat.shots.length })}
+                        </bdi>
+                      </span>
+                      <Button
+                        aria-label={t('conversation.creativeStudio.workspace.table.authoring.addShotForBeat', {
+                          title: beatDisplayTitle,
+                        })}
+                        disabled={interactionLocked}
+                        onClick={() => {
+                          if (!interactionLocked) void authoringActions.addShot(beat.id);
+                        }}
+                        size='mini'
+                        type='text'
+                      >
+                        {t('conversation.creativeStudio.workspace.table.authoring.addShot')}
+                      </Button>
+                    </div>
                   ),
                 },
                 {
@@ -876,112 +1011,131 @@ export const TableView: React.FC<TableViewProps> = ({
                       </td>
                     ))}
                   </tr>
-                  {boardDetailsOpen ? (
-                    <tr
-                      aria-rowindex={beatAriaRowIndex + 1}
-                      className={styles.detailRow}
-                      data-board-detail-for={beat.id}
-                      role='row'
-                    >
-                      <td
-                        aria-colindex={1}
-                        aria-colspan={columnCount}
-                        className={styles.detailCell}
-                        colSpan={columnCount}
-                        role='gridcell'
-                      >
-                        <section
-                          aria-label={t('conversation.creativeStudio.workspace.table.panel.detailLabel', {
-                            title: beat.title || beat.id,
-                          })}
-                          className={styles.detail}
-                          id={detailId(row)}
-                          onClick={(event) => event.stopPropagation()}
-                          onKeyDown={(event) => {
-                            if (event.key !== 'Escape') return;
-                            event.preventDefault();
-                            event.stopPropagation();
-                            closeBoardDetails(beat.id);
-                          }}
-                          tabIndex={-1}
-                        >
-                          <div className={styles.detailActions}>
-                            {drawableMissingCount > 0 ? (
-                              <Button
-                                disabled={!canDrawMissing}
-                                onClick={() => {
-                                  if (canDrawMissing) actions.drawBeat(beat.id);
-                                }}
-                                size='small'
-                                type='primary'
+                  {boardDetailsOpen
+                    ? beat.shots.map((shot, shotIndex) => {
+                        const panel = boardPanelsForBeat[shotIndex] ?? statusPendingPanel(shot.id);
+                        const binding = bindingByShotId.get(shot.id) ?? {
+                          shotId: shot.id,
+                          status: 'invalid' as const,
+                          characterReferenceIds: [],
+                          backgroundReferenceId: null,
+                        };
+                        const status = t(panelStatusKey(panel));
+                        const detailsOpen = openShotDetailId === shot.id;
+                        const rowId = shotRowId(row, shotIndex);
+                        const detailsId = shotDetailId(row, shotIndex);
+                        const panelStatusId = `${rowId}-status`;
+                        const detailLabel = t('conversation.creativeStudio.workspace.table.panel.shotDetails', {
+                          position: shotIndex + 1,
+                        });
+                        const shotCells: Array<{ column: TableColumnId; content: React.ReactNode }> = [
+                          {
+                            column: 'position',
+                            content: (
+                              <span className={styles.shotPosition} data-shot-position={shotIndex + 1}>
+                                <bdi>{String(shotIndex + 1).padStart(2, '0')}</bdi>
+                              </span>
+                            ),
+                          },
+                          {
+                            column: 'panel',
+                            content: (
+                              <FullscreenMediaFrame className={styles.shotPanelFrame} enabled={panel.assetId !== null}>
+                                <BoardPanelArtwork panel={panel} projectId={projectId} />
+                              </FullscreenMediaFrame>
+                            ),
+                          },
+                          {
+                            column: 'beat',
+                            content: (
+                              <span
+                                className={styles.chainPosition}
+                                data-chain-position={
+                                  shot.segmentHead
+                                    ? 'head'
+                                    : shotIndex > 0
+                                      ? `predecessor:${String(shotIndex)}`
+                                      : 'pending'
+                                }
                               >
-                                {t('conversation.creativeStudio.workspace.table.panel.drawMissing', {
-                                  count: drawableMissingCount,
-                                })}
-                              </Button>
-                            ) : null}
-                            {canOfferRedrawBeat ? (
-                              <Button
-                                disabled={generationLocked}
-                                onClick={() => {
-                                  if (!generationLocked) actions.redrawBeat(beat.id);
-                                }}
-                                size='small'
-                              >
-                                {t('conversation.creativeStudio.workspace.table.panel.redrawBeat')}
-                              </Button>
-                            ) : null}
-                          </div>
-                          <ol className={styles.detailPanels}>
-                            {beat.shots.map((shot, shotIndex) => {
-                              const panel = boardPanelsForBeat[shotIndex] ?? statusPendingPanel(shot.id);
-                              const binding = bindingByShotId.get(shot.id) ?? {
-                                shotId: shot.id,
-                                status: 'invalid' as const,
-                                characterReferenceIds: [],
-                                backgroundReferenceId: null,
-                              };
-                              const status = t(panelStatusKey(panel));
-                              const panelStatusId = `${detailId(row)}-shot-${String(shotIndex)}-status`;
-                              return (
-                                <li key={shot.id} className={styles.panelCardItem}>
-                                  <article
+                                {shot.segmentHead ? (
+                                  t('conversation.creativeStudio.workspace.table.panel.head')
+                                ) : shotIndex > 0 ? (
+                                  <>
+                                    <span aria-hidden='true'>← </span>
+                                    <bdi>
+                                      {t(`${REFERENCE_ROOT}.bindings.shot`, {
+                                        position: shotIndex,
+                                      })}
+                                    </bdi>
+                                  </>
+                                ) : (
+                                  t(PANEL_STATUS_KEYS.status_pending)
+                                )}
+                              </span>
+                            ),
+                          },
+                          {
+                            column: 'story',
+                            content: (
+                              <>
+                                <span className={styles.shotScript} dir='auto'>
+                                  {shot.shootingScript}
+                                </span>
+                                {shotIndex === 0 && (drawableMissingCount > 0 || canOfferRedrawBeat) ? (
+                                  <div
+                                    aria-label={t('conversation.creativeStudio.workspace.table.panel.detailLabel', {
+                                      title: beatDisplayTitle,
+                                    })}
+                                    className={styles.beatBoardActions}
+                                    onClick={(event) => event.stopPropagation()}
+                                    onKeyDown={(event) => {
+                                      event.stopPropagation();
+                                      if (event.key !== 'Escape') return;
+                                      event.preventDefault();
+                                      closeBoardDetails(beat.id);
+                                    }}
+                                    role='toolbar'
+                                  >
+                                    {drawableMissingCount > 0 ? (
+                                      <Button
+                                        disabled={!canDrawMissing}
+                                        onClick={() => {
+                                          if (canDrawMissing) actions.drawBeat(beat.id);
+                                        }}
+                                        size='small'
+                                        type='primary'
+                                      >
+                                        {t('conversation.creativeStudio.workspace.table.panel.drawMissing', {
+                                          count: drawableMissingCount,
+                                        })}
+                                      </Button>
+                                    ) : null}
+                                    {canOfferRedrawBeat ? (
+                                      <Button
+                                        disabled={generationLocked}
+                                        onClick={() => {
+                                          if (!generationLocked) actions.redrawBeat(beat.id);
+                                        }}
+                                        size='small'
+                                      >
+                                        {t('conversation.creativeStudio.workspace.table.panel.redrawBeat')}
+                                      </Button>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {detailsOpen ? (
+                                  <section
                                     ref={(node) => {
                                       if (node === null) bindingCardRefs.current.delete(shot.id);
                                       else bindingCardRefs.current.set(shot.id, node);
                                     }}
-                                    aria-label={t('conversation.creativeStudio.workspace.table.panel.cardLabel', {
-                                      position: shotIndex + 1,
-                                      status,
-                                    })}
-                                    className={`${styles.panelCard} ${highlightedBindingShotId === shot.id ? styles.bindingHighlighted : ''}`}
+                                    aria-label={detailLabel}
+                                    className={styles.shotDetails}
                                     data-shot-binding-highlighted={highlightedBindingShotId === shot.id || undefined}
-                                    data-shot-binding-status={binding.status}
-                                    data-shot-id={shot.id}
+                                    id={detailsId}
                                     tabIndex={-1}
                                   >
-                                    <FullscreenMediaFrame
-                                      className={styles.panelFrame}
-                                      enabled={panel.assetId !== null}
-                                    >
-                                      <BoardPanelArtwork panel={panel} projectId={projectId} />
-                                      {shot.segmentHead ? (
-                                        <span className={styles.panelHead}>
-                                          {t('conversation.creativeStudio.workspace.table.panel.head')}
-                                        </span>
-                                      ) : null}
-                                    </FullscreenMediaFrame>
-                                    <div className={styles.panelCaption}>
-                                      <bdi>{String(shotIndex + 1).padStart(2, '0')}</bdi>
-                                      <bdi>
-                                        {t('conversation.creativeStudio.workspace.table.actualDuration', {
-                                          seconds: shot.durationSeconds,
-                                        })}
-                                      </bdi>
-                                      <span id={panelStatusId} className={styles.panelStatus}>
-                                        {status}
-                                      </span>
-                                    </div>
                                     <ShotReferenceBindingEditor
                                       backgrounds={backgrounds}
                                       characters={characters}
@@ -1032,15 +1186,95 @@ export const TableView: React.FC<TableViewProps> = ({
                                         </Button>
                                       ) : null}
                                     </div>
-                                  </article>
-                                </li>
-                              );
+                                  </section>
+                                ) : null}
+                              </>
+                            ),
+                          },
+                          {
+                            column: 'shots',
+                            content: (
+                              <Button
+                                aria-controls={detailsId}
+                                aria-expanded={detailsOpen}
+                                aria-label={`${t(detailsOpen ? 'common.collapse' : 'common.expand')}: ${detailLabel}`}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  toggleShotDetails(beat.id, shot.id);
+                                }}
+                                size='mini'
+                                type='text'
+                              >
+                                {t(detailsOpen ? 'common.collapse' : 'common.expand')}
+                              </Button>
+                            ),
+                          },
+                          {
+                            column: 'length',
+                            content: (
+                              <span className={styles.durationFact} data-duration-kind='shot'>
+                                <bdi>
+                                  {t('conversation.creativeStudio.workspace.table.actualDuration', {
+                                    seconds: shot.durationSeconds,
+                                  })}
+                                </bdi>
+                              </span>
+                            ),
+                          },
+                          {
+                            column: 'state',
+                            content: (
+                              <span
+                                className={styles.panelStatus}
+                                data-panel-activity={panel.activity}
+                                data-panel-freshness={panel.freshness}
+                                id={panelStatusId}
+                              >
+                                {status}
+                              </span>
+                            ),
+                          },
+                        ];
+                        return (
+                          <tr
+                            key={shot.id}
+                            aria-label={t('conversation.creativeStudio.workspace.table.panel.cardLabel', {
+                              position: shotIndex + 1,
+                              status,
                             })}
-                          </ol>
-                        </section>
-                      </td>
-                    </tr>
-                  ) : null}
+                            aria-rowindex={beatAriaRowIndex + shotIndex + 1}
+                            className={`${styles.shotRow} ${highlightedBindingShotId === shot.id ? styles.bindingHighlighted : ''}`}
+                            data-board-detail-for={beat.id}
+                            data-shot-binding-highlighted={highlightedBindingShotId === shot.id || undefined}
+                            data-shot-binding-status={binding.status}
+                            data-shot-detail-open={detailsOpen}
+                            data-shot-id={shot.id}
+                            id={rowId}
+                            onClick={(event) => event.stopPropagation()}
+                            onKeyDown={(event) => {
+                              if (event.key !== 'Escape') return;
+                              event.preventDefault();
+                              event.stopPropagation();
+                              closeBoardDetails(beat.id);
+                            }}
+                            role='row'
+                          >
+                            {shotCells.map(({ column: columnId, content }, column) => (
+                              <td
+                                key={columnId}
+                                aria-colindex={column + 1}
+                                className={`${styles.cell} ${styles.shotCell}`}
+                                data-grid-column={column}
+                                data-grid-column-name={columnId}
+                                role='gridcell'
+                              >
+                                {content}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })
+                    : null}
                 </React.Fragment>
               );
             })}

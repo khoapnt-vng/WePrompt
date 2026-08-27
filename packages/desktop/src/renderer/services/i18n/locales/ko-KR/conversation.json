@@ -1019,6 +1019,20 @@
         "dismissed": "비용 없이 닫힘"
       },
       "table": {
+        "authoring": {
+          "label": "스토리 작성 및 복구",
+          "coverageGap": "Beat {{total}}개 중 {{count}}개에 Shot이 없습니다",
+          "coverageGap_one": "Beat {{total}}개 중 {{count}}개에 Shot이 없습니다",
+          "coverageGap_other": "Beat {{total}}개 중 {{count}}개에 Shot이 없습니다",
+          "unscriptedWarning": "Shot {{count}}개에 촬영 대본이 없습니다",
+          "unscriptedWarning_one": "Shot {{count}}개에 촬영 대본이 없습니다",
+          "unscriptedWarning_other": "Shot {{count}}개에 촬영 대본이 없습니다",
+          "askDirector": "Director에게 요청",
+          "addBeat": "Beat 추가",
+          "addShot": "Shot 추가",
+          "addShotForBeat": "{{title}}에 Shot 추가",
+          "unassignedReferenceNote": "직접 작성한 Shot은 참조가 할당되지 않은 상태로 시작하며 유료 생성 전에 검토해야 합니다."
+        },
         "columns": {
           "length": "합계",
           "panel": "패널",
@@ -1049,7 +1063,8 @@
           "drawMissing": "누락 패널 그리기 ({{count}})",
           "redrawBeat": "Beat 다시 그리기 · 유료",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "head": "시작",
+          "shotDetails": "Shot {{position}} 세부 정보",
+          "head": "체인 시작",
           "redrawShot": "Shot {{position}} 다시 그리기 · 유료",
           "useAsFirstFrame": "Shot {{position}} 패널을 첫 프레임으로 사용",
           "status": {

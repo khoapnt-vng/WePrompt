@@ -321,6 +321,7 @@ const projection = (cutProjection = cut(), activeBeats: WorkspaceProjection['act
     activeBeatIds: cutProjection.beats.map((beat) => beat.id),
     activeShotIds: activeBeats.flatMap((beat) => beat.shots.map((shot) => shot.id)),
     coverageGapBeatIds: ['beat_2'],
+    unscriptedShotIds: [],
     workspaceStatusReady: true,
     chainStatusReady: true,
     requestShapeLocked: false,

@@ -244,6 +244,8 @@ export type WorkspaceProjection = {
   activeBeatIds: string[];
   activeShotIds: string[];
   coverageGapBeatIds: string[];
+  /** Active Shots with no authored shooting script, in exact film order. */
+  unscriptedShotIds: string[];
   workspaceStatusReady: boolean;
   chainStatusReady: boolean;
   requestShapeLocked: boolean;
@@ -1681,6 +1683,9 @@ export const projectWorkspace = (
     activeBeatIds,
     activeShotIds,
     coverageGapBeatIds: activeBeats.filter((beat) => beat.shots.length === 0).map((beat) => beat.id),
+    unscriptedShotIds: activeBeats.flatMap((beat) =>
+      beat.shots.filter((shot) => shot.shootingScript.trim() === '').map((shot) => shot.id)
+    ),
     workspaceStatusReady: matchedWorkspaceStatus !== null,
     chainStatusReady: matchedChainStatus !== null,
     requestShapeLocked:

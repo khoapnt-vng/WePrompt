@@ -1019,6 +1019,20 @@
         "dismissed": "Закрыто без расходов"
       },
       "table": {
+        "authoring": {
+          "label": "Создание и восстановление истории",
+          "coverageGap": "В {{count}} из {{total}} Beats нет Shots",
+          "coverageGap_one": "В {{count}} из {{total}} Beat нет Shots",
+          "coverageGap_other": "В {{count}} из {{total}} Beats нет Shots",
+          "unscriptedWarning": "У {{count}} Shots нет съёмочного сценария",
+          "unscriptedWarning_one": "У {{count}} Shot нет съёмочного сценария",
+          "unscriptedWarning_other": "У {{count}} Shots нет съёмочного сценария",
+          "askDirector": "Спросить Director",
+          "addBeat": "Добавить Beat",
+          "addShot": "Добавить Shot",
+          "addShotForBeat": "Добавить Shot в {{title}}",
+          "unassignedReferenceNote": "Созданный вручную Shot начинает с неназначенными референсами и требует проверки перед платной генерацией."
+        },
         "columns": {
           "length": "Сумма",
           "panel": "Панель",
@@ -1049,7 +1063,8 @@
           "drawMissing": "Нарисовать недостающие ({{count}})",
           "redrawBeat": "Перерисовать бит · платно",
           "cardLabel": "Шот {{position}}: {{status}}",
-          "head": "Начало",
+          "shotDetails": "Сведения о шоте {{position}}",
+          "head": "Начало цепочки",
           "redrawShot": "Перерисовать шот {{position}} · платно",
           "useAsFirstFrame": "Использовать панель шота {{position}} как первый кадр",
           "status": {

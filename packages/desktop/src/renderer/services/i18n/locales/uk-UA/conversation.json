@@ -1019,6 +1019,20 @@
         "dismissed": "Закрито без витрат"
       },
       "table": {
+        "authoring": {
+          "label": "Створення та відновлення історії",
+          "coverageGap": "У {{count}} із {{total}} Beats немає Shots",
+          "coverageGap_one": "У {{count}} із {{total}} Beat немає Shots",
+          "coverageGap_other": "У {{count}} із {{total}} Beats немає Shots",
+          "unscriptedWarning": "У {{count}} Shots немає знімального сценарію",
+          "unscriptedWarning_one": "У {{count}} Shot немає знімального сценарію",
+          "unscriptedWarning_other": "У {{count}} Shots немає знімального сценарію",
+          "askDirector": "Запитати Director",
+          "addBeat": "Додати Beat",
+          "addShot": "Додати Shot",
+          "addShotForBeat": "Додати Shot до {{title}}",
+          "unassignedReferenceNote": "Створений вручну Shot починається з непризначеними референсами та потребує перевірки перед платною генерацією."
+        },
         "columns": {
           "length": "Сума",
           "panel": "Панель",
@@ -1049,7 +1063,8 @@
           "drawMissing": "Намалювати відсутні ({{count}})",
           "redrawBeat": "Перемалювати біт · платно",
           "cardLabel": "Шот {{position}}: {{status}}",
-          "head": "Початок",
+          "shotDetails": "Відомості про шот {{position}}",
+          "head": "Початок ланцюжка",
           "redrawShot": "Перемалювати шот {{position}} · платно",
           "useAsFirstFrame": "Використати панель шота {{position}} як перший кадр",
           "status": {

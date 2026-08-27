@@ -306,6 +306,9 @@ const makeProjection = (
   activeBeatIds: beats.map((beat) => beat.id),
   activeShotIds: beats.flatMap((beat) => beat.shots.map((shot) => shot.id)),
   coverageGapBeatIds: beats.filter((beat) => beat.shots.length === 0).map((beat) => beat.id),
+  unscriptedShotIds: beats.flatMap((beat) =>
+    beat.shots.filter((shot) => shot.shootingScript.trim() === '').map((shot) => shot.id)
+  ),
   workspaceStatusReady: true,
   chainStatusReady: true,
   requestShapeLocked: false,

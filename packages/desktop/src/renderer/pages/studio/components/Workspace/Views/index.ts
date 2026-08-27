@@ -16,6 +16,7 @@ export type {
 export { TableView } from './Table';
 export type {
   ReferenceBindingWorkspaceItem,
+  TableAuthoringActions,
   TableBoardActions,
   TableReferenceBindingActions,
   TableViewProps,

@@ -640,6 +640,7 @@ const makeProjection = (
   activeBeatIds: beats.map((beat) => beat.id),
   activeShotIds: beats.flatMap((beat) => beat.shots.map((shot) => shot.id)),
   coverageGapBeatIds: [],
+  unscriptedShotIds: [],
   workspaceStatusReady: true,
   chainStatusReady: true,
   requestShapeLocked: false,

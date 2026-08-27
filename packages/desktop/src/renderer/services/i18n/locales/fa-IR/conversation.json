@@ -1019,6 +1019,20 @@
         "dismissed": "بدون هزینه بسته شد"
       },
       "table": {
+        "authoring": {
+          "label": "نگارش و بازیابی داستان",
+          "coverageGap": "{{count}} از {{total}} Beat هیچ Shoti ندارند",
+          "coverageGap_one": "{{count}} از {{total}} Beat هیچ Shoti ندارد",
+          "coverageGap_other": "{{count}} از {{total}} Beat هیچ Shoti ندارند",
+          "unscriptedWarning": "{{count}} Shot فیلم‌نامهٔ تصویربرداری ندارند",
+          "unscriptedWarning_one": "{{count}} Shot فیلم‌نامهٔ تصویربرداری ندارد",
+          "unscriptedWarning_other": "{{count}} Shot فیلم‌نامهٔ تصویربرداری ندارند",
+          "askDirector": "پرسش از کارگردان",
+          "addBeat": "افزودن Beat",
+          "addShot": "افزودن Shot",
+          "addShotForBeat": "افزودن Shot به {{title}}",
+          "unassignedReferenceNote": "Shot ساخته‌شده به‌صورت دستی با ارجاع‌های تخصیص‌نیافته آغاز می‌شود و پیش از تولید پولی باید بازبینی شود."
+        },
         "columns": {
           "length": "مجموع",
           "panel": "پنل",
@@ -1049,7 +1063,8 @@
           "drawMissing": "طراحی موارد باقی‌مانده ({{count}})",
           "redrawBeat": "طراحی دوبارهٔ بیت · پولی",
           "cardLabel": "شات {{position}}: {{status}}",
-          "head": "آغاز",
+          "shotDetails": "جزئیات شات {{position}}",
+          "head": "آغاز زنجیره",
           "redrawShot": "طراحی دوبارهٔ شات {{position}} · پولی",
           "useAsFirstFrame": "استفاده از پنل شات {{position}} به‌عنوان فریم اول",
           "status": {

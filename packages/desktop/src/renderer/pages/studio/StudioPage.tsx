@@ -1417,11 +1417,20 @@ const StudioProjectPage: React.FC<{
     ]
   );
 
-  const focusDirectorForReviewedRequest = useCallback((): void => {
-    const revealed = workspaceShellRef.current?.revealDirector({ projectId, view: activeView }) ?? false;
-    if (!revealed) return;
-    setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.directorRequestHint');
-  }, [activeView, projectId, setActionErrorMessageKey]);
+  const focusDirectorForReviewedRequest = useCallback(
+    (_beatId: string): void => {
+      const revealed = workspaceShellRef.current?.revealDirector({ projectId, view: activeView }) ?? false;
+      if (!revealed) return;
+      directorDraftRequestSequenceRef.current += 1;
+      setDirectorDraftRequest({
+        requestId: directorDraftRequestSequenceRef.current,
+        projectId,
+        prompt: t('conversation.creativeStudio.workspace.beatPanel.directorRequestHint'),
+      });
+      setActionErrorMessageKey(null);
+    },
+    [activeView, projectId, setActionErrorMessageKey, t]
+  );
 
   const openContinuityReview = useCallback(
     (shotId: string, hardCut: boolean): void => {

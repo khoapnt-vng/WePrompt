@@ -1429,6 +1429,20 @@
       },
       "table": {
         "label": "Beat table",
+        "authoring": {
+          "label": "Story authoring and recovery",
+          "coverageGap": "{{count}} of {{total}} Beats have no Shots",
+          "coverageGap_one": "{{count}} of {{total}} Beats has no Shots",
+          "coverageGap_other": "{{count}} of {{total}} Beats have no Shots",
+          "unscriptedWarning": "{{count}} Shots have no shooting script",
+          "unscriptedWarning_one": "{{count}} Shot has no shooting script",
+          "unscriptedWarning_other": "{{count}} Shots have no shooting script",
+          "askDirector": "Ask Director",
+          "addBeat": "Add Beat",
+          "addShot": "Add Shot",
+          "addShotForBeat": "Add Shot to {{title}}",
+          "unassignedReferenceNote": "A hand-authored Shot starts with references unassigned and requires review before paid generation."
+        },
         "columns": {
           "position": "#",
           "beat": "Beat",
@@ -1462,7 +1476,8 @@
           "drawMissing": "Draw missing ({{count}})",
           "redrawBeat": "Redraw Beat · paid",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "head": "Head",
+          "shotDetails": "Shot {{position}} details",
+          "head": "Chain head",
           "redrawShot": "Redraw Shot {{position}} · paid",
           "useAsFirstFrame": "Use Shot {{position}} panel as first frame",
           "status": {

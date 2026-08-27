@@ -1019,6 +1019,20 @@
         "dismissed": "未花費並已關閉"
       },
       "table": {
+        "authoring": {
+          "label": "故事編寫與復原",
+          "coverageGap": "{{total}} 個 Beat 中有 {{count}} 個沒有 Shot",
+          "coverageGap_one": "{{total}} 個 Beat 中有 {{count}} 個沒有 Shot",
+          "coverageGap_other": "{{total}} 個 Beat 中有 {{count}} 個沒有 Shot",
+          "unscriptedWarning": "{{count}} 個 Shot 沒有拍攝腳本",
+          "unscriptedWarning_one": "{{count}} 個 Shot 沒有拍攝腳本",
+          "unscriptedWarning_other": "{{count}} 個 Shot 沒有拍攝腳本",
+          "askDirector": "詢問 Director",
+          "addBeat": "新增 Beat",
+          "addShot": "新增 Shot",
+          "addShotForBeat": "向 {{title}} 新增 Shot",
+          "unassignedReferenceNote": "手動建立的 Shot 初始未指派參考圖，且必須在付費生成前審查。"
+        },
         "columns": {
           "length": "合計",
           "panel": "分鏡",
@@ -1049,7 +1063,8 @@
           "drawMissing": "繪製缺漏項目（{{count}}）",
           "redrawBeat": "重新繪製 Beat · 付費",
           "cardLabel": "Shot {{position}}：{{status}}",
-          "head": "起始",
+          "shotDetails": "鏡頭 {{position}} 詳細資料",
+          "head": "鏈首",
           "redrawShot": "重新繪製 Shot {{position}} · 付費",
           "useAsFirstFrame": "將 Shot {{position}} 分鏡用作首幀",
           "status": {

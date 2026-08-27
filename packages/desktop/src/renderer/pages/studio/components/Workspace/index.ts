@@ -112,6 +112,7 @@ export type {
   ReferencesViewProps,
   StudioReferenceFocusIntent,
   ReferenceBindingWorkspaceItem,
+  TableAuthoringActions,
   TableBoardActions,
   TableReferenceBindingActions,
   TableViewProps,

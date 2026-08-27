@@ -1536,6 +1536,217 @@ describe('Board spend gate draft', () => {
 describe('WorkspaceControls', () => {
   beforeEach(() => window.sessionStorage.clear());
 
+  it('appends one opaque Beat and opens it only after the refreshed projection contains that identity', async () => {
+    const initial = makeProject();
+    const mutations = workspaceCallbacks();
+    const result = render(
+      <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={initial} mutations={mutations} />
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.table.authoring.addBeat' })
+    );
+    await waitFor(() => expect(mutations.applyAuthoring).toHaveBeenCalledOnce());
+    const operation = vi.mocked(mutations.applyAuthoring).mock.calls[0]![0]![0];
+    expect(operation).toEqual({
+      kind: 'add_beat',
+      beatId: expect.stringMatching(/^beat_[a-f0-9]{32}$/),
+      beat: { title: '', story: '', targetSeconds: null },
+      beforeBeatId: null,
+    });
+    if (operation?.kind !== 'add_beat') throw new Error('Expected add_beat operation');
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    const refreshed = structuredClone(initial);
+    refreshed.revision = 4;
+    refreshed.beatOrder.push(operation.beatId);
+    refreshed.beats[operation.beatId] = {
+      id: operation.beatId,
+      title: '',
+      story: '',
+      targetSeconds: null,
+      shotOrder: [],
+    };
+    result.rerender(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        project={refreshed}
+        mutations={mutations}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    expect(screen.getByRole('dialog')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.beatPanel.untitledBeat'
+    );
+  });
+
+  it('appends a four-second unassigned Shot and waits for its exact refreshed identity before opening', async () => {
+    const initial = makeProject();
+    const mutations = workspaceCallbacks();
+    const result = render(
+      <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={initial} mutations={mutations} />
+    );
+
+    const addShot = screen.getAllByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.table\.authoring\.addShotForBeat/,
+    })[0]!;
+    fireEvent.click(addShot);
+    await waitFor(() => expect(mutations.applyAuthoring).toHaveBeenCalledOnce());
+    const operation = vi.mocked(mutations.applyAuthoring).mock.calls[0]![0]![0];
+    expect(operation).toEqual({
+      kind: 'add_shot',
+      beatId: 'beat_1',
+      shotId: expect.stringMatching(/^shot_[a-f0-9]{32}$/),
+      shot: { shootingScript: '', durationSeconds: 4 },
+      beforeShotId: null,
+    });
+    if (operation?.kind !== 'add_shot') throw new Error('Expected add_shot operation');
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    const refreshed = structuredClone(initial);
+    refreshed.revision = 4;
+    refreshed.beats.beat_1!.shotOrder.push(operation.shotId);
+    refreshed.shots[operation.shotId] = {
+      id: operation.shotId,
+      shootingScript: '',
+      durationSeconds: 4,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: 'none',
+      referenceBinding: {
+        status: 'unassigned',
+        characterReferenceIds: [],
+        backgroundReferenceId: null,
+      },
+      seedStillId: null,
+      dismissedSeedStillIds: [],
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
+      assetIds: [],
+      jobIds: [],
+    };
+    result.rerender(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        project={refreshed}
+        mutations={mutations}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    expect(within(screen.getByRole('dialog')).getByRole('heading', { name: 'Opening' })).toBeVisible();
+  });
+
+  it('does not fabricate authoring UI when the typed mutation returns false or rejects', async () => {
+    const mutations = workspaceCallbacks();
+    vi.mocked(mutations.applyAuthoring).mockResolvedValueOnce(false).mockRejectedValueOnce(new Error('storage'));
+    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} mutations={mutations} />);
+    const addBeat = screen.getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.table.authoring.addBeat',
+    });
+
+    fireEvent.click(addBeat);
+    await waitFor(() => expect(mutations.applyAuthoring).toHaveBeenCalledTimes(1));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    fireEvent.click(addBeat);
+    await waitFor(() => expect(mutations.applyAuthoring).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('clears a successful authoring intent when a newer projection omits the minted identity', async () => {
+    const initial = makeProject();
+    const mutations = workspaceCallbacks();
+    const result = render(
+      <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={initial} mutations={mutations} />
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.table.authoring.addBeat' })
+    );
+    await waitFor(() => expect(mutations.applyAuthoring).toHaveBeenCalledOnce());
+    const operation = vi.mocked(mutations.applyAuthoring).mock.calls[0]![0]![0];
+    if (operation?.kind !== 'add_beat') throw new Error('Expected add_beat operation');
+
+    const staleRefresh = structuredClone(initial);
+    staleRefresh.revision = 4;
+    result.rerender(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        project={staleRefresh}
+        mutations={mutations}
+      />
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    const later = structuredClone(staleRefresh);
+    later.revision = 5;
+    later.beatOrder.push(operation.beatId);
+    later.beats[operation.beatId] = {
+      id: operation.beatId,
+      title: '',
+      story: '',
+      targetSeconds: null,
+      shotOrder: [],
+    };
+    result.rerender(
+      <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={later} mutations={mutations} />
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it.each(['project', 'view'] as const)(
+    'discards a successful pending authoring open after a %s change',
+    async (change) => {
+      let resolveMutation: ((value: boolean) => void) | undefined;
+      const mutation = new Promise<boolean>((resolve) => {
+        resolveMutation = resolve;
+      });
+      const mutations = workspaceCallbacks();
+      vi.mocked(mutations.applyAuthoring).mockReturnValueOnce(mutation);
+      const initial = makeProject();
+      const result = render(
+        <ControlsHarness
+          routes={routeCatalog('ready', 'ready')}
+          open={vi.fn()}
+          project={initial}
+          mutations={mutations}
+        />
+      );
+      fireEvent.click(
+        screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.table.authoring.addBeat' })
+      );
+      await waitFor(() => expect(mutations.applyAuthoring).toHaveBeenCalledOnce());
+
+      if (change === 'project') {
+        result.rerender(
+          <ControlsHarness
+            routes={routeCatalog('ready', 'ready')}
+            open={vi.fn()}
+            project={{ ...makeProject(), id: 'project_2' }}
+            mutations={mutations}
+          />
+        );
+      } else {
+        result.rerender(
+          <ControlsHarness
+            activeView='board'
+            routes={routeCatalog('ready', 'ready')}
+            open={vi.fn()}
+            project={initial}
+            mutations={mutations}
+          />
+        );
+      }
+      await act(async () => resolveMutation?.(true));
+      expect(screen.queryByRole('dialog')).toBeNull();
+    }
+  );
+
   const openFirstBeatPanel = (): HTMLElement => {
     const table = screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' });
     fireEvent.click(within(within(table).getAllByRole('row')[1]!).getAllByRole('gridcell')[1]!);

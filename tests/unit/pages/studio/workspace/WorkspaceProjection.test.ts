@@ -291,6 +291,26 @@ describe('buildStudioBarStats', () => {
 });
 
 describe('projectWorkspace', () => {
+  it('projects active unscripted Shots in exact film order independently of status freshness', () => {
+    const project = makeProject();
+    project.shots.shot_1!.shootingScript = ' \n\t ';
+    project.shots.shot_2!.shootingScript = '';
+    project.shots.shot_3!.shootingScript = '';
+    project.beats.beat_1!.shotOrder = ['shot_1', 'missing_shot'];
+    project.bin = [{ kind: 'shot', beatId: 'beat_1', shotId: 'shot_2', reason: 'lifted' }];
+
+    const current = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus());
+    const stale = projectWorkspace(project, cleanWorkspaceStatus(2), cleanChainStatus(2));
+    const unavailable = projectWorkspace(project, null, null);
+
+    expect(current.activeShotIds).toEqual(['shot_1', 'shot_3']);
+    expect(current.unscriptedShotIds).toEqual(['shot_1', 'shot_3']);
+    expect(stale.unscriptedShotIds).toEqual(current.unscriptedShotIds);
+    expect(unavailable.unscriptedShotIds).toEqual(current.unscriptedShotIds);
+    expect(current.unscriptedShotIds).not.toContain('shot_2');
+    expect(current.unscriptedShotIds).not.toContain('missing_shot');
+  });
+
   it('projects Board freshness independently and retains the current panel while a paid redraw is drawing', () => {
     const project = makeProject();
     project.boardStyle = 'grey_tone';

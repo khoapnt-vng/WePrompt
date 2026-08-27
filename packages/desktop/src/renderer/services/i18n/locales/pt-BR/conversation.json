@@ -1025,6 +1025,20 @@
         "dismissed": "Descartado sem gastar"
       },
       "table": {
+        "authoring": {
+          "label": "Autoria e recuperação da história",
+          "coverageGap": "{{count}} de {{total}} Beats não têm Shots",
+          "coverageGap_one": "{{count}} de {{total}} Beats não tem Shots",
+          "coverageGap_other": "{{count}} de {{total}} Beats não têm Shots",
+          "unscriptedWarning": "{{count}} Shots não têm roteiro de filmagem",
+          "unscriptedWarning_one": "{{count}} Shot não tem roteiro de filmagem",
+          "unscriptedWarning_other": "{{count}} Shots não têm roteiro de filmagem",
+          "askDirector": "Perguntar ao Director",
+          "addBeat": "Adicionar Beat",
+          "addShot": "Adicionar Shot",
+          "addShotForBeat": "Adicionar Shot a {{title}}",
+          "unassignedReferenceNote": "Um Shot criado manualmente começa com referências não atribuídas e precisa de revisão antes da geração paga."
+        },
         "columns": {
           "length": "Soma",
           "panel": "Painel",
@@ -1055,7 +1069,8 @@
           "drawMissing": "Desenhar ausentes ({{count}})",
           "redrawBeat": "Redesenhar Beat · pago",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "head": "Início",
+          "shotDetails": "Detalhes do Shot {{position}}",
+          "head": "Início da cadeia",
           "redrawShot": "Redesenhar Shot {{position}} · pago",
           "useAsFirstFrame": "Usar o painel do Shot {{position}} como primeiro quadro",
           "status": {

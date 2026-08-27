@@ -1021,6 +1021,20 @@
         "dismissed": "Harcama yapmadan kapatıldı"
       },
       "table": {
+        "authoring": {
+          "label": "Hikâye yazımı ve kurtarma",
+          "coverageGap": "{{total}} Beat'in {{count}} tanesinde Shot yok",
+          "coverageGap_one": "{{total}} Beat'in {{count}} tanesinde Shot yok",
+          "coverageGap_other": "{{total}} Beat'in {{count}} tanesinde Shot yok",
+          "unscriptedWarning": "{{count}} Shot'ın çekim senaryosu yok",
+          "unscriptedWarning_one": "{{count}} Shot'ın çekim senaryosu yok",
+          "unscriptedWarning_other": "{{count}} Shot'ın çekim senaryosu yok",
+          "askDirector": "Director'a sor",
+          "addBeat": "Beat ekle",
+          "addShot": "Shot ekle",
+          "addShotForBeat": "{{title}} için Shot ekle",
+          "unassignedReferenceNote": "Elle yazılan bir Shot, referansları atanmamış olarak başlar ve ücretli üretimden önce incelenmelidir."
+        },
         "columns": {
           "length": "Toplam",
           "panel": "Panel",
@@ -1051,7 +1065,8 @@
           "drawMissing": "Eksikleri çiz ({{count}})",
           "redrawBeat": "Beat'i yeniden çiz · ücretli",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "head": "Başlangıç",
+          "shotDetails": "Shot {{position}} ayrıntıları",
+          "head": "Zincir başlangıcı",
           "redrawShot": "Shot {{position}} öğesini yeniden çiz · ücretli",
           "useAsFirstFrame": "Shot {{position}} panelini ilk kare olarak kullan",
           "status": {

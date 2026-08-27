@@ -252,6 +252,7 @@ const makeProjection = (): WorkspaceProjection => {
     activeBeatIds: ['active_owner', 'active_second'],
     activeShotIds: ['active_shot', 'second_shot'],
     coverageGapBeatIds: [],
+    unscriptedShotIds: [],
     workspaceStatusReady: true,
     chainStatusReady: true,
     requestShapeLocked: false,
