@@ -39,6 +39,7 @@ import {
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
   deriveStudioInstructionProfileV2,
+  recomposeStudioGenerationV2,
   studioGenerationCompositionDigestV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
@@ -1194,6 +1195,41 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(true);
     (compositionInputs as { schemaVersion: number }).schemaVersion = STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION + 1;
     expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('accepts historical prompt bytes while retaining exact stored-to-stored composition authority', () => {
+    const current = makeProject();
+    const asset = addApprovedProjectReference(current);
+    // JSON is the persistence boundary: repeated composition values are serialized independently.
+    const archived = JSON.parse(JSON.stringify(current)) as StudioProjectV2;
+    const job = archived.jobs[`job_${asset.id}`]!;
+    const authorization = archived.spendAuthorizations.find((candidate) => candidate.id === job.authorizationId)!;
+    const item = authorization.baseItems.find((candidate) => candidate.id === job.authorizationItemId)!;
+    if (item.requestPlan.kind !== 'resolved' || job.requestPlan.kind !== 'resolved' || job.requestSnapshot === null) {
+      throw new Error('historical prompt fixture requires resolved request records');
+    }
+    const legacyPrompt = job.composition.prompt.replace(
+      /OUTPUT\n[\s\S]*$/,
+      'OUTPUT\nCreate one clean character reference sheet in a single image with front, three-quarter, side, and back views.'
+    );
+    expect(legacyPrompt).not.toBe(job.composition.prompt);
+    const persistedCopies = [
+      item.requestPlan.snapshot.composition,
+      job.requestPlan.snapshot.composition,
+      job.requestSnapshot.composition,
+      job.composition,
+    ];
+    for (const composition of persistedCopies) composition.prompt = legacyPrompt;
+    archived.assets[asset.id]!.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
+
+    expect(recomposeStudioGenerationV2(job.composition).prompt).not.toBe(legacyPrompt);
+    expect(validateStudioProjectV2(archived)).toBe(true);
+
+    job.composition.prompt = `${legacyPrompt}\nUNMATCHED JOB COPY`;
+    expect(validateStudioProjectV2(archived)).toBe(false);
+    job.composition.prompt = legacyPrompt;
+    authorization.providerBindings[0]!.provider = { ...provider, model: 'other-model' };
+    expect(validateStudioProjectV2(archived)).toBe(false);
   });
 
   it('accepts exact authorization/job/receipt binding and rejects ±1 tampering', () => {

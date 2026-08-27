@@ -33,7 +33,6 @@ import {
   type StudioBeat,
   type StudioBinItem,
   type StudioGenerationCompositionInputSnapshotV2,
-  type StudioGenerationCompositionV2,
   type StudioGenerationReferenceInputSnapshot,
   type StudioGenerationRequestPlan,
   type StudioJobV2,
@@ -57,9 +56,6 @@ import {
   calculateStudioQuotedGenerationAmounts,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
-  recomposeStudioGenerationV2,
-  studioGenerationCompositionMatchesAuthorityV2,
-  studioGenerationCompositionsEqualV2,
   studioGenerationTargetKey,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from './generation';
@@ -910,13 +906,10 @@ const validateComposition = (value: unknown): boolean => {
     (purpose === 'board_still') === (inputs.boardStyle !== null) &&
     (purpose !== 'video_take' || (inputs.referenceInputs as unknown[]).length === 0) &&
     inputs.instructionProfile === expectedInstructionProfile(route, purpose, source);
-  if (!semanticShapeIsValid) return false;
-  try {
-    const composition = value as unknown as StudioGenerationCompositionV2;
-    return studioGenerationCompositionsEqualV2(composition, recomposeStudioGenerationV2(composition));
-  } catch {
-    return false;
-  }
+  // The prompt is an immutable record of what was reviewed and sent. Re-deriving it with today's
+  // composer would make any instruction-text improvement retroactively invalidate durable history.
+  // Exact quote/plan/snapshot/job equality below remains the integrity boundary for persisted bytes.
+  return semanticShapeIsValid;
 };
 
 const validateConditioningInput = (value: unknown): boolean => {
@@ -1352,12 +1345,7 @@ const validateAuthorizationShape = (value: unknown, projectId: string, currentRe
       !hasExactKeys(binding, PROVIDER_BINDING_KEYS) ||
       binding.itemId !== (items[index] as Record<string, unknown>).id ||
       !validateProvider(binding.provider) ||
-      !studioGenerationCompositionMatchesAuthorityV2(composition, {
-        projectRevision: value.projectRevision as number,
-        target: item.target,
-        purpose: item.purpose,
-        provider: binding.provider as StudioProviderRef,
-      })
+      !providersEqual(composition.inputs.route, binding.provider)
     ) {
       return false;
     }
