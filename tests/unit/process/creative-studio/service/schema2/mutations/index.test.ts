@@ -753,6 +753,50 @@ describe('schema-5 reference lifecycle mutations', () => {
     expect(empty).toMatchObject({ referencePlanStatus: 'planned', referenceOrder: [], references: {} });
   });
 
+  it('binds an empty reference decision on a film that plans no references at all', () => {
+    // A film with no named characters and no recurring places never leaves `unplanned`, because
+    // nothing was ever planned. An empty binding references nothing, so it has nothing to validate
+    // against a plan and must not be gated behind one.
+    const project = makeProject();
+    expect(project.referencePlanStatus).toBe('unplanned');
+
+    const bound = apply(
+      project,
+      [
+        {
+          kind: 'set_shot_reference_binding',
+          shotId: 'shot_1',
+          characterReferenceIds: [],
+          backgroundReferenceId: null,
+        },
+      ],
+      'bind_nothing'
+    ).project;
+
+    expect(bound.shots.shot_1!.referenceBinding).toEqual({
+      status: 'ready',
+      characterReferenceIds: [],
+      backgroundReferenceId: null,
+    });
+    expect(bound.referencePlanStatus).toBe('unplanned');
+  });
+
+  it('still refuses a non-empty binding while the reference plan is unplanned', () => {
+    const project = makeProject();
+    expectReason(
+      project,
+      [
+        {
+          kind: 'set_shot_reference_binding',
+          shotId: 'shot_1',
+          characterReferenceIds: ['ref_1'],
+          backgroundReferenceId: null,
+        },
+      ],
+      'invalid_operation'
+    );
+  });
+
   it('adds a background to a character-only plan without changing approvals, asset hashes, or Shot bindings', () => {
     let project = persist(
       apply(
