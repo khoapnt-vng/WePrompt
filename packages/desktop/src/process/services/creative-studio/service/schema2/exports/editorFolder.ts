@@ -64,7 +64,7 @@ export type StudioEditorFolderCompositionV2 = {
   manifestBytes: Uint8Array;
   manifestSha256: string;
   byteSize: number;
-  fileCount: number;
+  payloadFileCount: number;
 };
 
 export type StudioEditorFolderErrorCodeV2 =
@@ -408,6 +408,6 @@ export const composeStudioEditorFolderV2 = (
     manifestBytes,
     manifestSha256: validatedManifest.manifestSha256,
     byteSize: validatedManifest.byteSize,
-    fileCount: validatedManifest.fileCount,
+    payloadFileCount: validatedManifest.payloadFileCount,
   };
 };

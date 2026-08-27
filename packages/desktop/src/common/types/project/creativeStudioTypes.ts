@@ -174,7 +174,7 @@ export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 5 as const;
 export const STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION = 5 as const;
 export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
 /** Sidecar contract version. It intentionally does not follow the project schema version. */
-export const STUDIO_EXPORT_SCHEMA_VERSION_V2 = 1 as const;
+export const STUDIO_EXPORT_SCHEMA_VERSION_V2 = 2 as const;
 export const STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS = 32;
 export const STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1125,7 +1125,7 @@ type StudioExportArtifactBaseV2 = {
   payloadKind: 'directory' | 'file';
   managedExport: StudioManagedExportRefV2;
   byteSize: number;
-  fileCount: number;
+  payloadFileCount: number;
   manifestSha256: string;
   createdAt: string;
 };
@@ -1149,7 +1149,7 @@ export type StudioExportCatalogV2 = {
 
 type StudioRendererExportArtifactBaseV2 = Pick<
   StudioExportArtifactBaseV2,
-  'id' | 'sourceRevision' | 'byteSize' | 'fileCount' | 'createdAt'
+  'id' | 'sourceRevision' | 'byteSize' | 'payloadFileCount' | 'createdAt'
 > & { folderName: string };
 
 export type StudioRendererExportArtifactV2 =
@@ -1212,7 +1212,7 @@ export type StudioFilmExportTerminalResultV2 =
       projectId: string;
       renderId: string;
       outcome: 'failed';
-      reason: 'stale_authority' | 'invalid_media' | 'unavailable' | 'render_failed';
+      reason: 'stale_project' | 'stale_export_catalog' | 'invalid_media' | 'unavailable' | 'render_failed';
     }
   | { projectId: string; renderId: string; outcome: 'cancelled' };
 export type StudioFilmExportStatusV2 =
@@ -2036,6 +2036,7 @@ export type StudioCommandErrorCode =
   | 'pricing_refused'
   | 'not_found'
   | 'stale_project'
+  | 'stale_export_catalog'
   | 'invalid_route'
   | 'rule_breach'
   | 'media_in_use'

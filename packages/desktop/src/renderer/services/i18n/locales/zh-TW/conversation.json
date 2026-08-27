@@ -1487,7 +1487,8 @@
         },
         "errors": {
           "catalogUnavailable": "匯出目錄無法使用。請重新載入專案後再試。",
-          "staleAuthority": "專案或匯出目錄已變更。請檢查目前專案後再匯出。",
+          "staleAuthority": "專案已變更。請檢查目前專案後再匯出。",
+          "staleCatalog": "匯出目錄已變更。請重新載入匯出記錄後再試。",
           "invalidMedia": "所選媒體已過期、非標準或無效。請先檢查剪輯。",
           "mediaUnavailable": "無法驗證所選媒體檔案。未發佈任何不完整匯出。",
           "busy": "Creative Studio 正在完成另一項工作區操作。請稍後再試。",
@@ -1516,7 +1517,8 @@
         "dissolve": "疊化",
         "errors": {
           "catalogUnavailable": "匯出目錄無法使用。請重新載入專案。",
-          "staleAuthority": "專案或匯出目錄已變更。未發佈任何過時影片——請檢查目前專案後再匯出。",
+          "staleAuthority": "專案已變更。未發佈任何過時影片——請檢查目前專案後再匯出。",
+          "staleCatalog": "匯出目錄已變更。未發佈任何過時影片——請重新載入匯出記錄後再匯出。",
           "unavailable": "影片匯出需要 FFmpeg，但在此裝置上找不到。請安裝 FFmpeg，或將 FFMPEG_PATH 設為你現有複本的路徑，然後重新開啟專案。",
           "renderFailed": "無法驗證本機影片算繪，未發佈部分匯出。",
           "cancelled": "影片匯出已取消，專案媒體未變更。",
@@ -1986,6 +1988,7 @@
       "projectNotFound": "此創意工作室專案已不存在。",
       "storyboardExists": "此專案已有分鏡。再次建立草稿前請確認取代。",
       "staleProject": "專案已在其他位置變更。請重新整理後再試。",
+      "staleExportCatalog": "匯出目錄已變更。請重新整理匯出記錄後再試。",
       "planningUnavailable": "分鏡草稿無法使用，你仍可繼續手動編輯。",
       "invalidRoute": "所選產生引擎無效或無法使用。",
       "cancellationRefused": "服務供應商已無法取消這個執行中的工作。",

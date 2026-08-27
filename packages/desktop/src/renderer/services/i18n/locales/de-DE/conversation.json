@@ -1488,7 +1488,8 @@
         },
         "errors": {
           "catalogUnavailable": "Der Exportkatalog ist nicht verfügbar. Lade das Projekt neu.",
-          "staleAuthority": "Projekt oder Exportkatalog wurden geändert. Prüfe das Projekt erneut.",
+          "staleAuthority": "Das Projekt wurde geändert. Prüfe das aktuelle Projekt vor einem erneuten Export.",
+          "staleCatalog": "Der Exportkatalog wurde geändert. Lade den Exportverlauf vor einem erneuten Versuch neu.",
           "invalidMedia": "Das ausgewählte Medium ist veraltet, nicht kanonisch oder ungültig. Prüfe Cut.",
           "mediaUnavailable": "Die ausgewählte Mediendatei konnte nicht geprüft werden. Es wurde kein Teilexport veröffentlicht.",
           "busy": "Creative Studio schließt einen anderen Vorgang ab. Versuche es danach erneut.",
@@ -1517,7 +1518,8 @@
         "dissolve": "Überblendung",
         "errors": {
           "catalogUnavailable": "Der Exportkatalog ist nicht verfügbar. Projekt neu laden und erneut versuchen.",
-          "staleAuthority": "Projekt oder Exportkatalog wurden geändert. Es wurde kein veralteter Film veröffentlicht – das aktuelle Projekt vor einem erneuten Export prüfen.",
+          "staleAuthority": "Das Projekt wurde geändert. Es wurde kein veralteter Film veröffentlicht – prüfe das aktuelle Projekt vor einem erneuten Export.",
+          "staleCatalog": "Der Exportkatalog wurde geändert. Es wurde kein veralteter Film veröffentlicht – lade den Exportverlauf vor einem erneuten Versuch neu.",
           "unavailable": "Für den Filmexport wird FFmpeg benötigt, das auf diesem Gerät nicht gefunden wurde. FFmpeg installieren oder FFMPEG_PATH auf eine bereits vorhandene Kopie setzen und das Projekt anschließend neu öffnen.",
           "renderFailed": "Der lokale Film konnte nicht verifiziert werden. Kein Teilexport wurde veröffentlicht.",
           "cancelled": "Der Filmexport wurde abgebrochen. Projektmedien blieben unverändert.",
@@ -2003,6 +2005,7 @@
       "projectNotFound": "Das Creative-Studio-Projekt existiert nicht mehr.",
       "storyboardExists": "Dieses Projekt hat bereits ein Storyboard. Bestätige das Ersetzen, bevor du es erneut entwirfst.",
       "staleProject": "Das Projekt wurde an anderer Stelle geändert. Aktualisiere es vor einem erneuten Versuch.",
+      "staleExportCatalog": "Der Exportkatalog wurde geändert. Aktualisiere den Exportverlauf vor einem erneuten Versuch.",
       "planningUnavailable": "Der Storyboard-Entwurf ist nicht verfügbar. Du kannst die Bearbeitung manuell fortsetzen.",
       "invalidRoute": "Die ausgewählte Generierungs-Engine ist ungültig oder nicht verfügbar.",
       "cancellationRefused": "Der Anbieter kann diesen laufenden Auftrag nicht mehr abbrechen.",

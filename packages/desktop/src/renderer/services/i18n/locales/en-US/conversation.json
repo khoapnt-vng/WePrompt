@@ -1173,6 +1173,7 @@
       "projectNotFound": "The Creative Studio project no longer exists.",
       "storyboardExists": "This project already has a storyboard. Confirm replacement before drafting again.",
       "staleProject": "The project changed elsewhere. Refresh it before retrying.",
+      "staleExportCatalog": "The export catalog changed. Refresh the export history before retrying.",
       "planningUnavailable": "Storyboard drafting is unavailable. You can continue editing manually.",
       "invalidRoute": "The selected generation engine is invalid or unavailable.",
       "mediaInUse": "This audio is currently selected or in use. Clear it as the bed or wait for the active operation before detaching it.",
@@ -2348,7 +2349,8 @@
         },
         "errors": {
           "catalogUnavailable": "The export catalog is unavailable. Reload the project and try again.",
-          "staleAuthority": "The project or export catalog changed. Review the current project before exporting again.",
+          "staleAuthority": "The project changed. Review the current project before exporting again.",
+          "staleCatalog": "The export catalog changed. Reload the export history before exporting again.",
           "invalidMedia": "The selected media is stale, noncanonical, or invalid. Review the Cut before exporting.",
           "mediaUnavailable": "A selected media file could not be verified. No partial export was published.",
           "busy": "Creative Studio is finishing another workspace operation. Try again when it completes.",
@@ -2377,7 +2379,8 @@
         "dissolve": "Cross dissolve",
         "errors": {
           "catalogUnavailable": "The export catalog is unavailable. Reload the project and try again.",
-          "staleAuthority": "The project or export catalog changed. No stale film was published — review the current project before exporting again.",
+          "staleAuthority": "The project changed. No stale film was published — review the current project before exporting again.",
+          "staleCatalog": "The export catalog changed. No stale film was published — reload the export history before exporting again.",
           "unavailable": "Film export needs FFmpeg, which was not found on this device. Install it, or set FFMPEG_PATH to a copy you already have, then reopen the project.",
           "renderFailed": "The local film render could not be verified. No partial export was published.",
           "cancelled": "Film export was cancelled. Completed project media was not changed.",

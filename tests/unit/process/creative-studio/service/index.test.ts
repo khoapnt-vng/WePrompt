@@ -1426,7 +1426,7 @@ describe('CreativeStudioServiceV2', () => {
           payloadKind: 'file',
           managedExport: { collection: 'exports', fileName: 'private-export-name' },
           byteSize: 42,
-          fileCount: 1,
+          payloadFileCount: 1,
           manifestSha256: 'f'.repeat(64),
           createdAt: '2026-08-17T00:00:02.000Z',
         },
@@ -1477,7 +1477,7 @@ describe('CreativeStudioServiceV2', () => {
           shape: 'script',
           folderName: 'private-export-name',
           byteSize: 42,
-          fileCount: 1,
+          payloadFileCount: 1,
           createdAt: '2026-08-17T00:00:02.000Z',
         },
       ],
@@ -1637,7 +1637,7 @@ describe('CreativeStudioServiceV2', () => {
           payloadKind: 'file' as const,
           managedExport: { collection: 'exports' as const, fileName: plan.managedFileName },
           byteSize: 4,
-          fileCount: 1,
+          payloadFileCount: 1,
           manifestSha256: 'e'.repeat(64),
           createdAt: plan.createdAt,
           film: facts,
@@ -1766,7 +1766,7 @@ describe('CreativeStudioServiceV2', () => {
         transition: { kind: 'cut' },
         trimTails: false,
       })
-    ).rejects.toMatchObject({ code: 'stale_project' });
+    ).rejects.toMatchObject({ code: 'stale_export_catalog' });
     expect(list).toHaveBeenCalledOnce();
     expect(harness.resolveAssetV2).not.toHaveBeenCalled();
     expect(render).not.toHaveBeenCalled();
@@ -2447,7 +2447,7 @@ describe('CreativeStudioServiceV2', () => {
   });
 
   it.each([
-    ['stale_catalog_revision', 'stale_project'],
+    ['stale_catalog_revision', 'stale_export_catalog'],
     ['stale_project_revision', 'stale_project'],
     ['invalid_create_plan', 'invalid_payload'],
     ['artifact_not_found', 'invalid_payload'],

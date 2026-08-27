@@ -54,6 +54,7 @@ const errorMessageKeys: Record<Exclude<StudioCommandErrorCode, 'connection_valid
   pricing_refused: 'conversation.creativeStudio.errors.pricingRefused',
   not_found: 'conversation.creativeStudio.errors.projectNotFound',
   stale_project: 'conversation.creativeStudio.errors.staleProject',
+  stale_export_catalog: 'conversation.creativeStudio.errors.staleExportCatalog',
   invalid_route: 'conversation.creativeStudio.errors.invalidRoute',
   rule_breach: 'conversation.creativeStudio.errors.ruleBreach',
   cancellation_refused: 'conversation.creativeStudio.errors.cancellationRefused',
@@ -680,8 +681,8 @@ const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 
       !isExactDataObject(
         artifact,
         artifact?.shape === 'film'
-          ? ['id', 'sourceRevision', 'shape', 'folderName', 'byteSize', 'fileCount', 'createdAt', 'film']
-          : ['id', 'sourceRevision', 'shape', 'folderName', 'byteSize', 'fileCount', 'createdAt']
+          ? ['id', 'sourceRevision', 'shape', 'folderName', 'byteSize', 'payloadFileCount', 'createdAt', 'film']
+          : ['id', 'sourceRevision', 'shape', 'folderName', 'byteSize', 'payloadFileCount', 'createdAt']
       ) ||
       typeof artifact.id !== 'string' ||
       !/^[A-Za-z0-9_-]{1,256}$/.test(artifact.id) ||
@@ -696,10 +697,10 @@ const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 
       !/^[A-Za-z0-9_-]{1,256}$/.test(artifact.folderName) ||
       !Number.isSafeInteger(artifact.byteSize) ||
       (artifact.byteSize as number) < 0 ||
-      !Number.isSafeInteger(artifact.fileCount) ||
-      (artifact.fileCount as number) < 1 ||
-      (artifact.fileCount as number) > STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT ||
-      (artifact.shape !== 'editor_folder' && artifact.fileCount !== 1) ||
+      !Number.isSafeInteger(artifact.payloadFileCount) ||
+      (artifact.payloadFileCount as number) < 1 ||
+      (artifact.payloadFileCount as number) > STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT ||
+      (artifact.shape !== 'editor_folder' && artifact.payloadFileCount !== 1) ||
       typeof artifact.createdAt !== 'string' ||
       !Number.isFinite(Date.parse(artifact.createdAt)) ||
       new Date(artifact.createdAt).toISOString() !== artifact.createdAt
@@ -724,7 +725,7 @@ const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 
       shape: artifact.shape,
       folderName: artifact.folderName,
       byteSize: artifact.byteSize as number,
-      fileCount: artifact.fileCount as number,
+      payloadFileCount: artifact.payloadFileCount as number,
       createdAt: artifact.createdAt,
     };
     if (artifact.shape === 'film') {
@@ -869,7 +870,8 @@ const toFilmExportStatus = (value: unknown): StudioFilmExportStatusV2 => {
   if (
     isExactDataObject(result, ['projectId', 'renderId', 'outcome', 'reason']) &&
     result.outcome === 'failed' &&
-    (result.reason === 'stale_authority' ||
+    (result.reason === 'stale_project' ||
+      result.reason === 'stale_export_catalog' ||
       result.reason === 'invalid_media' ||
       result.reason === 'unavailable' ||
       result.reason === 'render_failed')

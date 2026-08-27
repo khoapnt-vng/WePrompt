@@ -5243,7 +5243,7 @@ describe('StudioPage schema-5 cutover', () => {
           shape: 'script',
           folderName: 'export_new',
           byteSize: 24,
-          fileCount: 1,
+          payloadFileCount: 1,
           createdAt: '2026-01-01T00:00:03.000Z',
         },
       ],
@@ -5883,7 +5883,7 @@ describe('StudioPage schema-5 cutover', () => {
       shape: 'editor_folder' as const,
       folderName: 'editor-folder-20260101-000008-000-0123456789abcdef',
       byteSize: 64,
-      fileCount: 1,
+      payloadFileCount: 1,
       createdAt: '2026-01-01T00:00:08.000Z',
     };
     const catalog2: StudioRendererExportCatalogV2 = { revision: 2, artifacts: [artifact] };
@@ -5977,7 +5977,7 @@ describe('StudioPage schema-5 cutover', () => {
       shape: 'editor_folder' as const,
       folderName: 'editor-folder-20260101-000008-000-0123456789abcdef',
       byteSize: 64,
-      fileCount: 1,
+      payloadFileCount: 1,
       createdAt: '2026-01-01T00:00:08.000Z',
     };
     const catalog: StudioRendererExportCatalogV2 = { revision: 1, artifacts: [artifact] };
@@ -5993,7 +5993,10 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValueOnce({ ok: false, error: { code: 'storage_error', messageKey: 'native.detachFailed' } })
       .mockResolvedValueOnce(ok({ status: 'detached' as const, projectRevision: authority.revision + 1 }));
     mocks.bridge.createExport.invoke
-      .mockResolvedValueOnce({ ok: false, error: { code: 'storage_error', messageKey: 'native.exportFailed' } })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'stale_export_catalog', messageKey: 'native.exportFailed' },
+      })
       .mockResolvedValueOnce(ok({ revision: 3, artifacts: [{ ...artifact, sourceRevision: 99 }] }));
     mocks.bridge.copyExport.invoke.mockResolvedValue({
       ok: false,
@@ -6017,7 +6020,7 @@ describe('StudioPage schema-5 cutover', () => {
     await expect(invokeStudioAction(() => cut.detachBedAudio('audio_other'))).resolves.toBe(false);
     await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
       ok: false,
-      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable',
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleCatalog',
     });
     await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('missing_export'))).resolves.toEqual({
       ok: false,
@@ -6049,7 +6052,7 @@ describe('StudioPage schema-5 cutover', () => {
       shape: 'film' as const,
       folderName: 'film-20260827-000008-000-0123456789abcdef',
       byteSize: 4_096,
-      fileCount: 1,
+      payloadFileCount: 1,
       createdAt: '2026-08-27T00:00:08.000Z',
       film: {
         nominalDurationSeconds: 8,
@@ -6149,6 +6152,7 @@ describe('StudioPage schema-5 cutover', () => {
 
   it.each([
     ['stale_project', 'conversation.creativeStudio.workspace.filmExport.errors.staleAuthority'],
+    ['stale_export_catalog', 'conversation.creativeStudio.workspace.filmExport.errors.staleCatalog'],
     ['ffmpeg_unavailable', 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'],
     ['unsupported_capabilities', 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'],
     ['render_failed', 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'],

@@ -1493,7 +1493,8 @@
         },
         "errors": {
           "catalogUnavailable": "O catálogo de exportação está indisponível. Recarregue o projeto.",
-          "staleAuthority": "O projeto ou catálogo mudou. Revise o projeto antes de exportar novamente.",
+          "staleAuthority": "O projeto mudou. Revise o projeto atual antes de exportar novamente.",
+          "staleCatalog": "O catálogo de exportação mudou. Recarregue o histórico de exportações antes de tentar novamente.",
           "invalidMedia": "A mídia selecionada está desatualizada, não canônica ou inválida. Revise o Cut.",
           "mediaUnavailable": "Não foi possível verificar a mídia selecionada. Nenhuma exportação parcial foi publicada.",
           "busy": "O Creative Studio está concluindo outra operação. Tente novamente depois.",
@@ -1522,7 +1523,8 @@
         "dissolve": "Dissolvência cruzada",
         "errors": {
           "catalogUnavailable": "O catálogo de exportação não está disponível. Recarregue o projeto.",
-          "staleAuthority": "O projeto ou catálogo mudou. Nenhum filme obsoleto foi publicado. Revise o projeto antes de exportar novamente.",
+          "staleAuthority": "O projeto mudou. Nenhum filme obsoleto foi publicado. Revise o projeto atual antes de exportar novamente.",
+          "staleCatalog": "O catálogo de exportação mudou. Nenhum filme obsoleto foi publicado. Recarregue o histórico de exportações antes de tentar novamente.",
           "unavailable": "A exportação de filme precisa do FFmpeg, que não foi encontrado neste dispositivo. Instale-o ou defina FFMPEG_PATH apontando para uma cópia que você já tenha e reabra o projeto.",
           "renderFailed": "A renderização local não pôde ser verificada. Nenhuma exportação parcial foi publicada.",
           "cancelled": "A exportação foi cancelada. A mídia do projeto não mudou.",
@@ -2024,6 +2026,7 @@
       "projectNotFound": "O projeto do Creative Studio não existe mais.",
       "storyboardExists": "Este projeto já tem um storyboard. Confirme a substituição antes de criar outro rascunho.",
       "staleProject": "O projeto foi alterado em outro lugar. Atualize-o antes de tentar novamente.",
+      "staleExportCatalog": "O catálogo de exportação mudou. Atualize o histórico de exportações antes de tentar novamente.",
       "planningUnavailable": "A criação do rascunho do storyboard está indisponível. Você pode continuar editando manualmente.",
       "invalidRoute": "O mecanismo de geração selecionado é inválido ou está indisponível.",
       "cancellationRefused": "O provedor não pode mais cancelar este trabalho em execução.",

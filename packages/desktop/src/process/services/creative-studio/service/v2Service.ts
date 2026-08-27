@@ -1579,11 +1579,16 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
     }
     if (
-      (error instanceof CreativeStudioStoreError && error.code === 'stale_project') ||
-      (error instanceof StudioExportCatalogErrorV2 &&
-        (error.code === 'stale_catalog_revision' || error.code === 'stale_project_revision'))
+      (error instanceof CreativeStudioStoreError && error.code === 'stale_export_catalog') ||
+      (error instanceof StudioExportCatalogErrorV2 && error.code === 'stale_catalog_revision')
     ) {
-      return { projectId, renderId, outcome: 'failed', reason: 'stale_authority' };
+      return { projectId, renderId, outcome: 'failed', reason: 'stale_export_catalog' };
+    }
+    if (
+      (error instanceof CreativeStudioStoreError && error.code === 'stale_project') ||
+      (error instanceof StudioExportCatalogErrorV2 && error.code === 'stale_project_revision')
+    ) {
+      return { projectId, renderId, outcome: 'failed', reason: 'stale_project' };
     }
     return { projectId, renderId, outcome: 'failed', reason: 'render_failed' };
   };
@@ -1715,8 +1720,11 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     generationRoutesSnapshot ?? refreshGenerationRoutes();
   const rethrowExportFailure = (error: unknown): never => {
     if (error instanceof StudioExportCatalogErrorV2) {
-      if (error.code === 'stale_catalog_revision' || error.code === 'stale_project_revision') {
-        throw new CreativeStudioStoreError('stale_project', 'Studio export authority has changed');
+      if (error.code === 'stale_catalog_revision') {
+        throw new CreativeStudioStoreError('stale_export_catalog', 'Studio export catalog has changed');
+      }
+      if (error.code === 'stale_project_revision') {
+        throw new CreativeStudioStoreError('stale_project', 'Studio export project has changed');
       }
       if (error.code === 'invalid_create_plan' || error.code === 'artifact_not_found') {
         throw invalid('Invalid Studio export request');
@@ -2899,7 +2907,10 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
                 assertActive: () => assertFilmJobActive(controller.signal),
               });
               if (initialCatalog.revision !== input.expectedCatalogRevision) {
-                throw new CreativeStudioStoreError('stale_project', 'Studio export catalog revision has changed');
+                throw new CreativeStudioStoreError(
+                  'stale_export_catalog',
+                  'Studio export catalog revision has changed'
+                );
               }
               const project = structuredClone(authority.project);
               const requiredAssetIds = deriveStudioFilmRequiredAssetIdsV2(project);

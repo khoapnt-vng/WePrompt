@@ -186,6 +186,7 @@ type StoreErrorCode =
   | 'invalid_payload'
   | 'not_found'
   | 'stale_project'
+  | 'stale_export_catalog'
   | 'busy'
   | 'storage_error'
   | 'unsupported_prototype_schema';

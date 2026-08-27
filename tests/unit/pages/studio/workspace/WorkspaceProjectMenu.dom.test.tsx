@@ -461,7 +461,7 @@ describe('WorkspaceProjectMenu', () => {
       shape: 'editor_folder' as const,
       folderName: 'editor-folder-20260821-120000-000-0123456789abcdef',
       byteSize: 8192,
-      fileCount: 5,
+      payloadFileCount: 5,
       createdAt: '2026-08-21T12:00:00.000Z',
     };
     await act(async () => flight.resolve({ ok: true, catalog: { revision: 2, artifacts: [artifact] } }));
@@ -581,7 +581,7 @@ describe('WorkspaceProjectMenu', () => {
       shape: 'film' as const,
       folderName: 'film-20260821-120000-000-0123456789abcdef',
       byteSize: 4096,
-      fileCount: 1,
+      payloadFileCount: 1,
       createdAt: '2026-08-21T12:00:00.000Z',
       film: {
         nominalDurationSeconds: 12,
@@ -606,7 +606,7 @@ describe('WorkspaceProjectMenu', () => {
       shape: 'film' as const,
       folderName: 'film-20260821-120000-000-reloaded',
       byteSize: 4096,
-      fileCount: 1,
+      payloadFileCount: 1,
       createdAt: '2026-08-21T12:00:00.000Z',
       film: {
         nominalDurationSeconds: 12,
@@ -671,14 +671,14 @@ describe('WorkspaceProjectMenu', () => {
             projectId: 'project_1',
             renderId: 'film_run_failed_reload',
             outcome: 'failed' as const,
-            reason: 'stale_authority' as const,
+            reason: 'stale_export_catalog' as const,
           },
         }))}
         acknowledgeFilmExport={acknowledgeFilmExport}
       />
     );
 
-    const error = await screen.findByText('conversation.creativeStudio.workspace.filmExport.errors.staleAuthority');
+    const error = await screen.findByText('conversation.creativeStudio.workspace.filmExport.errors.staleCatalog');
     expect(error).toBeVisible();
     fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.filmExport.dismiss'));
     await waitFor(() => expect(acknowledgeFilmExport).toHaveBeenCalledExactlyOnceWith('film_run_failed_reload'));

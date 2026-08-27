@@ -1487,7 +1487,8 @@
         },
         "errors": {
           "catalogUnavailable": "导出目录不可用。请重新加载项目后重试。",
-          "staleAuthority": "项目或导出目录已更改。请检查当前项目后重试。",
+          "staleAuthority": "项目已更改。请检查当前项目后再导出。",
+          "staleCatalog": "导出目录已更改。请重新加载导出记录后重试。",
           "invalidMedia": "所选媒体已过期、不是标准媒体或无效。请先检查剪辑。",
           "mediaUnavailable": "无法验证所选媒体文件。未发布任何不完整导出。",
           "busy": "Creative Studio 正在完成另一项工作区操作。请稍后重试。",
@@ -1516,7 +1517,8 @@
         "dissolve": "叠化",
         "errors": {
           "catalogUnavailable": "导出目录不可用。请重新加载项目。",
-          "staleAuthority": "项目或导出目录已更改。未发布任何陈旧影片——请先检查当前项目，然后再重新导出。",
+          "staleAuthority": "项目已更改。未发布任何陈旧影片——请检查当前项目后再导出。",
+          "staleCatalog": "导出目录已更改。未发布任何陈旧影片——请重新加载导出记录后再导出。",
           "unavailable": "影片导出需要 FFmpeg，但在此设备上未找到。请安装 FFmpeg，或将 FFMPEG_PATH 设置为已有副本的路径，然后重新打开项目。",
           "renderFailed": "无法验证本地影片渲染，未发布部分导出。",
           "cancelled": "影片导出已取消，项目媒体未更改。",
@@ -1986,6 +1988,7 @@
       "projectNotFound": "此创意工作室项目已不存在。",
       "storyboardExists": "此项目已有故事板。再次起草前请确认替换。",
       "staleProject": "项目已在其他位置发生更改。请刷新后重试。",
+      "staleExportCatalog": "导出目录已更改。请刷新导出记录后重试。",
       "planningUnavailable": "故事板起草不可用，你仍可继续手动编辑。",
       "invalidRoute": "所选生成引擎无效或不可用。",
       "cancellationRefused": "服务商已无法取消这个运行中的任务。",

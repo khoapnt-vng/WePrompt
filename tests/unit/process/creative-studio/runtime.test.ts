@@ -5,7 +5,7 @@
  */
 
 import type { IProvider } from '@/common/config/storage';
-import type { StudioProjectV2 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_EXPORT_SCHEMA_VERSION_V2, type StudioProjectV2 } from '@/common/types/project/creativeStudioTypes';
 import type { StudioProjectCommitFacts } from '@process/services/creative-studio/store';
 import {
   createCreativeStudioRuntime,
@@ -25,7 +25,10 @@ import {
   type StudioProviderResolver,
 } from '@process/services/creative-studio/providerResolver';
 import type { StudioJobManagerV2 } from '@process/services/creative-studio/jobManager';
-import type { StudioExportCatalogStoreV2 } from '@process/services/creative-studio/service/schema2/exports';
+import {
+  StudioExportCatalogErrorV2,
+  type StudioExportCatalogStoreV2,
+} from '@process/services/creative-studio/service/schema2/exports';
 import type { StudioDirectorCommandMailboxV2 } from '@process/services/creative-studio/service/directorCommandMailbox';
 import type { StudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
 import type {
@@ -520,6 +523,46 @@ describe('Creative Studio schema-2 runtime activation', () => {
       'resume-frames:project_a,project_b',
       'resume-jobs:project_a,project_b',
     ]);
+  });
+
+  it('keeps every project runtime active when one project export catalog cannot be recovered', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_bad_catalog', 'project_healthy']) });
+    let rejectBadCatalog = true;
+    vi.mocked(harness.exportCatalogStore.repair).mockImplementation(async (authority) => {
+      if (authority.project.id === 'project_bad_catalog' && rejectBadCatalog) {
+        throw new StudioExportCatalogErrorV2('unsupported_catalog_schema');
+      }
+      return {
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+        projectId: authority.project.id,
+        revision: 1,
+        artifacts: [],
+      };
+    });
+
+    await harness.runtime.start();
+    await harness.runtime.onBackendReady();
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(2);
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledWith([
+      'project_bad_catalog',
+      'project_healthy',
+    ]);
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledWith(['project_bad_catalog', 'project_healthy']);
+    expect(harness.logError).toHaveBeenCalledWith(
+      '[CreativeStudio] Export-catalog recovery failed for project project_bad_catalog:',
+      'StudioExportCatalogErrorV2'
+    );
+
+    rejectBadCatalog = false;
+    await harness.runtime.refreshInventory();
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(4);
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledTimes(2);
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(2);
+
+    await harness.runtime.refreshInventory();
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(4);
   });
 
   it('keeps scanning for paid jobs that miss the startup dispatch', async () => {

@@ -1152,7 +1152,7 @@ describe('initCreativeStudioBridge', () => {
           shape: 'editor_folder' as const,
           folderName: 'editor-folder-20260819-020304-000-0123456789abcdef',
           byteSize: 1024,
-          fileCount: 3,
+          payloadFileCount: 3,
           createdAt: '2026-08-19T02:03:04.000Z',
         },
       ],
@@ -1189,7 +1189,7 @@ describe('initCreativeStudioBridge', () => {
           shape: 'film' as const,
           folderName: 'film_1',
           byteSize: 4096,
-          fileCount: 1,
+          payloadFileCount: 1,
           createdAt: '2026-08-19T02:03:04.000Z',
           film: {
             nominalDurationSeconds: 8,
@@ -1267,7 +1267,7 @@ describe('initCreativeStudioBridge', () => {
       shape: 'film' as const,
       folderName: 'film-terminal-1',
       byteSize: 4096,
-      fileCount: 1,
+      payloadFileCount: 1,
       createdAt: '2026-08-19T02:03:04.000Z',
       film: {
         nominalDurationSeconds: 8,
@@ -1294,7 +1294,7 @@ describe('initCreativeStudioBridge', () => {
           projectId: 'project_1',
           renderId: 'film_run_failure',
           outcome: 'failed',
-          reason: 'stale_authority',
+          reason: 'stale_export_catalog',
         },
       })
       .mockResolvedValueOnce({
@@ -1328,7 +1328,7 @@ describe('initCreativeStudioBridge', () => {
     });
     await expect(status()).resolves.toMatchObject({
       ok: true,
-      data: { status: 'terminal', result: { outcome: 'failed', reason: 'stale_authority' } },
+      data: { status: 'terminal', result: { outcome: 'failed', reason: 'stale_export_catalog' } },
     });
     await expect(status()).resolves.toMatchObject({
       ok: true,
@@ -1383,7 +1383,7 @@ describe('initCreativeStudioBridge', () => {
             shape: 'movie',
             folderName: 'export_1',
             byteSize: 1,
-            fileCount: 1,
+            payloadFileCount: 1,
             createdAt: '2026-08-19T02:03:04.000Z',
           },
         ],
@@ -1400,7 +1400,7 @@ describe('initCreativeStudioBridge', () => {
             shape: 'still',
             folderName: 'export_1',
             byteSize: 1,
-            fileCount: 1,
+            payloadFileCount: 1,
             createdAt: '2026-08-19T02:03:05.000Z',
           },
           {
@@ -1409,7 +1409,7 @@ describe('initCreativeStudioBridge', () => {
             shape: 'still',
             folderName: 'export_2',
             byteSize: 1,
-            fileCount: 1,
+            payloadFileCount: 1,
             createdAt: '2026-08-19T02:03:04.000Z',
           },
         ],
@@ -1425,7 +1425,7 @@ describe('initCreativeStudioBridge', () => {
           shape: 'still' as const,
           folderName: id,
           byteSize: 1,
-          fileCount: 1,
+          payloadFileCount: 1,
           createdAt: '2026-08-19T02:03:04.000Z',
         })),
       },
@@ -1440,7 +1440,7 @@ describe('initCreativeStudioBridge', () => {
           shape: 'still' as const,
           folderName: `export_${index}`,
           byteSize: 1,
-          fileCount: 1,
+          payloadFileCount: 1,
           createdAt: new Date(Date.UTC(2026, 7, 19, 2, 3, index)).toISOString(),
         })),
       },
@@ -1501,7 +1501,7 @@ describe('initCreativeStudioBridge', () => {
             shape: 'still',
             folderName: 'export_1',
             byteSize: 1,
-            fileCount: 2,
+            payloadFileCount: 2,
             createdAt: '2026-08-19T02:03:04.000Z',
           },
         ],
@@ -1600,6 +1600,17 @@ describe('initCreativeStudioBridge', () => {
     ).resolves.toEqual({
       ok: false,
       error: { code: 'stale_project', messageKey: 'conversation.creativeStudio.errors.staleProject' },
+    });
+
+    vi.mocked(service.listExports).mockRejectedValueOnce(
+      new CreativeStudioStoreError('stale_export_catalog', 'raw export catalog details')
+    );
+    await expect(registeredHandler('listExports')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'stale_export_catalog',
+        messageKey: 'conversation.creativeStudio.errors.staleExportCatalog',
+      },
     });
 
     vi.mocked(service.listProjects).mockRejectedValueOnce(new Error('private path'));

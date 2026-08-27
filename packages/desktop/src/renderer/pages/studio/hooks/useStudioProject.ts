@@ -158,8 +158,8 @@ const sanitizeExportCatalog = (
       !hasExactKeys(
         artifact,
         artifact.shape === 'film'
-          ? ['byteSize', 'createdAt', 'fileCount', 'folderName', 'id', 'shape', 'sourceRevision', 'film']
-          : ['byteSize', 'createdAt', 'fileCount', 'folderName', 'id', 'shape', 'sourceRevision']
+          ? ['byteSize', 'createdAt', 'payloadFileCount', 'folderName', 'id', 'shape', 'sourceRevision', 'film']
+          : ['byteSize', 'createdAt', 'payloadFileCount', 'folderName', 'id', 'shape', 'sourceRevision']
       ) ||
       typeof artifact.id !== 'string' ||
       !SAFE_STUDIO_ID.test(artifact.id) ||
@@ -175,10 +175,10 @@ const sanitizeExportCatalog = (
       !SAFE_STUDIO_ID.test(artifact.folderName) ||
       !Number.isSafeInteger(artifact.byteSize) ||
       (artifact.byteSize as number) < 0 ||
-      !Number.isSafeInteger(artifact.fileCount) ||
-      (artifact.fileCount as number) < 1 ||
-      (artifact.fileCount as number) > STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT ||
-      (artifact.shape !== 'editor_folder' && artifact.fileCount !== 1) ||
+      !Number.isSafeInteger(artifact.payloadFileCount) ||
+      (artifact.payloadFileCount as number) < 1 ||
+      (artifact.payloadFileCount as number) > STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT ||
+      (artifact.shape !== 'editor_folder' && artifact.payloadFileCount !== 1) ||
       typeof artifact.createdAt !== 'string' ||
       !Number.isFinite(Date.parse(artifact.createdAt)) ||
       new Date(artifact.createdAt).toISOString() !== artifact.createdAt ||
@@ -199,7 +199,7 @@ const sanitizeExportCatalog = (
       shape: artifact.shape,
       folderName: artifact.folderName,
       byteSize: artifact.byteSize as number,
-      fileCount: artifact.fileCount as number,
+      payloadFileCount: artifact.payloadFileCount as number,
       createdAt: artifact.createdAt,
     };
     if (artifact.shape === 'film') {

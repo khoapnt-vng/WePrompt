@@ -2352,13 +2352,15 @@ const StudioProjectPage: React.FC<{
         const messageKey =
           result.error.code === 'stale_project'
             ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleAuthority'
-            : result.error.code === 'invalid_payload'
-              ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.invalidMedia'
-              : result.error.code === 'storage_error'
-                ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable'
-                : result.error.code === 'busy'
-                  ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy'
-                  : result.error.messageKey;
+            : result.error.code === 'stale_export_catalog'
+              ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleCatalog'
+              : result.error.code === 'invalid_payload'
+                ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.invalidMedia'
+                : result.error.code === 'storage_error'
+                  ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable'
+                  : result.error.code === 'busy'
+                    ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy'
+                    : result.error.messageKey;
         return { ok: false as const, messageKey };
       }
       installExportCatalog(result.data);
@@ -2432,17 +2434,19 @@ const StudioProjectPage: React.FC<{
           const messageKey =
             result.error.code === 'stale_project'
               ? 'conversation.creativeStudio.workspace.filmExport.errors.staleAuthority'
-              : result.error.code === 'ffmpeg_unavailable' || result.error.code === 'unsupported_capabilities'
-                ? 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'
-                : result.error.code === 'render_failed' || result.error.code === 'storage_error'
-                  ? 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'
-                  : result.error.code === 'cancelled'
-                    ? 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'
-                    : result.error.code === 'invalid_payload'
-                      ? 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'
-                      : result.error.code === 'busy'
-                        ? 'conversation.creativeStudio.workspace.filmExport.errors.busy'
-                        : result.error.messageKey;
+              : result.error.code === 'stale_export_catalog'
+                ? 'conversation.creativeStudio.workspace.filmExport.errors.staleCatalog'
+                : result.error.code === 'ffmpeg_unavailable' || result.error.code === 'unsupported_capabilities'
+                  ? 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'
+                  : result.error.code === 'render_failed' || result.error.code === 'storage_error'
+                    ? 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'
+                    : result.error.code === 'cancelled'
+                      ? 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'
+                      : result.error.code === 'invalid_payload'
+                        ? 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'
+                        : result.error.code === 'busy'
+                          ? 'conversation.creativeStudio.workspace.filmExport.errors.busy'
+                          : result.error.messageKey;
           return { ok: false as const, messageKey };
         }
         installExportCatalog(result.data);

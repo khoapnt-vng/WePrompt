@@ -14,11 +14,12 @@ import { mkdirSync, promises as fs, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type {
-  StudioExportArtifactV2,
-  StudioExportCatalogV2,
-  StudioExportShapeV2,
-  StudioFilmExportFactsV2,
+import {
+  STUDIO_EXPORT_SCHEMA_VERSION_V2,
+  type StudioExportArtifactV2,
+  type StudioExportCatalogV2,
+  type StudioExportShapeV2,
+  type StudioFilmExportFactsV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/factories';
 import {
@@ -61,7 +62,7 @@ const makeArtifact = (
   createdAt = CREATED_AT,
   manifest = manifestFor({ relativePath: 'timeline.json', byteSize: 4, sha256: 'a'.repeat(64) })
 ): StudioExportArtifactV2 => ({
-  schemaVersion: 1,
+  schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
   id,
   projectId: CONTEXT.projectId,
   sourceRevision: CONTEXT.currentProjectRevision,
@@ -69,7 +70,7 @@ const makeArtifact = (
   payloadKind: shape === 'editor_folder' ? 'directory' : 'file',
   managedExport: { collection: 'exports', fileName: `managed_${id}` },
   byteSize: manifest.byteSize,
-  fileCount: manifest.fileCount,
+  payloadFileCount: manifest.payloadFileCount,
   manifestSha256: manifest.manifestSha256,
   createdAt,
 });
@@ -140,7 +141,7 @@ const filmFacts = (): StudioFilmExportFactsV2 => ({
 });
 
 const makeFilmArtifact = (id = 'film_1', createdAt = CREATED_AT): StudioExportArtifactV2 => ({
-  schemaVersion: 1,
+  schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
   id,
   projectId: CONTEXT.projectId,
   sourceRevision: CONTEXT.currentProjectRevision,
@@ -148,7 +149,7 @@ const makeFilmArtifact = (id = 'film_1', createdAt = CREATED_AT): StudioExportAr
   payloadKind: 'file',
   managedExport: { collection: 'exports', fileName: id },
   byteSize: 4,
-  fileCount: 1,
+  payloadFileCount: 1,
   manifestSha256: 'a'.repeat(64),
   createdAt,
   film: filmFacts(),
@@ -215,7 +216,7 @@ describe('schema-2 export catalog', () => {
   it('accepts strict film facts while stripping source hashes from the renderer projection', () => {
     const artifact = makeFilmArtifact();
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts: [artifact],
@@ -230,7 +231,7 @@ describe('schema-2 export catalog', () => {
           shape: 'film',
           folderName: 'film_1',
           byteSize: 4,
-          fileCount: 1,
+          payloadFileCount: 1,
           createdAt: CREATED_AT,
           film: {
             nominalDurationSeconds: 4,
@@ -258,7 +259,7 @@ describe('schema-2 export catalog', () => {
     const accepts = (film: StudioFilmExportFactsV2): boolean =>
       validateStudioExportCatalogV2(
         {
-          schemaVersion: 1,
+          schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
           projectId: CONTEXT.projectId,
           revision: 2,
           artifacts: [{ ...makeFilmArtifact(), film }],
@@ -355,7 +356,12 @@ describe('schema-2 export catalog', () => {
   });
   it('treats absence as logical revision one and projects only renderer-safe fields', () => {
     const logical = parseStudioExportCatalogV2(null, CONTEXT);
-    expect(logical).toEqual({ schemaVersion: 1, projectId: 'project_1', revision: 1, artifacts: [] });
+    expect(logical).toEqual({
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+      projectId: 'project_1',
+      revision: 1,
+      artifacts: [],
+    });
     expect(createLogicalStudioExportCatalogV2('project_1')).toEqual(logical);
 
     const artifact = makeArtifact('artifact_1');
@@ -369,7 +375,7 @@ describe('schema-2 export catalog', () => {
           shape: 'editor_folder',
           folderName: 'managed_artifact_1',
           byteSize: 4,
-          fileCount: 1,
+          payloadFileCount: 1,
           createdAt: CREATED_AT,
         },
       ],
@@ -381,7 +387,7 @@ describe('schema-2 export catalog', () => {
 
   it('round-trips only canonical exact-key catalog bytes and refuses raw authority mismatches', () => {
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts: [makeArtifact('artifact_1')],
@@ -418,10 +424,33 @@ describe('schema-2 export catalog', () => {
     for (const value of cases) expect(validateStudioExportCatalogV2(value, CONTEXT)).toBe(false);
   });
 
+  it('uses an explicit payload-file count and identifies an otherwise-owned catalog from another sidecar version', () => {
+    const artifact = makeArtifact('artifact_1');
+    const catalog = {
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+      projectId: CONTEXT.projectId,
+      revision: 2,
+      artifacts: [artifact],
+    };
+
+    expect(validateStudioExportCatalogV2(catalog, CONTEXT)).toBe(true);
+    const legacyArtifact = { ...artifact } as unknown as Record<string, unknown>;
+    const payloadFileCount = legacyArtifact.payloadFileCount;
+    delete legacyArtifact.payloadFileCount;
+    legacyArtifact.fileCount = payloadFileCount;
+    expect(validateStudioExportCatalogV2({ ...catalog, artifacts: [legacyArtifact] }, CONTEXT)).toBe(false);
+    for (const schemaVersion of [1, 5]) {
+      expectCode(
+        () => parseStudioExportCatalogV2(Buffer.from(JSON.stringify({ ...catalog, schemaVersion })), CONTEXT),
+        'unsupported_catalog_schema'
+      );
+    }
+  });
+
   it('rejects every non-data catalog shape and every malformed artifact authority field', () => {
     const artifact = makeArtifact('artifact_1');
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts: [artifact],
@@ -484,8 +513,8 @@ describe('schema-2 export catalog', () => {
       withArtifact({ managedExport: { collection: 'exports', fileName: 'invalid name' } }),
       withArtifact({ byteSize: -1 }),
       withArtifact({ byteSize: 1.5 }),
-      withArtifact({ fileCount: 0 }),
-      withArtifact({ fileCount: 1.5 }),
+      withArtifact({ payloadFileCount: 0 }),
+      withArtifact({ payloadFileCount: 1.5 }),
       withArtifact({ manifestSha256: 1 }),
       withArtifact({ manifestSha256: 'A'.repeat(64) }),
       withArtifact({ createdAt: 1 }),
@@ -493,9 +522,9 @@ describe('schema-2 export catalog', () => {
       withArtifact({ createdAt: '2026-99-99T00:00:00.000Z' }),
       withArtifact({ createdAt: '2026-08-20T00:00:00.000z' }),
       withArtifact({ payloadKind: 'file' }),
-      withArtifact({ fileCount: 105 }),
+      withArtifact({ payloadFileCount: 105 }),
       withArtifact({ shape: 'still', payloadKind: 'directory' }),
-      withArtifact({ shape: 'script', payloadKind: 'file', fileCount: 2 }),
+      withArtifact({ shape: 'script', payloadKind: 'file', payloadFileCount: 2 }),
     ];
     for (const value of malformedCatalogs) expect(validateStudioExportCatalogV2(value, CONTEXT)).toBe(false);
 
@@ -577,7 +606,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact(`artifact_${index}`, 'script', `2026-08-20T00:00:0${index}.000Z`)
     );
     const overRetained: StudioExportCatalogV2 = {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: CONTEXT.projectId,
       revision: 7,
       artifacts: sixScripts,
@@ -591,7 +620,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact('artifact_b', 'still', '2026-08-20T00:00:01.000Z', manifestB),
     ];
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts,
@@ -650,7 +679,7 @@ describe('schema-2 export catalog', () => {
     expect(parseStudioExportManifestV2(bytes)).toMatchObject({
       entries,
       byteSize: 18,
-      fileCount: 2,
+      payloadFileCount: 2,
       manifestSha256: createHash('sha256').update(bytes).digest('hex'),
     });
 
@@ -686,7 +715,7 @@ describe('schema-2 export catalog', () => {
   it('increments once, enforces exact catalog CAS, and evicts the oldest fifth artifact by time and ID', () => {
     const artifacts = ['a', 'b', 'c', 'd', 'e'].map((id) => makeArtifact(`artifact_${id}`));
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: CONTEXT.projectId,
       revision: 6,
       artifacts,
@@ -734,7 +763,7 @@ describe('schema-2 export catalog', () => {
     );
     const script = makeArtifact('script_kept', 'script', '2026-08-19T00:00:00.000Z');
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: CONTEXT.projectId,
       revision: 7,
       artifacts: [script, ...films],
@@ -764,7 +793,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact('artifact_b', 'still', '2026-08-20T00:00:01.000Z', manifestB),
     ];
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts,
@@ -822,6 +851,66 @@ describe('schema-2 export catalog', () => {
 });
 
 describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
+  it('quarantines schema-5 and immediately previous schema-1 catalogs before starting sidecar schema 2', async () => {
+    const currentArtifact = makeArtifact('legacy_artifact');
+    const { payloadFileCount, ...previousArtifactFields } = currentArtifact;
+    const incompatibleCatalogs = [
+      {
+        label: 'project-schema-coupled-v5',
+        catalog: { schemaVersion: 5, projectId: CONTEXT.projectId, revision: 9, artifacts: [] },
+      },
+      {
+        label: 'independent-sidecar-v1',
+        catalog: {
+          schemaVersion: 1,
+          projectId: CONTEXT.projectId,
+          revision: 9,
+          artifacts: [{ ...previousArtifactFields, schemaVersion: 1, fileCount: payloadFileCount }],
+        },
+      },
+    ] as const;
+
+    for (const { label, catalog } of incompatibleCatalogs) {
+      const authority = await makeAuthority();
+      const catalogPath = path.join(authority.projectDir, 'exports-v2.json');
+      const legacyCatalog = Buffer.from(JSON.stringify(catalog));
+      await fs.writeFile(catalogPath, legacyCatalog);
+      const legacyExportsPath = path.join(authority.projectDir, 'exports');
+      await fs.mkdir(legacyExportsPath);
+      await fs.writeFile(path.join(legacyExportsPath, 'legacy-export.txt'), `preserve ${label}`);
+
+      const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+      await expect(store.repair(authority)).resolves.toEqual(createLogicalStudioExportCatalogV2(authority.project.id));
+      await expect(fs.access(catalogPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(fs.access(legacyExportsPath)).rejects.toMatchObject({ code: 'ENOENT' });
+
+      const quarantinePath = path.join(authority.projectDir, 'exports-quarantine');
+      const quarantinedEntries = await fs.readdir(quarantinePath);
+      const quarantinedRoots = quarantinedEntries.map((entry) => path.join(quarantinePath, entry, 'entry'));
+      const quarantinedCatalog = await Promise.all(
+        quarantinedRoots.map(async (entry) => {
+          const stats = await fs.lstat(entry);
+          return stats.isFile() ? fs.readFile(entry) : null;
+        })
+      );
+      expect(quarantinedCatalog.some((bytes) => bytes?.equals(legacyCatalog) === true)).toBe(true);
+      const quarantinedExport = await Promise.all(
+        quarantinedRoots.map(async (entry) => {
+          const stats = await fs.lstat(entry);
+          return stats.isDirectory()
+            ? fs.readFile(path.join(entry, 'legacy-export.txt'), 'utf8').catch(() => null)
+            : null;
+        })
+      );
+      expect(quarantinedExport).toContain(`preserve ${label}`);
+
+      const created = await store.create(authority, makeCreatePlan(`after_cutover_${label}`, 1));
+      expect(created.schemaVersion).toBe(STUDIO_EXPORT_SCHEMA_VERSION_V2);
+      expect(created.revision).toBe(2);
+      await expect(store.list(authority)).resolves.toEqual(created);
+    }
+  });
+
   it('publishes and physically reloads one strict film payload with its exact composition facts', async () => {
     const authority = await makeAuthority();
     const film = Buffer.from('verified-film-bytes');
@@ -920,7 +1009,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
           shape: 'film',
           folderName: 'film_export_1',
           byteSize: film.byteLength,
-          fileCount: 1,
+          payloadFileCount: 1,
           createdAt: CREATED_AT,
           film: {
             nominalDurationSeconds: 10,
@@ -1095,7 +1184,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
     const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
 
     await expect(store.list(authority)).resolves.toEqual({
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: 'project_1',
       revision: 1,
       artifacts: [],
@@ -3154,7 +3243,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
 
     const restarted = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
     await expect(restarted.repair(authority)).resolves.toEqual({
-      schemaVersion: 1,
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
       projectId: 'project_1',
       revision: 1,
       artifacts: [],

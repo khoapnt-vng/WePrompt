@@ -1489,7 +1489,8 @@
         },
         "errors": {
           "catalogUnavailable": "Dışa aktarma kataloğu kullanılamıyor. Projeyi yeniden yükleyin.",
-          "staleAuthority": "Proje veya katalog değişti. Yeniden dışa aktarmadan önce projeyi inceleyin.",
+          "staleAuthority": "Proje değişti. Yeniden dışa aktarmadan önce geçerli projeyi inceleyin.",
+          "staleCatalog": "Dışa aktarım kataloğu değişti. Yeniden denemeden önce dışa aktarım geçmişini yeniden yükleyin.",
           "invalidMedia": "Seçili medya eski, standart dışı veya geçersiz. Cut görünümünü inceleyin.",
           "mediaUnavailable": "Seçili medya doğrulanamadı. Eksik bir dışa aktarma yayımlanmadı.",
           "busy": "Creative Studio başka bir işlemi tamamlıyor. Tamamlanınca yeniden deneyin.",
@@ -1518,7 +1519,8 @@
         "dissolve": "Zincirleme geçiş",
         "errors": {
           "catalogUnavailable": "Dışa aktarım kataloğu kullanılamıyor. Projeyi yeniden yükleyin.",
-          "staleAuthority": "Proje veya dışa aktarım kataloğu değişti. Eski film yayımlanmadı — yeniden dışa aktarmadan önce geçerli projeyi inceleyin.",
+          "staleAuthority": "Proje değişti. Eski film yayımlanmadı — yeniden dışa aktarmadan önce geçerli projeyi inceleyin.",
+          "staleCatalog": "Dışa aktarım kataloğu değişti. Eski film yayımlanmadı — dışa aktarım geçmişini yeniden yükleyip tekrar deneyin.",
           "unavailable": "Film dışa aktarımı için FFmpeg gerekir, ancak bu cihazda bulunamadı. FFmpeg'i yükleyin veya FFMPEG_PATH değişkenini elinizdeki bir kopyaya ayarlayın, ardından projeyi yeniden açın.",
           "renderFailed": "Yerel render doğrulanamadı. Kısmi dışa aktarım yayımlanmadı.",
           "cancelled": "Film dışa aktarımı iptal edildi. Proje medyası değişmedi.",
@@ -2004,6 +2006,7 @@
       "projectNotFound": "Creative Studio projesi artık mevcut değil.",
       "storyboardExists": "Bu projede zaten bir storyboard var. Yeniden taslak oluşturmadan önce değiştirmeyi onaylayın.",
       "staleProject": "Proje başka bir yerde değiştirildi. Tekrar denemeden önce yenileyin.",
+      "staleExportCatalog": "Dışa aktarım kataloğu değişti. Tekrar denemeden önce dışa aktarım geçmişini yenileyin.",
       "planningUnavailable": "Storyboard taslağı oluşturma kullanılamıyor. Elle düzenlemeye devam edebilirsiniz.",
       "invalidRoute": "Seçilen oluşturma motoru geçersiz veya kullanılamıyor.",
       "cancellationRefused": "Sağlayıcı artık çalışan bu işi iptal edemiyor.",

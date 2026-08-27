@@ -1488,7 +1488,8 @@
         },
         "errors": {
           "catalogUnavailable": "El catálogo de exportación no está disponible. Recarga el proyecto.",
-          "staleAuthority": "El proyecto o el catálogo cambió. Revisa el proyecto antes de volver a exportar.",
+          "staleAuthority": "El proyecto cambió. Revisa el proyecto actual antes de volver a exportar.",
+          "staleCatalog": "El catálogo de exportación cambió. Vuelve a cargar el historial de exportaciones antes de reintentarlo.",
           "invalidMedia": "El medio seleccionado está obsoleto, no es canónico o no es válido. Revisa Cut.",
           "mediaUnavailable": "No se pudo verificar el archivo seleccionado. No se publicó una exportación parcial.",
           "busy": "Creative Studio está terminando otra operación. Inténtalo cuando finalice.",
@@ -1517,7 +1518,8 @@
         "dissolve": "Fundido encadenado",
         "errors": {
           "catalogUnavailable": "El catálogo de exportación no está disponible. Recarga el proyecto.",
-          "staleAuthority": "El proyecto o el catálogo de exportación cambió. No se publicó ninguna película obsoleta: revisa el proyecto antes de volver a exportar.",
+          "staleAuthority": "El proyecto cambió. No se publicó ninguna película obsoleta: revisa el proyecto actual antes de volver a exportar.",
+          "staleCatalog": "El catálogo de exportación cambió. No se publicó ninguna película obsoleta: vuelve a cargar el historial de exportaciones antes de reintentarlo.",
           "unavailable": "La exportación de película necesita FFmpeg, que no se encontró en este dispositivo. Instálalo o define FFMPEG_PATH con la ruta de una copia que ya tengas y vuelve a abrir el proyecto.",
           "renderFailed": "No se pudo verificar el render local. No se publicó una exportación parcial.",
           "cancelled": "Se canceló la exportación. Los medios del proyecto no cambiaron.",
@@ -2019,6 +2021,7 @@
       "projectNotFound": "El proyecto de Creative Studio ya no existe.",
       "storyboardExists": "Este proyecto ya tiene un guion gráfico. Confirma que deseas sustituirlo antes de crear otro borrador.",
       "staleProject": "El proyecto se ha modificado en otro lugar. Actualízalo antes de reintentarlo.",
+      "staleExportCatalog": "El catálogo de exportación cambió. Actualiza el historial de exportaciones antes de reintentarlo.",
       "planningUnavailable": "La creación del borrador del guion gráfico no está disponible. Puedes continuar editando manualmente.",
       "invalidRoute": "El motor de generación seleccionado no es válido o no está disponible.",
       "cancellationRefused": "El proveedor ya no puede cancelar esta tarea en curso.",

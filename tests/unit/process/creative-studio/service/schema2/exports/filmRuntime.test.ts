@@ -11,7 +11,11 @@ import { chmod, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import type { StudioAssetV2, StudioProjectV2 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_EXPORT_SCHEMA_VERSION_V2,
+  type StudioAssetV2,
+  type StudioProjectV2,
+} from '@/common/types/project/creativeStudioTypes';
 import type { StudioEditorFolderCompositionV2 } from '@/process/services/creative-studio/service/schema2/exports/editorFolder';
 import {
   createStudioFilmExporterV2,
@@ -212,7 +216,7 @@ const project = (overrides: Partial<StudioProjectV2> = {}): StudioProjectV2 =>
 
 const composition = (): StudioEditorFolderCompositionV2 => ({
   timeline: {
-    schemaVersion: 1,
+    schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
     projectId: 'project_1',
     sourceRevision: 4,
     name: 'Runtime film',
@@ -276,7 +280,7 @@ const composition = (): StudioEditorFolderCompositionV2 => ({
   manifestBytes: new Uint8Array(),
   manifestSha256: 'a'.repeat(64),
   byteSize: 0,
-  fileCount: 0,
+  payloadFileCount: 0,
 });
 
 const sources = (): StudioFilmVerifiedSourceV2[] => [

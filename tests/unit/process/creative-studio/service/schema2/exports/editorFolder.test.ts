@@ -582,7 +582,7 @@ describe('composeStudioEditorFolderV2', () => {
     expect(result.manifest.map(({ relativePath }) => relativePath)).toEqual(
       result.files.map(({ relativePath }) => relativePath)
     );
-    expect(result.fileCount).toBe(6);
+    expect(result.payloadFileCount).toBe(6);
     expect(result.byteSize).toBe(result.manifest.reduce((sum, entry) => sum + entry.byteSize, 0));
     const repeated = composeStudioEditorFolderV2(project, proofsFor(project, 'take_1', 'take_2', 'bed_1'));
     expect(repeated.manifestBytes).toEqual(result.manifestBytes);
@@ -787,8 +787,8 @@ describe('composeStudioEditorFolderV2', () => {
     const takeIds = Array.from({ length: STUDIO_MAX_SHOTS_PER_PROJECT }, (_, index) => `take_${index + 1}`);
     const result = composeStudioEditorFolderV2(project, proofsFor(project, ...takeIds, 'bed_1'));
 
-    expect(result.fileCount).toBe(100);
-    expect(result.fileCount).toBeLessThan(STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT);
+    expect(result.payloadFileCount).toBe(100);
+    expect(result.payloadFileCount).toBeLessThan(STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT);
     expect(result.files).toHaveLength(100);
     expect(result.files.filter(({ kind }) => kind === 'managed_asset')).toHaveLength(97);
     expect(result.files.filter(({ kind }) => kind === 'generated')).toHaveLength(3);

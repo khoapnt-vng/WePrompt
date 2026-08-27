@@ -49,7 +49,7 @@ type EditorFolderExportStatus =
       artifactId: string;
       folderName: string;
       byteSize: number;
-      fileCount: number;
+      payloadFileCount: number;
       slateShotOrdinals: number[];
       movedAsideCount: number;
     }
@@ -1287,7 +1287,7 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
       artifactId: artifact.id,
       folderName: artifact.folderName,
       byteSize: artifact.byteSize,
-      fileCount: artifact.fileCount,
+      payloadFileCount: artifact.payloadFileCount,
       slateShotOrdinals: submittedPreview.slateShotOrdinals,
       movedAsideCount: Math.max(0, beforeCount + 1 - afterCount),
     });
@@ -1427,13 +1427,15 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
             const messageKey =
               terminal.outcome === 'cancelled'
                 ? 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'
-                : terminal.reason === 'stale_authority'
+                : terminal.reason === 'stale_project'
                   ? 'conversation.creativeStudio.workspace.filmExport.errors.staleAuthority'
-                  : terminal.reason === 'invalid_media'
-                    ? 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'
-                    : terminal.reason === 'unavailable'
-                      ? 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'
-                      : 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed';
+                  : terminal.reason === 'stale_export_catalog'
+                    ? 'conversation.creativeStudio.workspace.filmExport.errors.staleCatalog'
+                    : terminal.reason === 'invalid_media'
+                      ? 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'
+                      : terminal.reason === 'unavailable'
+                        ? 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'
+                        : 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed';
             setFilmExportStatus({ kind: 'failure', renderId: terminal.renderId, messageKey });
           }
         } else {
@@ -1570,7 +1572,7 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
                   <span>
                     {t('conversation.creativeStudio.workspace.editorFolderExport.successFacts', {
                       bytes: editorFolderExportStatus.byteSize,
-                      count: editorFolderExportStatus.fileCount,
+                      count: editorFolderExportStatus.payloadFileCount,
                     })}
                   </span>
                   <span>

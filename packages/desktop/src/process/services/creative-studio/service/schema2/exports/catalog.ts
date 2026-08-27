@@ -48,7 +48,7 @@ const ARTIFACT_KEYS = [
   'payloadKind',
   'managedExport',
   'byteSize',
-  'fileCount',
+  'payloadFileCount',
   'manifestSha256',
   'createdAt',
 ] as const;
@@ -150,7 +150,7 @@ export type StudioValidatedExportManifestV2 = {
   entries: StudioExportManifestEntryV2[];
   bytes: Uint8Array;
   byteSize: number;
-  fileCount: number;
+  payloadFileCount: number;
   manifestSha256: string;
 };
 
@@ -280,6 +280,7 @@ export type StudioExportCatalogStoreV2 = {
 
 export type StudioExportCatalogErrorCodeV2 =
   | 'invalid_catalog'
+  | 'unsupported_catalog_schema'
   | 'invalid_manifest'
   | 'invalid_identity_proof'
   | 'stale_catalog_revision'
@@ -446,7 +447,7 @@ export const parseStudioExportManifestV2 = (bytes: Uint8Array): StudioValidatedE
     entries,
     bytes: Uint8Array.from(bytes),
     byteSize,
-    fileCount: entries.length,
+    payloadFileCount: entries.length,
     manifestSha256: sha256(bytes),
   };
 };
@@ -728,7 +729,7 @@ const validateArtifact = (
     typeof value.managedExport.fileName !== 'string' ||
     !SAFE_ID.test(value.managedExport.fileName) ||
     !isSafeNonnegativeInteger(value.byteSize) ||
-    !isSafePositiveInteger(value.fileCount) ||
+    !isSafePositiveInteger(value.payloadFileCount) ||
     typeof value.manifestSha256 !== 'string' ||
     !LOWERCASE_SHA256.test(value.manifestSha256) ||
     !isCanonicalTimestamp(value.createdAt)
@@ -736,11 +737,16 @@ const validateArtifact = (
     return false;
   }
   if (value.shape === 'editor_folder') {
-    return value.payloadKind === 'directory' && value.fileCount <= STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT;
+    return value.payloadKind === 'directory' && value.payloadFileCount <= STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT;
   }
   if (value.shape === 'film')
-    return value.payloadKind === 'file' && value.fileCount === 1 && value.byteSize > 0 && validateFilmFacts(value.film);
-  return value.payloadKind === 'file' && value.fileCount === 1;
+    return (
+      value.payloadKind === 'file' &&
+      value.payloadFileCount === 1 &&
+      value.byteSize > 0 &&
+      validateFilmFacts(value.film)
+    );
+  return value.payloadKind === 'file' && value.payloadFileCount === 1;
 };
 
 /** Validates a raw catalog against its owning project and current project revision. */
@@ -808,6 +814,14 @@ export const parseStudioExportCatalogV2 = (
   } catch {
     return fail('invalid_catalog');
   }
+  if (
+    isDataRecord(parsed) &&
+    parsed.projectId === context.projectId &&
+    isSafePositiveInteger(parsed.schemaVersion) &&
+    parsed.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V2
+  ) {
+    return fail('unsupported_catalog_schema');
+  }
   if (!validateStudioExportCatalogV2(parsed, context) || JSON.stringify(parsed) !== text) {
     return fail('invalid_catalog');
   }
@@ -834,7 +848,7 @@ export const projectStudioRendererExportCatalogV2 = (
       sourceRevision: artifact.sourceRevision,
       folderName: artifact.managedExport.fileName,
       byteSize: artifact.byteSize,
-      fileCount: artifact.fileCount,
+      payloadFileCount: artifact.payloadFileCount,
       createdAt: artifact.createdAt,
     };
     return artifact.shape === 'film'
@@ -929,7 +943,7 @@ export const validateStudioExportCatalogIdentityProofsV2 = (
     const manifestBytes = serializeStudioExportManifestV2(entries);
     if (
       !validateManifestEntries(entries) ||
-      entries.length !== artifact.fileCount ||
+      entries.length !== artifact.payloadFileCount ||
       entries.reduce((total, entry) => total + entry.byteSize, 0) !== artifact.byteSize ||
       sha256(manifestBytes) !== artifact.manifestSha256 ||
       (artifact.shape === 'film' &&
@@ -1737,7 +1751,7 @@ const validatePhysicalCatalog = async (
     const manifest = parseStudioExportManifestV2(manifestFile.bytes);
     if (
       manifest.manifestSha256 !== artifact.manifestSha256 ||
-      manifest.fileCount !== artifact.fileCount ||
+      manifest.payloadFileCount !== artifact.payloadFileCount ||
       manifest.byteSize !== artifact.byteSize ||
       (artifact.shape === 'film' &&
         (manifest.entries.length !== 1 ||
@@ -2261,6 +2275,69 @@ export const createStudioExportCatalogStoreV2 = (
     return fail('storage_error');
   };
 
+  const quarantineUnsupportedCatalog = async (
+    authority: StudioExportProjectAuthorityV2,
+    context: StudioExportCatalogValidationContextV2
+  ): Promise<void> => {
+    try {
+      await readCatalogState(authority, context);
+      return;
+    } catch (error) {
+      if (!(error instanceof StudioExportCatalogErrorV2) || error.code !== 'unsupported_catalog_schema') {
+        throw error;
+      }
+    }
+
+    const catalogPath = path.join(authority.projectDir, CATALOG_FILE_NAME);
+    const activePath = path.join(authority.projectDir, ACTIVE_DIRECTORY_NAME);
+    const quarantinePath = await ensureQuarantineDirectory(authority);
+    await authority.assertCurrent?.();
+    authority.assertActive?.();
+
+    const verifiedCatalog = await readBoundedFileNoFollow(catalogPath, CATALOG_MAX_BYTES);
+    try {
+      parseStudioExportCatalogV2(verifiedCatalog.bytes, context);
+      return;
+    } catch (error) {
+      if (!(error instanceof StudioExportCatalogErrorV2) || error.code !== 'unsupported_catalog_schema') {
+        throw error;
+      }
+    }
+
+    let projectProof = await capturePhysicalDirectoryProof(authority.projectDir);
+    let quarantineProof = await capturePhysicalDirectoryProof(quarantinePath);
+    const catalogProof = await captureQuarantineNodeProof(catalogPath, false);
+    if (catalogProof.kind !== 'file' || !sameIdentity(catalogProof.identity, verifiedCatalog.identity)) {
+      return fail('storage_error');
+    }
+    ({ sourceParentProof: projectProof, quarantineProof } = await moveProvedNodeToQuarantine(
+      authority,
+      catalogPath,
+      catalogProof,
+      projectProof,
+      quarantineProof
+    ));
+
+    try {
+      await fs.lstat(activePath);
+      const activeProof = await captureQuarantineNodeProof(activePath, false);
+      ({ sourceParentProof: projectProof, quarantineProof } = await moveProvedNodeToQuarantine(
+        authority,
+        activePath,
+        activeProof,
+        projectProof,
+        quarantineProof
+      ));
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+
+    await reprovePhysicalDirectory(projectProof);
+    await reprovePhysicalDirectory(quarantineProof);
+    await authority.assertCurrent?.();
+    authority.assertActive?.();
+  };
+
   const claimCatalogTempInQuarantine = async (
     authority: StudioExportProjectAuthorityV2,
     sourcePath: string,
@@ -2714,7 +2791,7 @@ export const createStudioExportCatalogStoreV2 = (
             payloadKind: plan.shape === 'editor_folder' ? ('directory' as const) : ('file' as const),
             managedExport: { collection: 'exports' as const, fileName: plan.managedFileName },
             byteSize: manifest.byteSize,
-            fileCount: manifest.fileCount,
+            payloadFileCount: manifest.payloadFileCount,
             manifestSha256: manifest.manifestSha256,
             createdAt: plan.createdAt,
           };
@@ -3691,9 +3768,10 @@ export const createStudioExportCatalogStoreV2 = (
     enqueue(authority.project.id, async () => {
       try {
         const context = await assertAuthority(authority);
-        const physical = await loadPhysicalCatalogWithContext(authority, context);
         const quarantinePath = path.join(authority.projectDir, QUARANTINE_DIRECTORY_NAME);
         const initialQuarantine = await snapshotQuarantineEntries(quarantinePath);
+        await quarantineUnsupportedCatalog(authority, context);
+        const physical = await loadPhysicalCatalogWithContext(authority, context);
         authority.assertActive?.();
         await recoverCatalogTemps(authority, context);
         const activePath = path.join(authority.projectDir, ACTIVE_DIRECTORY_NAME);
