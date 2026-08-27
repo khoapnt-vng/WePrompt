@@ -62,6 +62,31 @@ const projectWithShot = () => {
   };
 };
 
+const projectWithUndoHistory = () => {
+  const withShot = projectWithShot();
+  const { assetIds: _assetIds, jobIds: _jobIds, ...shotBefore } = withShot.shots.shot_1;
+  return {
+    ...withShot,
+    undoHistory: [
+      {
+        id: 'undo_1',
+        sourceRevision: 1,
+        label: 'Shot edits',
+        patches: [
+          {
+            kind: 'shot_fields' as const,
+            shotId: 'shot_1',
+            before: shotBefore,
+            beforeBeatId: 'beat_1',
+            beforeIndex: 0,
+            afterDigest: 'a'.repeat(64),
+          },
+        ],
+      },
+    ],
+  };
+};
+
 describe('Creative Studio brief file manifest', () => {
   it('persists only digest metadata while hydrating the runtime prose from brief.md', () => {
     const manifest = createStudioProjectManifestV2(project());
@@ -87,6 +112,23 @@ describe('Creative Studio brief file manifest', () => {
     const manifest = createStudioProjectManifestV2(current);
     const previousBuildManifest = structuredClone(manifest);
     delete (previousBuildManifest.shots.shot_1 as Partial<(typeof current.shots)['shot_1']>).dismissedSeedStillIds;
+
+    expect(decodeStudioProjectManifestV2(previousBuildManifest, current.brief)).toEqual({
+      project: current,
+      synchronized: true,
+    });
+  });
+
+  it('opens a previous-build manifest whose undo history holds a legacy Shot snapshot', () => {
+    // `SHOT_BEFORE_KEYS` derives from `SHOT_KEYS`, so adding a required Shot field also tightened
+    // undo-patch validation. Normalizing only the live `shots` map leaves every project that has
+    // ever been edited unopenable.
+    const current = projectWithUndoHistory();
+    const manifest = createStudioProjectManifestV2(current);
+    const previousBuildManifest = structuredClone(manifest);
+    delete (previousBuildManifest.shots.shot_1 as Record<string, unknown>).dismissedSeedStillIds;
+    delete (previousBuildManifest.undoHistory[0]!.patches[0]! as { before: Record<string, unknown> }).before
+      .dismissedSeedStillIds;
 
     expect(decodeStudioProjectManifestV2(previousBuildManifest, current.brief)).toEqual({
       project: current,

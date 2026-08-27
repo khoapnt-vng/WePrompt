@@ -37,17 +37,63 @@ const isBriefMetadata = (value: unknown): value is StudioBriefFileMetadataV2 =>
   typeof value.sha256 === 'string' &&
   SHA256_HEX.test(value.sha256);
 
-const normalizeLegacyShotFieldsV2 = (project: Record<string, unknown>): Record<string, unknown> => {
-  if (!isRecord(project.shots)) return project;
+/**
+ * Defaults one absent Shot field. Applied to every location a Shot-shaped record can occupy, not
+ * only the live `shots` map: `SHOT_BEFORE_KEYS` derives from `SHOT_KEYS`, so a required Shot field
+ * also tightens undo-patch validation, and a project that has ever been edited carries Shot
+ * snapshots inside `undoHistory[].patches[].before`.
+ */
+const withDefaultedShotFieldsV2 = (shot: unknown): { value: unknown; changed: boolean } => {
+  if (!isRecord(shot) || Object.hasOwn(shot, 'dismissedSeedStillIds')) return { value: shot, changed: false };
+  return { value: { ...shot, dismissedSeedStillIds: [] }, changed: true };
+};
+
+const normalizeLegacyShotMapV2 = (
+  shots: Record<string, unknown>
+): { value: Record<string, unknown>; changed: boolean } => {
   let changed = false;
-  const shots = Object.fromEntries(
-    Object.entries(project.shots).map(([shotId, shot]) => {
-      if (!isRecord(shot) || Object.hasOwn(shot, 'dismissedSeedStillIds')) return [shotId, shot];
-      changed = true;
-      return [shotId, { ...shot, dismissedSeedStillIds: [] }];
+  const next = Object.fromEntries(
+    Object.entries(shots).map(([shotId, shot]) => {
+      const normalized = withDefaultedShotFieldsV2(shot);
+      if (normalized.changed) changed = true;
+      return [shotId, normalized.value];
     })
   );
-  return changed ? { ...project, shots } : project;
+  return { value: changed ? next : shots, changed };
+};
+
+/** Shot snapshots stored in undo patches share the Shot shape and so share its required fields. */
+const normalizeLegacyUndoHistoryV2 = (undoHistory: unknown): { value: unknown; changed: boolean } => {
+  if (!Array.isArray(undoHistory)) return { value: undoHistory, changed: false };
+  let changed = false;
+  const entries = undoHistory.map((entry) => {
+    if (!isRecord(entry) || !Array.isArray(entry.patches)) return entry;
+    let entryChanged = false;
+    const patches = entry.patches.map((patch) => {
+      if (!isRecord(patch) || patch.kind !== 'shot_fields') return patch;
+      const normalized = withDefaultedShotFieldsV2(patch.before);
+      if (!normalized.changed) return patch;
+      entryChanged = true;
+      return { ...patch, before: normalized.value };
+    });
+    if (!entryChanged) return entry;
+    changed = true;
+    return { ...entry, patches };
+  });
+  return { value: changed ? entries : undoHistory, changed };
+};
+
+const normalizeLegacyShotFieldsV2 = (project: Record<string, unknown>): Record<string, unknown> => {
+  const shots = isRecord(project.shots)
+    ? normalizeLegacyShotMapV2(project.shots)
+    : { value: project.shots, changed: false };
+  const undoHistory = normalizeLegacyUndoHistoryV2(project.undoHistory);
+  if (!shots.changed && !undoHistory.changed) return project;
+  return {
+    ...project,
+    ...(shots.changed ? { shots: shots.value } : {}),
+    ...(undoHistory.changed ? { undoHistory: undoHistory.value } : {}),
+  };
 };
 
 const normalizeLegacyFrameExtractionFieldsV2 = (project: Record<string, unknown>): Record<string, unknown> => {
