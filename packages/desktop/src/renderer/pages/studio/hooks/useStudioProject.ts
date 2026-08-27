@@ -8,6 +8,8 @@ import { ipcBridge } from '@/common';
 import {
   STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
   STUDIO_MAX_EXPORTS_PER_SHAPE,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_EXPORT_SHAPES,
 } from '@/common/types/project/creativeStudioTypes';
 import type {
   StudioRendererProposalV2,
@@ -19,6 +21,7 @@ import type {
   StudioRendererReferenceGenerationHandoffV2,
   StudioRendererWorkspaceStatusV2,
   StudioGenerationCapabilityV2,
+  StudioFilmExportCapabilityV2,
   StudioGenerationCapabilityItemV2,
   StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -35,6 +38,7 @@ export type UseStudioProjectResult = {
   chainStatus: StudioRendererChainStatusV2 | null;
   routeCatalog: StudioRouteCatalogV2 | null;
   generationCapability: StudioGenerationCapabilityV2 | null;
+  filmExportCapability: StudioFilmExportCapabilityV2 | null;
   exportCatalog: StudioRendererExportCatalogV2 | null;
   loadState: StudioProjectLoadState;
   errorMessageKey: string | null;
@@ -136,13 +140,13 @@ const sanitizeExportCatalog = (
     (catalog.revision as number) < 1 ||
     !Array.isArray(catalog.artifacts) ||
     Reflect.ownKeys(catalog.artifacts).length !== catalog.artifacts.length + 1 ||
-    catalog.artifacts.length > STUDIO_MAX_EXPORTS_PER_SHAPE * 3
+    catalog.artifacts.length > STUDIO_MAX_EXPORTS_PER_SHAPE * STUDIO_EXPORT_SHAPES.length
   ) {
     return null;
   }
 
   const ids = new Set<string>();
-  const shapeCounts = new Map<'editor_folder' | 'still' | 'script', number>();
+  const shapeCounts = new Map<'editor_folder' | 'still' | 'script' | 'film', number>();
   const artifacts: StudioRendererExportCatalogV2['artifacts'] = [];
   let previous: { createdAt: string; id: string } | null = null;
   for (let index = 0; index < catalog.artifacts.length; index += 1) {
@@ -151,14 +155,22 @@ const sanitizeExportCatalog = (
     if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) return null;
     const artifact = candidate as Record<string, unknown>;
     if (
-      !hasExactKeys(artifact, ['byteSize', 'createdAt', 'fileCount', 'folderName', 'id', 'shape', 'sourceRevision']) ||
+      !hasExactKeys(
+        artifact,
+        artifact.shape === 'film'
+          ? ['byteSize', 'createdAt', 'fileCount', 'folderName', 'id', 'shape', 'sourceRevision', 'film']
+          : ['byteSize', 'createdAt', 'fileCount', 'folderName', 'id', 'shape', 'sourceRevision']
+      ) ||
       typeof artifact.id !== 'string' ||
       !SAFE_STUDIO_ID.test(artifact.id) ||
       ids.has(artifact.id) ||
       !Number.isSafeInteger(artifact.sourceRevision) ||
       (artifact.sourceRevision as number) < 1 ||
       (artifact.sourceRevision as number) > currentProjectRevision ||
-      (artifact.shape !== 'editor_folder' && artifact.shape !== 'still' && artifact.shape !== 'script') ||
+      (artifact.shape !== 'editor_folder' &&
+        artifact.shape !== 'still' &&
+        artifact.shape !== 'script' &&
+        artifact.shape !== 'film') ||
       typeof artifact.folderName !== 'string' ||
       !SAFE_STUDIO_ID.test(artifact.folderName) ||
       !Number.isSafeInteger(artifact.byteSize) ||
@@ -166,6 +178,7 @@ const sanitizeExportCatalog = (
       !Number.isSafeInteger(artifact.fileCount) ||
       (artifact.fileCount as number) < 1 ||
       (artifact.fileCount as number) > STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT ||
+      (artifact.shape !== 'editor_folder' && artifact.fileCount !== 1) ||
       typeof artifact.createdAt !== 'string' ||
       !Number.isFinite(Date.parse(artifact.createdAt)) ||
       new Date(artifact.createdAt).toISOString() !== artifact.createdAt ||
@@ -180,7 +193,7 @@ const sanitizeExportCatalog = (
     if (shapeCount > STUDIO_MAX_EXPORTS_PER_SHAPE) return null;
     shapeCounts.set(artifact.shape, shapeCount);
     previous = { createdAt: artifact.createdAt, id: artifact.id };
-    artifacts.push({
+    const projected = {
       id: artifact.id,
       sourceRevision: artifact.sourceRevision as number,
       shape: artifact.shape,
@@ -188,7 +201,75 @@ const sanitizeExportCatalog = (
       byteSize: artifact.byteSize as number,
       fileCount: artifact.fileCount as number,
       createdAt: artifact.createdAt,
-    });
+    };
+    if (artifact.shape === 'film') {
+      if (typeof artifact.film !== 'object' || artifact.film === null || Array.isArray(artifact.film)) return null;
+      const film = artifact.film as Record<string, unknown>;
+      if (
+        !hasExactKeys(film, [
+          'nominalDurationSeconds',
+          'renderedDurationSeconds',
+          'transition',
+          'trimTails',
+          'trimmedShotCount',
+        ]) ||
+        typeof film.nominalDurationSeconds !== 'number' ||
+        !Number.isFinite(film.nominalDurationSeconds) ||
+        film.nominalDurationSeconds <= 0 ||
+        typeof film.renderedDurationSeconds !== 'number' ||
+        !Number.isFinite(film.renderedDurationSeconds) ||
+        film.renderedDurationSeconds <= 0 ||
+        film.renderedDurationSeconds > film.nominalDurationSeconds ||
+        typeof film.trimTails !== 'boolean' ||
+        !Number.isSafeInteger(film.trimmedShotCount) ||
+        (film.trimmedShotCount as number) < 0 ||
+        (film.trimmedShotCount as number) > STUDIO_MAX_SHOTS_PER_PROJECT ||
+        (artifact.byteSize as number) < 1 ||
+        typeof film.transition !== 'object' ||
+        film.transition === null ||
+        Array.isArray(film.transition)
+      ) {
+        return null;
+      }
+      const transition = film.transition as Record<string, unknown>;
+      if (
+        !hasExactKeys(transition, transition.kind === 'cut' ? ['kind'] : ['kind', 'requestedSeconds', 'seconds']) ||
+        (transition.kind !== 'cut' &&
+          (transition.kind !== 'dissolve' ||
+            typeof transition.requestedSeconds !== 'number' ||
+            !Number.isFinite(transition.requestedSeconds) ||
+            transition.requestedSeconds < 1 / 24 ||
+            transition.requestedSeconds > 1 ||
+            typeof transition.seconds !== 'number' ||
+            !Number.isFinite(transition.seconds) ||
+            transition.seconds < 1 / 24 ||
+            transition.seconds > transition.requestedSeconds ||
+            transition.requestedSeconds - transition.seconds >= 1 / 24 + Number.EPSILON ||
+            Math.abs(transition.seconds * 24 - Math.round(transition.seconds * 24)) > 0.000_001))
+      ) {
+        return null;
+      }
+      artifacts.push({
+        ...projected,
+        shape: 'film',
+        film: {
+          nominalDurationSeconds: film.nominalDurationSeconds,
+          renderedDurationSeconds: film.renderedDurationSeconds,
+          transition:
+            transition.kind === 'cut'
+              ? { kind: 'cut' }
+              : {
+                  kind: 'dissolve',
+                  requestedSeconds: transition.requestedSeconds as number,
+                  seconds: transition.seconds as number,
+                },
+          trimTails: film.trimTails,
+          trimmedShotCount: film.trimmedShotCount as number,
+        },
+      });
+    } else {
+      artifacts.push({ ...projected, shape: artifact.shape });
+    }
   }
   return { revision: catalog.revision as number, artifacts };
 };
@@ -213,6 +294,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   >([]);
   const [routeCatalog, setRouteCatalog] = useState<StudioRouteCatalogV2 | null>(null);
   const [generationCapability, setGenerationCapability] = useState<StudioGenerationCapabilityV2 | null>(null);
+  const [filmExportCapability, setFilmExportCapability] = useState<StudioFilmExportCapabilityV2 | null>(null);
   const [exportCatalog, setExportCatalog] = useState<StudioRendererExportCatalogV2 | null>(null);
   const [loadState, setLoadState] = useState<StudioProjectLoadState>(projectId ? 'loading' : 'idle');
   const [errorMessageKey, setErrorMessageKey] = useState<string | null>(null);
@@ -229,6 +311,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const referencePairRequestRef = useRef(0);
   const routeRequestRef = useRef(0);
   const capabilityRequestRef = useRef(0);
+  const filmCapabilityRequestRef = useRef(0);
   const routeRefreshActiveRef = useRef<number | null>(null);
   const capabilityRefreshPendingRef = useRef(false);
   const exportRequestRef = useRef(0);
@@ -839,11 +922,50 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     [applyExportCatalog]
   );
 
+  const loadFilmExportCapability = useCallback(
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<void> => {
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return;
+      }
+      const request = ++filmCapabilityRequestRef.current;
+      try {
+        const result = await ipcBridge.creativeStudio.getFilmExportCapability.invoke({ projectId: requestedProjectId });
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          filmCapabilityRequestRef.current !== request
+        ) {
+          return;
+        }
+        if (result.ok === false) {
+          setFilmExportCapability(null);
+          return;
+        }
+        setFilmExportCapability(result.data);
+      } catch {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          filmCapabilityRequestRef.current === request
+        ) {
+          setFilmExportCapability(null);
+        }
+      }
+    },
+    []
+  );
+
   useEffect(() => {
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     routeRequestRef.current += 1;
     capabilityRequestRef.current += 1;
+    filmCapabilityRequestRef.current += 1;
     routeRefreshActiveRef.current = null;
     capabilityRefreshPendingRef.current = false;
     const boundProjectId = binding.projectId;
@@ -857,6 +979,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       routeCatalogRef.current = null;
       setRouteCatalog(null);
       setGenerationCapability(null);
+      setFilmExportCapability(null);
       exportCatalogRef.current = null;
       setExportCatalog(null);
       setLoadState('idle');
@@ -879,6 +1002,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     routeCatalogRef.current = null;
     setRouteCatalog(null);
     setGenerationCapability(null);
+    setFilmExportCapability(null);
     exportCatalogRef.current = null;
     setExportCatalog(null);
     setWorkspaceErrorMessageKey(null);
@@ -912,7 +1036,11 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
 
     void (async () => {
       if ((await loadProjectWorkspace(binding, generation, true)) !== null) {
-        await Promise.all([loadRoutes(binding, generation), loadExports(binding, generation)]);
+        await Promise.all([
+          loadRoutes(binding, generation),
+          loadExports(binding, generation),
+          loadFilmExportCapability(binding, generation),
+        ]);
       }
     })();
     void loadProposals(binding, generation);
@@ -924,7 +1052,16 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       unsubscribeProposal();
       unsubscribeReference();
     };
-  }, [binding, loadExports, loadGenerationCapability, loadProjectWorkspace, loadProposals, loadReferences, loadRoutes]);
+  }, [
+    binding,
+    loadExports,
+    loadFilmExportCapability,
+    loadGenerationCapability,
+    loadProjectWorkspace,
+    loadProposals,
+    loadReferences,
+    loadRoutes,
+  ]);
 
   const refetchProjectWorkspace = useCallback(async (): Promise<StudioRendererProjectV2 | null> => {
     if (binding.projectId === undefined || activeBindingRef.current !== binding) return null;
@@ -991,6 +1128,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     chainStatus,
     routeCatalog,
     generationCapability,
+    filmExportCapability,
     exportCatalog,
     loadState,
     errorMessageKey,

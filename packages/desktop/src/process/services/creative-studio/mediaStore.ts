@@ -6,7 +6,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { constants as fsConstants, createReadStream, createWriteStream, promises as fs } from 'node:fs';
+import { constants as fsConstants, createWriteStream, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { PassThrough, Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -45,6 +45,8 @@ import {
   type CreativeStudioStore,
   type StudioProjectAuthoritySnapshotV2,
 } from './store';
+import { resolveStudioFfmpegBinaries } from './ffmpegBinaries';
+import { studioChildProcessDetached, terminateStudioChildProcessTree } from './childProcessTree';
 import { downloadRemoteMedia, type RemoteMediaDownloadDeps } from '../remote-media/remoteMediaDownloader';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
@@ -381,6 +383,8 @@ export type PersistCapturedPosterInputV2 = {
 export type StudioConditioningFrameRequestV2 = {
   projectId: string;
   extractionId: string;
+  /** Runtime cancellation only; never persisted or exposed across IPC. */
+  signal?: AbortSignal;
 };
 
 export type StudioResolvedAssetV2 = {
@@ -922,22 +926,9 @@ export const openVerifiedReadStream = async (
         throw new CreativeStudioMediaError('storage_error');
       }
     }
-    const stream = createReadStream(filePath, {
-      fd: handle.fd,
-      autoClose: false,
-      start,
-      end,
-    });
-    let closed = false;
-    const closeHandle = (): void => {
-      if (closed) return;
-      closed = true;
-      void handle.close().catch((): undefined => undefined);
-    };
-    stream.once('end', closeHandle);
-    stream.once('error', closeHandle);
-    stream.once('close', closeHandle);
-    return stream;
+    // FileHandle.createReadStream owns this exact descriptor. Its async iterator does not settle
+    // until the auto-close path has physically closed the FileHandle, including early return().
+    return handle.createReadStream({ autoClose: true, start, end });
   } catch (error) {
     await handle.close().catch((): undefined => undefined);
     throw error;
@@ -1183,23 +1174,6 @@ const digestOpenedFile = async (handle: Awaited<ReturnType<typeof fs.open>>): Pr
   }
 };
 
-const resolveFfprobeBinaryV2 = (configured: string | undefined): string => {
-  const explicit = configured?.trim() || process.env.FFPROBE_PATH?.trim();
-  if (explicit) return explicit;
-  const ffmpegBinary = process.env.FFMPEG_PATH?.trim();
-  if (!ffmpegBinary || !ffmpegBinary.includes(path.sep)) return 'ffprobe';
-  const extension = path.extname(ffmpegBinary).toLowerCase() === '.exe' ? '.exe' : '';
-  return path.join(path.dirname(ffmpegBinary), `ffprobe${extension}`);
-};
-
-const resolveFfmpegBinaryV2 = (configured: string | undefined, ffprobeBinary: string): string => {
-  const explicit = configured?.trim() || process.env.FFMPEG_PATH?.trim();
-  if (explicit) return explicit;
-  if (!ffprobeBinary.includes(path.sep)) return 'ffmpeg';
-  const extension = path.extname(ffprobeBinary).toLowerCase() === '.exe' ? '.exe' : '';
-  return path.join(path.dirname(ffprobeBinary), `ffmpeg${extension}`);
-};
-
 const runFfprobeDurationV2 = async (binary: string, handle: Awaited<ReturnType<typeof fs.open>>): Promise<number> =>
   new Promise<number>((resolve, reject) => {
     const child = spawn(
@@ -1215,15 +1189,12 @@ const runFfprobeDurationV2 = async (binary: string, handle: Awaited<ReturnType<t
         '3',
         'fd:',
       ],
-      { stdio: ['ignore', 'pipe', 'ignore', handle.fd], windowsHide: true }
+      { detached: studioChildProcessDetached(), stdio: ['ignore', 'pipe', 'ignore', handle.fd], windowsHide: true }
     );
     let stdout = '';
     let settled = false;
-    const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(new CreativeStudioMediaError('invalid_media'));
-    }, 60_000);
-    timer.unref?.();
+    let failed = false;
+    let termination: Promise<void> | null = null;
     const finish = (error?: Error, durationSeconds?: number): void => {
       if (settled) return;
       settled = true;
@@ -1231,17 +1202,40 @@ const runFfprobeDurationV2 = async (binary: string, handle: Awaited<ReturnType<t
       if (error) reject(error);
       else resolve(durationSeconds!);
     };
+    const terminate = (): void => {
+      if (termination !== null) return;
+      termination = terminateStudioChildProcessTree(child, { nativeChild: true }).catch((): void => {
+        failed = true;
+      });
+      void termination.then(() => {
+        if (!settled && failed) finish(new CreativeStudioMediaError('invalid_media'));
+      });
+    };
+    const timer = setTimeout(() => {
+      failed = true;
+      terminate();
+    }, 60_000);
+    timer.unref?.();
     child.stdout.on('data', (chunk: Buffer) => {
-      if (stdout.length > 4_096) {
-        child.kill('SIGKILL');
-        finish(new CreativeStudioMediaError('invalid_media'));
+      if (stdout.length + chunk.length > 4_096) {
+        failed = true;
+        terminate();
         return;
       }
       stdout += chunk.toString('utf8');
     });
-    child.once('error', () => finish(new CreativeStudioMediaError('invalid_media')));
-    child.once('close', (code, signal) => {
-      if (code !== 0 || signal !== null) {
+    child.stdout.on('error', () => {
+      failed = true;
+      terminate();
+    });
+    child.once('error', () => {
+      failed = true;
+      terminate();
+    });
+    const settleAfterTermination = async (code: number | null, signal: NodeJS.Signals | null): Promise<void> => {
+      await termination;
+      if (settled) return;
+      if (failed || code !== 0 || signal !== null) {
         finish(new CreativeStudioMediaError('invalid_media'));
         return;
       }
@@ -1251,7 +1245,8 @@ const runFfprobeDurationV2 = async (binary: string, handle: Awaited<ReturnType<t
         return;
       }
       finish(undefined, durationSeconds);
-    });
+    };
+    child.once('close', (code, signal) => void settleAfterTermination(code, signal));
   });
 
 type StudioBedAudioProbeV2 = {
@@ -1268,10 +1263,12 @@ const runFfprobeBedAudioV2 = async (
     const child = spawn(
       binary,
       ['-v', 'error', '-show_entries', 'stream=codec_type,duration:format=duration', '-of', 'json', '-fd', '3', 'fd:'],
-      { stdio: ['ignore', 'pipe', 'ignore', handle.fd], windowsHide: true }
+      { detached: studioChildProcessDetached(), stdio: ['ignore', 'pipe', 'ignore', handle.fd], windowsHide: true }
     );
     let stdout = '';
     let settled = false;
+    let failed = false;
+    let termination: Promise<void> | null = null;
     const finish = (error?: Error, result?: StudioBedAudioProbeV2): void => {
       if (settled) return;
       settled = true;
@@ -1279,22 +1276,40 @@ const runFfprobeBedAudioV2 = async (
       if (error) reject(error);
       else resolve(result!);
     };
+    const terminate = (): void => {
+      if (termination !== null) return;
+      termination = terminateStudioChildProcessTree(child, { nativeChild: true }).catch((): void => {
+        failed = true;
+      });
+      void termination.then(() => {
+        if (!settled && failed) finish(new CreativeStudioMediaError('invalid_media'));
+      });
+    };
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(new CreativeStudioMediaError('invalid_media'));
+      failed = true;
+      terminate();
     }, 60_000);
     timer.unref?.();
     child.stdout.on('data', (chunk: Buffer) => {
       if (stdout.length + chunk.length > 64 * 1024) {
-        child.kill('SIGKILL');
-        finish(new CreativeStudioMediaError('invalid_media'));
+        failed = true;
+        terminate();
         return;
       }
       stdout += chunk.toString('utf8');
     });
-    child.once('error', () => finish(new CreativeStudioMediaError('invalid_media')));
-    child.once('close', (code, signal) => {
-      if (code !== 0 || signal !== null) {
+    child.stdout.on('error', () => {
+      failed = true;
+      terminate();
+    });
+    child.once('error', () => {
+      failed = true;
+      terminate();
+    });
+    const settleAfterTermination = async (code: number | null, signal: NodeJS.Signals | null): Promise<void> => {
+      await termination;
+      if (settled) return;
+      if (failed || code !== 0 || signal !== null) {
         finish(new CreativeStudioMediaError('invalid_media'));
         return;
       }
@@ -1336,7 +1351,8 @@ const runFfprobeBedAudioV2 = async (
       } catch {
         finish(new CreativeStudioMediaError('invalid_media'));
       }
-    });
+    };
+    child.once('close', (code, signal) => void settleAfterTermination(code, signal));
   });
 
 const runFfmpegBedAudioDecodeV2 = async (
@@ -1365,12 +1381,15 @@ const runFfmpegBedAudioDecodeV2 = async (
         '-',
       ],
       {
+        detached: studioChildProcessDetached(),
         stdio: ['ignore', 'pipe', 'ignore', handle.fd],
         windowsHide: true,
       }
     );
     let stdout = '';
     let settled = false;
+    let failed = false;
+    let termination: Promise<void> | null = null;
     const finish = (error?: Error, durationSeconds?: number): void => {
       if (settled) return;
       settled = true;
@@ -1378,22 +1397,40 @@ const runFfmpegBedAudioDecodeV2 = async (
       if (error) reject(error);
       else resolve(durationSeconds!);
     };
+    const terminate = (): void => {
+      if (termination !== null) return;
+      termination = terminateStudioChildProcessTree(child, { nativeChild: true }).catch((): void => {
+        failed = true;
+      });
+      void termination.then(() => {
+        if (!settled && failed) finish(new CreativeStudioMediaError('invalid_media'));
+      });
+    };
     const timer = setTimeout(() => {
-      child.kill('SIGKILL');
-      finish(new CreativeStudioMediaError('invalid_media'));
+      failed = true;
+      terminate();
     }, 60_000);
     timer.unref?.();
     child.stdout.on('data', (chunk: Buffer) => {
       if (stdout.length + chunk.length > 64 * 1024) {
-        child.kill('SIGKILL');
-        finish(new CreativeStudioMediaError('invalid_media'));
+        failed = true;
+        terminate();
         return;
       }
       stdout += chunk.toString('utf8');
     });
-    child.once('error', () => finish(new CreativeStudioMediaError('invalid_media')));
-    child.once('close', (code, signal) => {
-      if (code !== 0 || signal !== null) {
+    child.stdout.on('error', () => {
+      failed = true;
+      terminate();
+    });
+    child.once('error', () => {
+      failed = true;
+      terminate();
+    });
+    const settleAfterTermination = async (code: number | null, signal: NodeJS.Signals | null): Promise<void> => {
+      await termination;
+      if (settled) return;
+      if (failed || code !== 0 || signal !== null) {
         finish(new CreativeStudioMediaError('invalid_media'));
         return;
       }
@@ -1405,7 +1442,8 @@ const runFfmpegBedAudioDecodeV2 = async (
         return;
       }
       finish(undefined, durationSeconds);
-    });
+    };
+    child.once('close', (code, signal) => void settleAfterTermination(code, signal));
   });
 
 const defaultProbeVideoDurationSecondsV2 = async (input: {
@@ -1529,21 +1567,21 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const createMutationId = deps.createMutationId ?? (() => randomUUID().replaceAll('-', '_'));
   const now = deps.now ?? (() => new Date().toISOString());
   const getAvailableDiskBytes = deps.getAvailableDiskBytes ?? getAvailableStudioDiskBytes;
+  const ffmpegBinaries = resolveStudioFfmpegBinaries(deps);
   const probeVideoDurationSecondsV2 =
     deps.probeVideoDurationSecondsV2 ??
     ((input: { filePath: string; byteSize: number; sha256: string }) =>
       defaultProbeVideoDurationSecondsV2({
         ...input,
-        ffprobeBinary: resolveFfprobeBinaryV2(deps.ffprobeBinary),
+        ffprobeBinary: ffmpegBinaries.ffprobe,
       }));
   const probeBedAudioV2 =
     deps.probeBedAudioV2 ??
     ((input: { filePath: string; byteSize: number; sha256: string }) => {
-      const ffprobeBinary = resolveFfprobeBinaryV2(deps.ffprobeBinary);
       return defaultProbeBedAudioV2({
         ...input,
-        ffprobeBinary,
-        ffmpegBinary: resolveFfmpegBinaryV2(deps.ffmpegBinary, ffprobeBinary),
+        ffprobeBinary: ffmpegBinaries.ffprobe,
+        ffmpegBinary: ffmpegBinaries.ffmpeg,
       });
     });
   const conditioningFrameExtractor = deps.conditioningFrameExtractor ?? extractConditioningFrame;
@@ -3411,7 +3449,12 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const extractConditioningFrameOnceV2 = async (
     input: StudioConditioningFrameRequestV2
   ): Promise<StudioFrameExtraction> => {
+    const assertConditioningActive = (): void => {
+      if (input.signal?.aborted) throw new StudioConditioningFrameError('decode_failed', 'decoder cancelled');
+    };
+    assertConditioningActive();
     const loaded = await deps.store.getProjectV2(input.projectId);
+    assertConditioningActive();
     if (loaded.status !== 'supported') throw new CreativeStudioMediaError('not_found');
     const initial = ownRecordValue(loaded.project.frameExtractions, input.extractionId);
     if (initial === undefined) throw new CreativeStudioMediaError('not_found');
@@ -3561,7 +3604,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           ? { byteSize: poster!.byteSize, sha256: poster!.sha256 }
           : null,
         allowProviderLastFrame,
+        signal: input.signal,
       });
+      assertConditioningActive();
       await assertV2ManagedMutation(authority, [partsDirectory, framesDirectory]);
       const completedPart = await regularFile(partPath);
       partIdentity = fileIdentity(completedPart);
@@ -3581,10 +3626,12 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const hash = createHash('sha256');
       let sample = Buffer.alloc(0);
       for await (const chunk of await openVerifiedReadStream(partPath)) {
+        assertConditioningActive();
         const bytes = Buffer.from(chunk);
         hash.update(bytes);
         if (sample.length < 32) sample = Buffer.concat([sample, bytes]).subarray(0, 32);
       }
+      assertConditioningActive();
       const signature = sniff(sample);
       if (signature === null || !signature.mimeType.startsWith('image/')) {
         throw new StudioConditioningFrameError('decode_failed');
@@ -3606,7 +3653,10 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         finalPath,
         framesDirectory.directory,
         partIdentity,
-        () => assertV2ManagedMutation(authority, [partsDirectory, framesDirectory]),
+        async () => {
+          assertConditioningActive();
+          await assertV2ManagedMutation(authority, [partsDirectory, framesDirectory]);
+        },
         (identity) => {
           finalIdentity = identity;
         }
@@ -3631,7 +3681,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       if (finalPath === null || finalIdentity === null) throw new CreativeStudioMediaError('storage_error');
       const frameFilePath = finalPath;
       const frameFileProof = await captureManagedFileProofV2(frameFilePath, finalIdentity, frameAsset);
+      assertConditioningActive();
       const committed = await withManagedProjectAuthority(project.id, async (projectAuthority, facts) => {
+        assertConditioningActive();
         if (projectAuthority.projectDir !== projectDir) throw new CreativeStudioMediaError('storage_error');
         await projectAuthority.assertCurrent?.();
         await assertV2ManagedMutation(authority, [framesDirectory]);
@@ -3680,6 +3732,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           undefined,
           async () => {
             assertOperationActive();
+            assertConditioningActive();
             await assertManagedFileProofV2(frameFilePath, frameFileProof);
           }
         );
@@ -3710,10 +3763,17 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     if (!SAFE_ID.test(input.projectId) || !SAFE_ID.test(input.extractionId)) {
       return Promise.reject(new CreativeStudioMediaError('invalid_media'));
     }
+    if (input.signal?.aborted) {
+      return Promise.reject(new StudioConditioningFrameError('decode_failed', 'decoder cancelled'));
+    }
     const key = `${input.projectId}\u0000${input.extractionId}`;
     const existing = conditioningFrameFlights.get(key);
     if (existing !== undefined) return existing;
-    const request = structuredClone(input);
+    const request: StudioConditioningFrameRequestV2 = {
+      projectId: input.projectId,
+      extractionId: input.extractionId,
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+    };
     const flight = extractConditioningFrameOnceV2(request).finally(() => {
       if (conditioningFrameFlights.get(key) === flight) conditioningFrameFlights.delete(key);
     });

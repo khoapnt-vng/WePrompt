@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => {
       listReferenceGenerationHandoffs: { invoke: vi.fn() },
       getProjectWorkspace: { invoke: vi.fn() },
       listRoutes: { invoke: vi.fn() },
+      getFilmExportCapability: { invoke: vi.fn() },
+      getFilmExportStatus: { invoke: vi.fn() },
+      listExports: { invoke: vi.fn() },
       hasUnsavedWork: { provider: vi.fn(() => vi.fn()) },
       flushUnsavedWork: { provider: vi.fn(() => vi.fn()) },
       projectUpdated: event(),
@@ -129,6 +132,12 @@ describe('Creative Studio E2E selectors', () => {
         catalogVersion: 'selector-test',
       },
     });
+    mocks.bridge.getFilmExportCapability.invoke.mockResolvedValue({
+      ok: true,
+      data: { status: 'unavailable', reason: 'ffmpeg_unavailable' },
+    });
+    mocks.bridge.getFilmExportStatus.invoke.mockResolvedValue({ ok: true, data: { status: 'idle' } });
+    mocks.bridge.listExports.invoke.mockResolvedValue({ ok: true, data: { revision: 1, artifacts: [] } });
   });
 
   it('resolves every stable selector used by the E2E route smoke exactly once', async () => {

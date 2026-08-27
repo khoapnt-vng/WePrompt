@@ -1491,6 +1491,48 @@
           "artifactUnavailable": "Dieser Export ist nicht mehr im aktiven Katalog. Lade das Projekt neu.",
           "resultConflict": "Vor der Bestätigung ist ein neuerer Katalog eingetroffen. Lade ihn neu und prüfe ihn."
         }
+      },
+      "filmExport": {
+        "action": "Film exportieren…",
+        "title": "Eine Filmdatei exportieren",
+        "description": "Erstellt eine editorfertige MP4 aus dem aktuellen Schnitt. Nicht abgedeckte Einstellungen werden zu zeitgesteuerten schwarzen Tafeln.",
+        "transition": "Übergänge",
+        "cut": "Harte Schnitte",
+        "dissolve": "0,35-s-Überblendungen",
+        "trimTails": "Begrenzte ruhige Enden kürzen (die letzte gerenderte Einstellung bleibt geschützt)",
+        "noSpend": "Dies ist ein lokaler Export. Es werden keine Medien generiert und kein Geld ausgegeben.",
+        "export": "Film exportieren",
+        "cancel": "Export abbrechen",
+        "reveal": "Im Finder anzeigen",
+        "dismiss": "Schließen",
+        "successFacts": "{{nominal}} s erstellt · {{rendered}} s exportiert · {{count}} Enden gekürzt",
+        "successQuarantine": "Ältere Filmexporte verschoben: {{count}}",
+        "phase": {
+          "preparing": "Exakte Quellmedien werden vorbereitet…",
+          "analyzing": "Medien und ruhige Enden werden analysiert…",
+          "rendering": "Film wird lokal gerendert…",
+          "publishing": "Fertiger Film wird geprüft und veröffentlicht…"
+        },
+        "disabled": {
+          "no_beats": "Vor dem Export einen Beat hinzufügen",
+          "duration_pending": "Für jeden leeren Beat eine Dauer festlegen",
+          "invalid_media": "Veraltete oder ungültige Medien vor dem Export beheben",
+          "bed_too_short": "Ein lang genuges Audiobett wählen",
+          "mutationActive": "Aktuelle Änderung vor dem Export abschließen",
+          "exportRunning": "Ein Filmexport läuft bereits",
+          "catalogUnavailable": "Filmexportspeicher ist nicht verfügbar"
+        },
+        "errors": {
+          "catalogUnavailable": "Der Exportkatalog ist nicht verfügbar. Projekt neu laden und erneut versuchen.",
+          "staleAuthority": "Projekt oder Exportkatalog wurden geändert. Kein veralteter Film wurde veröffentlicht.",
+          "unavailable": "Dieses Gerät hat keine verifizierte FFmpeg-Filmexportfunktion.",
+          "renderFailed": "Der lokale Film konnte nicht verifiziert werden. Kein Teilexport wurde veröffentlicht.",
+          "cancelled": "Der Filmexport wurde abgebrochen. Projektmedien blieben unverändert.",
+          "invalidMedia": "Der Schnitt enthält veraltete, nicht kanonische oder ungültige Medien.",
+          "busy": "Creative Studio schließt einen anderen Vorgang ab.",
+          "artifactUnavailable": "Dieser Film ist nicht mehr im aktiven Katalog.",
+          "resultConflict": "Ein neuerer Exportkatalog kam an, bevor dieser Film bestätigt werden konnte."
+        }
       }
     },
     "rules": {

@@ -302,6 +302,7 @@ const StudioProjectPage: React.FC<{
     chainStatus,
     routeCatalog,
     generationCapability,
+    filmExportCapability,
     exportCatalog,
     loadState,
     errorMessageKey,
@@ -313,6 +314,7 @@ const StudioProjectPage: React.FC<{
     refetchProposals,
     refetchReferences,
     refetchRoutes,
+    refetchExports,
     installExportCatalog,
   } = useStudioProject(projectId);
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
@@ -2285,6 +2287,126 @@ const StudioProjectPage: React.FC<{
     [runWorkspaceExclusive]
   );
 
+  const createFilm = useCallback(
+    async (input: {
+      renderId: string;
+      transition: { kind: 'cut' } | { kind: 'dissolve'; seconds: number };
+      trimTails: boolean;
+    }): Promise<{ ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }> => {
+      const completed = await runWorkspaceExclusive(async () => {
+        const current = projectRef.current;
+        const catalog = exportCatalogRef.current;
+        if (current === null || catalog === null) {
+          return {
+            ok: false as const,
+            messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.catalogUnavailable',
+          };
+        }
+        const result = await ipcBridge.creativeStudio.createExport.invoke({
+          projectId: current.id,
+          expectedRevision: current.revision,
+          expectedCatalogRevision: catalog.revision,
+          shape: 'film',
+          ...input,
+        });
+        if (result.ok === false) {
+          const messageKey =
+            result.error.code === 'stale_project'
+              ? 'conversation.creativeStudio.workspace.filmExport.errors.staleAuthority'
+              : result.error.code === 'ffmpeg_unavailable' || result.error.code === 'unsupported_capabilities'
+                ? 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'
+                : result.error.code === 'render_failed' || result.error.code === 'storage_error'
+                  ? 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'
+                  : result.error.code === 'cancelled'
+                    ? 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'
+                    : result.error.code === 'invalid_payload'
+                      ? 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'
+                      : result.error.code === 'busy'
+                        ? 'conversation.creativeStudio.workspace.filmExport.errors.busy'
+                        : result.error.messageKey;
+          return { ok: false as const, messageKey };
+        }
+        installExportCatalog(result.data);
+        return { ok: true as const, catalog: result.data };
+      });
+      return (
+        completed ?? {
+          ok: false,
+          messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.busy',
+        }
+      );
+    },
+    [installExportCatalog, runWorkspaceExclusive]
+  );
+
+  const getFilmExportStatus = useCallback(async () => {
+    try {
+      const result = await ipcBridge.creativeStudio.getFilmExportStatus.invoke({ projectId });
+      if (!result.ok) return null;
+      if (result.data.status === 'terminal' && result.data.result.projectId !== projectId) return null;
+      return result.data;
+    } catch {
+      return null;
+    }
+  }, [projectId]);
+
+  const cancelFilmExport = useCallback(
+    async (renderId: string): Promise<boolean> => {
+      try {
+        const result = await ipcBridge.creativeStudio.cancelFilmExport.invoke({ projectId, renderId });
+        return result.ok && result.data.status === 'cancelled';
+      } catch {
+        return false;
+      }
+    },
+    [projectId]
+  );
+
+  const acknowledgeFilmExport = useCallback(
+    async (renderId: string): Promise<'acknowledged' | 'not_found' | null> => {
+      try {
+        const result = await ipcBridge.creativeStudio.acknowledgeFilmExport.invoke({ projectId, renderId });
+        return result.ok ? result.data.status : null;
+      } catch {
+        return null;
+      }
+    },
+    [projectId]
+  );
+
+  const revealFilm = useCallback(
+    async (artifactId: string): Promise<{ ok: true } | { ok: false; messageKey: string }> => {
+      const completed = await runWorkspaceExclusive(async () => {
+        const current = projectRef.current;
+        const catalog = exportCatalogRef.current;
+        if (
+          current === null ||
+          catalog === null ||
+          catalog.artifacts.filter((artifact) => artifact.id === artifactId && artifact.shape === 'film').length !== 1
+        ) {
+          return {
+            ok: false as const,
+            messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.artifactUnavailable',
+          };
+        }
+        const result = await ipcBridge.creativeStudio.revealExport.invoke({
+          projectId: current.id,
+          expectedCatalogRevision: catalog.revision,
+          artifactId,
+        });
+        if (result.ok === false) return { ok: false as const, messageKey: result.error.messageKey };
+        return { ok: true as const };
+      });
+      return (
+        completed ?? {
+          ok: false,
+          messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.busy',
+        }
+      );
+    },
+    [runWorkspaceExclusive]
+  );
+
   const referenceActions = useMemo<ReferencesViewActions & TableReferenceBindingActions>(
     () => ({
       addBackground: async ({ label, prompt }): Promise<boolean> => {
@@ -3343,8 +3465,15 @@ const StudioProjectPage: React.FC<{
               routeCatalog={routeCatalog}
               generationCapability={currentGenerationCapability}
               exportCatalog={exportCatalog}
+              filmExportCapability={filmExportCapability}
               createEditorFolder={createEditorFolder}
               revealEditorFolder={revealEditorFolder}
+              createFilm={createFilm}
+              getFilmExportStatus={getFilmExportStatus}
+              refreshExports={refetchExports}
+              cancelFilmExport={cancelFilmExport}
+              acknowledgeFilmExport={acknowledgeFilmExport}
+              revealFilm={revealFilm}
               detachBedAudio={cutActions.detachBedAudio}
               drafts={drafts}
               pending={workspacePending}

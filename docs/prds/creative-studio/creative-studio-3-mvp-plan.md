@@ -7,11 +7,17 @@ Written 2026-08-22. Scope agreed with the owner the same day.
 references after the film spine. The earlier Slice 5 evidence remains useful as a record of what the
 old Cast/Look mechanism proved, but it is not the target workflow.
 
+**Owner-approved film amendment — 2026-08-27:** the one-file `film` export is implemented as one
+verified local `film.mp4`, with deterministic cut/dissolve assembly and selected-bed mixing. It never
+generates media or spends, and its action stays absent unless Main inventories the required local
+ffmpeg graph components and proves the selected encoder/container/basic-A/V contract. This supersedes
+the opening exclusion, the former §4 row, and the editor-folder non-goal.
+
 **The MVP is this sentence:** a pilot user types one line about what they want, answers two or three
 questions, and watches a film — without ever opening a settings form.
 
-Out of that sentence: no one-file export, no narration, no hand-tuning of models. References and cast
-land after the spine runs, not before.
+Still out of that sentence: no narration and no hand-tuning of models. Reference ordering follows the
+owner-approved 2026-08-24 reference amendment above.
 
 **Narrowed further 2026-08-22, on the owner's instruction: make it work first.** Cost legibility and
 duration fitting are out of the MVP — no rate-card display, no estimate ranges, no solving shot
@@ -169,13 +175,12 @@ users.
 
 ## 4. Explicitly out, and why
 
-| Item                              | Reason                                                                                                                                                                            |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| One-file stitched export          | §6 rules it ffmpeg-class, spiked out and unbuilt. The Cut offers the editor folder instead — and §6 is explicit that the one-file option is hidden rather than shown and failing. |
-| Voice generation and TTS          | Shooting script may contain voiceover direction, but the MVP has no audio/TTS lane or model. Real gap, own sequence.                                                              |
-| Hard-cut gating (BUG-095)         | Correctness, not viability. The bookkeeping is already right; only the money is missing.                                                                                          |
-| The Beat panel redraw (§13.4)     | Four pieces of carried design work. None of it blocks a film.                                                                                                                     |
-| `presentation-runs` (BUG-092/093) | Platform, not Studio. Broken 100% of the time and worth fixing — but it does not stand between a user and a film.                                                                 |
+| Item                              | Reason                                                                                                               |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Voice generation and TTS          | Shooting script may contain voiceover direction, but the MVP has no audio/TTS lane or model. Real gap, own sequence. |
+| Hard-cut gating (BUG-095)         | Correctness, not viability. The bookkeeping is already right; only the money is missing.                             |
+| The Beat panel redraw (§13.4)     | Four pieces of carried design work. None of it blocks a film.                                                        |
+| `presentation-runs` (BUG-092/093) | Platform, not Studio. Broken 100% of the time and worth fixing — but it does not stand between a user and a film.    |
 
 ## 5. Risks worth naming now
 
@@ -1190,6 +1195,9 @@ approving spend, or leaving the active workspace.
 
 ### Required product behavior
 
+- This is the authoritative coverage classification for both `editor_folder` and `film`: every
+  uncovered Shot receives its own timed slate; slate eligibility is not limited to structurally empty
+  Beats.
 - The project `⋮` menu is the only place that starts a new editor-folder export. Remove the obsolete
   export controls from Cut only after the menu path works.
 - The action runs immediately. It must never prepare a quote, request confirmation, authorize spend,
@@ -1239,7 +1247,6 @@ approving spend, or leaving the active workspace.
 
 ### Explicit non-goals
 
-- A single playable final film, FFmpeg concat/mux/transitions, or an **Export film…** action.
 - Determinate per-file progress or a new progress event channel.
 - Export-history UI, Files-panel redesign, Finder-drop ingestion, or a storage-layout migration.
 - Capturing arbitrary Cut frames as references or adding new reference nouns.

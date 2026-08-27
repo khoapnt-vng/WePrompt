@@ -364,6 +364,10 @@ const VALID_PAYLOADS = {
     expectedCatalogRevision: 1,
     shape: 'editor_folder',
   },
+  'creative-studio.get-film-export-capability': { projectId: 'project_1' },
+  'creative-studio.get-film-export-status': { projectId: 'project_1' },
+  'creative-studio.cancel-film-export': { projectId: 'project_1', renderId: 'film_1' },
+  'creative-studio.acknowledge-film-export': { projectId: 'project_1', renderId: 'film_1' },
   'creative-studio.list-exports': { projectId: 'project_1' },
   'creative-studio.copy-export': {
     projectId: 'project_1',
@@ -1173,6 +1177,11 @@ const INVALID_PAYLOADS = [
     'creative-studio.create-export',
     'stitched export shape',
     { projectId: 'project_1', expectedRevision: 1, expectedCatalogRevision: 1, shape: 'stitched' },
+  ],
+  [
+    'creative-studio.create-export',
+    'film without renderer-owned render identity and exact options',
+    { projectId: 'project_1', expectedRevision: 1, expectedCatalogRevision: 1, shape: 'film' },
   ],
   [
     'creative-studio.copy-export',
@@ -2021,6 +2030,10 @@ describe('native bridge payload schemas', () => {
       'creative-studio.detach-bed-audio',
       'creative-studio.set-bed',
       'creative-studio.create-export',
+      'creative-studio.get-film-export-capability',
+      'creative-studio.get-film-export-status',
+      'creative-studio.cancel-film-export',
+      'creative-studio.acknowledge-film-export',
       'creative-studio.list-exports',
       'creative-studio.copy-export',
       'creative-studio.reveal-export',
@@ -2078,6 +2091,9 @@ describe('native bridge payload schemas', () => {
       'creative-studio.detach-bed-audio',
       'creative-studio.set-bed',
       'creative-studio.create-export',
+      'creative-studio.get-film-export-capability',
+      'creative-studio.get-film-export-status',
+      'creative-studio.cancel-film-export',
       'creative-studio.list-exports',
       'creative-studio.copy-export',
       'creative-studio.reveal-export',
@@ -2093,9 +2109,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(48);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(52);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(52);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(52);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);
@@ -2343,7 +2359,7 @@ describe('native bridge payload schemas', () => {
     }
   });
 
-  it('accepts only the three exact Task 13 export shapes and keeps main-owned names absent', () => {
+  it('accepts only the four exact export shapes and keeps main-owned names absent', () => {
     const common = { projectId: 'project_1', expectedRevision: 7, expectedCatalogRevision: 2 };
     expect(parseNativeBridgePayload('creative-studio.create-export', { ...common, shape: 'editor_folder' })).toEqual({
       ...common,
@@ -2356,6 +2372,24 @@ describe('native bridge payload schemas', () => {
     expect(
       parseNativeBridgePayload('creative-studio.create-export', { ...common, shape: 'still', shotId: 'shot_1' })
     ).toEqual({ ...common, shape: 'still', shotId: 'shot_1' });
+    const film = {
+      ...common,
+      shape: 'film' as const,
+      renderId: 'film_1',
+      transition: { kind: 'dissolve' as const, seconds: 0.35 },
+      trimTails: true,
+    };
+    expect(parseNativeBridgePayload('creative-studio.create-export', film)).toEqual(film);
+    for (const payload of [
+      { ...film, transition: { kind: 'dissolve', seconds: 0 } },
+      { ...film, transition: { kind: 'cut', seconds: 0.35 } },
+      { ...film, trimTails: 'yes' },
+      { ...film, outputPath: '/private/film.mp4' },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.create-export', payload)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
     for (const shape of ['stitched', 'video', 'project'] as const) {
       expect(() => parseNativeBridgePayload('creative-studio.create-export', { ...common, shape })).toThrow(
         INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE

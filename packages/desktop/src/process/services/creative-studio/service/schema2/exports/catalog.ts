@@ -13,12 +13,24 @@ import {
   STUDIO_MAX_EXPORT_DIRECTORY_DEPTH,
   STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
   STUDIO_MAX_EXPORTS_PER_SHAPE,
+  STUDIO_MAX_BEATS,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_EXPORT_SHAPES,
   STUDIO_EXPORT_SCHEMA_VERSION_V2,
+  STUDIO_FILM_EXPORT_AUDIO_CHANNELS,
+  STUDIO_FILM_EXPORT_AUDIO_SAMPLE_RATE,
+  STUDIO_FILM_EXPORT_BED_GAIN,
+  STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION,
+  STUDIO_FILM_EXPORT_FRAME_RATE,
+  STUDIO_FILM_EXPORT_TAKE_GAIN,
+  STUDIO_BED_FADE_OUT_SECONDS,
   type StudioCopyExportResultV2,
   type StudioExportArtifactV2,
   type StudioExportArtifactRequestV2,
   type StudioExportCatalogV2,
   type StudioExportShapeV2,
+  type StudioFilmExportFactsV2,
   type StudioProjectV2,
   type StudioRendererExportCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -40,6 +52,73 @@ const ARTIFACT_KEYS = [
   'manifestSha256',
   'createdAt',
 ] as const;
+const FILM_ARTIFACT_KEYS = [...ARTIFACT_KEYS, 'film'] as const;
+const FILM_FACT_KEYS = [
+  'schemaVersion',
+  'nominalDurationSeconds',
+  'renderedDurationSeconds',
+  'transition',
+  'dissolveCount',
+  'trimTails',
+  'segments',
+  'video',
+  'audio',
+] as const;
+const FILM_SHOT_SEGMENT_KEYS = [
+  'kind',
+  'shotId',
+  'sourceAssetId',
+  'sourceSha256',
+  'sourceInSeconds',
+  'sourceOutSeconds',
+  'renderedSourceOutSeconds',
+  'normalizedDurationSeconds',
+  'chainBreak',
+  'hasAudio',
+] as const;
+const FILM_SLATE_SEGMENT_KEYS = ['kind', 'beatId', 'shotId', 'durationSeconds', 'normalizedDurationSeconds'] as const;
+const FILM_VIDEO_KEYS = [
+  'container',
+  'codec',
+  'encoder',
+  'profile',
+  'level',
+  'width',
+  'height',
+  'frameRate',
+  'pixelFormat',
+  'scaleMode',
+  'sampleAspectRatio',
+  'colorPrimaries',
+  'colorTransfer',
+  'colorSpace',
+  'colorRange',
+  'gopFrames',
+  'bitrate',
+  'trackTimeBase',
+  'metadataStripped',
+  'chaptersStripped',
+  'fastStart',
+] as const;
+const FILM_AUDIO_KEYS = [
+  'codec',
+  'sampleRate',
+  'channels',
+  'channelLayout',
+  'sampleFormat',
+  'bitrate',
+  'silenceForMissingStreams',
+  'takeGain',
+  'bedAssetId',
+  'bedSha256',
+  'bedGain',
+  'bedFadeOutSeconds',
+  'bedFadeCurve',
+  'dissolveCrossfade',
+  'dissolveCurve',
+  'limiterPeak',
+  'limiterLatencyCompensated',
+] as const;
 const CATALOG_KEYS = ['schemaVersion', 'projectId', 'revision', 'artifacts'] as const;
 const MANAGED_EXPORT_KEYS = ['collection', 'fileName'] as const;
 const MANIFEST_ENTRY_KEYS = ['relativePath', 'byteSize', 'sha256'] as const;
@@ -54,7 +133,7 @@ const ARTIFACT_RECORD_NAME = 'artifact.json';
 const MANIFEST_FILE_NAME = 'manifest.json';
 const FINDER_METADATA_FILE_NAME = '.DS_Store';
 const CATALOG_MAX_BYTES = 256 * 1024;
-const ARTIFACT_RECORD_MAX_BYTES = 16 * 1024;
+const ARTIFACT_RECORD_MAX_BYTES = 64 * 1024;
 const MANIFEST_MAX_BYTES = 256 * 1024;
 const DEFAULT_MAX_ARTIFACT_BYTES = 5 * 1024 * 1024 * 1024;
 const COPY_BUFFER_BYTES = 64 * 1024;
@@ -138,15 +217,18 @@ export type StudioExportPayloadFilePlanV2 =
   | StudioExportGeneratedPayloadFilePlanV2
   | StudioExportVerifiedStreamPayloadFilePlanV2;
 
-export type StudioExportCreatePlanV2 = {
+type StudioExportCreatePlanBaseV2 = {
   expectedProjectRevision: number;
   expectedCatalogRevision: number;
   artifactId: string;
   managedFileName: string;
-  shape: StudioExportShapeV2;
   createdAt: string;
   files: readonly StudioExportPayloadFilePlanV2[];
 };
+
+export type StudioExportCreatePlanV2 =
+  | (StudioExportCreatePlanBaseV2 & { shape: Exclude<StudioExportShapeV2, 'film'> })
+  | (StudioExportCreatePlanBaseV2 & { shape: 'film'; film: StudioFilmExportFactsV2 });
 
 export type StudioExportCopyDestinationDescriptionV2 = {
   artifactId: string;
@@ -375,20 +457,271 @@ const compareArtifacts = (left: StudioExportArtifactV2, right: StudioExportArtif
   return left.id < right.id ? -1 : 1;
 };
 
+const isFinitePositive = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0 && value <= Number.MAX_SAFE_INTEGER;
+
+const closeEnough = (left: number, right: number): boolean => Math.abs(left - right) <= 0.000_001;
+
+const STUDIO_FILM_DIMENSIONS = new Set([
+  '1280x720',
+  '720x1280',
+  '720x720',
+  '960x720',
+  '720x960',
+  '1920x1080',
+  '1080x1920',
+  '1080x1080',
+  '1440x1080',
+  '1080x1440',
+]);
+
+const validateFilmFacts = (value: unknown): value is StudioFilmExportFactsV2 => {
+  if (
+    !isDataRecord(value) ||
+    !hasExactKeys(value, FILM_FACT_KEYS) ||
+    value.schemaVersion !== STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION ||
+    !isFinitePositive(value.nominalDurationSeconds) ||
+    !isFinitePositive(value.renderedDurationSeconds) ||
+    typeof value.trimTails !== 'boolean' ||
+    !Number.isSafeInteger(value.dissolveCount) ||
+    (value.dissolveCount as number) < 0 ||
+    !isDenseDataArray(value.segments) ||
+    value.segments.length < 1 ||
+    value.segments.length > STUDIO_MAX_SHOTS_PER_PROJECT + STUDIO_MAX_BEATS ||
+    !isDataRecord(value.transition) ||
+    !isDataRecord(value.video) ||
+    !hasExactKeys(value.video, FILM_VIDEO_KEYS) ||
+    value.video.container !== 'mp4' ||
+    value.video.codec !== 'h264' ||
+    (value.video.encoder !== 'h264_videotoolbox' &&
+      value.video.encoder !== 'h264_nvenc' &&
+      value.video.encoder !== 'h264_qsv' &&
+      value.video.encoder !== 'h264_amf' &&
+      value.video.encoder !== 'h264_mf') ||
+    value.video.profile !== 'high' ||
+    value.video.level !== '4.2' ||
+    !Number.isSafeInteger(value.video.width) ||
+    !Number.isSafeInteger(value.video.height) ||
+    !STUDIO_FILM_DIMENSIONS.has(`${value.video.width}x${value.video.height}`) ||
+    value.video.frameRate !== STUDIO_FILM_EXPORT_FRAME_RATE ||
+    value.video.pixelFormat !== 'yuv420p' ||
+    value.video.scaleMode !== 'contain_black_pad' ||
+    value.video.sampleAspectRatio !== '1:1' ||
+    value.video.colorPrimaries !== 'bt709' ||
+    value.video.colorTransfer !== 'bt709' ||
+    value.video.colorSpace !== 'bt709' ||
+    value.video.colorRange !== 'tv' ||
+    value.video.gopFrames !== 48 ||
+    (value.video.bitrate !== 8_000_000 && value.video.bitrate !== 12_000_000) ||
+    value.video.bitrate !==
+      ((value.video.width as number) >= 1920 || (value.video.height as number) >= 1920 ? 12_000_000 : 8_000_000) ||
+    value.video.trackTimeBase !== '1/24000' ||
+    value.video.metadataStripped !== true ||
+    value.video.chaptersStripped !== true ||
+    value.video.fastStart !== false ||
+    !isDataRecord(value.audio) ||
+    !hasExactKeys(value.audio, FILM_AUDIO_KEYS) ||
+    value.audio.codec !== 'aac' ||
+    value.audio.sampleRate !== STUDIO_FILM_EXPORT_AUDIO_SAMPLE_RATE ||
+    value.audio.channels !== STUDIO_FILM_EXPORT_AUDIO_CHANNELS ||
+    value.audio.channelLayout !== 'stereo' ||
+    value.audio.sampleFormat !== 'fltp' ||
+    value.audio.bitrate !== 192_000 ||
+    value.audio.silenceForMissingStreams !== true ||
+    typeof value.audio.takeGain !== 'number' ||
+    !Number.isFinite(value.audio.takeGain) ||
+    value.audio.takeGain <= 0 ||
+    value.audio.takeGain > 1 ||
+    typeof value.audio.dissolveCrossfade !== 'boolean' ||
+    value.audio.dissolveCurve !== 'triangular' ||
+    value.audio.limiterPeak !== 0.95 ||
+    value.audio.limiterLatencyCompensated !== true
+  ) {
+    return false;
+  }
+  const transitionSeconds = (() => {
+    if (hasExactKeys(value.transition, ['kind']) && value.transition.kind === 'cut') return 0;
+    if (
+      hasExactKeys(value.transition, ['kind', 'requestedSeconds', 'seconds']) &&
+      value.transition.kind === 'dissolve' &&
+      isFinitePositive(value.transition.requestedSeconds) &&
+      value.transition.requestedSeconds >= 1 / STUDIO_FILM_EXPORT_FRAME_RATE &&
+      value.transition.requestedSeconds <= 1 &&
+      isFinitePositive(value.transition.seconds) &&
+      value.transition.seconds >= 1 / STUDIO_FILM_EXPORT_FRAME_RATE &&
+      value.transition.seconds <= value.transition.requestedSeconds &&
+      value.transition.requestedSeconds - value.transition.seconds <
+        1 / STUDIO_FILM_EXPORT_FRAME_RATE + Number.EPSILON &&
+      closeEnough(
+        value.transition.seconds * STUDIO_FILM_EXPORT_FRAME_RATE,
+        Math.round(value.transition.seconds * STUDIO_FILM_EXPORT_FRAME_RATE)
+      )
+    ) {
+      return value.transition.seconds;
+    }
+    return null;
+  })();
+  if (
+    transitionSeconds === null ||
+    (value.dissolveCount as number) > value.segments.length - 1 ||
+    (transitionSeconds === 0 && value.dissolveCount !== 0) ||
+    value.audio.dissolveCrossfade !== (value.dissolveCount as number) > 0
+  ) {
+    return false;
+  }
+  if (value.audio.bedAssetId === null) {
+    if (
+      value.audio.takeGain !== 1 ||
+      value.audio.bedSha256 !== null ||
+      value.audio.bedGain !== null ||
+      value.audio.bedFadeOutSeconds !== null ||
+      value.audio.bedFadeCurve !== null
+    ) {
+      return false;
+    }
+  } else if (
+    typeof value.audio.bedAssetId !== 'string' ||
+    !SAFE_ID.test(value.audio.bedAssetId) ||
+    typeof value.audio.bedSha256 !== 'string' ||
+    !LOWERCASE_SHA256.test(value.audio.bedSha256) ||
+    typeof value.audio.bedGain !== 'number' ||
+    !Number.isFinite(value.audio.bedGain) ||
+    value.audio.bedGain <= 0 ||
+    value.audio.bedGain !== STUDIO_FILM_EXPORT_BED_GAIN ||
+    value.audio.takeGain !== STUDIO_FILM_EXPORT_TAKE_GAIN ||
+    typeof value.audio.bedFadeOutSeconds !== 'number' ||
+    !Number.isFinite(value.audio.bedFadeOutSeconds) ||
+    value.audio.bedFadeOutSeconds < 0 ||
+    !closeEnough(value.audio.bedFadeOutSeconds, Math.min(STUDIO_BED_FADE_OUT_SECONDS, value.renderedDurationSeconds)) ||
+    value.audio.bedFadeCurve !== 'triangular'
+  ) {
+    return false;
+  }
+
+  const identities = new Set<string>();
+  const representedShotIds = new Set<string>();
+  let nominalDuration = 0;
+  let renderedDurationBeforeTransitions = 0;
+  let finalShot: Extract<StudioFilmExportFactsV2['segments'][number], { kind: 'shot' }> | null = null;
+  const validatedSegments: StudioFilmExportFactsV2['segments'] = [];
+  for (const segment of value.segments) {
+    if (!isDataRecord(segment)) return false;
+    if (segment.kind === 'shot') {
+      if (
+        !hasExactKeys(segment, FILM_SHOT_SEGMENT_KEYS) ||
+        typeof segment.shotId !== 'string' ||
+        !SAFE_ID.test(segment.shotId) ||
+        typeof segment.sourceAssetId !== 'string' ||
+        !SAFE_ID.test(segment.sourceAssetId) ||
+        typeof segment.sourceSha256 !== 'string' ||
+        !LOWERCASE_SHA256.test(segment.sourceSha256) ||
+        representedShotIds.has(segment.shotId) ||
+        typeof segment.sourceInSeconds !== 'number' ||
+        !Number.isFinite(segment.sourceInSeconds) ||
+        segment.sourceInSeconds < 0 ||
+        !isFinitePositive(segment.sourceOutSeconds) ||
+        !isFinitePositive(segment.renderedSourceOutSeconds) ||
+        !isFinitePositive(segment.normalizedDurationSeconds) ||
+        segment.sourceOutSeconds <= segment.sourceInSeconds ||
+        segment.sourceOutSeconds - segment.sourceInSeconds > STUDIO_MAX_SHOT_SECONDS ||
+        segment.renderedSourceOutSeconds <= segment.sourceInSeconds ||
+        segment.renderedSourceOutSeconds > segment.sourceOutSeconds ||
+        segment.sourceOutSeconds - segment.renderedSourceOutSeconds > 1 + 0.000_001 ||
+        segment.normalizedDurationSeconds > segment.renderedSourceOutSeconds - segment.sourceInSeconds ||
+        segment.renderedSourceOutSeconds - segment.sourceInSeconds - segment.normalizedDurationSeconds >=
+          1 / STUDIO_FILM_EXPORT_FRAME_RATE + Number.EPSILON ||
+        !closeEnough(
+          segment.normalizedDurationSeconds * STUDIO_FILM_EXPORT_FRAME_RATE,
+          Math.round(segment.normalizedDurationSeconds * STUDIO_FILM_EXPORT_FRAME_RATE)
+        ) ||
+        (segment.chainBreak !== 'none' && segment.chainBreak !== 'hard_cut') ||
+        typeof segment.hasAudio !== 'boolean'
+      ) {
+        return false;
+      }
+      identities.add(`shot:${segment.shotId}`);
+      representedShotIds.add(segment.shotId);
+      validatedSegments.push(segment as StudioFilmExportFactsV2['segments'][number]);
+      finalShot = segment as Extract<StudioFilmExportFactsV2['segments'][number], { kind: 'shot' }>;
+      nominalDuration += segment.sourceOutSeconds - segment.sourceInSeconds;
+      renderedDurationBeforeTransitions += segment.normalizedDurationSeconds;
+      if (!value.trimTails && segment.renderedSourceOutSeconds !== segment.sourceOutSeconds) return false;
+      if (
+        segment.renderedSourceOutSeconds !== segment.sourceOutSeconds &&
+        segment.normalizedDurationSeconds + Number.EPSILON < 1 + transitionSeconds
+      ) {
+        return false;
+      }
+    } else if (segment.kind === 'slate') {
+      if (
+        !hasExactKeys(segment, FILM_SLATE_SEGMENT_KEYS) ||
+        typeof segment.beatId !== 'string' ||
+        !SAFE_ID.test(segment.beatId) ||
+        (segment.shotId !== null && (typeof segment.shotId !== 'string' || !SAFE_ID.test(segment.shotId))) ||
+        (typeof segment.shotId === 'string' && representedShotIds.has(segment.shotId)) ||
+        identities.has(`slate:${segment.beatId}:${segment.shotId ?? 'empty'}`) ||
+        !isFinitePositive(segment.durationSeconds) ||
+        segment.durationSeconds > (segment.shotId === null ? 1_440 : STUDIO_MAX_SHOT_SECONDS) ||
+        !isFinitePositive(segment.normalizedDurationSeconds) ||
+        segment.normalizedDurationSeconds > segment.durationSeconds ||
+        segment.durationSeconds - segment.normalizedDurationSeconds >=
+          1 / STUDIO_FILM_EXPORT_FRAME_RATE + Number.EPSILON ||
+        !closeEnough(
+          segment.normalizedDurationSeconds * STUDIO_FILM_EXPORT_FRAME_RATE,
+          Math.round(segment.normalizedDurationSeconds * STUDIO_FILM_EXPORT_FRAME_RATE)
+        )
+      ) {
+        return false;
+      }
+      identities.add(`slate:${segment.beatId}:${segment.shotId ?? 'empty'}`);
+      if (typeof segment.shotId === 'string') representedShotIds.add(segment.shotId);
+      validatedSegments.push(segment as StudioFilmExportFactsV2['segments'][number]);
+      nominalDuration += segment.durationSeconds;
+      renderedDurationBeforeTransitions += segment.normalizedDurationSeconds;
+    } else {
+      return false;
+    }
+  }
+  if (finalShot !== null && finalShot.renderedSourceOutSeconds !== finalShot.sourceOutSeconds) return false;
+  let derivedDissolveCount = 0;
+  for (let index = 1; index < validatedSegments.length; index += 1) {
+    const previous = validatedSegments[index - 1]!;
+    const current = validatedSegments[index]!;
+    if (transitionSeconds > 0 && previous.kind === 'shot' && current.kind === 'shot' && current.chainBreak === 'none') {
+      if (
+        previous.normalizedDurationSeconds <= transitionSeconds ||
+        current.normalizedDurationSeconds <= transitionSeconds
+      ) {
+        return false;
+      }
+      derivedDissolveCount += 1;
+    }
+  }
+  if (derivedDissolveCount !== value.dissolveCount) return false;
+  const renderedDuration = renderedDurationBeforeTransitions - transitionSeconds * (value.dissolveCount as number);
+  return (
+    closeEnough(nominalDuration, value.nominalDurationSeconds) &&
+    closeEnough(renderedDuration, value.renderedDurationSeconds)
+  );
+};
+
 const validateArtifact = (
   value: unknown,
   context: StudioExportCatalogValidationContextV2
 ): value is StudioExportArtifactV2 => {
   if (
     !isDataRecord(value) ||
-    !hasExactKeys(value, ARTIFACT_KEYS) ||
+    !hasExactKeys(value, value.shape === 'film' ? FILM_ARTIFACT_KEYS : ARTIFACT_KEYS) ||
     value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V2 ||
     typeof value.id !== 'string' ||
     !SAFE_ID.test(value.id) ||
     value.projectId !== context.projectId ||
     !isSafePositiveInteger(value.sourceRevision) ||
     value.sourceRevision > context.currentProjectRevision ||
-    (value.shape !== 'editor_folder' && value.shape !== 'still' && value.shape !== 'script') ||
+    (value.shape !== 'editor_folder' &&
+      value.shape !== 'still' &&
+      value.shape !== 'script' &&
+      value.shape !== 'film') ||
     !isDataRecord(value.managedExport) ||
     !hasExactKeys(value.managedExport, MANAGED_EXPORT_KEYS) ||
     value.managedExport.collection !== 'exports' ||
@@ -405,6 +738,8 @@ const validateArtifact = (
   if (value.shape === 'editor_folder') {
     return value.payloadKind === 'directory' && value.fileCount <= STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT;
   }
+  if (value.shape === 'film')
+    return value.payloadKind === 'file' && value.fileCount === 1 && value.byteSize > 0 && validateFilmFacts(value.film);
   return value.payloadKind === 'file' && value.fileCount === 1;
 };
 
@@ -422,7 +757,7 @@ export const validateStudioExportCatalogV2 = (
     value.projectId !== context.projectId ||
     !isSafePositiveInteger(value.revision) ||
     !isDenseDataArray(value.artifacts) ||
-    value.artifacts.length > STUDIO_MAX_EXPORTS_PER_SHAPE * 3 ||
+    value.artifacts.length > STUDIO_MAX_EXPORTS_PER_SHAPE * STUDIO_EXPORT_SHAPES.length ||
     !value.artifacts.every((artifact) => validateArtifact(artifact, context))
   ) {
     return false;
@@ -493,15 +828,31 @@ export const projectStudioRendererExportCatalogV2 = (
   catalog: StudioExportCatalogV2
 ): StudioRendererExportCatalogV2 => ({
   revision: catalog.revision,
-  artifacts: catalog.artifacts.map(({ id, sourceRevision, shape, managedExport, byteSize, fileCount, createdAt }) => ({
-    id,
-    sourceRevision,
-    shape,
-    folderName: managedExport.fileName,
-    byteSize,
-    fileCount,
-    createdAt,
-  })),
+  artifacts: catalog.artifacts.map((artifact) => {
+    const projected = {
+      id: artifact.id,
+      sourceRevision: artifact.sourceRevision,
+      folderName: artifact.managedExport.fileName,
+      byteSize: artifact.byteSize,
+      fileCount: artifact.fileCount,
+      createdAt: artifact.createdAt,
+    };
+    return artifact.shape === 'film'
+      ? {
+          ...projected,
+          shape: 'film' as const,
+          film: {
+            nominalDurationSeconds: artifact.film.nominalDurationSeconds,
+            renderedDurationSeconds: artifact.film.renderedDurationSeconds,
+            transition: structuredClone(artifact.film.transition),
+            trimTails: artifact.film.trimTails,
+            trimmedShotCount: artifact.film.segments.filter(
+              (segment) => segment.kind === 'shot' && segment.renderedSourceOutSeconds < segment.sourceOutSeconds
+            ).length,
+          },
+        }
+      : { ...projected, shape: artifact.shape };
+  }),
 });
 
 /** Plans one CAS publication and exact per-shape retention update without touching storage. */
@@ -527,7 +878,7 @@ export const publishStudioExportArtifactInCatalogV2 = (
 
   const ordered = [...catalog.artifacts, structuredClone(input.artifact)].toSorted(compareArtifacts);
   const retainedIds = new Set<string>();
-  for (const shape of ['editor_folder', 'still', 'script'] as const) {
+  for (const shape of STUDIO_EXPORT_SHAPES) {
     const artifacts = ordered.filter((artifact) => artifact.shape === shape);
     for (const artifact of artifacts.slice(-STUDIO_MAX_EXPORTS_PER_SHAPE)) retainedIds.add(artifact.id);
   }
@@ -580,7 +931,9 @@ export const validateStudioExportCatalogIdentityProofsV2 = (
       !validateManifestEntries(entries) ||
       entries.length !== artifact.fileCount ||
       entries.reduce((total, entry) => total + entry.byteSize, 0) !== artifact.byteSize ||
-      sha256(manifestBytes) !== artifact.manifestSha256
+      sha256(manifestBytes) !== artifact.manifestSha256 ||
+      (artifact.shape === 'film' &&
+        (entries.length !== 1 || entries[0]?.relativePath !== 'film.mp4' || entries[0].byteSize < 1))
     ) {
       return false;
     }
@@ -1385,7 +1738,11 @@ const validatePhysicalCatalog = async (
     if (
       manifest.manifestSha256 !== artifact.manifestSha256 ||
       manifest.fileCount !== artifact.fileCount ||
-      manifest.byteSize !== artifact.byteSize
+      manifest.byteSize !== artifact.byteSize ||
+      (artifact.shape === 'film' &&
+        (manifest.entries.length !== 1 ||
+          manifest.entries[0]?.relativePath !== 'film.mp4' ||
+          manifest.entries[0].byteSize < 1))
     ) {
       return fail('storage_error');
     }
@@ -2168,12 +2525,13 @@ export const createStudioExportCatalogStoreV2 = (
       !isSafePositiveInteger(plan.expectedCatalogRevision) ||
       !SAFE_ID.test(plan.artifactId) ||
       !SAFE_ID.test(plan.managedFileName) ||
-      (plan.shape !== 'editor_folder' && plan.shape !== 'still' && plan.shape !== 'script') ||
+      (plan.shape !== 'editor_folder' && plan.shape !== 'still' && plan.shape !== 'script' && plan.shape !== 'film') ||
       !isCanonicalTimestamp(plan.createdAt) ||
       !isDenseDataArray(plan.files) ||
       plan.files.length < 1 ||
       plan.files.length > STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT ||
-      (plan.shape !== 'editor_folder' && plan.files.length !== 1)
+      (plan.shape !== 'editor_folder' && plan.files.length !== 1) ||
+      (plan.shape === 'film' && !validateFilmFacts(plan.film))
     ) {
       return fail('invalid_create_plan');
     }
@@ -2224,7 +2582,16 @@ export const createStudioExportCatalogStoreV2 = (
         return fail('invalid_create_plan');
       }
     }
-    return {
+    if (
+      plan.shape === 'film' &&
+      (files.length !== 1 ||
+        files[0]?.kind !== 'verified_stream' ||
+        files[0].relativePath !== 'film.mp4' ||
+        files[0].byteSize < 1)
+    ) {
+      return fail('invalid_create_plan');
+    }
+    const normalized = {
       expectedProjectRevision: plan.expectedProjectRevision,
       expectedCatalogRevision: plan.expectedCatalogRevision,
       artifactId: plan.artifactId,
@@ -2233,6 +2600,9 @@ export const createStudioExportCatalogStoreV2 = (
       createdAt: plan.createdAt,
       files: files.toSorted((left, right) => compareStudioExportRelativePathsV2(left.relativePath, right.relativePath)),
     };
+    return plan.shape === 'film'
+      ? { ...normalized, shape: 'film', film: structuredClone(plan.film) }
+      : { ...normalized, shape: plan.shape };
   };
 
   const assertPublicationCapacity = (
@@ -2336,19 +2706,22 @@ export const createStudioExportCatalogStoreV2 = (
           const payloadTreeProof = await capturePhysicalTreeProof(stagingPath, stagingNodes, 'construction');
           const manifestBytes = serializeStudioExportManifestV2(entries);
           const manifest = parseStudioExportManifestV2(manifestBytes);
-          const artifact: StudioExportArtifactV2 = {
+          const artifactBase = {
             schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
             id: plan.artifactId,
             projectId: authority.project.id,
             sourceRevision: authority.project.revision,
-            shape: plan.shape,
-            payloadKind: plan.shape === 'editor_folder' ? 'directory' : 'file',
-            managedExport: { collection: 'exports', fileName: plan.managedFileName },
+            payloadKind: plan.shape === 'editor_folder' ? ('directory' as const) : ('file' as const),
+            managedExport: { collection: 'exports' as const, fileName: plan.managedFileName },
             byteSize: manifest.byteSize,
             fileCount: manifest.fileCount,
             manifestSha256: manifest.manifestSha256,
             createdAt: plan.createdAt,
           };
+          const artifact: StudioExportArtifactV2 =
+            plan.shape === 'film'
+              ? { ...artifactBase, shape: 'film', payloadKind: 'file', film: structuredClone(plan.film) }
+              : { ...artifactBase, shape: plan.shape };
           const publication = publishStudioExportArtifactInCatalogV2(current.catalog, {
             ...context,
             expectedCatalogRevision: plan.expectedCatalogRevision,

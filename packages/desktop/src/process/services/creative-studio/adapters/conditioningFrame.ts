@@ -8,6 +8,8 @@ import { type ChildProcess, spawn, type SpawnOptions } from 'node:child_process'
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, rm, type FileHandle } from 'node:fs/promises';
+import { studioChildProcessDetached, terminateStudioChildProcessTree } from '../childProcessTree';
+import { resolveStudioFfmpegBinaries } from '../ffmpegBinaries';
 
 export type StudioConditioningFrameFileExpectation = {
   byteSize: number;
@@ -23,6 +25,7 @@ export type StudioConditioningFrameExtractionInput = {
   providerLastFramePath: string | null;
   providerLastFrameExpectation: StudioConditioningFrameFileExpectation | null;
   allowProviderLastFrame: boolean;
+  signal?: AbortSignal;
 };
 
 export type StudioConditioningFrameExtractionResult = {
@@ -50,6 +53,7 @@ export class StudioConditioningFrameError extends Error {
 
 /** Enough for ffmpeg's diagnosis, small enough that one failure stays one log line. */
 const DECODE_DIAGNOSIS_LIMIT = 512;
+const DEFAULT_DECODE_TIMEOUT_MS = 60_000;
 
 export type StudioConditioningFrameSpawn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
 
@@ -59,6 +63,7 @@ export type StudioConditioningFrameDeps = {
   rm?: typeof rm;
   spawnProcess?: StudioConditioningFrameSpawn;
   ffmpegBinary?: string;
+  decodeTimeoutMs?: number;
 };
 
 type FileIdentity = { dev: string; ino: string };
@@ -112,10 +117,16 @@ const closeQuietly = async (handle: FileHandle | null): Promise<void> => {
   await handle.close().catch((): undefined => undefined);
 };
 
+const assertNotAborted = (signal: AbortSignal | undefined): void => {
+  if (signal?.aborted) throw new StudioConditioningFrameError('decode_failed', 'decoder cancelled');
+};
+
 const hashOpenedFile = async (
   opened: OpenedFile,
-  expectation: StudioConditioningFrameFileExpectation
+  expectation: StudioConditioningFrameFileExpectation,
+  signal?: AbortSignal
 ): Promise<void> => {
+  assertNotAborted(signal);
   const before = await opened.handle.stat();
   if (!before.isFile() || !sameIdentity(identityOf(before), opened.identity) || before.size !== expectation.byteSize) {
     throw new StudioConditioningFrameError('source_missing');
@@ -124,6 +135,7 @@ const hashOpenedFile = async (
   const buffer = Buffer.allocUnsafe(BUFFER_BYTES);
   let position = 0;
   while (position < expectation.byteSize) {
+    assertNotAborted(signal);
     // eslint-disable-next-line no-await-in-loop -- Ordered reads keep one bounded buffer and one exact digest.
     const { bytesRead } = await opened.handle.read(
       buffer,
@@ -131,10 +143,12 @@ const hashOpenedFile = async (
       Math.min(buffer.length, expectation.byteSize - position),
       position
     );
+    assertNotAborted(signal);
     if (bytesRead === 0) throw new StudioConditioningFrameError('source_missing');
     hash.update(buffer.subarray(0, bytesRead));
     position += bytesRead;
   }
+  assertNotAborted(signal);
   const after = await opened.handle.stat();
   if (
     !sameIdentity(identityOf(after), opened.identity) ||
@@ -149,22 +163,26 @@ const openVerifiedSource = async (
   filePath: string,
   expectation: StudioConditioningFrameFileExpectation,
   statPath: typeof lstat,
-  openFile: typeof open
+  openFile: typeof open,
+  signal?: AbortSignal
 ): Promise<OpenedFile> => {
   let handle: FileHandle | null = null;
   try {
+    assertNotAborted(signal);
     const pathStats = await statPath(filePath);
+    assertNotAborted(signal);
     if (pathStats.isSymbolicLink() || !pathStats.isFile() || pathStats.size !== expectation.byteSize) {
       throw new StudioConditioningFrameError('source_missing');
     }
     const pathIdentity = identityOf(pathStats);
     handle = await openFile(filePath, constants.O_RDONLY | noFollowFlag);
+    assertNotAborted(signal);
     const openedStats = await handle.stat();
     if (!openedStats.isFile() || !sameIdentity(identityOf(openedStats), pathIdentity)) {
       throw new StudioConditioningFrameError('source_missing');
     }
     const opened = { handle, identity: pathIdentity };
-    await hashOpenedFile(opened, expectation);
+    await hashOpenedFile(opened, expectation, signal);
     return opened;
   } catch (error) {
     await closeQuietly(handle);
@@ -173,10 +191,16 @@ const openVerifiedSource = async (
   }
 };
 
-const openExclusiveDestination = async (filePath: string, openFile: typeof open): Promise<OpenedFile> => {
+const openExclusiveDestination = async (
+  filePath: string,
+  openFile: typeof open,
+  signal?: AbortSignal
+): Promise<OpenedFile> => {
   let handle: FileHandle | null = null;
   try {
+    assertNotAborted(signal);
     handle = await openFile(filePath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | noFollowFlag, 0o600);
+    assertNotAborted(signal);
     const stats = await handle.stat();
     if (!stats.isFile()) throw new StudioConditioningFrameError('storage_error');
     return { handle, identity: identityOf(stats) };
@@ -205,12 +229,14 @@ const removeOwnedDestination = async (
 const copyVerifiedProviderFrame = async (
   source: OpenedFile,
   destination: OpenedFile,
-  expectation: StudioConditioningFrameFileExpectation
+  expectation: StudioConditioningFrameFileExpectation,
+  signal?: AbortSignal
 ): Promise<void> => {
   const hash = createHash('sha256');
   const buffer = Buffer.allocUnsafe(BUFFER_BYTES);
   let position = 0;
   while (position < expectation.byteSize) {
+    assertNotAborted(signal);
     // eslint-disable-next-line no-await-in-loop -- The copy and digest must observe the same ordered bytes.
     const { bytesRead } = await source.handle.read(
       buffer,
@@ -218,19 +244,24 @@ const copyVerifiedProviderFrame = async (
       Math.min(buffer.length, expectation.byteSize - position),
       position
     );
+    assertNotAborted(signal);
     if (bytesRead === 0) throw new StudioConditioningFrameError('source_missing');
     const bytes = buffer.subarray(0, bytesRead);
     hash.update(bytes);
     let written = 0;
     while (written < bytes.length) {
+      assertNotAborted(signal);
       // eslint-disable-next-line no-await-in-loop -- Partial writes advance one exclusive destination deterministically.
       const result = await destination.handle.write(bytes, written, bytes.length - written, position + written);
+      assertNotAborted(signal);
       if (result.bytesWritten === 0) throw new StudioConditioningFrameError('storage_error');
       written += result.bytesWritten;
     }
     position += bytesRead;
   }
+  assertNotAborted(signal);
   await destination.handle.sync();
+  assertNotAborted(signal);
   const destinationStats = await destination.handle.stat();
   if (
     !sameIdentity(identityOf(destinationStats), destination.identity) ||
@@ -239,7 +270,7 @@ const copyVerifiedProviderFrame = async (
     throw new StudioConditioningFrameError('storage_error');
   }
   if (hash.digest('hex') !== expectation.sha256) throw new StudioConditioningFrameError('source_missing');
-  await hashOpenedFile(source, expectation);
+  await hashOpenedFile(source, expectation, signal);
 };
 
 const runLocalDecode = (
@@ -247,9 +278,15 @@ const runLocalDecode = (
   input: StudioConditioningFrameExtractionInput,
   source: OpenedFile,
   destination: OpenedFile,
-  spawnProcess: StudioConditioningFrameSpawn
+  spawnProcess: StudioConditioningFrameSpawn,
+  timeoutMs: number,
+  nativeSpawn: boolean
 ): Promise<void> =>
   new Promise((resolve, reject) => {
+    if (input.signal?.aborted) {
+      reject(new StudioConditioningFrameError('decode_failed'));
+      return;
+    }
     let child: ChildProcess;
     try {
       child = spawnProcess(
@@ -281,7 +318,11 @@ const runLocalDecode = (
           'image2pipe',
           'pipe:4',
         ],
-        { windowsHide: true, stdio: ['ignore', 'ignore', 'pipe', source.handle.fd, destination.handle.fd] }
+        {
+          detached: studioChildProcessDetached(),
+          windowsHide: true,
+          stdio: ['ignore', 'ignore', 'pipe', source.handle.fd, destination.handle.fd],
+        }
       );
     } catch {
       reject(new StudioConditioningFrameError('decode_failed'));
@@ -295,22 +336,59 @@ const runLocalDecode = (
       if (diagnosis.length >= DECODE_DIAGNOSIS_LIMIT) return;
       diagnosis = (diagnosis + String(chunk)).slice(0, DECODE_DIAGNOSIS_LIMIT);
     });
-    child.stderr?.on('error', () => undefined);
-
     let settled = false;
-    const finish = (work: () => void): void => {
+    let timedOut = false;
+    let childFailed = false;
+    let termination: Promise<void> | null = null;
+    let terminationFailed = false;
+    const finish = async (work: () => void): Promise<void> => {
       if (settled) return;
       settled = true;
+      clearTimeout(timer);
+      input.signal?.removeEventListener('abort', onAbort);
+      await termination;
+      if (terminationFailed) childFailed = true;
       work();
     };
     const decodeFailed = (): StudioConditioningFrameError =>
-      new StudioConditioningFrameError('decode_failed', diagnosis.trim() || undefined);
-    child.once('error', () => finish(() => reject(decodeFailed())));
-    child.once('close', (code, signal) =>
-      finish(() => {
-        if (code === 0 && signal === null) resolve();
-        else reject(decodeFailed());
-      })
+      new StudioConditioningFrameError(
+        'decode_failed',
+        input.signal?.aborted ? 'decoder cancelled' : timedOut ? 'decoder timed out' : diagnosis.trim() || undefined
+      );
+    const terminate = (): void => {
+      if (termination !== null) return;
+      termination = terminateStudioChildProcessTree(child, { nativeChild: nativeSpawn }).catch((): void => {
+        terminationFailed = true;
+      });
+      void termination.then(() => {
+        if (!settled && (input.signal?.aborted || timedOut || childFailed || terminationFailed)) {
+          void finish(() => reject(decodeFailed()));
+        }
+      });
+    };
+    const onAbort = (): void => terminate();
+    input.signal?.addEventListener('abort', onAbort, { once: true });
+    if (input.signal?.aborted) onAbort();
+    const timer = setTimeout(() => {
+      timedOut = true;
+      terminate();
+    }, timeoutMs);
+    timer.unref?.();
+    child.stderr?.on('error', () => {
+      childFailed = true;
+      terminate();
+    });
+    child.once('error', () => {
+      childFailed = true;
+      terminate();
+    });
+    child.once(
+      'close',
+      (code, signal) =>
+        void finish(() => {
+          if (!timedOut && !input.signal?.aborted && !childFailed && code === 0 && signal === null) resolve();
+          else reject(decodeFailed());
+        })
     );
   });
 
@@ -321,20 +399,41 @@ export const createStudioConditioningFrameExtractor = (
   const openFile = deps.open ?? open;
   const remove = deps.rm ?? rm;
   const spawnProcess = deps.spawnProcess ?? ((command, args, options) => spawn(command, args, options));
-  const binary = deps.ffmpegBinary?.trim() || 'ffmpeg';
+  const decodeTimeoutMs = deps.decodeTimeoutMs ?? DEFAULT_DECODE_TIMEOUT_MS;
+  if (!Number.isSafeInteger(decodeTimeoutMs) || decodeTimeoutMs < 1) {
+    throw new TypeError('invalid_conditioning_frame_timeout');
+  }
+  const binary = resolveStudioFfmpegBinaries(deps).ffmpeg;
 
   return async (input) => {
     if (invalidExtractionInput(input)) throw new TypeError('invalid_conditioning_frame_input');
+    assertNotAborted(input.signal);
 
     const useProviderFrame = input.allowProviderLastFrame && input.providerLastFramePath !== null;
-    const source = await openVerifiedSource(input.sourcePath, input.sourceExpectation, statPath, openFile);
+    const source = await openVerifiedSource(
+      input.sourcePath,
+      input.sourceExpectation,
+      statPath,
+      openFile,
+      input.signal
+    );
     let providerSource: OpenedFile | null = null;
     let destination: OpenedFile | null = null;
     let result: StudioConditioningFrameExtractionResult | null = null;
     let failure: unknown = null;
     const decodeLocally = async (): Promise<void> => {
-      await runLocalDecode(binary, input, source, destination!, spawnProcess);
+      await runLocalDecode(
+        binary,
+        input,
+        source,
+        destination!,
+        spawnProcess,
+        decodeTimeoutMs,
+        deps.spawnProcess === undefined
+      );
+      assertNotAborted(input.signal);
       await destination!.handle.sync();
+      assertNotAborted(input.signal);
       const destinationStats = await destination!.handle.stat();
       if (
         !sameIdentity(identityOf(destinationStats), destination!.identity) ||
@@ -343,7 +442,8 @@ export const createStudioConditioningFrameExtractor = (
       ) {
         throw new StudioConditioningFrameError('storage_error');
       }
-      await hashOpenedFile(source, input.sourceExpectation);
+      await hashOpenedFile(source, input.sourceExpectation, input.signal);
+      assertNotAborted(input.signal);
       result = { source: 'local_decode' };
     };
     try {
@@ -353,25 +453,33 @@ export const createStudioConditioningFrameExtractor = (
             input.providerLastFramePath!,
             input.providerLastFrameExpectation!,
             statPath,
-            openFile
+            openFile,
+            input.signal
           );
         } catch {
+          assertNotAborted(input.signal);
           // Provider posters are an optional optimization. The immutable primary Take remains the
           // authority and must still be locally decodable when a poster is missing or corrupt.
           providerSource = null;
         }
       }
-      destination = await openExclusiveDestination(input.destinationPath, openFile);
+      destination = await openExclusiveDestination(input.destinationPath, openFile, input.signal);
       if (providerSource !== null) {
         try {
-          await copyVerifiedProviderFrame(providerSource, destination, input.providerLastFrameExpectation!);
-          await hashOpenedFile(source, input.sourceExpectation);
+          await copyVerifiedProviderFrame(
+            providerSource,
+            destination,
+            input.providerLastFrameExpectation!,
+            input.signal
+          );
+          await hashOpenedFile(source, input.sourceExpectation, input.signal);
+          assertNotAborted(input.signal);
           result = { source: 'provider_last_frame' };
         } catch (error) {
           if (!(error instanceof StudioConditioningFrameError) || error.code !== 'source_missing') throw error;
           await destination.handle.close();
           await removeOwnedDestination(input.destinationPath, destination.identity, statPath, remove);
-          destination = await openExclusiveDestination(input.destinationPath, openFile);
+          destination = await openExclusiveDestination(input.destinationPath, openFile, input.signal);
           await decodeLocally();
         }
       } else {

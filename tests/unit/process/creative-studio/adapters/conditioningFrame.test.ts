@@ -36,7 +36,7 @@ const expectation = (bytes: string | Buffer): StudioConditioningFrameFileExpecta
 
 const makeChild = (): ChildProcess => {
   const child = new EventEmitter() as ChildProcess;
-  Object.assign(child, { kill: vi.fn(() => true) });
+  Object.assign(child, { exitCode: null, signalCode: null, kill: vi.fn(() => true) });
   return child;
 };
 
@@ -181,6 +181,79 @@ describe('conditioning frame extraction', () => {
       (error: unknown) => error
     );
     expect((failure as { detail?: string }).detail!.length).toBeLessThanOrEqual(512);
+  });
+
+  it('kills a timed-out decoder and rejects even when its eventual close claims success', async () => {
+    const directory = await makeDirectory();
+    const input = baseInput(directory, { allowProviderLastFrame: false });
+    await writeFile(input.sourcePath, 'video');
+    let child!: ChildProcess;
+    const spawnProcess: StudioConditioningFrameSpawn = vi.fn((_command, _args, options) => {
+      child = makeChild();
+      writeSync(destinationFd(options), Buffer.from('partial'));
+      return child;
+    });
+
+    const pending = createStudioConditioningFrameExtractor({ spawnProcess, decodeTimeoutMs: 1 })(input);
+    let settled = false;
+    void pending.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGKILL'));
+    expect(settled).toBe(false);
+    child.emit('close', 0, null);
+    await expect(pending).rejects.toMatchObject({ code: 'decode_failed', detail: 'decoder timed out' });
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    await expect(readFile(input.destinationPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('awaits an actively cancelled decoder close and never accepts its success code', async () => {
+    const directory = await makeDirectory();
+    const controller = new AbortController();
+    const input = baseInput(directory, { allowProviderLastFrame: false, signal: controller.signal });
+    await writeFile(input.sourcePath, 'video');
+    let child!: ChildProcess;
+    const spawnProcess: StudioConditioningFrameSpawn = vi.fn((_command, _args, options) => {
+      child = makeChild();
+      writeSync(destinationFd(options), Buffer.from('partial'));
+      return child;
+    });
+
+    const pending = createStudioConditioningFrameExtractor({ spawnProcess })(input);
+    await vi.waitFor(() => expect(spawnProcess).toHaveBeenCalledOnce());
+    controller.abort();
+    await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGKILL'));
+    child.emit('close', 0, null);
+
+    await expect(pending).rejects.toMatchObject({ code: 'decode_failed', detail: 'decoder cancelled' });
+    await expect(readFile(input.destinationPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects an already-cancelled extraction before filesystem or decoder work', async () => {
+    const directory = await makeDirectory();
+    const controller = new AbortController();
+    controller.abort();
+    const lstat = vi.fn();
+    const spawnProcess = vi.fn();
+
+    await expect(
+      createStudioConditioningFrameExtractor({ lstat, spawnProcess })(
+        baseInput(directory, { signal: controller.signal })
+      )
+    ).rejects.toMatchObject({ code: 'decode_failed', detail: 'decoder cancelled' });
+    expect(lstat).not.toHaveBeenCalled();
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid decoder deadline at construction', () => {
+    expect(() => createStudioConditioningFrameExtractor({ decodeTimeoutMs: 0 })).toThrow(
+      'invalid_conditioning_frame_timeout'
+    );
   });
 
   it("reads the source through a seekable descriptor, never ffmpeg's non-seekable pipe protocol", async () => {

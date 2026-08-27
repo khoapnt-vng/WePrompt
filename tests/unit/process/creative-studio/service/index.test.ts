@@ -87,6 +87,10 @@ import {
   type StudioExportCatalogStoreV2,
 } from '@process/services/creative-studio/service/schema2/exports';
 import {
+  StudioFilmExportErrorV2,
+  type StudioFilmExporterV2,
+} from '@process/services/creative-studio/service/filmExporter';
+import {
   createListRoutesHandler,
   createProposeBriefRuleHandlerV2,
   createProposeStoryboardHandlerV2,
@@ -523,6 +527,7 @@ describe('CreativeStudioServiceV2', () => {
       now?: () => Date;
       preparedSubmissionCache?: StudioPreparedSubmissionCacheV2;
       exportCatalogStore?: StudioExportCatalogStoreV2;
+      filmExporter?: StudioFilmExporterV2;
       serviceStore?: CreativeStudioStore;
       resolveAssetV2?: StudioMediaStore['resolveAssetV2'];
       resolveAssetWithProjectAuthorityV2?: StudioMediaStore['resolveAssetWithProjectAuthorityV2'];
@@ -930,6 +935,7 @@ describe('CreativeStudioServiceV2', () => {
       createConnectionId: options.createConnectionId,
       createExportId: options.createExportId,
       exportCatalogStore: options.exportCatalogStore ?? defaultExportCatalogStore,
+      filmExporter: options.filmExporter,
       ...(options.includeRateCard === false ? {} : { rateCard: loadRateCard }),
       ...(options.useDefaultIds
         ? {}
@@ -1439,6 +1445,728 @@ describe('CreativeStudioServiceV2', () => {
     expect(script).toContain('# Schema\n2 launch\n\nFirst brief line\nSecond brief line');
     expect(script).toContain('Story\n\nMove\nthrough the city in warm\nlight.');
     expect(script).toContain('Shooting script\n\nCamera: A wide\ncomposition.\nDialogue: We have arrived.');
+  });
+
+  it('renders a film outside project authority, then revalidates and publishes one verified file without spend', async () => {
+    const project = makeSchema2ServiceProject();
+    const cleanup = vi.fn(async () => undefined);
+    const facts = {
+      schemaVersion: 1 as const,
+      nominalDurationSeconds: 8,
+      renderedDurationSeconds: 8,
+      transition: { kind: 'cut' as const },
+      dissolveCount: 0,
+      trimTails: false,
+      segments: [
+        {
+          kind: 'slate' as const,
+          beatId: 'section_1',
+          shotId: null,
+          durationSeconds: 8,
+          normalizedDurationSeconds: 8,
+        },
+      ],
+      video: {
+        container: 'mp4' as const,
+        codec: 'h264' as const,
+        encoder: 'h264_videotoolbox' as const,
+        profile: 'high' as const,
+        level: '4.2' as const,
+        width: 1920,
+        height: 1080,
+        frameRate: 24 as const,
+        pixelFormat: 'yuv420p' as const,
+        scaleMode: 'contain_black_pad' as const,
+        sampleAspectRatio: '1:1' as const,
+        colorPrimaries: 'bt709' as const,
+        colorTransfer: 'bt709' as const,
+        colorSpace: 'bt709' as const,
+        colorRange: 'tv' as const,
+        gopFrames: 48 as const,
+        bitrate: 12_000_000 as const,
+        trackTimeBase: '1/24000' as const,
+        metadataStripped: true as const,
+        chaptersStripped: true as const,
+        fastStart: false as const,
+      },
+      audio: {
+        codec: 'aac' as const,
+        sampleRate: 48_000 as const,
+        channels: 2 as const,
+        channelLayout: 'stereo' as const,
+        sampleFormat: 'fltp' as const,
+        bitrate: 192_000 as const,
+        silenceForMissingStreams: true as const,
+        takeGain: 1,
+        bedAssetId: null,
+        bedSha256: null,
+        bedGain: null,
+        bedFadeOutSeconds: null,
+        bedFadeCurve: null,
+        dissolveCrossfade: false,
+        dissolveCurve: 'triangular' as const,
+        limiterPeak: 0.95 as const,
+        limiterLatencyCompensated: true as const,
+      },
+    };
+    const render = vi.fn<StudioFilmExporterV2['render']>(async ({ onProgress }) => {
+      onProgress({ phase: 'rendering', progress: 0.5 });
+      return {
+        facts,
+        byteSize: 4,
+        sha256: 'd'.repeat(64),
+        openVerifiedStream: async () => Readable.from([Buffer.from('film')]),
+        cleanup,
+      };
+    });
+    const filmExporter: StudioFilmExporterV2 = {
+      capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+      render,
+      dispose: vi.fn(),
+    };
+    const create = vi.fn(async (authority, plan) => ({
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+      projectId: project.id,
+      revision: 2,
+      artifacts: [
+        {
+          schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+          id: plan.artifactId,
+          projectId: project.id,
+          sourceRevision: authority.project.revision,
+          shape: 'film' as const,
+          payloadKind: 'file' as const,
+          managedExport: { collection: 'exports' as const, fileName: plan.managedFileName },
+          byteSize: 4,
+          fileCount: 1,
+          manifestSha256: 'e'.repeat(64),
+          createdAt: plan.createdAt,
+          film: facts,
+        },
+      ],
+    }));
+    const exportCatalogStore = {
+      create,
+      list: vi.fn(async () => ({
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+        projectId: project.id,
+        revision: 1,
+        artifacts: [],
+      })),
+      repair: vi.fn(),
+      copy: vi.fn(),
+      resolveRevealPath: vi.fn(),
+      withManagedMediaAuthority: vi.fn(),
+    } as unknown as StudioExportCatalogStoreV2;
+    const harness = makeHarness(project, {
+      filmExporter,
+      exportCatalogStore,
+      createExportId: () => 'film_export_1',
+    });
+
+    await expect(
+      harness.service.createExport({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expectedCatalogRevision: 1,
+        shape: 'film',
+        renderId: 'film_run_1',
+        transition: { kind: 'cut' },
+        trimTails: false,
+      })
+    ).resolves.toMatchObject({ revision: 2, artifacts: [{ id: 'film_export_1', shape: 'film' }] });
+    await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toMatchObject({
+      status: 'terminal',
+      result: {
+        projectId: project.id,
+        renderId: 'film_run_1',
+        outcome: 'succeeded',
+        artifact: { id: 'film_export_1', shape: 'film' },
+        movedAsideCount: 0,
+      },
+    });
+    await expect(
+      harness.service.acknowledgeFilmExport({ projectId: project.id, renderId: 'film_run_1' })
+    ).resolves.toEqual({ status: 'acknowledged' });
+
+    expect(harness.withProjectAuthorityV2.mock.invocationCallOrder[0]).toBeLessThan(
+      render.mock.invocationCallOrder[0]!
+    );
+    expect(vi.mocked(exportCatalogStore.list).mock.invocationCallOrder[0]).toBeLessThan(
+      render.mock.invocationCallOrder[0]!
+    );
+    expect(render.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.withProjectAuthorityV2.mock.invocationCallOrder[1]!
+    );
+    expect(create).toHaveBeenCalledOnce();
+    expect(create.mock.calls[0]![1]).toMatchObject({
+      shape: 'film',
+      film: facts,
+      files: [{ kind: 'verified_stream', relativePath: 'film.mp4', byteSize: 4, sha256: 'd'.repeat(64) }],
+    });
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+  });
+
+  it('reports unavailable Film capability and idle/not-found lifecycle without creating work', async () => {
+    const project = makeSchema2ServiceProject();
+    const filmExporter: StudioFilmExporterV2 = {
+      capability: vi.fn(async () => ({ status: 'unavailable', reason: 'unsupported_capabilities' })),
+      render: vi.fn(),
+      dispose: vi.fn(),
+    };
+    const harness = makeHarness(project, { filmExporter });
+
+    await expect(harness.service.getFilmExportCapability({ projectId: project.id })).resolves.toEqual({
+      status: 'unavailable',
+      reason: 'unsupported_capabilities',
+    });
+    await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({ status: 'idle' });
+    await expect(
+      harness.service.cancelFilmExport({ projectId: project.id, renderId: 'film_run_missing' })
+    ).resolves.toEqual({ status: 'not_found' });
+    expect(filmExporter.render).not.toHaveBeenCalled();
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale initial Film catalog before source resolution or rendering', async () => {
+    const project = makeSchema2ServiceProject();
+    const render = vi.fn<StudioFilmExporterV2['render']>();
+    const list = vi.fn(
+      async (): Promise<StudioExportCatalogV2> => ({
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+        projectId: project.id,
+        revision: 2,
+        artifacts: [],
+      })
+    );
+    const exportCatalogStore = {
+      create: vi.fn(),
+      list,
+      repair: vi.fn(),
+      copy: vi.fn(),
+      resolveRevealPath: vi.fn(),
+      withManagedMediaAuthority: vi.fn(),
+    } as unknown as StudioExportCatalogStoreV2;
+    const harness = makeHarness(project, {
+      exportCatalogStore,
+      filmExporter: {
+        capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+        render,
+        dispose: vi.fn(),
+      },
+    });
+
+    await expect(
+      harness.service.createExport({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expectedCatalogRevision: 1,
+        shape: 'film',
+        renderId: 'film_run_stale_initial_catalog',
+        transition: { kind: 'cut' },
+        trimTails: false,
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    expect(list).toHaveBeenCalledOnce();
+    expect(harness.resolveAssetV2).not.toHaveBeenCalled();
+    expect(render).not.toHaveBeenCalled();
+    expect(exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
+  it('reports and cancels one bounded active film render without publishing', async () => {
+    const project = makeSchema2ServiceProject();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const render = vi.fn<StudioFilmExporterV2['render']>(
+      ({ signal }) =>
+        new Promise((_, reject) => {
+          markStarted();
+          signal.addEventListener('abort', () => reject(new StudioFilmExportErrorV2('cancelled')), { once: true });
+        })
+    );
+    const filmExporter: StudioFilmExporterV2 = {
+      capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+      render,
+      dispose: vi.fn(),
+    };
+    const harness = makeHarness(project, { filmExporter, createExportId: () => 'must_not_publish' });
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_cancel',
+      transition: { kind: 'cut' as const },
+      trimTails: false,
+    };
+    const pending = harness.service.createExport(request);
+    await started;
+    await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toMatchObject({
+      status: 'active',
+      progress: { phase: 'preparing' },
+    });
+    await expect(harness.service.getFilmExportStatus({ projectId: 'project_other' })).resolves.toMatchObject({
+      status: 'active',
+      progress: { projectId: project.id, renderId: request.renderId, phase: 'preparing' },
+    });
+    await expect(
+      harness.service.cancelFilmExport({ projectId: project.id, renderId: request.renderId })
+    ).resolves.toEqual({ status: 'cancelled' });
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({
+      status: 'terminal',
+      result: { projectId: project.id, renderId: request.renderId, outcome: 'cancelled' },
+    });
+    await expect(
+      harness.service.acknowledgeFilmExport({ projectId: project.id, renderId: request.renderId })
+    ).resolves.toEqual({ status: 'acknowledged' });
+    await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({ status: 'idle' });
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
+  it('waits for initial managed-source resolution to settle before cancellation completes', async () => {
+    const project = makeSchema2ServiceProject();
+    addGeneratedVideosForMcpV2(project, 1);
+    const take = project.assets.take_01!;
+    let markResolverStarted!: () => void;
+    const resolverStarted = new Promise<void>((resolve) => {
+      markResolverStarted = resolve;
+    });
+    let releaseResolver!: () => void;
+    const resolverReleased = new Promise<void>((resolve) => {
+      releaseResolver = resolve;
+    });
+    const resolveAssetV2 = vi.fn<StudioMediaStore['resolveAssetV2']>(async () => {
+      markResolverStarted();
+      await resolverReleased;
+      return { asset: take, openVerifiedStream: async () => Readable.from([Buffer.alloc(take.byteSize)]) };
+    });
+    const render = vi.fn<StudioFilmExporterV2['render']>();
+    const harness = makeHarness(project, {
+      resolveAssetV2,
+      filmExporter: {
+        capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+        render,
+        dispose: vi.fn(),
+      },
+    });
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_initial_resolver',
+      transition: { kind: 'cut' as const },
+      trimTails: false,
+    };
+    const pending = harness.service.createExport(request);
+    const outcome = expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    await resolverStarted;
+    let cancelSettled = false;
+    const cancellation = harness.service
+      .cancelFilmExport({ projectId: project.id, renderId: request.renderId })
+      .finally(() => {
+        cancelSettled = true;
+      });
+    await Promise.resolve();
+    expect(cancelSettled).toBe(false);
+    expect(render).not.toHaveBeenCalled();
+    releaseResolver();
+    await expect(cancellation).resolves.toEqual({ status: 'cancelled' });
+    await outcome;
+    expect(render).not.toHaveBeenCalled();
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses cancellation in publishing and waits for final authority-source resolution before disposal settles', async () => {
+    const project = makeSchema2ServiceProject();
+    addGeneratedVideosForMcpV2(project, 1);
+    const take = project.assets.take_01!;
+    let markFinalResolverStarted!: () => void;
+    const finalResolverStarted = new Promise<void>((resolve) => {
+      markFinalResolverStarted = resolve;
+    });
+    let releaseFinalResolver!: () => void;
+    const finalResolverReleased = new Promise<void>((resolve) => {
+      releaseFinalResolver = resolve;
+    });
+    const finalOpen = vi.fn(async () => Readable.from([Buffer.alloc(take.byteSize)]));
+    const cleanup = vi.fn(async () => undefined);
+    const harness = makeHarness(project, {
+      resolveAssetV2: vi.fn(async () => ({
+        asset: take,
+        openVerifiedStream: async () => Readable.from([Buffer.alloc(take.byteSize)]),
+      })),
+      resolveAssetWithProjectAuthorityV2: vi.fn(async () => {
+        markFinalResolverStarted();
+        await finalResolverReleased;
+        return { asset: take, openVerifiedStream: finalOpen };
+      }),
+      filmExporter: {
+        capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+        render: vi.fn(async () => ({
+          facts: {} as never,
+          byteSize: 4,
+          sha256: 'd'.repeat(64),
+          openVerifiedStream: async () => Readable.from([Buffer.from('film')]),
+          cleanup,
+        })),
+        dispose: vi.fn(),
+      },
+    });
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_final_resolver',
+      transition: { kind: 'cut' as const },
+      trimTails: false,
+    };
+    const pending = harness.service.createExport(request);
+    const outcome = expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+    await finalResolverStarted;
+    await expect(
+      harness.service.cancelFilmExport({ projectId: project.id, renderId: request.renderId })
+    ).resolves.toEqual({ status: 'cancellation_refused' });
+    let jobSettled = false;
+    void pending.then(
+      () => {
+        jobSettled = true;
+      },
+      () => {
+        jobSettled = true;
+      }
+    );
+    harness.service.dispose();
+    await Promise.resolve();
+    expect(jobSettled).toBe(false);
+    releaseFinalResolver();
+    await outcome;
+    expect(finalOpen).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a cancellation that loses to the render failure and retains that winning terminal reason', async () => {
+    const project = makeSchema2ServiceProject();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let rejectRender!: (error: unknown) => void;
+    const render = vi.fn<StudioFilmExporterV2['render']>(
+      () =>
+        new Promise((_, reject) => {
+          rejectRender = reject;
+          markStarted();
+        })
+    );
+    const harness = makeHarness(project, {
+      filmExporter: {
+        capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+        render,
+        dispose: vi.fn(),
+      },
+    });
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_failure_wins',
+      transition: { kind: 'cut' as const },
+      trimTails: false,
+    };
+    const pending = harness.service.createExport(request);
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'render_failed' });
+    await started;
+    rejectRender(new StudioFilmExportErrorV2('render_failed'));
+    await expect(
+      harness.service.cancelFilmExport({ projectId: project.id, renderId: request.renderId })
+    ).resolves.toEqual({ status: 'cancellation_refused' });
+    await rejected;
+    await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({
+      status: 'terminal',
+      result: {
+        projectId: project.id,
+        renderId: request.renderId,
+        outcome: 'failed',
+        reason: 'render_failed',
+      },
+    });
+    await expect(
+      harness.service.acknowledgeFilmExport({ projectId: project.id, renderId: 'different_render' })
+    ).resolves.toEqual({ status: 'not_found' });
+  });
+
+  it('does not abandon a late final-source lease or settle disposal until that descriptor has closed', async () => {
+    const project = makeSchema2ServiceProject();
+    addGeneratedVideosForMcpV2(project, 1);
+    const take = project.assets.take_01!;
+    let markOpenStarted!: () => void;
+    const openStarted = new Promise<void>((resolve) => {
+      markOpenStarted = resolve;
+    });
+    let releaseOpen!: () => void;
+    const openReleased = new Promise<void>((resolve) => {
+      releaseOpen = resolve;
+    });
+    let releaseClose!: () => void;
+    const closeReleased = new Promise<void>((resolve) => {
+      releaseClose = resolve;
+    });
+    const returnStream = vi.fn(async () => {
+      await closeReleased;
+      return { done: true as const, value: undefined };
+    });
+    const finalStream = {
+      [Symbol.asyncIterator]: () => ({
+        next: async (): Promise<IteratorResult<Uint8Array>> => new Promise<IteratorResult<Uint8Array>>(() => undefined),
+        return: returnStream,
+      }),
+    };
+    const cleanup = vi.fn(async () => undefined);
+    const filmExporter: StudioFilmExporterV2 = {
+      capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+      render: vi.fn(async () => ({
+        facts: {
+          schemaVersion: 1,
+          nominalDurationSeconds: 10,
+          renderedDurationSeconds: 10,
+          transition: { kind: 'cut' },
+          dissolveCount: 0,
+          trimTails: false,
+          segments: [
+            {
+              kind: 'shot',
+              shotId: 'clip_1',
+              sourceAssetId: take.id,
+              sourceSha256: take.sha256,
+              sourceInSeconds: 0,
+              sourceOutSeconds: 5,
+              renderedSourceOutSeconds: 5,
+              normalizedDurationSeconds: 5,
+              chainBreak: 'none',
+              hasAudio: true,
+            },
+            { kind: 'slate', beatId: 'section_2', shotId: 'clip_2', durationSeconds: 5, normalizedDurationSeconds: 5 },
+          ],
+          video: {
+            container: 'mp4',
+            codec: 'h264',
+            encoder: 'h264_videotoolbox',
+            profile: 'high',
+            level: '4.2',
+            width: 1920,
+            height: 1080,
+            frameRate: 24,
+            pixelFormat: 'yuv420p',
+            scaleMode: 'contain_black_pad',
+            sampleAspectRatio: '1:1',
+            colorPrimaries: 'bt709',
+            colorTransfer: 'bt709',
+            colorSpace: 'bt709',
+            colorRange: 'tv',
+            gopFrames: 48,
+            bitrate: 12_000_000,
+            trackTimeBase: '1/24000',
+            metadataStripped: true,
+            chaptersStripped: true,
+            fastStart: false,
+          },
+          audio: {
+            codec: 'aac',
+            sampleRate: 48_000,
+            channels: 2,
+            channelLayout: 'stereo',
+            sampleFormat: 'fltp',
+            bitrate: 192_000,
+            silenceForMissingStreams: true,
+            takeGain: 1,
+            bedAssetId: null,
+            bedSha256: null,
+            bedGain: null,
+            bedFadeOutSeconds: null,
+            bedFadeCurve: null,
+            dissolveCrossfade: false,
+            dissolveCurve: 'triangular',
+            limiterPeak: 0.95,
+            limiterLatencyCompensated: true,
+          },
+        },
+        byteSize: 4,
+        sha256: 'd'.repeat(64),
+        openVerifiedStream: async () => Readable.from([Buffer.from('film')]),
+        cleanup,
+      })),
+      dispose: vi.fn(),
+    };
+    const harness = makeHarness(project, {
+      filmExporter,
+      resolveAssetV2: vi.fn(async (_projectId, assetId) =>
+        assetId === take.id
+          ? { asset: take, openVerifiedStream: async () => Readable.from([Buffer.alloc(take.byteSize)]) }
+          : null
+      ),
+      resolveAssetWithProjectAuthorityV2: vi.fn(async (_authority, assetId) =>
+        assetId === take.id
+          ? {
+              asset: take,
+              openVerifiedStream: async () => {
+                markOpenStarted();
+                await openReleased;
+                return finalStream;
+              },
+            }
+          : null
+      ),
+    });
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_close_wait',
+      transition: { kind: 'cut' as const },
+      trimTails: false,
+    };
+    const pending = harness.service.createExport(request);
+    await openStarted;
+
+    let jobSettled = false;
+    const observed = pending.then(
+      () => {
+        jobSettled = true;
+        return null;
+      },
+      (error: unknown) => {
+        jobSettled = true;
+        return error;
+      }
+    );
+    harness.service.dispose();
+    await Promise.resolve();
+    expect(jobSettled).toBe(false);
+    expect(returnStream).not.toHaveBeenCalled();
+    releaseOpen();
+    await vi.waitFor(() => expect(returnStream).toHaveBeenCalledOnce());
+    expect(jobSettled).toBe(false);
+    releaseClose();
+
+    await expect(observed).resolves.toMatchObject({ code: 'cancelled' });
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
+  it('discards and cleans a completed film when project authority changed during the out-of-lock render', async () => {
+    const project = makeSchema2ServiceProject();
+    const cleanup = vi.fn(async () => undefined);
+    let markStarted!: () => void;
+    let releaseRender!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const released = new Promise<void>((resolve) => {
+      releaseRender = resolve;
+    });
+    const filmExporter: StudioFilmExporterV2 = {
+      capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+      render: vi.fn(async () => {
+        markStarted();
+        await released;
+        return {
+          facts: {
+            schemaVersion: 1,
+            nominalDurationSeconds: 8,
+            renderedDurationSeconds: 8,
+            transition: { kind: 'cut' },
+            dissolveCount: 0,
+            trimTails: false,
+            segments: [
+              {
+                kind: 'slate',
+                beatId: 'section_1',
+                shotId: null,
+                durationSeconds: 8,
+                normalizedDurationSeconds: 8,
+              },
+            ],
+            video: {
+              container: 'mp4',
+              codec: 'h264',
+              encoder: 'h264_videotoolbox',
+              profile: 'high',
+              level: '4.2',
+              width: 1920,
+              height: 1080,
+              frameRate: 24,
+              pixelFormat: 'yuv420p',
+              scaleMode: 'contain_black_pad',
+              sampleAspectRatio: '1:1',
+              colorPrimaries: 'bt709',
+              colorTransfer: 'bt709',
+              colorSpace: 'bt709',
+              colorRange: 'tv',
+              gopFrames: 48,
+              bitrate: 12_000_000,
+              trackTimeBase: '1/24000',
+              metadataStripped: true,
+              chaptersStripped: true,
+              fastStart: false,
+            },
+            audio: {
+              codec: 'aac',
+              sampleRate: 48_000,
+              channels: 2,
+              channelLayout: 'stereo',
+              sampleFormat: 'fltp',
+              bitrate: 192_000,
+              silenceForMissingStreams: true,
+              takeGain: 1,
+              bedAssetId: null,
+              bedSha256: null,
+              bedGain: null,
+              bedFadeOutSeconds: null,
+              bedFadeCurve: null,
+              dissolveCrossfade: false,
+              dissolveCurve: 'triangular',
+              limiterPeak: 0.95,
+              limiterLatencyCompensated: true,
+            },
+          },
+          byteSize: 4,
+          sha256: 'd'.repeat(64),
+          openVerifiedStream: async () => Readable.from([Buffer.from('film')]),
+          cleanup,
+        };
+      }),
+      dispose: vi.fn(),
+    };
+    const harness = makeHarness(project, { filmExporter, createExportId: () => 'film_export_stale' });
+    const pending = harness.service.createExport({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film',
+      renderId: 'film_run_stale',
+      transition: { kind: 'cut' },
+      trimTails: false,
+    });
+    await started;
+    await harness.store.updateProjectV2(
+      project.id,
+      (current) => ({ ...current, name: 'Changed during render' }),
+      project.revision
+    );
+    releaseRender();
+
+    await expect(pending).rejects.toMatchObject({ code: 'stale_project' });
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledOnce();
   });
 
   it('builds still and editor exports through the held project authority without re-entering media lookup', async () => {

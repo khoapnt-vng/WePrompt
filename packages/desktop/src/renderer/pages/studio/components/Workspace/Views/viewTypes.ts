@@ -9,6 +9,9 @@ import type {
   StudioBriefRuleDraft,
   StudioEditableProjectSettingsChanges,
   StudioGenerationCapabilityV2,
+  StudioFilmExportCapabilityV2,
+  StudioFilmExportStatusV2,
+  StudioFilmExportTransitionV2,
   StudioRendererAuthoringOperationV2,
   StudioRendererExportCatalogV2,
   StudioRendererProjectV2,
@@ -68,10 +71,22 @@ export type WorkspaceProjectMenuProps = Pick<
   'project' | 'projection' | 'drafts' | 'pending' | 'errorMessageKey' | 'mutations'
 > & {
   exportCatalog: StudioRendererExportCatalogV2 | null;
+  filmExportCapability: StudioFilmExportCapabilityV2 | null;
   createEditorFolder: () => Promise<
     { ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }
   >;
   revealEditorFolder: (artifactId: string) => Promise<{ ok: true } | { ok: false; messageKey: string }>;
+  createFilm: (input: {
+    renderId: string;
+    transition: StudioFilmExportTransitionV2;
+    trimTails: boolean;
+  }) => Promise<{ ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }>;
+  /** Null means the status transport is temporarily unknown; callers must retain their last known state. */
+  getFilmExportStatus: () => Promise<StudioFilmExportStatusV2 | null>;
+  refreshExports: () => Promise<boolean>;
+  cancelFilmExport: (renderId: string) => Promise<boolean>;
+  acknowledgeFilmExport: (renderId: string) => Promise<'acknowledged' | 'not_found' | null>;
+  revealFilm: (artifactId: string) => Promise<{ ok: true } | { ok: false; messageKey: string }>;
   /** Imported audio is project housekeeping, so its drawer opens from the project menu. */
   detachBedAudio: (assetId: string) => Promise<boolean>;
   routeCatalog: StudioRouteCatalogV2 | null;

@@ -82,6 +82,10 @@ const mocks = vi.hoisted(() => {
       detachBedAudio: { invoke: vi.fn() },
       setBed: { invoke: vi.fn() },
       createExport: { invoke: vi.fn() },
+      getFilmExportCapability: { invoke: vi.fn() },
+      getFilmExportStatus: { invoke: vi.fn() },
+      cancelFilmExport: { invoke: vi.fn() },
+      acknowledgeFilmExport: { invoke: vi.fn() },
       listExports: { invoke: vi.fn() },
       copyExport: { invoke: vi.fn() },
       revealExport: { invoke: vi.fn() },
@@ -1445,6 +1449,12 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 4 }));
     mocks.bridge.setBed.invoke.mockResolvedValue(commit(4));
     mocks.bridge.createExport.invoke.mockResolvedValue(ok({ revision: 2, artifacts: [] }));
+    mocks.bridge.getFilmExportCapability.invoke.mockResolvedValue(
+      ok({ status: 'ready', encoder: 'h264_videotoolbox' })
+    );
+    mocks.bridge.getFilmExportStatus.invoke.mockResolvedValue(ok({ status: 'idle' }));
+    mocks.bridge.cancelFilmExport.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.acknowledgeFilmExport.invoke.mockResolvedValue(ok({ status: 'acknowledged' }));
     mocks.bridge.copyExport.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
     mocks.bridge.revealExport.invoke.mockResolvedValue(ok({ status: 'revealed' }));
     mocks.bridge.parkShot.invoke.mockResolvedValue(commit(4));
@@ -5548,6 +5558,141 @@ describe('StudioPage schema-5 cutover', () => {
       expectedCatalogRevision: 1,
       shape: 'editor_folder',
     });
+  });
+
+  it('keeps one-file Film creation, status, cancellation, and reveal on current local authority', async () => {
+    const initialCatalog: StudioRendererExportCatalogV2 = { revision: 1, artifacts: [] };
+    const filmArtifact = {
+      id: 'film_export_1',
+      sourceRevision: 3,
+      shape: 'film' as const,
+      folderName: 'film-20260827-000008-000-0123456789abcdef',
+      byteSize: 4_096,
+      fileCount: 1,
+      createdAt: '2026-08-27T00:00:08.000Z',
+      film: {
+        nominalDurationSeconds: 8,
+        renderedDurationSeconds: 7.65,
+        transition: { kind: 'dissolve' as const, requestedSeconds: 0.35, seconds: 1 / 3 },
+        trimTails: true,
+        trimmedShotCount: 1,
+      },
+    };
+    const publishedCatalog: StudioRendererExportCatalogV2 = { revision: 2, artifacts: [filmArtifact] };
+    mocks.bridge.listExports.invoke.mockReset().mockResolvedValue(ok(initialCatalog));
+    mocks.bridge.createExport.invoke.mockResolvedValueOnce(ok(publishedCatalog));
+    mocks.bridge.cancelFilmExport.invoke
+      .mockResolvedValueOnce(ok({ status: 'cancellation_refused' as const }))
+      .mockResolvedValueOnce(ok({ status: 'cancelled' as const }))
+      .mockRejectedValueOnce(new Error('cancel transport failed'));
+    mocks.bridge.acknowledgeFilmExport.invoke
+      .mockResolvedValueOnce(ok({ status: 'acknowledged' as const }))
+      .mockResolvedValueOnce(ok({ status: 'not_found' as const }))
+      .mockRejectedValueOnce(new Error('acknowledgement transport failed'));
+
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() =>
+      expect(capturedProjectMenuProps().filmExportCapability).toEqual({
+        status: 'ready',
+        encoder: 'h264_videotoolbox',
+      })
+    );
+    const menu = capturedProjectMenuProps();
+
+    await expect(
+      invokeStudioAction(() =>
+        menu.createFilm({
+          renderId: 'film_run_1',
+          transition: { kind: 'dissolve', seconds: 0.35 },
+          trimTails: true,
+        })
+      )
+    ).resolves.toEqual({ ok: true, catalog: publishedCatalog });
+    expect(mocks.bridge.createExport.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      expectedCatalogRevision: 1,
+      shape: 'film',
+      renderId: 'film_run_1',
+      transition: { kind: 'dissolve', seconds: 0.35 },
+      trimTails: true,
+    });
+    await waitFor(() => expect(capturedProjectMenuProps().exportCatalog).toEqual(publishedCatalog));
+
+    mocks.bridge.getFilmExportStatus.invoke
+      .mockReset()
+      .mockResolvedValueOnce(
+        ok({
+          status: 'active' as const,
+          progress: {
+            projectId: 'project_1',
+            renderId: 'film_run_1',
+            phase: 'rendering' as const,
+            progress: 0.5,
+          },
+        })
+      )
+      .mockRejectedValueOnce(new Error('status transport failed'))
+      .mockResolvedValueOnce(
+        ok({
+          status: 'terminal' as const,
+          result: { projectId: 'project_other', renderId: 'film_other', outcome: 'cancelled' as const },
+        })
+      );
+    await expect(menu.getFilmExportStatus()).resolves.toMatchObject({
+      status: 'active',
+      progress: { renderId: 'film_run_1', phase: 'rendering', progress: 0.5 },
+    });
+    await expect(menu.getFilmExportStatus()).resolves.toBeNull();
+    await expect(menu.getFilmExportStatus()).resolves.toBeNull();
+    await expect(menu.cancelFilmExport('film_run_1')).resolves.toBe(false);
+    await expect(menu.cancelFilmExport('film_run_1')).resolves.toBe(true);
+    await expect(menu.cancelFilmExport('film_run_1')).resolves.toBe(false);
+    await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBe('acknowledged');
+    await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBe('not_found');
+    await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBeNull();
+    await expect(menu.revealFilm('missing_film')).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.artifactUnavailable',
+    });
+    await expect(menu.revealFilm(filmArtifact.id)).resolves.toEqual({ ok: true });
+    expect(mocks.bridge.revealExport.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedCatalogRevision: 2,
+      artifactId: filmArtifact.id,
+    });
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['stale_project', 'conversation.creativeStudio.workspace.filmExport.errors.staleAuthority'],
+    ['ffmpeg_unavailable', 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'],
+    ['unsupported_capabilities', 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'],
+    ['render_failed', 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'],
+    ['storage_error', 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'],
+    ['cancelled', 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'],
+    ['invalid_payload', 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'],
+    ['busy', 'conversation.creativeStudio.workspace.filmExport.errors.busy'],
+  ] as const)('maps %s Film export failures to bounded renderer copy', async (code, messageKey) => {
+    mocks.bridge.createExport.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code, messageKey: 'native.untrustedFilmFailure' },
+    });
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.projectMenuProps).not.toBeNull());
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedProjectMenuProps().createFilm({
+          renderId: 'film_run_error',
+          transition: { kind: 'cut' },
+          trimTails: false,
+        })
+      )
+    ).resolves.toEqual({ ok: false, messageKey });
   });
 
   it('rejects a stale renderer hard-cut batch before it reaches the native bridge', async () => {

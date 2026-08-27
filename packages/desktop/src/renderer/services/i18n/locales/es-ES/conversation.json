@@ -1491,6 +1491,48 @@
           "artifactUnavailable": "Esta exportación ya no está en el catálogo activo. Recarga el proyecto.",
           "resultConflict": "Llegó un catálogo más reciente antes de confirmar el resultado. Recarga y revísalo."
         }
+      },
+      "filmExport": {
+        "action": "Exportar película…",
+        "title": "Exportar un archivo de película",
+        "description": "Crea un MP4 listo para edición desde el montaje actual. Los planos sin cobertura se convierten en pizarras negras temporizadas.",
+        "transition": "Transiciones",
+        "cut": "Cortes directos",
+        "dissolve": "Fundidos de 0,35 s",
+        "trimTails": "Recortar colas silenciosas limitadas (se protege el último plano renderizado)",
+        "noSpend": "Es una exportación local. No genera medios ni gasta dinero.",
+        "export": "Exportar película",
+        "cancel": "Cancelar exportación",
+        "reveal": "Mostrar en Finder",
+        "dismiss": "Cerrar",
+        "successFacts": "{{nominal}} s creados · {{rendered}} s exportados · {{count}} colas recortadas",
+        "successQuarantine": "Exportaciones anteriores apartadas: {{count}}",
+        "phase": {
+          "preparing": "Preparando los medios exactos…",
+          "analyzing": "Analizando medios y colas silenciosas…",
+          "rendering": "Renderizando la película localmente…",
+          "publishing": "Verificando y publicando la película…"
+        },
+        "disabled": {
+          "no_beats": "Añade un Beat antes de exportar",
+          "duration_pending": "Define la duración de cada Beat vacío",
+          "invalid_media": "Resuelve los medios obsoletos o no válidos",
+          "bed_too_short": "Elige una pista de audio suficientemente larga",
+          "mutationActive": "Termina el cambio actual antes de exportar",
+          "exportRunning": "Ya hay una exportación en curso",
+          "catalogUnavailable": "El almacenamiento de exportación no está disponible"
+        },
+        "errors": {
+          "catalogUnavailable": "El catálogo de exportación no está disponible. Recarga el proyecto.",
+          "staleAuthority": "El proyecto o catálogo cambió. No se publicó una película obsoleta.",
+          "unavailable": "Este dispositivo no tiene una capacidad FFmpeg verificada.",
+          "renderFailed": "No se pudo verificar el render local. No se publicó una exportación parcial.",
+          "cancelled": "Se canceló la exportación. Los medios del proyecto no cambiaron.",
+          "invalidMedia": "El montaje contiene medios obsoletos, no canónicos o no válidos.",
+          "busy": "Creative Studio está terminando otra operación.",
+          "artifactUnavailable": "La película ya no está en el catálogo activo.",
+          "resultConflict": "Llegó un catálogo más reciente antes de confirmar la película."
+        }
       }
     },
     "rules": {

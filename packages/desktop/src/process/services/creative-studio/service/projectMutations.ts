@@ -8,7 +8,15 @@ import type { StudioConnectionValidationFailureReason } from '@/common/types/pro
 
 /** A safe, stable service error that can cross only through the bridge error mapper. */
 export class CreativeStudioServiceError extends Error {
-  readonly code: 'provider_error' | 'invalid_route' | 'runtime_inactive' | 'project_quarantined';
+  readonly code:
+    | 'provider_error'
+    | 'invalid_route'
+    | 'runtime_inactive'
+    | 'project_quarantined'
+    | 'ffmpeg_unavailable'
+    | 'unsupported_capabilities'
+    | 'render_failed'
+    | 'cancelled';
   readonly projectId: string | null;
 
   constructor(code: CreativeStudioServiceError['code'], projectId: string | null = null) {

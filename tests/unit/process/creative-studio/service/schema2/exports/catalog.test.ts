@@ -18,6 +18,7 @@ import type {
   StudioExportArtifactV2,
   StudioExportCatalogV2,
   StudioExportShapeV2,
+  StudioFilmExportFactsV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/factories';
 import {
@@ -56,11 +57,11 @@ const manifestFor = (...entries: StudioExportManifestEntryV2[]) => {
 
 const makeArtifact = (
   id: string,
-  shape: StudioExportArtifactV2['shape'] = 'editor_folder',
+  shape: Exclude<StudioExportArtifactV2['shape'], 'film'> = 'editor_folder',
   createdAt = CREATED_AT,
   manifest = manifestFor({ relativePath: 'timeline.json', byteSize: 4, sha256: 'a'.repeat(64) })
 ): StudioExportArtifactV2 => ({
-  schemaVersion: 5,
+  schemaVersion: 1,
   id,
   projectId: CONTEXT.projectId,
   sourceRevision: CONTEXT.currentProjectRevision,
@@ -71,6 +72,86 @@ const makeArtifact = (
   fileCount: manifest.fileCount,
   manifestSha256: manifest.manifestSha256,
   createdAt,
+});
+
+const filmFacts = (): StudioFilmExportFactsV2 => ({
+  schemaVersion: 1,
+  nominalDurationSeconds: 4,
+  renderedDurationSeconds: 4,
+  transition: { kind: 'cut' },
+  dissolveCount: 0,
+  trimTails: false,
+  segments: [
+    {
+      kind: 'shot',
+      shotId: 'shot_1',
+      sourceAssetId: 'take_1',
+      sourceSha256: 'b'.repeat(64),
+      sourceInSeconds: 0,
+      sourceOutSeconds: 4,
+      renderedSourceOutSeconds: 4,
+      normalizedDurationSeconds: 4,
+      chainBreak: 'none',
+      hasAudio: true,
+    },
+  ],
+  video: {
+    container: 'mp4',
+    codec: 'h264',
+    encoder: 'h264_videotoolbox',
+    profile: 'high',
+    level: '4.2',
+    width: 1920,
+    height: 1080,
+    frameRate: 24,
+    pixelFormat: 'yuv420p',
+    scaleMode: 'contain_black_pad',
+    sampleAspectRatio: '1:1',
+    colorPrimaries: 'bt709',
+    colorTransfer: 'bt709',
+    colorSpace: 'bt709',
+    colorRange: 'tv',
+    gopFrames: 48,
+    bitrate: 12_000_000,
+    trackTimeBase: '1/24000',
+    metadataStripped: true,
+    chaptersStripped: true,
+    fastStart: false,
+  },
+  audio: {
+    codec: 'aac',
+    sampleRate: 48_000,
+    channels: 2,
+    channelLayout: 'stereo',
+    sampleFormat: 'fltp',
+    bitrate: 192_000,
+    silenceForMissingStreams: true,
+    takeGain: 1,
+    bedAssetId: null,
+    bedSha256: null,
+    bedGain: null,
+    bedFadeOutSeconds: null,
+    bedFadeCurve: null,
+    dissolveCrossfade: false,
+    dissolveCurve: 'triangular',
+    limiterPeak: 0.95,
+    limiterLatencyCompensated: true,
+  },
+});
+
+const makeFilmArtifact = (id = 'film_1', createdAt = CREATED_AT): StudioExportArtifactV2 => ({
+  schemaVersion: 1,
+  id,
+  projectId: CONTEXT.projectId,
+  sourceRevision: CONTEXT.currentProjectRevision,
+  shape: 'film',
+  payloadKind: 'file',
+  managedExport: { collection: 'exports', fileName: id },
+  byteSize: 4,
+  fileCount: 1,
+  manifestSha256: 'a'.repeat(64),
+  createdAt,
+  film: filmFacts(),
 });
 
 const expectCode = (operation: () => unknown, code: string): void => {
@@ -108,7 +189,7 @@ const nonceSequence = (): (() => string) => {
   return () => `nonce_${++index}`;
 };
 
-const fileNameForShape = (shape: StudioExportShapeV2): string => {
+const fileNameForShape = (shape: Exclude<StudioExportShapeV2, 'film'>): string => {
   if (shape === 'still') return 'still.png';
   if (shape === 'script') return 'script.md';
   return 'timeline.json';
@@ -117,7 +198,7 @@ const fileNameForShape = (shape: StudioExportShapeV2): string => {
 const makeCreatePlan = (
   id: string,
   expectedCatalogRevision: number,
-  shape: StudioExportShapeV2 = 'script',
+  shape: Exclude<StudioExportShapeV2, 'film'> = 'script',
   bytes: Uint8Array = Buffer.from(`# ${id}\n`),
   createdAt = CREATED_AT
 ): StudioExportCreatePlanV2 => ({
@@ -131,9 +212,150 @@ const makeCreatePlan = (
 });
 
 describe('schema-2 export catalog', () => {
+  it('accepts strict film facts while stripping source hashes from the renderer projection', () => {
+    const artifact = makeFilmArtifact();
+    const catalog: StudioExportCatalogV2 = {
+      schemaVersion: 1,
+      projectId: CONTEXT.projectId,
+      revision: 2,
+      artifacts: [artifact],
+    };
+    expect(validateStudioExportCatalogV2(catalog, CONTEXT)).toBe(true);
+    expect(projectStudioRendererExportCatalogV2(catalog)).toEqual({
+      revision: 2,
+      artifacts: [
+        {
+          id: 'film_1',
+          sourceRevision: CONTEXT.currentProjectRevision,
+          shape: 'film',
+          folderName: 'film_1',
+          byteSize: 4,
+          fileCount: 1,
+          createdAt: CREATED_AT,
+          film: {
+            nominalDurationSeconds: 4,
+            renderedDurationSeconds: 4,
+            transition: { kind: 'cut' },
+            trimTails: false,
+            trimmedShotCount: 0,
+          },
+        },
+      ],
+    });
+    expect(JSON.stringify(projectStudioRendererExportCatalogV2(catalog))).not.toContain('sourceSha256');
+    expect(validateStudioExportCatalogV2({ ...catalog, artifacts: [{ ...artifact, film: undefined }] }, CONTEXT)).toBe(
+      false
+    );
+    expect(
+      validateStudioExportCatalogV2(
+        { ...catalog, artifacts: [{ ...artifact, film: { ...artifact.film, sourcePath: '/private/take.mp4' } }] },
+        CONTEXT
+      )
+    ).toBe(false);
+  });
+
+  it('rejects film facts outside the frozen geometry, duration, tail, and final-shot contract', () => {
+    const accepts = (film: StudioFilmExportFactsV2): boolean =>
+      validateStudioExportCatalogV2(
+        {
+          schemaVersion: 1,
+          projectId: CONTEXT.projectId,
+          revision: 2,
+          artifacts: [{ ...makeFilmArtifact(), film }],
+        },
+        CONTEXT
+      );
+
+    const wrongGeometry = filmFacts();
+    wrongGeometry.video.width = 1000;
+    wrongGeometry.video.height = 1000;
+
+    const excessiveTail = filmFacts();
+    excessiveTail.nominalDurationSeconds = 8;
+    excessiveTail.renderedDurationSeconds = 6.5;
+    excessiveTail.trimTails = true;
+    excessiveTail.segments = [
+      {
+        ...excessiveTail.segments[0]!,
+        renderedSourceOutSeconds: 2.5,
+        normalizedDurationSeconds: 2.5,
+      },
+      {
+        ...excessiveTail.segments[0]!,
+        shotId: 'shot_2',
+        sourceAssetId: 'take_2',
+        sourceSha256: 'c'.repeat(64),
+      },
+    ];
+
+    const trimmedFinalShot = filmFacts();
+    trimmedFinalShot.renderedDurationSeconds = 3.5;
+    trimmedFinalShot.trimTails = true;
+    trimmedFinalShot.segments[0] = {
+      ...trimmedFinalShot.segments[0]!,
+      renderedSourceOutSeconds: 3.5,
+      normalizedDurationSeconds: 3.5,
+    };
+
+    const tooShortForDissolve = filmFacts();
+    tooShortForDissolve.nominalDurationSeconds = 6;
+    tooShortForDissolve.renderedDurationSeconds = 4.75;
+    tooShortForDissolve.transition = { kind: 'dissolve', requestedSeconds: 0.5, seconds: 0.5 };
+    tooShortForDissolve.dissolveCount = 1;
+    tooShortForDissolve.trimTails = true;
+    tooShortForDissolve.audio.dissolveCrossfade = true;
+    tooShortForDissolve.segments = [
+      {
+        ...tooShortForDissolve.segments[0]!,
+        sourceInSeconds: 2,
+        renderedSourceOutSeconds: 3.25,
+        normalizedDurationSeconds: 1.25,
+      },
+      {
+        ...tooShortForDissolve.segments[0]!,
+        shotId: 'shot_2',
+        sourceAssetId: 'take_2',
+        sourceSha256: 'c'.repeat(64),
+      },
+    ];
+
+    const oversizedShot = filmFacts();
+    oversizedShot.nominalDurationSeconds = 16;
+    oversizedShot.renderedDurationSeconds = 16;
+    oversizedShot.segments[0] = {
+      ...oversizedShot.segments[0]!,
+      sourceOutSeconds: 16,
+      renderedSourceOutSeconds: 16,
+      normalizedDurationSeconds: 16,
+    };
+
+    const oversizedSlate = filmFacts();
+    oversizedSlate.nominalDurationSeconds = 1_441;
+    oversizedSlate.renderedDurationSeconds = 1_441;
+    oversizedSlate.segments = [
+      {
+        kind: 'slate',
+        beatId: 'beat_1',
+        shotId: null,
+        durationSeconds: 1_441,
+        normalizedDurationSeconds: 1_441,
+      },
+    ];
+
+    for (const facts of [
+      wrongGeometry,
+      excessiveTail,
+      trimmedFinalShot,
+      tooShortForDissolve,
+      oversizedShot,
+      oversizedSlate,
+    ]) {
+      expect(accepts(facts)).toBe(false);
+    }
+  });
   it('treats absence as logical revision one and projects only renderer-safe fields', () => {
     const logical = parseStudioExportCatalogV2(null, CONTEXT);
-    expect(logical).toEqual({ schemaVersion: 5, projectId: 'project_1', revision: 1, artifacts: [] });
+    expect(logical).toEqual({ schemaVersion: 1, projectId: 'project_1', revision: 1, artifacts: [] });
     expect(createLogicalStudioExportCatalogV2('project_1')).toEqual(logical);
 
     const artifact = makeArtifact('artifact_1');
@@ -159,7 +381,7 @@ describe('schema-2 export catalog', () => {
 
   it('round-trips only canonical exact-key catalog bytes and refuses raw authority mismatches', () => {
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 5,
+      schemaVersion: 1,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts: [makeArtifact('artifact_1')],
@@ -199,7 +421,7 @@ describe('schema-2 export catalog', () => {
   it('rejects every non-data catalog shape and every malformed artifact authority field', () => {
     const artifact = makeArtifact('artifact_1');
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 5,
+      schemaVersion: 1,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts: [artifact],
@@ -238,17 +460,17 @@ describe('schema-2 export catalog', () => {
       symbolCatalog,
       accessorCatalog,
       hiddenCatalog,
-      { ...catalog, schemaVersion: 1 },
+      { ...catalog, schemaVersion: 5 },
       { ...catalog, revision: Number.NaN },
       { ...catalog, artifacts: customArtifacts },
       { ...catalog, artifacts: sparseArtifacts },
       { ...catalog, artifacts: accessorArtifacts },
       { ...catalog, artifacts: hiddenArtifacts },
       { ...catalog, artifacts: extraKeyArtifacts },
-      { ...catalog, artifacts: Array.from({ length: 16 }, (_, index) => makeArtifact(`artifact_${index}`)) },
+      { ...catalog, artifacts: Array.from({ length: 21 }, (_, index) => makeArtifact(`artifact_${index}`)) },
       { ...catalog, artifacts: [null] },
       { ...catalog, artifacts: [missingArtifactKey] },
-      withArtifact({ schemaVersion: 1 }),
+      withArtifact({ schemaVersion: 5 }),
       withArtifact({ id: 1 }),
       withArtifact({ id: 'invalid id' }),
       withArtifact({ projectId: 'project_2' }),
@@ -355,7 +577,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact(`artifact_${index}`, 'script', `2026-08-20T00:00:0${index}.000Z`)
     );
     const overRetained: StudioExportCatalogV2 = {
-      schemaVersion: 5,
+      schemaVersion: 1,
       projectId: CONTEXT.projectId,
       revision: 7,
       artifacts: sixScripts,
@@ -369,7 +591,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact('artifact_b', 'still', '2026-08-20T00:00:01.000Z', manifestB),
     ];
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 5,
+      schemaVersion: 1,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts,
@@ -464,7 +686,7 @@ describe('schema-2 export catalog', () => {
   it('increments once, enforces exact catalog CAS, and evicts the oldest fifth artifact by time and ID', () => {
     const artifacts = ['a', 'b', 'c', 'd', 'e'].map((id) => makeArtifact(`artifact_${id}`));
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 5,
+      schemaVersion: 1,
       projectId: CONTEXT.projectId,
       revision: 6,
       artifacts,
@@ -506,6 +728,34 @@ describe('schema-2 export catalog', () => {
     );
   });
 
+  it('retains only the newest five Film artifacts without evicting another export shape', () => {
+    const films = ['a', 'b', 'c', 'd', 'e'].map((id, index) =>
+      makeFilmArtifact(`film_${id}`, `2026-08-20T00:00:0${index}.000Z`)
+    );
+    const script = makeArtifact('script_kept', 'script', '2026-08-19T00:00:00.000Z');
+    const catalog: StudioExportCatalogV2 = {
+      schemaVersion: 1,
+      projectId: CONTEXT.projectId,
+      revision: 7,
+      artifacts: [script, ...films],
+    };
+    const result = publishStudioExportArtifactInCatalogV2(catalog, {
+      ...CONTEXT,
+      expectedCatalogRevision: 7,
+      artifact: makeFilmArtifact('film_f', '2026-08-20T00:00:05.000Z'),
+    });
+
+    expect(result.catalog.artifacts.map(({ id }) => id)).toEqual([
+      'script_kept',
+      'film_b',
+      'film_c',
+      'film_d',
+      'film_e',
+      'film_f',
+    ]);
+    expect(result.evictedArtifacts.map(({ id }) => id)).toEqual(['film_a']);
+  });
+
   it('refuses revision overflow and catalog-wide directory aliases, hard links, and manifest substitution', () => {
     const manifestA = manifestFor({ relativePath: 'a', byteSize: 4, sha256: 'a'.repeat(64) });
     const manifestB = manifestFor({ relativePath: 'b', byteSize: 5, sha256: 'b'.repeat(64) });
@@ -514,7 +764,7 @@ describe('schema-2 export catalog', () => {
       makeArtifact('artifact_b', 'still', '2026-08-20T00:00:01.000Z', manifestB),
     ];
     const catalog: StudioExportCatalogV2 = {
-      schemaVersion: 5,
+      schemaVersion: 1,
       projectId: CONTEXT.projectId,
       revision: 2,
       artifacts,
@@ -572,6 +822,118 @@ describe('schema-2 export catalog', () => {
 });
 
 describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
+  it('publishes and physically reloads one strict film payload with its exact composition facts', async () => {
+    const authority = await makeAuthority();
+    const film = Buffer.from('verified-film-bytes');
+    const dissolveSeconds = 8 / 24;
+    const facts: StudioFilmExportFactsV2 = {
+      ...filmFacts(),
+      nominalDurationSeconds: 10,
+      renderedDurationSeconds: 9.5 - dissolveSeconds,
+      transition: { kind: 'dissolve', requestedSeconds: 0.35, seconds: dissolveSeconds },
+      dissolveCount: 1,
+      trimTails: true,
+      segments: [
+        {
+          kind: 'shot',
+          shotId: 'shot_1',
+          sourceAssetId: 'take_1',
+          sourceSha256: 'b'.repeat(64),
+          sourceInSeconds: 0,
+          sourceOutSeconds: 4,
+          renderedSourceOutSeconds: 3.5,
+          normalizedDurationSeconds: 3.5,
+          chainBreak: 'none',
+          hasAudio: true,
+        },
+        {
+          kind: 'shot',
+          shotId: 'shot_2',
+          sourceAssetId: 'take_2',
+          sourceSha256: 'c'.repeat(64),
+          sourceInSeconds: 0,
+          sourceOutSeconds: 4,
+          renderedSourceOutSeconds: 4,
+          normalizedDurationSeconds: 4,
+          chainBreak: 'none',
+          hasAudio: false,
+        },
+        {
+          kind: 'slate',
+          beatId: 'beat_2',
+          shotId: null,
+          durationSeconds: 2,
+          normalizedDurationSeconds: 2,
+        },
+      ],
+      video: {
+        ...filmFacts().video,
+        encoder: 'h264_nvenc',
+        width: 1280,
+        height: 720,
+        bitrate: 8_000_000,
+      },
+      audio: {
+        ...filmFacts().audio,
+        takeGain: 0.85,
+        bedAssetId: 'bed_1',
+        bedSha256: 'd'.repeat(64),
+        bedGain: 0.2,
+        bedFadeOutSeconds: 2,
+        bedFadeCurve: 'triangular',
+        dissolveCrossfade: true,
+      },
+    };
+    const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
+    const catalog = await store.create(authority, {
+      expectedProjectRevision: authority.project.revision,
+      expectedCatalogRevision: 1,
+      artifactId: 'film_artifact_1',
+      managedFileName: 'film_export_1',
+      shape: 'film',
+      film: facts,
+      createdAt: CREATED_AT,
+      files: [
+        {
+          kind: 'verified_stream',
+          relativePath: 'film.mp4',
+          byteSize: film.byteLength,
+          sha256: createHash('sha256').update(film).digest('hex'),
+          openVerifiedStream: async () =>
+            (async function* (): AsyncIterable<Uint8Array> {
+              yield film.subarray(0, 7);
+              yield film.subarray(7);
+            })(),
+        },
+      ],
+    });
+
+    const reloaded = await createStudioExportCatalogStoreV2({ createNonce: nonceSequence() }).list(authority);
+    expect(reloaded).toEqual(catalog);
+    expect(await fs.readFile(path.join(authority.projectDir, 'exports', 'film_export_1', 'film.mp4'))).toEqual(film);
+    expect(projectStudioRendererExportCatalogV2(reloaded)).toEqual({
+      revision: 2,
+      artifacts: [
+        {
+          id: 'film_artifact_1',
+          sourceRevision: authority.project.revision,
+          shape: 'film',
+          folderName: 'film_export_1',
+          byteSize: film.byteLength,
+          fileCount: 1,
+          createdAt: CREATED_AT,
+          film: {
+            nominalDurationSeconds: 10,
+            renderedDurationSeconds: 9.5 - dissolveSeconds,
+            transition: { kind: 'dissolve', requestedSeconds: 0.35, seconds: dissolveSeconds },
+            trimTails: true,
+            trimmedShotCount: 1,
+          },
+        },
+      ],
+    });
+  });
+
   it('rejects malformed authorities, dependency bounds, plans, and verified streams before publication', async () => {
     expectCode(() => createStudioExportCatalogStoreV2({ maxArtifactBytes: 0 }), 'storage_error');
     expectCode(() => createStudioExportCatalogStoreV2({ maxProjectBytes: 0 }), 'storage_error');
@@ -651,6 +1013,33 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
       { plan: { ...base, files: [{ ...verified, sha256: 'A'.repeat(64) }] }, code: 'invalid_create_plan' },
       { plan: asPlan({ ...base, files: [{ ...verified, openVerifiedStream: true }] }), code: 'invalid_create_plan' },
       { plan: asPlan({ ...base, files: [{ ...generated, kind: 'foreign' }] }), code: 'invalid_create_plan' },
+      {
+        plan: asPlan({
+          ...base,
+          shape: 'film',
+          film: filmFacts(),
+          files: [{ ...generated, relativePath: 'film.mp4' }],
+        }),
+        code: 'invalid_create_plan',
+      },
+      {
+        plan: asPlan({
+          ...base,
+          shape: 'film',
+          film: filmFacts(),
+          files: [{ ...verified, relativePath: 'movie.mp4' }],
+        }),
+        code: 'invalid_create_plan',
+      },
+      {
+        plan: asPlan({
+          ...base,
+          shape: 'film',
+          film: filmFacts(),
+          files: [{ ...verified, relativePath: 'film.mp4', byteSize: 0 }],
+        }),
+        code: 'invalid_create_plan',
+      },
     ];
     for (const { plan, code } of invalidPlans) await expectAsyncCode(store.create(authority, plan), code);
 
@@ -706,7 +1095,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
     const store = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
 
     await expect(store.list(authority)).resolves.toEqual({
-      schemaVersion: 5,
+      schemaVersion: 1,
       projectId: 'project_1',
       revision: 1,
       artifacts: [],
@@ -2765,7 +3154,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
 
     const restarted = createStudioExportCatalogStoreV2({ createNonce: nonceSequence() });
     await expect(restarted.repair(authority)).resolves.toEqual({
-      schemaVersion: 5,
+      schemaVersion: 1,
       projectId: 'project_1',
       revision: 1,
       artifacts: [],

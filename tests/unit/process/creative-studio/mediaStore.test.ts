@@ -706,6 +706,7 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     const chunks: Buffer[] = [];
     for await (const chunk of unverified) chunks.push(Buffer.from(chunk));
     expect(Buffer.concat(chunks)).toEqual(png);
+    expect(unverified.closed).toBe(true);
     expect(unverified.emit('error', new Error('late close after end'))).toBe(true);
 
     const replacementPath = path.join(rootDir, 'replacement.png');
@@ -1689,7 +1690,11 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
           '3',
           'fd:',
         ],
-        options: { stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)], windowsHide: true },
+        options: {
+          detached: process.platform !== 'win32',
+          stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)],
+          windowsHide: true,
+        },
       },
     ]);
   });
@@ -2276,7 +2281,11 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         '3',
         'fd:',
       ],
-      options: { stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)], windowsHide: true },
+      options: {
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)],
+        windowsHide: true,
+      },
     });
   });
 
@@ -2319,7 +2328,11 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
         'null',
         '-',
       ],
-      options: { stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)], windowsHide: true },
+      options: {
+        detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'ignore', expect.any(Number)],
+        windowsHide: true,
+      },
     });
   });
 

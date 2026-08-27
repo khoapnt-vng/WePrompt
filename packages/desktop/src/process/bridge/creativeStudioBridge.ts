@@ -14,6 +14,8 @@ import {
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT,
   STUDIO_MAX_EXPORTS_PER_SHAPE,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_EXPORT_SHAPES,
   STUDIO_VIEWS,
   type StudioCommandErrorCode,
   type StudioCommandResult,
@@ -25,6 +27,10 @@ import {
   type StudioRendererConnectionCapabilities,
   type StudioRendererProjectCommitResultV2,
   type StudioRendererExportCatalogV2,
+  type StudioFilmExportCapabilityV2,
+  type StudioFilmExportStatusV2,
+  type StudioCancelFilmExportResultV2,
+  type StudioAcknowledgeFilmExportResultV2,
   type StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
@@ -52,6 +58,9 @@ const errorMessageKeys: Record<Exclude<StudioCommandErrorCode, 'connection_valid
   duplicate_charge_acknowledgement_required:
     'conversation.creativeStudio.errors.duplicateChargeAcknowledgementRequired',
   unsupported: 'conversation.creativeStudio.jobs.errors.unsupported',
+  ffmpeg_unavailable: 'conversation.creativeStudio.workspace.filmExport.errors.unavailable',
+  unsupported_capabilities: 'conversation.creativeStudio.workspace.filmExport.errors.unavailable',
+  render_failed: 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed',
   busy: 'conversation.creativeStudio.errors.busy',
   cancelled: 'conversation.creativeStudio.jobs.status.cancelled',
   provider_error: 'conversation.creativeStudio.errors.provider',
@@ -643,33 +652,33 @@ const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 
     (value.revision as number) < 1 ||
     !Array.isArray(value.artifacts) ||
     Reflect.ownKeys(value.artifacts).length !== value.artifacts.length + 1 ||
-    value.artifacts.length > STUDIO_MAX_EXPORTS_PER_SHAPE * 3
+    value.artifacts.length > STUDIO_MAX_EXPORTS_PER_SHAPE * STUDIO_EXPORT_SHAPES.length
   ) {
     return exportBoundaryFailure();
   }
   const artifacts: StudioRendererExportCatalogV2['artifacts'] = [];
   const ids = new Set<string>();
-  const shapeCounts = new Map<'editor_folder' | 'still' | 'script', number>();
+  const shapeCounts = new Map<'editor_folder' | 'still' | 'script' | 'film', number>();
   let previous: { createdAt: string; id: string } | null = null;
   for (let index = 0; index < value.artifacts.length; index += 1) {
     if (!Object.hasOwn(value.artifacts, index)) return exportBoundaryFailure();
     const artifact = value.artifacts[index];
     if (
-      !isExactDataObject(artifact, [
-        'id',
-        'sourceRevision',
-        'shape',
-        'folderName',
-        'byteSize',
-        'fileCount',
-        'createdAt',
-      ]) ||
+      !isExactDataObject(
+        artifact,
+        artifact?.shape === 'film'
+          ? ['id', 'sourceRevision', 'shape', 'folderName', 'byteSize', 'fileCount', 'createdAt', 'film']
+          : ['id', 'sourceRevision', 'shape', 'folderName', 'byteSize', 'fileCount', 'createdAt']
+      ) ||
       typeof artifact.id !== 'string' ||
       !/^[A-Za-z0-9_-]{1,256}$/.test(artifact.id) ||
       ids.has(artifact.id) ||
       !Number.isSafeInteger(artifact.sourceRevision) ||
       (artifact.sourceRevision as number) < 1 ||
-      (artifact.shape !== 'editor_folder' && artifact.shape !== 'still' && artifact.shape !== 'script') ||
+      (artifact.shape !== 'editor_folder' &&
+        artifact.shape !== 'still' &&
+        artifact.shape !== 'script' &&
+        artifact.shape !== 'film') ||
       typeof artifact.folderName !== 'string' ||
       !/^[A-Za-z0-9_-]{1,256}$/.test(artifact.folderName) ||
       !Number.isSafeInteger(artifact.byteSize) ||
@@ -696,7 +705,7 @@ const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 
     if (shapeCount > STUDIO_MAX_EXPORTS_PER_SHAPE) return exportBoundaryFailure();
     shapeCounts.set(artifact.shape, shapeCount);
     previous = { createdAt: artifact.createdAt, id: artifact.id };
-    artifacts.push({
+    const projected = {
       id: artifact.id,
       sourceRevision: artifact.sourceRevision as number,
       shape: artifact.shape,
@@ -704,9 +713,194 @@ const toRendererExportCatalog = (value: unknown): StudioRendererExportCatalogV2 
       byteSize: artifact.byteSize as number,
       fileCount: artifact.fileCount as number,
       createdAt: artifact.createdAt,
-    });
+    };
+    if (artifact.shape === 'film') {
+      if (
+        !isExactDataObject(artifact.film, [
+          'nominalDurationSeconds',
+          'renderedDurationSeconds',
+          'transition',
+          'trimTails',
+          'trimmedShotCount',
+        ])
+      ) {
+        return exportBoundaryFailure();
+      }
+      const film = artifact.film;
+      const transition = (() => {
+        if (isExactDataObject(film?.transition, ['kind']) && film.transition.kind === 'cut') {
+          return { kind: 'cut' as const };
+        }
+        if (
+          isExactDataObject(film?.transition, ['kind', 'requestedSeconds', 'seconds']) &&
+          film.transition.kind === 'dissolve' &&
+          typeof film.transition.requestedSeconds === 'number' &&
+          Number.isFinite(film.transition.requestedSeconds) &&
+          film.transition.requestedSeconds >= 1 / 24 &&
+          film.transition.requestedSeconds <= 1 &&
+          typeof film.transition.seconds === 'number' &&
+          Number.isFinite(film.transition.seconds) &&
+          film.transition.seconds >= 1 / 24 &&
+          film.transition.seconds <= film.transition.requestedSeconds &&
+          film.transition.requestedSeconds - film.transition.seconds < 1 / 24 + Number.EPSILON &&
+          Math.abs(film.transition.seconds * 24 - Math.round(film.transition.seconds * 24)) <= 0.000_001
+        ) {
+          return {
+            kind: 'dissolve' as const,
+            requestedSeconds: film.transition.requestedSeconds,
+            seconds: film.transition.seconds,
+          };
+        }
+        return null;
+      })();
+      if (
+        typeof film.nominalDurationSeconds !== 'number' ||
+        !Number.isFinite(film.nominalDurationSeconds) ||
+        film.nominalDurationSeconds <= 0 ||
+        typeof film.renderedDurationSeconds !== 'number' ||
+        !Number.isFinite(film.renderedDurationSeconds) ||
+        film.renderedDurationSeconds <= 0 ||
+        film.renderedDurationSeconds > film.nominalDurationSeconds ||
+        typeof film.trimTails !== 'boolean' ||
+        !Number.isSafeInteger(film.trimmedShotCount) ||
+        (film.trimmedShotCount as number) < 0 ||
+        (film.trimmedShotCount as number) > STUDIO_MAX_SHOTS_PER_PROJECT ||
+        (artifact.byteSize as number) < 1 ||
+        transition === null
+      ) {
+        return exportBoundaryFailure();
+      }
+      artifacts.push({
+        ...projected,
+        shape: 'film',
+        film: {
+          nominalDurationSeconds: film.nominalDurationSeconds,
+          renderedDurationSeconds: film.renderedDurationSeconds,
+          transition,
+          trimTails: film.trimTails,
+          trimmedShotCount: film.trimmedShotCount as number,
+        },
+      });
+    } else {
+      artifacts.push({ ...projected, shape: artifact.shape });
+    }
   }
   return { revision: value.revision as number, artifacts };
+};
+
+const toFilmExportCapability = (value: unknown): StudioFilmExportCapabilityV2 => {
+  if (isExactDataObject(value, ['status', 'encoder']) && value.status === 'ready') {
+    if (
+      value.encoder !== 'h264_videotoolbox' &&
+      value.encoder !== 'h264_nvenc' &&
+      value.encoder !== 'h264_qsv' &&
+      value.encoder !== 'h264_amf' &&
+      value.encoder !== 'h264_mf'
+    ) {
+      return exportBoundaryFailure();
+    }
+    return { status: 'ready', encoder: value.encoder };
+  }
+  if (!isExactDataObject(value, ['status', 'reason'])) return exportBoundaryFailure();
+  if (
+    value.status !== 'unavailable' ||
+    (value.reason !== 'ffmpeg_unavailable' &&
+      value.reason !== 'ffprobe_unavailable' &&
+      value.reason !== 'unsupported_capabilities')
+  ) {
+    return exportBoundaryFailure();
+  }
+  return { status: 'unavailable', reason: value.reason };
+};
+
+const toFilmExportStatus = (value: unknown): StudioFilmExportStatusV2 => {
+  if (isExactDataObject(value, ['status']) && value.status === 'idle') return { status: 'idle' };
+  if (isExactDataObject(value, ['status', 'progress']) && value.status === 'active') {
+    const progress = value.progress;
+    if (
+      !isExactDataObject(progress, ['projectId', 'renderId', 'phase', 'progress']) ||
+      typeof progress.projectId !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,256}$/.test(progress.projectId) ||
+      typeof progress.renderId !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,256}$/.test(progress.renderId) ||
+      (progress.phase !== 'preparing' &&
+        progress.phase !== 'analyzing' &&
+        progress.phase !== 'rendering' &&
+        progress.phase !== 'publishing') ||
+      (progress.progress !== null &&
+        (typeof progress.progress !== 'number' ||
+          !Number.isFinite(progress.progress) ||
+          progress.progress < 0 ||
+          progress.progress > 1))
+    ) {
+      return exportBoundaryFailure();
+    }
+    return { status: 'active', progress: { ...progress } } as StudioFilmExportStatusV2;
+  }
+  if (!isExactDataObject(value, ['status', 'result']) || value.status !== 'terminal') {
+    return exportBoundaryFailure();
+  }
+  const result = value.result;
+  const validIdentity =
+    typeof result === 'object' &&
+    result !== null &&
+    !Array.isArray(result) &&
+    typeof Reflect.get(result, 'projectId') === 'string' &&
+    /^[A-Za-z0-9_-]{1,256}$/.test(Reflect.get(result, 'projectId') as string) &&
+    typeof Reflect.get(result, 'renderId') === 'string' &&
+    /^[A-Za-z0-9_-]{1,256}$/.test(Reflect.get(result, 'renderId') as string);
+  if (!validIdentity) return exportBoundaryFailure();
+  if (isExactDataObject(result, ['projectId', 'renderId', 'outcome']) && result.outcome === 'cancelled') {
+    return { status: 'terminal', result: { ...result } } as StudioFilmExportStatusV2;
+  }
+  if (
+    isExactDataObject(result, ['projectId', 'renderId', 'outcome', 'reason']) &&
+    result.outcome === 'failed' &&
+    (result.reason === 'stale_authority' ||
+      result.reason === 'invalid_media' ||
+      result.reason === 'unavailable' ||
+      result.reason === 'render_failed')
+  ) {
+    return { status: 'terminal', result: { ...result } } as StudioFilmExportStatusV2;
+  }
+  if (
+    isExactDataObject(result, ['projectId', 'renderId', 'outcome', 'artifact', 'movedAsideCount']) &&
+    result.outcome === 'succeeded' &&
+    Number.isSafeInteger(result.movedAsideCount) &&
+    (result.movedAsideCount as number) >= 0 &&
+    (result.movedAsideCount as number) <= STUDIO_MAX_EXPORTS_PER_SHAPE
+  ) {
+    const artifact = toRendererExportCatalog({ revision: 1, artifacts: [result.artifact] }).artifacts[0];
+    if (artifact?.shape !== 'film') return exportBoundaryFailure();
+    return {
+      status: 'terminal',
+      result: {
+        projectId: result.projectId as string,
+        renderId: result.renderId as string,
+        outcome: 'succeeded',
+        artifact,
+        movedAsideCount: result.movedAsideCount as number,
+      },
+    };
+  }
+  return exportBoundaryFailure();
+};
+
+const toCancelFilmExportResult = (value: unknown): StudioCancelFilmExportResultV2 => {
+  if (
+    !isExactDataObject(value, ['status']) ||
+    (value.status !== 'cancelled' && value.status !== 'cancellation_refused' && value.status !== 'not_found')
+  ) {
+    return exportBoundaryFailure();
+  }
+  return { status: value.status };
+};
+
+const toAcknowledgeFilmExportResult = (value: unknown): StudioAcknowledgeFilmExportResultV2 => {
+  if (!isExactDataObject(value, ['status']) || (value.status !== 'acknowledged' && value.status !== 'not_found')) {
+    return exportBoundaryFailure();
+  }
+  return { status: value.status };
 };
 
 const toCopyExportResult = (value: unknown): { status: 'cancelled' } | { status: 'copied' } => {
@@ -895,6 +1089,18 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   );
   ipcBridge.creativeStudio.createExport.provider((input) =>
     runCommand(() => dependencies.getService().createExport(input).then(toRendererExportCatalog))
+  );
+  ipcBridge.creativeStudio.getFilmExportCapability.provider((input) =>
+    runCommand(() => dependencies.getService().getFilmExportCapability(input).then(toFilmExportCapability))
+  );
+  ipcBridge.creativeStudio.getFilmExportStatus.provider((input) =>
+    runCommand(() => dependencies.getService().getFilmExportStatus(input).then(toFilmExportStatus))
+  );
+  ipcBridge.creativeStudio.cancelFilmExport.provider((input) =>
+    runCommand(() => dependencies.getService().cancelFilmExport(input).then(toCancelFilmExportResult))
+  );
+  ipcBridge.creativeStudio.acknowledgeFilmExport.provider((input) =>
+    runCommand(() => dependencies.getService().acknowledgeFilmExport(input).then(toAcknowledgeFilmExportResult))
   );
   ipcBridge.creativeStudio.listExports.provider((input) =>
     runCommand(() => dependencies.getService().listExports(input).then(toRendererExportCatalog))

@@ -1,28 +1,55 @@
 # The film export — one file, with transitions
 
-**Date:** 2026-08-23 · **Updated:** 2026-08-24 · **Status:** proposed; seekable-FD prerequisite complete
+**Date:** 2026-08-23 · **Updated:** 2026-08-27 · **Status:** implemented
 **Related:** [direction and answers §6](../prds/creative-studio/creative-studio-3-direction-and-answers.md) ·
 [watching commission](creative-studio-3-watching-commission.md) ·
 [bug list](../prds/creative-studio/creative-studio-3-bug-list.md)
 
 ## What this reverses, and why that is allowed now
 
-§6 of _Direction and Answers_ ruled this out in terms:
+§6 of _Direction and Answers_ originally ruled this out in terms:
 
 > `ONE FILE · STITCHED WITH THE BED` — Not in v1. It is ffmpeg-class concat + mix + fade work with
 > **no implementation owner**, so the option is hidden. V1 offers the editor folder, still, and
 > on-demand script exports; **it never shows a control that fails**.
 
-The MVP plan repeats it under "Explicitly out, and why", the watching commission states it to the
-designer as a hard constraint, and the acceptance checklist requires the control be **absent**, not
-disabled. This document proposes building it anyway.
+Those records explain why the control was originally absent. The one-file `film` export is now
+owner-approved and implemented, superseding that earlier delivery decision.
 
-That is legitimate for one reason and one reason only: **the stated reason was the absence of an
-owner, not a technical veto.** Nothing in §6 argues the work is wrong; it argues nobody was going to
-do it. That has changed.
+That reversal is legitimate because **the stated reason was the absence of an owner, not a technical
+veto.** Nothing in §6 argues the work is wrong; it records that nobody then owned the work.
 
-The second half of the ruling is not reversed and is carried forward as a constraint: **the control
-must never be present and failing.** Section _"When ffmpeg is missing"_ below is how that is honoured.
+The second half of the ruling is carried forward for known toolchain availability: the control must
+not be shown when Main already knows the local encoder contract is unavailable. Runtime media, disk,
+and authority failures remain explicit after invocation.
+
+## Implemented decision record
+
+The implementation keeps the project at schema 5 and versions the film artifact facts independently.
+It does not mutate the project, initiate generation, or spend. Main captures the exact project and
+catalog revisions plus source-asset/hash expectations before rendering; renders outside those locks;
+fully re-proves the
+same authority before publication; and publishes exactly one verified `film.mp4` stream. A stale or
+cancelled render publishes nothing.
+
+Every Shot or generated slate is normalized to MP4/H.264 High Profile Level 4.2 using a proved local
+hardware encoder, BT.709 limited-range color, 24 fps, yuv420p, square pixels and
+contain-with-black-padding at the project geometry. Output readback proves the container, codec,
+profile, level, color, geometry, rate, pixel/sample layout, complete decode, duration, inode, size and
+hash. The command contract additionally freezes a 48-frame GOP, 1/24000 video track time base, either
+8 or 12 Mbps according to output size, stripped metadata/chapters, and no fast-start; those commanded
+parameters are persisted as artifact facts.
+
+Audio is AAC, 48 kHz stereo fltp at 192 kbps. Silent takes and slates receive synthesized silence.
+Without a bed, take gain is 1. With a bed, take gain is 0.85, bed gain is 0.2, the bed is trimmed to
+rendered duration and receives a bounded two-second triangular fade. Dissolves crossfade take audio
+with triangular curves. The final mix uses a 0.95 latency-compensated limiter.
+
+Tail detection samples the final second after authored trims at 8 fps, scales and pads to 160x90 gray,
+and compares mean absolute frame deltas against 1.25. It requires at least three quiet deltas, removes
+at most one second on a 24-fps boundary, preserves at least one second plus any required dissolve, and
+never trims the final generated Shot even when a slate follows it. Exact source cut points, hashes,
+normalized durations, transition facts, encoder facts and audio facts are persisted on the artifact.
 
 ## What was asked for, and what was measured
 
@@ -74,32 +101,28 @@ duration. That difference must become an export artifact fact rather than being 
 This also disposes of the delta-pill problem cleanly: the Cut keeps comparing the authored film
 against its target, because that comparison is about the film, not about one exported rendering of it.
 
-### Artifact facts — blocking decision
+### Artifact facts — resolved decision
 
-The current `StudioExportArtifactV2` and renderer projection carry shape, source revision, byte/count
-facts and creation time. They carry **no duration or render parameters**. The sentence above is not
-implementable until the catalog contract answers this explicitly.
-
-Before `film` joins the shape union, define and version a discriminated film artifact that records at
-least nominal duration, rendered duration and the exact render parameters. The later tail slice must
-also preserve its derived cut points, or an artifact cannot explain or reproduce its own duration.
-Existing three-shape catalogs must continue to exact-key parse after that change. Storing these facts
-only inside MP4 metadata is insufficient because the current renderer catalog projection cannot read
-them. If the catalog is not extended, delete the claim that the duration is stated on the artifact.
+`StudioExportArtifactV2` now has a discriminated `film` branch whose independently versioned
+`StudioFilmExportFactsV2` records nominal and rendered duration, exact render parameters, source facts
+and derived tail cut points. The renderer projection carries the safe film summary needed by the UI.
+These facts live in the catalog rather than only in MP4 metadata, so each artifact can explain its own
+duration without changing project schema 5.
 
 ## The export
 
-A fourth shape beside `editor_folder` / `still` / `script`.
+The fourth shape beside `editor_folder` / `still` / `script` is `film`.
 
-**Name it `film`.** `nativePayloadSchemas.test.ts:2069` deliberately asserts that `stitched`, `video`
+`nativePayloadSchemas.test.ts:2069` deliberately asserts that `stitched`, `video`
 and `project` are **rejected** as shape names; `film` is not reserved. Note the renderer already binds
 `const film = buildCutFilmSummary(...)` in `Cut/index.tsx:242`, so the card's local identifiers need
 distinct names.
 
-### Request — final target
+### Request — implemented contract
 
 ```ts
 | { projectId: string; expectedRevision: number; expectedCatalogRevision: number;
+    renderId: string;
     shape: 'film';
     transition: { kind: 'cut' } | { kind: 'dissolve'; seconds: number };
     trimTails: boolean }
@@ -109,38 +132,31 @@ distinct names.
 to the project**. Two exports of the same revision with different transitions are two artifacts of
 one film, which is exactly what the retention model already expresses.
 
-This is the final target, not the first slice's public contract. Strict request boundaries must expose
-only behavior that exists:
-
-- the base film slice accepts exact `{ projectId, expectedRevision, expectedCatalogRevision,
-shape: 'film' }`
-- the dissolve slice adds `transition`
-- the tail slice adds `trimTails`
-
-Until those later slices land, their keys and values are rejected rather than accepted and ignored.
-When both exist, their defaults are `{ kind: 'cut' }` and `false`.
+The landed strict request boundary requires every key shown above; unknown, missing and unsupported
+values are rejected rather than accepted or defaulted. The renderer dialog initializes its controls
+to `{ kind: 'cut' }` and `trimTails: false` before sending the exact request.
 
 ### Coverage
 
-Reuse `editor_folder`'s **classification**, not its payload:
+Reuse `editor_folder`'s authoritative **classification**, not its payload:
 
-- a Beat with exactly **zero active Shots** contributes a slate for its non-null target seconds
-  (`editorFolder.ts:232`, `createStudioBlackSlatePngV2`)
-- a nonempty Beat with any active Shot whose canonical selected video is absent fails the whole export
-  `coverage_incomplete` (`editorFolder.ts:247`)
+- every active Shot with a canonical selected video contributes that trimmed video
+- every uncovered active Shot whose `videoAssetId` is null contributes its own timed slate using the
+  Shot duration
+- a Beat with exactly **zero active Shots** contributes a timed slate for its non-null target seconds
 
-Therefore only a structurally empty Beat can stand in. A planned Beat whose Shots have not been
-generated cannot render as a slate. The existing slate payload is one PNG; a film renderer must turn
-it into a timed, normalized video segment and define its audio track. This distinction is
-load-bearing for both availability copy and the render graph.
+Corrupt, unverifiable, stale or noncanonical selected media fails closed instead of being reclassified
+as uncovered. The shared editor-folder slate payload is one PNG; the film renderer turns each slate
+entry into a timed, normalized video segment with synthesized silence. Slate coverage is therefore not
+limited to structurally empty Beats.
 
-### Audio contract — blocking decision
+### Audio contract — resolved decision
 
-The proposal starts by reversing `ONE FILE · STITCHED WITH THE BED` and says coverage should mirror
-`editor_folder`, whose timeline includes the selected bed and its end fade. The old non-goal that
-declined to decide how take audio and bed combine contradicted that promise.
+The approved export reverses `ONE FILE · STITCHED WITH THE BED` and mirrors `editor_folder` coverage,
+whose timeline includes the selected bed and its end fade. The old non-goal that declined to decide
+how take audio and bed combine contradicted that promise.
 
-Before any film graph is implemented, choose one deterministic export-time rule for:
+The implementation freezes one deterministic export-time rule for:
 
 - whether take audio is preserved or muted
 - whether the selected bed is included, and its gain/mix rule
@@ -150,10 +166,10 @@ Before any film graph is implemented, choose one deterministic export-time rule 
 - bed trim and fade against the **rendered** duration, which can be shorter than the nominal film
 
 This does not pull narration, ducking controls or the wider audio lane into scope. It owns only the
-media already present in the film being exported. Until this rule is settled, neither cut nor dissolve
-has a complete output contract.
+media already present in the film being exported; the exact values are recorded above and on each
+artifact.
 
-### The ffmpeg graph — blocking decision
+### The ffmpeg graph — resolved decision
 
 Thirty measured clips were h264 720p24 / AAC 44.1 stereo. That is useful evidence about one sample,
 not an accepted-media contract. `StudioAssetV2` persists no codec/profile, frame rate, pixel format,
@@ -167,25 +183,22 @@ Raw concat-demuxer `-c copy` therefore cannot be the general straight-cut graph:
 - it cannot guarantee frame-accurate non-keyframe source trims
 - it cannot safely concatenate heterogeneous codec, geometry, timing or audio layouts
 
-Before implementation, choose between:
+The design considered:
 
 1. normalize every Shot and slate to one explicit A/V segment contract, then concatenate those
    segments; or
 2. define a narrow, probe-proved stream-copy eligibility contract, exact trim behavior and honest
    omission/refusal rules for slates and incompatible media.
 
-The intended general film feature requires the first answer. It also requires a real, shippable
-encoder capability; the 30-clip measurement does not supply one. The normalized contract still has
-to freeze its container and codecs, encoder/profile, geometry and scaling policy, frame rate and time
-base, pixel format and color behavior, keyframe policy and muxing flags.
+The implementation chooses the first answer and proves a supported hardware encoder before exposing
+the action. The normalized contract freezes the container and codecs, encoder, geometry and scaling
+policy, frame rate and time base, pixel format, keyframe policy and muxing flags listed above.
 
 Dissolves still need `xfade` (video) and, if the audio contract calls for it, `acrossfade` (audio).
 ffmpeg 8.1.2 on the build host was measured to carry `xfade` (58 transition types), `acrossfade`,
-`fade` and `afade`. Chained pairwise, the proposed offset for boundary _k_ is
-`Σd₀..dₖ − (k+1)·D`, but the graph must first normalize dimensions, frame rate, time base and pixel
-format, synthesize any required silent tracks, and prove `0 < D` and `D` is shorter than each adjacent
-post-trim segment. Only `dissolve` should be offered initially; the other 57 modes are a menu, not a
-feature.
+`fade` and `afade`. The landed graph normalizes every segment and synthesizes required silence before
+chaining pairwise at offset `Σd₀..dₖ − (k+1)·D`; it proves `0 < D` and that `D` is shorter than each
+adjacent post-trim segment. Only `dissolve` is exposed; the other transition modes remain out of scope.
 
 ## Tail trimming — and a correction
 
@@ -201,11 +214,8 @@ invalidate — and why the same operation on the paper-boat film would have trig
 `trim_shot`, never touches the project, and never invalidates a chain. A person who wants the trim
 to be part of the film still does it in the Beat panel and pays what the chain costs.
 
-The proposed detector samples the final second and cuts back to where mean frame-to-frame difference
-rises above a floor. The measured separation is useful — 0.14–1.0 in dead tails against 3–30
-mid-clip — but it does not yet define an algorithm.
-
-Before `trimTails` enters the request, freeze and test all of these:
+The landed detector samples the final second and cuts back to where mean frame-to-frame difference
+rises above the frozen floor. Tests cover:
 
 - decoded frame format and scale, sample cadence, numeric metric and threshold
 - maximum removable tail and minimum remaining segment duration
@@ -215,32 +225,22 @@ Before `trimTails` enters the request, freeze and test all of these:
 - the meaning of "final Shot" when the final film segment is a slate, including whether the last
   generated Shot before it is protected
 
-The derived cut points and rendered duration must be artifact facts. `curl_happy` — the measured
-ending — settles deliberately, so the rule remains bounded and never trims the protected final Shot.
-Until the details above are settled, `trimTails` is absent from IPC and UI rather than accepted as a
-no-op.
+The derived cut points and rendered duration are artifact facts. `curl_happy` — the measured ending —
+settles deliberately, so the rule remains bounded and never trims the protected final Shot.
 
 ## When ffmpeg is missing
 
-The §6 constraint that the product "never shows a control that fails" is load-bearing here, and the
-remaining substrate cannot yet honour it:
+The §6 availability constraint remains load-bearing. Binary resolution is centralized, missing tools
+have typed unavailable results, and capability discovery inventories every required graph component
+before the Film action is shown.
 
-- ffmpeg is used in exactly **four** places, all frame extraction or probing. There is **no concat,
-  mux or encode path anywhere**.
-- There is **no presence check, no readiness probe, and no typed `ffmpeg_unavailable` error**.
-- Resolution is two ad-hoc functions in `mediaStore.ts` plus a third divergent default in
-  `conditioningFrame.ts` — no resolver module.
-- A missing binary is **misdiagnosed as bad media**: ENOENT surfaces as `decode_failed` on the frame
-  path and `invalid_media` on the probe paths.
-
-A resolved executable is not enough evidence to show the Film card. Main must probe the exact
+A resolved executable is not enough evidence to show the Film card. Main probes the exact
 ffmpeg/ffprobe pair and the protocols, demuxers, muxers, filters and encoders selected by the settled
-render contract. The current build-host measurement is insufficient: the measured ffmpeg 8.1.2 has the
-required filters, but the convenient prebuilt distributions and the LGPL/no-software-H.264 build do
-not expose the same encoder set, and the Windows fallback is unmeasured. The UI consumes this
-capability result and keeps the card absent; `createExport` rechecks it and returns a typed unavailable
-or unsupported-capability error so a binary replacement between discovery and invocation is not
-misreported as bad media.
+render contract. It then executes a small encoder/container/basic-A/V smoke and strictly reads back
+that output; the complete filter graph is proved by an actual render. The UI consumes this capability
+result and keeps the card absent whenever the proof fails; `createExport` rechecks it and returns a
+typed unavailable or unsupported-capability error so a binary replacement between discovery and
+invocation is not misreported as bad media.
 
 ### Landed prerequisite
 
@@ -250,15 +250,21 @@ ffprobe/ffmpeg inputs in `mediaStore.ts` now use descriptor 3 through `-fd 3 -i 
 remains a pipe intentionally. This work is complete and is not part of the film implementation
 slices below.
 
-### Remaining spawn defect
+### Supervised child lifecycle
 
-`conditioningFrame.ts` still has no timeout, process termination or `AbortSignal`. A stalled decoder
-can hold its descriptors indefinitely, and a film render is a much longer-running child. Before a
-render job ships, the existing media callers and the new renderer need one supervised-child contract:
-bounded stderr/progress capture, timeout, cancellation, process-tree termination and deterministic
-settlement of every inherited descriptor.
+All Creative Studio ffmpeg/ffprobe children now use bounded diagnostics, finite deadlines,
+process-tree termination and deterministic settlement of every inherited descriptor. The
+conditioning-frame extractor and film renderer additionally accept `AbortSignal` cancellation because
+they are user-cancellable jobs; the short import/probe helpers are deadline-bounded but are not exposed
+as cancellable jobs. A timeout, abort, stream error or child error remains a failure even if a later
+process close event reports success.
 
-## Render ownership, authority and temporary output — blocking decision
+Verified-stream acquisition and iterator release are settlement fences: cancellation does not abandon
+an opener or lease that Main cannot yet prove closed, so a stalled provider can delay the public
+result. Publishing itself is non-cancellable once catalog authority is entered. These choices prevent
+descriptor leaks and half-published artifacts rather than silently substituting a timeout result.
+
+## Render ownership, authority and temporary output — resolved decision
 
 `createExport` currently keeps its `withProjectAuthorityV2` callback open through payload construction
 and catalogue publication; the catalogue store takes its own lock only during publication. That is
@@ -266,11 +272,11 @@ appropriate for the current short, in-memory builders. Placing a long ffmpeg spa
 builder would hold project authority for the duration of an external process, even before the
 catalogue lock is needed.
 
-The film path therefore needs a main-owned, cancellable local job with a private temporary workspace.
-Its contract must preserve the frozen authority rules in this order:
+The film path uses a main-owned, cancellable local job with a private temporary workspace. Its
+contract preserves the frozen authority rules in this order:
 
-1. Capture the project revision and exact source expectations under project authority.
-2. Open verified source descriptors and render outside project/catalogue locks.
+1. Capture project/catalog revisions and exact source expectations under project authority.
+2. Resolve and stage verified streams, then render outside project/catalogue locks.
 3. Enforce output-size, disk, time, cancellation and disposal bounds while the job is alive.
 4. Prove the completed output is a no-follow regular, single-link inode and record its size and SHA-256.
 5. Re-enter the project queue and then the catalogue lock; reprove the active project/revision, source
@@ -280,57 +286,42 @@ Its contract must preserve the frozen authority rules in this order:
 7. Delete only the same owned temporary inode; if the path has been replaced, preserve the
    replacement and report cleanup failure.
 
-Before implementation, freeze the job API (including progress and cancellation) and the stale-result
-policy when the project or catalogue changes during rendering. `verified_stream` is a useful catalogue
-ingress shape, not a substitute for this ownership and lifecycle contract.
+The job API freezes progress and bounded child-process cancellation; the settlement fences above may
+delay completion. Project or catalog change makes the result stale and prevents publication.
+`verified_stream` is the catalogue ingress shape, backed by this ownership and lifecycle contract.
 
 ## Export plumbing — the inventory
 
-The shape union is a bare 3-member string literal (`creativeStudioTypes.ts:861`) with no const array
-and no exhaustiveness helper. The same literals and the number three are repeated across the native
-types, service/catalogue validation, bridge validation, renderer validation and UI. Adding a member
-requires an explicit inventory; the type alone will not catch a missed boundary.
-
-Three specific traps:
-
-- `STUDIO_MAX_EXPORTS_PER_SHAPE * 3` appears in **three** validators (`exports/catalog.ts:425`,
-  `creativeStudioBridge.ts:598`, `useStudioProject.ts:122`). A fourth shape makes every one of them
-  wrong by a factor.
-- The retention loop at `exports/catalog.ts:529` iterates a **literal array** independent of the union.
-  Adding a shape to the type without adding it there evicts incorrectly.
-- **The payload plan already supports this** — verified against
-  `exports/catalog.ts:137`. `StudioExportPayloadFilePlanV2` admits `verified_stream`:
-  `{ relativePath, byteSize, sha256, openVerifiedStream: () => Promise<AsyncIterable<Uint8Array>> }`.
-  No new plan kind appears necessary. A rendered film can enter through it only after the temporary
-  file lifecycle above is settled: the opener must not re-resolve an attacker-replaceable path, and
-  catalogue ingestion must verify the exact output descriptor against the proved size and digest.
+The landed `STUDIO_EXPORT_SHAPES` inventory includes `film` as its strict fourth member and is reused
+across native types, service/catalog validation, bridge validation, renderer validation, retention and
+capacity arithmetic. `StudioExportPayloadFilePlanV2` admits `verified_stream`:
+`{ relativePath, byteSize, sha256, openVerifiedStream: () => Promise<AsyncIterable<Uint8Array>> }`.
+The film enters through that existing plan kind after the temporary-file lifecycle above proves its
+exact descriptor, size and digest; the opener never re-resolves an attacker-replaceable path.
 
 `studioI18n.test.ts:924` asserts **exact set equality** of the en-US workspace key inventory, so the
-new card's keys move with the code that references them, never as a later cleanup.
+Film-card keys landed with the code that references them rather than as later cleanup.
 
-## Slices
+## Landed slices
 
 0. **Seekable inherited inputs — complete.** Commit `c7d74e1a6` moved the three `mediaStore.ts`
    descriptor-3 inputs to seekable `fd:` URLs and added regressions. It stays an independent repair.
-1. **Resolver and capability readiness.** Centralize ffmpeg/ffprobe resolution, probe the exact
-   required capabilities and give existing callers typed unavailable/capability failures. No Film
-   card yet.
-2. **Supervised child lifecycle.** Add timeout, cancellation, bounded diagnostics, process-tree
-   termination and descriptor settlement to existing media calls before introducing a long render.
-3. **Private render job and temporary lease.** Implement the authority/reproof, progress,
-   cancellation, resource-bound and exact-inode cleanup contract with no public `film` shape yet.
-4. **Base `film`, straight cuts.** Add the exact base request shape and all boundary/catalogue/i18n
-   updates. Normalize every eligible take and generated slate to the settled video and audio contract,
-   encode one MP4, record the settled artifact facts, and expose the card only when the capability
-   probe passes.
-5. **Dissolve.** Add `transition` to the request, the normalized `xfade`/audio transition graph and its
-   duration/artifact facts. Do not widen the base slice implicitly.
-6. **`trimTails`.** Add the request member and derived cut facts only after the bounded algorithm and
-   final-segment policy are frozen. It remains render-time only and never mutates the project.
-
-Slices 1 and 2 can proceed independently. Slices 3–6 are blocked until the normalized render, audio,
-artifact-fact and job-lifecycle contracts called out above are decided; each slice remains one
-irreducible behavior change.
+1. **Resolver and capability readiness — complete.** ffmpeg/ffprobe resolution is centralized and the
+   exact protocols, demuxers, muxers, filters and hardware encoder are probed before the UI is shown.
+2. **Supervised child lifecycle — complete.** Existing media calls and film rendering share bounded
+   deadlines, diagnostics, tree termination and descriptor settlement; cancellable jobs also carry an
+   `AbortSignal`, as described above.
+3. **Private render job and temporary lease — complete.** Authority capture, full source reproof,
+   progress, cancellation, resource bounds and exact-inode cleanup are enforced in Main. A bounded
+   in-memory terminal map supports renderer remount/reload until explicit acknowledgement (one result
+   per project, at most 32 projects); app/Main restart preserves published catalog artifacts but not
+   failed or cancelled terminal notifications.
+4. **Base `film`, straight cuts — complete.** `film` is a strict fourth export shape with one normalized
+   MP4 file and versioned artifact facts.
+5. **Dissolve — complete.** The request admits only cut or the bounded dissolve, with paired video and
+   audio transitions and exact rendered-duration facts.
+6. **`trimTails` — complete.** Tail trimming is deterministic, artifact-recorded, render-time only and
+   never mutates or invalidates the project.
 
 ## Non-goals
 
@@ -339,8 +330,8 @@ irreducible behavior change.
   delta pill keeps describing the authored film.
 - **No transition menu.** Dissolve or cut.
 - **No audio-lane expansion.** Narration, voice generation, user-authored gains and ducking remain
-  separate. This plan must still own one deterministic export rule for existing take audio and the
-  selected bed.
+  separate. The film export owns only its deterministic rule for existing take audio and the selected
+  bed.
 - **The Cut keeps its clip-by-clip player.** A rendered film is a snapshot; the Cut is derived live
   from the projection and must stay that way, or every edit would invalidate the thing being watched.
   BUG-118's prefetch fix is still the right fix for playback smoothness.

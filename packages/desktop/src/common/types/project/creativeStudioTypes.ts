@@ -140,6 +140,13 @@ export const STUDIO_MAX_EXPORTS_PER_SHAPE = 5;
 export const STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT = STUDIO_MAX_SHOTS_PER_PROJECT + 8;
 export const STUDIO_MAX_EXPORT_DIRECTORY_DEPTH = 4;
 export const STUDIO_BED_FADE_OUT_SECONDS = 2;
+export const STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION = 1 as const;
+export const STUDIO_FILM_EXPORT_FRAME_RATE = 24 as const;
+export const STUDIO_FILM_EXPORT_AUDIO_SAMPLE_RATE = 48_000 as const;
+export const STUDIO_FILM_EXPORT_AUDIO_CHANNELS = 2 as const;
+export const STUDIO_FILM_EXPORT_DISSOLVE_SECONDS = 0.35 as const;
+export const STUDIO_FILM_EXPORT_TAKE_GAIN = 0.85 as const;
+export const STUDIO_FILM_EXPORT_BED_GAIN = 0.2 as const;
 export const STUDIO_MAX_REFERENCE_REQUEST_ITEMS = 24;
 export const STUDIO_MAX_PROJECT_REFERENCES = 24;
 export const STUDIO_MAX_REFERENCE_LABEL_LENGTH = 120;
@@ -166,7 +173,8 @@ export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 5 as const;
 export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 5 as const;
 export const STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION = 5 as const;
 export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
-export const STUDIO_EXPORT_SCHEMA_VERSION_V2 = 5 as const;
+/** Sidecar contract version. It intentionally does not follow the project schema version. */
+export const STUDIO_EXPORT_SCHEMA_VERSION_V2 = 1 as const;
 export const STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS = 32;
 export const STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES = 256 * 1024;
 export const STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
@@ -1016,19 +1024,97 @@ export type StudioAssetV2 = {
   compositionDigest: string | null;
 };
 
-export type StudioExportShapeV2 = 'editor_folder' | 'still' | 'script';
+export const STUDIO_EXPORT_SHAPES = ['editor_folder', 'still', 'script', 'film'] as const;
+export type StudioExportShapeV2 = (typeof STUDIO_EXPORT_SHAPES)[number];
 
 export type StudioManagedExportRefV2 = {
   collection: 'exports';
   fileName: string;
 };
 
-export type StudioExportArtifactV2 = {
+export type StudioFilmExportTransitionV2 = { kind: 'cut' } | { kind: 'dissolve'; seconds: number };
+export type StudioFilmRenderedTransitionV2 =
+  | { kind: 'cut' }
+  | { kind: 'dissolve'; requestedSeconds: number; seconds: number };
+
+export type StudioFilmExportSegmentFactV2 =
+  | {
+      kind: 'shot';
+      shotId: string;
+      sourceAssetId: string;
+      sourceSha256: string;
+      sourceInSeconds: number;
+      sourceOutSeconds: number;
+      renderedSourceOutSeconds: number;
+      normalizedDurationSeconds: number;
+      chainBreak: 'none' | 'hard_cut';
+      hasAudio: boolean;
+    }
+  | {
+      kind: 'slate';
+      beatId: string;
+      shotId: string | null;
+      durationSeconds: number;
+      normalizedDurationSeconds: number;
+    };
+
+export type StudioFilmExportFactsV2 = {
+  schemaVersion: typeof STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION;
+  nominalDurationSeconds: number;
+  renderedDurationSeconds: number;
+  transition: StudioFilmRenderedTransitionV2;
+  dissolveCount: number;
+  trimTails: boolean;
+  segments: StudioFilmExportSegmentFactV2[];
+  video: {
+    container: 'mp4';
+    codec: 'h264';
+    encoder: 'h264_videotoolbox' | 'h264_nvenc' | 'h264_qsv' | 'h264_amf' | 'h264_mf';
+    profile: 'high';
+    level: '4.2';
+    width: number;
+    height: number;
+    frameRate: typeof STUDIO_FILM_EXPORT_FRAME_RATE;
+    pixelFormat: 'yuv420p';
+    scaleMode: 'contain_black_pad';
+    sampleAspectRatio: '1:1';
+    colorPrimaries: 'bt709';
+    colorTransfer: 'bt709';
+    colorSpace: 'bt709';
+    colorRange: 'tv';
+    gopFrames: 48;
+    bitrate: 8_000_000 | 12_000_000;
+    trackTimeBase: '1/24000';
+    metadataStripped: true;
+    chaptersStripped: true;
+    fastStart: false;
+  };
+  audio: {
+    codec: 'aac';
+    sampleRate: typeof STUDIO_FILM_EXPORT_AUDIO_SAMPLE_RATE;
+    channels: typeof STUDIO_FILM_EXPORT_AUDIO_CHANNELS;
+    channelLayout: 'stereo';
+    sampleFormat: 'fltp';
+    bitrate: 192_000;
+    silenceForMissingStreams: true;
+    takeGain: number;
+    bedAssetId: string | null;
+    bedSha256: string | null;
+    bedGain: number | null;
+    bedFadeOutSeconds: number | null;
+    bedFadeCurve: 'triangular' | null;
+    dissolveCrossfade: boolean;
+    dissolveCurve: 'triangular';
+    limiterPeak: 0.95;
+    limiterLatencyCompensated: true;
+  };
+};
+
+type StudioExportArtifactBaseV2 = {
   schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V2;
   id: string;
   projectId: string;
   sourceRevision: number;
-  shape: StudioExportShapeV2;
   payloadKind: 'directory' | 'file';
   managedExport: StudioManagedExportRefV2;
   byteSize: number;
@@ -1037,6 +1123,16 @@ export type StudioExportArtifactV2 = {
   createdAt: string;
 };
 
+export type StudioExportArtifactV2 =
+  | (StudioExportArtifactBaseV2 & {
+      shape: Exclude<StudioExportShapeV2, 'film'>;
+    })
+  | (StudioExportArtifactBaseV2 & {
+      shape: 'film';
+      payloadKind: 'file';
+      film: StudioFilmExportFactsV2;
+    });
+
 export type StudioExportCatalogV2 = {
   schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V2;
   projectId: string;
@@ -1044,10 +1140,23 @@ export type StudioExportCatalogV2 = {
   artifacts: StudioExportArtifactV2[];
 };
 
-export type StudioRendererExportArtifactV2 = Pick<
-  StudioExportArtifactV2,
-  'id' | 'sourceRevision' | 'shape' | 'byteSize' | 'fileCount' | 'createdAt'
+type StudioRendererExportArtifactBaseV2 = Pick<
+  StudioExportArtifactBaseV2,
+  'id' | 'sourceRevision' | 'byteSize' | 'fileCount' | 'createdAt'
 > & { folderName: string };
+
+export type StudioRendererExportArtifactV2 =
+  | (StudioRendererExportArtifactBaseV2 & { shape: Exclude<StudioExportShapeV2, 'film'> })
+  | (StudioRendererExportArtifactBaseV2 & {
+      shape: 'film';
+      film: {
+        nominalDurationSeconds: number;
+        renderedDurationSeconds: number;
+        transition: StudioFilmRenderedTransitionV2;
+        trimTails: boolean;
+        trimmedShotCount: number;
+      };
+    });
 
 export type StudioRendererExportCatalogV2 = {
   revision: number;
@@ -1063,6 +1172,53 @@ export type StudioExportArtifactRequestV2 = {
 export type StudioCopyExportResultV2 = { status: 'cancelled' } | { status: 'copied' };
 export type StudioRevealExportResultV2 = { status: 'revealed' };
 
+export type StudioFilmExportCapabilityV2 =
+  | {
+      status: 'ready';
+      encoder: StudioFilmExportFactsV2['video']['encoder'];
+    }
+  | {
+      status: 'unavailable';
+      reason: 'ffmpeg_unavailable' | 'ffprobe_unavailable' | 'unsupported_capabilities';
+    };
+
+export type StudioFilmExportCapabilityRequestV2 = { projectId: string };
+
+export type StudioFilmExportProgressV2 = {
+  projectId: string;
+  renderId: string;
+  phase: 'preparing' | 'analyzing' | 'rendering' | 'publishing';
+  progress: number | null;
+};
+
+/** Reports the single global render so every project can fail closed while that resource is occupied. */
+export type StudioFilmExportStatusRequestV2 = { projectId: string };
+export type StudioFilmExportTerminalResultV2 =
+  | {
+      projectId: string;
+      renderId: string;
+      outcome: 'succeeded';
+      artifact: Extract<StudioRendererExportArtifactV2, { shape: 'film' }>;
+      movedAsideCount: number;
+    }
+  | {
+      projectId: string;
+      renderId: string;
+      outcome: 'failed';
+      reason: 'stale_authority' | 'invalid_media' | 'unavailable' | 'render_failed';
+    }
+  | { projectId: string; renderId: string; outcome: 'cancelled' };
+export type StudioFilmExportStatusV2 =
+  | { status: 'idle' }
+  | { status: 'active'; progress: StudioFilmExportProgressV2 }
+  | { status: 'terminal'; result: StudioFilmExportTerminalResultV2 };
+export type StudioCancelFilmExportRequestV2 = { projectId: string; renderId: string };
+export type StudioCancelFilmExportResultV2 = {
+  status: 'cancelled' | 'cancellation_refused' | 'not_found';
+};
+export type StudioAcknowledgeFilmExportRequestV2 = { projectId: string; renderId: string };
+export type StudioAcknowledgeFilmExportResultV2 = { status: 'acknowledged' | 'not_found' };
+
 export type StudioCreateExportRequestV2 =
   | { projectId: string; expectedRevision: number; expectedCatalogRevision: number; shape: 'editor_folder' }
   | {
@@ -1072,7 +1228,16 @@ export type StudioCreateExportRequestV2 =
       shape: 'still';
       shotId: string;
     }
-  | { projectId: string; expectedRevision: number; expectedCatalogRevision: number; shape: 'script' };
+  | { projectId: string; expectedRevision: number; expectedCatalogRevision: number; shape: 'script' }
+  | {
+      projectId: string;
+      expectedRevision: number;
+      expectedCatalogRevision: number;
+      shape: 'film';
+      renderId: string;
+      transition: StudioFilmExportTransitionV2;
+      trimTails: boolean;
+    };
 
 export type StudioListExportsRequestV2 = { projectId: string };
 
@@ -1848,6 +2013,9 @@ export type StudioCommandErrorCode =
   | 'cancellation_refused'
   | 'duplicate_charge_acknowledgement_required'
   | 'unsupported'
+  | 'ffmpeg_unavailable'
+  | 'unsupported_capabilities'
+  | 'render_failed'
   | 'busy'
   | 'cancelled'
   | 'provider_error'

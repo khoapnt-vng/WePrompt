@@ -1490,6 +1490,48 @@
           "artifactUnavailable": "この書き出しは現在のカタログにありません。再読み込みしてください。",
           "resultConflict": "結果の確認前に新しいカタログが届きました。再読み込みして確認してください。"
         }
+      },
+      "filmExport": {
+        "action": "フィルムを書き出す…",
+        "title": "1本のフィルムファイルを書き出す",
+        "description": "現在のカットから編集可能なMP4を作成します。未カバーのショットは時間指定の黒スレートになります。",
+        "transition": "トランジション",
+        "cut": "ストレートカット",
+        "dissolve": "0.35秒ディゾルブ",
+        "trimTails": "静かな末尾を制限付きでトリム（最後のレンダー済みショットは保護）",
+        "noSpend": "ローカル書き出しです。メディア生成や費用発生はありません。",
+        "export": "フィルムを書き出す",
+        "cancel": "書き出しをキャンセル",
+        "reveal": "Finderで表示",
+        "dismiss": "閉じる",
+        "successFacts": "編集尺 {{nominal}}秒 · 書き出し {{rendered}}秒 · {{count}}件の末尾をトリム",
+        "successQuarantine": "退避した古い書き出し: {{count}}",
+        "phase": {
+          "preparing": "正確なソースメディアを準備中…",
+          "analyzing": "メディアと静かな末尾を解析中…",
+          "rendering": "ローカルでフィルムをレンダー中…",
+          "publishing": "完成したフィルムを検証して公開中…"
+        },
+        "disabled": {
+          "no_beats": "書き出す前にBeatを追加してください",
+          "duration_pending": "空のBeatごとに尺を設定してください",
+          "invalid_media": "古いまたは無効なメディアを解決してください",
+          "bed_too_short": "十分な長さの音声ベッドを選んでください",
+          "mutationActive": "現在の変更を完了してください",
+          "exportRunning": "フィルム書き出しは実行中です",
+          "catalogUnavailable": "書き出しストレージを利用できません"
+        },
+        "errors": {
+          "catalogUnavailable": "書き出しカタログを利用できません。プロジェクトを再読み込みしてください。",
+          "staleAuthority": "プロジェクトまたはカタログが変更されました。古いフィルムは公開されていません。",
+          "unavailable": "この端末には検証済みのFFmpeg書き出し機能がありません。",
+          "renderFailed": "ローカルレンダーを検証できませんでした。部分書き出しは公開されていません。",
+          "cancelled": "書き出しをキャンセルしました。プロジェクトメディアは変更されていません。",
+          "invalidMedia": "カットに古い、非正規、または無効なメディアがあります。",
+          "busy": "Creative Studioは別の処理を完了中です。",
+          "artifactUnavailable": "完成したフィルムは有効なカタログにありません。",
+          "resultConflict": "フィルム確認前に新しいカタログが届きました。"
+        }
       }
     },
     "rules": {

@@ -15,6 +15,9 @@ import {
 } from '@/common/types/project/creativeStudioRules';
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioFilmExportCapabilityV2,
+  type StudioFilmExportStatusV2,
+  type StudioFilmExportTransitionV2,
   type StudioGenerationCapabilityV2,
   type StudioRendererChainStatusV2,
   type StudioRendererExportCatalogV2,
@@ -211,10 +214,21 @@ type MenuHarnessProps = {
   staleRevision?: boolean;
   onRuleDraftDirtyCountChange?: (count: number) => void;
   exportCatalog?: StudioRendererExportCatalogV2 | null;
+  filmExportCapability?: StudioFilmExportCapabilityV2 | null;
   createEditorFolder?: () => Promise<
     { ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }
   >;
   revealEditorFolder?: (artifactId: string) => Promise<{ ok: true } | { ok: false; messageKey: string }>;
+  createFilm?: (input: {
+    renderId: string;
+    transition: StudioFilmExportTransitionV2;
+    trimTails: boolean;
+  }) => Promise<{ ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }>;
+  getFilmExportStatus?: () => Promise<StudioFilmExportStatusV2 | null>;
+  refreshExports?: () => Promise<boolean>;
+  cancelFilmExport?: (renderId: string) => Promise<boolean>;
+  acknowledgeFilmExport?: (renderId: string) => Promise<'acknowledged' | 'not_found' | null>;
+  revealFilm?: (artifactId: string) => Promise<{ ok: true } | { ok: false; messageKey: string }>;
   detachBedAudio?: (assetId: string) => Promise<boolean>;
   mutations: WorkspaceMutationCallbacks;
 };
@@ -232,11 +246,21 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
   staleRevision,
   onRuleDraftDirtyCountChange,
   exportCatalog = { revision: 1, artifacts: [] },
+  filmExportCapability = null,
   createEditorFolder = vi.fn(async () => ({
     ok: false as const,
     messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.storage',
   })),
   revealEditorFolder = vi.fn(async () => ({ ok: true as const })),
+  createFilm = vi.fn(async () => ({
+    ok: false as const,
+    messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed',
+  })),
+  getFilmExportStatus = vi.fn(async () => ({ status: 'idle' as const })),
+  refreshExports = vi.fn(async () => true),
+  cancelFilmExport = vi.fn(async () => false),
+  acknowledgeFilmExport = vi.fn(async () => 'acknowledged' as const),
+  revealFilm = vi.fn(async () => ({ ok: true as const })),
   detachBedAudio = vi.fn(async () => true),
   mutations,
 }) => {
@@ -267,8 +291,15 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
       routeCatalog={routeCatalog}
       generationCapability={generationCapability}
       exportCatalog={exportCatalog}
+      filmExportCapability={filmExportCapability}
       createEditorFolder={createEditorFolder}
       revealEditorFolder={revealEditorFolder}
+      createFilm={createFilm}
+      getFilmExportStatus={getFilmExportStatus}
+      refreshExports={refreshExports}
+      cancelFilmExport={cancelFilmExport}
+      acknowledgeFilmExport={acknowledgeFilmExport}
+      revealFilm={revealFilm}
       detachBedAudio={detachBedAudio}
       briefDialogRequest={briefDialogRequest}
       briefRouteFocusRole={briefRouteFocusRole}
@@ -485,6 +516,356 @@ describe('WorkspaceProjectMenu', () => {
     ).toBeVisible();
     expect(screen.queryByText('conversation.creativeStudio.workspace.editorFolderExport.reveal')).toBeNull();
     expect(screen.getByText('conversation.creativeStudio.workspace.editorFolderExport.dismiss')).toBeVisible();
+  });
+
+  it('offers film export only for a ready local toolchain and publishes one exact result without spend', async () => {
+    const { callbacks } = makeMutations();
+    const flight = deferred<{ ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }>();
+    let activeRenderId: string | null = null;
+    const createFilm = vi.fn((input: { renderId: string }) => {
+      activeRenderId = input.renderId;
+      return flight.promise;
+    });
+    const getFilmExportStatus = vi.fn(
+      async (): Promise<StudioFilmExportStatusV2> =>
+        activeRenderId === null
+          ? { status: 'idle' }
+          : {
+              status: 'active',
+              progress: { projectId: 'project_1', renderId: activeRenderId, phase: 'rendering', progress: 0.4 },
+            }
+    );
+    const revealFilm = vi.fn(async () => ({ ok: true as const }));
+    render(
+      <MenuHarness
+        project={editorFolderProject()}
+        mutations={callbacks}
+        filmExportCapability={{ status: 'ready', encoder: 'h264_videotoolbox' }}
+        createFilm={createFilm}
+        getFilmExportStatus={getFilmExportStatus}
+        revealFilm={revealFilm}
+      />
+    );
+
+    const menu = await openMenu();
+    fireEvent.click(
+      within(menu).getByRole('menuitem', { name: 'conversation.creativeStudio.workspace.filmExport.action' })
+    );
+    const dialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.workspace.filmExport.title',
+    });
+    expect(within(dialog).getByText('conversation.creativeStudio.workspace.filmExport.noSpend')).toBeVisible();
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.workspace.filmExport.export' })
+    );
+    await waitFor(() => expect(createFilm).toHaveBeenCalledOnce());
+    const request = createFilm.mock.calls[0]![0];
+    expect(request).toEqual({
+      renderId: expect.stringMatching(/^film_[a-f0-9]{32}$/u),
+      transition: { kind: 'cut' },
+      trimTails: false,
+    });
+    await waitFor(() => expect(getFilmExportStatus).toHaveBeenCalledWith());
+    expect(await screen.findByText('conversation.creativeStudio.workspace.filmExport.phase.rendering')).toBeVisible();
+
+    const artifact = {
+      id: 'film_export_1',
+      sourceRevision: 7,
+      shape: 'film' as const,
+      folderName: 'film-20260821-120000-000-0123456789abcdef',
+      byteSize: 4096,
+      fileCount: 1,
+      createdAt: '2026-08-21T12:00:00.000Z',
+      film: {
+        nominalDurationSeconds: 12,
+        renderedDurationSeconds: 11.5,
+        transition: { kind: 'cut' as const },
+        trimTails: false,
+        trimmedShotCount: 0,
+      },
+    };
+    await act(async () => flight.resolve({ ok: true, catalog: { revision: 2, artifacts: [artifact] } }));
+    expect(await screen.findByText(artifact.folderName)).toBeVisible();
+    expect(screen.getByText(/filmExport\.successFacts/)).toHaveTextContent('"rendered":"11.50"');
+    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.filmExport.reveal'));
+    await waitFor(() => expect(revealFilm).toHaveBeenCalledWith(artifact.id));
+  });
+
+  it('reattaches to an active Film render after reload and refreshes the catalog exactly once when it settles', async () => {
+    const { callbacks } = makeMutations();
+    const artifact = {
+      id: 'film_export_reloaded',
+      sourceRevision: 7,
+      shape: 'film' as const,
+      folderName: 'film-20260821-120000-000-reloaded',
+      byteSize: 4096,
+      fileCount: 1,
+      createdAt: '2026-08-21T12:00:00.000Z',
+      film: {
+        nominalDurationSeconds: 12,
+        renderedDurationSeconds: 11.5,
+        transition: { kind: 'cut' as const },
+        trimTails: false,
+        trimmedShotCount: 0,
+      },
+    };
+    const getFilmExportStatus = vi
+      .fn<() => Promise<StudioFilmExportStatusV2 | null>>()
+      .mockResolvedValueOnce({
+        status: 'active',
+        progress: {
+          projectId: 'project_1',
+          renderId: 'film_run_reloaded',
+          phase: 'publishing',
+          progress: 0.9,
+        },
+      })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({
+        status: 'terminal',
+        result: {
+          projectId: 'project_1',
+          renderId: 'film_run_reloaded',
+          outcome: 'succeeded',
+          artifact,
+          movedAsideCount: 0,
+        },
+      });
+    const refreshExports = vi.fn(async () => true);
+    render(
+      <MenuHarness
+        project={editorFolderProject()}
+        mutations={callbacks}
+        filmExportCapability={{ status: 'ready', encoder: 'h264_videotoolbox' }}
+        getFilmExportStatus={getFilmExportStatus}
+        refreshExports={refreshExports}
+      />
+    );
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.filmExport.phase.publishing')).toBeVisible();
+    await waitFor(() => expect(getFilmExportStatus.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 2_000 });
+    expect(screen.getByText('conversation.creativeStudio.workspace.filmExport.phase.publishing')).toBeVisible();
+    await waitFor(() => expect(getFilmExportStatus.mock.calls.length).toBeGreaterThanOrEqual(3), { timeout: 2_000 });
+    await waitFor(() => expect(refreshExports).toHaveBeenCalledOnce());
+    expect(await screen.findByText(artifact.folderName)).toBeVisible();
+  });
+
+  it('recovers a failed Film result after reload and explicitly acknowledges it on dismiss', async () => {
+    const { callbacks } = makeMutations();
+    const acknowledgeFilmExport = vi.fn(async () => 'acknowledged' as const);
+    render(
+      <MenuHarness
+        project={editorFolderProject()}
+        mutations={callbacks}
+        filmExportCapability={{ status: 'ready', encoder: 'h264_videotoolbox' }}
+        getFilmExportStatus={vi.fn(async () => ({
+          status: 'terminal' as const,
+          result: {
+            projectId: 'project_1',
+            renderId: 'film_run_failed_reload',
+            outcome: 'failed' as const,
+            reason: 'stale_authority' as const,
+          },
+        }))}
+        acknowledgeFilmExport={acknowledgeFilmExport}
+      />
+    );
+
+    const error = await screen.findByText('conversation.creativeStudio.workspace.filmExport.errors.staleAuthority');
+    expect(error).toBeVisible();
+    fireEvent.click(screen.getByText('conversation.creativeStudio.workspace.filmExport.dismiss'));
+    await waitFor(() => expect(acknowledgeFilmExport).toHaveBeenCalledExactlyOnceWith('film_run_failed_reload'));
+    expect(error).not.toBeInTheDocument();
+  });
+
+  it('preserves an unacknowledged terminal result while another project temporarily owns the renderer', async () => {
+    const { callbacks } = makeMutations();
+    const foreignActive = deferred<StudioFilmExportStatusV2>();
+    const idle = deferred<StudioFilmExportStatusV2>();
+    const refreshExports = vi.fn(async () => true);
+    const getFilmExportStatus = vi
+      .fn<() => Promise<StudioFilmExportStatusV2 | null>>()
+      .mockResolvedValueOnce({
+        status: 'terminal',
+        result: {
+          projectId: 'project_1',
+          renderId: 'film_terminal_before_other',
+          outcome: 'failed',
+          reason: 'render_failed',
+        },
+      })
+      .mockImplementationOnce(() => foreignActive.promise)
+      .mockImplementation(() => idle.promise);
+    render(
+      <MenuHarness
+        project={editorFolderProject()}
+        mutations={callbacks}
+        filmExportCapability={{ status: 'ready', encoder: 'h264_videotoolbox' }}
+        getFilmExportStatus={getFilmExportStatus}
+        refreshExports={refreshExports}
+      />
+    );
+
+    const error = await screen.findByText('conversation.creativeStudio.workspace.filmExport.errors.renderFailed');
+    await act(async () =>
+      foreignActive.resolve({
+        status: 'active',
+        progress: {
+          projectId: 'project_other',
+          renderId: 'film_other_project',
+          phase: 'rendering',
+          progress: 0.4,
+        },
+      })
+    );
+    await waitFor(() => expect(getFilmExportStatus).toHaveBeenCalledTimes(3), { timeout: 2_000 });
+    expect(error).toBeVisible();
+    const menu = await openMenu();
+    expect(
+      within(menu).getByRole('menuitem', {
+        name: 'conversation.creativeStudio.workspace.filmExport.disabled.exportRunning',
+      })
+    ).toHaveClass('arco-dropdown-menu-disabled');
+
+    await act(async () => idle.resolve({ status: 'idle' }));
+    expect(error).toBeVisible();
+  });
+
+  it('keeps a terminal Film result visible when acknowledgement transport fails and allows retry', async () => {
+    const { callbacks } = makeMutations();
+    const acknowledgeFilmExport = vi
+      .fn<() => Promise<'acknowledged' | 'not_found' | null>>()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce('acknowledged');
+    render(
+      <MenuHarness
+        project={editorFolderProject()}
+        mutations={callbacks}
+        filmExportCapability={{ status: 'ready', encoder: 'h264_videotoolbox' }}
+        getFilmExportStatus={vi.fn(async () => ({
+          status: 'terminal' as const,
+          result: {
+            projectId: 'project_1',
+            renderId: 'film_run_ack_retry',
+            outcome: 'failed' as const,
+            reason: 'render_failed' as const,
+          },
+        }))}
+        acknowledgeFilmExport={acknowledgeFilmExport}
+      />
+    );
+
+    const error = await screen.findByText('conversation.creativeStudio.workspace.filmExport.errors.renderFailed');
+    const dismiss = screen.getByText('conversation.creativeStudio.workspace.filmExport.dismiss');
+    fireEvent.click(dismiss);
+    await waitFor(() => expect(acknowledgeFilmExport).toHaveBeenCalledTimes(1));
+    expect(error).toBeVisible();
+    fireEvent.click(dismiss);
+    await waitFor(() => expect(acknowledgeFilmExport).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(error).not.toBeInTheDocument());
+  });
+
+  it('disables Film export without offering cancellation while another project owns the global renderer', async () => {
+    const { callbacks } = makeMutations();
+    const createFilm = vi.fn();
+    const getFilmExportStatus = vi.fn(
+      async (): Promise<StudioFilmExportStatusV2> => ({
+        status: 'active',
+        progress: {
+          projectId: 'project_other',
+          renderId: 'film_run_other',
+          phase: 'rendering',
+          progress: 0.25,
+        },
+      })
+    );
+    render(
+      <MenuHarness
+        project={editorFolderProject()}
+        mutations={callbacks}
+        filmExportCapability={{ status: 'ready', encoder: 'h264_videotoolbox' }}
+        createFilm={createFilm}
+        getFilmExportStatus={getFilmExportStatus}
+      />
+    );
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.filmExport.disabled.exportRunning')
+    ).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'conversation.creativeStudio.workspace.filmExport.cancel' })
+    ).toBeNull();
+    const menu = await openMenu();
+    const action = within(menu).getByRole('menuitem', {
+      name: 'conversation.creativeStudio.workspace.filmExport.disabled.exportRunning',
+    });
+    expect(action).toHaveClass('arco-dropdown-menu-disabled');
+    fireEvent.click(action);
+    expect(createFilm).not.toHaveBeenCalled();
+  });
+
+  it('hides film export when capability is unknown or unavailable and exposes bounded cancellation while rendering', async () => {
+    const { callbacks } = makeMutations();
+    const authority = editorFolderProject();
+    const { rerender } = render(<MenuHarness project={authority} mutations={callbacks} filmExportCapability={null} />);
+    let menu = await openMenu();
+    expect(within(menu).queryByRole('menuitem', { name: /filmExport/ })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: MORE }));
+    rerender(
+      <MenuHarness
+        project={authority}
+        mutations={callbacks}
+        filmExportCapability={{ status: 'unavailable', reason: 'unsupported_capabilities' }}
+      />
+    );
+    menu = await openMenu();
+    expect(within(menu).queryByRole('menuitem', { name: /filmExport/ })).toBeNull();
+
+    const never = deferred<{ ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }>();
+    let activeRenderId: string | null = null;
+    const createFilm = vi.fn((input: { renderId: string }) => {
+      activeRenderId = input.renderId;
+      return never.promise;
+    });
+    const cancelFilmExport = vi.fn(async () => true);
+    const getFilmExportStatus = vi.fn(
+      async (): Promise<StudioFilmExportStatusV2> =>
+        activeRenderId === null
+          ? { status: 'idle' }
+          : {
+              status: 'active',
+              progress: { projectId: authority.id, renderId: activeRenderId, phase: 'rendering', progress: null },
+            }
+    );
+    fireEvent.click(screen.getByRole('button', { name: MORE }));
+    rerender(
+      <MenuHarness
+        project={authority}
+        mutations={callbacks}
+        filmExportCapability={{ status: 'ready', encoder: 'h264_videotoolbox' }}
+        createFilm={createFilm}
+        getFilmExportStatus={getFilmExportStatus}
+        cancelFilmExport={cancelFilmExport}
+      />
+    );
+    menu = await openMenu();
+    fireEvent.click(
+      within(menu).getByRole('menuitem', { name: 'conversation.creativeStudio.workspace.filmExport.action' })
+    );
+    const dialog = await screen.findByRole('dialog', {
+      name: 'conversation.creativeStudio.workspace.filmExport.title',
+    });
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.workspace.filmExport.export' })
+    );
+    await waitFor(() => expect(createFilm).toHaveBeenCalledOnce());
+    const renderId = createFilm.mock.calls[0]![0].renderId;
+    const cancel = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.filmExport.cancel',
+    });
+    fireEvent.click(cancel);
+    await waitFor(() => expect(cancelFilmExport).toHaveBeenCalledWith(renderId));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.filmExport.errors.cancelled')).toBeVisible();
   });
 
   it('keeps project settings out of the workspace until its modal opens', async () => {

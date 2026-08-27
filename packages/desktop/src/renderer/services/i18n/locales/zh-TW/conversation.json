@@ -1167,9 +1167,19 @@
           "title": "首幀",
           "shotChip": "鏡頭 {{shot}}",
           "on": "目前",
-          "status": { "notReady": "未就緒", "ready": "可算繪", "rendering": "算繪中", "rendered": "已算繪" },
+          "status": {
+            "notReady": "未就緒",
+            "ready": "可算繪",
+            "rendering": "算繪中",
+            "rendered": "已算繪"
+          },
           "frameLabel": "幀 {{index}}",
-          "origin": { "generated": "已生成", "imported": "已匯入", "board": "分鏡", "inherited": "來自鏡頭 {{shot}}" },
+          "origin": {
+            "generated": "已生成",
+            "imported": "已匯入",
+            "board": "分鏡",
+            "inherited": "來自鏡頭 {{shot}}"
+          },
           "current": "目前",
           "unavailable": "無法使用",
           "previewAlt": "預覽 · {{label}}",
@@ -1479,6 +1489,48 @@
           "busy": "Creative Studio 正在完成另一項工作區操作。請稍後再試。",
           "artifactUnavailable": "此匯出已不在目前目錄中。請重新載入後再顯示。",
           "resultConflict": "確認結果前收到較新的匯出目錄。請重新載入並檢查匯出。"
+        }
+      },
+      "filmExport": {
+        "action": "匯出影片…",
+        "title": "匯出單一影片檔案",
+        "description": "從目前剪輯建立可供編輯的 MP4。未覆蓋的鏡頭會成為定時黑場。",
+        "transition": "轉場",
+        "cut": "直接剪接",
+        "dissolve": "0.35 秒疊化",
+        "trimTails": "有限裁剪靜止尾端（保護最後一個已算繪鏡頭）",
+        "noSpend": "這是本機匯出，不會產生媒體或費用。",
+        "export": "匯出影片",
+        "cancel": "取消匯出",
+        "reveal": "在 Finder 中顯示",
+        "dismiss": "關閉",
+        "successFacts": "創作 {{nominal}} 秒 · 匯出 {{rendered}} 秒 · 裁剪 {{count}} 個尾端",
+        "successQuarantine": "已移開較早的影片匯出：{{count}}",
+        "phase": {
+          "preparing": "正在準備精確來源媒體…",
+          "analyzing": "正在分析媒體與靜止尾端…",
+          "rendering": "正在本機算繪影片…",
+          "publishing": "正在驗證並發佈完成的影片…"
+        },
+        "disabled": {
+          "no_beats": "匯出前請新增 Beat",
+          "duration_pending": "請為每個空 Beat 設定長度",
+          "invalid_media": "匯出前請處理過時或無效媒體",
+          "bed_too_short": "請選擇足夠長的音訊床",
+          "mutationActive": "請先完成目前的工作區變更",
+          "exportRunning": "影片匯出已在執行",
+          "catalogUnavailable": "影片匯出儲存空間無法使用"
+        },
+        "errors": {
+          "catalogUnavailable": "匯出目錄無法使用。請重新載入專案。",
+          "staleAuthority": "專案或匯出目錄已變更，未發佈過時影片。",
+          "unavailable": "此裝置沒有已驗證的 FFmpeg 影片匯出能力。",
+          "renderFailed": "無法驗證本機影片算繪，未發佈部分匯出。",
+          "cancelled": "影片匯出已取消，專案媒體未變更。",
+          "invalidMedia": "剪輯包含過時、非規範或無效媒體。",
+          "busy": "Creative Studio 正在完成另一項操作。",
+          "artifactUnavailable": "該影片已不在有效目錄中。",
+          "resultConflict": "確認影片前收到較新的匯出目錄。"
         }
       }
     },

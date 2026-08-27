@@ -201,6 +201,7 @@ export const createStudioE2EFakeBundle = ({
   const providerRequests: StudioE2EFakeProviderRequest[] = [];
   let providerRequestWrite = Promise.resolve();
   let providerRequestWriteOrdinal = 0;
+  const fixtureFlights = new Map<StudioMediaKind, Promise<ProviderOutput>>();
 
   const ensureFixtureDirectory = async (): Promise<void> => {
     await mkdir(fixtureDirectory, { recursive: true });
@@ -295,7 +296,7 @@ export const createStudioE2EFakeBundle = ({
     await providerRequestWrite;
   };
 
-  const ensureFixture = async (mediaKind: StudioMediaKind): Promise<ProviderOutput> => {
+  const publishFixture = async (mediaKind: StudioMediaKind): Promise<ProviderOutput> => {
     const bytes = mediaKind === 'image' ? IMAGE_BYTES : VIDEO_BYTES;
     const mimeType = mediaKind === 'image' ? 'image/png' : 'video/mp4';
     const fileName = mediaKind === 'image' ? 'fake-image.png' : 'fake-video.mp4';
@@ -319,6 +320,18 @@ export const createStudioE2EFakeBundle = ({
       byteSize: bytes.byteLength,
       ...(mediaKind === 'video' ? { durationSeconds: 10 } : { width: 1, height: 1 }),
     };
+  };
+
+  const ensureFixture = (mediaKind: StudioMediaKind): Promise<ProviderOutput> => {
+    const existing = fixtureFlights.get(mediaKind);
+    if (existing !== undefined) return existing;
+    const flight = publishFixture(mediaKind);
+    fixtureFlights.set(mediaKind, flight);
+    const release = (): void => {
+      if (fixtureFlights.get(mediaKind) === flight) fixtureFlights.delete(mediaKind);
+    };
+    void flight.then(release, release);
+    return flight;
   };
 
   const createAdapter = (

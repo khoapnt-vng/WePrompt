@@ -7,6 +7,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
+import { isDeepStrictEqual } from 'node:util';
 import type { IProvider, ISessionMcpServer } from '@/common/config/storage';
 import {
   isStudioPricingRefusalReasonV2,
@@ -30,6 +31,14 @@ import {
   type StudioConfirmSubmissionResultV2,
   type StudioCopyExportResultV2,
   type StudioCreateExportRequestV2,
+  type StudioFilmExportCapabilityRequestV2,
+  type StudioFilmExportCapabilityV2,
+  type StudioFilmExportStatusRequestV2,
+  type StudioFilmExportStatusV2,
+  type StudioCancelFilmExportRequestV2,
+  type StudioCancelFilmExportResultV2,
+  type StudioAcknowledgeFilmExportRequestV2,
+  type StudioAcknowledgeFilmExportResultV2,
   type StudioDetachBedAudioRequestV2,
   type StudioDismissReferenceGenerationHandoffRequestV2,
   type StudioDismissReferenceGenerationHandoffResultV2,
@@ -138,6 +147,13 @@ import {
   type StudioExportPayloadFilePlanV2,
 } from './schema2/exports';
 import {
+  createStudioFilmExporterV2,
+  deriveStudioFilmRequiredAssetIdsV2,
+  StudioFilmExportErrorV2,
+  type StudioFilmExporterV2,
+  type StudioFilmVerifiedSourceV2,
+} from './filmExporter';
+import {
   StudioPreparedSubmissionCacheErrorV2,
   StudioPreparedSubmissionCacheV2,
   type StudioPreparedSubmissionClaimV2,
@@ -173,6 +189,7 @@ const ROUTE_INTEGRATION_LABELS = {
   'openrouter-video-v1': 'openRouterVideo',
 } as const;
 const CONNECTION_VALIDATION_TIMEOUT_MS = 30_000;
+const FILM_EXPORT_JOB_DEADLINE_MS = 30 * 60_000;
 const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
 const RESOLUTIONS = new Set(['720p', '1080p']);
 const MEDIA_INTEGRATIONS = [
@@ -244,6 +261,10 @@ export type CreativeStudioServiceV2 = {
   }): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }>;
   detachBedAudio(input: StudioDetachBedAudioRequestV2): Promise<StudioRendererProjectV2>;
   createExport(input: StudioCreateExportRequestV2): Promise<StudioRendererExportCatalogV2>;
+  getFilmExportCapability(input: StudioFilmExportCapabilityRequestV2): Promise<StudioFilmExportCapabilityV2>;
+  getFilmExportStatus(input: StudioFilmExportStatusRequestV2): Promise<StudioFilmExportStatusV2>;
+  cancelFilmExport(input: StudioCancelFilmExportRequestV2): Promise<StudioCancelFilmExportResultV2>;
+  acknowledgeFilmExport(input: StudioAcknowledgeFilmExportRequestV2): Promise<StudioAcknowledgeFilmExportResultV2>;
   listExports(input: StudioListExportsRequestV2): Promise<StudioRendererExportCatalogV2>;
   copyExport(
     input: StudioExportArtifactRequestV2,
@@ -302,6 +323,7 @@ export type CreativeStudioServiceV2Deps = {
   jobManager: StudioJobManagerV2;
   mediaStore?: StudioMediaStore;
   exportCatalogStore?: StudioExportCatalogStoreV2;
+  filmExporter?: StudioFilmExporterV2;
   listProviders?: () => Promise<IProvider[]>;
   getAdapterRegistry?: () => GenerationProviderAdapterRegistry;
   getStudioServerScriptPath?: () => string;
@@ -1493,10 +1515,138 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   const createExportId = deps.createExportId ?? (() => defaultId('export'));
   const createConnectionId = deps.createConnectionId ?? randomUUID;
   const exportCatalogStore = deps.exportCatalogStore ?? createStudioExportCatalogStoreV2();
+  const filmExporter =
+    deps.filmExporter ??
+    createStudioFilmExporterV2({
+      onDiagnostic: (code) => console.warn(formatStudioJobLog('film_export_cleanup', { code })),
+    });
+  type ActiveFilmRenderV2 = {
+    renderId: string;
+    controller: AbortController;
+    progress: Extract<StudioFilmExportStatusV2, { status: 'active' }>['progress'];
+    settled: Promise<void>;
+    resolveSettled: () => void;
+  };
+  type TerminalFilmRenderV2 = Extract<StudioFilmExportStatusV2, { status: 'terminal' }>['result'];
+  const MAX_RETAINED_FILM_TERMINALS = 32;
+  const activeFilmRenders = new Map<string, ActiveFilmRenderV2>();
+  const terminalFilmRenders = new Map<string, TerminalFilmRenderV2>();
   const activeClaims = new Set<StudioPreparedSubmissionClaimV2>();
   let generationRoutesSnapshot: StudioGenerationRouteCatalog | null = null;
   let generationRoutesFlight: Promise<StudioGenerationRouteCatalog> | null = null;
   let disposed = false;
+
+  const rememberFilmTerminal = (result: TerminalFilmRenderV2): void => {
+    terminalFilmRenders.delete(result.projectId);
+    terminalFilmRenders.set(result.projectId, structuredClone(result));
+    while (terminalFilmRenders.size > MAX_RETAINED_FILM_TERMINALS) {
+      const oldestProjectId = terminalFilmRenders.keys().next().value;
+      if (oldestProjectId === undefined) break;
+      terminalFilmRenders.delete(oldestProjectId);
+    }
+  };
+
+  const failedFilmTerminal = (projectId: string, renderId: string, error: unknown): TerminalFilmRenderV2 => {
+    if (error instanceof StudioFilmExportErrorV2) {
+      if (error.code === 'cancelled') return { projectId, renderId, outcome: 'cancelled' };
+      if (error.code === 'invalid_project' || error.code === 'invalid_media') {
+        return { projectId, renderId, outcome: 'failed', reason: 'invalid_media' };
+      }
+      if (error.code === 'ffmpeg_unavailable' || error.code === 'unsupported_capabilities') {
+        return { projectId, renderId, outcome: 'failed', reason: 'unavailable' };
+      }
+    }
+    if (
+      (error instanceof CreativeStudioStoreError && error.code === 'stale_project') ||
+      (error instanceof StudioExportCatalogErrorV2 &&
+        (error.code === 'stale_catalog_revision' || error.code === 'stale_project_revision'))
+    ) {
+      return { projectId, renderId, outcome: 'failed', reason: 'stale_authority' };
+    }
+    return { projectId, renderId, outcome: 'failed', reason: 'render_failed' };
+  };
+
+  const sameFilmSourceAsset = (left: StudioAssetV2, right: StudioAssetV2): boolean => isDeepStrictEqual(left, right);
+
+  const filmAbortFailure = (signal: AbortSignal): StudioFilmExportErrorV2 =>
+    signal.reason instanceof StudioFilmExportErrorV2 ? signal.reason : new StudioFilmExportErrorV2('cancelled');
+
+  const assertFilmJobActive = (signal: AbortSignal): void => {
+    if (signal.aborted) throw filmAbortFailure(signal);
+    assertGeneralServiceActive();
+  };
+
+  const awaitFilmJobStep = async <Value>(work: Promise<Value>, signal: AbortSignal): Promise<Value> => {
+    if (signal.aborted) throw filmAbortFailure(signal);
+    let removeAbort = (): void => undefined;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      const onAbort = (): void => reject(filmAbortFailure(signal));
+      signal.addEventListener('abort', onAbort, { once: true });
+      removeAbort = (): void => signal.removeEventListener('abort', onAbort);
+    });
+    try {
+      return await Promise.race([work, aborted]);
+    } finally {
+      removeAbort();
+    }
+  };
+
+  const fullyReproveFilmSource = async (
+    authority: StudioProjectAuthoritySnapshotV2,
+    expected: StudioAssetV2,
+    signal: AbortSignal
+  ): Promise<void> => {
+    if (deps.mediaStore === undefined) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
+    }
+    assertFilmJobActive(signal);
+    // Resolution itself opens and hashes managed media. Never race it against cancellation: wait until
+    // its internal descriptor work has settled, then honor the abort before opening the returned lease.
+    const resolved = await deps.mediaStore.resolveAssetWithProjectAuthorityV2(authority, expected.id);
+    assertFilmJobActive(signal);
+    if (resolved === null || !sameFilmSourceAsset(resolved.asset, expected)) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio film source bytes changed');
+    }
+    const digest = createHash('sha256');
+    let byteSize = 0;
+    try {
+      // Do not abandon a late local lease on cancellation. Once acquisition starts, wait for it,
+      // then return the iterator below before allowing the public Film job to settle.
+      const iterable = await resolved.openVerifiedStream();
+      const iterator = iterable[Symbol.asyncIterator]();
+      try {
+        assertFilmJobActive(signal);
+        for (;;) {
+          const next = await awaitFilmJobStep(iterator.next(), signal);
+          if (next.done) break;
+          const chunk = next.value;
+          assertFilmJobActive(signal);
+          if (!(chunk instanceof Uint8Array)) {
+            throw new CreativeStudioStoreError('storage_error', 'Studio film source stream is invalid');
+          }
+          byteSize += chunk.byteLength;
+          if (!Number.isSafeInteger(byteSize) || byteSize > expected.byteSize) {
+            throw new CreativeStudioStoreError('storage_error', 'Studio film source bytes changed');
+          }
+          digest.update(chunk);
+        }
+      } finally {
+        const closing = iterator.return?.();
+        if (closing !== undefined) {
+          // Once iteration has begun, cancellation must wait for the stream lease itself to close.
+          // Racing this return against an already-aborted signal would let the public job settle
+          // while an owned source descriptor remained live.
+          await Promise.resolve(closing);
+        }
+      }
+    } catch (error) {
+      if (error instanceof CreativeStudioStoreError || error instanceof StudioFilmExportErrorV2) throw error;
+      throw new CreativeStudioStoreError('storage_error', 'Studio film source bytes changed');
+    }
+    if (byteSize !== expected.byteSize || digest.digest('hex') !== expected.sha256) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio film source bytes changed');
+    }
+  };
 
   const cacheFailure = (code: 'quote_not_found'): StudioPreparedSubmissionCacheErrorV2 =>
     new StudioPreparedSubmissionCacheErrorV2(code);
@@ -1554,6 +1704,17 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     if (error instanceof StudioEditorFolderErrorV2) {
       throw invalid(`Invalid Studio editor-folder export: ${error.code}`);
     }
+    if (error instanceof StudioFilmExportErrorV2) {
+      if (error.code === 'ffmpeg_unavailable') throw new CreativeStudioServiceError('ffmpeg_unavailable');
+      if (error.code === 'unsupported_capabilities') {
+        throw new CreativeStudioServiceError('unsupported_capabilities');
+      }
+      if (error.code === 'cancelled') throw new CreativeStudioServiceError('cancelled');
+      if (error.code === 'invalid_project' || error.code === 'invalid_media') {
+        throw invalid(`Invalid Studio film export: ${error.code}`);
+      }
+      throw new CreativeStudioServiceError('render_failed');
+    }
     throw error;
   };
   const editorFolderManagedFileName = (createdAt: string, artifactId: string): string => {
@@ -1563,6 +1724,14 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     );
     const identity = createHash('sha256').update(artifactId, 'utf8').digest('hex').slice(0, 16);
     return `editor-folder-${timestamp}-${identity}`;
+  };
+  const filmManagedFileName = (createdAt: string, artifactId: string): string => {
+    const timestamp = createdAt.replace(
+      /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.(\d{3})Z$/u,
+      '$1$2$3-$4$5$6-$7'
+    );
+    const identity = createHash('sha256').update(artifactId, 'utf8').digest('hex').slice(0, 16);
+    return `film-${timestamp}-${identity}`;
   };
   const assertGeneralServiceActive = (): void => {
     if (disposed) throw new CreativeStudioStoreError('busy', 'Creative Studio service is closed');
@@ -2352,7 +2521,10 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         if (error instanceof CreativeStudioStoreError && error.code === 'not_found') return false;
         throw error;
       }
-      if (deleted) deps.onProjectUpdated(input.projectId);
+      if (deleted) {
+        terminalFilmRenders.delete(input.projectId);
+        deps.onProjectUpdated(input.projectId);
+      }
       return deleted;
     },
 
@@ -2586,10 +2758,23 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       const exactKeys =
         input.shape === 'still'
           ? ['projectId', 'expectedRevision', 'expectedCatalogRevision', 'shape', 'shotId']
-          : ['projectId', 'expectedRevision', 'expectedCatalogRevision', 'shape'];
+          : input.shape === 'film'
+            ? [
+                'projectId',
+                'expectedRevision',
+                'expectedCatalogRevision',
+                'shape',
+                'renderId',
+                'transition',
+                'trimTails',
+              ]
+            : ['projectId', 'expectedRevision', 'expectedCatalogRevision', 'shape'];
       if (
         !hasExactKeys(input, exactKeys) ||
-        (input.shape !== 'editor_folder' && input.shape !== 'still' && input.shape !== 'script')
+        (input.shape !== 'editor_folder' &&
+          input.shape !== 'still' &&
+          input.shape !== 'script' &&
+          input.shape !== 'film')
       ) {
         throw invalid('Invalid Studio export request');
       }
@@ -2597,9 +2782,215 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       assertRevision(input.expectedRevision);
       assertRevision(input.expectedCatalogRevision);
       if (input.shape === 'still') assertSafeId(input.shotId, 'shot id');
+      if (input.shape === 'film') {
+        assertSafeId(input.renderId, 'film render id');
+        if (
+          typeof input.trimTails !== 'boolean' ||
+          !isRecord(input.transition) ||
+          !(
+            (hasExactKeys(input.transition, ['kind']) && input.transition.kind === 'cut') ||
+            (hasExactKeys(input.transition, ['kind', 'seconds']) &&
+              input.transition.kind === 'dissolve' &&
+              typeof input.transition.seconds === 'number' &&
+              Number.isFinite(input.transition.seconds) &&
+              input.transition.seconds >= 1 / 24 &&
+              input.transition.seconds <= 1)
+          )
+        ) {
+          throw invalid('Invalid Studio film export request');
+        }
+      }
       assertGeneralServiceActive();
 
       try {
+        if (input.shape === 'film') {
+          if (activeFilmRenders.size > 0) {
+            throw new CreativeStudioStoreError('busy', 'A Studio film export is already active');
+          }
+          const controller = new AbortController();
+          const deadline = setTimeout(
+            () => controller.abort(new StudioFilmExportErrorV2('render_failed', 'film_deadline_elapsed')),
+            FILM_EXPORT_JOB_DEADLINE_MS
+          );
+          deadline.unref?.();
+          let resolveSettled = (): void => undefined;
+          const settled = new Promise<void>((resolve) => {
+            resolveSettled = resolve;
+          });
+          const active: ActiveFilmRenderV2 = {
+            renderId: input.renderId,
+            controller,
+            settled,
+            resolveSettled,
+            progress: {
+              projectId: input.projectId,
+              renderId: input.renderId,
+              phase: 'preparing' as const,
+              progress: 0,
+            },
+          };
+          terminalFilmRenders.delete(input.projectId);
+          activeFilmRenders.set(input.projectId, active);
+          let rendered: Awaited<ReturnType<StudioFilmExporterV2['render']>> | null = null;
+          let terminal: TerminalFilmRenderV2 | null = null;
+          try {
+            const captured = await deps.store.withProjectAuthorityV2(input.projectId, async (authority) => {
+              assertFilmJobActive(controller.signal);
+              if (authority.project.revision !== input.expectedRevision) {
+                throw new CreativeStudioStoreError('stale_project', 'Studio export project revision has changed');
+              }
+              if (deps.mediaStore === undefined) {
+                throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
+              }
+              const initialCatalog = await exportCatalogStore.list({
+                ...authority,
+                assertActive: () => assertFilmJobActive(controller.signal),
+              });
+              if (initialCatalog.revision !== input.expectedCatalogRevision) {
+                throw new CreativeStudioStoreError('stale_project', 'Studio export catalog revision has changed');
+              }
+              const project = structuredClone(authority.project);
+              const requiredAssetIds = deriveStudioFilmRequiredAssetIdsV2(project);
+              const sourceAssets = requiredAssetIds.map((assetId) => {
+                const canonical = ownValue(project.assets, assetId);
+                if (canonical === undefined) {
+                  throw new CreativeStudioStoreError('storage_error', 'Studio film source is unavailable');
+                }
+                return structuredClone(canonical);
+              });
+              await authority.assertCurrent?.();
+              assertFilmJobActive(controller.signal);
+              return {
+                project,
+                requiredAssetIds,
+                sourceAssets,
+                initialFilmCount: initialCatalog.artifacts.filter(({ shape }) => shape === 'film').length,
+              };
+            });
+            const { project, requiredAssetIds, sourceAssets, initialFilmCount } = captured;
+            const sources: StudioFilmVerifiedSourceV2[] = [];
+            for (const sourceAsset of sourceAssets) {
+              // eslint-disable-next-line no-await-in-loop -- Exact source openers are resolved after the authority callback exits.
+              // Resolution opens and hashes the managed file, so cancellation may not abandon it.
+              const resolved = await deps.mediaStore.resolveAssetV2(project.id, sourceAsset.id);
+              assertFilmJobActive(controller.signal);
+              if (resolved === null || !sameFilmSourceAsset(resolved.asset, sourceAsset)) {
+                throw new CreativeStudioStoreError('storage_error', 'Studio film source is unavailable');
+              }
+              sources.push({ asset: sourceAsset, openVerifiedStream: resolved.openVerifiedStream });
+            }
+            rendered = await filmExporter.render({
+              project: structuredClone(project),
+              transition: structuredClone(input.transition),
+              trimTails: input.trimTails,
+              sources,
+              signal: controller.signal,
+              onProgress: (progress) => {
+                const current = activeFilmRenders.get(input.projectId);
+                if (current?.renderId === input.renderId) {
+                  current.progress = { projectId: input.projectId, renderId: input.renderId, ...progress };
+                }
+              },
+            });
+            if (controller.signal.aborted) throw new StudioFilmExportErrorV2('cancelled');
+            active.progress = { ...active.progress, phase: 'publishing', progress: null };
+            assertFilmJobActive(controller.signal);
+            const artifactId = createExportId();
+            assertSafeId(artifactId, 'export id');
+            const createdAt = readNow().toISOString();
+            const published = await deps.store.withProjectAuthorityV2(input.projectId, async (authority) => {
+              assertFilmJobActive(controller.signal);
+              if (authority.project.revision !== input.expectedRevision) {
+                throw new CreativeStudioStoreError('stale_project', 'Studio export project revision has changed');
+              }
+              const currentRequiredAssetIds = deriveStudioFilmRequiredAssetIdsV2(authority.project);
+              if (!isDeepStrictEqual(currentRequiredAssetIds, requiredAssetIds)) {
+                throw new CreativeStudioStoreError('stale_project', 'Studio film source authority has changed');
+              }
+              for (const source of sources) {
+                const current = ownValue(authority.project.assets, source.asset.id);
+                if (current === undefined || !sameFilmSourceAsset(current, source.asset)) {
+                  throw new CreativeStudioStoreError('stale_project', 'Studio film source authority has changed');
+                }
+                // eslint-disable-next-line no-await-in-loop -- Final publication authority fully re-hashes each exact source.
+                await fullyReproveFilmSource(authority, source.asset, controller.signal);
+              }
+              await authority.assertCurrent?.();
+              assertFilmJobActive(controller.signal);
+              const catalog = await exportCatalogStore.create(
+                { ...authority, assertActive: () => assertFilmJobActive(controller.signal) },
+                {
+                  expectedProjectRevision: input.expectedRevision,
+                  expectedCatalogRevision: input.expectedCatalogRevision,
+                  artifactId,
+                  managedFileName: filmManagedFileName(createdAt, artifactId),
+                  shape: 'film',
+                  createdAt,
+                  film: rendered!.facts,
+                  files: [
+                    {
+                      kind: 'verified_stream',
+                      relativePath: 'film.mp4',
+                      byteSize: rendered!.byteSize,
+                      sha256: rendered!.sha256,
+                      openVerifiedStream: rendered!.openVerifiedStream,
+                    },
+                  ],
+                }
+              );
+              const rendererCatalog = projectStudioRendererExportCatalogV2(catalog);
+              const artifact = rendererCatalog.artifacts.find(
+                (candidate): candidate is Extract<(typeof rendererCatalog.artifacts)[number], { shape: 'film' }> =>
+                  candidate.id === artifactId && candidate.shape === 'film'
+              );
+              if (artifact === undefined) {
+                throw new CreativeStudioStoreError('storage_error', 'Studio film artifact projection is unavailable');
+              }
+              terminal = {
+                projectId: input.projectId,
+                renderId: input.renderId,
+                outcome: 'succeeded',
+                artifact: structuredClone(artifact),
+                movedAsideCount: Math.max(
+                  0,
+                  initialFilmCount + 1 - rendererCatalog.artifacts.filter(({ shape }) => shape === 'film').length
+                ),
+              };
+              return rendererCatalog;
+            });
+            return published;
+          } catch (error) {
+            terminal = failedFilmTerminal(input.projectId, input.renderId, error);
+            throw error;
+          } finally {
+            try {
+              await rendered?.cleanup();
+            } catch (error) {
+              console.warn(
+                formatStudioJobLog('film_export_cleanup', {
+                  projectId: input.projectId,
+                  renderId: input.renderId,
+                  code: 'cleanup_failed',
+                  reason: error instanceof Error ? error.name : 'unknown',
+                })
+              );
+            } finally {
+              clearTimeout(deadline);
+              rememberFilmTerminal(
+                terminal ?? {
+                  projectId: input.projectId,
+                  renderId: input.renderId,
+                  outcome: 'failed',
+                  reason: 'render_failed',
+                }
+              );
+              if (activeFilmRenders.get(input.projectId)?.renderId === input.renderId) {
+                activeFilmRenders.delete(input.projectId);
+              }
+              active.resolveSettled();
+            }
+          }
+        }
         return await deps.store.withProjectAuthorityV2(input.projectId, async (authority) => {
           assertGeneralServiceActive();
           if (authority.project.revision !== input.expectedRevision) {
@@ -2626,8 +3017,70 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           return projectStudioRendererExportCatalogV2(catalog);
         });
       } catch (error) {
+        if (input.shape === 'film' && error instanceof StudioFilmExportErrorV2) {
+          console.warn(
+            formatStudioJobLog('film_export_failed', {
+              projectId: input.projectId,
+              renderId: input.renderId,
+              code: error.code,
+              detail: error.detail,
+            })
+          );
+        }
         return rethrowExportFailure(error);
       }
+    },
+
+    async getFilmExportCapability(input): Promise<StudioFilmExportCapabilityV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
+        throw invalid('Invalid Studio film-export capability request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertGeneralServiceActive();
+      await loadSupported(input.projectId);
+      return filmExporter.capability();
+    },
+
+    async getFilmExportStatus(input): Promise<StudioFilmExportStatusV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
+        throw invalid('Invalid Studio film-export status request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertGeneralServiceActive();
+      const active = activeFilmRenders.get(input.projectId) ?? activeFilmRenders.values().next().value;
+      if (active !== undefined) return { status: 'active', progress: structuredClone(active.progress) };
+      const terminal = terminalFilmRenders.get(input.projectId);
+      return terminal === undefined ? { status: 'idle' } : { status: 'terminal', result: structuredClone(terminal) };
+    },
+
+    async cancelFilmExport(input): Promise<StudioCancelFilmExportResultV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'renderId'])) {
+        throw invalid('Invalid Studio film-export cancellation request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.renderId, 'film render id');
+      const active = activeFilmRenders.get(input.projectId);
+      if (active?.renderId !== input.renderId) return { status: 'not_found' };
+      if (active.progress.phase === 'publishing') return { status: 'cancellation_refused' };
+      active.controller.abort();
+      await active.settled;
+      const terminal = terminalFilmRenders.get(input.projectId);
+      return terminal?.renderId === input.renderId && terminal.outcome === 'cancelled'
+        ? { status: 'cancelled' }
+        : { status: 'cancellation_refused' };
+    },
+
+    async acknowledgeFilmExport(input): Promise<StudioAcknowledgeFilmExportResultV2> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'renderId'])) {
+        throw invalid('Invalid Studio film-export acknowledgement request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.renderId, 'film render id');
+      assertGeneralServiceActive();
+      const terminal = terminalFilmRenders.get(input.projectId);
+      if (terminal?.renderId !== input.renderId) return { status: 'not_found' };
+      terminalFilmRenders.delete(input.projectId);
+      return { status: 'acknowledged' };
     },
 
     async listExports(input): Promise<StudioRendererExportCatalogV2> {
@@ -3441,6 +3894,10 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     dispose(): void {
       if (disposed) return;
       disposed = true;
+      for (const active of activeFilmRenders.values()) active.controller.abort();
+      activeFilmRenders.clear();
+      terminalFilmRenders.clear();
+      filmExporter.dispose();
       activeClaims.clear();
       preparedSubmissionCache.close();
     },

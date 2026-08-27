@@ -841,6 +841,18 @@ const ControlsHarness: React.FC<{
         project={project}
         projection={projection}
         routeCatalog={routes}
+        generationCapability={null}
+        exportCatalog={null}
+        filmExportCapability={null}
+        createEditorFolder={vi.fn(async () => ({ ok: false as const, messageKey: 'unavailable' }))}
+        revealEditorFolder={vi.fn(async () => ({ ok: false as const, messageKey: 'unavailable' }))}
+        createFilm={vi.fn(async () => ({ ok: false as const, messageKey: 'unavailable' }))}
+        getFilmExportStatus={vi.fn(async () => ({ status: 'idle' as const }))}
+        refreshExports={vi.fn(async () => true)}
+        cancelFilmExport={vi.fn(async () => false)}
+        acknowledgeFilmExport={vi.fn(async () => true)}
+        revealFilm={vi.fn(async () => ({ ok: false as const, messageKey: 'unavailable' }))}
+        detachBedAudio={vi.fn(async () => false)}
         drafts={drafts}
         pending={pending}
         errorMessageKey={null}

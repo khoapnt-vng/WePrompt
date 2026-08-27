@@ -1071,6 +1071,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
             const extraction = await deps.mediaStore.extractConditioningFrameV2({
               projectId: context.projectId,
               extractionId,
+              signal,
             });
             if (extraction.status === 'ready') {
               const verification = await deps.mediaStore.verifyConditioningFrameV2({

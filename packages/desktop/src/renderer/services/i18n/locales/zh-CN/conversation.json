@@ -1167,9 +1167,19 @@
           "title": "首帧",
           "shotChip": "镜头 {{shot}}",
           "on": "当前",
-          "status": { "notReady": "未就绪", "ready": "可渲染", "rendering": "渲染中", "rendered": "已渲染" },
+          "status": {
+            "notReady": "未就绪",
+            "ready": "可渲染",
+            "rendering": "渲染中",
+            "rendered": "已渲染"
+          },
           "frameLabel": "帧 {{index}}",
-          "origin": { "generated": "已生成", "imported": "已导入", "board": "分镜", "inherited": "来自镜头 {{shot}}" },
+          "origin": {
+            "generated": "已生成",
+            "imported": "已导入",
+            "board": "分镜",
+            "inherited": "来自镜头 {{shot}}"
+          },
           "current": "当前",
           "unavailable": "不可用",
           "previewAlt": "预览 · {{label}}",
@@ -1479,6 +1489,48 @@
           "busy": "Creative Studio 正在完成另一项工作区操作。请稍后重试。",
           "artifactUnavailable": "此导出已不在当前目录中。请重新加载后再显示。",
           "resultConflict": "确认结果前收到了更新的导出目录。请重新加载并检查导出。"
+        }
+      },
+      "filmExport": {
+        "action": "导出影片…",
+        "title": "导出单个影片文件",
+        "description": "从当前剪辑创建可供编辑的 MP4。未覆盖的镜头会成为定时黑场。",
+        "transition": "转场",
+        "cut": "直接剪切",
+        "dissolve": "0.35 秒叠化",
+        "trimTails": "有限裁剪静止尾部（保护最后一个已渲染镜头）",
+        "noSpend": "这是本地导出，不会生成媒体或产生费用。",
+        "export": "导出影片",
+        "cancel": "取消导出",
+        "reveal": "在 Finder 中显示",
+        "dismiss": "关闭",
+        "successFacts": "创作 {{nominal}} 秒 · 导出 {{rendered}} 秒 · 裁剪 {{count}} 个尾部",
+        "successQuarantine": "已移走较早的影片导出：{{count}}",
+        "phase": {
+          "preparing": "正在准备精确源媒体…",
+          "analyzing": "正在分析媒体和静止尾部…",
+          "rendering": "正在本地渲染影片…",
+          "publishing": "正在验证并发布完成的影片…"
+        },
+        "disabled": {
+          "no_beats": "导出前请添加 Beat",
+          "duration_pending": "请为每个空 Beat 设置时长",
+          "invalid_media": "导出前请处理陈旧或无效媒体",
+          "bed_too_short": "请选择足够长的音频床",
+          "mutationActive": "请先完成当前工作区更改",
+          "exportRunning": "影片导出已在运行",
+          "catalogUnavailable": "影片导出存储不可用"
+        },
+        "errors": {
+          "catalogUnavailable": "导出目录不可用。请重新加载项目。",
+          "staleAuthority": "项目或导出目录已更改，未发布陈旧影片。",
+          "unavailable": "此设备没有已验证的 FFmpeg 影片导出能力。",
+          "renderFailed": "无法验证本地影片渲染，未发布部分导出。",
+          "cancelled": "影片导出已取消，项目媒体未更改。",
+          "invalidMedia": "剪辑包含陈旧、非规范或无效媒体。",
+          "busy": "Creative Studio 正在完成另一项操作。",
+          "artifactUnavailable": "该影片已不在活动目录中。",
+          "resultConflict": "确认影片前收到了更新的导出目录。"
         }
       }
     },

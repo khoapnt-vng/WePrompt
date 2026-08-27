@@ -1492,6 +1492,48 @@
           "artifactUnavailable": "Bu dışa aktarma artık etkin katalogda değil. Yeniden yükleyin.",
           "resultConflict": "Sonuç doğrulanmadan daha yeni bir katalog geldi. Yeniden yükleyip inceleyin."
         }
+      },
+      "filmExport": {
+        "action": "Filmi dışa aktar…",
+        "title": "Tek film dosyası dışa aktar",
+        "description": "Geçerli kurgudan düzenlemeye hazır bir MP4 oluşturur. Kapsanmayan çekimler süreli siyah kartlara dönüşür.",
+        "transition": "Geçişler",
+        "cut": "Düz kesmeler",
+        "dissolve": "0,35 sn çözünmeler",
+        "trimTails": "Sınırlı sessiz sonları kırp (son render çekimi korunur)",
+        "noSpend": "Bu yerel bir dışa aktarımdır. Medya üretmez veya para harcamaz.",
+        "export": "Filmi dışa aktar",
+        "cancel": "Dışa aktarımı iptal et",
+        "reveal": "Finder'da göster",
+        "dismiss": "Kapat",
+        "successFacts": "{{nominal}} sn yazıldı · {{rendered}} sn dışa aktarıldı · {{count}} son kırpıldı",
+        "successQuarantine": "Eski film dışa aktarımları taşındı: {{count}}",
+        "phase": {
+          "preparing": "Kesin kaynak medya hazırlanıyor…",
+          "analyzing": "Medya ve sessiz sonlar analiz ediliyor…",
+          "rendering": "Film yerel olarak render ediliyor…",
+          "publishing": "Film doğrulanıp yayımlanıyor…"
+        },
+        "disabled": {
+          "no_beats": "Dışa aktarmadan önce bir Beat ekleyin",
+          "duration_pending": "Her boş Beat için süre belirleyin",
+          "invalid_media": "Eski veya geçersiz medyayı çözün",
+          "bed_too_short": "Yeterince uzun bir ses yatağı seçin",
+          "mutationActive": "Dışa aktarmadan önce mevcut değişikliği bitirin",
+          "exportRunning": "Bir film dışa aktarımı zaten çalışıyor",
+          "catalogUnavailable": "Dışa aktarım depolaması kullanılamıyor"
+        },
+        "errors": {
+          "catalogUnavailable": "Dışa aktarım kataloğu kullanılamıyor. Projeyi yeniden yükleyin.",
+          "staleAuthority": "Proje veya katalog değişti. Eski film yayımlanmadı.",
+          "unavailable": "Bu cihazda doğrulanmış FFmpeg film dışa aktarımı yok.",
+          "renderFailed": "Yerel render doğrulanamadı. Kısmi dışa aktarım yayımlanmadı.",
+          "cancelled": "Film dışa aktarımı iptal edildi. Proje medyası değişmedi.",
+          "invalidMedia": "Kurgu eski, kanonik olmayan veya geçersiz medya içeriyor.",
+          "busy": "Creative Studio başka bir işlemi tamamlıyor.",
+          "artifactUnavailable": "Film artık etkin katalogda değil.",
+          "resultConflict": "Film doğrulanmadan önce daha yeni bir katalog geldi."
+        }
       }
     },
     "rules": {

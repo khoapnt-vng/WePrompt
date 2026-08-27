@@ -111,6 +111,14 @@ import type {
   StudioConfirmSubmissionResultV2,
   StudioCopyExportResultV2,
   StudioCreateExportRequestV2,
+  StudioFilmExportCapabilityRequestV2,
+  StudioFilmExportCapabilityV2,
+  StudioFilmExportStatusRequestV2,
+  StudioFilmExportStatusV2,
+  StudioAcknowledgeFilmExportRequestV2,
+  StudioAcknowledgeFilmExportResultV2,
+  StudioCancelFilmExportRequestV2,
+  StudioCancelFilmExportResultV2,
   StudioDetachBedAudioRequestV2,
   StudioDetachManagedMediaResultV2,
   StudioDirectorSessionAuthorityV2,
@@ -1365,6 +1373,22 @@ export const creativeStudio = {
   createExport: bridge.buildProvider<StudioCommandResult<StudioRendererExportCatalogV2>, StudioCreateExportRequestV2>(
     'creative-studio.create-export'
   ),
+  getFilmExportCapability: bridge.buildProvider<
+    StudioCommandResult<StudioFilmExportCapabilityV2>,
+    StudioFilmExportCapabilityRequestV2
+  >('creative-studio.get-film-export-capability'),
+  getFilmExportStatus: bridge.buildProvider<
+    StudioCommandResult<StudioFilmExportStatusV2>,
+    StudioFilmExportStatusRequestV2
+  >('creative-studio.get-film-export-status'),
+  cancelFilmExport: bridge.buildProvider<
+    StudioCommandResult<StudioCancelFilmExportResultV2>,
+    StudioCancelFilmExportRequestV2
+  >('creative-studio.cancel-film-export'),
+  acknowledgeFilmExport: bridge.buildProvider<
+    StudioCommandResult<StudioAcknowledgeFilmExportResultV2>,
+    StudioAcknowledgeFilmExportRequestV2
+  >('creative-studio.acknowledge-film-export'),
   listExports: bridge.buildProvider<StudioCommandResult<StudioRendererExportCatalogV2>, StudioListExportsRequestV2>(
     'creative-studio.list-exports'
   ),

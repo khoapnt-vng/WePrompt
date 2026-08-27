@@ -7,6 +7,7 @@
 import {
   Alert,
   Button,
+  Checkbox,
   Drawer,
   Dropdown,
   Input,
@@ -15,6 +16,7 @@ import {
   Menu,
   Modal,
   Popconfirm,
+  Progress,
   Select,
   Tag,
 } from '@arco-design/web-react';
@@ -53,6 +55,33 @@ type EditorFolderExportStatus =
       movedAsideCount: number;
     }
   | { kind: 'failure'; messageKey: string };
+
+type FilmExportStatus =
+  | { kind: 'idle' }
+  | {
+      kind: 'busy_elsewhere';
+      projectId: string;
+      renderId: string;
+      phase: 'preparing' | 'analyzing' | 'rendering' | 'publishing';
+      progress: number | null;
+    }
+  | {
+      kind: 'exporting';
+      renderId: string;
+      phase: 'preparing' | 'analyzing' | 'rendering' | 'publishing';
+      progress: number | null;
+    }
+  | {
+      kind: 'success';
+      renderId: string;
+      artifactId: string;
+      folderName: string;
+      nominalDurationSeconds: number;
+      renderedDurationSeconds: number;
+      trimmedShotCount: number;
+      movedAsideCount: number;
+    }
+  | { kind: 'failure'; renderId: string; messageKey: string };
 
 type RuleValidation = {
   field: 'text' | 'terms';
@@ -776,8 +805,15 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   routeCatalog,
   generationCapability,
   exportCatalog,
+  filmExportCapability,
   createEditorFolder,
   revealEditorFolder,
+  createFilm,
+  getFilmExportStatus,
+  refreshExports,
+  cancelFilmExport,
+  acknowledgeFilmExport,
+  revealFilm,
   detachBedAudio,
   drafts,
   pending,
@@ -811,6 +847,13 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   const [menuOpen, setMenuOpen] = useState(false);
   const [dialog, setDialog] = useState<ProjectDialog>(null);
   const [editorFolderExportStatus, setEditorFolderExportStatus] = useState<EditorFolderExportStatus>({ kind: 'idle' });
+  const [filmExportStatus, setFilmExportStatus] = useState<FilmExportStatus>({ kind: 'idle' });
+  const [filmRendererBusyElsewhere, setFilmRendererBusyElsewhere] = useState(false);
+  const handledFilmTerminalIdsRef = useRef(new Set<string>());
+  const [filmDialogOpen, setFilmDialogOpen] = useState(false);
+  const [filmTransition, setFilmTransition] = useState<'cut' | 'dissolve'>('cut');
+  const [filmTrimTails, setFilmTrimTails] = useState(false);
+  const [revealingFilm, setRevealingFilm] = useState(false);
   const [revealingEditorFolder, setRevealingEditorFolder] = useState(false);
   const [briefErrorKey, setBriefErrorKey] = useState<string | null>(null);
   const [ruleText, setRuleText] = useState(initialStoredRuleDrafts.add.text);
@@ -1185,6 +1228,16 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
           : editorFolderPreview.status === 'blocked'
             ? `conversation.creativeStudio.workspace.editorFolderExport.disabled.${editorFolderPreview.reason}`
             : null;
+  const filmExportDisabledKey =
+    filmRendererBusyElsewhere || filmExportStatus.kind === 'exporting' || filmExportStatus.kind === 'busy_elsewhere'
+      ? 'conversation.creativeStudio.workspace.filmExport.disabled.exportRunning'
+      : pending
+        ? 'conversation.creativeStudio.workspace.filmExport.disabled.mutationActive'
+        : exportCatalog === null
+          ? 'conversation.creativeStudio.workspace.filmExport.disabled.catalogUnavailable'
+          : editorFolderPreview.status === 'blocked'
+            ? `conversation.creativeStudio.workspace.filmExport.disabled.${editorFolderPreview.reason}`
+            : null;
   const exportEditorFolder = async (): Promise<void> => {
     if (editorFolderDisabledKey !== null || exportCatalog === null || editorFolderPreview.status !== 'ready') return;
     const beforeIds = new Set(exportCatalog.artifacts.map(({ id }) => id));
@@ -1230,6 +1283,165 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
     setRevealingEditorFolder(false);
     if (result.ok === false) setEditorFolderExportStatus({ kind: 'failure', messageKey: result.messageKey });
   };
+  const exportFilm = async (): Promise<void> => {
+    if (filmExportDisabledKey !== null || exportCatalog === null || editorFolderPreview.status !== 'ready') return;
+    const renderId = `film_${crypto.randomUUID().replaceAll('-', '')}`;
+    const beforeIds = new Set(exportCatalog.artifacts.map(({ id }) => id));
+    const beforeCount = exportCatalog.artifacts.filter(({ shape }) => shape === 'film').length;
+    const submittedRevision = project.revision;
+    setFilmDialogOpen(false);
+    setFilmExportStatus({ kind: 'exporting', renderId, phase: 'preparing', progress: 0 });
+    const result = await createFilm({
+      renderId,
+      transition: filmTransition === 'dissolve' ? { kind: 'dissolve', seconds: 0.35 } : { kind: 'cut' },
+      trimTails: filmTrimTails,
+    });
+    if (result.ok === false) {
+      setFilmExportStatus({ kind: 'failure', renderId, messageKey: result.messageKey });
+      return;
+    }
+    const created = result.catalog.artifacts.filter(
+      (artifact) =>
+        artifact.shape === 'film' && artifact.sourceRevision === submittedRevision && !beforeIds.has(artifact.id)
+    );
+    if (created.length !== 1 || created[0]!.shape !== 'film') {
+      setFilmExportStatus({
+        kind: 'failure',
+        renderId,
+        messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.resultConflict',
+      });
+      return;
+    }
+    const artifact = created[0]!;
+    const afterCount = result.catalog.artifacts.filter(({ shape }) => shape === 'film').length;
+    setFilmExportStatus({
+      kind: 'success',
+      renderId,
+      artifactId: artifact.id,
+      folderName: artifact.folderName,
+      nominalDurationSeconds: artifact.film.nominalDurationSeconds,
+      renderedDurationSeconds: artifact.film.renderedDurationSeconds,
+      trimmedShotCount: artifact.film.trimmedShotCount,
+      movedAsideCount: Math.max(0, beforeCount + 1 - afterCount),
+    });
+  };
+  const cancelCurrentFilmExport = async (renderId: string): Promise<void> => {
+    if (await cancelFilmExport(renderId)) {
+      setFilmExportStatus({
+        kind: 'failure',
+        renderId,
+        messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.cancelled',
+      });
+    }
+  };
+  const revealCompletedFilm = async (artifactId: string, renderId: string): Promise<void> => {
+    if (revealingFilm) return;
+    setRevealingFilm(true);
+    const result = await revealFilm(artifactId);
+    setRevealingFilm(false);
+    if (result.ok === false) setFilmExportStatus({ kind: 'failure', renderId, messageKey: result.messageKey });
+  };
+
+  const dismissFilmExportResult = async (renderId: string): Promise<void> => {
+    const result = await acknowledgeFilmExport(renderId);
+    if (result === null) return;
+    handledFilmTerminalIdsRef.current.add(renderId);
+    setFilmExportStatus({ kind: 'idle' });
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: number | null = null;
+    let attachedRenderId: string | null = null;
+    const poll = async (): Promise<void> => {
+      const result = await getFilmExportStatus();
+      if (cancelled) return;
+      if (result === null) {
+        timer = window.setTimeout((): void => void poll(), 500);
+        return;
+      }
+      if (result.status === 'active') {
+        if (result.progress.projectId === project.id) {
+          setFilmRendererBusyElsewhere(false);
+          attachedRenderId = result.progress.renderId;
+          setFilmExportStatus({
+            kind: 'exporting',
+            renderId: result.progress.renderId,
+            phase: result.progress.phase,
+            progress: result.progress.progress,
+          });
+        } else {
+          setFilmRendererBusyElsewhere(true);
+          attachedRenderId = null;
+          setFilmExportStatus((current) =>
+            current.kind === 'failure' || current.kind === 'success'
+              ? current
+              : {
+                  kind: 'busy_elsewhere',
+                  projectId: result.progress.projectId,
+                  renderId: result.progress.renderId,
+                  phase: result.progress.phase,
+                  progress: result.progress.progress,
+                }
+          );
+        }
+      } else if (result.status === 'terminal') {
+        setFilmRendererBusyElsewhere(false);
+        attachedRenderId = null;
+        const terminal = result.result;
+        if (!handledFilmTerminalIdsRef.current.has(terminal.renderId)) {
+          if (terminal.outcome === 'succeeded') {
+            if (!(await refreshExports()) || cancelled) {
+              timer = window.setTimeout((): void => void poll(), 500);
+              return;
+            }
+            handledFilmTerminalIdsRef.current.add(terminal.renderId);
+            setFilmExportStatus({
+              kind: 'success',
+              renderId: terminal.renderId,
+              artifactId: terminal.artifact.id,
+              folderName: terminal.artifact.folderName,
+              nominalDurationSeconds: terminal.artifact.film.nominalDurationSeconds,
+              renderedDurationSeconds: terminal.artifact.film.renderedDurationSeconds,
+              trimmedShotCount: terminal.artifact.film.trimmedShotCount,
+              movedAsideCount: terminal.movedAsideCount,
+            });
+          } else {
+            handledFilmTerminalIdsRef.current.add(terminal.renderId);
+            const messageKey =
+              terminal.outcome === 'cancelled'
+                ? 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'
+                : terminal.reason === 'stale_authority'
+                  ? 'conversation.creativeStudio.workspace.filmExport.errors.staleAuthority'
+                  : terminal.reason === 'invalid_media'
+                    ? 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'
+                    : terminal.reason === 'unavailable'
+                      ? 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'
+                      : 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed';
+            setFilmExportStatus({ kind: 'failure', renderId: terminal.renderId, messageKey });
+          }
+        } else {
+          setFilmExportStatus((current) => (current.kind === 'busy_elsewhere' ? { kind: 'idle' } : current));
+        }
+      } else if (attachedRenderId !== null) {
+        setFilmRendererBusyElsewhere(false);
+        const settledRenderId = attachedRenderId;
+        attachedRenderId = null;
+        setFilmExportStatus((current) =>
+          current.kind === 'exporting' && current.renderId === settledRenderId ? { kind: 'idle' } : current
+        );
+      } else {
+        setFilmRendererBusyElsewhere(false);
+        setFilmExportStatus((current) => (current.kind === 'busy_elsewhere' ? { kind: 'idle' } : current));
+      }
+      timer = window.setTimeout((): void => void poll(), 500);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [getFilmExportStatus, project.id, refreshExports]);
   const audioImports = projection.cut.audioImports;
   const bedAssetId = projection.cut.bed.assetId;
   const detachAudio = async (assetId: string): Promise<void> => {
@@ -1267,6 +1479,21 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
               })
             : t('conversation.creativeStudio.workspace.editorFolderExport.action')}
       </Menu.Item>
+      {filmExportCapability?.status === 'ready' ? (
+        <Menu.Item
+          key='film-export'
+          disabled={filmExportDisabledKey !== null}
+          data-studio-film-export
+          onClick={() => {
+            setMenuOpen(false);
+            setFilmDialogOpen(true);
+          }}
+        >
+          {filmExportDisabledKey === null
+            ? t('conversation.creativeStudio.workspace.filmExport.action')
+            : t(filmExportDisabledKey)}
+        </Menu.Item>
+      ) : null}
     </Menu>
   );
 
@@ -1361,6 +1588,112 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
           )}
         </div>
       )}
+
+      {filmExportStatus.kind === 'idle' ? null : (
+        <div className={styles.editorFolderExportStatus} data-studio-film-export-status>
+          {filmExportStatus.kind === 'exporting' || filmExportStatus.kind === 'busy_elsewhere' ? (
+            <Alert
+              showIcon
+              type='info'
+              content={
+                <div className={styles.editorFolderExportStatusContent} role='status'>
+                  <span>
+                    {filmExportStatus.kind === 'busy_elsewhere'
+                      ? t('conversation.creativeStudio.workspace.filmExport.disabled.exportRunning')
+                      : t(`conversation.creativeStudio.workspace.filmExport.phase.${filmExportStatus.phase}`)}
+                  </span>
+                  {filmExportStatus.progress === null ? null : (
+                    <Progress percent={Math.round(filmExportStatus.progress * 100)} size='small' />
+                  )}
+                  {filmExportStatus.kind === 'busy_elsewhere' ? null : (
+                    <Button
+                      size='small'
+                      disabled={filmExportStatus.phase === 'publishing'}
+                      onClick={() => void cancelCurrentFilmExport(filmExportStatus.renderId)}
+                    >
+                      {t('conversation.creativeStudio.workspace.filmExport.cancel')}
+                    </Button>
+                  )}
+                </div>
+              }
+            />
+          ) : filmExportStatus.kind === 'failure' ? (
+            <Alert
+              showIcon
+              type='error'
+              content={
+                <div className={styles.editorFolderExportStatusContent} role='alert'>
+                  <span>{t(filmExportStatus.messageKey)}</span>
+                  <Button size='small' onClick={() => void dismissFilmExportResult(filmExportStatus.renderId)}>
+                    {t('conversation.creativeStudio.workspace.filmExport.dismiss')}
+                  </Button>
+                </div>
+              }
+            />
+          ) : (
+            <Alert
+              showIcon
+              type='success'
+              content={
+                <div className={styles.editorFolderExportStatusContent} role='status'>
+                  <strong dir='auto'>{filmExportStatus.folderName}</strong>
+                  <span>
+                    {t('conversation.creativeStudio.workspace.filmExport.successFacts', {
+                      nominal: filmExportStatus.nominalDurationSeconds.toFixed(2),
+                      rendered: filmExportStatus.renderedDurationSeconds.toFixed(2),
+                      count: filmExportStatus.trimmedShotCount,
+                    })}
+                  </span>
+                  <span>
+                    {t('conversation.creativeStudio.workspace.filmExport.successQuarantine', {
+                      count: filmExportStatus.movedAsideCount,
+                    })}
+                  </span>
+                  <div className={styles.editorFolderExportStatusActions}>
+                    <Button
+                      size='small'
+                      loading={revealingFilm}
+                      onClick={() => void revealCompletedFilm(filmExportStatus.artifactId, filmExportStatus.renderId)}
+                    >
+                      {t('conversation.creativeStudio.workspace.filmExport.reveal')}
+                    </Button>
+                    <Button size='small' onClick={() => void dismissFilmExportResult(filmExportStatus.renderId)}>
+                      {t('conversation.creativeStudio.workspace.filmExport.dismiss')}
+                    </Button>
+                  </div>
+                </div>
+              }
+            />
+          )}
+        </div>
+      )}
+
+      <Modal
+        title={t('conversation.creativeStudio.workspace.filmExport.title')}
+        visible={filmDialogOpen}
+        okText={t('conversation.creativeStudio.workspace.filmExport.export')}
+        cancelText={t('common.cancel')}
+        unmountOnExit
+        onCancel={() => setFilmDialogOpen(false)}
+        onOk={() => void exportFilm()}
+      >
+        <div className={styles.modalBody} data-studio-film-export-dialog>
+          <p>{t('conversation.creativeStudio.workspace.filmExport.description')}</p>
+          <label>
+            <span>{t('conversation.creativeStudio.workspace.filmExport.transition')}</span>
+            <Select value={filmTransition} onChange={(value) => setFilmTransition(value as 'cut' | 'dissolve')}>
+              <Select.Option value='cut'>{t('conversation.creativeStudio.workspace.filmExport.cut')}</Select.Option>
+              <Select.Option value='dissolve'>
+                {t('conversation.creativeStudio.workspace.filmExport.dissolve')}
+              </Select.Option>
+            </Select>
+          </label>
+          <Checkbox checked={filmTrimTails} onChange={setFilmTrimTails}>
+            {t('conversation.creativeStudio.workspace.filmExport.trimTails')}
+          </Checkbox>
+          <p>{t('conversation.creativeStudio.workspace.filmExport.noSpend')}</p>
+        </div>
+      </Modal>
 
       <Drawer
         footer={

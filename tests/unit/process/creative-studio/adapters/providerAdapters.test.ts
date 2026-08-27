@@ -777,6 +777,42 @@ describe('Creative Studio provider adapters', () => {
     expect(bytes.includes(Buffer.from(STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL))).toBe(true);
   });
 
+  it('shares one in-flight fake fixture publication across concurrently completed jobs', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-concurrent-fixture-'));
+    temporaryDirectories.push(rootDir);
+    const bundle = createStudioE2EFakeBundle({ rootDir });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!adapter) throw new Error('expected fake image adapter');
+    const signal = new AbortController().signal;
+    const submissions = await Promise.all(
+      Array.from({ length: 12 }, () =>
+        adapter.submit({ ...request, mediaKind: 'image', durationSeconds: 4 }, fakeProvider, signal)
+      )
+    );
+    const providerJobIds = submissions.map((submission) => {
+      if (submission.kind !== 'remote') throw new Error('expected a remote fake provider task');
+      return submission.providerJobId;
+    });
+    await Promise.all(providerJobIds.map((providerJobId) => adapter.poll(providerJobId, fakeProvider, signal)));
+    await Promise.all(providerJobIds.map((providerJobId) => adapter.poll(providerJobId, fakeProvider, signal)));
+    const completed = await Promise.all(
+      providerJobIds.map((providerJobId) => adapter.poll(providerJobId, fakeProvider, signal))
+    );
+
+    expect(completed).toHaveLength(providerJobIds.length);
+    expect(completed.every((snapshot) => snapshot.status === 'succeeded')).toBe(true);
+    const outputPaths = completed.map((snapshot) => {
+      if (snapshot.status !== 'succeeded' || snapshot.outputs[0]?.source.kind !== 'file') {
+        throw new Error('expected a file-backed completed fake image');
+      }
+      return snapshot.outputs[0].source.path;
+    });
+    expect(new Set(outputPaths).size).toBe(1);
+    expect((await fs.readFile(outputPaths[0]!)).byteLength).toBeGreaterThan(0);
+    expect((await fs.readdir(path.dirname(outputPaths[0]!))).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
+  });
+
   it('counts rejected fake-provider calls and repeated output reads without leaking temporary files', async () => {
     const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-call-boundaries-'));
     temporaryDirectories.push(rootDir);

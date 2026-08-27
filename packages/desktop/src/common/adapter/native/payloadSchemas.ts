@@ -1018,7 +1018,33 @@ export const nativeBridgePayloadSchemas = {
         shape: z.literal('script'),
       })
       .strict(),
+    z
+      .object({
+        ...studioV2MutationRequestShape,
+        expectedCatalogRevision: studioExpectedRevisionSchema,
+        shape: z.literal('film'),
+        renderId: safeIdSchema,
+        transition: z.discriminatedUnion('kind', [
+          z.object({ kind: z.literal('cut') }).strict(),
+          z
+            .object({
+              kind: z.literal('dissolve'),
+              seconds: z
+                .number()
+                .finite()
+                .min(1 / 24)
+                .max(1),
+            })
+            .strict(),
+        ]),
+        trimTails: z.boolean(),
+      })
+      .strict(),
   ]),
+  'creative-studio.get-film-export-capability': studioV2ProjectRequestSchema,
+  'creative-studio.get-film-export-status': studioV2ProjectRequestSchema,
+  'creative-studio.cancel-film-export': z.object({ projectId: safeIdSchema, renderId: safeIdSchema }).strict(),
+  'creative-studio.acknowledge-film-export': z.object({ projectId: safeIdSchema, renderId: safeIdSchema }).strict(),
   'creative-studio.list-exports': studioV2ProjectRequestSchema,
   'creative-studio.copy-export': z
     .object({

@@ -2349,6 +2349,48 @@
           "artifactUnavailable": "That completed export is no longer in the active catalog. Reload before revealing it.",
           "resultConflict": "A newer export catalog arrived before this result could be confirmed. Reload and review the exports."
         }
+      },
+      "filmExport": {
+        "action": "Export film…",
+        "title": "Export one film file",
+        "description": "Create an editor-ready MP4 from the current Cut. Uncovered Shots become timed black slates.",
+        "transition": "Transitions",
+        "cut": "Straight cuts",
+        "dissolve": "0.35s dissolves",
+        "trimTails": "Trim bounded quiet tails (the final rendered Shot is protected)",
+        "noSpend": "This is local export work. It does not generate media or spend money.",
+        "export": "Export film",
+        "cancel": "Cancel export",
+        "reveal": "Reveal in Finder",
+        "dismiss": "Dismiss",
+        "successFacts": "{{nominal}}s authored · {{rendered}}s exported · {{count}} tails trimmed",
+        "successQuarantine": "Older film exports moved aside: {{count}}",
+        "phase": {
+          "preparing": "Preparing exact source media…",
+          "analyzing": "Analyzing media and quiet tails…",
+          "rendering": "Rendering the film locally…",
+          "publishing": "Verifying and publishing the completed film…"
+        },
+        "disabled": {
+          "no_beats": "Add a Beat before exporting a film",
+          "duration_pending": "Set a duration for every empty Beat before exporting",
+          "invalid_media": "Resolve stale or invalid selected media before exporting",
+          "bed_too_short": "Choose an audio bed long enough for the timeline",
+          "mutationActive": "Finish the current workspace change before exporting",
+          "exportRunning": "A film export is already running",
+          "catalogUnavailable": "Film export storage is unavailable"
+        },
+        "errors": {
+          "catalogUnavailable": "The export catalog is unavailable. Reload the project and try again.",
+          "staleAuthority": "The project or export catalog changed. No stale film was published.",
+          "unavailable": "This device does not have a verified FFmpeg film-export capability.",
+          "renderFailed": "The local film render could not be verified. No partial export was published.",
+          "cancelled": "Film export was cancelled. Completed project media was not changed.",
+          "invalidMedia": "The Cut contains stale, noncanonical, or invalid media. Review it before exporting.",
+          "busy": "Creative Studio is finishing another workspace operation. Try again when it completes.",
+          "artifactUnavailable": "That completed film is no longer in the active catalog. Reload before revealing it.",
+          "resultConflict": "A newer export catalog arrived before this film could be confirmed. Reload and review exports."
+        }
       }
     }
   },

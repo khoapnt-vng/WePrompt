@@ -63,6 +63,10 @@ const providerNames = [
   'detachBedAudio',
   'setBed',
   'createExport',
+  'getFilmExportCapability',
+  'getFilmExportStatus',
+  'cancelFilmExport',
+  'acknowledgeFilmExport',
   'listExports',
   'copyExport',
   'revealExport',
@@ -118,6 +122,10 @@ const mocks = vi.hoisted(() => ({
       'detachBedAudio',
       'setBed',
       'createExport',
+      'getFilmExportCapability',
+      'getFilmExportStatus',
+      'cancelFilmExport',
+      'acknowledgeFilmExport',
       'listExports',
       'copyExport',
       'revealExport',
@@ -304,6 +312,10 @@ const createService = () =>
     importBedAudioFromPath: vi.fn(async () => ({ asset: { id: 'bed_1' }, project: rendererProject })),
     detachBedAudio: vi.fn(async () => rendererProject),
     createExport: vi.fn(async () => ({ revision: 2, artifacts: [] })),
+    getFilmExportCapability: vi.fn(async () => ({ status: 'ready' as const, encoder: 'h264_videotoolbox' as const })),
+    getFilmExportStatus: vi.fn(async () => ({ status: 'idle' as const })),
+    cancelFilmExport: vi.fn(async () => ({ status: 'cancelled' as const })),
+    acknowledgeFilmExport: vi.fn(async () => ({ status: 'acknowledged' as const })),
     listExports: vi.fn(async () => ({ revision: 1, artifacts: [] })),
     copyExport: vi.fn(async () => ({ status: 'copied' as const })),
     revealExport: vi.fn(async () => ({ status: 'revealed' as const })),
@@ -1078,6 +1090,167 @@ describe('initCreativeStudioBridge', () => {
     });
     expect(service.createExport).toHaveBeenCalledWith(createInput);
     expect(service.listExports).toHaveBeenCalledWith({ projectId: 'project_1' });
+  });
+
+  it('routes film capability, progress, cancellation, and renderer-safe artifact facts', async () => {
+    const filmCatalog = {
+      revision: 3,
+      artifacts: [
+        {
+          id: 'film_1',
+          sourceRevision: 7,
+          shape: 'film' as const,
+          folderName: 'film_1',
+          byteSize: 4096,
+          fileCount: 1,
+          createdAt: '2026-08-19T02:03:04.000Z',
+          film: {
+            nominalDurationSeconds: 8,
+            renderedDurationSeconds: 7.65,
+            transition: { kind: 'dissolve' as const, requestedSeconds: 0.35, seconds: 1 / 3 },
+            trimTails: true,
+            trimmedShotCount: 1,
+          },
+        },
+      ],
+    };
+    vi.mocked(service.listExports).mockResolvedValueOnce(filmCatalog);
+    vi.mocked(service.getFilmExportStatus).mockResolvedValueOnce({
+      status: 'active',
+      progress: { projectId: 'project_1', renderId: 'film_run_1', phase: 'rendering', progress: 0.5 },
+    });
+    vi.mocked(service.cancelFilmExport).mockResolvedValueOnce({ status: 'cancellation_refused' });
+    vi.mocked(service.acknowledgeFilmExport).mockResolvedValueOnce({ status: 'acknowledged' });
+    initCreativeStudioBridge(dependencies);
+
+    await expect(registeredHandler('getFilmExportCapability')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: true,
+      data: { status: 'ready', encoder: 'h264_videotoolbox' },
+    });
+    await expect(registeredHandler('getFilmExportStatus')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: true,
+      data: {
+        status: 'active',
+        progress: { projectId: 'project_1', renderId: 'film_run_1', phase: 'rendering', progress: 0.5 },
+      },
+    });
+    await expect(
+      registeredHandler('cancelFilmExport')({ projectId: 'project_1', renderId: 'film_run_1' } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'cancellation_refused' } });
+    await expect(
+      registeredHandler('acknowledgeFilmExport')({ projectId: 'project_1', renderId: 'film_run_1' } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'acknowledged' } });
+    await expect(registeredHandler('listExports')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: true,
+      data: filmCatalog,
+    });
+    expect(JSON.stringify(filmCatalog)).not.toContain('sha256');
+  });
+
+  it('projects unavailable and idle Film state plus a missing cancellation without widening the envelope', async () => {
+    vi.mocked(service.getFilmExportCapability).mockResolvedValueOnce({
+      status: 'unavailable',
+      reason: 'unsupported_capabilities',
+    });
+    vi.mocked(service.getFilmExportStatus).mockResolvedValueOnce({ status: 'idle' });
+    vi.mocked(service.cancelFilmExport).mockResolvedValueOnce({ status: 'not_found' });
+    vi.mocked(service.acknowledgeFilmExport).mockResolvedValueOnce({ status: 'not_found' });
+    initCreativeStudioBridge(dependencies);
+
+    await expect(registeredHandler('getFilmExportCapability')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: true,
+      data: { status: 'unavailable', reason: 'unsupported_capabilities' },
+    });
+    await expect(registeredHandler('getFilmExportStatus')({ projectId: 'project_1' } as never)).resolves.toEqual({
+      ok: true,
+      data: { status: 'idle' },
+    });
+    await expect(
+      registeredHandler('cancelFilmExport')({ projectId: 'project_1', renderId: 'film_run_missing' } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'not_found' } });
+    await expect(
+      registeredHandler('acknowledgeFilmExport')({ projectId: 'project_1', renderId: 'film_run_missing' } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'not_found' } });
+  });
+
+  it('projects exact terminal Film success, failure, and cancellation while rejecting widened recovery state', async () => {
+    const artifact = {
+      id: 'film_terminal_1',
+      sourceRevision: 7,
+      shape: 'film' as const,
+      folderName: 'film-terminal-1',
+      byteSize: 4096,
+      fileCount: 1,
+      createdAt: '2026-08-19T02:03:04.000Z',
+      film: {
+        nominalDurationSeconds: 8,
+        renderedDurationSeconds: 8,
+        transition: { kind: 'cut' as const },
+        trimTails: false,
+        trimmedShotCount: 0,
+      },
+    };
+    vi.mocked(service.getFilmExportStatus)
+      .mockResolvedValueOnce({
+        status: 'terminal',
+        result: {
+          projectId: 'project_1',
+          renderId: 'film_run_success',
+          outcome: 'succeeded',
+          artifact,
+          movedAsideCount: 1,
+        },
+      })
+      .mockResolvedValueOnce({
+        status: 'terminal',
+        result: {
+          projectId: 'project_1',
+          renderId: 'film_run_failure',
+          outcome: 'failed',
+          reason: 'stale_authority',
+        },
+      })
+      .mockResolvedValueOnce({
+        status: 'terminal',
+        result: { projectId: 'project_1', renderId: 'film_run_cancel', outcome: 'cancelled' },
+      })
+      .mockResolvedValueOnce({
+        status: 'terminal',
+        result: {
+          projectId: 'project_1',
+          renderId: 'film_run_widened',
+          outcome: 'cancelled',
+          internalPath: '/private/film.mp4',
+        },
+      } as never);
+    initCreativeStudioBridge(dependencies);
+
+    const status = () => registeredHandler('getFilmExportStatus')({ projectId: 'project_1' } as never);
+    await expect(status()).resolves.toEqual({
+      ok: true,
+      data: {
+        status: 'terminal',
+        result: {
+          projectId: 'project_1',
+          renderId: 'film_run_success',
+          outcome: 'succeeded',
+          artifact,
+          movedAsideCount: 1,
+        },
+      },
+    });
+    await expect(status()).resolves.toMatchObject({
+      ok: true,
+      data: { status: 'terminal', result: { outcome: 'failed', reason: 'stale_authority' } },
+    });
+    await expect(status()).resolves.toMatchObject({
+      ok: true,
+      data: { status: 'terminal', result: { outcome: 'cancelled' } },
+    });
+    await expect(status()).resolves.toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+    });
   });
 
   it('projects a null-prototype export catalog into a plain renderer envelope', async () => {
