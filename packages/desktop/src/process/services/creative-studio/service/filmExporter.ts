@@ -891,7 +891,11 @@ const probeMedia = async (
     }
     if (!sameIdentity(identity(await handle.stat()), expectedIdentity)) return fail('invalid_media');
     return { hasAudio: audio.length === 1 };
-  } catch {
+  } catch (error) {
+    // An already-classified export failure keeps its own cause. Flattening it here
+    // reported a cancellation, or a child that never settled, as invalid media —
+    // blaming the user's Cut for a failure it did not cause.
+    if (error instanceof StudioFilmExportErrorV2) throw error;
     return fail('invalid_media');
   } finally {
     await handle.close();

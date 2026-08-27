@@ -510,6 +510,30 @@ describe('schema-2 film runtime', () => {
     await expect(observed).rejects.toMatchObject({ code: 'cancelled' });
     expect(returnLease).toHaveBeenCalledOnce();
   });
+  it('reports a cancellation during media analysis as cancelled, not as invalid media', async () => {
+    const binaries = await fakeFfmpegPair();
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: composition,
+    });
+    const controller = new AbortController();
+    // Aborting from the analyzing callback lands inside probeMedia, whose child
+    // process carries the same signal. The media itself is valid.
+    await expect(
+      exporter.render({
+        project: project(),
+        transition: { kind: 'cut' },
+        trimTails: false,
+        sources: sources(),
+        signal: controller.signal,
+        onProgress: ({ phase }) => {
+          if (phase === 'analyzing') controller.abort();
+        },
+      })
+    ).rejects.toMatchObject({ code: 'cancelled' });
+  });
 
   it('derives every supported geometry without reading mutable state', () => {
     expect(deriveStudioFilmDimensionsV2(project({ aspectRatio: '16:9', resolution: '720p' }))).toEqual({
