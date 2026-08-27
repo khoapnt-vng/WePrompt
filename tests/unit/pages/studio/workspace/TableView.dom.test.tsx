@@ -229,6 +229,8 @@ const makeReference = (overrides: Partial<ReferenceWorkspaceItem> = {}): Referen
   approvedAssetId: 'asset_ming',
   generatedAssetIds: ['asset_ming'],
   assetCreatedAt: { asset_ming: '2026-08-20T10:00:00.000Z' },
+  assetOrdinalById: { asset_ming: 0 },
+  removalBlockers: [],
   generationStatus: 'succeeded',
   candidateJob: null,
   ...overrides,

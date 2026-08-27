@@ -1357,7 +1357,19 @@
           },
           "importPhoto": "Import photo",
           "removePhoto": "Remove {{handle}}",
-          "removePhotoLocked": "Authorized work is using this photo. Finish or cancel that work before removing it."
+          "removePhotoLocked": "This photo has unresolved work. Review the blockers below before removing it.",
+          "removalBlocker": {
+            "activeReferenceJob": "{{purpose}} job {{jobId}} is unresolved for this reference. The current photo remains locked until that job reaches a terminal state.",
+            "activeAssetConsumer": "{{purpose}} for Beat {{beatPosition}}, Shot {{shotPosition}} is using this exact photo. It remains locked while that job is unresolved.",
+            "activeAssetConsumerRetained": "{{purpose}} for retained Shot {{shotId}} is using this exact photo. It remains locked while that job is unresolved.",
+            "activeAssetConsumerOther": "{{purpose}} job {{jobId}} is using this exact photo. It remains locked while that job is unresolved.",
+            "downloadRecovery": "{{purpose}} for Beat {{beatPosition}}, Shot {{shotPosition}} finished at the provider, but its result did not download. Retry here; this photo remains locked until recovery succeeds.",
+            "downloadRecoveryRetainedShot": "{{purpose}} for retained Shot {{shotId}} finished at the provider, but its result did not download. Restore the Shot from the Board Bin to review recovery; this photo remains locked until recovery succeeds.",
+            "downloadRecoveryRetainedBeat": "{{purpose}} for Shot {{shotId}} inside retained Beat {{beatId}} finished at the provider, but its result did not download. Restore the Beat from the Board Bin to review recovery; this photo remains locked until recovery succeeds.",
+            "downloadRecoveryOther": "{{purpose}} job {{jobId}} finished at the provider, but its result did not download. Retry here; this photo remains locked until recovery succeeds.",
+            "invalidAuthority": "The current photo's reference data is inconsistent. Reload the project and review this reference before trying removal again.",
+            "reviewInBoard": "Review in Board"
+          }
         },
         "description": "Generate canonical character images first, then recurring-background images. Bind the current references to each Shot before Board or first-frame generation.",
         "generationScope": "Generation scope",

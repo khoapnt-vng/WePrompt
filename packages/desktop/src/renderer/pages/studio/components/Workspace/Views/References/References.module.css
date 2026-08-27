@@ -262,6 +262,38 @@
   font-size: 11px;
 }
 
+.removalBlockers {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.removalBlocker {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--color-warning-light-3);
+  border-radius: 8px;
+  padding: 7px 9px;
+  color: var(--color-text-2);
+  background: var(--color-warning-light-1);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.removalBlocker span {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+}
+
+.removalBlocker button {
+  flex: 0 0 auto;
+}
+
 .pictureBand {
   position: relative;
   display: grid;

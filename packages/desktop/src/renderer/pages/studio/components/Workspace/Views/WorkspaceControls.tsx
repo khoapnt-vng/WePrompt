@@ -12,6 +12,7 @@ import { BeatPanel } from '../BeatPanel';
 import { BoardView, binItemFocusKey } from './Board';
 import { CutView } from './Cut';
 import { ReferencesView, type ReferenceWorkspaceItem } from './References';
+import { deriveReferenceRemovalBlockers } from './References/referenceRemovalBlockers';
 import { TableView, type ReferenceBindingWorkspaceItem } from './Table';
 import type { WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
@@ -169,25 +170,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
             generatedAssetIds,
             assetCreatedAt,
             assetOrdinalById,
-            removalBlocked:
-              reference.approvedAssetId !== null &&
-              Object.values(project.jobs).some((job) => {
-                const usesAsset = job.composition.inputs.referenceInputs.some(
-                  (input) => input.referenceId === reference.id && input.assetId === reference.approvedAssetId
-                );
-                const nonterminal =
-                  job.status === 'waiting_for_conditioning' ||
-                  job.status === 'queued_local' ||
-                  job.status === 'submitting' ||
-                  job.status === 'queued_remote' ||
-                  job.status === 'running' ||
-                  job.status === 'needs_attention';
-                return (
-                  (nonterminal &&
-                    ((job.target.kind === 'reference' && job.target.referenceId === reference.id) || usesAsset)) ||
-                  (job.canRetryDownload && usesAsset)
-                );
-              }),
+            removalBlockers: deriveReferenceRemovalBlockers(project, reference.id),
             generationStatus,
             candidateJob: candidateJobValid
               ? {
@@ -299,18 +282,37 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       {activeView === 'references' ? (
         <ReferencesView
           actions={
-            referenceActions ?? {
-              addBackground: async () => false,
-              updateDetails: async () => false,
-              selectImage: async () => false,
-              removeImage: async () => false,
-              importPhoto: async () => false,
-              regenerate: async () => false,
-              retryJob: async () => false,
-              retryDownload: async () => false,
-              cancelJob: async () => false,
-              openBindings: () => {},
-            }
+            referenceActions === undefined
+              ? {
+                  addBackground: async () => false,
+                  updateDetails: async () => false,
+                  selectImage: async () => false,
+                  removeImage: async () => false,
+                  importPhoto: async () => false,
+                  regenerate: async () => false,
+                  retryJob: async () => false,
+                  retryDownload: async () => false,
+                  retryBlockingDownload: async () => false,
+                  reviewRetainedShot: async () => false,
+                  cancelJob: async () => false,
+                  openBindings: () => {},
+                }
+              : {
+                  ...referenceActions,
+                  reviewRetainedShot: async (claim) => {
+                    const expectedProjectId = project.id;
+                    const reviewed = await referenceActions.reviewRetainedShot(claim);
+                    if (!reviewed || currentProjectId.current !== expectedProjectId) return reviewed;
+                    setBinFocusIntent({
+                      projectId: expectedProjectId,
+                      itemKey: binItemFocusKey(claim.retainedOwner),
+                    });
+                    setShotLiftAnnouncement(
+                      t('conversation.creativeStudio.workspace.referenceWorkflow.panel.removalBlocker.reviewInBoard')
+                    );
+                    return true;
+                  },
+                }
           }
           errorMessageKey={referenceErrorMessageKey}
           focusIntent={referenceFocusIntent}

@@ -933,7 +933,19 @@
           },
           "importPhoto": "写真を読み込む",
           "removePhoto": "{{handle}}を削除",
-          "removePhotoLocked": "承認済みの処理がこの写真を使用しています。削除する前に、その処理を完了またはキャンセルしてください。"
+          "removePhotoLocked": "未解決の処理があるため、この写真はロックされています。削除する前に、下のブロッカーを確認してください。",
+          "removalBlocker": {
+            "activeReferenceJob": "このリファレンスの{{purpose}}ジョブ（{{jobId}}）は未解決です。ジョブが終了状態になるまで、現在の写真はロックされたままです。",
+            "activeAssetConsumer": "Beat {{beatPosition}}、Shot {{shotPosition}}の{{purpose}}がこの写真を使用しています。ジョブが未解決の間はロックされたままです。",
+            "activeAssetConsumerRetained": "保持されているShot {{shotId}}の{{purpose}}がこの写真を使用しています。ジョブが未解決の間はロックされたままです。",
+            "activeAssetConsumerOther": "{{purpose}}ジョブ（{{jobId}}）がこの写真を使用しています。ジョブが未解決の間はロックされたままです。",
+            "downloadRecovery": "Beat {{beatPosition}}、Shot {{shotPosition}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。ここで再試行してください。復旧に成功するまで写真はロックされたままです。",
+            "downloadRecoveryRetainedShot": "保持されているShot {{shotId}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。BoardのBinからShotを復元して復旧を確認してください。復旧に成功するまで写真はロックされたままです。",
+            "downloadRecoveryRetainedBeat": "保持されているBeat {{beatId}}内のShot {{shotId}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。BoardのBinからBeatを復元して復旧を確認してください。復旧に成功するまで写真はロックされたままです。",
+            "downloadRecoveryOther": "{{purpose}}ジョブ（{{jobId}}）はプロバイダーで完了しましたが、結果をダウンロードできませんでした。ここで再試行してください。復旧に成功するまで写真はロックされたままです。",
+            "invalidAuthority": "現在の写真のリファレンスデータに不整合があります。プロジェクトを再読み込みし、このリファレンスを確認してから、もう一度削除してください。",
+            "reviewInBoard": "Boardで確認"
+          }
         },
         "description": "まずキャラクターの正規画像を生成し、次に繰り返し登場する背景画像を生成します。Board または最初のフレームを生成する前に、現在のリファレンスを各 Shot に割り当ててください。",
         "generationScope": "生成範囲",

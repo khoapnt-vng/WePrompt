@@ -21,6 +21,7 @@ vi.mock('react-i18next', () => ({
 import {
   ReferencesView,
   referencePhotoHandle,
+  type ReferenceRemovalBlocker,
   type ReferenceWorkspaceItem,
   type ReferencesViewActions,
 } from '@/renderer/pages/studio/components/Workspace/Views/References';
@@ -42,7 +43,7 @@ const workflowReference = (overrides: Partial<ReferenceWorkspaceItem> = {}): Ref
   generatedAssetIds: ['asset_ming_current'],
   assetCreatedAt: { asset_ming_current: '2026-08-20T10:00:00.000Z' },
   assetOrdinalById: { asset_ming_current: 0 },
-  removalBlocked: false,
+  removalBlockers: [],
   generationStatus: 'succeeded',
   candidateJob: null,
   ...overrides,
@@ -57,6 +58,8 @@ const createActions = (): ReferencesViewActions => ({
   regenerate: vi.fn(async () => true),
   retryJob: vi.fn(async () => true),
   retryDownload: vi.fn(async () => true),
+  retryBlockingDownload: vi.fn(async () => true),
+  reviewRetainedShot: vi.fn(async () => true),
   cancelJob: vi.fn(async () => true),
   openBindings: vi.fn(),
 });
@@ -277,7 +280,7 @@ describe('the schema-5 References workspace', () => {
     );
   });
 
-  it('removes only the exact current photo and disables removal while authorized work uses it', async () => {
+  it('removes only the exact current photo and disables removal while an exact blocker remains', async () => {
     const actions = createActions();
     const { rerender } = renderWorkflow({ actions, references: [workflowReference()] });
     const remove = screen.getByRole('button', {
@@ -297,7 +300,25 @@ describe('the schema-5 References workspace', () => {
         gateLocked={false}
         pendingReferenceId={null}
         projectId='project_1'
-        references={[workflowReference({ removalBlocked: true })]}
+        references={[
+          workflowReference({
+            removalBlockers: [
+              {
+                kind: 'active_asset_consumer',
+                referenceId: 'reference_ming',
+                assetId: 'asset_ming_current',
+                jobId: 'job_video_active',
+                createdAt: '2026-08-27T10:00:00.000Z',
+                purpose: 'video_take',
+                status: 'running',
+                shotId: 'shot_1',
+                beatId: 'beat_1',
+                beatPosition: 1,
+                shotPosition: 2,
+              },
+            ],
+          }),
+        ]}
       />
     );
     const blockedRemove = screen.getByRole('button', {
@@ -305,6 +326,287 @@ describe('the schema-5 References workspace', () => {
     });
     expect(blockedRemove).toBeDisabled();
     expect(blockedRemove).toHaveClass('arco-btn-status-danger');
+  });
+
+  it('allows exact removal when a failed replacement-reference job does not freeze or use the current photo', () => {
+    renderWorkflow({
+      references: [
+        workflowReference({
+          removalBlockers: [],
+          generationStatus: 'failed',
+          candidateJob: {
+            id: 'job_replacement_download_failed',
+            status: 'failed',
+            error: {
+              code: 'download_failed',
+              messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+            },
+            canRetry: false,
+            canRetryDownload: true,
+            canCancel: false,
+          },
+        }),
+      ],
+    });
+
+    expect(
+      screen.getByRole('button', {
+        name: `${PANEL_KEY}.removePhoto:{"handle":"@ming-01"}`,
+      })
+    ).toBeEnabled();
+  });
+
+  it('renders every exact blocker with truthful copy and retries only the frozen failed download', async () => {
+    const actions = createActions();
+    const blockers: ReferenceRemovalBlocker[] = [
+      {
+        kind: 'active_reference_job',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_reference_active',
+        createdAt: '2026-08-27T10:00:01.000Z',
+        purpose: 'reference_image',
+        status: 'needs_attention',
+        shotId: null,
+        beatId: null,
+        beatPosition: null,
+        shotPosition: null,
+      },
+      {
+        kind: 'active_asset_consumer',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_video_active',
+        createdAt: '2026-08-27T10:00:02.000Z',
+        purpose: 'video_take',
+        status: 'running',
+        shotId: 'shot_1',
+        beatId: 'beat_1',
+        beatPosition: 1,
+        shotPosition: 2,
+      },
+      {
+        kind: 'download_recovery',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_seed_download',
+        createdAt: '2026-08-27T10:00:03.000Z',
+        purpose: 'seed_still',
+        status: 'failed',
+        recoveryAction: 'restore_shot',
+        retainedOwner: {
+          kind: 'shot',
+          beatId: 'beat_retained_owner',
+          shotId: 'shot_retained',
+          reason: 'lifted',
+        },
+        shotId: 'shot_retained',
+        beatId: null,
+        beatPosition: null,
+        shotPosition: null,
+      },
+      {
+        kind: 'download_recovery',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_seed_download_in_beat',
+        createdAt: '2026-08-27T10:00:03.500Z',
+        purpose: 'seed_still',
+        status: 'failed',
+        recoveryAction: 'restore_shot',
+        retainedOwner: { kind: 'beat', beatId: 'beat_retained', reason: 'alternate' },
+        shotId: 'shot_in_retained_beat',
+        beatId: null,
+        beatPosition: null,
+        shotPosition: null,
+      },
+      {
+        kind: 'active_asset_consumer',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_retained_active',
+        createdAt: '2026-08-27T10:00:04.000Z',
+        purpose: 'board_still',
+        status: 'queued_remote',
+        shotId: 'shot_retained',
+        beatId: null,
+        beatPosition: null,
+        shotPosition: null,
+      },
+      {
+        kind: 'active_asset_consumer',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_other_active',
+        createdAt: '2026-08-27T10:00:05.000Z',
+        purpose: 'seed_still',
+        status: 'queued_local',
+        shotId: null,
+        beatId: null,
+        beatPosition: null,
+        shotPosition: null,
+      },
+      {
+        kind: 'download_recovery',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_video_download',
+        createdAt: '2026-08-27T10:00:06.000Z',
+        purpose: 'video_take',
+        status: 'failed',
+        recoveryAction: 'retry_download',
+        shotId: 'shot_2',
+        beatId: 'beat_2',
+        beatPosition: 2,
+        shotPosition: 1,
+      },
+      {
+        kind: 'download_recovery',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_other_download',
+        createdAt: '2026-08-27T10:00:07.000Z',
+        purpose: 'board_still',
+        status: 'failed',
+        recoveryAction: 'retry_download',
+        shotId: null,
+        beatId: null,
+        beatPosition: null,
+        shotPosition: null,
+      },
+    ];
+    const { container } = renderWorkflow({
+      actions,
+      references: [workflowReference({ removalBlockers: blockers })],
+    });
+
+    expect(container.querySelectorAll('[data-reference-removal-blocker]')).toHaveLength(8);
+    expect(
+      screen.getByText(
+        `${PANEL_KEY}.removalBlocker.activeReferenceJob:{"purpose":"conversation.creativeStudio.workspace.gate.purpose.reference_image","jobId":"job_reference_active"}`
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        `${PANEL_KEY}.removalBlocker.activeAssetConsumer:{"purpose":"conversation.creativeStudio.workspace.gate.purpose.video_take","beatPosition":1,"shotPosition":2}`
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        `${PANEL_KEY}.removalBlocker.downloadRecoveryRetainedShot:{"purpose":"conversation.creativeStudio.workspace.gate.purpose.seed_still","shotId":"shot_retained"}`
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        `${PANEL_KEY}.removalBlocker.downloadRecoveryRetainedBeat:{"purpose":"conversation.creativeStudio.workspace.gate.purpose.seed_still","shotId":"shot_in_retained_beat","beatId":"beat_retained"}`
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        `${PANEL_KEY}.removalBlocker.activeAssetConsumerRetained:{"purpose":"conversation.creativeStudio.workspace.gate.purpose.board_still","shotId":"shot_retained"}`
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        `${PANEL_KEY}.removalBlocker.activeAssetConsumerOther:{"purpose":"conversation.creativeStudio.workspace.gate.purpose.seed_still","jobId":"job_other_active"}`
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        `${PANEL_KEY}.removalBlocker.downloadRecovery:{"purpose":"conversation.creativeStudio.workspace.gate.purpose.video_take","beatPosition":2,"shotPosition":1}`
+      )
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        `${PANEL_KEY}.removalBlocker.downloadRecoveryOther:{"purpose":"conversation.creativeStudio.workspace.gate.purpose.board_still","jobId":"job_other_download"}`
+      )
+    ).toBeVisible();
+    expect(container.querySelectorAll('[data-blocker-kind="download_recovery"] button')).toHaveLength(4);
+    expect(screen.getAllByRole('button', { name: `${PANEL_KEY}.removalBlocker.reviewInBoard` })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'conversation.creativeStudio.jobs.retryDownload' })).toHaveLength(2);
+    expect(container.querySelectorAll('[data-blocker-kind="active_reference_job"] button')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-blocker-kind="active_asset_consumer"] button')).toHaveLength(0);
+
+    const retainedRecovery = container.querySelector<HTMLElement>(
+      '[data-reference-removal-blocker="job_seed_download"]'
+    );
+    expect(retainedRecovery).not.toBeNull();
+    fireEvent.click(
+      within(retainedRecovery!).getByRole('button', { name: `${PANEL_KEY}.removalBlocker.reviewInBoard` })
+    );
+    await waitFor(() =>
+      expect(actions.reviewRetainedShot).toHaveBeenCalledExactlyOnceWith({
+        kind: 'download_recovery',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_seed_download',
+        createdAt: '2026-08-27T10:00:03.000Z',
+        purpose: 'seed_still',
+        status: 'failed',
+        recoveryAction: 'restore_shot',
+        retainedOwner: {
+          kind: 'shot',
+          beatId: 'beat_retained_owner',
+          shotId: 'shot_retained',
+          reason: 'lifted',
+        },
+        shotId: 'shot_retained',
+        beatId: null,
+        beatPosition: null,
+        shotPosition: null,
+      })
+    );
+    expect(actions.openBindings).not.toHaveBeenCalled();
+    expect(actions.retryBlockingDownload).not.toHaveBeenCalled();
+
+    const activeRecovery = container.querySelector<HTMLElement>(
+      '[data-reference-removal-blocker="job_video_download"]'
+    );
+    expect(activeRecovery).not.toBeNull();
+    fireEvent.click(
+      within(activeRecovery!).getByRole('button', { name: 'conversation.creativeStudio.jobs.retryDownload' })
+    );
+    await waitFor(() =>
+      expect(actions.retryBlockingDownload).toHaveBeenCalledExactlyOnceWith({
+        kind: 'download_recovery',
+        recoveryAction: 'retry_download',
+        referenceId: 'reference_ming',
+        assetId: 'asset_ming_current',
+        jobId: 'job_video_download',
+        createdAt: '2026-08-27T10:00:06.000Z',
+        purpose: 'video_take',
+        status: 'failed',
+        shotId: 'shot_2',
+        beatId: 'beat_2',
+        beatPosition: 2,
+        shotPosition: 1,
+      })
+    );
+    expect(actions.retryDownload).not.toHaveBeenCalled();
+  });
+
+  it('renders malformed current-reference authority as a non-actionable removal blocker', () => {
+    const { container } = renderWorkflow({
+      references: [
+        workflowReference({
+          removalBlockers: [
+            {
+              kind: 'invalid_authority',
+              referenceId: 'reference_ming',
+              assetId: 'asset_ming_current',
+            },
+          ],
+        }),
+      ],
+    });
+
+    expect(screen.getByText(`${PANEL_KEY}.removalBlocker.invalidAuthority`)).toBeVisible();
+    expect(container.querySelector('[data-blocker-kind="invalid_authority"] button')).toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: `${PANEL_KEY}.removePhoto:{"handle":"@ming-01"}`,
+      })
+    ).toBeDisabled();
   });
 
   it('keeps Import photo available after a repeated variation-grid refusal', async () => {
@@ -384,6 +686,7 @@ describe('the schema-5 References workspace', () => {
     expect(css).toMatch(/--studio-reference-matte:\s*rgb\(239 231 216\)/s);
     expect(css).toMatch(/\.pictureBand img\s*\{[^}]*object-fit:\s*contain/s);
     expect(css).toMatch(/\.take img\s*\{[^}]*object-fit:\s*cover/s);
+    expect(css).toMatch(/\.removalBlocker span\s*\{[^}]*overflow-wrap:\s*anywhere/s);
   });
 
   it('exposes exact retry and cancellation recovery while regeneration stays blocked', async () => {

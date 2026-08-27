@@ -935,7 +935,19 @@
           },
           "importPhoto": "Fotoğraf içe aktar",
           "removePhoto": "{{handle}} öğesini kaldır",
-          "removePhotoLocked": "Yetkilendirilmiş çalışma bu fotoğrafı kullanıyor. Fotoğrafı kaldırmadan önce çalışmayı tamamlayın veya iptal edin."
+          "removePhotoLocked": "Bu fotoğraf çözümlenmemiş bir iş nedeniyle kilitli. Kaldırmadan önce aşağıdaki engelleri inceleyin.",
+          "removalBlocker": {
+            "activeReferenceJob": "Bu referansın {{purpose}} işi ({{jobId}}) hâlâ çözümlenmedi. İş son duruma ulaşana kadar geçerli fotoğraf kilitli kalır.",
+            "activeAssetConsumer": "Beat {{beatPosition}}, Shot {{shotPosition}} için {{purpose}} tam olarak bu fotoğrafı kullanıyor. İş çözümlenene kadar fotoğraf kilitli kalır.",
+            "activeAssetConsumerRetained": "Saklanan Shot {{shotId}} için {{purpose}} tam olarak bu fotoğrafı kullanıyor. İş çözümlenene kadar fotoğraf kilitli kalır.",
+            "activeAssetConsumerOther": "{{purpose}} işi ({{jobId}}) tam olarak bu fotoğrafı kullanıyor. İş çözümlenene kadar fotoğraf kilitli kalır.",
+            "downloadRecovery": "Beat {{beatPosition}}, Shot {{shotPosition}} için {{purpose}} sağlayıcıda tamamlandı ancak sonuç indirilemedi. Buradan yeniden deneyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
+            "downloadRecoveryRetainedShot": "Saklanan Shot {{shotId}} için {{purpose}} sağlayıcıda tamamlandı ancak sonuç indirilemedi. Kurtarmayı incelemek için Shot’ı Board Çöp Kutusu’ndan geri yükleyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
+            "downloadRecoveryRetainedBeat": "Saklanan Beat {{beatId}} içindeki Shot {{shotId}} için {{purpose}} sağlayıcıda tamamlandı ancak sonuç indirilemedi. Kurtarmayı incelemek için Beat’i Board Çöp Kutusu’ndan geri yükleyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
+            "downloadRecoveryOther": "{{purpose}} işi ({{jobId}}) sağlayıcıda tamamlandı ancak sonuç indirilemedi. Buradan yeniden deneyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
+            "invalidAuthority": "Geçerli fotoğrafın referans verileri tutarsız. Projeyi yeniden yükleyin ve kaldırmayı tekrar denemeden önce bu referansı inceleyin.",
+            "reviewInBoard": "Board’da incele"
+          }
         },
         "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka plan görsellerini oluşturun. Board veya ilk kare oluşturulmadan önce güncel referansları her Shot'a bağlayın.",
         "generationScope": "Oluşturma kapsamı",

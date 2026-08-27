@@ -24,6 +24,7 @@ import type {
   BeatPanelImportResult,
   BoardActions,
   CutActions,
+  ReferenceRetainedShotReviewClaim,
   ReferencesViewActions,
   TableBoardActions,
   WorkspaceMutationCallbacks,
@@ -594,6 +595,77 @@ const projectWithGenerationReferences = (
   }
   return value;
 };
+
+const projectWithReferenceDownloadBlocker = (revision = 3): StudioRendererProjectV2 => {
+  const value = projectWithGenerationReferences(1);
+  value.revision = revision;
+  const referenceAsset = value.assets.asset_reference_character!;
+  const jobId = 'job_seed_download_failed';
+  value.jobs[jobId] = {
+    ...structuredClone(value.jobs.job_reference_character!),
+    id: jobId,
+    target: { kind: 'shot', shotId: 'shot_0' },
+    status: 'failed',
+    outputAssetIds: [],
+    outputAssetIdsByRole: { primary: null, poster: null },
+    error: {
+      code: 'download_failed',
+      messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+    },
+    canCancel: false,
+    canRetry: false,
+    canRetryDownload: true,
+    purpose: 'seed_still',
+    composition: testComposition({ kind: 'shot', shotId: 'shot_0' }, 'seed_still', {
+      projectRevision: revision,
+      referenceInputs: [
+        {
+          referenceId: 'reference_character',
+          kind: 'character',
+          assetId: referenceAsset.id,
+          sha256: referenceAsset.sha256,
+        },
+      ],
+    }),
+  };
+  value.shots.shot_0!.jobIds.push(jobId);
+  return value;
+};
+
+const projectWithRetainedReferenceDownloadBlocker = (
+  ownerKind: 'shot' | 'beat',
+  revision = 3
+): StudioRendererProjectV2 => {
+  const value = projectWithReferenceDownloadBlocker(revision);
+  value.beats.beat_0!.shotOrder = [];
+  if (ownerKind === 'shot') {
+    value.bin = [{ kind: 'shot', beatId: 'beat_0', shotId: 'shot_0', reason: 'lifted' }];
+  } else {
+    value.beatOrder = [];
+    value.beats.beat_0!.shotOrder = ['shot_0'];
+    value.bin = [{ kind: 'beat', beatId: 'beat_0', reason: 'lifted' }];
+  }
+  return value;
+};
+
+const retainedShotReviewClaim = (ownerKind: 'shot' | 'beat'): ReferenceRetainedShotReviewClaim => ({
+  kind: 'download_recovery',
+  recoveryAction: 'restore_shot',
+  referenceId: 'reference_character',
+  assetId: 'asset_reference_character',
+  jobId: 'job_seed_download_failed',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  purpose: 'seed_still',
+  status: 'failed',
+  shotId: 'shot_0',
+  beatId: null,
+  beatPosition: null,
+  shotPosition: null,
+  retainedOwner:
+    ownerKind === 'shot'
+      ? { kind: 'shot', beatId: 'beat_0', shotId: 'shot_0', reason: 'lifted' }
+      : { kind: 'beat', beatId: 'beat_0', reason: 'lifted' },
+});
 
 const projectWithBoardJobs = (shotCount: number, includeJobs = true): StudioRendererProjectV2 => {
   const value = project();
@@ -2236,6 +2308,283 @@ describe('StudioPage schema-5 cutover', () => {
         name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
       })
     ).toBeEnabled();
+  });
+
+  it.each(['shot', 'beat'] as const)(
+    're-reads an exact retained %s Bin owner and navigates to Board without writes or spend',
+    async (ownerKind) => {
+      const initial = projectWithRetainedReferenceDownloadBlocker(ownerKind, 3);
+      const preflight = structuredClone(initial);
+      preflight.revision = 4;
+      mocks.bridge.getProjectWorkspace.invoke
+        .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+        .mockResolvedValue(projectWorkspaceLoad(preflight));
+
+      renderStudio('/studio/project_1/references');
+      await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.removalBlocker.reviewInBoard',
+        })
+      );
+
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+      await waitFor(() =>
+        expect(document.activeElement).toHaveAttribute(
+          'data-bin-focus-key',
+          ownerKind === 'shot' ? 'shot:shot_0' : 'beat:beat_0'
+        )
+      );
+      expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+      expect(mocks.bridge.retryDownload.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    {
+      label: 'is no longer binned',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.bin = [];
+      },
+    },
+    {
+      label: 'has a different exact Bin identity',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.bin = [{ kind: 'beat', beatId: 'beat_0', reason: 'lifted' }];
+        authority.beatOrder = [];
+        authority.beats.beat_0!.shotOrder = ['shot_0'];
+      },
+    },
+  ])('does not navigate when the retained Shot $label on fresh authority', async ({ change }) => {
+    const initial = projectWithRetainedReferenceDownloadBlocker('shot', 3);
+    const preflight = structuredClone(initial);
+    preflight.revision = 4;
+    change(preflight);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(preflight));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() => capturedReferenceActions().reviewRetainedShot(retainedShotReviewClaim('shot')))
+    ).resolves.toBe(false);
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references');
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.retryDownload.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('accepts a higher-revision preflight, retries the exact download, and keeps another blocker visible', async () => {
+    const initial = projectWithReferenceDownloadBlocker(3);
+    const otherBlocker = {
+      ...structuredClone(initial.jobs.job_seed_download_failed!),
+      id: 'job_video_still_running',
+      status: 'running' as const,
+      error: null,
+      canRetryDownload: false,
+      purpose: 'video_take' as const,
+      createdAt: '2026-01-01T00:00:02.000Z',
+      updatedAt: '2026-01-01T00:00:02.000Z',
+    };
+    initial.jobs[otherBlocker.id] = otherBlocker;
+    initial.shots.shot_0!.jobIds.push(otherBlocker.id);
+    const preflight = structuredClone(initial);
+    preflight.revision = 5;
+    preflight.shots.shot_lead = {
+      ...structuredClone(preflight.shots.shot_0!),
+      id: 'shot_lead',
+      jobIds: [],
+    };
+    preflight.beats.beat_0!.shotOrder.unshift('shot_lead');
+    preflight.beats.beat_0!.targetSeconds = 8;
+    const recovered = structuredClone(preflight);
+    recovered.revision = 6;
+    recovered.jobs.job_seed_download_failed!.status = 'succeeded';
+    recovered.jobs.job_seed_download_failed!.error = null;
+    recovered.jobs.job_seed_download_failed!.canRetryDownload = false;
+    recovered.jobs.job_seed_download_failed!.updatedAt = '2026-01-01T00:00:01.000Z';
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValueOnce(projectWorkspaceLoad(preflight))
+      .mockResolvedValue(projectWorkspaceLoad(recovered));
+    mocks.bridge.retryDownload.invoke.mockResolvedValue(ok(recovered.jobs.job_seed_download_failed!));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().retryBlockingDownload({
+          kind: 'download_recovery',
+          recoveryAction: 'retry_download',
+          referenceId: 'reference_character',
+          assetId: 'asset_reference_character',
+          jobId: 'job_seed_download_failed',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          purpose: 'seed_still',
+          status: 'failed',
+          shotId: 'shot_0',
+          beatId: 'beat_0',
+          beatPosition: 1,
+          shotPosition: 1,
+        })
+      )
+    ).resolves.toBe(true);
+
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3);
+    expect(mocks.bridge.retryDownload.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: initial.id,
+      jobId: 'job_seed_download_failed',
+      expectedRevision: preflight.revision,
+    });
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removalBlocker\.activeAssetConsumer/u
+      )
+    ).toBeVisible();
+    expect(document.querySelector('[data-reference-removal-blocker="job_video_still_running"]')).not.toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
+      })
+    ).toBeDisabled();
+  });
+
+  it('keeps the exact removal lock when blocking download recovery is refused', async () => {
+    const initial = projectWithReferenceDownloadBlocker(3);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(structuredClone(initial)));
+    mocks.bridge.retryDownload.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.retryDownloadFailed' },
+    });
+
+    renderStudio('/studio/project_1/references');
+    const remove = await screen.findByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
+    });
+    expect(remove).toBeDisabled();
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().retryBlockingDownload({
+          kind: 'download_recovery',
+          recoveryAction: 'retry_download',
+          referenceId: 'reference_character',
+          assetId: 'asset_reference_character',
+          jobId: 'job_seed_download_failed',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          purpose: 'seed_still',
+          status: 'failed',
+          shotId: 'shot_0',
+          beatId: 'beat_0',
+          beatPosition: 1,
+          shotPosition: 1,
+        })
+      )
+    ).resolves.toBe(false);
+
+    expect(remove).toBeDisabled();
+    expect(await screen.findByText('native.retryDownloadFailed')).toBeVisible();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: 'approved reference asset changed',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.references.reference_character!.approvedAssetId = 'asset_reference_background';
+      },
+    },
+    {
+      label: 'Shot no longer owns the job',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.shots.shot_0!.jobIds = authority.shots.shot_0!.jobIds.filter(
+          (jobId) => jobId !== 'job_seed_download_failed'
+        );
+      },
+    },
+    {
+      label: 'job is no longer a failed download recovery',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.jobs.job_seed_download_failed!.status = 'cancelled';
+        authority.jobs.job_seed_download_failed!.error = null;
+        authority.jobs.job_seed_download_failed!.canRetryDownload = false;
+      },
+    },
+    {
+      label: 'job creation identity changed',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.jobs.job_seed_download_failed!.createdAt = '2026-01-01T00:00:09.000Z';
+      },
+    },
+    {
+      label: 'current asset hash no longer matches the frozen input',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.assets.asset_reference_character!.sha256 = 'f'.repeat(64);
+      },
+    },
+    {
+      label: 'frozen composition no longer names the exact pair',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.jobs.job_seed_download_failed!.composition.inputs.referenceInputs[0]!.assetId =
+          'asset_reference_background';
+      },
+    },
+  ])('fails blocking download recovery closed when fresh $label', async ({ change }) => {
+    const initial = projectWithReferenceDownloadBlocker(3);
+    const stale = structuredClone(initial);
+    change(stale);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(stale));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().retryBlockingDownload({
+          kind: 'download_recovery',
+          recoveryAction: 'retry_download',
+          referenceId: 'reference_character',
+          assetId: 'asset_reference_character',
+          jobId: 'job_seed_download_failed',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          purpose: 'seed_still',
+          status: 'failed',
+          shotId: 'shot_0',
+          beatId: 'beat_0',
+          beatPosition: 1,
+          shotPosition: 1,
+        })
+      )
+    ).resolves.toBe(false);
+
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.retryDownload.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('imports an exact reference photo and accepts only a preservation-complete durable refresh', async () => {

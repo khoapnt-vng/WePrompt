@@ -81,6 +81,7 @@ import {
   generationBlockGroupsForItems,
   generationCapabilityIsCurrent,
 } from './components/Workspace/Gate/generationBlockers';
+import { deriveReferenceRemovalBlockers } from './components/Workspace/Views/References/referenceRemovalBlockers';
 import { useStudioProject } from './hooks/useStudioProject';
 import {
   hasOpenedStudioReferences,
@@ -861,31 +862,50 @@ const StudioProjectPage: React.FC<{
     async (
       jobId: string,
       isAuthorized: (job: StudioRendererJobV2, project: StudioRendererProjectV2) => boolean,
-      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererJobV2>>
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererJobV2>>,
+      options: { refreshBeforeInvoke?: boolean } = {}
     ): Promise<boolean> => {
-      const current = projectRef.current;
-      if (current === null || workspacePendingRef.current || !Object.hasOwn(current.jobs, jobId)) return false;
-      const job = current.jobs[jobId];
-      const ownerHasJob =
-        job?.target.kind === 'shot'
-          ? Object.hasOwn(current.shots, job.target.shotId) && current.shots[job.target.shotId]?.jobIds.includes(job.id)
-          : job?.target.kind === 'reference'
-            ? Object.hasOwn(current.references, job.target.referenceId) &&
-              current.references[job.target.referenceId]?.jobIds.includes(job.id)
-            : false;
-      if (
-        job === undefined ||
-        job.id !== jobId ||
-        job.projectId !== current.id ||
-        !ownerHasJob ||
-        !isAuthorized(job, current)
-      ) {
-        return false;
-      }
+      const authorizedJob = (authority: StudioRendererProjectV2): StudioRendererJobV2 | null => {
+        if (!Object.hasOwn(authority.jobs, jobId)) return null;
+        const candidate = authority.jobs[jobId];
+        const ownerHasJob =
+          candidate?.target.kind === 'shot'
+            ? Object.hasOwn(authority.shots, candidate.target.shotId) &&
+              authority.shots[candidate.target.shotId]?.jobIds.includes(candidate.id)
+            : candidate?.target.kind === 'reference'
+              ? Object.hasOwn(authority.references, candidate.target.referenceId) &&
+                authority.references[candidate.target.referenceId]?.jobIds.includes(candidate.id)
+              : false;
+        return candidate?.id === jobId &&
+          candidate.projectId === authority.id &&
+          ownerHasJob &&
+          isAuthorized(candidate, authority)
+          ? candidate
+          : null;
+      };
+      let current = projectRef.current;
+      let job = current === null ? null : authorizedJob(current);
+      if (current === null || job === null || workspacePendingRef.current) return false;
       workspacePendingRef.current = true;
       setWorkspacePending(true);
       setActionErrorMessageKey(null);
       try {
+        if (options.refreshBeforeInvoke === true) {
+          const refreshedAuthority = await refetchProjectWorkspace();
+          if (
+            refreshedAuthority === null ||
+            refreshedAuthority.id !== current.id ||
+            refreshedAuthority.revision < current.revision
+          ) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return false;
+          }
+          projectRef.current = refreshedAuthority;
+          const refreshedJob = authorizedJob(refreshedAuthority);
+          if (refreshedJob === null) return false;
+          current = refreshedAuthority;
+          job = refreshedJob;
+        }
         const result = await invoke(current);
         if (result.ok === false) {
           setActionErrorMessageKey(result.error.messageKey);
@@ -3020,6 +3040,143 @@ const StudioProjectPage: React.FC<{
               expectedRevision: current.revision,
             })
         ),
+      retryBlockingDownload: async (claim): Promise<boolean> => {
+        const { referenceId, assetId, jobId } = claim;
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        if (
+          claim.kind !== 'download_recovery' ||
+          claim.recoveryAction !== 'retry_download' ||
+          claim.status !== 'failed' ||
+          referenceId.length === 0 ||
+          assetId.length === 0 ||
+          jobId.length === 0 ||
+          current === null ||
+          reference?.id !== referenceId ||
+          reference.approvedAssetId !== assetId ||
+          current.referenceOrder.filter((candidateId) => candidateId === referenceId).length !== 1 ||
+          pendingReferenceId !== null ||
+          workspacePendingRef.current ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        setPendingReferenceId(referenceId);
+        try {
+          return await runJobRecovery(
+            jobId,
+            (job, authority) => {
+              const exactReference = Object.hasOwn(authority.references, referenceId)
+                ? authority.references[referenceId]
+                : undefined;
+              const exactAsset = Object.hasOwn(authority.assets, assetId) ? authority.assets[assetId] : undefined;
+              const exactRetryBlocker = deriveReferenceRemovalBlockers(authority, referenceId).some(
+                (blocker) =>
+                  blocker.kind === 'download_recovery' &&
+                  blocker.recoveryAction === 'retry_download' &&
+                  blocker.jobId === job.id &&
+                  blocker.createdAt === claim.createdAt &&
+                  blocker.purpose === claim.purpose &&
+                  blocker.shotId === claim.shotId
+              );
+              return (
+                exactReference?.id === referenceId &&
+                exactReference.approvedAssetId === assetId &&
+                authority.referenceOrder.filter((candidateId) => candidateId === referenceId).length === 1 &&
+                exactAsset?.id === assetId &&
+                exactAsset.projectId === authority.id &&
+                exactAsset.projectReferenceId === referenceId &&
+                exactAsset.shotId === null &&
+                exactAsset.mediaKind === 'image' &&
+                job.createdAt === claim.createdAt &&
+                job.purpose === claim.purpose &&
+                exactRetryBlocker &&
+                job.status === 'failed' &&
+                job.error?.code === 'download_failed' &&
+                job.canRetryDownload &&
+                job.composition.inputs.referenceInputs.some(
+                  (input) =>
+                    input.referenceId === referenceId && input.assetId === assetId && input.sha256 === exactAsset.sha256
+                )
+              );
+            },
+            (latest) =>
+              ipcBridge.creativeStudio.retryDownload.invoke({
+                projectId: latest.id,
+                jobId,
+                expectedRevision: latest.revision,
+              }),
+            { refreshBeforeInvoke: true }
+          );
+        } finally {
+          setPendingReferenceId((pendingId) => (pendingId === referenceId ? null : pendingId));
+        }
+      },
+      reviewRetainedShot: async (claim): Promise<boolean> => {
+        const exactReviewClaimExists = (authority: StudioRendererProjectV2): boolean => {
+          const matches = deriveReferenceRemovalBlockers(authority, claim.referenceId).filter((blocker) => {
+            if (
+              blocker.kind !== 'download_recovery' ||
+              blocker.recoveryAction !== 'restore_shot' ||
+              blocker.referenceId !== claim.referenceId ||
+              blocker.assetId !== claim.assetId ||
+              blocker.jobId !== claim.jobId ||
+              blocker.createdAt !== claim.createdAt ||
+              blocker.purpose !== claim.purpose ||
+              blocker.shotId !== claim.shotId ||
+              blocker.retainedOwner.kind !== claim.retainedOwner.kind ||
+              blocker.retainedOwner.beatId !== claim.retainedOwner.beatId ||
+              blocker.retainedOwner.reason !== claim.retainedOwner.reason
+            ) {
+              return false;
+            }
+            return (
+              blocker.retainedOwner.kind === 'beat' ||
+              (claim.retainedOwner.kind === 'shot' && blocker.retainedOwner.shotId === claim.retainedOwner.shotId)
+            );
+          });
+          return matches.length === 1;
+        };
+        const current = projectRef.current;
+        if (
+          claim.kind !== 'download_recovery' ||
+          claim.recoveryAction !== 'restore_shot' ||
+          claim.status !== 'failed' ||
+          claim.referenceId.length === 0 ||
+          claim.assetId.length === 0 ||
+          claim.jobId.length === 0 ||
+          claim.shotId === null ||
+          current === null ||
+          current.id !== projectId ||
+          workspacePendingRef.current ||
+          !exactReviewClaimExists(current)
+        ) {
+          return false;
+        }
+        workspacePendingRef.current = true;
+        setWorkspacePending(true);
+        setActionErrorMessageKey(null);
+        try {
+          const refreshed = await refetchProjectWorkspace();
+          if (refreshed === null || refreshed.id !== current.id || refreshed.revision < current.revision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return false;
+          }
+          projectRef.current = refreshed;
+          if (!exactReviewClaimExists(refreshed)) return false;
+          navigate(studioViewPath(projectId, 'board'));
+          return true;
+        } catch {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        } finally {
+          workspacePendingRef.current = false;
+          setWorkspacePending(false);
+        }
+      },
       cancelJob: async (referenceId, jobId): Promise<boolean> =>
         runReferenceJobRecovery(
           referenceId,
@@ -3078,6 +3235,7 @@ const StudioProjectPage: React.FC<{
       referenceRequests,
       refetchProjectWorkspace,
       routeCatalog,
+      runJobRecovery,
       runReferenceJobRecovery,
       runWorkspaceCommit,
       setActionErrorMessageKey,

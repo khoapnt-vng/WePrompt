@@ -98,6 +98,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/index.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Cut/playbackSequence.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/index.tsx',
+  'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/referenceRemovalBlockers.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/References/referenceStatus.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Table/index.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/WorkspaceControls.tsx',

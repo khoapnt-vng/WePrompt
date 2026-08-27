@@ -933,7 +933,19 @@
           },
           "importPhoto": "匯入照片",
           "removePhoto": "移除 {{handle}}",
-          "removePhotoLocked": "已授權的工作正在使用這張照片。請先完成或取消該工作，再移除照片。"
+          "removePhotoLocked": "這張照片因尚未解決的工作而被鎖定。移除前，請查看下方的阻擋項目。",
+          "removalBlocker": {
+            "activeReferenceJob": "此參考的{{purpose}}工作（{{jobId}}）尚未解決。工作進入終止狀態前，目前照片會保持鎖定。",
+            "activeAssetConsumer": "Beat {{beatPosition}}、Shot {{shotPosition}}的{{purpose}}工作正在使用這張照片。工作解決前，照片會保持鎖定。",
+            "activeAssetConsumerRetained": "保留的 Shot {{shotId}} 的{{purpose}}工作正在使用這張照片。工作解決前，照片會保持鎖定。",
+            "activeAssetConsumerOther": "{{purpose}}工作（{{jobId}}）正在使用這張照片。工作解決前，照片會保持鎖定。",
+            "downloadRecovery": "Beat {{beatPosition}}、Shot {{shotPosition}}的{{purpose}}工作已在供應商完成，但結果未能下載。請在此重試；復原成功前，照片會保持鎖定。",
+            "downloadRecoveryRetainedShot": "保留的 Shot {{shotId}} 的{{purpose}}工作已在供應商完成，但結果未能下載。請從 Board 垃圾桶還原 Shot 以檢查復原；復原成功前，照片會保持鎖定。",
+            "downloadRecoveryRetainedBeat": "保留的 Beat {{beatId}} 內 Shot {{shotId}} 的{{purpose}}工作已在供應商完成，但結果未能下載。請從 Board 垃圾桶還原 Beat 以檢查復原；復原成功前，照片會保持鎖定。",
+            "downloadRecoveryOther": "{{purpose}}工作（{{jobId}}）已在供應商完成，但結果未能下載。請在此重試；復原成功前，照片會保持鎖定。",
+            "invalidAuthority": "目前照片的參考資料不一致。請重新載入專案並檢查此參考，再嘗試移除。",
+            "reviewInBoard": "在 Board 中檢查"
+          }
         },
         "description": "先產生角色的目前標準圖，再產生重複出現的背景圖。產生分鏡或首幀之前，請將目前參考圖明確綁定到每個鏡頭。",
         "generationScope": "產生範圍",

@@ -933,7 +933,19 @@
           },
           "importPhoto": "导入照片",
           "removePhoto": "移除 {{handle}}",
-          "removePhotoLocked": "已授权的任务正在使用这张照片。请先完成或取消该任务，再移除照片。"
+          "removePhotoLocked": "这张照片因未解决的工作而被锁定。移除前，请查看下方的阻止项。",
+          "removalBlocker": {
+            "activeReferenceJob": "此参考的{{purpose}}任务（{{jobId}}）尚未解决。任务进入终止状态前，当前照片会保持锁定。",
+            "activeAssetConsumer": "Beat {{beatPosition}}、Shot {{shotPosition}}的{{purpose}}任务正在使用这张照片。任务解决前，照片会保持锁定。",
+            "activeAssetConsumerRetained": "保留的 Shot {{shotId}} 的{{purpose}}任务正在使用这张照片。任务解决前，照片会保持锁定。",
+            "activeAssetConsumerOther": "{{purpose}}任务（{{jobId}}）正在使用这张照片。任务解决前，照片会保持锁定。",
+            "downloadRecovery": "Beat {{beatPosition}}、Shot {{shotPosition}}的{{purpose}}任务已在提供商完成，但结果未能下载。请在此重试；恢复成功前，照片会保持锁定。",
+            "downloadRecoveryRetainedShot": "保留的 Shot {{shotId}} 的{{purpose}}任务已在提供商完成，但结果未能下载。请从 Board 废纸篓恢复 Shot 以检查恢复操作；恢复成功前，照片会保持锁定。",
+            "downloadRecoveryRetainedBeat": "保留的 Beat {{beatId}} 内 Shot {{shotId}} 的{{purpose}}任务已在提供商完成，但结果未能下载。请从 Board 废纸篓恢复 Beat 以检查恢复操作；恢复成功前，照片会保持锁定。",
+            "downloadRecoveryOther": "{{purpose}}任务（{{jobId}}）已在提供商完成，但结果未能下载。请在此重试；恢复成功前，照片会保持锁定。",
+            "invalidAuthority": "当前照片的参考数据不一致。请重新加载项目并检查此参考，然后再尝试移除。",
+            "reviewInBoard": "在 Board 中检查"
+          }
         },
         "description": "先生成角色的当前标准图，再生成重复出现的背景图。生成分镜或首帧之前，请将当前参考图明确绑定到每个镜头。",
         "generationScope": "生成范围",

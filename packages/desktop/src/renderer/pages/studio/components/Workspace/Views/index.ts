@@ -4,6 +4,10 @@ export { CutView } from './Cut';
 export type { CutActions, CutImportResult, CutViewProps } from './Cut';
 export { ReferencesView } from './References';
 export type {
+  ReferenceDownloadRecoveryClaim,
+  ReferenceRemovalBlocker,
+  ReferenceRetainedShotBinOwner,
+  ReferenceRetainedShotReviewClaim,
   ReferenceWorkspaceItem,
   ReferencesViewActions,
   ReferencesViewProps,

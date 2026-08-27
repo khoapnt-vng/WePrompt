@@ -19,6 +19,17 @@ import {
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import styles from './References.module.css';
+export type {
+  ReferenceDownloadRecoveryClaim,
+  ReferenceRemovalBlocker,
+  ReferenceRetainedShotBinOwner,
+  ReferenceRetainedShotReviewClaim,
+} from './referenceRemovalBlockers';
+import type {
+  ReferenceDownloadRecoveryClaim,
+  ReferenceRemovalBlocker,
+  ReferenceRetainedShotReviewClaim,
+} from './referenceRemovalBlockers';
 import { referenceWorkspaceStatus } from './referenceStatus';
 
 export type ReferenceCandidateJob = Pick<
@@ -36,7 +47,7 @@ export type ReferenceWorkspaceItem = {
   generatedAssetIds: readonly string[];
   assetCreatedAt: Readonly<Record<string, string>>;
   assetOrdinalById: Readonly<Record<string, number>>;
-  removalBlocked: boolean;
+  removalBlockers: readonly ReferenceRemovalBlocker[];
   generationStatus: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed';
   candidateJob: ReferenceCandidateJob | null;
 };
@@ -58,6 +69,8 @@ export type ReferencesViewActions = {
   regenerate: (referenceId: string, prompt: string) => Promise<boolean>;
   retryJob: (referenceId: string, jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   retryDownload: (referenceId: string, jobId: string) => Promise<boolean>;
+  retryBlockingDownload: (claim: ReferenceDownloadRecoveryClaim) => Promise<boolean>;
+  reviewRetainedShot: (claim: ReferenceRetainedShotReviewClaim) => Promise<boolean>;
   cancelJob: (referenceId: string, jobId: string) => Promise<boolean>;
   openBindings: () => void;
 };
@@ -279,7 +292,9 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
     const recoveryPending = item.candidateJob?.status === 'needs_attention';
     const downloadRecoveryPending = item.candidateJob?.canRetryDownload === true;
     const recoveryDescriptionId = `studio-reference-recovery-${item.id}`;
+    const removalBlockersId = `studio-reference-removal-blockers-${item.id}`;
     const actionsDisabled = gateLocked || pendingReferenceId !== null;
+    const removalBlocked = item.removalBlockers.length > 0;
     const draft = detailsFor(item);
     const trimmedPrompt = draft.prompt.trim();
     const duplicateLabel = references.some(
@@ -330,15 +345,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
       }
     };
     const removeImage = async (assetId: string): Promise<void> => {
-      if (
-        assetId !== item.approvedAssetId ||
-        actionsDisabled ||
-        generationActive ||
-        recoveryPending ||
-        downloadRecoveryPending ||
-        item.removalBlocked ||
-        cardActionPending
-      ) {
+      if (assetId !== item.approvedAssetId || actionsDisabled || removalBlocked || cardActionPending) {
         return;
       }
       setCardActionPending(true);
@@ -436,15 +443,9 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
               <Button
                 aria-label={t(`${PANEL_ROOT}.removePhoto`, { handle: currentHandle })}
                 className={styles.removeControl}
-                disabled={
-                  actionsDisabled ||
-                  generationActive ||
-                  recoveryPending ||
-                  downloadRecoveryPending ||
-                  item.removalBlocked ||
-                  cardActionPending
-                }
+                disabled={actionsDisabled || removalBlocked || cardActionPending}
                 icon={<Delete aria-hidden='true' />}
+                aria-describedby={removalBlocked ? removalBlockersId : undefined}
                 onClick={(event) => {
                   event.stopPropagation();
                   void removeImage(item.approvedAssetId!);
@@ -452,7 +453,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
                 shape='circle'
                 size='mini'
                 status='danger'
-                title={item.removalBlocked ? t(`${PANEL_ROOT}.removePhotoLocked`) : undefined}
+                title={removalBlocked ? t(`${PANEL_ROOT}.removePhotoLocked`) : undefined}
                 type='secondary'
               />
               <div className={styles.fullscreenTitle}>
@@ -461,6 +462,89 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
               </div>
             </div>
           </FullscreenMediaFrame>
+        )}
+        {item.removalBlockers.length === 0 ? null : (
+          <ul className={styles.removalBlockers} id={removalBlockersId}>
+            {item.removalBlockers.map((blocker) => {
+              if (blocker.kind === 'invalid_authority') {
+                return (
+                  <li
+                    className={styles.removalBlocker}
+                    data-blocker-kind={blocker.kind}
+                    data-reference-removal-blocker={`${blocker.referenceId}:${blocker.assetId}`}
+                    key={`${blocker.kind}:${blocker.referenceId}:${blocker.assetId}`}
+                  >
+                    <span>{t(`${PANEL_ROOT}.removalBlocker.invalidAuthority`)}</span>
+                  </li>
+                );
+              }
+              const hasActivePosition = blocker.beatPosition !== null && blocker.shotPosition !== null;
+              const purpose = t(`conversation.creativeStudio.workspace.gate.purpose.${blocker.purpose}`);
+              const message =
+                blocker.kind === 'active_reference_job'
+                  ? t(`${PANEL_ROOT}.removalBlocker.activeReferenceJob`, { purpose, jobId: blocker.jobId })
+                  : blocker.kind === 'active_asset_consumer'
+                    ? hasActivePosition
+                      ? t(`${PANEL_ROOT}.removalBlocker.activeAssetConsumer`, {
+                          purpose,
+                          beatPosition: blocker.beatPosition,
+                          shotPosition: blocker.shotPosition,
+                        })
+                      : blocker.shotId === null
+                        ? t(`${PANEL_ROOT}.removalBlocker.activeAssetConsumerOther`, { purpose, jobId: blocker.jobId })
+                        : t(`${PANEL_ROOT}.removalBlocker.activeAssetConsumerRetained`, {
+                            purpose,
+                            shotId: blocker.shotId,
+                          })
+                    : blocker.recoveryAction === 'restore_shot'
+                      ? blocker.retainedOwner.kind === 'shot'
+                        ? t(`${PANEL_ROOT}.removalBlocker.downloadRecoveryRetainedShot`, {
+                            purpose,
+                            shotId: blocker.shotId,
+                          })
+                        : t(`${PANEL_ROOT}.removalBlocker.downloadRecoveryRetainedBeat`, {
+                            purpose,
+                            shotId: blocker.shotId,
+                            beatId: blocker.retainedOwner.beatId,
+                          })
+                      : hasActivePosition
+                        ? t(`${PANEL_ROOT}.removalBlocker.downloadRecovery`, {
+                            purpose,
+                            beatPosition: blocker.beatPosition,
+                            shotPosition: blocker.shotPosition,
+                          })
+                        : t(`${PANEL_ROOT}.removalBlocker.downloadRecoveryOther`, { purpose, jobId: blocker.jobId });
+              return (
+                <li
+                  className={styles.removalBlocker}
+                  data-blocker-kind={blocker.kind}
+                  data-reference-removal-blocker={blocker.jobId}
+                  key={`${blocker.kind}:${blocker.jobId}`}
+                >
+                  <span>{message}</span>
+                  {blocker.kind === 'download_recovery' && blocker.recoveryAction === 'retry_download' ? (
+                    <Button
+                      disabled={actionsDisabled}
+                      loading={busy}
+                      onClick={() => void actions.retryBlockingDownload(blocker)}
+                      size='small'
+                    >
+                      {t(`${JOB_ROOT}.retryDownload`)}
+                    </Button>
+                  ) : blocker.kind === 'download_recovery' ? (
+                    <Button
+                      disabled={actionsDisabled}
+                      loading={busy}
+                      onClick={() => void actions.reviewRetainedShot(blocker)}
+                      size='small'
+                    >
+                      {t(`${PANEL_ROOT}.removalBlocker.reviewInBoard`)}
+                    </Button>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
         )}
         <div className={styles.takeStrip} data-reference-row='takes'>
           {assets.map((assetId, index) => {

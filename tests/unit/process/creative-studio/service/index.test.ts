@@ -4889,6 +4889,28 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
+  it('keeps retry-download on the existing free recovery seam without pricing, authorization, or dispatch', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const recovered = makeSchema2Job(project, {
+      status: 'succeeded',
+      providerJobId: 'remote_job_1',
+      error: null,
+    });
+    harness.retryDownloadV2.mockResolvedValueOnce(recovered);
+    const request = { projectId: project.id, jobId: recovered.id, expectedRevision: project.revision };
+
+    await harness.service.retryDownload(request);
+
+    expect(harness.retryDownloadV2).toHaveBeenCalledExactlyOnceWith(request);
+    expect(harness.retryJobV2).not.toHaveBeenCalled();
+    expect(harness.cancelJobV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.store.confirmProjectV2).not.toHaveBeenCalled();
+  });
+
   it('projects independent same-attempt retry capability across generation siblings', async () => {
     const single = makeSchema2ServiceProject();
     const retryable = makeSchema2Job(single, {

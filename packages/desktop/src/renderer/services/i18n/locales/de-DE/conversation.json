@@ -934,7 +934,19 @@
           },
           "importPhoto": "Foto importieren",
           "removePhoto": "{{handle}} entfernen",
-          "removePhotoLocked": "Ein autorisierter Vorgang verwendet dieses Foto. Schließe den Vorgang ab oder brich ihn ab, bevor du das Foto entfernst."
+          "removePhotoLocked": "Dieses Foto ist durch ungelöste Arbeit gesperrt. Prüfe die unten aufgeführten Blocker, bevor du es entfernst.",
+          "removalBlocker": {
+            "activeReferenceJob": "Der Auftrag „{{purpose}}“ ({{jobId}}) für diese Referenz ist noch ungelöst. Das aktuelle Foto bleibt gesperrt, bis der Auftrag einen Endstatus erreicht.",
+            "activeAssetConsumer": "„{{purpose}}“ für Beat {{beatPosition}}, Shot {{shotPosition}} verwendet genau dieses Foto. Es bleibt gesperrt, solange der Auftrag ungelöst ist.",
+            "activeAssetConsumerRetained": "„{{purpose}}“ für den aufbewahrten Shot {{shotId}} verwendet genau dieses Foto. Es bleibt gesperrt, solange der Auftrag ungelöst ist.",
+            "activeAssetConsumerOther": "Der Auftrag „{{purpose}}“ ({{jobId}}) verwendet genau dieses Foto. Es bleibt gesperrt, solange der Auftrag ungelöst ist.",
+            "downloadRecovery": "„{{purpose}}“ für Beat {{beatPosition}}, Shot {{shotPosition}} wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Wiederhole den Download hier; das Foto bleibt gesperrt, bis die Wiederherstellung erfolgreich ist.",
+            "downloadRecoveryRetainedShot": "„{{purpose}}“ für den aufbewahrten Shot {{shotId}} wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Stelle den Shot aus dem Board-Papierkorb wieder her, um die Wiederherstellung zu prüfen; das Foto bleibt bis zum Erfolg gesperrt.",
+            "downloadRecoveryRetainedBeat": "„{{purpose}}“ für Shot {{shotId}} im aufbewahrten Beat {{beatId}} wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Stelle den Beat aus dem Board-Papierkorb wieder her, um die Wiederherstellung zu prüfen; das Foto bleibt bis zum Erfolg gesperrt.",
+            "downloadRecoveryOther": "Der Auftrag „{{purpose}}“ ({{jobId}}) wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Wiederhole den Download hier; das Foto bleibt gesperrt, bis die Wiederherstellung erfolgreich ist.",
+            "invalidAuthority": "Die Referenzdaten des aktuellen Fotos sind inkonsistent. Lade das Projekt neu und prüfe diese Referenz, bevor du das Entfernen erneut versuchst.",
+            "reviewInBoard": "Im Board prüfen"
+          }
         },
         "description": "Erzeugen Sie zuerst kanonische Charakterbilder und danach Bilder wiederkehrender Hintergründe. Binden Sie die aktuellen Referenzen an jeden Shot, bevor Sie das Board oder das erste Bild generieren.",
         "generationScope": "Generierungsumfang",

@@ -934,7 +934,19 @@
           },
           "importPhoto": "Importar foto",
           "removePhoto": "Eliminar {{handle}}",
-          "removePhotoLocked": "Un trabajo autorizado está usando esta foto. Termina o cancela ese trabajo antes de eliminarla."
+          "removePhotoLocked": "Esta foto está bloqueada por trabajo sin resolver. Revisa los bloqueos de abajo antes de eliminarla.",
+          "removalBlocker": {
+            "activeReferenceJob": "El trabajo {{purpose}} ({{jobId}}) de esta referencia sigue sin resolverse. La foto actual permanecerá bloqueada hasta que el trabajo llegue a un estado terminal.",
+            "activeAssetConsumer": "{{purpose}} de Beat {{beatPosition}}, Shot {{shotPosition}} usa exactamente esta foto. Permanecerá bloqueada mientras el trabajo siga sin resolverse.",
+            "activeAssetConsumerRetained": "{{purpose}} del Shot conservado {{shotId}} usa exactamente esta foto. Permanecerá bloqueada mientras el trabajo siga sin resolverse.",
+            "activeAssetConsumerOther": "El trabajo {{purpose}} ({{jobId}}) usa exactamente esta foto. Permanecerá bloqueada mientras el trabajo siga sin resolverse.",
+            "downloadRecovery": "{{purpose}} de Beat {{beatPosition}}, Shot {{shotPosition}} terminó en el proveedor, pero el resultado no se descargó. Reintenta aquí; la foto permanecerá bloqueada hasta que la recuperación finalice correctamente.",
+            "downloadRecoveryRetainedShot": "{{purpose}} del Shot conservado {{shotId}} terminó en el proveedor, pero el resultado no se descargó. Restaura el Shot desde la Papelera de Board para revisar la recuperación; la foto permanecerá bloqueada hasta que finalice correctamente.",
+            "downloadRecoveryRetainedBeat": "{{purpose}} del Shot {{shotId}} dentro del Beat conservado {{beatId}} terminó en el proveedor, pero el resultado no se descargó. Restaura el Beat desde la Papelera de Board para revisar la recuperación; la foto permanecerá bloqueada hasta que finalice correctamente.",
+            "downloadRecoveryOther": "El trabajo {{purpose}} ({{jobId}}) terminó en el proveedor, pero el resultado no se descargó. Reintenta aquí; la foto permanecerá bloqueada hasta que la recuperación finalice correctamente.",
+            "invalidAuthority": "Los datos de referencia de la foto actual son incoherentes. Vuelve a cargar el proyecto y revisa esta referencia antes de intentar eliminarla de nuevo.",
+            "reviewInBoard": "Revisar en Board"
+          }
         },
         "description": "Genera primero las imágenes canónicas de los personajes y después las imágenes de los fondos recurrentes. Vincula las referencias actuales a cada Shot antes de generar el Board o el primer fotograma.",
         "generationScope": "Alcance de la generación",

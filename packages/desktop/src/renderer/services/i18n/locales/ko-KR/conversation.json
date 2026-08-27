@@ -933,7 +933,19 @@
           },
           "importPhoto": "사진 가져오기",
           "removePhoto": "{{handle}} 제거",
-          "removePhotoLocked": "승인된 작업에서 이 사진을 사용 중입니다. 사진을 제거하기 전에 작업을 완료하거나 취소하세요."
+          "removePhotoLocked": "해결되지 않은 작업 때문에 이 사진이 잠겨 있습니다. 제거하기 전에 아래 차단 항목을 검토하세요.",
+          "removalBlocker": {
+            "activeReferenceJob": "이 참조의 {{purpose}} 작업({{jobId}})이 아직 해결되지 않았습니다. 작업이 최종 상태가 될 때까지 현재 사진은 잠긴 상태로 유지됩니다.",
+            "activeAssetConsumer": "Beat {{beatPosition}}, Shot {{shotPosition}}의 {{purpose}} 작업이 이 사진을 사용합니다. 작업이 해결될 때까지 사진은 잠긴 상태로 유지됩니다.",
+            "activeAssetConsumerRetained": "보존된 Shot {{shotId}}의 {{purpose}} 작업이 이 사진을 사용합니다. 작업이 해결될 때까지 사진은 잠긴 상태로 유지됩니다.",
+            "activeAssetConsumerOther": "{{purpose}} 작업({{jobId}})이 이 사진을 사용합니다. 작업이 해결될 때까지 사진은 잠긴 상태로 유지됩니다.",
+            "downloadRecovery": "Beat {{beatPosition}}, Shot {{shotPosition}}의 {{purpose}} 작업은 제공자에서 완료됐지만 결과를 다운로드하지 못했습니다. 여기서 다시 시도하세요. 복구가 성공할 때까지 사진은 잠긴 상태로 유지됩니다.",
+            "downloadRecoveryRetainedShot": "보존된 Shot {{shotId}}의 {{purpose}} 작업은 제공자에서 완료됐지만 결과를 다운로드하지 못했습니다. Board Bin에서 Shot을 복원해 복구를 검토하세요. 복구가 성공할 때까지 사진은 잠긴 상태로 유지됩니다.",
+            "downloadRecoveryRetainedBeat": "보존된 Beat {{beatId}} 안의 Shot {{shotId}}에 대한 {{purpose}} 작업은 제공자에서 완료됐지만 결과를 다운로드하지 못했습니다. Board Bin에서 Beat를 복원해 복구를 검토하세요. 복구가 성공할 때까지 사진은 잠긴 상태로 유지됩니다.",
+            "downloadRecoveryOther": "{{purpose}} 작업({{jobId}})은 제공자에서 완료됐지만 결과를 다운로드하지 못했습니다. 여기서 다시 시도하세요. 복구가 성공할 때까지 사진은 잠긴 상태로 유지됩니다.",
+            "invalidAuthority": "현재 사진의 참조 데이터가 일치하지 않습니다. 프로젝트를 다시 불러오고 이 참조를 검토한 뒤 삭제를 다시 시도하세요.",
+            "reviewInBoard": "Board에서 검토"
+          }
         },
         "description": "먼저 캐릭터의 대표 이미지를 생성한 다음 반복되는 배경 이미지를 생성하세요. Board 또는 첫 프레임을 생성하기 전에 현재 레퍼런스를 각 Shot에 연결하세요.",
         "generationScope": "생성 범위",
