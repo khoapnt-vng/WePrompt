@@ -1864,3 +1864,75 @@ troubleshooting assignment above — build them together; the status tool is tha
 **Do not weaken:** grants no operation; persists nothing; boards stay advisory; a Director reading
 status still cannot spend. Acceptance: for each of the eight 2026-08-26 stuck moments recorded in
 the design doc, the status output names the true cause and the correct remedy lane.
+
+## Assignable follow-on — regroup the project menu by consequence
+
+**Status:** owner-directed 2026-08-27. **Blocked on Codex's film-export work landing** — this edits
+`WorkspaceProjectMenu.tsx`, the same file the export feature lives in (`7a3ed801e`). Start only once
+export is merged.
+
+### Problem
+
+The two dialogs behind the project menu are mis-cut. Each mixes decisions that are casual and
+reversible with decisions that reshape every future request or steer spend:
+
+| Menu item | What it actually contains |
+| --- | --- |
+| **Project settings** | `name`, `targetDurationSeconds` · **`aspectRatio`, `resolution`** (already `disabled` when `requestShapeLocked`) |
+| **Brief** | the brief prose · **image and video engine selection + `Refresh routes`** · project rules · organisation rules |
+
+The Brief dialog is ~185 lines holding four unrelated concerns. Engine selection in particular is a
+spend-steering decision sitting inside a prose editor, and the owner's reaction on meeting it was
+that the menu needs cleaning up. The grouping is by *noun* ("settings", "brief") where it should be
+by **consequence**.
+
+### Required product behavior
+
+1. **Retire the Project settings dialog.** Nothing in it justifies a modal of its own once its four
+   fields are placed where they belong.
+2. **`name` becomes an inline rename**, the same gesture as renaming a chat. Cheap, reversible, no
+   downstream effect.
+3. **`targetDurationSeconds` moves to the Cut**, beside the `of 0:30 target` readout it drives —
+   the only place its effect is visible.
+4. **`aspectRatio` and `resolution` move in beside engine selection**, not out to chat. They are the
+   same class of decision — the shape of every future request — and they already carry the
+   `requestShapeLocked` guard for exactly that reason. Keep that guard.
+5. **Rename the Brief dialog to match its contents** — prose, rules, engines and request shape.
+   Something like *Film setup*; the name is design's to settle, but it must stop claiming to be only
+   the brief.
+6. **Keep rules where they are**, inside that dialog. Organisation rules stay read-only.
+
+### Dependency — do not skip
+
+The owner's framing was that rename and sizing could move to chat. **They cannot today.**
+`edit_project` is `operation_not_permitted` for the Director in
+`STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2` (`creativeStudioTypes.ts:1418`) **with no proposal path**,
+so the Director can neither perform nor propose a rename, a target-duration change, or a reshape.
+
+Consequently:
+
+- **Inline rename in the UI is safe to build now** — it is an owner action, not a chat action.
+- **"Rename it via the Director" is not available** until the Director charter's item 4 lands
+  (a `proposal` disposition for `edit_project`'s editable settings). Do not remove any UI affordance
+  on the assumption that chat can replace it, or the field becomes unreachable — the same failure
+  shape as BUG-140, where a legitimate state had no route to it.
+
+### Do not weaken
+
+- **`requestShapeLocked` stays.** Aspect ratio and resolution must remain disabled once bound
+  non-terminal requests exist; moving them must not drop the guard.
+- **Engine selection keeps its spend framing.** It is not a preference — it decides what every
+  generation costs and which capabilities exist (e.g. first-frame support). Grouping it with request
+  shape is the point; burying it deeper is not.
+- **No behaviour change to rules precedence** — organisation rules continue to outrank project rules
+  and remain read-only.
+
+### Acceptance
+
+1. The project menu no longer carries a `Project settings` item, and every field it held is reachable
+   elsewhere without chat.
+2. Renaming a project is possible inline, and the new name appears in the app bar and library card.
+3. Changing the target duration is possible from the Cut and updates the `of <target>` readout.
+4. Aspect ratio and resolution remain disabled while `requestShapeLocked` is true.
+5. TypeScript, i18n generation/checks, focused main/renderer tests, Creative Studio coverage, the
+   full test suite, format, lint, and `git diff --check` pass from the exact final head.
