@@ -1582,6 +1582,10 @@ test.describe('Creative Studio workspace', () => {
 
   test('creates and reloads a Beat/Shot project across the shared Table, Board, and Cut routes', async ({ page }) => {
     const projectBrief = `A quiet paper-airplane launch story ${Date.now()}.`;
+    const renamedProject = `${projectBrief} — renamed ${'with a deliberately extended title '.repeat(12)}`.slice(
+      0,
+      256
+    );
 
     await navigateTo(page, ROUTES.studio);
     const workspace = page.locator(workspaceSelector);
@@ -1601,35 +1605,54 @@ test.describe('Creative Studio workspace', () => {
     const projectTitle = page.locator(projectHeaderSelector).getByRole('heading', { level: 1 });
     await projectTitle.getByRole('button', { name: 'Rename project' }).click();
     const nameDraft = projectTitle.getByRole('textbox', { name: 'Rename project' });
-    await nameDraft.fill(`${projectBrief} — renamed`);
+    await nameDraft.fill(' ');
     await nameDraft.press('Enter');
-    await expect(projectTitle).toHaveText(`${projectBrief} — renamed`);
+    await expect(projectTitle.getByRole('alert')).toBeVisible();
+    await expect(projectTitle).toHaveCSS('overflow', 'visible');
+    await nameDraft.fill(renamedProject);
+    await nameDraft.press('Enter');
+    await expect(projectTitle).toHaveText(renamedProject);
+    const titleGeometry = await projectTitle.evaluate((heading) => {
+      const titleText = heading.querySelector('bdi');
+      if (!(titleText instanceof HTMLElement)) throw new Error('Project title text box is missing.');
+      const headingRect = heading.getBoundingClientRect();
+      const titleTextRect = titleText.getBoundingClientRect();
+      return {
+        clientWidth: titleText.clientWidth,
+        headingRight: headingRect.right,
+        scrollWidth: titleText.scrollWidth,
+        textRight: titleTextRect.right,
+      };
+    });
+    expect(titleGeometry.textRight).toBeLessThanOrEqual(titleGeometry.headingRight + 1);
+    expect(titleGeometry.scrollWidth).toBeGreaterThan(titleGeometry.clientWidth);
 
     await navigation.getByRole('link', { name: 'Board' }).click();
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/board$/);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
     await expectProjectConfigurationOutsideActiveView(page);
-    await expect(projectTitle).toHaveText(`${projectBrief} — renamed`);
+    await expect(projectTitle).toHaveText(renamedProject);
 
     await navigation.getByRole('link', { name: 'Cut' }).click();
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/cut$/);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
     await expectProjectConfigurationOutsideActiveView(page);
-    await expect(projectTitle).toHaveText(`${projectBrief} — renamed`);
-    await page.getByRole('button', { name: 'Edit: Target duration (seconds)' }).click();
+    await expect(projectTitle).toHaveText(renamedProject);
+    const editTargetDuration = page.getByRole('button', { name: 'Edit: Target duration (seconds)' });
+    await editTargetDuration.click();
     const targetDraft = page.getByRole('spinbutton', { name: 'Target duration (seconds)' });
+    await expect(targetDraft).toBeFocused();
     await targetDraft.fill('30');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.locator('[data-cut-film]')).toContainText('of 0:30');
+    await expect(page.getByRole('button', { name: 'Edit: Target duration (seconds)' })).toBeFocused();
 
     const cutUrl = page.url();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(cutUrl);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
     await expectProjectConfigurationOutsideActiveView(page);
-    await expect(page.locator(projectHeaderSelector).getByRole('heading', { level: 1 })).toHaveText(
-      `${projectBrief} — renamed`
-    );
+    await expect(page.locator(projectHeaderSelector).getByRole('heading', { level: 1 })).toHaveText(renamedProject);
     await expect(page.locator('[data-cut-film]')).toContainText('of 0:30');
 
     const briefDialog = await openStudioProjectDialog(page, briefAndRulesTitle);
@@ -1644,7 +1667,7 @@ test.describe('Creative Studio workspace', () => {
     await closeStudioProjectDialog(briefDialog);
 
     await navigateTo(page, ROUTES.studio);
-    await expect(page.getByRole('button', { name: `${projectBrief} — renamed`, exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: renamedProject, exact: true })).toBeVisible();
 
     // Merely loading, navigating, and restoring drafts cannot open or cross the paid boundary.
     await expect(page.locator('[data-testid="studio-spend-gate"]')).toHaveCount(0);

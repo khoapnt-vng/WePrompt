@@ -61,6 +61,7 @@ type SliderProps = {
 
 type InputNumberProps = {
   'aria-label'?: string;
+  autoFocus?: boolean;
   disabled?: boolean;
   error?: boolean;
   max?: number;
@@ -133,6 +134,7 @@ vi.mock('@arco-design/web-react', async () => {
   const InputNumber = ({ error: _error, onChange, precision: _precision, size: _size, ...props }: InputNumberProps) => (
     <input
       aria-label={props['aria-label']}
+      autoFocus={props.autoFocus}
       disabled={props.disabled}
       max={props.max}
       min={props.min}
@@ -1741,6 +1743,7 @@ describe('CutView', () => {
     const input = screen.getByRole('spinbutton', {
       name: 'conversation.creativeStudio.workspace.controls.targetDuration',
     });
+    expect(input).toHaveFocus();
     expect(input).toHaveAttribute('min', '5');
     expect(input).toHaveAttribute('max', '1440');
     fireEvent.change(input, { target: { value: '30' } });
@@ -1749,6 +1752,59 @@ describe('CutView', () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith(30, TARGET_AUTHORITY));
     await waitFor(() => expect(document.querySelector('[data-cut-film]')).toHaveTextContent('0:30'));
     expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+    expect(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    ).toHaveFocus();
+  });
+
+  it('returns focus to Edit after cancelling a target-duration draft', async () => {
+    renderCut({
+      cutProjection: cut({ targetDurationSeconds: 18 }),
+      onSetTargetDuration: vi.fn(async () => true),
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    );
+    expect(
+      screen.getByRole('spinbutton', {
+        name: 'conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    ).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: 'common.cancel' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', {
+          name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+        })
+      ).toHaveFocus()
+    );
+  });
+
+  it('returns focus to Edit after saving an unchanged target duration without invoking Main', async () => {
+    const update = vi.fn(async () => true);
+    renderCut({ cutProjection: cut({ targetDurationSeconds: 18 }), onSetTargetDuration: update });
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', {
+          name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+        })
+      ).toHaveFocus()
+    );
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('fails closed on an invalid or refused target and leaves the retryable draft visible', async () => {
@@ -1771,9 +1827,51 @@ describe('CutView', () => {
     expect(update).not.toHaveBeenCalled();
 
     fireEvent.change(input, { target: { value: '30' } });
-    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    const save = screen.getByRole('button', { name: 'common.save' });
+    save.focus();
+    fireEvent.click(save);
     await waitFor(() => expect(update).toHaveBeenCalledWith(30, TARGET_AUTHORITY));
     expect(screen.getByRole('spinbutton')).toHaveValue(30);
+    expect(save).toHaveFocus();
+  });
+
+  it('does not move focus to the new project when a target editor is discarded during navigation', async () => {
+    const update = vi.fn(async () => true);
+    const view = render(
+      <CutView
+        actions={actions()}
+        pending={false}
+        projectId='project_1'
+        projection={projection(cut({ targetDurationSeconds: 18 }))}
+        onOpenBeat={vi.fn()}
+        onSetTargetDuration={update}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    );
+    expect(screen.getByRole('spinbutton')).toHaveFocus();
+
+    view.rerender(
+      <CutView
+        actions={actions()}
+        pending={false}
+        projectId='project_2'
+        projection={{ ...projection(cut({ targetDurationSeconds: 24 })), projectId: 'project_2', projectRevision: 1 }}
+        onOpenBeat={vi.fn()}
+        onSetTargetDuration={update}
+      />
+    );
+
+    await waitFor(() => expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument());
+    expect(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    ).not.toHaveFocus();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('discards a target draft when refreshed authority changes during editing', async () => {

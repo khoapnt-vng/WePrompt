@@ -21,6 +21,31 @@ const INVALID = 'conversation.creativeStudio.phase.shared.invalidProjectName';
 const AUTHORITY = { projectId: 'project_1', expectedRevision: 7 };
 
 describe('WorkspaceProjectTitle', () => {
+  it('uses the same bounded text box for editable and read-only titles', () => {
+    const onRename = vi.fn(async () => true);
+    const view = render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name={'A very long project title '.repeat(12)}
+        pending={false}
+        onRename={onRename}
+      />
+    );
+    const editableTextClass = view.container.querySelector('bdi')?.className;
+    expect(editableTextClass).not.toBe('');
+
+    view.rerender(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name={'A very long project title '.repeat(12)}
+        pending={false}
+      />
+    );
+    expect(view.container.querySelector('bdi')?.className).toBe(editableTextClass);
+  });
+
   it('commits one trimmed inline rename on Enter and reflects the refreshed authority', async () => {
     const onRename = vi.fn(async () => true);
     const view = render(
@@ -92,6 +117,7 @@ describe('WorkspaceProjectTitle', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(INVALID);
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(onRename).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toBeVisible();
 
     fireEvent.keyDown(input, { key: 'Escape' });
     expect(screen.queryByRole('textbox', { name: RENAME })).not.toBeInTheDocument();

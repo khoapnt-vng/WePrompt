@@ -117,13 +117,32 @@ export const CutView: React.FC<CutViewProps> = ({
   const targetEditAuthorityRef = useRef<(CutProjectEditAuthority & { targetDurationSeconds: number | null }) | null>(
     null
   );
+  const targetEditButtonRef = useRef<HTMLButtonElement | null>(null);
+  const restoreTargetEditFocusRef = useRef(false);
+
+  const closeTargetEditor = useCallback(
+    (restoreFocus: boolean): void => {
+      targetEditAuthorityRef.current = null;
+      restoreTargetEditFocusRef.current = restoreFocus;
+      setTargetDraft(canonicalTargetDuration ?? 5);
+      setEditingTarget(false);
+    },
+    [canonicalTargetDuration]
+  );
 
   useEffect(() => {
+    restoreTargetEditFocusRef.current = false;
     setEditingTarget(false);
     setTargetDraft(canonicalTargetDuration ?? 5);
     setTargetPending(false);
     targetEditAuthorityRef.current = null;
   }, [projectId]);
+
+  useLayoutEffect(() => {
+    if (editingTarget || !restoreTargetEditFocusRef.current) return;
+    restoreTargetEditFocusRef.current = false;
+    targetEditButtonRef.current?.focus({ preventScroll: true });
+  }, [editingTarget]);
 
   useEffect(() => {
     if (!editingTarget && canonicalTargetDuration !== null) setTargetDraft(canonicalTargetDuration);
@@ -140,6 +159,7 @@ export const CutView: React.FC<CutViewProps> = ({
     ) {
       return;
     }
+    restoreTargetEditFocusRef.current = false;
     targetEditAuthorityRef.current = null;
     setTargetDraft(canonicalTargetDuration ?? 5);
     setEditingTarget(false);
@@ -228,14 +248,14 @@ export const CutView: React.FC<CutViewProps> = ({
       authority.expectedRevision !== projection.projectRevision ||
       authority.targetDurationSeconds !== canonicalTargetDuration
     ) {
+      restoreTargetEditFocusRef.current = false;
       targetEditAuthorityRef.current = null;
       setTargetDraft(canonicalTargetDuration ?? 5);
       setEditingTarget(false);
       return;
     }
     if (targetDraft === canonicalTargetDuration) {
-      targetEditAuthorityRef.current = null;
-      setEditingTarget(false);
+      closeTargetEditor(true);
       return;
     }
     setTargetPending(true);
@@ -246,8 +266,7 @@ export const CutView: React.FC<CutViewProps> = ({
           expectedRevision: authority.expectedRevision,
         })
       ) {
-        targetEditAuthorityRef.current = null;
-        setEditingTarget(false);
+        closeTargetEditor(true);
       }
     } finally {
       setTargetPending(false);
@@ -340,6 +359,7 @@ export const CutView: React.FC<CutViewProps> = ({
               {editingTarget ? (
                 <span className={styles.targetEditor}>
                   <InputNumber
+                    autoFocus
                     aria-label={t('conversation.creativeStudio.workspace.controls.targetDuration')}
                     disabled={pending || targetPending}
                     error={!targetDraftValid}
@@ -363,9 +383,7 @@ export const CutView: React.FC<CutViewProps> = ({
                     disabled={pending || targetPending}
                     size='mini'
                     onClick={() => {
-                      targetEditAuthorityRef.current = null;
-                      setTargetDraft(canonicalTargetDuration ?? 5);
-                      setEditingTarget(false);
+                      closeTargetEditor(true);
                     }}
                   >
                     {t('common.cancel')}
@@ -380,6 +398,9 @@ export const CutView: React.FC<CutViewProps> = ({
                   </bdi>
                   {onSetTargetDuration === undefined ? null : (
                     <Button
+                      ref={(node) => {
+                        targetEditButtonRef.current = node instanceof HTMLButtonElement ? node : null;
+                      }}
                       aria-label={`${t('common.edit')}: ${t(
                         'conversation.creativeStudio.workspace.controls.targetDuration'
                       )}`}
@@ -387,6 +408,7 @@ export const CutView: React.FC<CutViewProps> = ({
                       size='mini'
                       type='text'
                       onClick={() => {
+                        restoreTargetEditFocusRef.current = false;
                         targetEditAuthorityRef.current = {
                           projectId,
                           expectedRevision: projection.projectRevision,

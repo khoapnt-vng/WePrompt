@@ -181,7 +181,9 @@ export const WorkspaceProjectTitle: React.FC<WorkspaceProjectTitleProps> = ({
           ) : null}
         </span>
       ) : onRename === undefined ? (
-        <bdi dir='auto'>{name}</bdi>
+        <bdi className={styles.projectTitleText} dir='auto'>
+          {name}
+        </bdi>
       ) : (
         <Tooltip content={renameLabel}>
           <Button
