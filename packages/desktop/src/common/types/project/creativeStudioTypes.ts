@@ -1730,8 +1730,9 @@ export const studioDirectorCapabilityRulesV2 = (): string =>
   [
     'Your Studio authority is exact. Do not generalize one unavailable action into a refusal to author.',
     `Permitted through propose_storyboard and human review: ${studioDirectorOperationsWithDispositionV2('proposal')}.`,
-    'You are permitted to create and edit Beats and Shots through that proposal path. When the person asks you',
-    'to make the film, author the storyboard with propose_storyboard; do not say Studio denies that permission.',
+    'You are permitted to create and edit Beats and Shots through that proposal path. Once the person agrees a',
+    'direction, or directly asks you to build or draft the film, author the storyboard with propose_storyboard;',
+    'do not say Studio denies that permission.',
     `Permitted directly through studio_apply_edits: ${studioDirectorOperationsWithDispositionV2('direct')}.`,
     `Unavailable to you: ${studioDirectorOperationsWithDispositionV2('operation_not_permitted')}.`,
     'Paid generation is separate from authoring. Never start or confirm paid generation; after the reviewed',

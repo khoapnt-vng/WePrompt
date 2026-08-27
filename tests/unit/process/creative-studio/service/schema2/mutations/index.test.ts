@@ -1614,6 +1614,59 @@ describe('schema-5 reference lifecycle mutations', () => {
 });
 
 describe('schema-5 coverage, park, and deterministic controls', () => {
+  it('adds a Beat and fills its coverage in one ordered batch against the sequential draft', () => {
+    const project = makeProject();
+    const proposedShots = Array.from({ length: 6 }, (_, index) => ({
+      shotId: `shot_new_${index + 1}`,
+      shootingScript: `New Beat Shot ${index + 1}.`,
+      durationSeconds: 4,
+      chainBreak: 'none' as const,
+    }));
+
+    const result = apply(project, [
+      {
+        kind: 'add_beat',
+        beatId: 'beat_new',
+        beat: { title: 'New Beat', story: 'A complete new Beat.', targetSeconds: 24 },
+        beforeBeatId: null,
+      },
+      {
+        kind: 'apply_coverage',
+        beatId: 'beat_new',
+        shots: proposedShots,
+        fixedShots: [],
+      },
+    ]);
+
+    expect(result.createdBeatIds).toEqual(['beat_new']);
+    expect(result.createdShotIds).toEqual(proposedShots.map(({ shotId }) => shotId));
+    expect(result.project.beatOrder).toEqual(['beat_1', 'beat_2', 'beat_new']);
+    expect(result.project.beats.beat_new).toMatchObject({
+      title: 'New Beat',
+      story: 'A complete new Beat.',
+      targetSeconds: 24,
+      shotOrder: proposedShots.map(({ shotId }) => shotId),
+    });
+    expect(result.coverageResults).toEqual([
+      {
+        beatId: 'beat_new',
+        createdShotIds: proposedShots.map(({ shotId }) => shotId),
+        retainedShotIds: [],
+        removedShotIds: [],
+        fixedShotIds: [],
+      },
+    ]);
+    for (const proposed of proposedShots) {
+      expect(result.project.shots[proposed.shotId]).toMatchObject({
+        shootingScript: proposed.shootingScript,
+        durationSeconds: 4,
+        chainBreak: 'none',
+        referenceBinding: { status: 'unassigned' },
+      });
+    }
+    expect(validateStudioProjectV2(persist(result.project))).toBe(true);
+  });
+
   it('preserves a fixed authored Shooting script while replacing only the free coverage interval', () => {
     const project = makeProject();
     project.shots.shot_1!.shootingScript = 'Keep this reviewed script.';

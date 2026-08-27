@@ -8,7 +8,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
+  STUDIO_MAX_MUTATION_OPERATIONS,
+} from '@/common/types/project/creativeStudioTypes';
 
 import {
   DIRECTOR_PRESET_RULES,
@@ -95,6 +98,12 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/before/i);
   });
 
+  it('ends the authoring brake when the person agrees or directly asks to build or draft', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/brake ends[\s\S]*explicitly agrees to a direction/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/directly asks you to build or draft the film/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/authorizes free authoring only; it never authorizes paid generation/i);
+  });
+
   it('names the two tools it must not reach for unprompted', () => {
     // Naming them is what makes the instruction actionable; "do not act" alone is advice.
     expect(DIRECTOR_PRESET_RULES).toContain('studio_apply_edits');
@@ -154,13 +163,70 @@ describe('the Director preset rules', () => {
   it('authors Beats and Shots through review without claiming it can spend', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/permitted to create and edit Beats and Shots/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/author the storyboard with propose_storyboard/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/agrees a[\s\S]*direction, or directly asks you to build or draft/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/never start or confirm paid generation/i);
+  });
+
+  it('drafts the storyboard as a numbered phase before it plans references', () => {
+    const direction = DIRECTOR_PRESET_RULES.indexOf('1. Agree the direction');
+    const storyboard = DIRECTOR_PRESET_RULES.indexOf('2. Draft the storyboard before planning canonical references');
+    const references = DIRECTOR_PRESET_RULES.indexOf('3. Plan and request canonical references');
+    expect(direction).toBeGreaterThanOrEqual(0);
+    expect(storyboard).toBeGreaterThan(direction);
+    expect(references).toBeGreaterThan(storyboard);
+  });
+
+  it('requires one bounded proposal whose adjacent coverage operations create the Shots', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/exactly one\s+propose_storyboard call for the complete draft/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /for every new Beat, put add_beat immediately followed by\s+apply_coverage for that same Beat/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/apply_coverage shots array creates all of that Beat's Shots/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/6 Beats × 6 Shots film is 12 operations total/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/not 42 operations made from six add_shot calls per Beat/i);
+    expect(DIRECTOR_PRESET_RULES).toContain(`The mutation batch cap is ${STUDIO_MAX_MUTATION_OPERATIONS}`);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/a 42-operation draft is rejected/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/one proposal and\s+one human review click/i);
+  });
+
+  it('uses coverage only for empty coverage and edit_shot for existing Shooting scripts', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /apply_coverage fills empty coverage and never rewrites an existing Shooting script/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/preserve every fixed\s+Shot exactly as read/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/use edit_shot for that exact Shot instead/i);
   });
 
   it('keeps a recorded proposal pending until a later read proves human acceptance', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/pending human review/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/never claim.*applied/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/cannot approve or reject your own proposal/i);
+  });
+
+  it('closes out only exact tool-proven outcomes and names the action still owed', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/close every turn from positive tool evidence/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/applied when a current read proves the revision and values/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/recorded when the write result proves a record exists/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/queued when the result proves work is waiting/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/proposal pending human review is pending, not applied/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /reference request queued for the person to start[\s\S]*recorded work, not generated media/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /reference plan or current reference images do not complete the workflow[\s\S]*active Shot remains\s+unbound/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Shots that still need set_shot_reference_binding as remaining work/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/rejected, failed, busy, unconfirmed, and storage_error.*incomplete/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/when the person owes an action, name that exact action/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/accept or revise a proposal/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/start reference\s+generation and confirm its spend/i);
+  });
+
+  it('forbids an evidence-free stock all-done claim', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never use a stock claim such as "All done"/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/"everything went through as planned"/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/unless fresh tool\s+evidence proves every requested item complete/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/for mixed outcomes, list what is proved and what remains/i);
   });
 
   it('spells out the ordered app-owned current-reference workflow', () => {
