@@ -40,6 +40,7 @@ import {
   type StudioJobV2,
   type StudioMutationBatchV2,
   type StudioMutationOperationV2,
+  type StudioMutationReasonV2 as StudioMutationReason,
   type StudioMutationReducerContextV2,
   type StudioProjectV2,
   type StudioReferenceDraftV2,
@@ -47,23 +48,13 @@ import {
   type StudioSpendPolicy,
   type StudioUndoPatch,
 } from '@/common/types/project/creativeStudioTypes';
+export type { StudioMutationReasonV2 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioInboundShotReferencesV2 } from '../chain';
 import {
   resolveStudioCanonicalBoardAssetV2,
   resolveStudioCurrentBoardPanelAuthorityV2,
 } from '../generation/boardPanel';
 import { validateStudioFixedShotReviewsV2, validateStudioProjectV2, validateStudioProposedShotV2 } from '../validation';
-
-export type StudioMutationReasonV2 =
-  | 'beat_capacity_reached'
-  | 'beat_shot_capacity_reached'
-  | 'project_shot_capacity_reached'
-  | 'invalid_shot_duration'
-  | 'dependency_blocked'
-  | 'identity_collision'
-  | 'invalid_operation'
-  | 'undo_conflict'
-  | 'validation_failed';
 
 export type StudioMutationApplyResultV2 = {
   project: StudioProjectV2;
@@ -74,9 +65,9 @@ export type StudioMutationApplyResultV2 = {
 
 /** A bounded mutation failure safe for translation by the service boundary. */
 export class StudioMutationErrorV2 extends Error {
-  readonly reasonCode: StudioMutationReasonV2;
+  readonly reasonCode: StudioMutationReason;
 
-  constructor(reasonCode: StudioMutationReasonV2) {
+  constructor(reasonCode: StudioMutationReason) {
     super(reasonCode);
     this.name = 'StudioMutationErrorV2';
     this.reasonCode = reasonCode;
@@ -144,7 +135,7 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   undo_last: new Set(['kind', 'entryId']),
 };
 
-const fail = (reasonCode: StudioMutationReasonV2): never => {
+const fail = (reasonCode: StudioMutationReason): never => {
   throw new StudioMutationErrorV2(reasonCode);
 };
 

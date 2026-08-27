@@ -1167,6 +1167,7 @@
     "errors": {
       "featureDisabled": "Creative Studio is disabled in this build.",
       "invalidPayload": "The request contains invalid or incomplete information.",
+      "mutationRefused": "This change cannot be applied to the project in its current state. Review the project and try again.",
       "pricingRefused": "The estimate was refused before submission. Nothing was submitted.",
       "projectNotFound": "The Creative Studio project no longer exists.",
       "storyboardExists": "This project already has a storyboard. Confirm replacement before drafting again.",

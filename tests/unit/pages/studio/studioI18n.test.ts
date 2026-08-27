@@ -2001,6 +2001,23 @@ describe('Creative Studio workspace translations', () => {
     );
   });
 
+  it('localizes the authoring-mutation refusal in every configured locale', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const conversation = loadConversation(locale);
+      const creativeStudio = asObject(conversation.creativeStudio, `${locale}.creativeStudio`);
+      const errors = asObject(creativeStudio.errors, `${locale}.creativeStudio.errors`);
+
+      expect(errors.mutationRefused, locale).toBeTypeOf('string');
+      expect((errors.mutationRefused as string).trim(), locale).not.toBe('');
+    }
+
+    const creativeStudio = asObject(englishConversation.creativeStudio, 'creativeStudio');
+    const errors = asObject(creativeStudio.errors, 'creativeStudio.errors');
+    expect(errors.mutationRefused).toBe(
+      'This change cannot be applied to the project in its current state. Review the project and try again.'
+    );
+  });
+
   it('localizes the seed-still variation-grid refusal in every configured locale', () => {
     for (const locale of i18nConfig.supportedLanguages) {
       const conversation = loadConversation(locale);

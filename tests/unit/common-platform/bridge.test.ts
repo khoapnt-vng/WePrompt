@@ -263,6 +263,47 @@ describe('local bridge', () => {
     vi.doUnmock('@process/services/creative-studio/runtime');
   });
 
+  it('preserves only a bounded Studio mutation reason across the V2 IPC transport', async () => {
+    await loadLoopbackBridge();
+    vi.doMock('@process/services/creative-studio/runtime', () => ({
+      getCreativeStudioRuntime: vi.fn(),
+      getCreativeStudioService: vi.fn(),
+    }));
+    const [{ creativeStudio }, { initCreativeStudioBridge }, { StudioMutationErrorV2 }] = await Promise.all([
+      import('@/common/adapter/ipcBridge'),
+      import('@process/bridge/creativeStudioBridge'),
+      import('@process/services/creative-studio/service/schema2/mutations'),
+    ]);
+    initCreativeStudioBridge({
+      isFeatureEnabled: () => true,
+      getService: () =>
+        ({
+          applyMutations: async () => {
+            throw Object.assign(new StudioMutationErrorV2('dependency_blocked'), {
+              internalState: 'private mutation details',
+            });
+          },
+        }) as never,
+    });
+
+    const result = await creativeStudio.applyAuthoringBatch.invoke({
+      projectId: 'project_1',
+      expectedRevision: 1,
+      operations: [{ kind: 'set_brief', brief: 'Revised' }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'mutation_refused',
+        reason: 'dependency_blocked',
+        messageKey: 'conversation.creativeStudio.errors.mutationRefused',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('private mutation details');
+    vi.doUnmock('@process/services/creative-studio/runtime');
+  });
+
   it('disposes a renderer query callback listener when the invoke times out', async () => {
     vi.useFakeTimers();
     const { bridge, getIncoming, outbound } = await loadLoopbackBridge();

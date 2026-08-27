@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_MAX_EXPORTS_PER_SHAPE,
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+  STUDIO_MUTATION_REASONS_V2,
   STUDIO_VIEWS,
   type StudioMutationBatchResultV2,
   type StudioRendererPreparedSubmissionOptionsV2,
@@ -20,6 +21,7 @@ import { CreativeStudioStoreError } from '@process/services/creative-studio/stor
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
 import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import { StudioPricingErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/estimate';
+import { StudioMutationErrorV2 } from '@process/services/creative-studio/service/schema2/mutations';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
 
@@ -419,6 +421,53 @@ describe('initCreativeStudioBridge', () => {
       { mutationId: 'native_mutation_1', capturedAt: '2026-08-19T02:03:04.000Z' }
     );
     expect((await registeredHandler('applyAuthoringBatch')(input as never)) as object).not.toHaveProperty('project');
+  });
+
+  it.each(STUDIO_MUTATION_REASONS_V2)(
+    'reports the bounded %s authoring refusal as current-state feedback, not a storage failure',
+    async (reason) => {
+      vi.mocked(service.applyMutations).mockRejectedValueOnce(new StudioMutationErrorV2(reason));
+      initCreativeStudioBridge(dependencies);
+
+      await expect(
+        registeredHandler('applyAuthoringBatch')({
+          projectId: 'project_1',
+          expectedRevision: 6,
+          operations: [
+            {
+              kind: 'set_shot_reference_binding',
+              shotId: 'shot_1',
+              characterReferenceIds: ['reference_character_1'],
+              backgroundReferenceId: null,
+            },
+          ],
+        } as never)
+      ).resolves.toEqual({
+        ok: false,
+        error: {
+          code: 'mutation_refused',
+          reason,
+          messageKey: 'conversation.creativeStudio.errors.mutationRefused',
+        },
+      });
+    }
+  );
+
+  it('redacts an impossible mutation refusal reason behind the unknown-error boundary', async () => {
+    vi.mocked(service.applyMutations).mockRejectedValueOnce(new StudioMutationErrorV2('unknown_reason' as never));
+    initCreativeStudioBridge(dependencies);
+
+    const result = await registeredHandler('applyAuthoringBatch')({
+      projectId: 'project_1',
+      expectedRevision: 6,
+      operations: [{ kind: 'set_brief', brief: 'Revised' }],
+    } as never);
+
+    expect(result).toEqual({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
+    });
+    expect(JSON.stringify(result)).not.toContain('unknown_reason');
   });
 
   it('routes the UI reference-plan amendment through the shared authoring mutation seam unchanged', async () => {

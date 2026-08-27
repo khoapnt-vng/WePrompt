@@ -1968,6 +1968,7 @@
     "errors": {
       "featureDisabled": "此版本中已停用 Creative Studio。",
       "invalidPayload": "要求包含無效或不完整的資訊。",
+      "mutationRefused": "無法在專案目前狀態下套用此變更。請檢查專案後再試。",
       "pricingRefused": "估價在提交前遭拒。未提交任何內容。",
       "projectNotFound": "此創意工作室專案已不存在。",
       "storyboardExists": "此專案已有分鏡。再次建立草稿前請確認取代。",

@@ -1968,6 +1968,7 @@
     "errors": {
       "featureDisabled": "Creative Studio はこのビルドでは無効です。",
       "invalidPayload": "リクエストに無効または不完全な情報が含まれています。",
+      "mutationRefused": "この変更はプロジェクトの現在の状態には適用できません。プロジェクトを確認して、もう一度お試しください。",
       "pricingRefused": "送信前に見積もりが拒否されました。何も送信されていません。",
       "projectNotFound": "このクリエイティブスタジオのプロジェクトは存在しません。",
       "storyboardExists": "このプロジェクトには既にストーリーボードがあります。再作成する前に置き換えを確認してください。",

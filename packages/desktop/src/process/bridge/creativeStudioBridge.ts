@@ -9,6 +9,7 @@ import { ipcBridge } from '@/common';
 import { CREATIVE_STUDIO_ENABLED } from '@/common/config/constants';
 import {
   isStudioPricingRefusalReasonV2,
+  isStudioMutationReasonV2,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
@@ -40,6 +41,7 @@ import {
 import { StudioJobManagerError } from '@process/services/creative-studio/jobManager';
 import { StudioPreparedSubmissionCacheErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import { StudioPricingErrorV2 } from '@process/services/creative-studio/service/schema2/pricing/estimate';
+import { StudioMutationErrorV2 } from '@process/services/creative-studio/service/schema2/mutations';
 import type { CreativeStudioServiceV2 } from '@process/services/creative-studio/service/v2Service';
 import { CreativeStudioStoreError } from '@process/services/creative-studio/store';
 import { CreativeStudioMediaError } from '@process/services/creative-studio/mediaStore';
@@ -71,6 +73,7 @@ const errorMessageKeys: Record<Exclude<StudioCommandErrorCode, 'connection_valid
   quote_cache_full: 'conversation.creativeStudio.errors.quoteCacheFull',
   quote_too_large: 'conversation.creativeStudio.errors.quoteTooLarge',
   media_in_use: 'conversation.creativeStudio.errors.mediaInUse',
+  mutation_refused: 'conversation.creativeStudio.errors.mutationRefused',
   storage_error: 'conversation.creativeStudio.errors.storage',
 };
 
@@ -86,7 +89,7 @@ const connectionValidationErrorMessageKeys: Record<StudioConnectionValidationFai
 
 type SimpleStudioCommandErrorCode = Exclude<
   StudioCommandErrorCode,
-  'pricing_refused' | 'connection_validation_failed' | 'project_quarantined'
+  'pricing_refused' | 'connection_validation_failed' | 'project_quarantined' | 'mutation_refused'
 >;
 
 const storeErrorCode = (error: CreativeStudioStoreError): SimpleStudioCommandErrorCode =>
@@ -117,6 +120,16 @@ const toCommandError = (error: unknown): StudioCommandResult<never> => {
         code: 'connection_validation_failed',
         reason: error.reason,
         messageKey: connectionValidationErrorMessageKeys[error.reason],
+      },
+    };
+  }
+  if (error instanceof StudioMutationErrorV2 && isStudioMutationReasonV2(error.reasonCode)) {
+    return {
+      ok: false,
+      error: {
+        code: 'mutation_refused',
+        reason: error.reasonCode,
+        messageKey: errorMessageKeys.mutation_refused,
       },
     };
   }

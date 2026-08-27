@@ -1986,6 +1986,7 @@
     "errors": {
       "featureDisabled": "Creative Studio bu derlemede devre dışıdır.",
       "invalidPayload": "İstek geçersiz veya eksik bilgiler içeriyor.",
+      "mutationRefused": "Bu değişiklik projenin mevcut durumuna uygulanamaz. Projeyi gözden geçirip tekrar deneyin.",
       "pricingRefused": "Tahmin gönderimden önce reddedildi. Hiçbir şey gönderilmedi.",
       "projectNotFound": "Creative Studio projesi artık mevcut değil.",
       "storyboardExists": "Bu projede zaten bir storyboard var. Yeniden taslak oluşturmadan önce değiştirmeyi onaylayın.",

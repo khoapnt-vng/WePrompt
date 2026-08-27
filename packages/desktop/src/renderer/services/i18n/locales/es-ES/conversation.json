@@ -2001,6 +2001,7 @@
     "errors": {
       "featureDisabled": "Creative Studio está deshabilitado en esta compilación.",
       "invalidPayload": "La solicitud contiene información no válida o incompleta.",
+      "mutationRefused": "Este cambio no se puede aplicar al proyecto en su estado actual. Revisa el proyecto e inténtalo de nuevo.",
       "pricingRefused": "La estimación se rechazó antes del envío. No se envió nada.",
       "projectNotFound": "El proyecto de Creative Studio ya no existe.",
       "storyboardExists": "Este proyecto ya tiene un guion gráfico. Confirma que deseas sustituirlo antes de crear otro borrador.",

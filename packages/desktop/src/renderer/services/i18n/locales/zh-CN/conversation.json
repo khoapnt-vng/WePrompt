@@ -1968,6 +1968,7 @@
     "errors": {
       "featureDisabled": "此版本中已禁用 Creative Studio。",
       "invalidPayload": "请求包含无效或不完整的信息。",
+      "mutationRefused": "无法在项目当前状态下应用此更改。请检查项目后重试。",
       "pricingRefused": "报价在提交前被拒绝。未提交任何内容。",
       "projectNotFound": "此创意工作室项目已不存在。",
       "storyboardExists": "此项目已有故事板。再次起草前请确认替换。",

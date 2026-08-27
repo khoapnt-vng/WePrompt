@@ -1968,6 +1968,7 @@
     "errors": {
       "featureDisabled": "이 빌드에서는 Creative Studio가 비활성화되어 있습니다.",
       "invalidPayload": "요청에 유효하지 않거나 불완전한 정보가 포함되어 있습니다.",
+      "mutationRefused": "이 변경 사항은 프로젝트의 현재 상태에 적용할 수 없습니다. 프로젝트를 검토한 후 다시 시도하세요.",
       "pricingRefused": "제출 전에 견적이 거부되었습니다. 아무것도 제출되지 않았습니다.",
       "projectNotFound": "이 크리에이티브 스튜디오 프로젝트는 더 이상 존재하지 않습니다.",
       "storyboardExists": "이 프로젝트에는 이미 스토리보드가 있습니다. 다시 초안을 만들기 전에 교체를 확인하세요.",

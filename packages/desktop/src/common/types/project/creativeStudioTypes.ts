@@ -2001,6 +2001,26 @@ export type StudioGenerationCapabilityV2 = {
   blocks: StudioGenerationCapabilityBlockGroupV2[];
 };
 
+/** Bounded, renderer-safe reasons for refusing an authoring mutation before persistence. */
+export const STUDIO_MUTATION_REASONS_V2 = [
+  'beat_capacity_reached',
+  'beat_shot_capacity_reached',
+  'project_shot_capacity_reached',
+  'invalid_shot_duration',
+  'dependency_blocked',
+  'identity_collision',
+  'invalid_operation',
+  'undo_conflict',
+  'validation_failed',
+] as const;
+
+export type StudioMutationReasonV2 = (typeof STUDIO_MUTATION_REASONS_V2)[number];
+
+const STUDIO_MUTATION_REASON_SET_V2: ReadonlySet<string> = new Set(STUDIO_MUTATION_REASONS_V2);
+
+export const isStudioMutationReasonV2 = (value: unknown): value is StudioMutationReasonV2 =>
+  typeof value === 'string' && STUDIO_MUTATION_REASON_SET_V2.has(value);
+
 export type StudioCommandErrorCode =
   | 'feature_disabled'
   | 'invalid_payload'
@@ -2022,6 +2042,7 @@ export type StudioCommandErrorCode =
   | 'runtime_inactive'
   | 'project_quarantined'
   | 'connection_validation_failed'
+  | 'mutation_refused'
   | StudioSubmissionCacheErrorCodeV2
   | 'storage_error';
 
@@ -2043,7 +2064,15 @@ export type StudioCommandError =
       messageKey: string;
     }
   | {
-      code: Exclude<StudioCommandErrorCode, 'pricing_refused' | 'connection_validation_failed' | 'project_quarantined'>;
+      code: 'mutation_refused';
+      reason: StudioMutationReasonV2;
+      messageKey: string;
+    }
+  | {
+      code: Exclude<
+        StudioCommandErrorCode,
+        'pricing_refused' | 'connection_validation_failed' | 'project_quarantined' | 'mutation_refused'
+      >;
       messageKey: string;
     };
 
