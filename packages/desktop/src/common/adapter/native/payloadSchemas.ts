@@ -324,6 +324,19 @@ const studioV2ProjectInputSchema = z
   })
   .strict();
 const studioV2ProjectRequestSchema = z.object({ projectId: safeIdSchema }).strict();
+const studioV2ProjectStatusRequestSchema = z.preprocess((value) => {
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) !== Object.prototype ||
+      !Object.hasOwn(value, 'projectId') ||
+      Reflect.ownKeys(value).some((key) => key !== 'projectId' && key !== 'detail'))
+  ) {
+    return null;
+  }
+  return value;
+}, z.object({ projectId: safeIdSchema, detail: z.boolean().optional() }).strict());
 const studioV2MutationRequestShape = {
   projectId: safeIdSchema,
   expectedRevision: studioExpectedRevisionSchema,
@@ -971,6 +984,7 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.apply-authoring-batch': studioV2ApplyAuthoringBatchSchema,
   'creative-studio.undo-last': z.object({ ...studioV2MutationRequestShape, entryId: safeIdSchema }).strict(),
   'creative-studio.get-project-workspace': studioV2ProjectRequestSchema,
+  'creative-studio.get-project-status': studioV2ProjectStatusRequestSchema,
   'creative-studio.retry-conditioning-frame': z
     .object({ ...studioV2MutationRequestShape, dependentShotId: safeIdSchema })
     .strict(),

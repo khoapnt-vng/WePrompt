@@ -1970,6 +1970,237 @@ export type StudioRouteCatalogV2 = {
   catalogVersion: string;
 };
 
+/** Stable pipeline order for the derived Creative Studio project status. */
+export const STUDIO_PROJECT_STATUS_STAGE_ORDER_V2 = [
+  'brief',
+  'engines',
+  'references',
+  'storyboard',
+  'bindings',
+  'production',
+  'cut',
+] as const;
+
+export type StudioProjectStatusStageIdV2 = (typeof STUDIO_PROJECT_STATUS_STAGE_ORDER_V2)[number];
+
+export type StudioProjectStatusStageStateV2 = 'not_started' | 'in_progress' | 'complete' | 'blocked';
+
+/** Explicit no-cache input used when fresh provider inventory cannot be discovered. */
+export type StudioProjectStatusRouteCatalogV2 =
+  | { status: 'available'; catalog: StudioRouteCatalogV2 }
+  | { status: 'inventory_unavailable'; catalogVersion: null };
+
+export const STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2 = [
+  'route_inventory_unavailable',
+  'route_not_selected',
+  'route_setup_required',
+  'route_unavailable',
+  'route_retired',
+  'route_incompatible_frame',
+  'route_first_frame_unsupported',
+  'route_duration_unsupported',
+  'reference_plan_invalid',
+  'reference_generation_required',
+  'reference_approval_required',
+  'reference_generation_failed',
+  'reference_binding_unassigned',
+  'reference_binding_unknown_reference',
+  'reference_binding_wrong_kind',
+  'reference_binding_unapproved_reference',
+  'reference_binding_missing_asset',
+  'reference_binding_capacity_exceeded',
+  'seed_selection_required',
+  'seed_generation_required',
+  'conditioning_frame_required',
+  'extraction_failed',
+  'dependency_failed',
+  'generation_invalid_request',
+  'generation_content_rejected',
+  'generation_auth',
+  'generation_quota',
+  'generation_rate_limited',
+  'generation_provider_unavailable',
+  'generation_timeout',
+  'generation_poll_deadline',
+  'generation_no_output',
+  'generation_variation_grid',
+  'generation_submission_unknown',
+  'generation_download_failed',
+  'generation_unsupported',
+  'generation_unknown',
+  'cut_invalid_media',
+  'cut_bed_too_short',
+] as const;
+
+export type StudioProjectStatusBlockerCauseV2 = (typeof STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2)[number];
+
+export type StudioProjectStatusWhereV2 =
+  | { kind: 'project' }
+  | { kind: 'route'; routeKind: StudioMediaKind }
+  | { kind: 'reference'; referenceId: string; jobId: string | null }
+  | {
+      kind: 'shot';
+      beatId: string;
+      shotId: string;
+      beatPosition: number;
+      shotPosition: number;
+      jobId: string | null;
+    }
+  | { kind: 'cut' };
+
+export type StudioProjectStatusPrepareIntentV2 =
+  | { kind: 'project_references'; referenceIds: string[] }
+  | {
+      kind: 'generation';
+      baseChoices: StudioPrepareGenerationChoiceV2[];
+      cascadeChoices: StudioPrepareGenerationChoiceV2[];
+      continuityChange: StudioContinuityChangeV2 | null;
+    };
+
+export type StudioProjectStatusFreeFixV2 =
+  | { op: 'retry_conditioning_frame'; dependentShotId: string }
+  | { op: 'terminalize_refused_job'; jobId: string }
+  | { op: 'set_shot_reference_binding'; shotId: string };
+
+export type StudioProjectStatusOwnerReasonV2 =
+  | 'select_engine'
+  | 'configure_engine'
+  | 'repair_engine_health'
+  | 'choose_compatible_engine'
+  | 'approve_reference'
+  | 'select_seed'
+  | 'review_project_data'
+  | 'review_job_recovery'
+  | 'acknowledge_possible_duplicate_charge'
+  | 'retry_download'
+  | 'edit_cut'
+  | 'replace_audio_bed';
+
+export type StudioProjectStatusRemedyV2 =
+  | ({ kind: 'free_fix' } & StudioProjectStatusFreeFixV2)
+  | {
+      kind: 'proposal';
+      prepare: StudioProjectStatusPrepareIntentV2;
+      /** Wave 6A discloses intent only; a later prepared quote supplies exact price authority. */
+      estimatedMinorUnits: null;
+      currency: null;
+    }
+  | { kind: 'owner_only'; reason: StudioProjectStatusOwnerReasonV2 };
+
+export type StudioProjectStatusBlockerV2 = {
+  cause: StudioProjectStatusBlockerCauseV2;
+  where: StudioProjectStatusWhereV2;
+  remedy: StudioProjectStatusRemedyV2;
+};
+
+export type StudioProjectStatusAdvisoryV2 =
+  | {
+      cause: 'target_duration_mismatch';
+      stage: Extract<StudioProjectStatusStageIdV2, 'storyboard' | 'cut'>;
+      actualSeconds: number;
+      targetSeconds: number;
+    }
+  | {
+      cause: 'current_take_stale';
+      stage: 'production';
+      shotId: string;
+      staleCauses: StudioRendererDirtyShotV2['causes'];
+    };
+
+export type StudioProjectStatusStageSummaryV2 =
+  | { stage: 'brief'; hasBrief: boolean }
+  | {
+      stage: 'engines';
+      image: StudioModelAvailability;
+      video: StudioModelAvailability;
+    }
+  | { stage: 'references'; plannedCount: number; approvedCount: number }
+  | {
+      stage: 'storyboard';
+      beatCount: number;
+      shotCount: number;
+      authoredShotCount: number;
+      plannedSeconds: number;
+      targetSeconds: number;
+    }
+  | { stage: 'bindings'; readyShotCount: number; shotCount: number; maxConditioningImages: number | null }
+  | { stage: 'production'; currentTakeCount: number; shotCount: number; activeJobCount: number }
+  | {
+      stage: 'cut';
+      currentTakeCount: number;
+      shotCount: number;
+      durationSeconds: number | null;
+      targetSeconds: number;
+      structurallyPlayable: boolean;
+    };
+
+export type StudioProjectStatusStageV2 = {
+  [Stage in StudioProjectStatusStageIdV2]: {
+    id: Stage;
+    state: StudioProjectStatusStageStateV2;
+    summary: Extract<StudioProjectStatusStageSummaryV2, { stage: Stage }>;
+    blockers: StudioProjectStatusBlockerV2[];
+  };
+}[StudioProjectStatusStageIdV2];
+
+export type StudioProjectStatusShotDetailV2 = {
+  beatId: string;
+  shotId: string;
+  beatPosition: number;
+  shotPosition: number;
+  seedStillAssetId: string | null;
+  videoAssetId: string | null;
+  latestGenerationJob: null | {
+    jobId: string;
+    purpose: Extract<StudioJobPurpose, 'seed_still' | 'video_take'>;
+    status: StudioJobStatusV2;
+    errorCode: StudioJobErrorV2['code'] | null;
+  };
+  binding:
+    | { status: 'ready'; selectedCount: number; limit: number | null }
+    | { status: 'unassigned'; selectedCount: number; limit: number | null }
+    | { status: 'unknown'; selectedCount: number; limit: null }
+    | {
+        status: 'invalid';
+        reason: Exclude<StudioReferenceBindingFailureReasonV2, 'unassigned'>;
+        selectedCount: number;
+        limit: number | null;
+      };
+  conditioning: null | {
+    upstreamShotId: string;
+    /** Persisted extraction state only; Wave 6A performs no physical media verification. */
+    recordStatus: 'missing' | StudioFrameExtraction['status'];
+    mediaVerified: false;
+    extractionId: string | null;
+    errorCode: StudioFrameExtraction['errorCode'];
+    attemptCount: number | null;
+  };
+};
+
+export type StudioProjectStatusReferenceDetailV2 = {
+  referenceId: string;
+  kind: StudioReferenceKindV2;
+  approved: boolean;
+  latestJob: null | {
+    jobId: string;
+    status: StudioJobStatusV2;
+    errorCode: StudioJobErrorV2['code'] | null;
+  };
+};
+
+export type StudioProjectStatusV2 = {
+  projectId: string;
+  projectRevision: number;
+  catalogVersion: string | null;
+  stages: StudioProjectStatusStageV2[];
+  blockerCount: number;
+  advisories: StudioProjectStatusAdvisoryV2[];
+  boards: { currentPictureCount: number; shotCount: number };
+  detail: { shots: StudioProjectStatusShotDetailV2[]; references: StudioProjectStatusReferenceDetailV2[] } | null;
+};
+
+export type StudioProjectStatusRequestV2 = { projectId: string; detail?: boolean };
+
 /** One renderer-requested target whose persisted route/input capability Main may explain. */
 export type StudioGenerationCapabilityItemV2 =
   | {

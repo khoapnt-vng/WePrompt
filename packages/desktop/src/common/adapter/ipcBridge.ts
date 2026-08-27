@@ -140,6 +140,8 @@ import type {
   StudioPrepareSubmissionRequestV2,
   StudioProjectListResultV2,
   StudioProjectLoadResultV2,
+  StudioProjectStatusRequestV2,
+  StudioProjectStatusV2,
   StudioProjectWorkspaceLoadResultV2,
   StudioProposalV2,
   StudioRendererProposalV2,
@@ -1318,6 +1320,9 @@ export const creativeStudio = {
     StudioCommandResult<StudioProjectWorkspaceLoadResultV2>,
     StudioProjectRequestV2
   >('creative-studio.get-project-workspace'),
+  getProjectStatus: bridge.buildProvider<StudioCommandResult<StudioProjectStatusV2>, StudioProjectStatusRequestV2>(
+    'creative-studio.get-project-status'
+  ),
   retryConditioningFrame: bridge.buildProvider<
     StudioCommandResult<StudioRendererProjectCommitResultV2>,
     StudioCascadeBarrierActionRequestV2

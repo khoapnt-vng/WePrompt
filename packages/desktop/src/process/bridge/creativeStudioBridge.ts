@@ -1172,4 +1172,7 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.listRoutes.provider((input) =>
     runCommand(() => dependencies.getService().listRoutes(input))
   );
+  ipcBridge.creativeStudio.getProjectStatus.provider((input) =>
+    runCommand(() => dependencies.getService().getProjectStatus(input))
+  );
 }

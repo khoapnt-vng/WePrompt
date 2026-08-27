@@ -96,6 +96,7 @@ export const NATIVE_BRIDGE_PROVIDER_KEYS = [
   'creative-studio.apply-authoring-batch',
   'creative-studio.undo-last',
   'creative-studio.get-project-workspace',
+  'creative-studio.get-project-status',
   'creative-studio.retry-conditioning-frame',
   'creative-studio.cancel-waiting-cascade',
   'creative-studio.edit-project',

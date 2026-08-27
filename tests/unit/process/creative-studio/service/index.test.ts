@@ -5167,6 +5167,122 @@ describe('CreativeStudioServiceV2', () => {
     await expect(harness.service.listRoutes()).rejects.toMatchObject({ code: 'storage_error' });
   });
 
+  it('re-discovers routes before every project-status read and performs no write', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes
+      .mockResolvedValueOnce({
+        routes: [structuredClone(imageRoute), structuredClone(videoRoute)],
+        diagnostics: [],
+        generationCatalogVersion: 'status_catalog_1',
+      })
+      .mockResolvedValueOnce({
+        routes: [structuredClone(imageRoute), structuredClone(videoRoute)],
+        diagnostics: [],
+        generationCatalogVersion: 'status_catalog_2',
+      });
+
+    const first = await harness.service.getProjectStatus({ projectId: project.id });
+    const second = await harness.service.getProjectStatus({ projectId: project.id, detail: true });
+
+    expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(2);
+    expect(harness.providerResolver.listGenerationRoutes.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.store.getProjectV2.mock.invocationCallOrder[0]!
+    );
+    expect(first).toMatchObject({
+      projectId: project.id,
+      projectRevision: project.revision,
+      catalogVersion: 'status_catalog_1',
+      detail: null,
+    });
+    expect(second.catalogVersion).toBe('status_catalog_2');
+    expect(second.detail?.shots.map((shot) => shot.shotId)).toEqual(['clip_1', 'clip_2']);
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.importReferenceImageFromPathV2).not.toHaveBeenCalled();
+    expect(harness.importBedAudioFromPathV2).not.toHaveBeenCalled();
+  });
+
+  it('loads the latest project revision only after a slow fresh route discovery completes', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    let resolveCatalog!: (catalog: StudioGenerationRouteCatalog) => void;
+    harness.providerResolver.listGenerationRoutes.mockReturnValueOnce(
+      new Promise<StudioGenerationRouteCatalog>((resolve) => {
+        resolveCatalog = resolve;
+      })
+    );
+
+    const statusPromise = harness.service.getProjectStatus({ projectId: project.id });
+    await vi.waitFor(() => expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledOnce());
+    harness.setProject({ ...project, revision: project.revision + 1 });
+    resolveCatalog({
+      routes: [structuredClone(imageRoute), structuredClone(videoRoute)],
+      diagnostics: [],
+      generationCatalogVersion: 'status_catalog_after_flight',
+    });
+
+    await expect(statusPromise).resolves.toMatchObject({
+      projectRevision: project.revision + 1,
+      catalogVersion: 'status_catalog_after_flight',
+    });
+  });
+
+  it('returns all other status stages with a bounded engines blocker when fresh inventory fails', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockRejectedValueOnce(new Error('secret inventory body'));
+
+    const status = await harness.service.getProjectStatus({ projectId: project.id });
+
+    expect(status.catalogVersion).toBeNull();
+    expect(status.stages.map((stage) => stage.id)).toEqual([
+      'brief',
+      'engines',
+      'references',
+      'storyboard',
+      'bindings',
+      'production',
+      'cut',
+    ]);
+    expect(status.stages.find((stage) => stage.id === 'engines')).toMatchObject({
+      state: 'blocked',
+      blockers: [{ cause: 'route_inventory_unavailable', remedy: { kind: 'owner_only' } }],
+    });
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [structuredClone(imageRoute), structuredClone(videoRoute)],
+      diagnostics: [],
+      generationCatalogVersion: 'status_catalog_recovered',
+    });
+    await expect(harness.service.getProjectStatus({ projectId: project.id })).resolves.toMatchObject({
+      catalogVersion: 'status_catalog_recovered',
+    });
+    expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects prototype-bearing status requests and propagates unknown inventory errors before loading a project', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const inherited = Object.assign(Object.create({ detail: true }) as object, { projectId: project.id });
+
+    await expect(harness.service.getProjectStatus(inherited as never)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+
+    const runtimeError = new CreativeStudioServiceError('runtime_inactive');
+    harness.providerResolver.listGenerationRoutes.mockRejectedValueOnce(runtimeError);
+    await expect(harness.service.getProjectStatus({ projectId: project.id })).rejects.toBe(runtimeError);
+    expect(harness.store.getProjectV2).not.toHaveBeenCalled();
+  });
+
   it('preserves a quarantined-project runtime cause while refreshing routes', async () => {
     const harness = makeHarness();
     const runtimeError = new CreativeStudioServiceError('project_quarantined', 'broken_project');

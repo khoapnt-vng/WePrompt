@@ -13,6 +13,7 @@ import {
   STUDIO_MUTATION_REASONS_V2,
   STUDIO_VIEWS,
   type StudioMutationBatchResultV2,
+  type StudioProjectStatusV2,
   type StudioRendererPreparedSubmissionOptionsV2,
   type StudioRendererProjectV2,
   type StudioRendererWorkspaceStatusV2,
@@ -49,6 +50,7 @@ const providerNames = [
   'applyAuthoringBatch',
   'undoLast',
   'getProjectWorkspace',
+  'getProjectStatus',
   'retryConditioningFrame',
   'cancelWaitingCascade',
   'editProject',
@@ -109,6 +111,7 @@ const mocks = vi.hoisted(() => ({
       'applyAuthoringBatch',
       'undoLast',
       'getProjectWorkspace',
+      'getProjectStatus',
       'retryConditioningFrame',
       'cancelWaitingCascade',
       'editProject',
@@ -166,6 +169,68 @@ import {
 type ProviderHandler = (input?: never) => Promise<unknown>;
 
 const rendererProject = { id: 'project_1', revision: 7 } as StudioRendererProjectV2;
+const projectStatus: StudioProjectStatusV2 = {
+  projectId: 'project_1',
+  projectRevision: 8,
+  catalogVersion: 'catalog_1',
+  stages: [
+    { id: 'brief', state: 'complete', summary: { stage: 'brief', hasBrief: true }, blockers: [] },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state: 'complete',
+      summary: { stage: 'references', plannedCount: 0, approvedCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'storyboard',
+      state: 'not_started',
+      summary: {
+        stage: 'storyboard',
+        beatCount: 0,
+        shotCount: 0,
+        authoredShotCount: 0,
+        plannedSeconds: 0,
+        targetSeconds: 30,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state: 'not_started',
+      summary: { stage: 'bindings', readyShotCount: 0, shotCount: 0, maxConditioningImages: 3 },
+      blockers: [],
+    },
+    {
+      id: 'production',
+      state: 'not_started',
+      summary: { stage: 'production', currentTakeCount: 0, shotCount: 0, activeJobCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'cut',
+      state: 'not_started',
+      summary: {
+        stage: 'cut',
+        currentTakeCount: 0,
+        shotCount: 0,
+        durationSeconds: 0,
+        targetSeconds: 30,
+        structurallyPlayable: false,
+      },
+      blockers: [],
+    },
+  ],
+  blockerCount: 0,
+  advisories: [],
+  boards: { currentPictureCount: 0, shotCount: 0 },
+  detail: { shots: [], references: [] },
+};
 const mutationResult: StudioMutationBatchResultV2 = {
   project: rendererProject,
   createdBeatIds: ['beat_2'],
@@ -308,6 +373,7 @@ const createService = () =>
         },
       },
     })),
+    getProjectStatus: vi.fn(async () => projectStatus),
     retryConditioningFrame: vi.fn(async () => workspaceStatus),
     cancelWaitingCascade: vi.fn(async () => workspaceStatus),
     deleteProject: vi.fn(async () => true),
@@ -669,6 +735,30 @@ describe('initCreativeStudioBridge', () => {
       },
     });
     expect(service.getProjectWorkspace).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_1' });
+  });
+
+  it('forwards the bounded project-status query without adding mutation authority', async () => {
+    initCreativeStudioBridge(dependencies);
+    const input = { projectId: 'project_1', detail: true };
+
+    await expect(registeredHandler('getProjectStatus')(input as never)).resolves.toEqual({
+      ok: true,
+      data: projectStatus,
+    });
+    expect(service.getProjectStatus).toHaveBeenCalledExactlyOnceWith(input);
+    expect(service.applyMutations).not.toHaveBeenCalled();
+  });
+
+  it('maps project-status service failures through the stable command envelope', async () => {
+    vi.mocked(service.getProjectStatus).mockRejectedValueOnce(new CreativeStudioServiceError('provider_error'));
+    initCreativeStudioBridge(dependencies);
+
+    await expect(
+      registeredHandler('getProjectStatus')({ projectId: 'project_1', detail: false } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: { code: 'provider_error', messageKey: 'conversation.creativeStudio.errors.provider' },
+    });
   });
 
   it('routes bounded prepare choices and returns only the renderer-safe quote allowlist', async () => {

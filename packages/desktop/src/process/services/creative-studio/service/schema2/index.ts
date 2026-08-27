@@ -26,6 +26,7 @@ export {
   projectStudioChainStatusV2,
   projectStudioWorkspaceStatusV2,
 } from './workspaceStatus';
+export { projectStudioStatusV2 } from './projectStatus';
 export {
   applyStudioMutationBatchV2,
   StudioMutationErrorV2,

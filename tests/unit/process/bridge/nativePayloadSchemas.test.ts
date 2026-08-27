@@ -304,6 +304,7 @@ const VALID_PAYLOADS = {
   },
   'creative-studio.undo-last': { projectId: 'project_1', expectedRevision: 1, entryId: 'undo_1' },
   'creative-studio.get-project-workspace': { projectId: 'project_1' },
+  'creative-studio.get-project-status': { projectId: 'project_1', detail: true },
   'creative-studio.retry-conditioning-frame': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -1595,6 +1596,7 @@ describe('native bridge payload schemas', () => {
 
   it.each([
     ['creative-studio.get-project-workspace', { projectId: 'project_1' }],
+    ['creative-studio.get-project-status', { projectId: 'project_1', detail: true }],
     [
       'creative-studio.retry-conditioning-frame',
       { projectId: 'project_1', expectedRevision: 1, dependentShotId: 'shot_2' },
@@ -1609,6 +1611,41 @@ describe('native bridge payload schemas', () => {
     ];
     expect(schema?.safeParse(payload).success).toBe(true);
     expect(schema?.safeParse({ ...payload, jobId: 'internal_job' }).success).toBe(false);
+  });
+
+  it('rejects an inherited Creative Studio project-status detail option', () => {
+    const payload = Object.assign(Object.create({ detail: true }) as object, { projectId: 'project_1' });
+    expect(() => parseNativeBridgePayload('creative-studio.get-project-status', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+  });
+
+  it('rejects an inherited Creative Studio project-status project id', () => {
+    const payload = Object.assign(Object.create({ projectId: 'project_1' }) as object, { detail: true });
+    expect(() => parseNativeBridgePayload('creative-studio.get-project-status', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+  });
+
+  it('accepts only the bounded Creative Studio project-status detail variants', () => {
+    expect(parseNativeBridgePayload('creative-studio.get-project-status', { projectId: 'project_1' })).toEqual({
+      projectId: 'project_1',
+    });
+    expect(
+      parseNativeBridgePayload('creative-studio.get-project-status', { projectId: 'project_1', detail: false })
+    ).toEqual({ projectId: 'project_1', detail: false });
+    expect(
+      parseNativeBridgePayload('creative-studio.get-project-status', { projectId: 'project_1', detail: true })
+    ).toEqual({ projectId: 'project_1', detail: true });
+    for (const payload of [
+      { projectId: 'project_1', detail: 'true' },
+      { projectId: '../project_1' },
+      { projectId: '' },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.get-project-status', payload)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
   });
 
   it.each([
@@ -2061,6 +2098,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.apply-authoring-batch',
       'creative-studio.undo-last',
       'creative-studio.get-project-workspace',
+      'creative-studio.get-project-status',
       'creative-studio.retry-conditioning-frame',
       'creative-studio.cancel-waiting-cascade',
       'creative-studio.edit-project',
@@ -2087,6 +2125,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.decide-reference-request',
       'creative-studio.list-reference-generation-handoffs',
       'creative-studio.get-generation-capability',
+      'creative-studio.get-project-status',
       'creative-studio.prepare-project-references',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
@@ -2125,6 +2164,7 @@ describe('native bridge payload schemas', () => {
     const exactOnceProviderKeys = [
       'creative-studio.get-director-session-authority',
       'creative-studio.bind-director-conversation',
+      'creative-studio.get-project-status',
       'creative-studio.get-generation-capability',
       'creative-studio.prepare-project-references',
       'creative-studio.prepare-submission',
@@ -2156,9 +2196,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(54);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(54);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(54);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);

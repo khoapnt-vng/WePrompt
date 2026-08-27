@@ -61,6 +61,9 @@ import {
   type StudioMutationReducerContextV2,
   type StudioProjectListResultV2,
   type StudioProjectLoadResultV2,
+  type StudioProjectStatusRequestV2,
+  type StudioProjectStatusRouteCatalogV2,
+  type StudioProjectStatusV2,
   type StudioProjectWorkspaceLoadResultV2,
   type StudioProjectV2,
   type StudioPrepareProjectReferencesRequestV2,
@@ -165,6 +168,7 @@ import {
   deriveStudioInboundShotReferencesV2,
   projectStudioChainBoundaryVerificationIdsV2,
   projectStudioChainStatusV2,
+  projectStudioStatusV2,
   projectStudioWorkspaceStatusV2,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
   resolveStudioReferenceBindingV2,
@@ -289,6 +293,7 @@ export type CreativeStudioServiceV2 = {
     height: number;
   }): Promise<StudioAssetV2>;
   listRoutes(input?: { projectId?: string }): Promise<StudioRouteCatalogV2>;
+  getProjectStatus(input: StudioProjectStatusRequestV2): Promise<StudioProjectStatusV2>;
   getGenerationCapability(input: StudioGenerationCapabilityRequestV2): Promise<StudioGenerationCapabilityV2>;
   getProjectWorkspace(input: { projectId: string }): Promise<StudioProjectWorkspaceLoadResultV2>;
   listProposals(input: { projectId: string }): Promise<StudioRendererProposalV2[]>;
@@ -3254,6 +3259,34 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       if (input.projectId !== undefined) assertSafeId(input.projectId, 'project id');
       const project = input.projectId === undefined ? null : await loadSupported(input.projectId);
       return toRouteCatalog(await refreshGenerationRoutes(), project);
+    },
+
+    async getProjectStatus(input): Promise<StudioProjectStatusV2> {
+      if (
+        !isRecord(input) ||
+        Object.getPrototypeOf(input) !== Object.prototype ||
+        (!hasExactKeys(input, ['projectId']) && !hasExactKeys(input, ['projectId', 'detail'])) ||
+        (input.detail !== undefined && typeof input.detail !== 'boolean')
+      ) {
+        throw invalid('Invalid Studio project status request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      const detail = Object.hasOwn(input, 'detail') && input.detail === true;
+      let generation: StudioGenerationRouteCatalog | null = null;
+      try {
+        generation = await refreshGenerationRoutes();
+      } catch (error) {
+        const knownInventoryFailure =
+          (error instanceof CreativeStudioServiceError && error.code === 'provider_error') ||
+          (error instanceof CreativeStudioStoreError && error.code === 'storage_error');
+        if (!knownInventoryFailure) throw error;
+      }
+      const project = await loadSupported(input.projectId);
+      const routes: StudioProjectStatusRouteCatalogV2 =
+        generation === null
+          ? { status: 'inventory_unavailable', catalogVersion: null }
+          : { status: 'available', catalog: toRouteCatalog(generation, project) };
+      return projectStudioStatusV2(project, routes, { detail });
     },
 
     async getGenerationCapability(input): Promise<StudioGenerationCapabilityV2> {
