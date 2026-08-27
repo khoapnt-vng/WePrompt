@@ -18,6 +18,14 @@ import type {
   WorkspaceShotProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 
+const boardCss = readFileSync(
+  resolve(
+    process.cwd(),
+    'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Board/Board.module.css'
+  ),
+  'utf8'
+);
+
 type MockButtonProps = Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'type'> & {
   icon?: React.ReactNode;
   loading?: boolean;
@@ -140,6 +148,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.state.noCoverage': 'No coverage state',
         'conversation.creativeStudio.workspace.table.state.seedPending': 'First frame pending',
         'conversation.creativeStudio.workspace.table.state.partDone': 'Part done',
+        'conversation.creativeStudio.workspace.table.state.needsAttention': 'Needs attention',
         'conversation.creativeStudio.workspace.table.state.rendering': 'Rendering',
         'conversation.creativeStudio.workspace.table.state.stale': 'Stale',
         'conversation.creativeStudio.workspace.table.state.statusPending': 'Status pending',
@@ -362,14 +371,15 @@ describe('BoardView', () => {
       shots: [makeShot('shot_4'), makeShot('shot_5')],
       displayState: 'draft',
     });
-    const result = render(<BoardView {...boardProps(makeProjection([covered, empty, unavailable]))} />);
+    const needsAttention = makeBeat('attention', { title: 'Attention', displayState: 'needs_attention' });
+    const result = render(<BoardView {...boardProps(makeProjection([covered, empty, unavailable, needsAttention]))} />);
 
     const list = screen.getByRole('list', { name: 'Beat board' });
     expect(
       within(list)
         .getAllByRole('listitem')
         .map((item) => item.dataset.beatId)
-    ).toEqual(['covered', 'empty', 'unavailable']);
+    ).toEqual(['covered', 'empty', 'unavailable', 'attention']);
     const coveredCard = cardFor(result.container, 'covered');
     const image = coveredCard.querySelector<HTMLImageElement>('img');
     expect(image).not.toBeNull();
@@ -388,6 +398,9 @@ describe('BoardView', () => {
     expect(cardFor(result.container, 'unavailable').querySelector('[data-cover-kind="unavailable"]')).toHaveTextContent(
       'Preview unavailable'
     );
+    const attentionState = cardFor(result.container, 'attention').querySelector('[data-state]');
+    expect(attentionState).toHaveAttribute('data-state', 'needs_attention');
+    expect(attentionState).toHaveTextContent('Needs attention');
 
     fireEvent.error(image!);
     expect(coveredCard.querySelector('[data-cover-kind="unavailable"]')).toHaveTextContent('Preview unavailable');
@@ -415,29 +428,40 @@ describe('BoardView', () => {
     expect(actions.parkBeat).not.toHaveBeenCalled();
     expect(actions.reorderBin).not.toHaveBeenCalled();
 
-    const css = readFileSync(
-      resolve(
-        process.cwd(),
-        'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/Board/Board.module.css'
-      ),
-      'utf8'
-    );
-    expect(css).toMatch(/\.beatList\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
-    expect(css).toMatch(/\.beatTitle\s*\{[^}]*color:\s*var\(--text-primary\)/s);
-    expect(css).toMatch(/\.beatTitle\s*\{[^}]*font-family:\s*var\(--font-display\)/s);
-    expect(css).toMatch(/\.beatTitle\s*\{[^}]*font-size:\s*13px/s);
-    expect(css).toMatch(/\.beatTitle\s*\{[^}]*font-weight:\s*var\(--fw-semibold\)/s);
-    expect(css).toMatch(/\.beatTitle\s*\{[^}]*composes:\s*inkTextAction/s);
-    expect(css).toMatch(/\.beatCard\s*\{[^}]*position:\s*relative/s);
-    expect(css).toMatch(/\.beatTitle\s*\{[^}]*position:\s*static/s);
-    expect(css).toMatch(
+    expect(boardCss).toMatch(/\.beatList\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\)/s);
+    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*color:\s*var\(--text-primary\)/s);
+    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-family:\s*var\(--font-display\)/s);
+    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-size:\s*13px/s);
+    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-weight:\s*var\(--fw-semibold\)/s);
+    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*composes:\s*inkTextAction/s);
+    expect(boardCss).toMatch(/\.beatCard\s*\{[^}]*position:\s*relative/s);
+    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*position:\s*static/s);
+    expect(boardCss).toMatch(
       /\.beatTitle:global\(\.arco-btn-text\)[^{]*\{[^}]*border-color:\s*transparent[^}]*background-color:\s*transparent[^}]*box-shadow:\s*none/s
     );
-    expect(css).toMatch(/\.beatTitle::before\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0/s);
-    expect(css).toMatch(/\.selectionActions\s*\{[^}]*z-index:\s*2/s);
-    expect(css).toMatch(
+    expect(boardCss).toMatch(/\.beatTitle::before\s*\{[^}]*position:\s*absolute[^}]*inset:\s*0/s);
+    expect(boardCss).toMatch(/\.selectionActions\s*\{[^}]*z-index:\s*2/s);
+    expect(boardCss).toMatch(
       /\.liftBeat[^,{]*\[aria-disabled='true'\][^{]*\{[^}]*color:\s*var\(--text-disabled\)[^}]*cursor:\s*not-allowed/s
     );
+    for (const state of [
+      'duration_pending',
+      'no_coverage',
+      'seed_pending',
+      'part_done',
+      'needs_attention',
+      'rendering',
+      'stale',
+      'status_pending',
+      'ready',
+      'draft',
+    ]) {
+      expect(boardCss).toContain(`.state[data-state='${state}']`);
+    }
+    expect(boardCss).toMatch(
+      /\.state\[data-state='needs_attention'\]\s*\{[^}]*color:\s*var\(--color-danger-7\)[^}]*font-weight:\s*var\(--fw-bold\)/s
+    );
+    expect(boardCss).toMatch(/\.state\[data-state='stale'\][^{]*\{[^}]*color:\s*var\(--color-danger-6\)/s);
   });
 
   it('opens from the neutral full-card target, exposes actions only on the selected card, and preserves paid Shots', async () => {

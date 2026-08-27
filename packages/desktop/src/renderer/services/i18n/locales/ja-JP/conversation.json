@@ -1020,9 +1020,11 @@
       },
       "table": {
         "columns": {
+          "length": "合計",
           "panel": "パネル",
           "story": "ストーリー"
         },
+        "plannedPending": "計画合計なし",
         "board": {
           "label": "ディレクター・ボードの操作",
           "progress": "{{total}}枚中{{drawn}}枚を作成済み",

@@ -1020,9 +1020,11 @@
       },
       "table": {
         "columns": {
+          "length": "合计",
           "panel": "分镜",
           "story": "故事"
         },
+        "plannedPending": "暂无计划总时长",
         "board": {
           "label": "导演分镜控制",
           "progress": "已绘制 {{drawn}} / {{total}} 个分镜",

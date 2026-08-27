@@ -1020,9 +1020,11 @@
       },
       "table": {
         "columns": {
+          "length": "مجموع",
           "panel": "پنل",
           "story": "داستان"
         },
+        "plannedPending": "جمع برنامه‌ریزی‌شده موجود نیست",
         "board": {
           "label": "کنترل‌های بورد کارگردان",
           "progress": "{{drawn}} از {{total}} پنل طراحی شده",

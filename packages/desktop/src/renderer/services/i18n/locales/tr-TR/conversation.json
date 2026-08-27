@@ -1022,9 +1022,11 @@
       },
       "table": {
         "columns": {
+          "length": "Toplam",
           "panel": "Panel",
           "story": "Hikâye"
         },
+        "plannedPending": "Planlanan toplam yok",
         "board": {
           "label": "Yönetmen panosu denetimleri",
           "progress": "{{total}} panelden {{drawn}} tanesi çizildi",

@@ -1020,9 +1020,11 @@
       },
       "table": {
         "columns": {
+          "length": "합계",
           "panel": "패널",
           "story": "스토리"
         },
+        "plannedPending": "계획 합계 없음",
         "board": {
           "label": "디렉터 보드 제어",
           "progress": "{{total}}개 중 {{drawn}}개 패널 완성",

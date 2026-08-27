@@ -1434,7 +1434,7 @@
           "beat": "Beat",
           "shots": "Shots",
           "panel": "Panel",
-          "length": "Length",
+          "length": "Sum",
           "state": "State",
           "story": "Story"
         },
@@ -1483,7 +1483,7 @@
         "targetDuration": "~{{seconds}}s target",
         "targetPending": "No target",
         "actualDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s",
-        "actualPending": "No actual",
+        "plannedPending": "No planned sum",
         "empty": "No active beats yet.",
         "state": {
           "durationPending": "Duration pending",

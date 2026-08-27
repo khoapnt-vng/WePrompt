@@ -1021,9 +1021,11 @@
       },
       "table": {
         "columns": {
+          "length": "Suma",
           "panel": "Panel",
           "story": "Historia"
         },
+        "plannedPending": "Sin suma planificada",
         "board": {
           "label": "Controles del Board del Director",
           "progress": "{{drawn}} de {{total}} paneles dibujados",

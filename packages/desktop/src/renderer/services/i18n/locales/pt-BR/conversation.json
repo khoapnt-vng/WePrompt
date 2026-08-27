@@ -1026,9 +1026,11 @@
       },
       "table": {
         "columns": {
+          "length": "Soma",
           "panel": "Painel",
           "story": "História"
         },
+        "plannedPending": "Sem soma planejada",
         "board": {
           "label": "Controles do Board do Diretor",
           "progress": "{{drawn}} de {{total}} painéis desenhados",

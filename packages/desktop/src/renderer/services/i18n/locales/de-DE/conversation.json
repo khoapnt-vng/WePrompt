@@ -1021,9 +1021,11 @@
       },
       "table": {
         "columns": {
+          "length": "Summe",
           "panel": "Panel",
           "story": "Story"
         },
+        "plannedPending": "Keine geplante Summe",
         "board": {
           "label": "Director-Board-Steuerung",
           "progress": "{{drawn}} von {{total}} Panels gezeichnet",

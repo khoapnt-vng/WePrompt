@@ -421,7 +421,7 @@ const expectedLeaves = [
   'table.targetDuration',
   'table.targetPending',
   'table.actualDuration',
-  'table.actualPending',
+  'table.plannedPending',
   'table.empty',
   'table.state.durationPending',
   'table.state.noCoverage',
@@ -1399,7 +1399,9 @@ const localizedWorkspaceKeys = [
   ...localizedMoveToBinKeys,
   ...localizedBoardKeys,
   ...localizedBoardPromotionKeys,
+  'table.columns.length',
   'table.columns.story',
+  'table.plannedPending',
   'controls.briefAndRulesTitle',
   'controls.undoLabel.set_reference_plan',
   'controls.undoLabel.amend_reference_plan',
@@ -1482,6 +1484,7 @@ describe('Creative Studio workspace translations', () => {
 
     expect(Object.keys(leaves).toSorted()).toEqual(expectedLeaves.toSorted());
     expect(leaves['table.columns.position']).toBe('#');
+    expect(leaves['table.columns.length']).toBe('Sum');
     expect(placeholders(leaves['bin.coverAlt']!)).toEqual(['kind', 'title']);
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
@@ -2025,7 +2028,9 @@ describe('Creative Studio workspace translations', () => {
         ...localizedMoveToBinKeys,
         ...localizedBoardKeys,
         ...localizedBoardPromotionKeys,
+        'table.columns.length',
         'table.columns.story',
+        'table.plannedPending',
       ]) {
         const englishCopy = englishLeaves[key];
         const localizedCopy = localizedLeaves[key];

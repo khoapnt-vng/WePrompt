@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 
 import {
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
   type StudioBoardStyleV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
@@ -116,6 +118,31 @@ const exactFilmOrderBoardPanels = (
     return shotIds.map(statusPendingPanel);
   }
   return panels.map((panel) => ({ ...panel, staleCauses: [...panel.staleCauses] }));
+};
+
+const plannedSecondsForBeat = (beat: WorkspaceBeatProjection): number | null => {
+  if (beat.shots.length === 0) return null;
+  let cursor = 0;
+  for (const shot of beat.shots) {
+    const boundary = shot.planningBoundary;
+    if (
+      boundary === null ||
+      boundary.shotId !== shot.id ||
+      !Number.isSafeInteger(shot.durationSeconds) ||
+      shot.durationSeconds < STUDIO_MIN_SHOT_SECONDS ||
+      shot.durationSeconds > STUDIO_MAX_SHOT_SECONDS ||
+      !Number.isSafeInteger(boundary.startSeconds) ||
+      boundary.startSeconds < 0 ||
+      !Number.isSafeInteger(boundary.endSeconds) ||
+      boundary.endSeconds < 0 ||
+      boundary.startSeconds !== cursor ||
+      boundary.endSeconds - boundary.startSeconds !== shot.durationSeconds
+    ) {
+      return null;
+    }
+    cursor = boundary.endSeconds;
+  }
+  return cursor;
 };
 
 type BoardPanelArtworkProps = {
@@ -696,13 +723,13 @@ export const TableView: React.FC<TableViewProps> = ({
                 boardPanelsForBeat.every((panel) => panel.assetId !== null && isDrawableBoardPanel(panel));
               const leadPanel = boardPanelsForBeat[0] ?? null;
               const beatAriaRowIndex = row + 2 + (openBoardBeatIndex >= 0 && row > openBoardBeatIndex ? 1 : 0);
-              const durationKind = hasCoverage ? 'actual' : 'target';
-              const durationSeconds = hasCoverage ? beat.actualSeconds : beat.targetSeconds;
+              const durationKind = hasCoverage ? 'planned' : 'target';
+              const durationSeconds = hasCoverage ? plannedSecondsForBeat(beat) : beat.targetSeconds;
               const duration =
                 durationSeconds === null
                   ? t(
                       hasCoverage
-                        ? 'conversation.creativeStudio.workspace.table.actualPending'
+                        ? 'conversation.creativeStudio.workspace.table.plannedPending'
                         : 'conversation.creativeStudio.workspace.table.targetPending'
                     )
                   : t(
@@ -798,7 +825,7 @@ export const TableView: React.FC<TableViewProps> = ({
                   content: (
                     <span className={styles.durationFact}>
                       <span
-                        className={`${durationKind === 'actual' ? styles.actualDuration : styles.targetDuration} ${durationSeconds === null ? styles.pendingDuration : ''}`}
+                        className={`${durationKind === 'planned' ? styles.plannedDuration : styles.targetDuration} ${durationSeconds === null ? styles.pendingDuration : ''}`}
                         data-duration-kind={durationKind}
                       >
                         <bdi>{duration}</bdi>

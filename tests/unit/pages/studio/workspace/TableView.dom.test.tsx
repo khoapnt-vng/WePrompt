@@ -29,15 +29,16 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.columns.beat': 'Beat',
         'conversation.creativeStudio.workspace.table.columns.story': 'Story',
         'conversation.creativeStudio.workspace.table.columns.shots': 'Shots',
-        'conversation.creativeStudio.workspace.table.columns.length': 'Length',
+        'conversation.creativeStudio.workspace.table.columns.length': 'Sum',
         'conversation.creativeStudio.workspace.table.columns.state': 'State',
         'conversation.creativeStudio.workspace.table.targetPending': 'No target',
-        'conversation.creativeStudio.workspace.table.actualPending': 'No actual',
+        'conversation.creativeStudio.workspace.table.plannedPending': 'No planned sum',
         'conversation.creativeStudio.workspace.table.empty': 'No beats yet',
         'conversation.creativeStudio.workspace.table.state.durationPending': 'Duration pending',
         'conversation.creativeStudio.workspace.table.state.noCoverage': 'No coverage',
         'conversation.creativeStudio.workspace.table.state.seedPending': 'First frame pending',
         'conversation.creativeStudio.workspace.table.state.partDone': 'Part done',
+        'conversation.creativeStudio.workspace.table.state.needsAttention': 'Needs attention',
         'conversation.creativeStudio.workspace.table.state.rendering': 'Rendering',
         'conversation.creativeStudio.workspace.table.state.stale': 'Stale',
         'conversation.creativeStudio.workspace.table.state.statusPending': 'Status pending',
@@ -286,7 +287,7 @@ describe('TableView', () => {
       within(rows[0]!)
         .getAllByRole('columnheader')
         .map((cell) => cell.textContent)
-    ).toEqual(['#', 'Panel', 'Beat', 'Story', 'Shots', 'Length', 'State']);
+    ).toEqual(['#', 'Panel', 'Beat', 'Story', 'Shots', 'Sum', 'State']);
     expect(
       within(rows[0]!)
         .getAllByRole('columnheader')
@@ -1225,17 +1226,87 @@ describe('TableView', () => {
     expect(rowForBeat('empty')).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('renders one rounded actual fact for a covered Beat even when it also has a target', () => {
-    const beats = [makeBeat('equal', { targetSeconds: 9, actualSeconds: 9.52 })];
+  it('renders one authored planning sum for a covered Beat even when render duration and target disagree', () => {
+    const beats = [
+      makeBeat('authored', {
+        targetSeconds: 9,
+        actualSeconds: 9.52,
+        shots: [
+          makeShot('shot_1', {
+            durationSeconds: 6,
+            planningBoundary: { shotId: 'shot_1', startSeconds: 0, endSeconds: 6 },
+          }),
+          makeShot('shot_2', {
+            durationSeconds: 6,
+            planningBoundary: { shotId: 'shot_2', startSeconds: 6, endSeconds: 12 },
+          }),
+          makeShot('shot_3', {
+            durationSeconds: 5,
+            planningBoundary: { shotId: 'shot_3', startSeconds: 12, endSeconds: 17 },
+          }),
+        ],
+      }),
+    ];
     render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
-    const length = cellAt(rowForBeat('equal'), 5);
+    const length = cellAt(rowForBeat('authored'), 5);
     const facts = length.querySelectorAll<HTMLElement>('[data-duration-kind]');
     expect(facts).toHaveLength(1);
-    const actual = facts[0];
-    if (actual === undefined) throw new Error('Missing actual duration fact');
-    expect(actual).toHaveAttribute('data-duration-kind', 'actual');
-    expect(actual).toHaveTextContent('10s');
+    const planned = facts[0];
+    if (planned === undefined) throw new Error('Missing planned duration fact');
+    expect(planned).toHaveAttribute('data-duration-kind', 'planned');
+    expect(planned).toHaveTextContent('17s');
     expect(length).not.toHaveTextContent('~9s target');
+  });
+
+  it('keeps the authored sum when current takes and trims shorten rendered playback', () => {
+    const authoredShots = [
+      makeShot('shot_1', {
+        durationSeconds: 6,
+        planningBoundary: { shotId: 'shot_1', startSeconds: 0, endSeconds: 6 },
+      }),
+      makeShot('shot_2', {
+        durationSeconds: 6,
+        planningBoundary: { shotId: 'shot_2', startSeconds: 6, endSeconds: 12 },
+      }),
+      makeShot('shot_3', {
+        durationSeconds: 5,
+        planningBoundary: { shotId: 'shot_3', startSeconds: 12, endSeconds: 17 },
+      }),
+    ];
+    const before = [makeBeat('trimmed', { actualSeconds: 17, shots: authoredShots })];
+    const result = render(
+      <TableView {...tableBoardProps(before)} beats={before} selectedBeatId={null} onSelectBeat={vi.fn()} />
+    );
+    expect(cellAt(rowForBeat('trimmed'), 5)).toHaveTextContent('17s');
+
+    const after = [
+      makeBeat('trimmed', {
+        actualSeconds: 8,
+        shots: authoredShots.map((shot, index) =>
+          makeShot(shot.id, {
+            ...shot,
+            currentPicture: {
+              assetId: `video_${String(index + 1)}`,
+              sourceDurationSeconds: 6,
+              posterAssetId: null,
+              createdAt: '2026-08-28T00:00:00.000Z',
+              prompt: 'Recorded prompt',
+              promptChanged: false,
+              firstFrameChanged: false,
+            },
+            trimInSeconds: 1,
+            trimOutSeconds: index === 2 ? 4 : 3,
+            playedDurationSeconds: index === 2 ? 3 : 2,
+          })
+        ),
+      }),
+    ];
+    result.rerender(
+      <TableView {...tableBoardProps(after)} beats={after} selectedBeatId={null} onSelectBeat={vi.fn()} />
+    );
+    const sum = cellAt(rowForBeat('trimmed'), 5);
+    expect(sum).toHaveTextContent('17s');
+    expect(sum).not.toHaveTextContent('8s');
   });
 
   it('shows exactly one coverage-appropriate duration fact and never invents zero seconds', () => {
@@ -1252,8 +1323,12 @@ describe('TableView', () => {
         displayState: 'no_coverage',
         shots: [],
       }),
-      makeBeat('covered_pending', { targetSeconds: 7, actualSeconds: null }),
-      makeBeat('covered', { targetSeconds: 7, actualSeconds: 8 }),
+      makeBeat('covered_pending', {
+        targetSeconds: 7,
+        actualSeconds: 23,
+        shots: [makeShot('missing_boundary', { planningBoundary: null })],
+      }),
+      makeBeat('covered', { targetSeconds: 7, actualSeconds: 99 }),
       makeBeat('max_target', {
         targetSeconds: 1440,
         actualSeconds: null,
@@ -1274,13 +1349,16 @@ describe('TableView', () => {
     expect(uncovered).toHaveTextContent('~7s target');
     expect(uncovered.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
     expect(uncovered.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'target');
-    expect(coveredPending).toHaveTextContent('No actual');
+    expect(coveredPending).toHaveTextContent('No planned sum');
+    expect(coveredPending).not.toHaveTextContent('23s');
+    expect(coveredPending).not.toHaveTextContent('0s');
     expect(coveredPending.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
-    expect(coveredPending.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'actual');
-    expect(covered).toHaveTextContent('8s');
+    expect(coveredPending.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'planned');
+    expect(covered).toHaveTextContent('4s');
+    expect(covered).not.toHaveTextContent('99s');
     expect(covered).not.toHaveTextContent('~7s target');
     expect(covered.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
-    expect(covered.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'actual');
+    expect(covered.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'planned');
     expect(maxTarget).toHaveTextContent('~1440s target');
     expect(maxTarget.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
     expect(maxTarget.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'target');
@@ -1289,12 +1367,82 @@ describe('TableView', () => {
     }
   });
 
+  it.each([
+    [
+      'a mismatched Shot identity',
+      [makeShot('wrong_id', { planningBoundary: { shotId: 'other', startSeconds: 0, endSeconds: 4 } })],
+    ],
+    [
+      'a non-contiguous boundary sequence',
+      [
+        makeShot('first'),
+        makeShot('second', { planningBoundary: { shotId: 'second', startSeconds: 5, endSeconds: 9 } }),
+      ],
+    ],
+    [
+      'a boundary whose span differs from the authored duration',
+      [makeShot('wrong_span', { planningBoundary: { shotId: 'wrong_span', startSeconds: 0, endSeconds: 3 } })],
+    ],
+    [
+      'a non-finite authored duration',
+      [
+        makeShot('non_finite', {
+          durationSeconds: Number.POSITIVE_INFINITY,
+          planningBoundary: { shotId: 'non_finite', startSeconds: 0, endSeconds: Number.POSITIVE_INFINITY },
+        }),
+      ],
+    ],
+    [
+      'a zero-length Shot',
+      [
+        makeShot('zero_length', {
+          durationSeconds: 0,
+          planningBoundary: { shotId: 'zero_length', startSeconds: 0, endSeconds: 0 },
+        }),
+      ],
+    ],
+    [
+      'a fractional authored duration and boundary',
+      [
+        makeShot('fractional', {
+          durationSeconds: 4.5,
+          planningBoundary: { shotId: 'fractional', startSeconds: 0, endSeconds: 4.5 },
+        }),
+      ],
+    ],
+    [
+      'an unsafe authored duration and boundary',
+      [
+        makeShot('unsafe_integer', {
+          durationSeconds: Number.MAX_SAFE_INTEGER + 1,
+          planningBoundary: { shotId: 'unsafe_integer', startSeconds: 0, endSeconds: Number.MAX_SAFE_INTEGER + 1 },
+        }),
+      ],
+    ],
+    [
+      'a negative boundary',
+      [makeShot('negative', { planningBoundary: { shotId: 'negative', startSeconds: -1, endSeconds: 3 } })],
+    ],
+  ] satisfies ReadonlyArray<readonly [string, WorkspaceShotProjection[]]>)(
+    'fails closed instead of borrowing rendered seconds for %s',
+    (_case, shots) => {
+      const beats = [makeBeat('invalid_plan', { actualSeconds: 41, shots })];
+      render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
+      const sum = cellAt(rowForBeat('invalid_plan'), 5);
+      expect(sum).toHaveTextContent('No planned sum');
+      expect(sum).not.toHaveTextContent('41s');
+      expect(sum).not.toHaveTextContent('0s');
+      expect(sum.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'planned');
+    }
+  );
+
   it('names every Beat state in text rather than relying on color', () => {
     const states: Array<[WorkspaceBeatProjection['displayState'], string]> = [
       ['duration_pending', 'Duration pending'],
       ['no_coverage', 'No coverage'],
       ['seed_pending', 'First frame pending'],
       ['part_done', 'Part done'],
+      ['needs_attention', 'Needs attention'],
       ['rendering', 'Rendering'],
       ['stale', 'Stale'],
       ['status_pending', 'Status pending'],
@@ -1308,7 +1456,12 @@ describe('TableView', () => {
       const stateCell = cellAt(rowForBeat(state), 6);
       expect(stateCell).toHaveTextContent(label);
       expect(stateCell.querySelector('[data-state]')).toHaveAttribute('data-state', state);
+      expect(tableCss).toContain(`.state[data-state='${state}']`);
     }
+    expect(tableCss).toMatch(
+      /\.state\[data-state='needs_attention'\]\s*\{[^}]*color:\s*var\(--color-danger-7\)[^}]*font-weight:\s*var\(--fw-bold\)/s
+    );
+    expect(tableCss).toMatch(/\.state\[data-state='stale'\][^{]*\{[^}]*color:\s*var\(--color-danger-6\)/s);
   });
 });
 

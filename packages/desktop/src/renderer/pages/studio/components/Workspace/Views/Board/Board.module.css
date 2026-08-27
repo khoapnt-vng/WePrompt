@@ -270,6 +270,11 @@
   color: var(--color-danger-6);
 }
 
+.state[data-state='needs_attention'] {
+  color: var(--color-danger-7);
+  font-weight: var(--fw-bold);
+}
+
 .state[data-state='status_pending'],
 .state[data-state='draft'] {
   color: var(--color-text-3);
