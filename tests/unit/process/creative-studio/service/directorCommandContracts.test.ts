@@ -10,6 +10,8 @@ import { describe, expect, it } from 'vitest';
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_PROJECT_REFERENCES,
@@ -131,7 +133,7 @@ const parsePendingV2 = (value: unknown, slot: unknown = validSlotV2()) =>
   });
 
 const validQueryCommandV2 = (
-  policy: 'get_project_status' | 'list_routes',
+  policy: 'get_project_status' | 'list_routes' | 'get_proposal',
   detail = false
 ): StudioDirectorQueryCommandRecordV2 =>
   policy === 'get_project_status'
@@ -144,14 +146,24 @@ const validQueryCommandV2 = (
         policy,
         detail,
       }
-    : {
-        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
-        commandId: 'command_1',
-        projectId: 'project_1',
-        createdAt: NOW,
-        deadlineAt: '2026-08-16T12:00:15.000Z',
-        policy,
-      };
+    : policy === 'list_routes'
+      ? {
+          schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+          commandId: 'command_1',
+          projectId: 'project_1',
+          createdAt: NOW,
+          deadlineAt: '2026-08-16T12:00:15.000Z',
+          policy,
+        }
+      : {
+          schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+          commandId: 'command_1',
+          projectId: 'project_1',
+          createdAt: NOW,
+          deadlineAt: '2026-08-16T12:00:15.000Z',
+          policy,
+          proposalId: 'proposal_exact_2',
+        };
 
 const validProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
   projectId: 'project_1',
@@ -324,7 +336,7 @@ describe('Studio Director V2 command contracts', () => {
     ]) {
       expect(parsePendingV2(validCommandV2({ operations: [operation] })).status).toBe('valid');
     }
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(6);
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(7);
     expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
   });
 
@@ -559,25 +571,24 @@ describe('Studio Director V2 command contracts', () => {
     });
   });
 
-  it('treats the immediate-prior schema-5 command family as unsupported without migration', () => {
-    const command = { ...validCommandV2(), schemaVersion: 5 };
-    const slot = { ...validSlotV2(), schemaVersion: 5 };
-    const lease = { ...validLeaseV2(), schemaVersion: 5 };
+  it('treats the immediate-prior schema-6 query family as unsupported without migration', () => {
+    const command = { ...validQueryCommandV2('get_proposal'), schemaVersion: 6 };
+    const slot = { ...validSlotV2(), schemaVersion: 6 };
+    const lease = { ...validLeaseV2(), schemaVersion: 6 };
     const receipt = {
-      schemaVersion: 5,
+      schemaVersion: 6,
       commandId: 'command_1',
       projectId: 'project_1',
-      expectedRevision: 4,
       decidedAt: NOW,
-      status: 'rejected',
-      observedRevision: 4,
-      reasonCode: 'validation_failed',
+      status: 'answered',
+      query: { kind: 'get_proposal', proposalId: 'proposal_exact_2' },
+      result: { status: 'not_found' },
     };
 
     expect(parsePendingV2(command, slot)).toEqual({
       status: 'unsupported_prototype_schema',
       commandId: 'command_1',
-      expectedRevision: 4,
+      expectedRevision: null,
     });
     expect(parseStudioDirectorCommandSlotV2(slot, NOW, WAIT_MS)).toEqual({
       status: 'unsupported_prototype_schema',
@@ -674,18 +685,194 @@ describe('Studio Director V2 command contracts', () => {
 });
 
 describe('Studio Director V2 read-query contracts', () => {
-  it('accepts only exact normalized status and route commands while sidecar versions remain independent', () => {
+  it('accepts only exact normalized status, route, and proposal commands while sidecar versions remain independent', () => {
     const status = validQueryCommandV2('get_project_status', true);
     const routes = validQueryCommandV2('list_routes');
+    const proposal = validQueryCommandV2('get_proposal');
 
     expect(parsePendingV2(status)).toEqual({ status: 'valid', record: status });
     expect(parsePendingV2(routes)).toEqual({ status: 'valid', record: routes });
+    expect(parsePendingV2(proposal)).toEqual({ status: 'valid', record: proposal });
     expect(parsePendingV2({ ...status, detail: undefined })).toMatchObject({ status: 'invalid' });
     expect(parsePendingV2({ ...status, expectedRevision: 4 })).toMatchObject({ status: 'invalid' });
     expect(parsePendingV2({ ...routes, detail: false })).toMatchObject({ status: 'invalid' });
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(6);
+    expect(parsePendingV2({ ...proposal, proposalId: '../unsafe' })).toMatchObject({ status: 'invalid' });
+    expect(parsePendingV2({ ...proposal, detail: false })).toMatchObject({ status: 'invalid' });
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(7);
     expect(STUDIO_PROPOSAL_SCHEMA_VERSION_V2).toBe(5);
     expect(STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION).toBe(5);
+    expect(STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES).toBeGreaterThan(256 * 1024);
+  });
+
+  it('accepts exact pending, no-longer-pending, and missing proposal answers and rejects cross-ID results', () => {
+    const command = validQueryCommandV2('get_proposal');
+    const proposal: StudioProposalRecordV2 = {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      id: 'proposal_exact_2',
+      projectId: 'project_1',
+      status: 'pending',
+      baseRevision: 4,
+      payload: {
+        kind: 'mutation_batch',
+        operations: [{ kind: 'edit_shot', shotId: 'shot_1', changes: { shootingScript: 'Exact proposal.' } }],
+      },
+      createdAt: NOW,
+      decidedAt: null,
+    };
+    const base = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered' as const,
+      query: { kind: 'get_proposal' as const, proposalId: proposal.id },
+    };
+    const receipts = [
+      { ...base, result: { status: 'pending' as const, proposal } },
+      {
+        ...base,
+        result: { status: 'no_longer_pending' as const, proposalId: proposal.id, decision: 'accepted' as const },
+      },
+      { ...base, result: { status: 'not_found' as const } },
+    ];
+
+    for (const receipt of receipts) expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
+    expect(studioDirectorCommandReceiptMatchesRecordV2(receipts[0], command)).toBe(true);
+    expect(
+      parseReceiptV2({
+        ...base,
+        result: { status: 'pending', proposal: { ...proposal, id: 'proposal_other' } },
+      })
+    ).toEqual({ status: 'invalid' });
+    expect(
+      parseReceiptV2({
+        ...base,
+        result: { status: 'no_longer_pending', proposalId: 'proposal_other', decision: 'rejected' },
+      })
+    ).toEqual({ status: 'invalid' });
+    expect(
+      parseReceiptV2({
+        ...base,
+        query: { kind: 'get_proposal', proposalId: 'proposal_other' },
+        result: receipts[0].result,
+      })
+    ).toEqual({ status: 'invalid' });
+  });
+
+  it('reserves the larger receipt ceiling exclusively for answered exact-proposal reads', () => {
+    const longText = 'x'.repeat(256);
+    const route = (role: 'image' | 'video', index: number) => ({
+      choiceId: `choice_${index.toString(16).padStart(24, '0')}`,
+      providerId: `provider_${index}`,
+      providerName: longText,
+      model: longText,
+      integrationLabelKey: role === 'image' ? ('imageApi' as const) : ('bytePlusSeedance' as const),
+      health: 'available' as const,
+      kind: role,
+      constraints: {
+        aspectRatios: ['16:9' as const],
+        resolutions: ['1080p' as const],
+        minDurationSeconds: 4,
+        maxDurationSeconds: 8,
+        supportedDurationSeconds: [4, 8],
+        supportsFirstFrame: role === 'video',
+        maxConditioningImages: role === 'image' ? 3 : 0,
+        silentOutput: role === 'video',
+      },
+    });
+    let oversizedRoutes: StudioDirectorCommandReceiptV2 | null = null;
+    for (let count = 1; count <= 256; count += 1) {
+      const imageOptions = Array.from({ length: count }, (_, index) => route('image', index));
+      const videoOptions = Array.from({ length: count }, (_, index) => route('video', index + 256));
+      const image = imageOptions[0]!;
+      const video = videoOptions[0]!;
+      const candidate: StudioDirectorCommandReceiptV2 = {
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+        commandId: 'command_1',
+        projectId: 'project_1',
+        decidedAt: NOW,
+        status: 'answered',
+        query: { kind: 'list_routes' },
+        result: {
+          catalogVersion: 'fedcba9876543210',
+          image: {
+            status: 'ready',
+            selected: { choiceId: image.choiceId, providerId: image.providerId, model: image.model },
+            selectedRoute: image,
+            selectionIssue: null,
+            options: imageOptions,
+          },
+          video: {
+            status: 'ready',
+            selected: { choiceId: video.choiceId, providerId: video.providerId, model: video.model },
+            selectedRoute: video,
+            selectionIssue: null,
+            options: videoOptions,
+          },
+        },
+      };
+      const bytes = Buffer.byteLength(JSON.stringify(candidate), 'utf8');
+      if (bytes > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) {
+        let bytesToTrim = bytes - (STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES + 1);
+        for (const option of [...imageOptions.slice(1), ...videoOptions.slice(1)]) {
+          for (const field of ['providerName', 'model'] as const) {
+            const trim = Math.min(bytesToTrim, option[field].length - 1);
+            option[field] = option[field].slice(0, option[field].length - trim);
+            bytesToTrim -= trim;
+            if (bytesToTrim === 0) break;
+          }
+          if (bytesToTrim === 0) break;
+        }
+        expect(bytesToTrim).toBe(0);
+        expect(Buffer.byteLength(JSON.stringify(candidate), 'utf8')).toBe(STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES + 1);
+        const controlOption = videoOptions.at(-1)!;
+        controlOption.model = controlOption.model.slice(0, -1);
+        expect(Buffer.byteLength(JSON.stringify(candidate), 'utf8')).toBe(STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES);
+        expect(parseReceiptV2(candidate)).toEqual({ status: 'valid', record: candidate });
+        controlOption.model += 'x';
+        expect(Buffer.byteLength(JSON.stringify(candidate.result), 'utf8')).toBeLessThanOrEqual(
+          STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES
+        );
+        oversizedRoutes = candidate;
+        break;
+      }
+    }
+    expect(oversizedRoutes).not.toBeNull();
+    expect(parseReceiptV2(oversizedRoutes)).toEqual({ status: 'invalid' });
+
+    const oversizedProposal = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_proposal', proposalId: 'proposal_exact_2' },
+      result: {
+        status: 'pending',
+        proposal: {
+          schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+          id: 'proposal_exact_2',
+          projectId: 'project_1',
+          status: 'pending',
+          baseRevision: 4,
+          payload: {
+            kind: 'mutation_batch',
+            operations: [
+              {
+                kind: 'set_brief',
+                brief: 'x'.repeat(STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES),
+              },
+            ],
+          },
+          createdAt: NOW,
+          decidedAt: null,
+        },
+      },
+    };
+    expect(Buffer.byteLength(JSON.stringify(oversizedProposal), 'utf8')).toBeGreaterThan(
+      STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES
+    );
+    expect(parseReceiptV2(oversizedProposal)).toEqual({ status: 'invalid' });
   });
 
   it('accepts exact answered, failed, and expired query receipts and correlates immutable query identity', () => {

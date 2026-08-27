@@ -175,7 +175,7 @@ describe('DirectorProposals', () => {
         proposals={proposals}
         referenceRequests={referenceRequests}
         referenceGenerationHandoffs={referenceGenerationHandoffs}
-        pendingActionId={null}
+        pendingAction={null}
         onAcceptProposal={onAcceptProposal}
         onRejectProposal={onRejectProposal}
         onGenerateReferences={onGenerateReferences}
@@ -262,7 +262,9 @@ describe('DirectorProposals', () => {
       kind: 'pin_rule',
       rule: { text: 'Keep brands fictional.', predicate: null },
     });
-    renderList([proposal('mutation'), pinRule], [], [], { blockMutationProposalAcceptance: true });
+    renderList([proposal('mutation'), pinRule], [], [], {
+      proposalDraftBlocker: (candidate) => (candidate.payload.kind === 'mutation_batch' ? 'workspace' : null),
+    });
 
     const mutation = within(screen.getByTestId('studio-proposal-mutation'));
     expect(
@@ -283,7 +285,7 @@ describe('DirectorProposals', () => {
         proposals={[]}
         referenceRequests={[]}
         referenceGenerationHandoffs={[]}
-        pendingActionId={null}
+        pendingAction={null}
         proposalErrorMessageKey='proposal.error'
         referenceErrorMessageKey='reference.error'
         onAcceptProposal={onAcceptProposal}

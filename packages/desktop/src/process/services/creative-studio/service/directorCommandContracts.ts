@@ -7,6 +7,7 @@
 import {
   STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2,
@@ -48,6 +49,7 @@ const COMMAND_BASE_KEYS = ['schemaVersion', 'commandId', 'projectId', 'createdAt
 const AUTO_APPLY_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'expectedRevision', 'operations']);
 const PROJECT_STATUS_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'detail']);
 const LIST_ROUTES_COMMAND_KEYS = new Set(COMMAND_BASE_KEYS);
+const GET_PROPOSAL_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'proposalId']);
 const SLOT_KEYS = new Set(['schemaVersion', 'commandId', 'reservedAt', 'deadlineAt']);
 const SLOT_LEASE_KEYS = new Set([
   'schemaVersion',
@@ -89,6 +91,10 @@ const QUERY_TERMINAL_RECEIPT_KEYS = new Set([
 ]);
 const PROJECT_STATUS_QUERY_KEYS = new Set(['kind', 'detail']);
 const LIST_ROUTES_QUERY_KEYS = new Set(['kind']);
+const GET_PROPOSAL_QUERY_KEYS = new Set(['kind', 'proposalId']);
+const PENDING_PROPOSAL_LOOKUP_KEYS = new Set(['status', 'proposal']);
+const TERMINAL_PROPOSAL_LOOKUP_KEYS = new Set(['status', 'proposalId', 'decision']);
+const MISSING_PROPOSAL_LOOKUP_KEYS = new Set(['status']);
 
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -110,6 +116,14 @@ const timestampMs = (value: unknown): number | null => {
 const fitsCommandRecord = (value: unknown): boolean => {
   try {
     return Buffer.byteLength(JSON.stringify(value), 'utf8') <= STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES;
+  } catch {
+    return false;
+  }
+};
+
+const fitsCommandReceipt = (value: unknown): boolean => {
+  try {
+    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES;
   } catch {
     return false;
   }
@@ -292,7 +306,33 @@ const parseDirectorQueryV2 = (value: unknown): StudioDirectorQueryV2 | null => {
   if (hasExactKeysV2(record, LIST_ROUTES_QUERY_KEYS) && record.kind === 'list_routes') {
     return { kind: 'list_routes' };
   }
+  if (
+    hasExactKeysV2(record, GET_PROPOSAL_QUERY_KEYS) &&
+    record.kind === 'get_proposal' &&
+    isSafeStudioDirectorId(record.proposalId)
+  ) {
+    return { kind: 'get_proposal', proposalId: record.proposalId };
+  }
   return null;
+};
+
+const validatesProposalLookupV2 = (value: unknown, projectId: string, proposalId: string): boolean => {
+  const result = snapshotDataRecordV2(value);
+  if (result === null || typeof result.status !== 'string') return false;
+  if (result.status === 'not_found') return hasExactKeysV2(result, MISSING_PROPOSAL_LOOKUP_KEYS);
+  if (result.status === 'pending') {
+    return (
+      hasExactKeysV2(result, PENDING_PROPOSAL_LOOKUP_KEYS) &&
+      parseStudioProposalRecordV2({ projectId, proposalId, value: result.proposal }).status === 'valid'
+    );
+  }
+  return (
+    result.status === 'no_longer_pending' &&
+    hasExactKeysV2(result, TERMINAL_PROPOSAL_LOOKUP_KEYS) &&
+    result.proposalId === proposalId &&
+    typeof result.decision === 'string' &&
+    V2_PROPOSAL_DECISION_STATUSES.has(result.decision)
+  );
 };
 
 const isNonnegativeSafeIntegerV2 = (value: unknown): value is number =>
@@ -1309,7 +1349,10 @@ export function parseStudioDirectorPendingRecordV2(input: {
     (value.policy === 'get_project_status' &&
       hasExactKeysV2(value, PROJECT_STATUS_COMMAND_KEYS) &&
       typeof value.detail === 'boolean') ||
-    (value.policy === 'list_routes' && hasExactKeysV2(value, LIST_ROUTES_COMMAND_KEYS));
+    (value.policy === 'list_routes' && hasExactKeysV2(value, LIST_ROUTES_COMMAND_KEYS)) ||
+    (value.policy === 'get_proposal' &&
+      hasExactKeysV2(value, GET_PROPOSAL_COMMAND_KEYS) &&
+      isSafeStudioDirectorId(value.proposalId));
   if (!commandShapeIsValid) {
     return invalidCommandV2(input.value, input.projectId, input.commandId, 'malformed_record');
   }
@@ -1337,7 +1380,7 @@ export function parseStudioDirectorCommandReceiptV2(input: {
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
   if (
     value === null ||
-    !fitsCommandRecord(value) ||
+    !fitsCommandReceipt(value) ||
     value.commandId !== input.commandId ||
     value.projectId !== input.projectId ||
     !isSafeStudioDirectorId(value.commandId) ||
@@ -1349,12 +1392,21 @@ export function parseStudioDirectorCommandReceiptV2(input: {
   if (Object.hasOwn(value, 'query')) {
     const query = parseDirectorQueryV2(value.query);
     if (query === null) return invalidSidecarV2();
+    // Only one receipt shape can legitimately exceed the command-record ceiling: an answered
+    // exact-proposal read may contain the complete immutable proposal record. All other answers
+    // and terminal receipts stay on the original bound even though the mailbox can physically
+    // carry the larger proposal answer.
+    if (!(value.status === 'answered' && query.kind === 'get_proposal') && !fitsCommandRecord(value)) {
+      return invalidSidecarV2();
+    }
     if (value.status === 'answered') {
       if (!hasExactKeysV2(value, QUERY_ANSWERED_RECEIPT_KEYS)) return invalidSidecarV2();
       const validResult =
         query.kind === 'get_project_status'
           ? validatesProjectStatusResultV2(value.result, input.projectId, query.detail)
-          : validatesMediaRouteCatalogV2(value.result);
+          : query.kind === 'list_routes'
+            ? validatesMediaRouteCatalogV2(value.result)
+            : validatesProposalLookupV2(value.result, input.projectId, query.proposalId);
       return validResult ? validSidecarV2(value as StudioDirectorCommandReceiptV2) : invalidSidecarV2();
     }
     if (!hasExactKeysV2(value, QUERY_TERMINAL_RECEIPT_KEYS) || typeof value.reasonCode !== 'string') {
@@ -1372,6 +1424,7 @@ export function parseStudioDirectorCommandReceiptV2(input: {
     }
     return invalidSidecarV2();
   }
+  if (!fitsCommandRecord(value)) return invalidSidecarV2();
   if (value.status === 'applied') {
     if (
       !hasExactKeysV2(value, V2_APPLIED_RECEIPT_KEYS) ||
@@ -1422,7 +1475,9 @@ export const isStudioDirectorQueryReceiptV2 = (
 export const studioDirectorQueryForCommandV2 = (command: StudioDirectorQueryCommandRecordV2): StudioDirectorQueryV2 =>
   command.policy === 'get_project_status'
     ? { kind: 'get_project_status', detail: command.detail }
-    : { kind: 'list_routes' };
+    : command.policy === 'list_routes'
+      ? { kind: 'list_routes' }
+      : { kind: 'get_proposal', proposalId: command.proposalId };
 
 export const studioDirectorCommandReceiptMatchesRecordV2 = (
   receipt: StudioDirectorCommandReceiptV2,
@@ -1436,8 +1491,11 @@ export const studioDirectorCommandReceiptMatchesRecordV2 = (
   const query = studioDirectorQueryForCommandV2(command);
   return (
     receipt.query.kind === query.kind &&
-    (query.kind !== 'get_project_status' ||
-      (receipt.query.kind === 'get_project_status' && receipt.query.detail === query.detail))
+    (query.kind === 'get_project_status'
+      ? receipt.query.kind === 'get_project_status' && receipt.query.detail === query.detail
+      : query.kind === 'get_proposal'
+        ? receipt.query.kind === 'get_proposal' && receipt.query.proposalId === query.proposalId
+        : true)
   );
 };
 

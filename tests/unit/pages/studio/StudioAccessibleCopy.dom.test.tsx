@@ -273,7 +273,7 @@ describe('Creative Studio workspace accessible copy', () => {
         proposals={[proposal]}
         referenceRequests={[referenceRequest]}
         referenceGenerationHandoffs={[handoff]}
-        pendingActionId={null}
+        pendingAction={null}
         onAcceptProposal={vi.fn(async () => undefined)}
         onRejectProposal={vi.fn(async () => undefined)}
         onGenerateReferences={vi.fn(async () => undefined)}
@@ -302,7 +302,7 @@ describe('Creative Studio workspace accessible copy', () => {
         proposals={[coverageProposal]}
         referenceRequests={[]}
         referenceGenerationHandoffs={[]}
-        pendingActionId={null}
+        pendingAction={null}
         onAcceptProposal={vi.fn(async () => undefined)}
         onRejectProposal={vi.fn(async () => undefined)}
         onGenerateReferences={vi.fn(async () => undefined)}

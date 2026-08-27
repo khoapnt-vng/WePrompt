@@ -342,7 +342,7 @@ const createService = () =>
       createdBeatIds: [],
       createdShotIds: [],
     })),
-    listProposals: vi.fn(async () => []),
+    listProposals: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8, proposals: [] })),
     acceptProposal: vi.fn(),
     rejectProposal: vi.fn(),
     listReferenceRequests: vi.fn(async () => []),

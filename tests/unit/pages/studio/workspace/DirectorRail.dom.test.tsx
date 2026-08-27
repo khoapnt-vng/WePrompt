@@ -36,6 +36,7 @@ const harness = vi.hoisted(() => ({
   getProject: vi.fn(),
   update: vi.fn(),
   send: vi.fn(),
+  prefill: vi.fn(),
 }));
 
 vi.mock('@/common', () => ({
@@ -58,6 +59,10 @@ vi.mock('@/common', () => ({
 }));
 
 vi.mock('@/common/utils', () => ({ uuid: harness.uuid }));
+
+vi.mock('@/renderer/hooks/chat/useSendBoxDraft', () => ({
+  requestConversationSendBoxPrefill: harness.prefill,
+}));
 
 vi.mock('@/renderer/hooks/context/ConversationHistoryContext', () => ({
   useConversationHistoryContext: () => ({
@@ -359,6 +364,7 @@ describe('DirectorRail', () => {
     harness.getProject.mockReset().mockResolvedValue(supportedProject(null));
     harness.update.mockReset().mockResolvedValue(true);
     harness.send.mockReset();
+    harness.prefill.mockReset();
   });
 
   it('accepts a persisted session whose keys came back in a different order', () => {
@@ -680,21 +686,30 @@ describe('DirectorRail', () => {
   });
 
   it.each([
-    ['Approve', 'accept'],
-    ['apply it.', 'accept'],
-    ['/approve', 'accept'],
-    ['Reject!', 'reject'],
-    ['/reject', 'reject'],
+    ['Approve', { decision: 'accept', proposalId: null }],
+    ['apply it.', { decision: 'accept', proposalId: null }],
+    ['/approve', { decision: 'accept', proposalId: null }],
+    ['Reject!', { decision: 'reject', proposalId: null }],
+    ['/reject', { decision: 'reject', proposalId: null }],
+    ['/approve Proposal_EXACT-7', { decision: 'accept', proposalId: 'Proposal_EXACT-7' }],
+    ['/reject proposal_other', { decision: 'reject', proposalId: 'proposal_other' }],
   ] as const)('recognizes only an exact proposal decision phrase: %s', (message, intent) => {
-    expect(parseDirectorProposalChatIntent(message)).toBe(intent);
+    expect(parseDirectorProposalChatIntent(message)).toEqual(intent);
   });
 
-  it.each(['yes', 'okay', 'approve these proposals', 'approve and render', 'do not reject', ''])(
-    'does not grant proposal authority to an ambiguous chat phrase: %s',
-    (message) => {
-      expect(parseDirectorProposalChatIntent(message)).toBeNull();
-    }
-  );
+  it.each([
+    'yes',
+    'okay',
+    'approve these proposals',
+    'approve and render',
+    'do not reject',
+    '/approve proposal one',
+    '/approve proposal_1 now',
+    `/approve ${'a'.repeat(257)}`,
+    '',
+  ])('does not grant proposal authority to an ambiguous chat phrase: %s', (message) => {
+    expect(parseDirectorProposalChatIntent(message)).toBeNull();
+  });
 
   it('consumes one exact human approval without forwarding it to the Director model', async () => {
     const onProposalIntent = vi.fn(async () => undefined);
@@ -703,8 +718,33 @@ describe('DirectorRail', () => {
 
     await expect(harness.beforeSend?.({ message: 'approve', hasAttachments: false })).resolves.toBe(true);
     expect(onProposalIntent).toHaveBeenCalledOnce();
-    expect(onProposalIntent).toHaveBeenCalledWith('accept');
+    expect(onProposalIntent).toHaveBeenCalledWith({ decision: 'accept', proposalId: null });
     expect(harness.send).not.toHaveBeenCalled();
+  });
+
+  it('prefills one editable exact-ID re-propose turn without sending it', async () => {
+    const bound = exactConversation('conversation_bound');
+    harness.conversations = [bound];
+    harness.getProject.mockResolvedValue(supportedProject('conversation_bound'));
+    const prompt = 'Inspect proposal Proposal_EXACT-7 and draft a replacement.';
+    const { rerender } = render(
+      <DirectorRail
+        project={project({ briefConversationId: 'conversation_bound' })}
+        draftRequest={{ requestId: 1, projectId: 'project_1', prompt }}
+      />
+    );
+
+    await screen.findByRole('textbox', { name: 'Director composer' });
+    await waitFor(() => expect(harness.prefill).toHaveBeenCalledWith('conversation_bound', prompt));
+    expect(harness.send).not.toHaveBeenCalled();
+
+    rerender(
+      <DirectorRail
+        project={project({ briefConversationId: 'conversation_bound' })}
+        draftRequest={{ requestId: 1, projectId: 'project_1', prompt }}
+      />
+    );
+    expect(harness.prefill).toHaveBeenCalledTimes(1);
   });
 
   it('leaves ordinary messages and messages with attachments on the normal chat path', async () => {

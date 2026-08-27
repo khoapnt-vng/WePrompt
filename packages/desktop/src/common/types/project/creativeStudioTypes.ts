@@ -169,7 +169,7 @@ export const isValidProviderJobId = (value: string): boolean =>
 
 export const STUDIO_MAX_DIRTY_DRAFTS_REPORTED = 24;
 /** Durable Beat/Shot Director command schema. */
-export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 6 as const;
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 7 as const;
 export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 5 as const;
 export const STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION = 5 as const;
 export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
@@ -177,6 +177,11 @@ export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
 export const STUDIO_EXPORT_SCHEMA_VERSION_V2 = 2 as const;
 export const STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS = 32;
 export const STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES = 256 * 1024;
+/**
+ * Query receipts may contain one maximum-size immutable proposal plus their bounded envelope.
+ * Commands and slots intentionally retain the smaller command-record cap.
+ */
+export const STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES = STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES + 4 * 1024;
 export const STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS = 64;
 export const STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS = 60_000;
@@ -230,14 +235,23 @@ export type StudioDirectorListRoutesCommandRecordV2 = StudioDirectorCommandRecor
   policy: 'list_routes';
 };
 
+export type StudioDirectorGetProposalCommandRecordV2 = StudioDirectorCommandRecordBaseV2 & {
+  policy: 'get_proposal';
+  proposalId: string;
+};
+
 export type StudioDirectorQueryCommandRecordV2 =
   | StudioDirectorGetProjectStatusCommandRecordV2
-  | StudioDirectorListRoutesCommandRecordV2;
+  | StudioDirectorListRoutesCommandRecordV2
+  | StudioDirectorGetProposalCommandRecordV2;
 
 /** One durable lane carries both direct mutations and read-only Director queries. */
 export type StudioDirectorCommandRecordV2 = StudioDirectorAutoApplyCommandRecordV2 | StudioDirectorQueryCommandRecordV2;
 
-export type StudioDirectorQueryV2 = { kind: 'get_project_status'; detail: boolean } | { kind: 'list_routes' };
+export type StudioDirectorQueryV2 =
+  | { kind: 'get_project_status'; detail: boolean }
+  | { kind: 'list_routes' }
+  | { kind: 'get_proposal'; proposalId: string };
 
 export type StudioDirectorCommandSlotV2 = {
   schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
@@ -343,6 +357,11 @@ export type StudioDirectorAnsweredReceiptV2 =
       status: 'answered';
       query: Extract<StudioDirectorQueryV2, { kind: 'list_routes' }>;
       result: StudioRouteCatalogV2;
+    })
+  | (StudioDirectorQueryReceiptBaseV2 & {
+      status: 'answered';
+      query: Extract<StudioDirectorQueryV2, { kind: 'get_proposal' }>;
+      result: StudioDirectorProposalLookupV2;
     });
 
 export type StudioDirectorFailedQueryReceiptV2 = StudioDirectorQueryReceiptBaseV2 & {
@@ -1837,6 +1856,23 @@ export type StudioProposalReviewV2 =
 export type StudioRendererProposalV2 = StudioProposalV2 & {
   review: StudioProposalReviewV2;
 };
+
+/** Main-correlated proposal authority installed atomically by the renderer. */
+export type StudioRendererProposalCatalogV2 = {
+  projectId: string;
+  projectRevision: number;
+  proposals: StudioRendererProposalV2[];
+};
+
+/** Exact bounded answer for the Director's read-only proposal lookup. */
+export type StudioDirectorProposalLookupV2 =
+  | { status: 'pending'; proposal: StudioProposalRecordV2 }
+  | { status: 'not_found' }
+  | {
+      status: 'no_longer_pending';
+      proposalId: string;
+      decision: Exclude<StudioProposalStatus, 'pending'>;
+    };
 
 export type StudioProposalDecisionV2 = {
   schemaVersion: typeof STUDIO_PROPOSAL_SCHEMA_VERSION_V2;

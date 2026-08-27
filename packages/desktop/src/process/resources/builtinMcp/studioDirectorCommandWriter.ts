@@ -10,6 +10,7 @@ import path from 'node:path';
 import {
   isUnsupportedStudioPrototypeSchemaVersion,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
@@ -62,6 +63,8 @@ export type StudioGetCommandStatusInput = { commandId: string };
 
 export type StudioGetProjectStatusDirectorInputV2 = { detail?: boolean };
 
+export type StudioGetProposalDirectorInputV2 = { proposalId: string };
+
 export type StudioDirectorToolApplyResultV2 =
   | StudioDirectorMutationReceiptV2
   | {
@@ -99,6 +102,7 @@ export type StudioDirectorCommandWriterV2 = {
   apply(input: StudioApplyEditsInputV2): Promise<StudioDirectorToolApplyResultV2>;
   getProjectStatus(input?: StudioGetProjectStatusDirectorInputV2): Promise<StudioDirectorToolQueryResultV2>;
   listRoutes(): Promise<StudioDirectorToolQueryResultV2>;
+  getProposal(input: StudioGetProposalDirectorInputV2): Promise<StudioDirectorToolQueryResultV2>;
   getStatus(input: StudioGetCommandStatusInput): Promise<StudioDirectorToolStatusResultV2>;
 };
 
@@ -119,6 +123,27 @@ const normalizedProjectStatusDetailV2 = (input: unknown): boolean | null => {
     if (keys.length !== 1 || keys[0] !== 'detail') return null;
     const descriptor = Object.getOwnPropertyDescriptor(input, 'detail');
     return descriptor !== undefined && Object.hasOwn(descriptor, 'value') && typeof descriptor.value === 'boolean'
+      ? descriptor.value
+      : null;
+  } catch {
+    return null;
+  }
+};
+
+const normalizedProposalIdV2 = (input: unknown): string | null => {
+  try {
+    if (
+      typeof input !== 'object' ||
+      input === null ||
+      Array.isArray(input) ||
+      Object.getPrototypeOf(input) !== Object.prototype
+    ) {
+      return null;
+    }
+    const keys = Reflect.ownKeys(input);
+    if (keys.length !== 1 || keys[0] !== 'proposalId') return null;
+    const descriptor = Object.getOwnPropertyDescriptor(input, 'proposalId');
+    return descriptor !== undefined && Object.hasOwn(descriptor, 'value') && isSafeStudioDirectorId(descriptor.value)
       ? descriptor.value
       : null;
   } catch {
@@ -185,7 +210,8 @@ type PreparedCommandV2 = {
 type StudioDirectorWriterRequestV2 =
   | { policy: 'auto_apply'; input: StudioApplyEditsInputV2 }
   | { policy: 'get_project_status'; detail: boolean }
-  | { policy: 'list_routes' };
+  | { policy: 'list_routes' }
+  | { policy: 'get_proposal'; proposalId: string };
 
 type IdentifiedJsonRecord = {
   value: unknown;
@@ -398,10 +424,11 @@ const readJsonRecord = async (input: {
   fs: RecordIoFileSystem;
   canonicalRoot: string;
   file: string;
+  maxBytes?: number;
 }): Promise<unknown | null> => {
   const bytes = await readBoundedRegularFile({
     ...input,
-    maxBytes: STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+    maxBytes: input.maxBytes ?? STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   });
   return bytes === null ? null : parseJson(bytes);
 };
@@ -436,6 +463,7 @@ const readNamedReceiptV2 = async (input: {
       fs: input.fs,
       canonicalRoot: input.directories.canonicalRoot,
       file: receiptFile,
+      maxBytes: STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
     });
   } catch (error) {
     if (input.publicationAuthority === undefined || !(error instanceof RecordIoError) || error.code !== 'unsafe_file') {
@@ -464,6 +492,7 @@ const readNamedReceiptV2 = async (input: {
         fs: input.fs,
         canonicalRoot: input.directories.canonicalRoot,
         file: receiptFile,
+        maxBytes: STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
       });
       await assertCommandDirectoriesV2(input.fs, input.directories);
       const retryAuthorityStatus = await projectAuthorityStatusForReceiptPollingV2(
@@ -582,7 +611,9 @@ const prepareCommandV2 = (input: {
         }
       : input.request.policy === 'get_project_status'
         ? { ...base, policy: 'get_project_status', detail: input.request.detail }
-        : { ...base, policy: 'list_routes' };
+        : input.request.policy === 'list_routes'
+          ? { ...base, policy: 'list_routes' }
+          : { ...base, policy: 'get_proposal', proposalId: input.request.proposalId };
   const slot: StudioDirectorCommandSlotV2 = {
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId,
@@ -1835,5 +1866,12 @@ export const createStudioDirectorCommandWriterV2 = (
   const listRoutes = async (): Promise<StudioDirectorToolQueryResultV2> =>
     (await submit({ policy: 'list_routes' })) as StudioDirectorToolQueryResultV2;
 
-  return { apply, getProjectStatus, listRoutes, getStatus };
+  const getProposal = async (input: StudioGetProposalDirectorInputV2): Promise<StudioDirectorToolQueryResultV2> => {
+    const proposalId = normalizedProposalIdV2(input);
+    return proposalId === null
+      ? storageError('unavailable')
+      : ((await submit({ policy: 'get_proposal', proposalId })) as StudioDirectorToolQueryResultV2);
+  };
+
+  return { apply, getProjectStatus, listRoutes, getProposal, getStatus };
 };

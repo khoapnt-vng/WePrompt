@@ -810,14 +810,24 @@ const expectedLeaves = [
   'library.composer.submit',
   'library.composer.empty',
   'proposals.title',
+  'proposals.proposalId',
   'proposals.ownerBeat',
   'proposals.before',
   'proposals.after',
   'proposals.reviewUnavailable',
+  'proposals.refreshing',
+  'proposals.authorityUnavailable',
+  'proposals.requestUpdated',
+  'proposals.saveAndRequestUpdated',
+  'proposals.reviewRuleDrafts',
+  'proposals.reviewRuleDraftsFirst',
+  'proposals.reproposalPrompt',
   'proposals.chatAccepted',
   'proposals.chatRejected',
   'proposals.chatNoPending',
   'proposals.chatMultiplePending',
+  'proposals.chatProposalNotFound',
+  'proposals.chatUnavailable',
   'proposals.chatStale',
   'proposals.chatDecisionBusy',
   'proposals.chatDirty',
@@ -1233,6 +1243,7 @@ const localizedWorkspaceKeys = [
   ...localizedFirstFramesPanelKeys,
   ...localizedShotComposerKeys,
   ...localizedReferencesPanelKeys,
+  'proposals.proposalId',
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
@@ -1241,10 +1252,19 @@ const localizedWorkspaceKeys = [
   'proposals.before',
   'proposals.after',
   'proposals.reviewUnavailable',
+  'proposals.refreshing',
+  'proposals.authorityUnavailable',
+  'proposals.requestUpdated',
+  'proposals.saveAndRequestUpdated',
+  'proposals.reviewRuleDrafts',
+  'proposals.reviewRuleDraftsFirst',
+  'proposals.reproposalPrompt',
   'proposals.chatAccepted',
   'proposals.chatRejected',
   'proposals.chatNoPending',
   'proposals.chatMultiplePending',
+  'proposals.chatProposalNotFound',
+  'proposals.chatUnavailable',
   'proposals.chatStale',
   'proposals.chatDecisionBusy',
   'proposals.chatDirty',
@@ -1466,6 +1486,18 @@ describe('Creative Studio workspace translations', () => {
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
     }
+  });
+
+  it('labels re-proposal as preparing an editable draft and exposes the proposal ID', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'proposals.proposalId': 'Proposal ID',
+      'proposals.requestUpdated': 'Prepare updated proposal',
+      'proposals.saveAndRequestUpdated': 'Save and prepare updated proposal',
+      'proposals.authorityUnavailable':
+        'Proposal authority could not be verified. The proposal remains pending and its actions are unavailable.',
+    });
   });
 
   it('defines one exact undo label for every mutation operation that can be persisted', () => {

@@ -29,6 +29,8 @@ import {
   type StudioRendererJobV2,
   type StudioRendererProjectCommitResultV2,
   type StudioRendererProjectV2,
+  type StudioRendererProposalCatalogV2,
+  type StudioRendererProposalV2,
   type StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { StudioLibrary } from './components/Library';
@@ -74,6 +76,7 @@ import {
   type WorkspaceMutationCallbacks,
   type WorkspaceProjection,
   type WorkspaceReviewedOutput,
+  type WorkspaceDirectorDraftRequest,
   type WorkspaceShellHandle,
 } from './components/Workspace';
 import {
@@ -96,6 +99,23 @@ import {
 import styles from './StudioPage.module.css';
 
 type StudioReferenceDecisionIntent = { kind: 'rejected' } | { kind: 'generation_gate' };
+
+type StudioProposalAuthoritySnapshot = {
+  project: StudioRendererProjectV2;
+  catalog: StudioRendererProposalCatalogV2;
+};
+
+type StudioProposalAuthorityState = 'ready' | 'stale' | 'unavailable' | 'refreshing';
+
+type StudioReviewedActionTarget = {
+  kind: 'proposal' | 'reference_request' | 'handoff';
+  id: string;
+};
+
+type StudioReviewedActionLatch = {
+  token: number;
+  target: StudioReviewedActionTarget | null;
+};
 
 const shotCapabilityItemsForDraft = (draft: SpendGateDraft): StudioGenerationCapabilityItemV2[] =>
   'baseChoices' in draft
@@ -295,6 +315,8 @@ const StudioProjectPage: React.FC<{
   const {
     project,
     proposals,
+    proposalCatalog,
+    proposalRefreshing,
     referenceRequests,
     referenceGenerationHandoffs,
     workspaceStatus,
@@ -316,19 +338,32 @@ const StudioProjectPage: React.FC<{
     refetchExports,
     installExportCatalog,
   } = useStudioProject(projectId);
-  const [pendingActionId, setPendingActionId] = useState<string | null>(null);
-  const pendingActionIdRef = useRef<string | null>(null);
-  const beginPendingAction = useCallback((actionId: string): boolean => {
-    if (pendingActionIdRef.current !== null) return false;
-    pendingActionIdRef.current = actionId;
-    setPendingActionId(actionId);
+  const [reviewedAction, setReviewedAction] = useState<StudioReviewedActionLatch | null>(null);
+  const reviewedActionRef = useRef<StudioReviewedActionLatch | null>(null);
+  const reviewedActionSequenceRef = useRef(0);
+  const beginReviewedAction = useCallback((target: StudioReviewedActionTarget | null): number | null => {
+    if (reviewedActionRef.current !== null) return null;
+    reviewedActionSequenceRef.current += 1;
+    const latch = { token: reviewedActionSequenceRef.current, target };
+    reviewedActionRef.current = latch;
+    setReviewedAction(latch);
+    return latch.token;
+  }, []);
+  const retargetReviewedAction = useCallback((token: number, target: StudioReviewedActionTarget): boolean => {
+    const current = reviewedActionRef.current;
+    if (current?.token !== token) return false;
+    const next = { token, target };
+    reviewedActionRef.current = next;
+    setReviewedAction(next);
     return true;
   }, []);
-  const finishPendingAction = useCallback((actionId: string): void => {
-    if (pendingActionIdRef.current !== actionId) return;
-    pendingActionIdRef.current = null;
-    setPendingActionId(null);
+  const finishReviewedAction = useCallback((token: number): void => {
+    if (reviewedActionRef.current?.token !== token) return;
+    reviewedActionRef.current = null;
+    setReviewedAction(null);
   }, []);
+  const reviewedActionLocked = reviewedAction !== null;
+  const pendingReviewedAction = reviewedAction?.target ?? null;
   const [pendingReferenceId, setPendingReferenceId] = useState<string | null>(null);
   const [actionErrorMessageKey, setActionErrorMessageKeyState] = useState<string | null>(null);
   const actionErrorGenerationRef = useRef(0);
@@ -356,6 +391,8 @@ const StudioProjectPage: React.FC<{
   const [ruleDraftDirtyCount, setRuleDraftDirtyCount] = useState(0);
   const [activeRuleDraftDirtyCount, setActiveRuleDraftDirtyCount] = useState(0);
   const [briefDialogRequest, setBriefDialogRequest] = useState(0);
+  const [directorDraftRequest, setDirectorDraftRequest] = useState<WorkspaceDirectorDraftRequest | null>(null);
+  const directorDraftRequestSequenceRef = useRef(0);
   const [briefRouteFocusRole, setBriefRouteFocusRole] = useState<'image' | 'video' | null>(null);
   const [referenceFocusIntent, setReferenceFocusIntent] = useState<StudioReferenceFocusIntent | null>(null);
   const [pendingRejoinReview, setPendingRejoinReview] = useState<{
@@ -392,6 +429,11 @@ const StudioProjectPage: React.FC<{
     activeShotIds: projection?.activeShotIds ?? [],
     enabled: project !== null,
   });
+  const proposalDraftAuthorityRef = useRef({ workspaceDirtyCount: 0, activeRuleDirtyCount: 0 });
+  proposalDraftAuthorityRef.current = {
+    workspaceDirtyCount: drafts.dirtyCount,
+    activeRuleDirtyCount: activeRuleDraftDirtyCount,
+  };
   const generationDraftsBlockReview =
     drafts.staleRevision || activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
 
@@ -424,6 +466,7 @@ const StudioProjectPage: React.FC<{
   useEffect(() => {
     setReferenceFocusIntent(null);
     setPendingRejoinReview(null);
+    setDirectorDraftRequest(null);
   }, [projectId]);
 
   const openReferenceFocus = useCallback(
@@ -3456,125 +3499,325 @@ const StudioProjectPage: React.FC<{
     return () => onCloseContractChange(null);
   }, [closeDirtyDraftCount, flushAllWorkspaceDrafts, onCloseContractChange, project]);
 
-  const refreshProposalAuthority = useCallback(async (): Promise<void> => {
-    const [projectOutcome] = await Promise.allSettled([refetchProjectWorkspace(), refetchProposals()]);
-    if (projectOutcome.status === 'fulfilled' && projectOutcome.value !== null) {
-      projectRef.current = projectOutcome.value;
+  const proposalDraftBlocker = useCallback((candidate: StudioRendererProposalV2): 'workspace' | 'rules' | null => {
+    const current = proposalDraftAuthorityRef.current;
+    if (candidate.payload.kind === 'mutation_batch') return current.workspaceDirtyCount > 0 ? 'workspace' : null;
+    return current.activeRuleDirtyCount > 0 ? 'rules' : null;
+  }, []);
+
+  const proposalAuthorityVerified = useCallback(
+    (candidate: StudioRendererProposalV2): boolean =>
+      !proposalRefreshing &&
+      project !== null &&
+      proposalErrorMessageKey === null &&
+      proposalCatalog !== null &&
+      proposalCatalog.projectId === project.id &&
+      proposalCatalog.projectRevision === project.revision &&
+      proposalCatalog.proposals.find((proposal) => proposal.id === candidate.id) === candidate,
+    [project, proposalCatalog, proposalErrorMessageKey, proposalRefreshing]
+  );
+
+  const proposalAuthorityState = useCallback(
+    (candidate: StudioRendererProposalV2): StudioProposalAuthorityState => {
+      if (proposalRefreshing) return 'refreshing';
+      if (!proposalAuthorityVerified(candidate)) {
+        return 'unavailable';
+      }
+      return candidate.review.status;
+    },
+    [proposalAuthorityVerified, proposalRefreshing]
+  );
+
+  const refreshProposalAuthority = useCallback(async (): Promise<StudioProposalAuthoritySnapshot | null> => {
+    const refreshedProject = await refetchProjectWorkspace();
+    if (refreshedProject === null) return null;
+    projectRef.current = refreshedProject;
+    const catalog = await refetchProposals();
+    if (
+      catalog === null ||
+      catalog.projectId !== refreshedProject.id ||
+      catalog.projectRevision !== refreshedProject.revision
+    ) {
+      return null;
     }
+    return { project: refreshedProject, catalog };
   }, [refetchProjectWorkspace, refetchProposals]);
 
-  const acceptProposal = useCallback(
-    async (proposalId: string): Promise<boolean> => {
-      if (pendingActionIdRef.current !== null) return false;
-      const target = proposals.find((proposal) => proposal.id === proposalId && proposal.status === 'pending');
-      if (closeDirtyDraftCount > 0 && target?.payload.kind === 'mutation_batch') {
-        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.saveBeforeApply');
-        return false;
-      }
-      if (!beginPendingAction(proposalId)) return false;
-      setActionErrorMessageKey(null);
-      try {
-        const result = await ipcBridge.creativeStudio.acceptProposal.invoke({ projectId, proposalId });
+  const performProposalDecision = useCallback(
+    async (
+      decision: 'accept' | 'reject',
+      target: StudioRendererProposalV2,
+      authority: StudioProposalAuthoritySnapshot,
+      draftErrorMode: 'card' | 'chat' = 'card'
+    ): Promise<boolean> => {
+      if (decision === 'accept') {
+        if (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision) {
+          setActionErrorMessageKey(
+            target.review.status === 'stale'
+              ? 'conversation.creativeStudio.workspace.proposals.chatStale'
+              : 'conversation.creativeStudio.workspace.proposals.reviewUnavailable'
+          );
+          return false;
+        }
+        // Refreshing authority is asynchronous. Read the live draft fence at the final synchronous
+        // boundary immediately before invoking Main so a draft created during refresh cannot be
+        // accepted over.
+        const draftBlocker = proposalDraftBlocker(target);
+        if (draftBlocker !== null) {
+          setActionErrorMessageKey(
+            draftErrorMode === 'chat'
+              ? 'conversation.creativeStudio.workspace.proposals.chatDirty'
+              : draftBlocker === 'workspace'
+                ? 'conversation.creativeStudio.workspace.proposals.saveBeforeApply'
+                : 'conversation.creativeStudio.workspace.proposals.reviewRuleDraftsFirst'
+          );
+          return false;
+        }
+        const result = await ipcBridge.creativeStudio.acceptProposal.invoke({
+          projectId: authority.project.id,
+          proposalId: target.id,
+        });
         if (result.ok === false) {
           setActionErrorMessageKey(result.error.messageKey);
           await refreshProposalAuthority();
           return false;
         }
-        await refreshProposalAuthority();
-        return true;
+      } else {
+        const result = await ipcBridge.creativeStudio.rejectProposal.invoke({
+          projectId: authority.project.id,
+          proposalId: target.id,
+        });
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          await refreshProposalAuthority();
+          return false;
+        }
+      }
+      await refreshProposalAuthority();
+      return true;
+    },
+    [proposalDraftBlocker, refreshProposalAuthority, setActionErrorMessageKey]
+  );
+
+  const decideProposalFromCard = useCallback(
+    async (decision: 'accept' | 'reject', proposalId: string): Promise<boolean> => {
+      const token = beginReviewedAction({ kind: 'proposal', id: proposalId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return false;
+      }
+      setActionErrorMessageKey(null);
+      try {
+        const authority = await refreshProposalAuthority();
+        if (authority === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+          return false;
+        }
+        const target = authority.catalog.proposals.find(
+          (candidate) => candidate.id === proposalId && candidate.status === 'pending'
+        );
+        if (target === undefined) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return false;
+        }
+        return await performProposalDecision(decision, target, authority);
       } catch {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
         await refreshProposalAuthority();
         return false;
       } finally {
-        finishPendingAction(proposalId);
+        finishReviewedAction(token);
       }
     },
     [
-      beginPendingAction,
-      closeDirtyDraftCount,
-      finishPendingAction,
-      projectId,
-      proposals,
+      beginReviewedAction,
+      finishReviewedAction,
+      performProposalDecision,
       refreshProposalAuthority,
       setActionErrorMessageKey,
     ]
   );
 
-  const rejectProposal = useCallback(
-    async (proposalId: string): Promise<boolean> => {
-      if (!beginPendingAction(proposalId)) return false;
-      setActionErrorMessageKey(null);
-      try {
-        const result = await ipcBridge.creativeStudio.rejectProposal.invoke({ projectId, proposalId });
-        if (result.ok === false) {
-          setActionErrorMessageKey(result.error.messageKey);
-          return false;
-        }
-        await refetchProposals();
-        return true;
-      } catch {
-        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
-        return false;
-      } finally {
-        finishPendingAction(proposalId);
-      }
-    },
-    [beginPendingAction, finishPendingAction, projectId, refetchProposals, setActionErrorMessageKey]
-  );
-
   const decideProposalFromDirectorChat = useCallback(
     async (intent: DirectorProposalChatIntent): Promise<void> => {
-      if (pendingActionIdRef.current !== null) {
+      const token = beginReviewedAction(
+        intent.proposalId === null ? null : { kind: 'proposal', id: intent.proposalId }
+      );
+      if (token === null) {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
         return;
       }
-      const pending = proposals.filter((proposal) => proposal.status === 'pending');
-      if (pending.length === 0) {
-        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatNoPending');
-        return;
-      }
-      if (pending.length !== 1) {
-        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatMultiplePending');
-        return;
-      }
-      const current = projectRef.current;
-      const target = pending[0]!;
-      if (current === null || target.projectId !== current.id || target.baseRevision !== current.revision) {
-        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatStale');
-        return;
-      }
-      if (closeDirtyDraftCount > 0) {
-        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDirty');
-        return;
-      }
-      const succeeded = intent === 'accept' ? await acceptProposal(target.id) : await rejectProposal(target.id);
-      if (succeeded) {
-        setActionErrorMessageKey(
-          intent === 'accept'
-            ? 'conversation.creativeStudio.workspace.proposals.chatAccepted'
-            : 'conversation.creativeStudio.workspace.proposals.chatRejected'
+      try {
+        setActionErrorMessageKey(null);
+        const authority = await refreshProposalAuthority();
+        if (authority === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+          return;
+        }
+        const pending = authority.catalog.proposals.filter((candidate) => candidate.status === 'pending');
+        const ready = pending.filter(
+          (candidate) => candidate.review.status === 'ready' && candidate.baseRevision === authority.project.revision
         );
+        const target =
+          intent.proposalId === null
+            ? ready.length === 1
+              ? ready[0]
+              : undefined
+            : pending.find((candidate) => candidate.id === intent.proposalId);
+        if (intent.proposalId === null && ready.length === 0) {
+          setActionErrorMessageKey(
+            pending.length === 0
+              ? 'conversation.creativeStudio.workspace.proposals.chatNoPending'
+              : pending.some((candidate) => candidate.review.status === 'stale')
+                ? 'conversation.creativeStudio.workspace.proposals.chatStale'
+                : 'conversation.creativeStudio.workspace.proposals.chatUnavailable'
+          );
+          return;
+        }
+        if (intent.proposalId === null && ready.length > 1) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatMultiplePending');
+          return;
+        }
+        if (target === undefined) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        if (!retargetReviewedAction(token, { kind: 'proposal', id: target.id })) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+          return;
+        }
+        if (
+          intent.decision === 'accept' &&
+          (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision)
+        ) {
+          setActionErrorMessageKey(
+            target.review.status === 'stale'
+              ? 'conversation.creativeStudio.workspace.proposals.chatStale'
+              : 'conversation.creativeStudio.workspace.proposals.chatUnavailable'
+          );
+          return;
+        }
+        const succeeded = await performProposalDecision(intent.decision, target, authority, 'chat');
+        if (succeeded) {
+          setActionErrorMessageKey(
+            intent.decision === 'accept'
+              ? 'conversation.creativeStudio.workspace.proposals.chatAccepted'
+              : 'conversation.creativeStudio.workspace.proposals.chatRejected'
+          );
+        }
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        await refreshProposalAuthority();
+      } finally {
+        finishReviewedAction(token);
       }
     },
-    [acceptProposal, closeDirtyDraftCount, proposals, rejectProposal, setActionErrorMessageKey]
+    [
+      beginReviewedAction,
+      finishReviewedAction,
+      performProposalDecision,
+      refreshProposalAuthority,
+      retargetReviewedAction,
+      setActionErrorMessageKey,
+    ]
   );
+
+  const queueUpdatedProposalDraft = useCallback(
+    (proposalId: string): void => {
+      directorDraftRequestSequenceRef.current += 1;
+      setDirectorDraftRequest({
+        requestId: directorDraftRequestSequenceRef.current,
+        projectId,
+        prompt: t('conversation.creativeStudio.workspace.proposals.reproposalPrompt', { proposalId }),
+      });
+      workspaceShellRef.current?.revealDirector({ projectId, view: activeView });
+    },
+    [activeView, projectId, t]
+  );
+
+  const requestUpdatedProposal = useCallback(
+    async (proposalId: string, saveWorkspaceDrafts: boolean): Promise<void> => {
+      const token = beginReviewedAction({ kind: 'proposal', id: proposalId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      setActionErrorMessageKey(null);
+      try {
+        const visibleTarget = proposals.find(
+          (candidate) =>
+            candidate.id === proposalId && candidate.projectId === projectId && candidate.status === 'pending'
+        );
+        if (visibleTarget === undefined) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        if (saveWorkspaceDrafts) {
+          if (visibleTarget.payload.kind !== 'mutation_batch') return;
+          if (!(await saveAllDrafts())) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.saveBeforeApply');
+            return;
+          }
+        }
+        const authority = await refreshProposalAuthority();
+        if (authority === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+          return;
+        }
+        const exactPending = authority.catalog.proposals.some(
+          (candidate) => candidate.id === proposalId && candidate.status === 'pending'
+        );
+        if (!exactPending) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        queueUpdatedProposalDraft(proposalId);
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      } finally {
+        finishReviewedAction(token);
+      }
+    },
+    [
+      beginReviewedAction,
+      finishReviewedAction,
+      projectId,
+      proposals,
+      queueUpdatedProposalDraft,
+      refreshProposalAuthority,
+      saveAllDrafts,
+      setActionErrorMessageKey,
+    ]
+  );
+
+  const reviewRuleDrafts = useCallback((): void => {
+    setBriefDialogRequest((request) => request + 1);
+  }, []);
+
+  const consumeDirectorDraftRequest = useCallback((requestId: number): void => {
+    setDirectorDraftRequest((current) => (current?.requestId === requestId ? null : current));
+  }, []);
 
   const acceptProposalFromCard = useCallback(
     async (proposalId: string): Promise<void> => {
-      await acceptProposal(proposalId);
+      await decideProposalFromCard('accept', proposalId);
     },
-    [acceptProposal]
+    [decideProposalFromCard]
   );
   const rejectProposalFromCard = useCallback(
     async (proposalId: string): Promise<void> => {
-      await rejectProposal(proposalId);
+      await decideProposalFromCard('reject', proposalId);
     },
-    [rejectProposal]
+    [decideProposalFromCard]
   );
 
   const reviewHandoff = useCallback(
-    (handoff: StudioRendererReferenceGenerationHandoffV2): void => {
+    (handoff: StudioRendererReferenceGenerationHandoffV2, ownedActionToken?: number): void => {
+      const activeAction = reviewedActionRef.current;
+      if (activeAction !== null && activeAction.token !== ownedActionToken) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
       const current = projectRef.current;
       if (current === null) return;
       if (generationDraftsBlockReview) {
@@ -3621,7 +3864,12 @@ const StudioProjectPage: React.FC<{
 
   const decideReferences = useCallback(
     async (requestId: string, outcome: StudioReferenceDecisionIntent): Promise<void> => {
-      if (project === null || !beginPendingAction(requestId)) return;
+      if (project === null) return;
+      const token = beginReviewedAction({ kind: 'reference_request', id: requestId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
       setActionErrorMessageKey(null);
       try {
         const result = await ipcBridge.creativeStudio.decideReferenceRequest.invoke({
@@ -3635,28 +3883,31 @@ const StudioProjectPage: React.FC<{
           return;
         }
         if (result.data.outcome.kind === 'generation_gate') {
-          reviewHandoff({
-            handoffId: result.data.outcome.handoffId,
-            requestId: result.data.requestId,
-            referenceIds: [...result.data.outcome.referenceIds],
-            decidedAt: result.data.decidedAt,
-            status: 'awaiting_spend',
-            counts: { queued: 0, running: 0, succeeded: 0, failed: 0 },
-            resultAssetIds: [],
-            failedReferenceIds: [],
-            completedAt: null,
-          });
+          reviewHandoff(
+            {
+              handoffId: result.data.outcome.handoffId,
+              requestId: result.data.requestId,
+              referenceIds: [...result.data.outcome.referenceIds],
+              decidedAt: result.data.decidedAt,
+              status: 'awaiting_spend',
+              counts: { queued: 0, running: 0, succeeded: 0, failed: 0 },
+              resultAssetIds: [],
+              failedReferenceIds: [],
+              completedAt: null,
+            },
+            token
+          );
         }
         await refetchReferences();
       } catch {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
       } finally {
-        finishPendingAction(requestId);
+        finishReviewedAction(token);
       }
     },
     [
-      beginPendingAction,
-      finishPendingAction,
+      beginReviewedAction,
+      finishReviewedAction,
       project,
       projectId,
       refetchReferences,
@@ -3667,6 +3918,10 @@ const StudioProjectPage: React.FC<{
 
   const reviewGeneratedReferences = useCallback(
     (handoff: StudioRendererReferenceGenerationHandoffV2): void => {
+      if (reviewedActionRef.current !== null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
       const current = projectRef.current;
       if (
         current === null ||
@@ -3686,7 +3941,7 @@ const StudioProjectPage: React.FC<{
       );
       openReferenceFocus({ referenceIds, assetIds: generatedAssetIds });
     },
-    [openReferenceFocus]
+    [openReferenceFocus, setActionErrorMessageKey]
   );
 
   const reviewShotBinding = useCallback(
@@ -3703,6 +3958,7 @@ const StudioProjectPage: React.FC<{
       const current = projectRef.current;
       if (
         current === null ||
+        reviewedActionRef.current !== null ||
         (handoff.status !== 'partially_failed' && handoff.status !== 'failed') ||
         handoff.failedReferenceIds.length === 0 ||
         generationDraftsBlockReview ||
@@ -3711,6 +3967,8 @@ const StudioProjectPage: React.FC<{
       ) {
         if (generationDraftsBlockReview) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+        } else if (reviewedActionRef.current !== null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
         }
         return;
       }
@@ -3785,7 +4043,12 @@ const StudioProjectPage: React.FC<{
   const dismissHandoff = useCallback(
     async (handoff: StudioRendererReferenceGenerationHandoffV2): Promise<void> => {
       const current = projectRef.current;
-      if (current === null || !beginPendingAction(handoff.handoffId)) return;
+      if (current === null) return;
+      const token = beginReviewedAction({ kind: 'handoff', id: handoff.handoffId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
       setActionErrorMessageKey(null);
       try {
         const result = await ipcBridge.creativeStudio.dismissReferenceGenerationHandoff.invoke({
@@ -3801,10 +4064,10 @@ const StudioProjectPage: React.FC<{
       } catch {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
       } finally {
-        finishPendingAction(handoff.handoffId);
+        finishReviewedAction(token);
       }
     },
-    [beginPendingAction, finishPendingAction, refetchReferences, setActionErrorMessageKey]
+    [beginReviewedAction, finishReviewedAction, refetchReferences, setActionErrorMessageKey]
   );
 
   if (loadState === 'loading' || loadState === 'idle') {
@@ -3842,9 +4105,6 @@ const StudioProjectPage: React.FC<{
     );
   }
 
-  const actionableProposals = proposals.filter(
-    (proposal) => proposal.status === 'pending' && proposal.baseRevision === project.revision
-  );
   const directorReviewCard = (
     cardProposals: DirectorProposalsProps['proposals'],
     cardReferenceRequests: DirectorProposalsProps['referenceRequests'],
@@ -3857,12 +4117,17 @@ const StudioProjectPage: React.FC<{
       proposals={cardProposals}
       referenceRequests={cardReferenceRequests}
       referenceGenerationHandoffs={cardHandoffs}
-      pendingActionId={pendingActionId}
-      blockMutationProposalAcceptance={closeDirtyDraftCount > 0}
+      pendingAction={pendingReviewedAction}
+      actionsLocked={reviewedActionLocked}
+      proposalAuthorityState={proposalAuthorityState}
+      proposalAuthorityVerified={proposalAuthorityVerified}
+      proposalDraftBlocker={proposalDraftBlocker}
       proposalErrorMessageKey={cardProposalErrorMessageKey}
       referenceErrorMessageKey={cardReferenceErrorMessageKey}
       onAcceptProposal={acceptProposalFromCard}
       onRejectProposal={rejectProposalFromCard}
+      onRequestUpdatedProposal={requestUpdatedProposal}
+      onReviewRuleDrafts={reviewRuleDrafts}
       onGenerateReferences={(requestId) => decideReferences(requestId, { kind: 'generation_gate' })}
       onRejectReferences={(requestId) => decideReferences(requestId, { kind: 'rejected' })}
       onReviewHandoff={reviewHandoff}
@@ -3873,12 +4138,8 @@ const StudioProjectPage: React.FC<{
       reviewBlockedMessageKey={handoffReviewBlockedMessageKey}
     />
   );
+  const proposalInbox = directorReviewCard(proposals, [], [], proposalErrorMessageKey);
   const reviewedDirectorOutputs: WorkspaceReviewedOutput[] = [
-    ...actionableProposals.map((proposal) => ({
-      id: `proposal-${proposal.id}`,
-      createdAt: Date.parse(proposal.createdAt),
-      content: directorReviewCard([proposal], [], []),
-    })),
     ...referenceRequests.map((request) => ({
       id: `reference-request-${request.id}`,
       createdAt: Date.parse(request.createdAt),
@@ -3889,15 +4150,6 @@ const StudioProjectPage: React.FC<{
       createdAt: Date.parse(handoff.decidedAt),
       content: directorReviewCard([], [], [handoff]),
     })),
-    ...(proposalErrorMessageKey === null
-      ? []
-      : [
-          {
-            id: 'proposal-error',
-            createdAt: Date.parse(project.updatedAt),
-            content: directorReviewCard([], [], [], proposalErrorMessageKey),
-          },
-        ]),
     ...(referenceErrorMessageKey === null
       ? []
       : [
@@ -3915,6 +4167,9 @@ const StudioProjectPage: React.FC<{
         ref={workspaceShellRef}
         project={project}
         onDirectorProposalIntent={decideProposalFromDirectorChat}
+        directorDraftRequest={directorDraftRequest}
+        onDirectorDraftRequestConsumed={consumeDirectorDraftRequest}
+        proposalInbox={proposalInbox}
         activeView={activeView}
         stats={projection === null ? undefined : buildStudioBarStats(projection)}
         renderAction={

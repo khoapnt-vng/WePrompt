@@ -160,10 +160,14 @@ const proposal = (
 describe('DirectorProposalCard semantic review', () => {
   const onAccept = vi.fn(async () => undefined);
   const onReject = vi.fn(async () => undefined);
+  const onRequestUpdated = vi.fn(async () => undefined);
+  const onReviewRuleDrafts = vi.fn();
 
   beforeEach(() => {
     onAccept.mockClear();
     onReject.mockClear();
+    onRequestUpdated.mockClear();
+    onReviewRuleDrafts.mockClear();
   });
 
   const renderCard = (value = proposal(), overrides: Partial<React.ComponentProps<typeof DirectorProposalCard>> = {}) =>
@@ -192,6 +196,17 @@ describe('DirectorProposalCard semantic review', () => {
 
     openReview();
     expect(screen.getByTestId('studio-proposal-semantic-review')).toBeVisible();
+  });
+
+  it('renders the complete proposal ID as labelled, selectable code with bidirectional isolation', () => {
+    renderCard();
+
+    const id = screen.getByText('proposal_1');
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.proposalId')).toBeVisible();
+    expect(id.tagName).toBe('BDI');
+    expect(id).toHaveAttribute('dir', 'auto');
+    expect(id.parentElement?.tagName).toBe('CODE');
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveTextContent('proposal_1');
   });
 
   it('shows full main-derived Brief, Story, and Shooting script text with human subject/field labels', () => {
@@ -334,6 +349,112 @@ describe('DirectorProposalCard semantic review', () => {
       screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
     ).toBeDisabled();
     expect(screen.getByRole('status')).toHaveTextContent('workspace.proposals.saveBeforeApply');
+  });
+
+  it('renders exact refreshing, unavailable, and stale authority states without losing the card', async () => {
+    const { rerender } = renderCard(proposal(), { authorityState: 'refreshing', onRequestUpdated });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'refreshing');
+    expect(screen.getByRole('status')).toHaveTextContent('workspace.proposals.refreshing');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeDisabled();
+
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={proposal()}
+        pending={false}
+        authorityState='unavailable'
+        authorityVerified={false}
+        onAccept={onAccept}
+        onReject={onReject}
+        onRequestUpdated={onRequestUpdated}
+      />
+    );
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.proposals.authorityUnavailable');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeDisabled();
+
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={proposal({ status: 'unavailable', groups: [], reason: 'reducer_rejected' })}
+        pending={false}
+        authorityState='unavailable'
+        authorityVerified
+        onAccept={onAccept}
+        onReject={onReject}
+        onRequestUpdated={onRequestUpdated}
+      />
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.proposals.reviewUnavailable');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeEnabled();
+
+    const stale = proposal({ status: 'stale', groups: [], baseRevision: 7, currentRevision: 8 });
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={stale}
+        pending={false}
+        authorityState='stale'
+        onAccept={onAccept}
+        onReject={onReject}
+        onRequestUpdated={onRequestUpdated}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    );
+    await waitFor(() => expect(onRequestUpdated).toHaveBeenCalledWith('proposal_1', false));
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeEnabled();
+  });
+
+  it('scopes dirty-draft recovery to saving workspace edits or reviewing rule edits', async () => {
+    const { rerender } = renderCard(proposal(), {
+      draftBlocker: 'workspace',
+      onRequestUpdated,
+      onReviewRuleDrafts,
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.saveAndRequestUpdated' })
+    );
+    await waitFor(() => expect(onRequestUpdated).toHaveBeenCalledWith('proposal_1', true));
+
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={{
+          ...proposal(),
+          payload: { kind: 'pin_rule', rule: { text: 'Keep brands fictional.', predicate: null } },
+        }}
+        pending={false}
+        draftBlocker='rules'
+        onAccept={onAccept}
+        onReject={onReject}
+        onRequestUpdated={onRequestUpdated}
+        onReviewRuleDrafts={onReviewRuleDrafts}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reviewRuleDrafts' })
+    );
+    expect(onReviewRuleDrafts).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status')).toHaveTextContent('workspace.proposals.reviewRuleDraftsFirst');
   });
 
   it('renders list and placement edge states, empty reviews, decision errors, and hides decided records', () => {

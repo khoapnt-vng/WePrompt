@@ -104,9 +104,16 @@ describe('the Director preset rules', () => {
   it('leaves the free reads free, so asking well is not also blocked', () => {
     expect(DIRECTOR_PRESET_RULES).toContain('read_storyboard');
     expect(DIRECTOR_PRESET_RULES).toContain('studio_get_project_status');
+    expect(DIRECTOR_PRESET_RULES).toContain('studio_get_proposal');
     expect(DIRECTOR_PRESET_RULES).toContain('studio_list_routes');
     expect(DIRECTOR_PRESET_RULES).toMatch(/start with studio_get_project_status/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/detail: true.*only/i);
+  });
+
+  it('requires an exact proposal read and current storyboard before drafting a replacement', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_proposal with the\s+full proposal ID/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/read_storyboard for current authority/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never silently rebase, apply, approve, reject, or substitute/i);
   });
 
   it('distinguishes historical receipts from fresh status and route reads', () => {

@@ -13,6 +13,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import type {
   StudioRendererProposalV2,
+  StudioRendererProposalCatalogV2,
   StudioProjectWorkspaceLoadResultV2,
   StudioReferenceRequestV2,
   StudioRendererChainStatusV2,
@@ -32,6 +33,8 @@ export type StudioProjectLoadState = 'idle' | 'loading' | 'supported' | 'unsuppo
 export type UseStudioProjectResult = {
   project: StudioRendererProjectV2 | null;
   proposals: StudioRendererProposalV2[];
+  proposalCatalog: StudioRendererProposalCatalogV2 | null;
+  proposalRefreshing: boolean;
   referenceRequests: StudioReferenceRequestV2[];
   referenceGenerationHandoffs: StudioRendererReferenceGenerationHandoffV2[];
   workspaceStatus: StudioRendererWorkspaceStatusV2 | null;
@@ -48,7 +51,7 @@ export type UseStudioProjectResult = {
   routeErrorMessageKey: string | null;
   exportErrorMessageKey: string | null;
   refetchProjectWorkspace: () => Promise<StudioRendererProjectV2 | null>;
-  refetchProposals: () => Promise<void>;
+  refetchProposals: () => Promise<StudioRendererProposalCatalogV2 | null>;
   refetchReferences: () => Promise<void>;
   refetchRoutes: () => Promise<boolean>;
   refetchExports: () => Promise<boolean>;
@@ -288,6 +291,8 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   });
   const { project, workspaceStatus, chainStatus } = projectWorkspace;
   const [proposals, setProposals] = useState<StudioRendererProposalV2[]>([]);
+  const [proposalCatalog, setProposalCatalog] = useState<StudioRendererProposalCatalogV2 | null>(null);
+  const [proposalRefreshing, setProposalRefreshing] = useState(false);
   const [referenceRequests, setReferenceRequests] = useState<StudioReferenceRequestV2[]>([]);
   const [referenceGenerationHandoffs, setReferenceGenerationHandoffs] = useState<
     StudioRendererReferenceGenerationHandoffV2[]
@@ -530,16 +535,20 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   );
 
   const loadProposals = useCallback(
-    async (requestedBinding: StudioProjectBinding, generation: number): Promise<void> => {
+    async (
+      requestedBinding: StudioProjectBinding,
+      generation: number
+    ): Promise<StudioRendererProposalCatalogV2 | null> => {
       const requestedProjectId = requestedBinding.projectId;
       if (
         requestedProjectId === undefined ||
         activeBindingRef.current !== requestedBinding ||
         generationRef.current !== generation
       ) {
-        return;
+        return null;
       }
       const request = ++proposalRequestRef.current;
+      setProposalRefreshing(true);
       try {
         const result = await ipcBridge.creativeStudio.listProposals.invoke({ projectId: requestedProjectId });
         if (
@@ -547,14 +556,40 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           generationRef.current !== generation ||
           proposalRequestRef.current !== request
         ) {
-          return;
+          return null;
         }
         if (result.ok === false) {
           setProposalErrorMessageKey(result.error.messageKey);
-          return;
+          return null;
         }
-        setProposals(result.data.filter((candidate) => candidate.status === 'pending'));
+        const catalog = result.data;
+        const currentProject = projectRef.current;
+        const validCatalog =
+          catalog.projectId === requestedProjectId &&
+          currentProject?.id === requestedProjectId &&
+          currentProject.revision === catalog.projectRevision &&
+          Number.isSafeInteger(catalog.projectRevision) &&
+          catalog.projectRevision >= 1 &&
+          Array.isArray(catalog.proposals) &&
+          new Set(catalog.proposals.map((candidate) => candidate.id)).size === catalog.proposals.length &&
+          catalog.proposals.every(
+            (candidate) =>
+              candidate.projectId === requestedProjectId &&
+              (candidate.review.status === 'stale'
+                ? candidate.review.currentRevision === catalog.projectRevision &&
+                  candidate.review.baseRevision === candidate.baseRevision &&
+                  candidate.baseRevision !== catalog.projectRevision
+                : candidate.baseRevision === catalog.projectRevision)
+          );
+        if (!validCatalog) {
+          setProposalErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return null;
+        }
+        const installed = structuredClone(catalog) as StudioRendererProposalCatalogV2;
+        setProposalCatalog(installed);
+        setProposals(installed.proposals.filter((candidate) => candidate.status === 'pending'));
         setProposalErrorMessageKey(null);
+        return installed;
       } catch {
         if (
           activeBindingRef.current === requestedBinding &&
@@ -562,6 +597,15 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           proposalRequestRef.current === request
         ) {
           setProposalErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        }
+        return null;
+      } finally {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          proposalRequestRef.current === request
+        ) {
+          setProposalRefreshing(false);
         }
       }
     },
@@ -974,6 +1018,8 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       projectRef.current = null;
       setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
       setProposals([]);
+      setProposalCatalog(null);
+      setProposalRefreshing(false);
       setReferenceRequests([]);
       setReferenceGenerationHandoffs([]);
       routeCatalogRef.current = null;
@@ -993,6 +1039,8 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     }
 
     setProposals([]);
+    setProposalCatalog(null);
+    setProposalRefreshing(false);
     setReferenceRequests([]);
     setReferenceGenerationHandoffs([]);
     setProposalErrorMessageKey(null);
@@ -1013,6 +1061,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       if (updatedProjectId === boundProjectId && activeBindingRef.current === binding) {
         void (async () => {
           if ((await loadProjectWorkspace(binding, generation, false)) !== null) {
+            await loadProposals(binding, generation);
             await (routeCatalogRef.current === null
               ? loadRoutes(binding, generation)
               : loadGenerationCapability(binding, generation));
@@ -1037,13 +1086,13 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     void (async () => {
       if ((await loadProjectWorkspace(binding, generation, true)) !== null) {
         await Promise.all([
+          loadProposals(binding, generation),
           loadRoutes(binding, generation),
           loadExports(binding, generation),
           loadFilmExportCapability(binding, generation),
         ]);
       }
     })();
-    void loadProposals(binding, generation);
     void loadReferences(binding, generation);
 
     return () => {
@@ -1069,10 +1118,10 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     return loadProjectWorkspace(binding, generation, false);
   }, [binding, loadProjectWorkspace]);
 
-  const refetchProposals = useCallback(async (): Promise<void> => {
-    if (binding.projectId === undefined || activeBindingRef.current !== binding) return;
+  const refetchProposals = useCallback(async (): Promise<StudioRendererProposalCatalogV2 | null> => {
+    if (binding.projectId === undefined || activeBindingRef.current !== binding) return null;
     const generation = generationRef.current;
-    await loadProposals(binding, generation);
+    return loadProposals(binding, generation);
   }, [binding, loadProposals]);
 
   const refetchReferences = useCallback(async (): Promise<void> => {
@@ -1111,17 +1160,22 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const refetchAll = useCallback(async (): Promise<void> => {
     if (binding.projectId === undefined || activeBindingRef.current !== binding) return;
     const generation = generationRef.current;
-    const [refreshed] = await Promise.all([
-      loadProjectWorkspace(binding, generation, false),
-      loadProposals(binding, generation),
-      loadReferences(binding, generation),
-    ]);
-    if (refreshed !== null) await Promise.all([loadRoutes(binding, generation), loadExports(binding, generation)]);
+    const refreshed = await loadProjectWorkspace(binding, generation, false);
+    if (refreshed !== null) {
+      await Promise.all([
+        loadProposals(binding, generation),
+        loadReferences(binding, generation),
+        loadRoutes(binding, generation),
+        loadExports(binding, generation),
+      ]);
+    }
   }, [binding, loadExports, loadProjectWorkspace, loadProposals, loadReferences, loadRoutes]);
 
   return {
     project,
     proposals,
+    proposalCatalog,
+    proposalRefreshing,
     referenceRequests,
     referenceGenerationHandoffs,
     workspaceStatus,

@@ -38,6 +38,7 @@ import {
   type StudioProjectV2,
   type StudioPrepareGenerationChoiceV2,
   type StudioProposalRecordV2,
+  type StudioProposalV2,
   type StudioReferenceRequestV2,
   type StudioQuotedGeneration,
 } from '@/common/types/project/creativeStudioTypes';
@@ -92,6 +93,7 @@ import {
 } from '@process/services/creative-studio/service/filmExporter';
 import {
   createListRoutesHandler,
+  createStudioGetProposalHandlerV2,
   createStudioGetProjectStatusHandlerV2,
   createProposeBriefRuleHandlerV2,
   createProposeStoryboardHandlerV2,
@@ -101,6 +103,7 @@ import {
   registerStudioToolsV2,
   studioApplyEditsInputSchemaV2,
   studioGetProjectStatusInputSchemaV2,
+  studioGetProposalInputSchemaV2,
   studioProposeStoryboardInputSchemaV2,
   studioRequestReferenceImagesInputSchemaV2,
 } from '@process/resources/builtinMcp/studioServer';
@@ -2724,9 +2727,11 @@ describe('CreativeStudioServiceV2', () => {
   it('projects schema-2 proposal lifecycle results without exposing persisted project authority', async () => {
     const harness = makeHarness();
 
-    await expect(harness.service.listProposals({ projectId: 'project_v2' })).resolves.toEqual([
-      expect.objectContaining(harness.proposal),
-    ]);
+    await expect(harness.service.listProposals({ projectId: 'project_v2' })).resolves.toEqual({
+      projectId: 'project_v2',
+      projectRevision: harness.getProject().revision,
+      proposals: [expect.objectContaining(harness.proposal)],
+    });
     await expect(
       harness.service.acceptProposal({ projectId: 'project_v2', proposalId: harness.proposal.id })
     ).resolves.toMatchObject({
@@ -2769,6 +2774,46 @@ describe('CreativeStudioServiceV2', () => {
     await expect(
       harness.service.rejectProposal({ projectId: '../project', proposalId: harness.proposal.id })
     ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('retries a proposal catalog read when a deferred ledger read straddles a project revision', async () => {
+    const harness = makeHarness();
+    let releaseLedger!: (proposals: StudioProposalV2[]) => void;
+    const firstLedger = new Promise<StudioProposalV2[]>((resolve) => {
+      releaseLedger = resolve;
+    });
+    harness.listProposalsV2
+      .mockImplementationOnce(async () => firstLedger)
+      .mockImplementation(async () => [structuredClone(harness.proposal)]);
+
+    const pendingCatalog = harness.service.listProposals({ projectId: 'project_v2' });
+    await vi.waitFor(() => expect(harness.listProposalsV2).toHaveBeenCalledOnce());
+    const advanced = { ...harness.getProject(), revision: harness.getProject().revision + 1 };
+    harness.setProject(advanced);
+    releaseLedger([structuredClone(harness.proposal)]);
+
+    await expect(pendingCatalog).resolves.toMatchObject({
+      projectId: advanced.id,
+      projectRevision: advanced.revision,
+      proposals: [{ id: harness.proposal.id, review: { status: 'stale', currentRevision: advanced.revision } }],
+    });
+    expect(harness.listProposalsV2).toHaveBeenCalledTimes(2);
+    expect(harness.store.getProjectV2).toHaveBeenCalledTimes(4);
+  });
+
+  it('fails a proposal catalog read closed after both bounded snapshots observe concurrent revision movement', async () => {
+    const harness = makeHarness();
+    harness.listProposalsV2.mockImplementation(async () => {
+      const current = harness.getProject();
+      harness.setProject({ ...current, revision: current.revision + 1 });
+      return [structuredClone(harness.proposal)];
+    });
+
+    await expect(harness.service.listProposals({ projectId: 'project_v2' })).rejects.toMatchObject({
+      code: 'stale_project',
+    });
+    expect(harness.listProposalsV2).toHaveBeenCalledTimes(2);
+    expect(harness.store.getProjectV2).toHaveBeenCalledTimes(4);
   });
 
   it('projects reference handoffs from immutable authorization jobs without exposing their identity', () => {
@@ -7662,6 +7707,8 @@ describe('Studio MCP schema-2 server', () => {
     expect(JSON.parse(staleEnvironment.content[0]!.text)).toMatchObject({ status: 'storage_error' });
     const statusUnavailable = await createStudioGetProjectStatusHandlerV2(null)({});
     expect(JSON.parse(statusUnavailable.content[0]!.text)).toMatchObject({ status: 'storage_error' });
+    const proposalUnavailable = await createStudioGetProposalHandlerV2(null)({ proposalId: 'proposal_exact' });
+    expect(JSON.parse(proposalUnavailable.content[0]!.text)).toMatchObject({ status: 'storage_error' });
   });
 
   it.each(['ordinary file', 'symbolic link'] as const)(
@@ -7834,6 +7881,7 @@ describe('Studio MCP schema-2 server', () => {
         'studio_apply_edits',
         'studio_get_command_status',
         'studio_get_project_status',
+        'studio_get_proposal',
         'studio_list_routes',
         'studio_request_reference_images',
       ]);
@@ -7937,6 +7985,19 @@ describe('Studio MCP schema-2 server', () => {
       expect(studioGetProjectStatusInputSchemaV2.safeParse({ detail: true }).success).toBe(true);
       expect(studioGetProjectStatusInputSchemaV2.safeParse({ detail: 1 }).success).toBe(false);
       expect(projectStatusTool?.description).toMatch(/without writing, generating, or spending/i);
+      const proposalTool = tools.find((tool) => tool.name === 'studio_get_proposal');
+      const proposalValidator = new AjvJsonSchemaValidator().getValidator(proposalTool?.inputSchema as never);
+      expect(proposalTool?.inputSchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+        required: ['proposalId'],
+      });
+      expect(proposalValidator({ proposalId: 'proposal_exact' })).toMatchObject({ valid: true });
+      expect(proposalValidator({ proposalId: 'proposal_exact', extra: true })).toMatchObject({ valid: false });
+      expect(proposalValidator({ proposalId: '../unsafe' })).toMatchObject({ valid: false });
+      expect(studioGetProposalInputSchemaV2.safeParse({ proposalId: 'proposal_exact' }).success).toBe(true);
+      expect(proposalTool?.description).toMatch(/never authors the project, generates, authorizes, or spends/i);
+      expect(proposalTool?.description).toMatch(/never silently rebase, apply, or replace/i);
       const commandStatus = tools.find((tool) => tool.name === 'studio_get_command_status');
       expect(commandStatus?.description).toMatch(/durable.*mutation or read-query status/i);
       expect(commandStatus?.description).not.toMatch(/schema-5/i);

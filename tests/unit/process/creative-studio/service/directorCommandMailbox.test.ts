@@ -14,12 +14,18 @@ import type {
   StudioDirectorCommandRecordV2,
   StudioDirectorCommandSlotLeaseV2,
   StudioDirectorCommandSlotV2,
+  StudioProposalRecordV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_WAIT_MS,
+  STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandMailboxV2,
@@ -251,6 +257,52 @@ describe('Studio Director schema-2 command mailbox', () => {
     await expect(nodeFs.readdir(directories.pending)).resolves.toEqual([]);
     await expect(nodeFs.readdir(directories.slots)).resolves.toEqual([]);
     await expect(nodeFs.readdir(directories.receipts)).resolves.toEqual(['command_v2.json']);
+  });
+
+  it('persists a maximum-size proposal lookup receipt beyond the smaller command-record bound', async () => {
+    await mailbox.ensure(projectId);
+    const operations = Array.from({ length: 11 }, (_, index) => ({
+      kind: 'edit_shot' as const,
+      shotId: `shot_${index}`,
+      changes: { shootingScript: index < 10 ? 'x'.repeat(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH) : '' },
+    }));
+    const proposal: StudioProposalRecordV2 = {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      id: 'proposal_maximum',
+      projectId,
+      status: 'pending',
+      baseRevision: 1,
+      payload: { kind: 'mutation_batch', operations },
+      createdAt: NOW,
+      decidedAt: null,
+    };
+    const currentProposalBytes = Buffer.byteLength(JSON.stringify(proposal), 'utf8');
+    const finalScriptLength = STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES - 32 - currentProposalBytes;
+    expect(finalScriptLength).toBeGreaterThan(0);
+    expect(finalScriptLength).toBeLessThanOrEqual(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH);
+    operations.at(-1)!.changes.shootingScript = 'y'.repeat(finalScriptLength);
+
+    const receipt: StudioDirectorCommandReceiptV2 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'proposal_query_maximum',
+      projectId,
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_proposal', proposalId: proposal.id },
+      result: { status: 'pending', proposal },
+    };
+    const receiptBytes = Buffer.byteLength(JSON.stringify(receipt), 'utf8');
+    expect(Buffer.byteLength(JSON.stringify(proposal), 'utf8')).toBeLessThanOrEqual(
+      STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES
+    );
+    expect(receiptBytes).toBeGreaterThan(STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES);
+    expect(receiptBytes).toBeLessThanOrEqual(STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES);
+
+    await mailbox.writeReceipt(projectId, receipt);
+    await expect(mailbox.readReceipt(projectId, receipt.commandId)).resolves.toEqual({
+      status: 'valid',
+      record: receipt,
+    });
   });
 
   it('rejects malformed identities, traversal bounds, cursors, and maintenance timestamps', async () => {
@@ -1771,17 +1823,33 @@ describe('Studio Director schema-2 command mailbox', () => {
     expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
   });
 
-  it('reports immediate-prior schema-5 command sidecars as unsupported and leaves every byte untouched', async () => {
+  it('reports immediate-prior schema-6 proposal-query sidecars as unsupported and leaves every byte untouched', async () => {
     await mailbox.ensure(projectId);
     const directories = commandDirectories(rootDir, projectId);
-    const commandId = 'command_v5';
-    const command = { ...makeCommandV2(projectId, commandId), schemaVersion: 5 };
-    const slot = { ...makeSlotV2(commandId), schemaVersion: 5 };
-    const lease = {
-      ...makeLeaseV2({ leaseId: 'lease_v5', owner: 'writer', slot: makeSlotV2(commandId) }),
-      schemaVersion: 5,
+    const commandId = 'command_v6';
+    const command = {
+      schemaVersion: 6,
+      commandId,
+      projectId,
+      createdAt: NOW,
+      deadlineAt: '2026-08-16T12:00:15.000Z',
+      policy: 'get_proposal',
+      proposalId: 'proposal_exact',
     };
-    const receipt = { ...makeReceiptV2(projectId, commandId), schemaVersion: 5 };
+    const slot = { ...makeSlotV2(commandId), schemaVersion: 6 };
+    const lease = {
+      ...makeLeaseV2({ leaseId: 'lease_v6', owner: 'writer', slot: makeSlotV2(commandId) }),
+      schemaVersion: 6,
+    };
+    const receipt = {
+      schemaVersion: 6,
+      commandId,
+      projectId,
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_proposal', proposalId: 'proposal_exact' },
+      result: { status: 'not_found' },
+    };
     await nodeFs.writeFile(path.join(directories.pending, `${commandId}.json`), JSON.stringify(command));
     await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
     await nodeFs.writeFile(path.join(directories.slots, '0.slot.lease'), JSON.stringify(lease));
@@ -1791,7 +1859,7 @@ describe('Studio Director schema-2 command mailbox', () => {
     await expect(mailbox.readPending(projectId, commandId)).resolves.toEqual({
       status: 'unsupported_prototype_schema',
       commandId,
-      expectedRevision: 1,
+      expectedRevision: null,
     });
     await expect(mailbox.readReceipt(projectId, commandId)).resolves.toEqual({
       status: 'unsupported_prototype_schema',

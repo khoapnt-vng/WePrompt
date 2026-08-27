@@ -23,10 +23,16 @@ export type DirectorProposalCardProps = {
   project: StudioRendererProjectV2;
   proposal: StudioRendererProposalV2;
   pending: boolean;
+  actionsLocked?: boolean;
+  authorityState?: 'ready' | 'stale' | 'unavailable' | 'refreshing';
+  authorityVerified?: boolean;
+  draftBlocker?: 'workspace' | 'rules' | null;
   acceptBlockedMessageKey?: string | null;
   errorMessageKey?: string | null;
   onAccept: (proposalId: string) => Promise<void>;
   onReject: (proposalId: string) => Promise<void>;
+  onRequestUpdated?: (proposalId: string, saveWorkspaceDrafts: boolean) => Promise<void>;
+  onReviewRuleDrafts?: () => void;
 };
 
 const fieldLabelKey = (key: StudioProposalReviewFieldKeyV2): string =>
@@ -145,17 +151,32 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
   project,
   proposal,
   pending,
+  actionsLocked = false,
+  authorityState = proposal.review.status,
+  authorityVerified = true,
+  draftBlocker = null,
   acceptBlockedMessageKey = null,
   errorMessageKey = null,
   onAccept,
   onReject,
+  onRequestUpdated = async () => undefined,
+  onReviewRuleDrafts = () => undefined,
 }) => {
   const { t } = useTranslation();
   const acceptBlockId = React.useId();
   const reviewDetailsId = React.useId();
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   if (proposal.status !== 'pending') return null;
-  const reviewUnavailable = proposal.review.status !== 'ready';
+  const reviewUnavailable = authorityState !== 'ready';
+  const authorityUnavailable = authorityState === 'unavailable' && !authorityVerified;
+  const actionsUnavailable = !authorityVerified || authorityState === 'refreshing';
+  const effectiveAcceptBlockedMessageKey =
+    acceptBlockedMessageKey ??
+    (draftBlocker === 'workspace'
+      ? 'conversation.creativeStudio.workspace.proposals.saveBeforeApply'
+      : draftBlocker === 'rules'
+        ? 'conversation.creativeStudio.workspace.proposals.reviewRuleDraftsFirst'
+        : null);
   const reviewGroups = proposal.review.status === 'ready' ? proposal.review.groups : [];
   const reviewLabels = new Map<string, string>([[project.id, project.name]]);
   for (const beatId of project.beatOrder) {
@@ -188,18 +209,29 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
   return (
     <Card
       className={styles.card}
+      data-proposal-state={authorityState}
       data-testid={`studio-proposal-${proposal.id}`}
       title={t('conversation.creativeStudio.workspace.proposals.title')}
     >
+      <p>
+        <span>{t('conversation.creativeStudio.workspace.proposals.proposalId')}</span>:{' '}
+        <code>
+          <bdi dir='auto'>{proposal.id}</bdi>
+        </code>
+      </p>
       <p>{t('conversation.creativeStudio.workspace.proposals.revision', { revision: proposal.baseRevision })}</p>
-      {proposal.review.status === 'stale' ? (
+      {authorityState === 'refreshing' ? (
+        <p role='status'>{t('conversation.creativeStudio.workspace.proposals.refreshing')}</p>
+      ) : authorityState === 'stale' && proposal.review.status === 'stale' ? (
         <p role='alert'>
           {t('conversation.creativeStudio.workspace.proposals.reviewStale', {
             baseRevision: proposal.review.baseRevision,
             currentRevision: proposal.review.currentRevision,
           })}
         </p>
-      ) : proposal.review.status === 'unavailable' ? (
+      ) : authorityUnavailable ? (
+        <p role='alert'>{t('conversation.creativeStudio.workspace.proposals.authorityUnavailable')}</p>
+      ) : authorityState === 'unavailable' || proposal.review.status === 'unavailable' ? (
         <p role='alert'>{t('conversation.creativeStudio.workspace.proposals.reviewUnavailable')}</p>
       ) : proposal.review.groups.length === 0 ? (
         <p>{t('conversation.creativeStudio.workspace.proposals.noChanges')}</p>
@@ -255,20 +287,37 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
       <div className={styles.actions}>
         <Button
           type='primary'
-          aria-describedby={acceptBlockedMessageKey === null ? undefined : acceptBlockId}
-          disabled={pending || acceptBlockedMessageKey !== null || reviewUnavailable}
+          aria-describedby={effectiveAcceptBlockedMessageKey === null ? undefined : acceptBlockId}
+          disabled={actionsLocked || effectiveAcceptBlockedMessageKey !== null || reviewUnavailable}
           loading={pending}
           onClick={() => void onAccept(proposal.id)}
         >
           {t('conversation.creativeStudio.workspace.proposals.accept')}
         </Button>
-        <Button disabled={pending} onClick={() => void onReject(proposal.id)}>
+        <Button disabled={actionsLocked || actionsUnavailable} onClick={() => void onReject(proposal.id)}>
           {t('conversation.creativeStudio.workspace.proposals.reject')}
         </Button>
+        {draftBlocker === 'rules' ? (
+          <Button disabled={actionsLocked} onClick={onReviewRuleDrafts}>
+            {t('conversation.creativeStudio.workspace.proposals.reviewRuleDrafts')}
+          </Button>
+        ) : authorityState !== 'ready' || draftBlocker === 'workspace' ? (
+          <Button
+            disabled={actionsLocked || actionsUnavailable}
+            loading={pending}
+            onClick={() => void onRequestUpdated(proposal.id, draftBlocker === 'workspace')}
+          >
+            {t(
+              draftBlocker === 'workspace'
+                ? 'conversation.creativeStudio.workspace.proposals.saveAndRequestUpdated'
+                : 'conversation.creativeStudio.workspace.proposals.requestUpdated'
+            )}
+          </Button>
+        ) : null}
       </div>
-      {acceptBlockedMessageKey === null ? null : (
+      {effectiveAcceptBlockedMessageKey === null ? null : (
         <p id={acceptBlockId} role='status'>
-          {t(acceptBlockedMessageKey)}
+          {t(effectiveAcceptBlockedMessageKey)}
         </p>
       )}
       {errorMessageKey !== null ? <div role='alert'>{t(errorMessageKey)}</div> : null}

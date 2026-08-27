@@ -12,6 +12,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
   type StudioDirectorAutoApplyCommandRecordV2,
   type StudioDirectorMutationReceiptV2,
   type StudioDirectorQueryCommandRecordV2,
@@ -20,6 +21,8 @@ import {
   type StudioDirectorCommandRejectionCodeV2,
   type StudioDirectorCommandExpiryCode,
   type StudioDirectorCommandIndeterminateCode,
+  type StudioDirectorProposalLookupV2,
+  type StudioProposalV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   CreativeStudioStoreError,
@@ -55,7 +58,7 @@ export type StudioDirectorCommitTrackerV2 = {
 type IntervalHandle = unknown;
 
 export type StudioDirectorCommandProcessorDepsV2 = {
-  store: Pick<CreativeStudioStore, 'getProjectV2'>;
+  store: Pick<CreativeStudioStore, 'getProjectV2' | 'listProposalsV2'>;
   mailbox: StudioDirectorCommandMailboxV2;
   service: StudioDirectorCommandServiceV2 & Pick<CreativeStudioServiceV2, 'getProjectStatus' | 'listRoutes'>;
   tracker: StudioDirectorCommitTrackerV2;
@@ -319,6 +322,19 @@ export const createStudioDirectorCommandProcessorV2 = (
     return command.policy === 'list_routes' ? 'route_inventory_unavailable' : 'project_read_unavailable';
   };
 
+  const proposalLookup = async (
+    command: StudioDirectorQueryCommandRecordV2
+  ): Promise<StudioDirectorProposalLookupV2> => {
+    if (command.policy !== 'get_proposal') throw new Error('Invalid proposal query');
+    const proposals = await deps.store.listProposalsV2(command.projectId);
+    const proposal = proposals.find((candidate: StudioProposalV2) => candidate.id === command.proposalId);
+    if (proposal === undefined) return { status: 'not_found' };
+    if (proposal.status !== 'pending') {
+      return { status: 'no_longer_pending', proposalId: proposal.id, decision: proposal.status };
+    }
+    return { status: 'pending', proposal: structuredClone(proposal) };
+  };
+
   const answeredQuery = (
     command: StudioDirectorQueryCommandRecordV2,
     result: unknown
@@ -339,22 +355,36 @@ export const createStudioDirectorCommandProcessorV2 = (
             >,
             result: snapshot as Awaited<ReturnType<CreativeStudioServiceV2['getProjectStatus']>>,
           }
-        : {
-            schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
-            commandId: command.commandId,
-            projectId: command.projectId,
-            decidedAt: decidedAt(),
-            status: 'answered',
-            query: { kind: 'list_routes' },
-            result: snapshot as Awaited<ReturnType<CreativeStudioServiceV2['listRoutes']>>,
-          };
+        : command.policy === 'list_routes'
+          ? {
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+              commandId: command.commandId,
+              projectId: command.projectId,
+              decidedAt: decidedAt(),
+              status: 'answered',
+              query: { kind: 'list_routes' },
+              result: snapshot as Awaited<ReturnType<CreativeStudioServiceV2['listRoutes']>>,
+            }
+          : {
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+              commandId: command.commandId,
+              projectId: command.projectId,
+              decidedAt: decidedAt(),
+              status: 'answered',
+              query: { kind: 'get_proposal', proposalId: command.proposalId },
+              result: snapshot as StudioDirectorProposalLookupV2,
+            };
     let bytes: number;
     try {
       bytes = Buffer.byteLength(JSON.stringify(candidate), 'utf8');
     } catch {
       return failedQuery(command, 'result_mismatch');
     }
-    if (bytes > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) return failedQuery(command, 'response_too_large');
+    const maximumBytes =
+      command.policy === 'get_proposal'
+        ? STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES
+        : STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES;
+    if (bytes > maximumBytes) return failedQuery(command, 'response_too_large');
     const parsed = parseStudioDirectorCommandReceiptV2({
       projectId: command.projectId,
       commandId: command.commandId,
@@ -440,7 +470,9 @@ export const createStudioDirectorCommandProcessorV2 = (
           const result =
             command.policy === 'get_project_status'
               ? await deps.service.getProjectStatus({ projectId: command.projectId, detail: command.detail })
-              : await deps.service.listRoutes({ projectId: command.projectId });
+              : command.policy === 'list_routes'
+                ? await deps.service.listRoutes({ projectId: command.projectId })
+                : await proposalLookup(command);
           // The active graph may be revoked while provider or project I/O is
           // in flight. A superseded graph must not publish a fresh answer.
           if (!queryAuthorityActive()) return;

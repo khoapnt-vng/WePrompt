@@ -23,6 +23,9 @@ export type WorkspaceShellProps = {
   stats?: StudioBarStats;
   reviewedOutputs?: readonly WorkspaceReviewedOutput[];
   onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
+  directorDraftRequest?: WorkspaceDirectorDraftRequest | null;
+  onDirectorDraftRequestConsumed?: (requestId: number) => void;
+  proposalInbox?: React.ReactNode;
   /** The bar's primary action. It spends money, so it is the control that never leaves the bar. */
   renderAction?: React.ReactNode;
   /** Owner-only, revision-checked rename. The Director still has no edit_project disposition. */
@@ -211,6 +214,12 @@ export const WorkspaceProjectTitle: React.FC<WorkspaceProjectTitleProps> = ({
 
 export type WorkspaceReviewedOutput = { id: string; content: React.ReactNode; createdAt: number };
 
+export type WorkspaceDirectorDraftRequest = {
+  requestId: number;
+  projectId: string;
+  prompt: string;
+};
+
 export type WorkspaceShellHandle = {
   /** Opens and focuses the Director without changing the person's persisted collapse choice. */
   revealDirector: (expectedScope: { projectId: string; view: StudioView }) => boolean;
@@ -328,6 +337,9 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
     stats,
     reviewedOutputs,
     onDirectorProposalIntent,
+    directorDraftRequest,
+    onDirectorDraftRequestConsumed,
+    proposalInbox,
     renderAction,
     onRenameProject,
     renamePending = false,
@@ -478,6 +490,8 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
           project={project}
           reviewedOutputs={reviewedOutputs}
           onProposalIntent={onDirectorProposalIntent}
+          draftRequest={directorDraftRequest}
+          onDraftRequestConsumed={onDirectorDraftRequestConsumed}
           collapsed={railCollapsed}
           contentId={railContentId}
           widthPixels={railWidth}
@@ -528,6 +542,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
                 {notice}
               </div>
             )}
+            {proposalInbox}
             <main aria-labelledby={viewHeadingId} className={styles.viewSurface} data-studio-view={activeView}>
               <h2 id={viewHeadingId}>{t(`conversation.creativeStudio.workspace.views.${activeView}`)}</h2>
               {children}

@@ -82,7 +82,12 @@ export type {
   StudioBarStats,
 } from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';
-export type { WorkspaceReviewedOutput, WorkspaceShellHandle, WorkspaceShellProps } from './WorkspaceShell';
+export type {
+  WorkspaceDirectorDraftRequest,
+  WorkspaceReviewedOutput,
+  WorkspaceShellHandle,
+  WorkspaceShellProps,
+} from './WorkspaceShell';
 export {
   BoardView,
   CutView,

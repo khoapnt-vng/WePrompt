@@ -21,6 +21,7 @@ import {
   type StudioDirectorCommandRecordV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
+  type StudioProposalRecordV2,
 } from '@/common/types/project/creativeStudioTypes';
 import * as studioDirectorCommandWriter from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import {
@@ -680,6 +681,88 @@ describe('Studio Director subprocess command writer', () => {
     expect(durableCommand).toMatchObject({ policy: 'list_routes' });
     expect(durableCommand).not.toHaveProperty('detail');
     expect(durableCommand).not.toHaveProperty('expectedRevision');
+  });
+
+  it('persists one exact proposal lookup and returns only its correlated pending record', async () => {
+    let currentMs = START_MS;
+    let durableCommand: StudioDirectorCommandRecordV2 | null = null;
+    const proposal: StudioProposalRecordV2 = {
+      ...pendingProposalV2('proposal_exact_b'),
+      baseRevision: 1,
+    };
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: PROJECT_ID, projectDir },
+      {
+        now: () => currentMs,
+        createId: vi.fn<() => string>().mockReturnValueOnce('query_proposal').mockReturnValueOnce('lease_proposal'),
+        sleep: async (milliseconds) => {
+          currentMs += milliseconds;
+          if (durableCommand !== null) return;
+          durableCommand = JSON.parse(
+            await readFile(path.join(pendingDir, 'query_proposal.json'), 'utf8')
+          ) as StudioDirectorCommandRecordV2;
+          await writeFile(
+            path.join(receiptsDir, 'query_proposal.json'),
+            JSON.stringify({
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+              commandId: 'query_proposal',
+              projectId: PROJECT_ID,
+              decidedAt: new Date(currentMs).toISOString(),
+              status: 'answered',
+              query: { kind: 'get_proposal', proposalId: proposal.id },
+              result: { status: 'pending', proposal },
+            })
+          );
+        },
+      }
+    );
+
+    await expect(writer.getProposal({ proposalId: proposal.id })).resolves.toMatchObject({
+      status: 'answered',
+      query: { kind: 'get_proposal', proposalId: proposal.id },
+      result: { status: 'pending', proposal: { id: proposal.id } },
+    });
+    expect(durableCommand).toMatchObject({ policy: 'get_proposal', proposalId: proposal.id });
+    expect(durableCommand).not.toHaveProperty('expectedRevision');
+  });
+
+  it('rejects hostile proposal lookup input before minting identity or touching storage', async () => {
+    const createId = vi.fn<() => string>().mockReturnValue('must_not_mint');
+    const lstat = vi.fn(nodeFs.lstat.bind(nodeFs));
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: PROJECT_ID, projectDir },
+      { createId, fs: bindMethods(nodeFs, { lstat }) }
+    );
+    let getterCalls = 0;
+    const accessor = {};
+    Object.defineProperty(accessor, 'proposalId', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return 'proposal_exact_b';
+      },
+    });
+    const inherited = Object.assign(Object.create({ proposalId: 'proposal_exact_b' }), {});
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+
+    await Promise.all(
+      [
+        { proposalId: '../unsafe' },
+        { proposalId: 'proposal_exact_b', extra: true },
+        accessor,
+        inherited,
+        revoked.proxy,
+      ].map((input) =>
+        expect(writer.getProposal(input as never)).resolves.toEqual({
+          status: 'storage_error',
+          commandId: 'unavailable',
+        })
+      )
+    );
+    expect(getterCalls).toBe(0);
+    expect(createId).not.toHaveBeenCalled();
+    expect(lstat).not.toHaveBeenCalled();
   });
 
   it('rejects hostile getProjectStatus input before minting identity or touching storage', async () => {

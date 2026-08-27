@@ -96,7 +96,10 @@ describe('Creative Studio E2E selectors', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.bridge.listProposals.invoke.mockResolvedValue({ ok: true, data: [] });
+    mocks.bridge.listProposals.invoke.mockResolvedValue({
+      ok: true,
+      data: { projectId: project.id, projectRevision: project.revision, proposals: [] },
+    });
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue({ ok: true, data: [] });
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue({ ok: true, data: [] });
     mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue({

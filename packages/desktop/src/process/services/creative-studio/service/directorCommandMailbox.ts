@@ -11,6 +11,7 @@ import path from 'node:path';
 import {
   isUnsupportedStudioPrototypeSchemaVersion,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
   STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SLOT_LEASE_MS,
@@ -485,13 +486,17 @@ const createStudioDirectorCommandMailboxInternal = (
     }
   };
 
-  const readBytes = async (canonicalRoot: string, file: string): Promise<string | null> => {
+  const readBytes = async (
+    canonicalRoot: string,
+    file: string,
+    maxBytes = STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES
+  ): Promise<string | null> => {
     try {
       return await readBoundedRegularFile({
         fs,
         canonicalRoot,
         file,
-        maxBytes: STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+        maxBytes,
       });
     } catch {
       throw storageError();
@@ -500,14 +505,15 @@ const createStudioDirectorCommandMailboxInternal = (
 
   const readIdentifiedBytes = async (
     canonicalRoot: string,
-    file: string
+    file: string,
+    maxBytes = STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES
   ): Promise<{ bytes: string; identity: { dev: number; ino: number } } | null> => {
     try {
       return await readBoundedRegularFileWithIdentity({
         fs,
         canonicalRoot,
         file,
-        maxBytes: STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+        maxBytes,
       });
     } catch {
       throw storageError();
@@ -721,7 +727,11 @@ const createStudioDirectorCommandMailboxInternal = (
       project: await captureProjectAuthorityV2(projectId, directories),
       receipts: await captureDirectoryAuthorityV2(directories.receipts),
     };
-    const bytes = await readBytes(canonicalRoot, path.join(directories.receipts, `${commandId}.json`));
+    const bytes = await readBytes(
+      canonicalRoot,
+      path.join(directories.receipts, `${commandId}.json`),
+      STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES
+    );
     if (bytes === null) {
       await assertDirectoryAuthorityV2(authorities.receipts);
       await assertProjectAuthorityV2(authorities.project);
@@ -749,7 +759,11 @@ const createStudioDirectorCommandMailboxInternal = (
     if (indeterminateReceiptPublications.has(receiptPublicationKey(input.projectId, input.commandId))) return false;
     await assertProjectAuthorityV2(input.projectAuthority);
     await assertDirectoryAuthorityV2(input.authority);
-    const current = await readIdentifiedBytes(input.canonicalRoot, input.file);
+    const current = await readIdentifiedBytes(
+      input.canonicalRoot,
+      input.file,
+      STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES
+    );
     if (
       current === null ||
       current.bytes !== input.expected.bytes ||
@@ -1300,7 +1314,7 @@ const createStudioDirectorCommandMailboxInternal = (
         throw invalidPayload();
       }
       const bytes = JSON.stringify(receipt);
-      if (Buffer.byteLength(bytes, 'utf8') > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) throw invalidPayload();
+      if (Buffer.byteLength(bytes, 'utf8') > STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES) throw invalidPayload();
       const directories = await directoriesFor(projectId, true);
       if (directories === null) throw storageError();
       let published = false;
@@ -1356,7 +1370,11 @@ const createStudioDirectorCommandMailboxInternal = (
         if (indeterminateReceiptPublications.has(receiptPublicationKey(projectId, commandId))) {
           throw storageError();
         }
-        const receiptRecordV2 = await readIdentifiedBytes(canonicalRoot, receiptFile);
+        const receiptRecordV2 = await readIdentifiedBytes(
+          canonicalRoot,
+          receiptFile,
+          STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES
+        );
         const receipt: DirectorReceiptRead | null =
           receiptRecordV2 === null
             ? null
@@ -1767,7 +1785,11 @@ const createStudioDirectorCommandMailboxInternal = (
                   let receiptIsValid = false;
                   if (!indeterminateReceiptPublications.has(receiptPublicationKey(projectId, slot.commandId))) {
                     const receiptFile = path.join(directories.receipts, `${slot.commandId}.json`);
-                    const receiptRecord = await readIdentifiedBytes(canonicalRoot, receiptFile);
+                    const receiptRecord = await readIdentifiedBytes(
+                      canonicalRoot,
+                      receiptFile,
+                      STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES
+                    );
                     if (receiptRecord !== null) {
                       const parsed = parseReceiptRecord({
                         projectId,
@@ -1910,7 +1932,11 @@ const createStudioDirectorCommandMailboxInternal = (
           const receiptFile = path.join(directories.receipts, `${ref.commandId}.json`);
           if (indeterminateReceiptPublications.has(receiptPublicationKey(ref.projectId, ref.commandId))) continue;
           // eslint-disable-next-line no-await-in-loop
-          const receiptRecord = await readIdentifiedBytes(canonicalRoot, receiptFile);
+          const receiptRecord = await readIdentifiedBytes(
+            canonicalRoot,
+            receiptFile,
+            STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES
+          );
           if (receiptRecord === null) continue;
           const receipt = parseReceiptRecord({
             projectId: ref.projectId,
@@ -1938,7 +1964,7 @@ const createStudioDirectorCommandMailboxInternal = (
             identity: receiptRecord.identity,
             missingIsSuccess: true,
             isStillAuthorized: async (_phase, file) => {
-              const current = await readIdentifiedBytes(canonicalRoot, file);
+              const current = await readIdentifiedBytes(canonicalRoot, file, STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES);
               if (
                 current === null ||
                 current.bytes !== receiptRecord.bytes ||

@@ -5,7 +5,7 @@
  */
 
 import { Button, Spin } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ipcBridge } from '@/common';
@@ -30,6 +30,7 @@ import type {
 import { uuid } from '@/common/utils';
 import { useProvidersQuery } from '@/renderer/hooks/agent/useModelProviderList';
 import { useConversationHistoryContext } from '@/renderer/hooks/context/ConversationHistoryContext';
+import { requestConversationSendBoxPrefill } from '@/renderer/hooks/chat/useSendBoxDraft';
 import { buildContextHandoffExtraPatch } from '@/renderer/pages/conversation/contextHandoff/contextConversationUpdate';
 import { getConversationPinnedContext } from '@/renderer/pages/conversation/contextHandoff/pinnedContext';
 import AionrsChat from '@/renderer/pages/conversation/platforms/aionrs/AionrsChat';
@@ -41,7 +42,10 @@ import { DIRECTOR_PRESET_RULES, seedDirectorOpeningTurn } from './openingTurn';
 
 type DirectorConversation = Extract<TChatConversation, { type: 'aionrs' }>;
 
-export type DirectorProposalChatIntent = 'accept' | 'reject';
+export type DirectorProposalChatIntent = {
+  decision: 'accept' | 'reject';
+  proposalId: string | null;
+};
 
 const ACCEPT_PROPOSAL_CHAT_INTENTS = new Set([
   'approve',
@@ -56,15 +60,18 @@ const REJECT_PROPOSAL_CHAT_INTENTS = new Set(['reject', 'reject it', 'decline', 
 
 /** Only exact, bounded human phrases can cross from the composer into proposal authority. */
 export const parseDirectorProposalChatIntent = (message: string): DirectorProposalChatIntent | null => {
-  const normalized = message
-    .normalize('NFKC')
-    .trim()
+  const normalizedInput = message.normalize('NFKC').trim();
+  const exact = /^\/(approve|reject) ([A-Za-z0-9_-]{1,256})$/u.exec(normalizedInput);
+  if (exact !== null) {
+    return { decision: exact[1] === 'approve' ? 'accept' : 'reject', proposalId: exact[2]! };
+  }
+  const normalized = normalizedInput
     .toLocaleLowerCase('en-US')
     .replace(/[.!?]+$/u, '')
     .trim()
     .replace(/\s+/gu, ' ');
-  if (ACCEPT_PROPOSAL_CHAT_INTENTS.has(normalized)) return 'accept';
-  if (REJECT_PROPOSAL_CHAT_INTENTS.has(normalized)) return 'reject';
+  if (ACCEPT_PROPOSAL_CHAT_INTENTS.has(normalized)) return { decision: 'accept', proposalId: null };
+  if (REJECT_PROPOSAL_CHAT_INTENTS.has(normalized)) return { decision: 'reject', proposalId: null };
   return null;
 };
 
@@ -950,6 +957,8 @@ export type DirectorRailProps = {
   project: StudioRendererProjectV2;
   reviewedOutputs?: readonly MessageListInlineItem[];
   onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
+  draftRequest?: { requestId: number; projectId: string; prompt: string } | null;
+  onDraftRequestConsumed?: (requestId: number) => void;
   /** Owned by the shell: the collapse control lives in the app bar, not in this pane. */
   collapsed: boolean;
   contentId: string;
@@ -962,6 +971,8 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
   project,
   reviewedOutputs = [],
   onProposalIntent,
+  draftRequest,
+  onDraftRequestConsumed,
   collapsed,
   contentId,
   widthPixels,
@@ -1192,6 +1203,21 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
 
   const visibleState: DirectorState =
     state.projectId === project.id ? state : { kind: 'loading', projectId: project.id };
+  const consumedDraftRequestRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (
+      draftRequest === null ||
+      draftRequest === undefined ||
+      draftRequest.projectId !== project.id ||
+      visibleState.kind !== 'ready' ||
+      consumedDraftRequestRef.current === draftRequest.requestId
+    ) {
+      return;
+    }
+    requestConversationSendBoxPrefill(visibleState.conversation.id, draftRequest.prompt);
+    consumedDraftRequestRef.current = draftRequest.requestId;
+    onDraftRequestConsumed?.(draftRequest.requestId);
+  }, [draftRequest, onDraftRequestConsumed, project.id, visibleState]);
 
   const runExplicitAttempt = useCallback(
     (

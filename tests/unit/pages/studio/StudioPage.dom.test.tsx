@@ -14,6 +14,7 @@ import type {
   StudioRendererChainStatusV2,
   StudioRendererJobV2,
   StudioRendererProjectV2,
+  StudioRendererProposalCatalogV2,
   StudioRendererProposalV2,
   StudioRendererReferenceGenerationHandoffV2,
   StudioRendererSubmissionQuoteV2,
@@ -30,6 +31,7 @@ import type {
   WorkspaceMutationCallbacks,
   WorkspaceProjectMenuProps,
 } from '@/renderer/pages/studio/components/Workspace';
+import type { DirectorProposalChatIntent } from '@/renderer/pages/studio/components/Workspace/DirectorRail';
 
 const mocks = vi.hoisted(() => {
   type ProjectEventListener = (payload: { projectId: string }) => void;
@@ -61,7 +63,8 @@ const mocks = vi.hoisted(() => {
     referenceActions: null as ReferencesViewActions | null,
     workspaceMutations: null as WorkspaceMutationCallbacks | null,
     projectMenuProps: null as WorkspaceProjectMenuProps | null,
-    directorProposalIntent: null as null | ((intent: 'accept' | 'reject') => Promise<void>),
+    directorProposalIntent: null as null | ((intent: DirectorProposalChatIntent) => Promise<void>),
+    directorDraftRequest: null as null | { requestId: number; projectId: string; prompt: string },
     bridge: {
       getProject: { invoke: vi.fn() },
       getProjectWorkspace: { invoke: vi.fn() },
@@ -162,15 +165,18 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
     contentId,
     widthPixels,
     onProposalIntent,
+    draftRequest,
   }: {
     project: StudioRendererProjectV2;
     reviewedOutputs?: readonly { id: string; content: React.ReactNode; createdAt: number }[];
     collapsed: boolean;
     contentId: string;
     widthPixels?: number;
-    onProposalIntent?: (intent: 'accept' | 'reject') => Promise<void>;
+    onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
+    draftRequest?: { requestId: number; projectId: string; prompt: string } | null;
   }) => {
     mocks.directorProposalIntent = onProposalIntent ?? null;
+    mocks.directorDraftRequest = draftRequest ?? null;
     return (
       <aside
         data-studio-director-rail
@@ -1257,11 +1263,42 @@ const proposal = (): StudioRendererProposalV2 => ({
   },
 });
 
+const proposalCatalog = (
+  proposals: StudioRendererProposalV2[] = [],
+  projectRevision = proposals[0]?.review.status === 'stale'
+    ? proposals[0].review.currentRevision
+    : (proposals[0]?.baseRevision ?? 3),
+  projectId = proposals[0]?.projectId ?? 'project_1'
+): StudioRendererProposalCatalogV2 => ({ projectId, projectRevision, proposals });
+
 const pinRuleProposal = (): StudioRendererProposalV2 => ({
   ...proposal(),
   id: 'proposal_rule',
   payload: { kind: 'pin_rule', rule: { text: 'Never show a logo', predicate: null } },
 });
+
+const staleProposal = (candidate: StudioRendererProposalV2, currentRevision: number): StudioRendererProposalV2 => ({
+  ...candidate,
+  review: {
+    status: 'stale',
+    groups: [],
+    baseRevision: candidate.baseRevision,
+    currentRevision,
+  },
+});
+
+const mockProposalUntilDecision = (candidate: StudioRendererProposalV2): void => {
+  mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+    ok(
+      proposalCatalog(
+        mocks.bridge.acceptProposal.invoke.mock.calls.length + mocks.bridge.rejectProposal.invoke.mock.calls.length ===
+          0
+          ? [candidate]
+          : []
+      )
+    )
+  );
+};
 
 const referenceRequest = (): StudioReferenceRequestV2 => ({
   schemaVersion: 5,
@@ -1452,7 +1489,7 @@ const capturedProjectMenuProps = (): WorkspaceProjectMenuProps => {
   return mocks.projectMenuProps!;
 };
 
-const capturedDirectorProposalIntent = (): ((intent: 'accept' | 'reject') => Promise<void>) => {
+const capturedDirectorProposalIntent = (): ((intent: DirectorProposalChatIntent) => Promise<void>) => {
   expect(mocks.directorProposalIntent).not.toBeNull();
   return mocks.directorProposalIntent!;
 };
@@ -1521,8 +1558,9 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.workspaceMutations = null;
     mocks.projectMenuProps = null;
     mocks.directorProposalIntent = null;
+    mocks.directorDraftRequest = null;
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([]));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog()));
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([]));
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([]));
     mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(3)));
@@ -4402,7 +4440,7 @@ describe('StudioPage schema-5 cutover', () => {
     });
     mocks.bridge.listProposals.invoke.mockImplementation(async () => {
       mocks.callOrder.push('list-proposals');
-      return ok([]);
+      return ok(proposalCatalog());
     });
     mocks.bridge.listReferenceRequests.invoke.mockImplementation(async () => {
       mocks.callOrder.push('list-references');
@@ -4422,8 +4460,8 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.callOrder.indexOf('subscribe-reference')).toBeLessThan(mocks.callOrder.indexOf('list-handoffs'));
   });
 
-  it('renders reviewed proposals, pending references, and one persistent card for each handoff', async () => {
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
+  it('keeps proposals in the workspace inbox while references and handoffs remain Director outputs', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest()]));
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(
       ok([handoff(), handoff(), handoff('succeeded'), handoff('dismissed')])
@@ -4443,9 +4481,101 @@ describe('StudioPage schema-5 cutover', () => {
     const referenceOutput = screen
       .getByTestId('studio-reference-reference_1')
       .closest('[data-studio-director-reviewed-output]');
-    expect(transcript).toContainElement(proposalOutput);
+    expect(proposalOutput).toBeNull();
+    expect(transcript).not.toContainElement(screen.getByTestId('studio-proposal-proposal_1'));
     expect(transcript).toContainElement(referenceOutput);
-    expect(proposalOutput).not.toBe(referenceOutput);
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.references' }));
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toBeVisible();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.board' });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toBeVisible();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' }));
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.cut' });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toBeVisible();
+  });
+
+  it('keeps the last proposal cards visible but unavailable through refresh and a mismatched catalog', async () => {
+    const mismatch = deferred<{ ok: true; data: StudioRendererProposalCatalogV2 }>();
+    mocks.bridge.listProposals.invoke
+      .mockResolvedValueOnce(ok(proposalCatalog([proposal()])))
+      .mockReturnValueOnce(mismatch.promise);
+    renderStudio();
+    const card = await screen.findByTestId('studio-proposal-proposal_1');
+    expect(card).toHaveAttribute('data-proposal-state', 'ready');
+
+    act(() => mocks.listeners.proposalUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(card).toHaveAttribute('data-proposal-state', 'refreshing'));
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+
+    const wrongRevision = { ...proposal(), baseRevision: 4 };
+    await act(async () => {
+      mismatch.resolve(ok(proposalCatalog([wrongRevision], 4)));
+      await mismatch.promise;
+    });
+    await waitFor(() => expect(card).toHaveAttribute('data-proposal-state', 'unavailable'));
+    expect(card).toBeVisible();
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.authorityUnavailable')).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('retains disabled proposal cards across catalog IPC errors and thrown reads', async () => {
+    mocks.bridge.listProposals.invoke
+      .mockResolvedValueOnce(ok(proposalCatalog([proposal()])))
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'storage_error', messageKey: 'native.proposalCatalogFailed' },
+      })
+      .mockRejectedValueOnce(new Error('offline'));
+    renderStudio();
+    const card = await screen.findByTestId('studio-proposal-proposal_1');
+
+    act(() => mocks.listeners.proposalUpdated?.({ projectId: 'project_1' }));
+    expect(await screen.findByText('native.proposalCatalogFailed')).toBeVisible();
+    await waitFor(() => expect(card).toHaveAttribute('data-proposal-state', 'unavailable'));
+    expect(card).toBeVisible();
+    expect(
+      within(card).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+    expect(
+      within(card).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeDisabled();
+
+    act(() => mocks.listeners.proposalUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(card).toBeVisible();
+    expect(card).toHaveAttribute('data-proposal-state', 'unavailable');
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('ignores a late proposal response instead of rolling the installed inbox backward', async () => {
+    const late = deferred<{ ok: true; data: StudioRendererProposalCatalogV2 }>();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.listProposals.invoke
+      .mockResolvedValueOnce(ok(proposalCatalog([proposal()])))
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValue(ok(proposalCatalog([proposal(), second])));
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_1');
+
+    act(() => {
+      mocks.listeners.proposalUpdated?.({ projectId: 'project_1' });
+      mocks.listeners.proposalUpdated?.({ projectId: 'project_1' });
+    });
+    expect(await screen.findByTestId('studio-proposal-proposal_2')).toBeVisible();
+
+    await act(async () => {
+      late.resolve(ok(proposalCatalog([proposal()])));
+      await late.promise;
+    });
+    expect(screen.getByTestId('studio-proposal-proposal_2')).toBeVisible();
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'ready');
   });
 
   it('refreshes running handoff progress and thumbnails when project-owned jobs change', async () => {
@@ -5133,7 +5263,7 @@ describe('StudioPage schema-5 cutover', () => {
       },
       review: { status: 'unavailable', groups: [], reason: 'reducer_rejected' },
     };
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([routeProposal]));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([routeProposal])));
 
     renderStudio();
     const accept = await screen.findByRole('button', {
@@ -5533,7 +5663,7 @@ describe('StudioPage schema-5 cutover', () => {
   it('discards delayed proposal, reference, and export results from the previous project binding', async () => {
     const projectA = project();
     const projectB = { ...project(), id: 'project_2', revision: 6, name: 'Project B' };
-    const delayedProposals = deferred<{ ok: true; data: StudioRendererProposalV2[] }>();
+    const delayedProposals = deferred<{ ok: true; data: StudioRendererProposalCatalogV2 }>();
     const delayedReferenceRequests = deferred<{ ok: true; data: StudioReferenceRequestV2[] }>();
     const delayedHandoffs = deferred<{ ok: true; data: StudioRendererReferenceGenerationHandoffV2[] }>();
     const delayedExports = deferred<{ ok: true; data: StudioRendererExportCatalogV2 }>();
@@ -5549,7 +5679,7 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockReturnValueOnce(delayedHandoffs.promise);
     mocks.bridge.listExports.invoke.mockReturnValueOnce(delayedExports.promise);
 
-    let proposals!: Promise<void>;
+    let proposals!: Promise<StudioRendererProposalCatalogV2 | null>;
     let references!: Promise<void>;
     let exports!: Promise<boolean>;
     act(() => {
@@ -5567,7 +5697,9 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(3));
 
     await act(async () => {
-      delayedProposals.resolve(ok([{ ...proposal(), id: 'stale_proposal' }]));
+      delayedProposals.resolve(
+        ok(proposalCatalog([{ ...proposal(), id: 'stale_proposal' }], projectA.revision, projectA.id))
+      );
       delayedReferenceRequests.resolve(ok([{ ...referenceRequest(), id: 'stale_reference' }]));
       delayedHandoffs.resolve(ok([{ ...handoff(), handoffId: 'stale_handoff' }]));
       delayedExports.resolve(ok({ revision: 9, artifacts: [] }));
@@ -6984,7 +7116,7 @@ describe('StudioPage schema-5 cutover', () => {
   });
 
   it('reports deterministic failures from each reviewed-output action without auto-retrying', async () => {
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
     mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest()]));
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
     mocks.bridge.acceptProposal.invoke.mockResolvedValue({
@@ -7024,7 +7156,7 @@ describe('StudioPage schema-5 cutover', () => {
       'shot.shot_0.shootingScript': { baseValue: 'Shot 1', value: 'Unsaved local script' },
     });
     mockSupportedProject(draftedProject);
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
 
     renderStudio();
 
@@ -7041,11 +7173,11 @@ describe('StudioPage schema-5 cutover', () => {
   });
 
   it('accepts the one exact current proposal from human Director chat without entering the spend gate', async () => {
-    mocks.bridge.listProposals.invoke.mockResolvedValueOnce(ok([proposal()])).mockResolvedValue(ok([]));
+    mockProposalUntilDecision(proposal());
     renderStudio();
 
     await screen.findByTestId('studio-proposal-proposal_1');
-    await act(async () => capturedDirectorProposalIntent()('accept'));
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
 
     expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
@@ -7057,12 +7189,29 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
+  it('accepts an exact sibling by full chat ID while generic approval remains ambiguous', async () => {
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      ok(proposalCatalog(mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? [proposal(), second] : []))
+    );
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_2');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: 'proposal_2' }));
+
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_2',
+    });
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
   it('rejects the one exact current proposal from human Director chat', async () => {
-    mocks.bridge.listProposals.invoke.mockResolvedValueOnce(ok([proposal()])).mockResolvedValue(ok([]));
+    mockProposalUntilDecision(proposal());
     renderStudio();
 
     await screen.findByTestId('studio-proposal-proposal_1');
-    await act(async () => capturedDirectorProposalIntent()('reject'));
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'reject', proposalId: null }));
 
     expect(mocks.bridge.rejectProposal.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
@@ -7072,12 +7221,43 @@ describe('StudioPage schema-5 cutover', () => {
     expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatRejected')).toBeVisible();
   });
 
+  it('rejects only the proposal named by a full chat ID when ready siblings coexist', async () => {
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      ok(proposalCatalog(mocks.bridge.rejectProposal.invoke.mock.calls.length === 0 ? [proposal(), second] : []))
+    );
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_2');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'reject', proposalId: 'proposal_2' }));
+
+    expect(mocks.bridge.rejectProposal.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_2',
+    });
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails a full-ID chat decision closed when that exact proposal is not pending', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_1');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'reject', proposalId: 'proposal_missing' }));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.proposals.chatProposalNotFound')
+    ).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
   it('fails closed when Director chat has no pending proposal', async () => {
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1));
 
-    await act(async () => capturedDirectorProposalIntent()('accept'));
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatNoPending')).toBeVisible();
     expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
@@ -7086,12 +7266,12 @@ describe('StudioPage schema-5 cutover', () => {
 
   it('fails closed when Director chat has more than one pending proposal', async () => {
     mocks.bridge.listProposals.invoke.mockResolvedValue(
-      ok([proposal(), { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' }])
+      ok(proposalCatalog([proposal(), { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' }]))
     );
     renderStudio();
     await screen.findByTestId('studio-proposal-proposal_2');
 
-    await act(async () => capturedDirectorProposalIntent()('accept'));
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
 
     expect(
       await screen.findByText('conversation.creativeStudio.workspace.proposals.chatMultiplePending')
@@ -7100,8 +7280,28 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
   });
 
+  it('uses the one current ready proposal for generic chat while retaining a stale sibling', async () => {
+    const currentProject = { ...project(), revision: 4 };
+    const current = { ...proposal(), id: 'proposal_current', baseRevision: 4 };
+    const stale = staleProposal(proposal(), 4);
+    mockSupportedProject(currentProject);
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      ok(proposalCatalog(mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? [current, stale] : [stale], 4))
+    );
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_current');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
+
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_current',
+    });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'stale');
+  });
+
   it('fails closed while another reviewed proposal action is in progress', async () => {
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
     mocks.bridge.acceptProposal.invoke.mockReturnValue(new Promise(() => {}));
     renderStudio();
     fireEvent.click(
@@ -7109,11 +7309,139 @@ describe('StudioPage schema-5 cutover', () => {
     );
     await waitFor(() => expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1));
 
-    await act(async () => capturedDirectorProposalIntent()('reject'));
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'reject', proposalId: null }));
 
     expect(
       screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDecisionBusy').length
     ).toBeGreaterThan(0);
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('globally disables sibling proposal, reference, and handoff actions during a card decision', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal(), second])));
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest()]));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    renderStudio();
+    const firstCard = await screen.findByTestId('studio-proposal-proposal_1');
+    const secondCard = screen.getByTestId('studio-proposal-proposal_2');
+    const firstAccept = within(firstCard).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    fireEvent.click(firstAccept);
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    expect(firstAccept).toHaveClass('arco-btn-loading');
+    expect(
+      within(secondCard).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    expect(
+      within(secondCard).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.references.generate' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.references.reject' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' })
+    ).toBeDisabled();
+    expect(within(secondCard).getByRole('button', { name: /workspace\.proposals\.accept/ })).not.toHaveClass(
+      'arco-btn-loading'
+    );
+
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+    });
+    await waitFor(() => expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1));
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.decideReferenceRequest.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.dismissReferenceGenerationHandoff.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails a re-entrant card-to-card race visibly before React can paint the global disabled state', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal(), second])));
+    renderStudio();
+    const firstCard = await screen.findByTestId('studio-proposal-proposal_1');
+    const secondCard = screen.getByTestId('studio-proposal-proposal_2');
+    const firstAccept = within(firstCard).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    const siblingReject = within(secondCard).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.reject',
+    });
+
+    act(() => {
+      firstAccept.click();
+      siblingReject.click();
+    });
+
+    expect(
+      screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDecisionBusy').length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+    });
+    await waitFor(() => expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1));
+  });
+
+  it('uses the same global latch when chat starts first and exposes only its exact card as loading', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal(), second])));
+    renderStudio();
+    const firstCard = await screen.findByTestId('studio-proposal-proposal_1');
+    const secondCard = screen.getByTestId('studio-proposal-proposal_2');
+    const siblingReject = within(secondCard).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.reject',
+    });
+
+    let chatDecision!: Promise<void>;
+    act(() => {
+      chatDecision = capturedDirectorProposalIntent()({ decision: 'accept', proposalId: 'proposal_1' });
+      siblingReject.click();
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(
+      within(firstCard).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toHaveClass('arco-btn-loading');
+    expect(siblingReject).toBeDisabled();
+    expect(
+      screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDecisionBusy').length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+      await chatDecision;
+    });
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_1',
+    });
     expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
   });
 
@@ -7126,15 +7454,15 @@ describe('StudioPage schema-5 cutover', () => {
         applied: boolean;
       };
     }>();
-    mocks.bridge.listProposals.invoke.mockResolvedValueOnce(ok([proposal()])).mockResolvedValue(ok([]));
+    mockProposalUntilDecision(proposal());
     mocks.bridge.acceptProposal.invoke.mockReturnValue(acceptance.promise);
     renderStudio();
     await screen.findByTestId('studio-proposal-proposal_1');
 
     let firstDecision!: Promise<void>;
     await act(async () => {
-      firstDecision = capturedDirectorProposalIntent()('accept');
-      await capturedDirectorProposalIntent()('reject');
+      firstDecision = capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null });
+      await capturedDirectorProposalIntent()({ decision: 'reject', proposalId: null });
     });
 
     expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1);
@@ -7157,33 +7485,91 @@ describe('StudioPage schema-5 cutover', () => {
 
   it('fails closed when the sole pending proposal is stale', async () => {
     mockSupportedProject({ ...project(), revision: 4 });
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
+    const stale = staleProposal(proposal(), 4);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([stale], 4)));
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1));
 
-    await act(async () => capturedDirectorProposalIntent()('accept'));
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatStale')).toBeVisible();
     expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
   });
 
-  it('fails closed when a non-Shot workspace draft is dirty', async () => {
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
+  it('blocks only a rule proposal when the active rule draft for that proposal is dirty', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([pinRuleProposal()])));
     renderStudio();
-    await screen.findByTestId('studio-proposal-proposal_1');
+    await screen.findByTestId('studio-proposal-proposal_rule');
     const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     fireEvent.change(within(briefDialog).getByLabelText(RULE_TEXT), {
       target: { value: 'Keep this rule draft local.' },
     });
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
 
-    await act(async () => capturedDirectorProposalIntent()('accept'));
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
 
     expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDirty').length).toBeGreaterThan(0);
     expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rechecks a workspace draft created while proposal authority is refreshing before accept IPC', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(dialog).getByLabelText(BRIEF), { target: { value: 'Draft created during refresh.' } });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+    });
+
+    expect(
+      (await screen.findAllByText('conversation.creativeStudio.workspace.proposals.saveBeforeApply')).length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rechecks an active rule draft created while proposal authority is refreshing before accept IPC', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const ruleProposal = pinRuleProposal();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([ruleProposal])));
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(dialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Rule draft created during refresh.' },
+    });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+    });
+
+    expect(
+      (await screen.findAllByText('conversation.creativeStudio.workspace.proposals.reviewRuleDraftsFirst')).length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
   });
 
   it('keeps an independent rule-pin proposal actionable while local Shot drafts are unsaved', async () => {
@@ -7193,7 +7579,7 @@ describe('StudioPage schema-5 cutover', () => {
       'shot.shot_0.shootingScript': { baseValue: 'Shot 1', value: 'Unsaved local script' },
     });
     mockSupportedProject(draftedProject);
-    mocks.bridge.listProposals.invoke.mockResolvedValueOnce(ok([ruleProposal])).mockResolvedValue(ok([]));
+    mockProposalUntilDecision(ruleProposal);
     mocks.bridge.acceptProposal.invoke.mockResolvedValue(
       ok({
         proposal: { ...ruleProposal, status: 'accepted', decidedAt: '2026-01-01T00:00:05.000Z' },
@@ -7218,35 +7604,268 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
   });
 
-  it('removes a revision-stale proposal after a refused acceptance refreshes project authority', async () => {
+  it("does not let another project's persisted drafts block this project's mutation proposal", async () => {
+    seedWorkspaceDrafts(
+      { 'shot.other.shootingScript': { baseValue: 'Old', value: 'Other project draft' } },
+      'project_2'
+    );
+    mockProposalUntilDecision(proposal());
+    renderStudio();
+    const accept = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    expect(accept).toBeEnabled();
+    fireEvent.click(accept);
+
+    await waitFor(() =>
+      expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        proposalId: 'proposal_1',
+      })
+    );
+  });
+
+  it('keeps an accepted sibling visible as stale and offers an exact re-propose action', async () => {
+    const first = proposal();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    const advanced = { ...project(), revision: 4 };
+    const staleSecond = staleProposal(second, 4);
+    mocks.bridge.getProject.invoke.mockImplementation(async () =>
+      ok({
+        status: 'supported' as const,
+        project: mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? project() : advanced,
+      })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async () =>
+      ok(workspaceStatus(mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? project() : advanced))
+    );
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async () =>
+      ok(chainStatus(mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? project() : advanced))
+    );
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      mocks.bridge.acceptProposal.invoke.mock.calls.length === 0
+        ? ok(proposalCatalog([first, second], 3))
+        : ok(proposalCatalog([staleSecond], 4))
+    );
+    mocks.bridge.acceptProposal.invoke.mockResolvedValue(
+      ok({
+        proposal: { ...first, status: 'accepted', decidedAt: '2026-01-01T00:00:05.000Z' },
+        project: advanced,
+        applied: true,
+      })
+    );
+    renderStudio();
+    const firstCard = await screen.findByTestId('studio-proposal-proposal_1');
+    fireEvent.click(
+      within(firstCard).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('studio-proposal-proposal_2')).toHaveAttribute('data-proposal-state', 'stale')
+    );
+    expect(screen.queryByTestId('studio-proposal-proposal_1')).toBeNull();
+    expect(
+      within(screen.getByTestId('studio-proposal-proposal_2')).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
+      })
+    ).toBeEnabled();
+  });
+
+  it.each(['terminal', 'missing'] as const)(
+    'does not prefill when the exact proposal becomes %s before a clean re-propose refresh',
+    async (outcome) => {
+      const advanced = { ...project(), revision: 4 };
+      const stale = staleProposal(proposal(), 4);
+      const terminal = {
+        ...stale,
+        status: 'rejected' as const,
+        decidedAt: '2026-01-01T00:00:05.000Z',
+      };
+      mockSupportedProject(advanced);
+      mocks.bridge.listProposals.invoke
+        .mockResolvedValueOnce(ok(proposalCatalog([stale], 4)))
+        .mockResolvedValue(ok(proposalCatalog(outcome === 'terminal' ? [terminal] : [], 4)));
+      renderStudio('/studio/project_1/board');
+      fireEvent.click(
+        within(await screen.findByTestId('studio-proposal-proposal_1')).getByRole('button', {
+          name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
+        })
+      );
+
+      expect(
+        await screen.findByText('conversation.creativeStudio.workspace.proposals.chatProposalNotFound')
+      ).toBeVisible();
+      expect(mocks.directorDraftRequest).toBeNull();
+      expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['error', 'mismatch'] as const)(
+    'does not prefill when a clean re-propose refresh returns a catalog %s',
+    async (outcome) => {
+      const advanced = { ...project(), revision: 4 };
+      const stale = staleProposal(proposal(), 4);
+      mockSupportedProject(advanced);
+      mocks.bridge.listProposals.invoke
+        .mockResolvedValueOnce(ok(proposalCatalog([stale], 4)))
+        .mockResolvedValueOnce(
+          outcome === 'error'
+            ? { ok: false, error: { code: 'storage_error', messageKey: 'native.proposalCatalogFailed' } }
+            : ok(proposalCatalog([stale], 5))
+        );
+      renderStudio('/studio/project_1/board');
+      fireEvent.click(
+        within(await screen.findByTestId('studio-proposal-proposal_1')).getByRole('button', {
+          name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
+        })
+      );
+
+      expect(
+        (await screen.findAllByText('conversation.creativeStudio.workspace.proposals.authorityUnavailable')).length
+      ).toBeGreaterThan(0);
+      expect(mocks.directorDraftRequest).toBeNull();
+      expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    }
+  );
+
+  it('prefills an editable exact-ID re-propose turn without applying or sending it', async () => {
+    const advanced = { ...project(), revision: 4 };
+    const stale = staleProposal(proposal(), 4);
+    mockSupportedProject(advanced);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([stale], 4)));
+    renderStudio('/studio/project_1/board');
+    const card = await screen.findByTestId('studio-proposal-proposal_1');
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.director.show' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    fireEvent.click(
+      within(card).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    );
+
+    await waitFor(() => expect(mocks.directorDraftRequest).not.toBeNull());
+    expect(mocks.directorDraftRequest?.prompt).toContain('proposals.reproposalPrompt');
+    expect(mocks.directorDraftRequest?.prompt).toContain('proposal_1');
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.director.hide' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+  });
+
+  it('saves only the proposal-scoped workspace drafts, then requests an updated proposal without accepting', async () => {
+    const initial = projectWithDraftBatch(1);
+    const revised = structuredClone(initial);
+    revised.revision = 4;
+    revised.shots.shot_0!.shootingScript = 'Unsaved local script';
+    seedWorkspaceDrafts({
+      'shot.shot_0.shootingScript': { baseValue: 'Shot 1', value: 'Unsaved local script' },
+    });
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: revised }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValue(ok(workspaceStatus(revised)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(revised)));
+    const stale = staleProposal(proposal(), 4);
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      mocks.bridge.getProject.invoke.mock.calls.length <= 1
+        ? ok(proposalCatalog([proposal()], 3))
+        : ok(proposalCatalog([stale], 4))
+    );
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.saveAndRequestUpdated',
+      })
+    );
+
+    await waitFor(() => expect(mocks.directorDraftRequest?.prompt).toContain('proposal_1'));
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [{ kind: 'edit_shot', shotId: 'shot_0', changes: { shootingScript: 'Unsaved local script' } }],
+    });
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+  });
+
+  it('does not queue a re-propose turn when saving the conflicting workspace draft fails', async () => {
+    const initial = projectWithDraftBatch(1);
+    seedWorkspaceDrafts({
+      'shot.shot_0.shootingScript': { baseValue: 'Shot 1', value: 'Unsaved local script' },
+    });
+    mockSupportedProject(initial);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.saveFailed' },
+    });
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.saveAndRequestUpdated',
+      })
+    );
+
+    await waitFor(() => expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledOnce());
+    expect(mocks.directorDraftRequest).toBeNull();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('retains a proposal as stale when fresh authority advances before acceptance', async () => {
     const current = project();
     const advanced = { ...project(), revision: 4 };
     mocks.bridge.getProject.invoke
       .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
       .mockResolvedValue(ok({ status: 'supported', project: advanced }));
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok([proposal()]));
+    const stale = staleProposal(proposal(), 4);
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      mocks.bridge.getProject.invoke.mock.calls.length > 1
+        ? ok(proposalCatalog([stale], 4))
+        : ok(proposalCatalog([proposal()], 3))
+    );
     mocks.bridge.projectWorkspaceStatusFixture.invoke
       .mockResolvedValueOnce(ok(workspaceStatus(current)))
       .mockResolvedValue(ok(workspaceStatus(advanced)));
     mocks.bridge.projectWorkspaceChainFixture.invoke
       .mockResolvedValueOnce(ok(chainStatus(current)))
       .mockResolvedValue(ok(chainStatus(advanced)));
-    mocks.bridge.acceptProposal.invoke.mockResolvedValue({
-      ok: false,
-      error: { code: 'stale_revision', messageKey: 'native.acceptFailed' },
-    });
     renderStudio();
 
     fireEvent.click(
       await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
     );
 
-    expect(await screen.findByText('native.acceptFailed')).toBeVisible();
-    await waitFor(() =>
-      expect(
-        screen.queryByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
-      ).toBeNull()
-    );
+    expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatStale')).toBeVisible();
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'stale');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeEnabled();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2);
     expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(2);
     expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(2);

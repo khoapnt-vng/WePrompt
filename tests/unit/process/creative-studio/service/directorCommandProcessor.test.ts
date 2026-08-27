@@ -20,6 +20,8 @@ import {
   type StudioDirectorQueryCommandRecordV2,
   type StudioProjectV2,
   type StudioProjectStatusV2,
+  type StudioProposalRecordV2,
+  type StudioProposalV2,
   type StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
@@ -132,7 +134,7 @@ const makeCommandV2 = (
 });
 
 const makeQueryCommandV2 = (
-  policy: 'get_project_status' | 'list_routes',
+  policy: 'get_project_status' | 'list_routes' | 'get_proposal',
   commandId = 'query_v2',
   detail = false
 ): StudioDirectorQueryCommandRecordV2 =>
@@ -146,14 +148,24 @@ const makeQueryCommandV2 = (
         policy,
         detail,
       }
-    : {
-        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
-        commandId,
-        projectId: 'project_v2',
-        createdAt: '2026-08-16T12:00:00.000Z',
-        deadlineAt: '2026-08-16T12:00:15.000Z',
-        policy,
-      };
+    : policy === 'list_routes'
+      ? {
+          schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+          commandId,
+          projectId: 'project_v2',
+          createdAt: '2026-08-16T12:00:00.000Z',
+          deadlineAt: '2026-08-16T12:00:15.000Z',
+          policy,
+        }
+      : {
+          schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+          commandId,
+          projectId: 'project_v2',
+          createdAt: '2026-08-16T12:00:00.000Z',
+          deadlineAt: '2026-08-16T12:00:15.000Z',
+          policy,
+          proposalId: 'proposal_exact_b',
+        };
 
 const makeProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
   projectId: 'project_v2',
@@ -281,6 +293,23 @@ const makeProjectV2 = (projectId = 'project_v2', revision = 1): StudioProjectV2 
     updatedAt: revision === 1 ? '2026-08-16T12:00:00.000Z' : COMMITTED_AT,
   }) as StudioProjectV2;
 
+const makeProposalV2 = (id: string, status: StudioProposalV2['status'] = 'pending'): StudioProposalV2 => {
+  const pending: StudioProposalRecordV2 = {
+    schemaVersion: 5,
+    id,
+    projectId: 'project_v2',
+    status: 'pending',
+    baseRevision: 1,
+    payload: {
+      kind: 'mutation_batch',
+      operations: [{ kind: 'edit_shot', shotId: 'shot_1', changes: { shootingScript: `Proposal ${id}` } }],
+    },
+    createdAt: '2026-08-16T12:00:00.000Z',
+    decidedAt: null,
+  };
+  return status === 'pending' ? pending : { ...pending, status, decidedAt: '2026-08-16T12:00:05.000Z' };
+};
+
 type HarnessV2 = {
   processor: StudioDirectorCommandProcessorV2;
   tracker: StudioDirectorCommitTrackerV2;
@@ -293,6 +322,7 @@ type HarnessV2 = {
   serviceGetProjectStatus: ReturnType<typeof vi.fn>;
   serviceListRoutes: ReturnType<typeof vi.fn>;
   storeGetProject: ReturnType<typeof vi.fn>;
+  storeListProposals: ReturnType<typeof vi.fn>;
   writeReceipt: ReturnType<
     typeof vi.fn<
       (
@@ -319,6 +349,7 @@ const createHarnessV2 = (
     serviceApply?: StudioDirectorCommandServiceV2['apply'];
     serviceGetProjectStatus?: (input: { projectId: string; detail?: boolean }) => Promise<StudioProjectStatusV2>;
     serviceListRoutes?: (input: { projectId: string }) => Promise<StudioRouteCatalogV2>;
+    proposals?: StudioProposalV2[];
     queryAuthorityActive?: () => boolean;
     beforeReceiptPublish?: () => Promise<void>;
   } = {}
@@ -413,9 +444,10 @@ const createHarnessV2 = (
     }
     return { status: 'supported' as const, project };
   });
+  const storeListProposals = vi.fn(async () => structuredClone(input.proposals ?? []));
   const notify = vi.fn<(projectId: string) => void>();
   const processor = createStudioDirectorCommandProcessorV2({
-    store: { getProjectV2: storeGetProject },
+    store: { getProjectV2: storeGetProject, listProposalsV2: storeListProposals },
     mailbox,
     service: { apply: serviceApply, getProjectStatus: serviceGetProjectStatus, listRoutes: serviceListRoutes },
     tracker,
@@ -444,6 +476,7 @@ const createHarnessV2 = (
     serviceGetProjectStatus,
     serviceListRoutes,
     storeGetProject,
+    storeListProposals,
     writeReceipt,
     finish,
     notify,
@@ -546,6 +579,46 @@ describe('Studio Director schema-2 commit tracker', () => {
 });
 
 describe('Studio Director schema-2 command processor', () => {
+  it('reads exactly one proposal and reports terminal or missing identities without mutation authority', async () => {
+    const proposalA = makeProposalV2('proposal_exact_a');
+    const proposalB = makeProposalV2('proposal_exact_b');
+    const pending = createHarnessV2({ proposals: [proposalA, proposalB] });
+    const trackerExpect = vi.spyOn(pending.tracker, 'expect');
+    await pending.processor.start();
+    const command = makeQueryCommandV2('get_proposal', 'proposal_query');
+    addLiveCommandV2(pending, command);
+    pending.processor.trigger(command.projectId, command.commandId);
+
+    expect(await waitForReceiptV2(pending, command.projectId, command.commandId)).toMatchObject({
+      status: 'answered',
+      query: { kind: 'get_proposal', proposalId: proposalB.id },
+      result: { status: 'pending', proposal: { id: proposalB.id } },
+    });
+    expect(pending.storeListProposals).toHaveBeenCalledExactlyOnceWith('project_v2');
+    expect(pending.storeGetProject).not.toHaveBeenCalled();
+    expect(pending.serviceApply).not.toHaveBeenCalled();
+    expect(pending.serviceGetProjectStatus).not.toHaveBeenCalled();
+    expect(pending.serviceListRoutes).not.toHaveBeenCalled();
+    expect(pending.notify).not.toHaveBeenCalled();
+    expect(trackerExpect).not.toHaveBeenCalled();
+
+    const terminal = createHarnessV2({ proposals: [makeProposalV2('proposal_exact_b', 'rejected')] });
+    await terminal.processor.start();
+    addLiveCommandV2(terminal, command);
+    terminal.processor.trigger(command.projectId, command.commandId);
+    expect(await waitForReceiptV2(terminal, command.projectId, command.commandId)).toMatchObject({
+      result: { status: 'no_longer_pending', proposalId: 'proposal_exact_b', decision: 'rejected' },
+    });
+
+    const missing = createHarnessV2();
+    await missing.processor.start();
+    addLiveCommandV2(missing, command);
+    missing.processor.trigger(command.projectId, command.commandId);
+    expect(await waitForReceiptV2(missing, command.projectId, command.commandId)).toMatchObject({
+      result: { status: 'not_found' },
+    });
+  });
+
   it('answers an exact status query without loading, mutating, tracking, notifying, or spending', async () => {
     const harness = createHarnessV2();
     const trackerExpect = vi.spyOn(harness.tracker, 'expect');

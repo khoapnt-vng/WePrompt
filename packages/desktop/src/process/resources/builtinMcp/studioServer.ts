@@ -62,6 +62,7 @@ import {
   type StudioApplyEditsInputV2,
   type StudioDirectorCommandWriterDeps,
   type StudioGetCommandStatusInput,
+  type StudioGetProposalDirectorInputV2,
 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import {
   decodeStudioProjectManifestV2,
@@ -608,6 +609,8 @@ export const studioApplyEditsInputSchemaV2 = z4
 export const studioGetCommandStatusInputSchemaV2 = z4.object({ commandId: studioDirectorIdSchemaV2 }).strict();
 
 export const studioGetProjectStatusInputSchemaV2 = z4.object({ detail: z4.boolean().optional() }).strict();
+
+export const studioGetProposalInputSchemaV2 = z4.object({ proposalId: studioDirectorIdSchemaV2 }).strict();
 
 export const studioProposeStoryboardInputSchemaV2 = z4
   .object({
@@ -1276,6 +1279,17 @@ export function createStudioGetProjectStatusHandlerV2(
   return async (input) => commandToolResult(await writer.getProjectStatus(input));
 }
 
+export function createStudioGetProposalHandlerV2(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: StudioGetProposalDirectorInputV2) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => commandToolResult(await writer.getProposal(input));
+}
+
 /** Registers the sole production Beat/Shot catalog after the atomic Task 7 cutover. */
 export function registerStudioToolsV2(
   server: Pick<McpServer, 'registerTool'>,
@@ -1354,6 +1368,15 @@ export function registerStudioToolsV2(
       inputSchema: studioGetProjectStatusInputSchemaV2,
     },
     createStudioGetProjectStatusHandlerV2(config, writerDeps)
+  );
+  server.registerTool(
+    'studio_get_proposal',
+    {
+      description:
+        'Read one exact proposal by its complete proposalId. This read never authors the project, generates, authorizes, or spends. A pending answer is the original immutable proposal; after reading it, call read_storyboard and draft a new proposal against the current revision. Never silently rebase, apply, or replace the original proposal.',
+      inputSchema: studioGetProposalInputSchemaV2,
+    },
+    createStudioGetProposalHandlerV2(config, writerDeps)
   );
   server.registerTool(
     'studio_get_command_status',

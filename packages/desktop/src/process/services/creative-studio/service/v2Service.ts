@@ -78,7 +78,7 @@ import {
   type StudioRendererExportCatalogV2,
   type StudioRendererJobV2,
   type StudioRendererPreparedSubmissionOptionsV2,
-  type StudioRendererProposalV2,
+  type StudioRendererProposalCatalogV2,
   type StudioRendererProjectCommitResultV2,
   type StudioRendererProjectV2,
   type StudioRendererReferenceGenerationHandoffV2,
@@ -296,7 +296,7 @@ export type CreativeStudioServiceV2 = {
   getProjectStatus(input: StudioProjectStatusRequestV2): Promise<StudioProjectStatusV2>;
   getGenerationCapability(input: StudioGenerationCapabilityRequestV2): Promise<StudioGenerationCapabilityV2>;
   getProjectWorkspace(input: { projectId: string }): Promise<StudioProjectWorkspaceLoadResultV2>;
-  listProposals(input: { projectId: string }): Promise<StudioRendererProposalV2[]>;
+  listProposals(input: { projectId: string }): Promise<StudioRendererProposalCatalogV2>;
   acceptProposal(input: { projectId: string; proposalId: string }): Promise<{
     proposal: StudioProposalV2;
     project: StudioRendererProjectV2;
@@ -3407,17 +3407,27 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
     },
 
-    async listProposals(input): Promise<StudioRendererProposalV2[]> {
+    async listProposals(input): Promise<StudioRendererProposalCatalogV2> {
       if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) throw invalid('Invalid Studio proposal request');
       assertSafeId(input.projectId, 'project id');
-      const [project, proposals] = await Promise.all([
-        loadSupported(input.projectId),
-        deps.store.listProposalsV2(input.projectId),
-      ]);
-      return proposals.map((proposal) => ({
-        ...structuredClone(proposal),
-        review: deriveStudioProposalReviewV2(project, proposal),
-      }));
+      // The project manifest and proposal ledger use distinct durable authorities. Bracket the
+      // ledger read with project snapshots so a renderer catalog can never pair proposal state
+      // observed around revision R+1 with a review derived from revision R. One retry absorbs a
+      // single concurrent project commit; repeated movement fails closed for the caller to retry.
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const before = await loadSupported(input.projectId);
+        const proposals = await deps.store.listProposalsV2(input.projectId);
+        const after = await loadSupported(input.projectId);
+        if (before.id !== after.id || before.revision !== after.revision) continue;
+        return {
+          projectId: after.id,
+          projectRevision: after.revision,
+          proposals: proposals.map((proposal) =>
+            Object.assign(structuredClone(proposal), { review: deriveStudioProposalReviewV2(after, proposal) })
+          ),
+        };
+      }
+      throw new CreativeStudioStoreError('stale_project', 'Studio proposal catalog authority changed');
     },
 
     async acceptProposal(input): Promise<{

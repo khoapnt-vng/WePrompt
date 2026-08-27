@@ -144,7 +144,7 @@ import type {
   StudioProjectStatusV2,
   StudioProjectWorkspaceLoadResultV2,
   StudioProposalV2,
-  StudioRendererProposalV2,
+  StudioRendererProposalCatalogV2,
   StudioReferenceRequestDecisionV2,
   StudioReferenceRequestV2,
   StudioRendererJobV2,
@@ -1260,7 +1260,7 @@ export const creativeStudio = {
     StudioCommandResult<StudioRendererProjectCommitResultV2>,
     StudioBindDirectorConversationRequestV2
   >('creative-studio.bind-director-conversation'),
-  listProposals: bridge.buildProvider<StudioCommandResult<StudioRendererProposalV2[]>, StudioProjectRequestV2>(
+  listProposals: bridge.buildProvider<StudioCommandResult<StudioRendererProposalCatalogV2>, StudioProjectRequestV2>(
     'creative-studio.list-proposals'
   ),
   acceptProposal: bridge.buildProvider<StudioCommandResult<StudioProposalAcceptanceV2>, StudioProposalRequestV2>(

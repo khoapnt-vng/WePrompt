@@ -22,12 +22,17 @@ export type DirectorProposalsProps = {
   proposals: readonly StudioRendererProposalV2[];
   referenceRequests: readonly StudioReferenceRequestV2[];
   referenceGenerationHandoffs: readonly StudioRendererReferenceGenerationHandoffV2[];
-  pendingActionId: string | null;
-  blockMutationProposalAcceptance?: boolean;
+  pendingAction: { kind: 'proposal' | 'reference_request' | 'handoff'; id: string } | null;
+  actionsLocked?: boolean;
+  proposalAuthorityState?: (proposal: StudioRendererProposalV2) => 'ready' | 'stale' | 'unavailable' | 'refreshing';
+  proposalAuthorityVerified?: (proposal: StudioRendererProposalV2) => boolean;
+  proposalDraftBlocker?: (proposal: StudioRendererProposalV2) => 'workspace' | 'rules' | null;
   proposalErrorMessageKey?: string | null;
   referenceErrorMessageKey?: string | null;
   onAcceptProposal: (proposalId: string) => Promise<void>;
   onRejectProposal: (proposalId: string) => Promise<void>;
+  onRequestUpdatedProposal?: (proposalId: string, saveWorkspaceDrafts: boolean) => Promise<void>;
+  onReviewRuleDrafts?: () => void;
   onGenerateReferences: (requestId: string) => Promise<void>;
   onRejectReferences: (requestId: string) => Promise<void>;
   onReviewHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
@@ -57,12 +62,17 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   proposals,
   referenceRequests,
   referenceGenerationHandoffs,
-  pendingActionId,
-  blockMutationProposalAcceptance = false,
+  pendingAction,
+  actionsLocked = false,
+  proposalAuthorityState = (proposal) => proposal.review.status,
+  proposalAuthorityVerified = () => true,
+  proposalDraftBlocker = () => null,
   proposalErrorMessageKey = null,
   referenceErrorMessageKey = null,
   onAcceptProposal,
   onRejectProposal,
+  onRequestUpdatedProposal = async () => undefined,
+  onReviewRuleDrafts = () => undefined,
   onGenerateReferences,
   onRejectReferences,
   onReviewHandoff,
@@ -99,14 +109,16 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           key={proposal.id}
           project={project}
           proposal={proposal}
-          pending={pendingActionId === proposal.id}
-          acceptBlockedMessageKey={
-            blockMutationProposalAcceptance && proposal.payload.kind === 'mutation_batch'
-              ? 'conversation.creativeStudio.workspace.proposals.saveBeforeApply'
-              : null
-          }
+          pending={pendingAction?.kind === 'proposal' && pendingAction.id === proposal.id}
+          actionsLocked={actionsLocked}
+          authorityState={proposalAuthorityState(proposal)}
+          authorityVerified={proposalAuthorityVerified(proposal)}
+          draftBlocker={proposalDraftBlocker(proposal)}
+          acceptBlockedMessageKey={null}
           onAccept={onAcceptProposal}
           onReject={onRejectProposal}
+          onRequestUpdated={onRequestUpdatedProposal}
+          onReviewRuleDrafts={onReviewRuleDrafts}
         />
       ))}
       {referenceRequests.map((request) => (
@@ -130,12 +142,13 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           <div className='flex gap-8px'>
             <Button
               type='primary'
-              loading={pendingActionId === request.id}
+              disabled={actionsLocked}
+              loading={pendingAction?.kind === 'reference_request' && pendingAction.id === request.id}
               onClick={() => void onGenerateReferences(request.id)}
             >
               {t('conversation.creativeStudio.workspace.references.generate')}
             </Button>
-            <Button disabled={pendingActionId === request.id} onClick={() => void onRejectReferences(request.id)}>
+            <Button disabled={actionsLocked} onClick={() => void onRejectReferences(request.id)}>
               {t('conversation.creativeStudio.workspace.references.reject')}
             </Button>
           </div>
@@ -188,14 +201,14 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
             <div className='flex gap-8px'>
               <Button
                 type='primary'
-                disabled={gateLocked || reviewBlockedMessageKey !== null}
+                disabled={gateLocked || actionsLocked || reviewBlockedMessageKey !== null}
                 onClick={() => onReviewHandoff(handoff)}
               >
                 {t('conversation.creativeStudio.workspace.handoffs.review')}
               </Button>
               <Button
-                disabled={gateLocked || pendingActionId === handoff.handoffId}
-                loading={pendingActionId === handoff.handoffId}
+                disabled={gateLocked || actionsLocked}
+                loading={pendingAction?.kind === 'handoff' && pendingAction.id === handoff.handoffId}
                 onClick={() => void onDismissHandoff(handoff)}
               >
                 {t('conversation.creativeStudio.workspace.handoffs.dismiss')}
@@ -210,12 +223,12 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
               handoff.status === 'failed' ? (
                 <div className='flex flex-wrap gap-8px'>
                   {handoff.resultAssetIds.length === 0 ? null : (
-                    <Button type='primary' onClick={() => onReviewReferences(handoff)}>
+                    <Button type='primary' disabled={actionsLocked} onClick={() => onReviewReferences(handoff)}>
                       {t('conversation.creativeStudio.workspace.handoffs.reviewReferences')}
                     </Button>
                   )}
                   {handoff.failedReferenceIds.length === 0 ? null : (
-                    <Button disabled={gateLocked} onClick={() => onRetryFailedReferences(handoff)}>
+                    <Button disabled={gateLocked || actionsLocked} onClick={() => onRetryFailedReferences(handoff)}>
                       {t('conversation.creativeStudio.workspace.handoffs.retryFailed')}
                     </Button>
                   )}
