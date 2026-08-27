@@ -1363,7 +1363,7 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "简报与规则",
+        "briefAndRulesTitle": "影片设置",
         "undoLabel": {
           "promote_board_panel": "将分镜用作首帧",
           "set_reference_plan": "参考计划",
@@ -1435,7 +1435,7 @@
           "rejoinConfirmed": "已确认重新衔接。请在镜头中查看帧提取和替换工作的进度，以及任何必要的恢复操作。"
         },
         "errors": {
-          "routesUnavailable": "准备此估算前，请在“简报与规则”中选择可用的图像和视频路线。",
+          "routesUnavailable": "准备此估算前，请在“影片设置”中选择可用的图像和视频路线。",
           "pricing": {
             "invalidQuote": "报价数据内部不一致。未提交任何内容。",
             "inactiveShot": "一个已选镜头已不再处于活动状态。请刷新项目后重新准备报价。",

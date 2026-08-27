@@ -1363,7 +1363,7 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "ブリーフとルール",
+        "briefAndRulesTitle": "映画設定",
         "undoLabel": {
           "promote_board_panel": "パネルを最初のフレームに使用",
           "set_reference_plan": "リファレンス計画",
@@ -1435,7 +1435,7 @@
           "rejoinConfirmed": "再接続を確定しました。フレーム抽出と差し替えの進行状況、または必要な復旧対応をショットで確認してください。"
         },
         "errors": {
-          "routesUnavailable": "この見積もりを準備する前に、ブリーフとルールで利用可能な画像ルートと動画ルートを選択してください。",
+          "routesUnavailable": "この見積もりを準備する前に、映画設定で利用可能な画像ルートと動画ルートを選択してください。",
           "pricing": {
             "invalidQuote": "見積もりデータに内部的な不整合がありました。何も送信されていません。",
             "inactiveShot": "選択したショットの1つが無効になっています。プロジェクトを更新して、もう一度準備してください。",

@@ -1364,7 +1364,7 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "Brief & Regeln",
+        "briefAndRulesTitle": "Film-Einrichtung",
         "undoLabel": {
           "promote_board_panel": "Panel als erstes Bild verwenden",
           "set_reference_plan": "Referenzplan",
@@ -1436,7 +1436,7 @@
           "rejoinConfirmed": "Wiederverknüpfung bestätigt. Prüfe im Shot den Fortschritt der Bildextraktion und der Ersatzarbeiten sowie mögliche erforderliche Wiederherstellungsschritte."
         },
         "errors": {
-          "routesUnavailable": "Wähle unter Brief & Regeln einsatzbereite Bild- und Videorouten aus, bevor du diesen Kostenvoranschlag vorbereitest.",
+          "routesUnavailable": "Wähle unter Film-Einrichtung einsatzbereite Bild- und Videorouten aus, bevor du diesen Kostenvoranschlag vorbereitest.",
           "pricing": {
             "invalidQuote": "Die Schätzungsdaten waren intern inkonsistent. Es wurde nichts übermittelt.",
             "inactiveShot": "Eine ausgewählte Einstellung ist nicht mehr aktiv. Aktualisieren Sie das Projekt und bereiten Sie erneut vor.",

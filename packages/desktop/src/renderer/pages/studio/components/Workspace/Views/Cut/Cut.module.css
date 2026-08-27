@@ -645,10 +645,24 @@
 }
 
 .filmTarget {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 10px;
   text-transform: uppercase;
+}
+
+.targetEditor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-transform: none;
+}
+
+.targetEditor :global(.arco-input-number) {
+  inline-size: 82px;
 }
 
 .filmDelta {

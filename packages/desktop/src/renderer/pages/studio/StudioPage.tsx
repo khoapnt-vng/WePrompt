@@ -258,8 +258,6 @@ const exactLatestCancellableBoardJob = (
 
 const projectDraftValues = (project: StudioRendererProjectV2): Record<string, WorkspaceDraftValue> => {
   const values: Record<string, WorkspaceDraftValue> = {
-    'settings.name': project.name,
-    'settings.targetDurationSeconds': project.targetDurationSeconds,
     'settings.aspectRatio': project.aspectRatio,
     'settings.resolution': project.resolution,
     'brief.text': project.brief,
@@ -1127,14 +1125,31 @@ const StudioProjectPage: React.FC<{
 
   const mutations = useMemo<WorkspaceMutationCallbacks>(
     () => ({
-      editProject: async (changes) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.editProject.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            changes,
-          })
-        ),
+      editProject: async (changes, authority) => {
+        if (authority === undefined) {
+          return runWorkspaceCommit((current) =>
+            ipcBridge.creativeStudio.editProject.invoke({
+              projectId: current.id,
+              expectedRevision: current.revision,
+              changes,
+            })
+          );
+        }
+        const current = projectRef.current;
+        if (current === null || current.id !== authority.projectId || current.revision !== authority.expectedRevision) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.draftConflict');
+          return false;
+        }
+        return (
+          (await runWorkspaceCommitAtRevision(authority.expectedRevision, (expected) =>
+            ipcBridge.creativeStudio.editProject.invoke({
+              projectId: expected.id,
+              expectedRevision: expected.revision,
+              changes,
+            })
+          )) !== null
+        );
+      },
       applyAuthoring: async (operations) => {
         if (containsUnavailableHardCutOperation(operations)) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.chain.hardCutUnavailable');
@@ -1147,6 +1162,109 @@ const StudioProjectPage: React.FC<{
             operations,
           })
         );
+      },
+      saveFilmSetup: async ({ projectId, expectedRevision, projectChanges, authoringOperations }) => {
+        const failed = { projectSettingsSaved: false, authoringSaved: false };
+        const startingProject = projectRef.current;
+        if (
+          startingProject === null ||
+          startingProject.id !== projectId ||
+          startingProject.revision !== expectedRevision ||
+          workspacePendingRef.current
+        ) {
+          return failed;
+        }
+
+        workspacePendingRef.current = true;
+        setWorkspacePending(true);
+        setActionErrorMessageKey(null);
+        let authority = startingProject;
+        let projectSettingsSaved = projectChanges === null;
+        try {
+          if (projectChanges !== null) {
+            const result = await ipcBridge.creativeStudio.editProject.invoke({
+              projectId,
+              expectedRevision,
+              changes: projectChanges,
+            });
+            if (result.ok === false) {
+              setActionErrorMessageKey(result.error.messageKey);
+              return failed;
+            }
+            const refreshed = await refetchProjectWorkspace();
+            if (
+              refreshed === null ||
+              refreshed.id !== projectId ||
+              refreshed.revision !== result.data.projectRevision ||
+              refreshed.revision <= expectedRevision ||
+              (projectChanges.aspectRatio !== undefined && refreshed.aspectRatio !== projectChanges.aspectRatio) ||
+              (projectChanges.resolution !== undefined && refreshed.resolution !== projectChanges.resolution)
+            ) {
+              setActionErrorMessageKey(
+                refreshed?.id === projectId && refreshed.revision > result.data.projectRevision
+                  ? 'conversation.creativeStudio.workspace.controls.draftConflict'
+                  : 'conversation.creativeStudio.workspace.errors.storage'
+              );
+              return failed;
+            }
+            projectRef.current = refreshed;
+            authority = refreshed;
+            projectSettingsSaved = true;
+          }
+
+          if (authoringOperations.length === 0) {
+            return { projectSettingsSaved, authoringSaved: true };
+          }
+          const current = projectRef.current;
+          if (current === null || current.id !== authority.id || current.revision !== authority.revision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.draftConflict');
+            return { projectSettingsSaved, authoringSaved: false };
+          }
+          const result = await ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: authoringOperations,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return { projectSettingsSaved, authoringSaved: false };
+          }
+          const refreshed = await refetchProjectWorkspace();
+          if (
+            refreshed === null ||
+            refreshed.id !== current.id ||
+            refreshed.revision !== result.data.projectRevision ||
+            refreshed.revision <= current.revision ||
+            authoringOperations.some((operation) => {
+              switch (operation.kind) {
+                case 'set_brief':
+                  return refreshed.brief !== operation.brief;
+                case 'set_routes':
+                  return (
+                    refreshed.imageRouteId !== operation.imageRouteId ||
+                    refreshed.videoRouteId !== operation.videoRouteId
+                  );
+                case 'set_spend_policy':
+                  return JSON.stringify(refreshed.spendPolicy) !== JSON.stringify(operation.policy);
+              }
+            })
+          ) {
+            setActionErrorMessageKey(
+              refreshed?.id === current.id && refreshed.revision > result.data.projectRevision
+                ? 'conversation.creativeStudio.workspace.controls.draftConflict'
+                : 'conversation.creativeStudio.workspace.errors.storage'
+            );
+            return { projectSettingsSaved, authoringSaved: false };
+          }
+          projectRef.current = refreshed;
+          return { projectSettingsSaved, authoringSaved: true };
+        } catch {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return { projectSettingsSaved, authoringSaved: false };
+        } finally {
+          workspacePendingRef.current = false;
+          setWorkspacePending(false);
+        }
       },
       setRules: async (update, adoptionKey) =>
         (await runWorkspaceExclusive(async () => {
@@ -1230,6 +1348,7 @@ const StudioProjectPage: React.FC<{
       refetchRoutes,
       reportRuleAdoptionUnconfirmed,
       runWorkspaceCommit,
+      runWorkspaceCommitAtRevision,
       runWorkspaceExclusive,
       setActionErrorMessageKey,
     ]
@@ -2796,47 +2915,43 @@ const StudioProjectPage: React.FC<{
     const hasBlockedShapeDraft =
       projection?.requestShapeLocked === true &&
       (dirty.has('settings.aspectRatio') || dirty.has('settings.resolution'));
-    const settingsKeys = [
-      'settings.name',
-      'settings.targetDurationSeconds',
-      'settings.aspectRatio',
-      'settings.resolution',
-    ];
+    const settingsKeys = ['settings.aspectRatio', 'settings.resolution'];
     if (settingsKeys.some((key) => dirty.has(key))) {
       const current = currentForChain();
       if (current === null) return false;
       const submittedSettings = Object.fromEntries(settingsKeys.map((key) => [key, drafts.value(key)]));
-      const candidate = {
-        name: String(drafts.value('settings.name') ?? '').trim(),
-        targetDurationSeconds: Number(drafts.value('settings.targetDurationSeconds')),
-      };
       const requestShape = projection?.requestShapeLocked
         ? {}
         : {
             aspectRatio: drafts.value('settings.aspectRatio') as StudioRendererProjectV2['aspectRatio'],
             resolution: drafts.value('settings.resolution') as StudioRendererProjectV2['resolution'],
           };
-      const settingsCandidate = { ...candidate, ...requestShape };
-      const changes = Object.fromEntries(
-        Object.entries(settingsCandidate).filter(
-          ([key, value]) => current[key as keyof StudioRendererProjectV2] !== value
-        )
-      );
+      const aspectRatioChanged =
+        requestShape.aspectRatio !== undefined && requestShape.aspectRatio !== current.aspectRatio;
+      const resolutionChanged = requestShape.resolution !== undefined && requestShape.resolution !== current.resolution;
+      const changes: Parameters<WorkspaceMutationCallbacks['editProject']>[0] | null =
+        aspectRatioChanged && resolutionChanged
+          ? {
+              aspectRatio: requestShape.aspectRatio!,
+              resolution: requestShape.resolution!,
+            }
+          : aspectRatioChanged
+            ? { aspectRatio: requestShape.aspectRatio! }
+            : resolutionChanged
+              ? { resolution: requestShape.resolution! }
+              : null;
       if (
-        Object.keys(changes).length > 0 &&
+        changes !== null &&
         !(await runChainedCommit((authority) =>
           ipcBridge.creativeStudio.editProject.invoke({
             projectId: authority.id,
             expectedRevision: authority.revision,
-            changes: changes as Parameters<WorkspaceMutationCallbacks['editProject']>[0],
+            changes,
           })
         ))
       ) {
         return false;
       }
-      ['settings.name', 'settings.targetDurationSeconds'].forEach((key) =>
-        drafts.resetIfValue(key, submittedSettings[key] as WorkspaceDraftValue)
-      );
       if (projection?.requestShapeLocked !== true) {
         ['settings.aspectRatio', 'settings.resolution'].forEach((key) =>
           drafts.resetIfValue(key, submittedSettings[key] as WorkspaceDraftValue)
@@ -3457,6 +3572,8 @@ const StudioProjectPage: React.FC<{
             {t('conversation.creativeStudio.workspace.controls.renderFilm')}
           </Button>
         }
+        renamePending={workspacePending}
+        onRenameProject={(name, authority) => mutations.editProject({ name }, authority)}
         projectMenu={
           projection === null ? undefined : (
             <WorkspaceProjectMenu

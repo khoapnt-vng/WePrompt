@@ -1034,18 +1034,18 @@ const placeholders = (value: string): string[] =>
   [...value.matchAll(/{{\s*([^},\s]+)(?:\s*,[^}]*)?\s*}}/g)].map((match) => match[1]!).sort();
 
 const briefAndRulesTitles: Record<string, string> = {
-  'de-DE': 'Brief & Regeln',
-  'en-US': 'Brief & rules',
-  'es-ES': 'Brief y reglas',
-  'fa-IR': 'بریف و قوانین',
-  'ja-JP': 'ブリーフとルール',
-  'ko-KR': '브리프 및 규칙',
-  'pt-BR': 'Brief e regras',
-  'ru-RU': 'Бриф и правила',
-  'tr-TR': 'Brief ve kurallar',
-  'uk-UA': 'Бриф і правила',
-  'zh-CN': '简报与规则',
-  'zh-TW': '簡報與規則',
+  'de-DE': 'Film-Einrichtung',
+  'en-US': 'Film setup',
+  'es-ES': 'Configuración de la película',
+  'fa-IR': 'تنظیمات فیلم',
+  'ja-JP': '映画設定',
+  'ko-KR': '영화 설정',
+  'pt-BR': 'Configuração do filme',
+  'ru-RU': 'Настройка фильма',
+  'tr-TR': 'Film kurulumu',
+  'uk-UA': 'Налаштування фільму',
+  'zh-CN': '影片设置',
+  'zh-TW': '影片設定',
 };
 
 const localizedCutPreviewKeys = [
@@ -1670,11 +1670,11 @@ describe('Creative Studio workspace translations', () => {
     expect(placeholders(leaves['gate.continuity.confirmRejoin']!)).toEqual(['cost', 'count']);
   });
 
-  it('names both unavailable estimate routes and directs recovery to Brief and rules', () => {
+  it('names both unavailable estimate routes and directs recovery to Film setup', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves['gate.errors.routesUnavailable']).toBe(
-      'Choose ready image and video routes in Brief & rules before preparing this estimate.'
+      'Choose ready image and video routes in Film setup before preparing this estimate.'
     );
   });
 

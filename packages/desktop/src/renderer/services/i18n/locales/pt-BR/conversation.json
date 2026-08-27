@@ -1369,7 +1369,7 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "Brief e regras",
+        "briefAndRulesTitle": "Configuração do filme",
         "undoLabel": {
           "promote_board_panel": "Usar painel como primeiro quadro",
           "set_reference_plan": "plano de referências",
@@ -1441,7 +1441,7 @@
           "rejoinConfirmed": "Reconexão confirmada. Verifique no plano o progresso da extração do quadro e da substituição ou qualquer recuperação necessária."
         },
         "errors": {
-          "routesUnavailable": "Escolha rotas de imagem e vídeo prontas em Brief e regras antes de preparar esta estimativa.",
+          "routesUnavailable": "Escolha rotas de imagem e vídeo prontas em Configuração do filme antes de preparar esta estimativa.",
           "pricing": {
             "invalidQuote": "Os dados da estimativa estavam internamente inconsistentes. Nada foi enviado.",
             "inactiveShot": "Uma tomada selecionada não está mais ativa. Atualize o projeto e prepare novamente.",

@@ -1365,7 +1365,7 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "Brief ve kurallar",
+        "briefAndRulesTitle": "Film kurulumu",
         "undoLabel": {
           "promote_board_panel": "Paneli ilk kare olarak kullan",
           "set_reference_plan": "referans planı",
@@ -1437,7 +1437,7 @@
           "rejoinConfirmed": "Yeniden bağlanma onaylandı. Shot'ta kare çıkarma ve ikame ilerlemesini ya da gereken kurtarma işlemlerini inceleyin."
         },
         "errors": {
-          "routesUnavailable": "Bu tahmini hazırlamadan önce Brief ve kurallar bölümünde hazır görsel ve video rotalarını seçin.",
+          "routesUnavailable": "Bu tahmini hazırlamadan önce Film kurulumu bölümünde hazır görsel ve video rotalarını seçin.",
           "pricing": {
             "invalidQuote": "Tahmin verileri kendi içinde tutarlı değildi. Hiçbir şey gönderilmedi.",
             "inactiveShot": "Seçili çekimlerden biri artık etkin değil. Projeyi yenileyip yeniden hazırlayın.",

@@ -1363,7 +1363,7 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "簡報與規則",
+        "briefAndRulesTitle": "影片設定",
         "undoLabel": {
           "promote_board_panel": "將分鏡用作首幀",
           "set_reference_plan": "參考計畫",
@@ -1435,7 +1435,7 @@
           "rejoinConfirmed": "已確認重新銜接。請在鏡頭中查看畫面擷取和替換算圖的進度，以及任何必要的復原操作。"
         },
         "errors": {
-          "routesUnavailable": "準備此估算前，請在「簡報與規則」中選擇可用的圖片與影片路線。",
+          "routesUnavailable": "準備此估算前，請在「影片設定」中選擇可用的圖片與影片路線。",
           "pricing": {
             "invalidQuote": "估價資料內部不一致。未提交任何內容。",
             "inactiveShot": "一個已選鏡頭已不再處於啟用狀態。請重新整理專案後再次準備估價。",

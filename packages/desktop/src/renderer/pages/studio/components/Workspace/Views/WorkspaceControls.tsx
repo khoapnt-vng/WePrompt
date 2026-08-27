@@ -318,6 +318,9 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           projectId={project.id}
           projection={projection}
           onOpenBeat={selectAndOpenBeat}
+          onSetTargetDuration={(targetDurationSeconds, authority) =>
+            mutations.editProject({ targetDurationSeconds }, authority)
+          }
         />
       ) : null}
       {openBeat === null ? null : (

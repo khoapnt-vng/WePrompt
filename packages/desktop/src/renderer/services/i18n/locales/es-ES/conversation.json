@@ -1364,7 +1364,7 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "Brief y reglas",
+        "briefAndRulesTitle": "Configuración de la película",
         "undoLabel": {
           "promote_board_panel": "Usar panel como primer fotograma",
           "set_reference_plan": "plan de referencias",
@@ -1436,7 +1436,7 @@
           "rejoinConfirmed": "Reconexión confirmada. Revisa el plano para ver el progreso de la extracción del fotograma y del trabajo de sustitución, o cualquier recuperación necesaria."
         },
         "errors": {
-          "routesUnavailable": "Elige rutas de imagen y vídeo listas en Brief y reglas antes de preparar este presupuesto.",
+          "routesUnavailable": "Elige rutas de imagen y vídeo listas en Configuración de la película antes de preparar este presupuesto.",
           "pricing": {
             "invalidQuote": "Los datos de la estimación no eran coherentes internamente. No se envió nada.",
             "inactiveShot": "Una toma seleccionada ya no está activa. Actualiza el proyecto y vuelve a preparar.",

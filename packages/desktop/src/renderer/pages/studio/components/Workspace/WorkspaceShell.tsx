@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button } from '@arco-design/web-react';
+import { Button, Input, Tooltip } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -13,6 +13,7 @@ import type { StudioRendererProjectV2 } from '@/common/types/project/creativeStu
 import SidebarIcon from '@/renderer/components/base/SidebarIcon';
 import { STUDIO_VIEWS, studioViewPath, type StudioView } from '@/renderer/pages/studio/studioPhaseRoute';
 import { DirectorRail, type DirectorProposalChatIntent } from './DirectorRail';
+import type { WorkspaceProjectEditAuthority } from './Views/viewTypes';
 import styles from './Workspace.module.css';
 import type { StudioBarStats } from './workspaceProjection';
 
@@ -24,9 +25,180 @@ export type WorkspaceShellProps = {
   onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
   /** The bar's primary action. It spends money, so it is the control that never leaves the bar. */
   renderAction?: React.ReactNode;
+  /** Owner-only, revision-checked rename. The Director still has no edit_project disposition. */
+  onRenameProject?: (name: string, authority: WorkspaceProjectEditAuthority) => Promise<boolean>;
+  renamePending?: boolean;
   notice?: React.ReactNode;
   projectMenu?: React.ReactNode;
   children: React.ReactNode;
+};
+
+const MAX_PROJECT_NAME_CHARS = 256;
+
+export type WorkspaceProjectTitleProps = {
+  projectId: string;
+  projectRevision: number;
+  name: string;
+  pending: boolean;
+  onRename?: (name: string, authority: WorkspaceProjectEditAuthority) => Promise<boolean>;
+};
+
+/** Cheap owner rename, using the same click/Enter/blur and Escape gesture as a chat title. */
+export const WorkspaceProjectTitle: React.FC<WorkspaceProjectTitleProps> = ({
+  projectId,
+  projectRevision,
+  name,
+  pending,
+  onRename,
+}) => {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const [committing, setCommitting] = useState(false);
+  const commitPendingRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const editAuthorityRef = useRef<(WorkspaceProjectEditAuthority & { name: string }) | null>(null);
+  const invalid = draft.trim().length === 0 || draft.length > MAX_PROJECT_NAME_CHARS;
+
+  useEffect(() => {
+    setEditing(false);
+    setDraft(name);
+    setCommitting(false);
+    commitPendingRef.current = false;
+    cancelledRef.current = false;
+    editAuthorityRef.current = null;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!editing) setDraft(name);
+  }, [editing, name]);
+
+  useEffect(() => {
+    const authority = editAuthorityRef.current;
+    if (
+      !editing ||
+      committing ||
+      authority === null ||
+      (authority.projectId === projectId && authority.expectedRevision === projectRevision && authority.name === name)
+    ) {
+      return;
+    }
+    cancelledRef.current = true;
+    editAuthorityRef.current = null;
+    setDraft(name);
+    setEditing(false);
+  }, [committing, editing, name, projectId, projectRevision]);
+
+  const begin = (): void => {
+    if (onRename === undefined || pending || committing) return;
+    cancelledRef.current = false;
+    editAuthorityRef.current = { projectId, expectedRevision: projectRevision, name };
+    setDraft(name);
+    setEditing(true);
+  };
+
+  const commit = async (): Promise<void> => {
+    if (onRename === undefined || pending || committing || invalid || commitPendingRef.current) return;
+    const authority = editAuthorityRef.current;
+    if (
+      authority === null ||
+      authority.projectId !== projectId ||
+      authority.expectedRevision !== projectRevision ||
+      authority.name !== name
+    ) {
+      cancelledRef.current = true;
+      editAuthorityRef.current = null;
+      setDraft(name);
+      setEditing(false);
+      return;
+    }
+    const nextName = draft.trim();
+    if (nextName === name) {
+      editAuthorityRef.current = null;
+      setDraft(name);
+      setEditing(false);
+      return;
+    }
+    commitPendingRef.current = true;
+    setCommitting(true);
+    try {
+      if (
+        await onRename(nextName, {
+          projectId: authority.projectId,
+          expectedRevision: authority.expectedRevision,
+        })
+      ) {
+        editAuthorityRef.current = null;
+        setEditing(false);
+      }
+    } finally {
+      commitPendingRef.current = false;
+      setCommitting(false);
+    }
+  };
+
+  const renameLabel = t('conversation.creativeStudio.phase.shared.renameProject');
+  return (
+    <h1 aria-label={name} className={styles.projectTitle} title={name}>
+      {editing ? (
+        <span className={styles.projectTitleEditor}>
+          <Input
+            autoFocus
+            aria-describedby={invalid ? 'studio-project-name-error' : undefined}
+            aria-label={renameLabel}
+            className={styles.projectTitleInput}
+            disabled={pending || committing}
+            error={invalid}
+            maxLength={MAX_PROJECT_NAME_CHARS}
+            value={draft}
+            onBlur={() => {
+              if (cancelledRef.current) {
+                cancelledRef.current = false;
+                return;
+              }
+              void commit();
+            }}
+            onChange={setDraft}
+            onFocus={(event) => event.target.select()}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void commit();
+                return;
+              }
+              if (event.key === 'Escape') {
+                cancelledRef.current = true;
+                editAuthorityRef.current = null;
+                setDraft(name);
+                setEditing(false);
+              }
+            }}
+          />
+          {invalid ? (
+            <span className={styles.projectTitleError} id='studio-project-name-error' role='alert'>
+              {t('conversation.creativeStudio.phase.shared.invalidProjectName')}
+            </span>
+          ) : null}
+        </span>
+      ) : onRename === undefined ? (
+        <bdi dir='auto'>{name}</bdi>
+      ) : (
+        <Tooltip content={renameLabel}>
+          <Button
+            aria-label={renameLabel}
+            className={styles.projectTitleButton}
+            disabled={pending}
+            type='text'
+            onClick={begin}
+          >
+            <bdi className={styles.projectTitleText} dir='auto'>
+              {name}
+            </bdi>
+          </Button>
+        </Tooltip>
+      )}
+    </h1>
+  );
 };
 
 export type WorkspaceReviewedOutput = { id: string; content: React.ReactNode; createdAt: number };
@@ -149,6 +321,8 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
     reviewedOutputs,
     onDirectorProposalIntent,
     renderAction,
+    onRenameProject,
+    renamePending = false,
     notice,
     projectMenu,
     children,
@@ -243,9 +417,13 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
           onClick={toggleRail}
         />
         <span className={styles.projectDot} aria-hidden='true' />
-        <h1 className={styles.projectTitle} title={project.name}>
-          <bdi dir='auto'>{project.name}</bdi>
-        </h1>
+        <WorkspaceProjectTitle
+          projectId={project.id}
+          projectRevision={project.revision}
+          name={project.name}
+          pending={renamePending}
+          onRename={onRenameProject}
+        />
         <span className={styles.statStrip} data-studio-bar-stats>
           <bdi dir='auto'>
             {t('conversation.creativeStudio.workspace.project.structure', {

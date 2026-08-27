@@ -59,6 +59,18 @@ type SliderProps = {
   value?: number;
 };
 
+type InputNumberProps = {
+  'aria-label'?: string;
+  disabled?: boolean;
+  error?: boolean;
+  max?: number;
+  min?: number;
+  onChange?: (value: number) => void;
+  precision?: number;
+  size?: string;
+  value?: number;
+};
+
 const optionText = (value: React.ReactNode): string => {
   if (typeof value === 'string' || typeof value === 'number') return String(value);
   if (Array.isArray(value)) return value.map(optionText).join('');
@@ -117,6 +129,18 @@ vi.mock('@arco-design/web-react', async () => {
       />
     </div>
   ));
+  // eslint-disable-next-line unicorn/consistent-function-scoping -- Vitest requires this component to stay inside the hoisted mock factory.
+  const InputNumber = ({ error: _error, onChange, precision: _precision, size: _size, ...props }: InputNumberProps) => (
+    <input
+      aria-label={props['aria-label']}
+      disabled={props.disabled}
+      max={props.max}
+      min={props.min}
+      onChange={(event) => onChange?.(Number(event.target.value))}
+      type='number'
+      value={props.value}
+    />
+  );
   const Popconfirm = ({ children, content, disabled, okText, onOk, title }: PopconfirmProps) => {
     const [open, setOpen] = ReactModule.useState(false);
     return (
@@ -162,6 +186,7 @@ vi.mock('@arco-design/web-react', async () => {
           {footer}
         </section>
       ) : null,
+    InputNumber,
     Popconfirm,
     Select,
     Slider,
@@ -1635,6 +1660,8 @@ const actions = (): CutActions => ({
   detachBedAudio: vi.fn().mockResolvedValue(true),
 });
 
+const TARGET_AUTHORITY = { projectId: 'project_1', expectedRevision: 7 };
+
 const renderCut = (
   input: {
     actions?: CutActions;
@@ -1642,6 +1669,10 @@ const renderCut = (
     pending?: boolean;
     activeBeats?: WorkspaceProjection['activeBeats'];
     onOpenBeat?: (beatId: string) => void;
+    onSetTargetDuration?: (
+      seconds: number,
+      authority: { projectId: string; expectedRevision: number }
+    ) => Promise<boolean>;
   } = {}
 ) => {
   const cutActions = input.actions ?? actions();
@@ -1653,6 +1684,7 @@ const renderCut = (
       projectId='project_1'
       projection={projection(input.cutProjection, input.activeBeats)}
       onOpenBeat={onOpenBeat}
+      onSetTargetDuration={input.onSetTargetDuration}
     />
   );
   return Object.assign(cutActions, { onOpenBeat });
@@ -1678,6 +1710,110 @@ describe('CutView', () => {
     expect(
       screen.getAllByRole('button', { name: /workspace\.cut\.(?:openBeat|slate\.openBeat)/ }).length
     ).toBeGreaterThan(0);
+  });
+
+  it('edits the authoritative target beside the Cut readout and reflects the refreshed projection', async () => {
+    const update = vi.fn(async () => true);
+    const Harness: React.FC = () => {
+      const [targetDurationSeconds, setTargetDurationSeconds] = React.useState(18);
+      return (
+        <CutView
+          actions={actions()}
+          pending={false}
+          projectId='project_1'
+          projection={projection(cut({ filmDurationSeconds: 12, targetDurationSeconds }))}
+          onOpenBeat={vi.fn()}
+          onSetTargetDuration={async (seconds, authority) => {
+            const saved = await update(seconds, authority);
+            if (saved) setTargetDurationSeconds(seconds);
+            return saved;
+          }}
+        />
+      );
+    };
+    render(<Harness />);
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    );
+    const input = screen.getByRole('spinbutton', {
+      name: 'conversation.creativeStudio.workspace.controls.targetDuration',
+    });
+    expect(input).toHaveAttribute('min', '5');
+    expect(input).toHaveAttribute('max', '1440');
+    fireEvent.change(input, { target: { value: '30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith(30, TARGET_AUTHORITY));
+    await waitFor(() => expect(document.querySelector('[data-cut-film]')).toHaveTextContent('0:30'));
+    expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument();
+  });
+
+  it('fails closed on an invalid or refused target and leaves the retryable draft visible', async () => {
+    const update = vi.fn(async () => false);
+    renderCut({
+      cutProjection: cut({ targetDurationSeconds: 18 }),
+      onSetTargetDuration: update,
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    );
+    const input = screen.getByRole('spinbutton', {
+      name: 'conversation.creativeStudio.workspace.controls.targetDuration',
+    });
+    fireEvent.change(input, { target: { value: '4' } });
+    expect(screen.getByRole('button', { name: 'common.save' })).toBeDisabled();
+    expect(update).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: '30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+    await waitFor(() => expect(update).toHaveBeenCalledWith(30, TARGET_AUTHORITY));
+    expect(screen.getByRole('spinbutton')).toHaveValue(30);
+  });
+
+  it('discards a target draft when refreshed authority changes during editing', async () => {
+    const update = vi.fn(async () => true);
+    const view = render(
+      <CutView
+        actions={actions()}
+        pending={false}
+        projectId='project_1'
+        projection={projection(cut({ targetDurationSeconds: 18 }))}
+        onOpenBeat={vi.fn()}
+        onSetTargetDuration={update}
+      />
+    );
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    );
+    fireEvent.change(
+      screen.getByRole('spinbutton', {
+        name: 'conversation.creativeStudio.workspace.controls.targetDuration',
+      }),
+      { target: { value: '30' } }
+    );
+    view.rerender(
+      <CutView
+        actions={actions()}
+        pending={false}
+        projectId='project_1'
+        projection={{ ...projection(cut({ targetDurationSeconds: 24 })), projectRevision: 8 }}
+        onOpenBeat={vi.fn()}
+        onSetTargetDuration={update}
+      />
+    );
+
+    await waitFor(() => expect(screen.queryByRole('spinbutton')).not.toBeInTheDocument());
+    expect(document.querySelector('[data-cut-film]')).toHaveTextContent('0:24');
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('renders a compact selectable filmstrip and keeps reorder controls out of its segments', () => {

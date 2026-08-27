@@ -1266,16 +1266,16 @@ const renderStudioWithProjectSwitch = () =>
   );
 
 const MORE = 'common.more';
-const SETTINGS_TITLE = 'conversation.creativeStudio.workspace.controls.settingsTitle';
 const BRIEF_RULES_TITLE = 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle';
 const NAME = 'conversation.creativeStudio.workspace.controls.name';
 const BRIEF = 'conversation.creativeStudio.workspace.controls.brief';
+const RESOLUTION = 'conversation.creativeStudio.workspace.controls.resolution';
 const IMAGE_ROUTE = 'conversation.creativeStudio.workspace.controls.imageRoute';
 const VIDEO_ROUTE = 'conversation.creativeStudio.workspace.controls.videoRoute';
 const RULE_TEXT = 'conversation.creativeStudio.rules.textLabel';
 const RULE_TERMS = 'conversation.creativeStudio.rules.termsLabel';
 
-const openProjectDialog = async (title: typeof SETTINGS_TITLE | typeof BRIEF_RULES_TITLE): Promise<HTMLElement> => {
+const openProjectDialog = async (title: typeof BRIEF_RULES_TITLE): Promise<HTMLElement> => {
   fireEvent.click(await screen.findByRole('button', { name: MORE }));
   const menu = await screen.findByRole('menu');
   fireEvent.click(within(menu).getByRole('menuitem', { name: title }));
@@ -3500,6 +3500,92 @@ describe('StudioPage schema-5 cutover', () => {
     expect(headings[0]).toHaveAttribute('id', 'studio-cut-heading');
   });
 
+  it('routes inline app-bar rename through the revisioned owner and refreshes the title', async () => {
+    const renamed = { ...project(), revision: 4, name: 'Retitled film' };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: renamed }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.shared.renameProject' }));
+    const input = screen.getByRole('textbox', {
+      name: 'conversation.creativeStudio.phase.shared.renameProject',
+    });
+    fireEvent.change(input, { target: { value: 'Retitled film' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { name: 'Retitled film' },
+      })
+    );
+    expect(await screen.findByRole('heading', { name: 'Retitled film' })).toBeVisible();
+  });
+
+  it('refuses an inline owner edit when its edit-start authority is stale', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    const saved = await invokeStudioAction(() =>
+      capturedWorkspaceMutations().editProject(
+        { name: 'Stale overwrite' },
+        { projectId: 'project_1', expectedRevision: 2 }
+      )
+    );
+
+    expect(saved).toBe(false);
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(screen.getByText('conversation.creativeStudio.workspace.controls.draftConflict')).toBeVisible();
+  });
+
+  it('routes the Cut target editor through the revisioned owner and refreshes its readout', async () => {
+    const retargeted = { ...project(), revision: 4, targetDurationSeconds: 45 };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: retargeted }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    );
+    const input = screen.getByRole('spinbutton', {
+      name: 'conversation.creativeStudio.workspace.controls.targetDuration',
+    });
+    fireEvent.change(input, { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { targetDurationSeconds: 45 },
+      })
+    );
+    await waitFor(() =>
+      expect(document.querySelector('[data-cut-film]')).toHaveTextContent(
+        'conversation.creativeStudio.workspace.cut.film.ofTarget:{"clock":"0:45"}'
+      )
+    );
+  });
+
   it('omits the reviewed-output rail section when there are no cards or review errors', async () => {
     renderStudio();
 
@@ -3507,13 +3593,13 @@ describe('StudioPage schema-5 cutover', () => {
     expect(document.querySelector('[data-studio-director-reviewed-output]')).toBeNull();
   });
 
-  it('keeps app-bar project drafts and native snapshot counts stable across Table, Board, and Cut navigation', async () => {
+  it('keeps Film setup drafts and native snapshot counts stable across Table, Board, and Cut navigation', async () => {
     mockSupportedProject(projectWithHandoffShot());
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     expectProjectFormsAbsentFromMain('table');
-    let settingsDialog = await openProjectDialog(SETTINGS_TITLE);
-    const name = within(settingsDialog).getByLabelText(NAME);
+    let setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const brief = within(setupDialog).getByLabelText(BRIEF);
     const shell = document.querySelector('[data-studio-workspace-shell]');
     const directorRail = document.querySelector('[data-studio-director-rail]');
     const workPanel = document.querySelector('[data-studio-work-panel]');
@@ -3560,8 +3646,8 @@ describe('StudioPage schema-5 cutover', () => {
       prepare: mocks.bridge.prepareSubmission.invoke.mock.calls.length,
       confirm: mocks.bridge.confirmSubmission.invoke.mock.calls.length,
     };
-    fireEvent.change(name, { target: { value: 'Navigation-only local draft' } });
-    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
+    fireEvent.change(brief, { target: { value: 'Navigation-only local draft' } });
+    await closeProjectDialog(setupDialog, BRIEF_RULES_TITLE);
     const table = screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' });
     const selectedRow = within(table).getAllByRole('row')[1]!;
     fireEvent.click(within(selectedRow).getAllByRole('gridcell')[1]!);
@@ -3578,9 +3664,9 @@ describe('StudioPage schema-5 cutover', () => {
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
     expectProjectFormsAbsentFromMain('board');
-    settingsDialog = await openProjectDialog(SETTINGS_TITLE);
-    expect(within(settingsDialog).getByLabelText(NAME)).toHaveValue('Navigation-only local draft');
-    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
+    setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(setupDialog).getByLabelText(BRIEF)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(setupDialog, BRIEF_RULES_TITLE);
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
     fireEvent.click(screen.getAllByLabelText(/conversation\.creativeStudio\.workspace\.board\.openBeat/)[0]!);
     expect(screen.getByRole('dialog')).toBeVisible();
@@ -3588,16 +3674,16 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/cut'));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expectProjectFormsAbsentFromMain('cut');
-    settingsDialog = await openProjectDialog(SETTINGS_TITLE);
-    expect(within(settingsDialog).getByLabelText(NAME)).toHaveValue('Navigation-only local draft');
-    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
+    setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(setupDialog).getByLabelText(BRIEF)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(setupDialog, BRIEF_RULES_TITLE);
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
     expectProjectFormsAbsentFromMain('table');
-    settingsDialog = await openProjectDialog(SETTINGS_TITLE);
-    expect(within(settingsDialog).getByLabelText(NAME)).toHaveValue('Navigation-only local draft');
-    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
+    setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(setupDialog).getByLabelText(BRIEF)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(setupDialog, BRIEF_RULES_TITLE);
     expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
     expect(
       within(screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' })).getAllByRole(
@@ -3917,7 +4003,7 @@ describe('StudioPage schema-5 cutover', () => {
 
   it('reports and flushes the shared draft owner, preserving drafts when the commit fails', async () => {
     const initial = project();
-    const revised = { ...project(), revision: 4, name: 'Saved name' };
+    const revised = { ...project(), revision: 4, resolution: '1080p' as const };
     mocks.bridge.getProject.invoke.mockResolvedValueOnce(ok({ status: 'supported', project: initial }));
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: revised }));
     mocks.bridge.projectWorkspaceStatusFixture.invoke
@@ -3928,10 +4014,9 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValue(ok(chainStatus(4)));
 
     const first = renderStudio();
-    let settingsDialog = await openProjectDialog(SETTINGS_TITLE);
-    fireEvent.change(within(settingsDialog).getByLabelText(NAME), {
-      target: { value: 'Saved name' },
-    });
+    let setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(within(setupDialog).getByRole('combobox', { name: RESOLUTION }));
+    fireEvent.click(await screen.findByRole('option', { name: '1080p' }));
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork).not.toBeNull());
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
 
@@ -3943,21 +4028,23 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedRevision: 3,
-      changes: { name: 'Saved name' },
+      changes: { resolution: '1080p' },
     });
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
 
     first.unmount();
     window.sessionStorage.clear();
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: initial }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(3)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(3)));
     mocks.bridge.editProject.invoke.mockResolvedValue({
       ok: false,
       error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.workspace.errors.storage' },
     });
     const second = renderStudio();
-    settingsDialog = await openProjectDialog(SETTINGS_TITLE);
-    fireEvent.change(within(settingsDialog).getByLabelText(NAME), {
-      target: { value: 'Still dirty' },
-    });
+    setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(within(setupDialog).getByRole('combobox', { name: RESOLUTION }));
+    fireEvent.click(await screen.findByRole('option', { name: '1080p' }));
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
     await act(async () => {
       saved = await mocks.closeHandlers.flushUnsavedWork?.();
@@ -3969,7 +4056,7 @@ describe('StudioPage schema-5 cutover', () => {
 
   it('drops persisted draft values whose runtime type disagrees with project authority', async () => {
     seedWorkspaceDrafts({
-      'settings.name': { baseValue: 'Launch film', value: 42 },
+      'settings.resolution': { baseValue: '720p', value: 42 },
       'brief.text': { baseValue: 'A small launch film.', value: 42 },
     });
 
@@ -4096,15 +4183,16 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
   });
 
-  it('does not let a deferred project-A settings continuation reset project-B drafts after direct navigation', async () => {
+  it('does not let a deferred project-A shape continuation reset project-B drafts after direct navigation', async () => {
     const projectB = {
       ...project(),
       id: 'project_2',
       revision: 4,
       name: 'Second project',
     };
-    seedWorkspaceDrafts({ 'settings.name': { baseValue: 'Second project', value: 'B local draft' } }, 'project_2', 4);
-    const projectACommitted = { ...project(), revision: 4, name: 'Deferred A' };
+    seedWorkspaceDrafts({ 'settings.resolution': { baseValue: '720p', value: '1080p' } }, 'project_2', 4);
+    seedWorkspaceDrafts({ 'settings.resolution': { baseValue: '720p', value: '1080p' } });
+    const projectACommitted = { ...project(), revision: 4, resolution: '1080p' as const };
     let projectALoads = 0;
     const edit = deferred<ReturnType<typeof commit>>();
     mocks.bridge.editProject.invoke.mockReturnValue(edit.promise);
@@ -4121,36 +4209,33 @@ describe('StudioPage schema-5 cutover', () => {
     );
 
     renderStudioWithProjectSwitch();
-    const projectADialog = await openProjectDialog(SETTINGS_TITLE);
-    fireEvent.change(within(projectADialog).getByLabelText(NAME), { target: { value: 'Deferred A' } });
+    const projectADialog = await openProjectDialog(BRIEF_RULES_TITLE);
     fireEvent.click(
       within(projectADialog).getByRole('button', {
-        name: 'conversation.creativeStudio.workspace.controls.saveSettings',
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
       })
     );
     await waitFor(() =>
       expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
         projectId: 'project_1',
         expectedRevision: 3,
-        changes: { name: 'Deferred A' },
+        changes: { resolution: '1080p' },
       })
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
     expect(await screen.findByRole('heading', { name: 'Second project' })).toBeVisible();
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: SETTINGS_TITLE })).toBeNull());
-    const projectBDialog = await openProjectDialog(SETTINGS_TITLE);
-    const projectBName = within(projectBDialog).getByLabelText(NAME);
-    expect(projectBName).toHaveValue('B local draft');
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: BRIEF_RULES_TITLE })).toBeNull());
+    const projectBDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const projectBResolution = within(projectBDialog).getByRole('combobox', { name: RESOLUTION });
+    expect(projectBResolution).toHaveTextContent('1080p');
 
     await act(async () => edit.resolve(commit(4)));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Second project' })).toBeVisible());
 
-    expect(projectBName).toHaveValue('B local draft');
+    expect(projectBResolution).toHaveTextContent('1080p');
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 });
-    expect(window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_2')).toContain(
-      'B local draft'
-    );
+    expect(window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_2')).toContain('1080p');
   });
 
   it('continues close-save past locked shape drafts, commits Brief, and discards retired rule drafts', async () => {
@@ -4194,6 +4279,97 @@ describe('StudioPage schema-5 cutover', () => {
     const persisted = window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_1') ?? '';
     expect(persisted).toContain('settings.aspectRatio');
     expect(persisted).not.toContain('brief.rules');
+  });
+
+  it('chains one Film setup save through the refreshed revision authority', async () => {
+    seedWorkspaceDrafts({
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
+      'brief.text': { baseValue: 'A small launch film.', value: 'A combined Film setup brief.' },
+    });
+    const initial = project();
+    const revision4 = { ...initial, revision: 4, resolution: '1080p' as const };
+    const revision5 = { ...revision4, revision: 5, brief: 'A combined Film setup brief.' };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: revision4 }))
+      .mockResolvedValue(ok({ status: 'supported', project: revision5 }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValueOnce(ok(workspaceStatus(revision4)))
+      .mockResolvedValue(ok(workspaceStatus(revision5)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValueOnce(ok(chainStatus(revision4)))
+      .mockResolvedValue(ok(chainStatus(revision5)));
+    mocks.bridge.editProject.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(5));
+
+    renderStudio();
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(
+      within(dialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
+      })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { resolution: '1080p' },
+      })
+    );
+    await waitFor(() =>
+      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        operations: [{ kind: 'set_brief', brief: 'A combined Film setup brief.' }],
+      })
+    );
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+  });
+
+  it('fails a Film setup chain closed when authority advances before authoring', async () => {
+    seedWorkspaceDrafts({
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
+      'brief.text': { baseValue: 'A small launch film.', value: 'Do not overwrite concurrent authority.' },
+    });
+    const initial = project();
+    const concurrent = {
+      ...initial,
+      revision: 5,
+      resolution: '1080p' as const,
+      brief: 'A concurrent owner brief.',
+    };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: concurrent }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValue(ok(workspaceStatus(concurrent)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(concurrent)));
+    mocks.bridge.editProject.invoke.mockResolvedValue(commit(4));
+
+    renderStudio();
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(
+      within(dialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
+      })
+    );
+
+    await waitFor(() => expect(mocks.bridge.editProject.invoke).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(
+        within(dialog).getAllByText('conversation.creativeStudio.workspace.controls.draftConflict').length
+      ).toBeGreaterThan(0)
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(within(dialog).getByLabelText(BRIEF)).toHaveValue('Do not overwrite concurrent authority.');
+    expect(within(dialog).getByRole('combobox', { name: RESOLUTION })).toHaveTextContent('1080p');
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
   });
 
   it('flushes Beat and Shot drafts in revisioned batches without exceeding the mutation limit', async () => {
@@ -4250,9 +4426,10 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
   });
 
-  it('disables project editors while a deferred settings commit is pending', async () => {
+  it('disables every Film setup editor while a deferred shape commit is pending', async () => {
     const initial = project();
-    const revised = { ...project(), revision: 4, name: 'Pending name' };
+    const revised = { ...project(), revision: 4, resolution: '1080p' as const };
+    seedWorkspaceDrafts({ 'settings.resolution': { baseValue: '720p', value: '1080p' } });
     const edit = deferred<ReturnType<typeof commit>>();
     mocks.bridge.editProject.invoke.mockReturnValue(edit.promise);
     mocks.bridge.getProject.invoke
@@ -4266,21 +4443,19 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
-    const settingsDialog = await openProjectDialog(SETTINGS_TITLE);
-    const name = within(settingsDialog).getByLabelText(NAME);
-    fireEvent.change(name, { target: { value: 'Pending name' } });
+    const setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const resolution = within(setupDialog).getByRole('combobox', { name: RESOLUTION });
+    const brief = within(setupDialog).getByLabelText(BRIEF);
+    const rule = within(setupDialog).getByLabelText('conversation.creativeStudio.rules.textLabel');
     fireEvent.click(
-      within(settingsDialog).getByRole('button', {
-        name: 'conversation.creativeStudio.workspace.controls.saveSettings',
+      within(setupDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
       })
     );
 
-    await waitFor(() => expect(name).toBeDisabled());
-    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
-    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
-    const brief = within(briefDialog).getByLabelText(BRIEF);
+    await waitFor(() => expect(resolution).toHaveAttribute('aria-disabled', 'true'));
     expect(brief).toBeDisabled();
-    expect(within(briefDialog).getByLabelText('conversation.creativeStudio.rules.textLabel')).toBeDisabled();
+    expect(rule).toBeDisabled();
 
     await act(async () => edit.resolve(commit(4)));
     await waitFor(() => expect(brief).toBeEnabled());
@@ -4325,17 +4500,15 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValue(ok(chainStatus(4)));
 
     renderStudio();
-    let briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     await waitFor(() =>
       expect(
         within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
       ).toHaveLength(2)
     );
-    await closeProjectDialog(briefDialog, BRIEF_RULES_TITLE);
-    const settingsDialog = await openProjectDialog(SETTINGS_TITLE);
     fireEvent.click(
-      within(settingsDialog).getByRole('button', {
-        name: 'conversation.creativeStudio.workspace.controls.saveSettings',
+      within(briefDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
       })
     );
 
@@ -4346,8 +4519,6 @@ describe('StudioPage schema-5 cutover', () => {
         changes: { resolution: '1080p' },
       })
     );
-    await closeProjectDialog(settingsDialog, SETTINGS_TITLE);
-    briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
     await waitFor(() =>
       expect(
         within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
@@ -6415,35 +6586,33 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.projectWorkspaceChainFixture.invoke).toHaveBeenCalledTimes(2);
   });
 
-  it('keeps a setting draft dirty when the post-commit snapshot is older than the commit receipt', async () => {
+  it('keeps a shape draft dirty when the post-commit snapshot is older than the commit receipt', async () => {
+    seedWorkspaceDrafts({ 'settings.resolution': { baseValue: '720p', value: '1080p' } });
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
     renderStudio();
-    const settingsDialog = await openProjectDialog(SETTINGS_TITLE);
-    const name = within(settingsDialog).getByLabelText(NAME);
-    fireEvent.change(name, { target: { value: 'Awaiting durable refresh' } });
+    const setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const resolution = within(setupDialog).getByRole('combobox', { name: RESOLUTION });
     fireEvent.click(
-      within(settingsDialog).getByRole('button', {
-        name: 'conversation.creativeStudio.workspace.controls.saveSettings',
+      within(setupDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
       })
     );
 
-    expect(
-      await within(settingsDialog).findByText('conversation.creativeStudio.workspace.errors.storage')
-    ).toBeVisible();
-    expect(name).toHaveValue('Awaiting durable refresh');
+    expect(await within(setupDialog).findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(resolution).toHaveTextContent('1080p');
     expect(mocks.bridge.editProject.invoke).toHaveBeenCalledTimes(1);
     expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
   });
 
   it('stops a chained close-save when another writer advances past the commit receipt', async () => {
     seedWorkspaceDrafts({
-      'settings.name': { baseValue: 'Launch film', value: 'Saved local name' },
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
       'brief.text': { baseValue: 'A small launch film.', value: 'Unsaved local Brief.' },
     });
     const concurrentlyAdvanced = {
       ...project(),
       revision: 5,
-      name: 'Saved local name',
+      resolution: '1080p' as const,
       brief: 'A concurrent Brief.',
     };
     mocks.bridge.getProject.invoke
@@ -6468,7 +6637,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedRevision: 3,
-      changes: { name: 'Saved local name' },
+      changes: { resolution: '1080p' },
     });
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
@@ -6478,10 +6647,10 @@ describe('StudioPage schema-5 cutover', () => {
 
   it('coalesces an update during close-save refresh and retains the next draft when authority advances', async () => {
     seedWorkspaceDrafts({
-      'settings.name': { baseValue: 'Launch film', value: 'Saved local name' },
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
       'brief.text': { baseValue: 'A small launch film.', value: 'Unsaved local Brief.' },
     });
-    const committed = { ...project(), revision: 4, name: 'Saved local name' };
+    const committed = { ...project(), revision: 4, resolution: '1080p' as const };
     const concurrentlyAdvanced = {
       ...committed,
       revision: 5,
@@ -6523,7 +6692,7 @@ describe('StudioPage schema-5 cutover', () => {
       stalledWorkspace.resolve(stalledWorkspaceResult);
     });
     await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(4));
-    await screen.findByRole('heading', { name: 'Saved local name' });
+    await screen.findByRole('heading', { name: 'Launch film' });
     await act(async () => {
       saved = await flushPromise;
     });
@@ -6532,7 +6701,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedRevision: 3,
-      changes: { name: 'Saved local name' },
+      changes: { resolution: '1080p' },
     });
     expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
@@ -6849,7 +7018,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(1);
   });
 
-  it('renders authoritative rules and spend policy in Brief & rules without legacy JSON mutation', async () => {
+  it('renders authoritative rules and spend policy in Film setup without legacy JSON mutation', async () => {
     const governed = {
       ...project(),
       spendPolicy: { currency: 'USD', maxPerBatchMinorUnits: 1_234 },

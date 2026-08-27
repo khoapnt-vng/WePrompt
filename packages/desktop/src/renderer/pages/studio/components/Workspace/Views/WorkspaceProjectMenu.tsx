@@ -11,7 +11,6 @@ import {
   Drawer,
   Dropdown,
   Input,
-  InputNumber,
   InputTag,
   Menu,
   Modal,
@@ -40,7 +39,7 @@ import type { WorkspaceDraftValue } from '../useWorkspaceDrafts';
 import styles from './WorkspaceControls.module.css';
 import type { WorkspaceProjectMenuProps } from './viewTypes';
 
-type ProjectDialog = 'settings' | 'brief' | null;
+type ProjectDialog = 'brief' | null;
 
 type EditorFolderExportStatus =
   | { kind: 'idle' }
@@ -412,7 +411,6 @@ export const purgeStoredStudioRuleDrafts = (projectId: string): void => {
 };
 
 const asString = (value: WorkspaceDraftValue | undefined): string => (typeof value === 'string' ? value : '');
-const asNumber = (value: WorkspaceDraftValue | undefined): number => (typeof value === 'number' ? value : 0);
 
 const toRuleDraft = ({ id, text, predicate }: StudioBriefRule): StudioBriefRuleDraft => ({
   id,
@@ -1053,34 +1051,26 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
     setDialog(next);
   };
 
-  const saveSettings = async (): Promise<void> => {
-    const changes: Record<string, unknown> = {
-      name: asString(drafts.value('settings.name')).trim(),
-      targetDurationSeconds: asNumber(drafts.value('settings.targetDurationSeconds')),
-    };
-    if (!projection.requestShapeLocked) {
-      changes.aspectRatio = asString(drafts.value('settings.aspectRatio')) as typeof project.aspectRatio;
-      changes.resolution = asString(drafts.value('settings.resolution')) as typeof project.resolution;
-    }
-    const changed = Object.fromEntries(
-      Object.entries(changes).filter(([key, value]) => project[key as keyof typeof project] !== value)
-    );
-    const savedKeys = ['settings.name', 'settings.targetDurationSeconds'];
-    if (!projection.requestShapeLocked) savedKeys.push('settings.aspectRatio', 'settings.resolution');
-    if (Object.keys(changed).length === 0) {
-      savedKeys.forEach(drafts.reset);
-      return;
-    }
-    if (await mutations.editProject(changed as Parameters<typeof mutations.editProject>[0])) {
-      savedKeys.forEach(drafts.reset);
-    }
+  const filmSetupDraftKeys = [
+    'settings.aspectRatio',
+    'settings.resolution',
+    'brief.text',
+    'brief.imageRouteId',
+    'brief.videoRouteId',
+    'brief.spendCurrency',
+    'brief.spendMajorUnits',
+  ] as const;
+
+  const resetFilmSetup = (): void => {
+    filmSetupDraftKeys.forEach(drafts.reset);
+    setBriefErrorKey(null);
   };
 
-  const saveBrief = async (): Promise<void> => {
+  const saveFilmSetup = async (): Promise<void> => {
     const brief = asString(drafts.value('brief.text'));
     const imageRouteId = asString(drafts.value('brief.imageRouteId')) || null;
     const videoRouteId = asString(drafts.value('brief.videoRouteId')) || null;
-    const operations: Parameters<typeof mutations.applyAuthoring>[0] = [];
+    const operations: Parameters<typeof mutations.saveFilmSetup>[0]['authoringOperations'] = [];
     if (brief !== project.brief) operations.push({ kind: 'set_brief', brief });
     if (imageRouteId !== project.imageRouteId || videoRouteId !== project.videoRouteId) {
       operations.push({ kind: 'set_routes', imageRouteId, videoRouteId });
@@ -1097,20 +1087,46 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
     if (JSON.stringify(nextPolicy) !== JSON.stringify(project.spendPolicy)) {
       operations.push({ kind: 'set_spend_policy', policy: nextPolicy });
     }
-    const savedKeys = [
+    const authoringKeys = [
       'brief.text',
       'brief.imageRouteId',
       'brief.videoRouteId',
       'brief.spendCurrency',
       'brief.spendMajorUnits',
     ];
-    if (operations.length === 0) {
-      savedKeys.forEach(drafts.reset);
+    const shapeKeys = ['settings.aspectRatio', 'settings.resolution'];
+    let changedShape: Parameters<typeof mutations.saveFilmSetup>[0]['projectChanges'] = null;
+    if (!projection.requestShapeLocked) {
+      const shapeChanges = {
+        aspectRatio: asString(drafts.value('settings.aspectRatio')) as typeof project.aspectRatio,
+        resolution: asString(drafts.value('settings.resolution')) as typeof project.resolution,
+      };
+      const aspectRatioChanged = shapeChanges.aspectRatio !== project.aspectRatio;
+      const resolutionChanged = shapeChanges.resolution !== project.resolution;
+      changedShape =
+        aspectRatioChanged && resolutionChanged
+          ? shapeChanges
+          : aspectRatioChanged
+            ? { aspectRatio: shapeChanges.aspectRatio }
+            : resolutionChanged
+              ? { resolution: shapeChanges.resolution }
+              : null;
+    }
+    if (changedShape === null && operations.length === 0) {
+      if (!projection.requestShapeLocked) shapeKeys.forEach(drafts.reset);
+      authoringKeys.forEach(drafts.reset);
       setBriefErrorKey(null);
       return;
     }
-    if (await mutations.applyAuthoring(operations)) {
-      savedKeys.forEach(drafts.reset);
+    const result = await mutations.saveFilmSetup({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      projectChanges: changedShape,
+      authoringOperations: operations,
+    });
+    if (!projection.requestShapeLocked && result.projectSettingsSaved) shapeKeys.forEach(drafts.reset);
+    if (result.authoringSaved) {
+      authoringKeys.forEach(drafts.reset);
       setBriefErrorKey(null);
     }
   };
@@ -1456,9 +1472,6 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   };
   const menu = (
     <Menu>
-      <Menu.Item key='settings' onClick={() => openDialog('settings')}>
-        {t('conversation.creativeStudio.workspace.controls.settingsTitle')}
-      </Menu.Item>
       <Menu.Item key='brief' onClick={() => openDialog('brief')}>
         {t('conversation.creativeStudio.workspace.controls.briefAndRulesTitle')}
       </Menu.Item>
@@ -1754,95 +1767,6 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
       </Drawer>
 
       <Modal
-        visible={dialog === 'settings'}
-        title={t('conversation.creativeStudio.workspace.controls.settingsTitle')}
-        footer={null}
-        unmountOnExit={false}
-        className={styles.projectModal}
-        onCancel={() => setDialog(null)}
-        afterClose={restoreTriggerFocus}
-      >
-        <div className={styles.modalBody} data-studio-project-settings>
-          {errorMessageKey === null ? null : <Alert type='error' content={t(errorMessageKey)} />}
-          {drafts.staleRevision ? (
-            <Alert type='error' content={t('conversation.creativeStudio.workspace.controls.draftConflict')} />
-          ) : null}
-          <div className={styles.formGrid}>
-            <label>
-              {t('conversation.creativeStudio.workspace.controls.name')}
-              <Input
-                disabled={pending}
-                value={asString(drafts.value('settings.name'))}
-                onChange={(value) => drafts.setValue('settings.name', value)}
-              />
-            </label>
-            <label>
-              {t('conversation.creativeStudio.workspace.controls.targetDuration')}
-              <InputNumber
-                disabled={pending}
-                min={1}
-                precision={0}
-                value={asNumber(drafts.value('settings.targetDurationSeconds'))}
-                onChange={(value) => drafts.setValue('settings.targetDurationSeconds', value ?? 0)}
-              />
-            </label>
-            <label>
-              {t('conversation.creativeStudio.workspace.controls.aspectRatio')}
-              <AccessibleSelect
-                accessibleName={t('conversation.creativeStudio.workspace.controls.aspectRatio')}
-                disabled={pending || projection.requestShapeLocked}
-                value={asString(drafts.value('settings.aspectRatio'))}
-                onChange={(value) => drafts.setValue('settings.aspectRatio', value)}
-              >
-                {['16:9', '9:16', '1:1', '4:3', '3:4'].map((value) => (
-                  <Select.Option key={value} value={value}>
-                    {value}
-                  </Select.Option>
-                ))}
-              </AccessibleSelect>
-            </label>
-            <label>
-              {t('conversation.creativeStudio.workspace.controls.resolution')}
-              <AccessibleSelect
-                accessibleName={t('conversation.creativeStudio.workspace.controls.resolution')}
-                disabled={pending || projection.requestShapeLocked}
-                value={asString(drafts.value('settings.resolution'))}
-                onChange={(value) => drafts.setValue('settings.resolution', value)}
-              >
-                <Select.Option value='720p'>720p</Select.Option>
-                <Select.Option value='1080p'>1080p</Select.Option>
-              </AccessibleSelect>
-            </label>
-          </div>
-          <p>
-            {t(
-              projection.requestShapeLocked
-                ? 'conversation.creativeStudio.workspace.controls.requestShapeLocked'
-                : 'conversation.creativeStudio.workspace.controls.settingsEffect'
-            )}
-          </p>
-          <div className={styles.actions}>
-            <Button
-              disabled={pending}
-              onClick={() =>
-                [
-                  'settings.name',
-                  'settings.targetDurationSeconds',
-                  'settings.aspectRatio',
-                  'settings.resolution',
-                ].forEach(drafts.reset)
-              }
-            >
-              {t('conversation.creativeStudio.workspace.controls.reset')}
-            </Button>
-            <Button type='primary' disabled={pending || drafts.staleRevision} onClick={() => void saveSettings()}>
-              {t('conversation.creativeStudio.workspace.controls.saveSettings')}
-            </Button>
-          </div>
-        </div>
-      </Modal>
-
-      <Modal
         visible={dialog === 'brief'}
         title={t('conversation.creativeStudio.workspace.controls.briefAndRulesTitle')}
         footer={null}
@@ -1932,6 +1856,33 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
                 })}
               </label>
               <label>
+                {t('conversation.creativeStudio.workspace.controls.aspectRatio')}
+                <AccessibleSelect
+                  accessibleName={t('conversation.creativeStudio.workspace.controls.aspectRatio')}
+                  disabled={pending || projection.requestShapeLocked}
+                  value={asString(drafts.value('settings.aspectRatio'))}
+                  onChange={(value) => drafts.setValue('settings.aspectRatio', value)}
+                >
+                  {['16:9', '9:16', '1:1', '4:3', '3:4'].map((value) => (
+                    <Select.Option key={value} value={value}>
+                      {value}
+                    </Select.Option>
+                  ))}
+                </AccessibleSelect>
+              </label>
+              <label>
+                {t('conversation.creativeStudio.workspace.controls.resolution')}
+                <AccessibleSelect
+                  accessibleName={t('conversation.creativeStudio.workspace.controls.resolution')}
+                  disabled={pending || projection.requestShapeLocked}
+                  value={asString(drafts.value('settings.resolution'))}
+                  onChange={(value) => drafts.setValue('settings.resolution', value)}
+                >
+                  <Select.Option value='720p'>720p</Select.Option>
+                  <Select.Option value='1080p'>1080p</Select.Option>
+                </AccessibleSelect>
+              </label>
+              <label>
                 {t('conversation.creativeStudio.workspace.controls.spendCurrency')}
                 <Input
                   disabled={pending}
@@ -1949,13 +1900,25 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
                 />
               </label>
             </div>
+            <p className={styles.ruleDescription}>
+              {t(
+                projection.requestShapeLocked
+                  ? 'conversation.creativeStudio.workspace.controls.requestShapeLocked'
+                  : 'conversation.creativeStudio.workspace.controls.settingsEffect'
+              )}
+            </p>
             <div className={styles.actions}>
               <Button disabled={pending} onClick={() => void mutations.refreshRoutes()}>
                 {t('conversation.creativeStudio.workspace.controls.refreshRoutes')}
               </Button>
-              <Button type='primary' disabled={pending || drafts.staleRevision} onClick={() => void saveBrief()}>
-                {t('conversation.creativeStudio.workspace.controls.saveBrief')}
-              </Button>
+              <span className={styles.actionGroup}>
+                <Button disabled={pending} onClick={resetFilmSetup}>
+                  {t('conversation.creativeStudio.workspace.controls.reset')}
+                </Button>
+                <Button type='primary' disabled={pending || drafts.staleRevision} onClick={() => void saveFilmSetup()}>
+                  {t('conversation.creativeStudio.workspace.controls.saveBrief')}
+                </Button>
+              </span>
             </div>
           </section>
 

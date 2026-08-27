@@ -1363,7 +1363,7 @@
         }
       },
       "controls": {
-        "briefAndRulesTitle": "브리프 및 규칙",
+        "briefAndRulesTitle": "영화 설정",
         "undoLabel": {
           "promote_board_panel": "패널을 첫 프레임으로 사용",
           "set_reference_plan": "참조 계획",
@@ -1435,7 +1435,7 @@
           "rejoinConfirmed": "재연결을 확인했습니다. 샷에서 프레임 추출과 교체 작업의 진행 상황 또는 필요한 복구 조치를 확인하세요."
         },
         "errors": {
-          "routesUnavailable": "이 견적을 준비하기 전에 브리프 및 규칙에서 준비된 이미지와 비디오 경로를 선택하세요.",
+          "routesUnavailable": "이 견적을 준비하기 전에 영화 설정에서 준비된 이미지와 비디오 경로를 선택하세요.",
           "pricing": {
             "invalidQuote": "견적 데이터의 내부 일관성이 맞지 않습니다. 아무것도 제출되지 않았습니다.",
             "inactiveShot": "선택한 샷 중 하나가 더 이상 활성 상태가 아닙니다. 프로젝트를 새로 고친 후 다시 준비하세요.",

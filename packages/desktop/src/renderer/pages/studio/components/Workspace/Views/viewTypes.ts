@@ -7,6 +7,7 @@
 import type {
   StudioBriefRule,
   StudioBriefRuleDraft,
+  StudioAspectRatio,
   StudioEditableProjectSettingsChanges,
   StudioGenerationCapabilityV2,
   StudioFilmExportCapabilityV2,
@@ -15,6 +16,7 @@ import type {
   StudioRendererAuthoringOperationV2,
   StudioRendererExportCatalogV2,
   StudioRendererProjectV2,
+  StudioResolution,
   StudioRouteCatalogV2,
   StudioView,
 } from '@/common/types/project/creativeStudioTypes';
@@ -28,9 +30,39 @@ import type { ReferencesViewActions, StudioReferenceFocusIntent } from './Refere
 
 export type WorkspaceAuthoringOperationV2 = Exclude<StudioRendererAuthoringOperationV2, { kind: 'set_hard_cut' }>;
 
+export type WorkspaceFilmSetupProjectChanges =
+  | { aspectRatio: StudioAspectRatio; resolution?: StudioResolution }
+  | { aspectRatio?: StudioAspectRatio; resolution: StudioResolution };
+
+export type WorkspaceFilmSetupAuthoringOperation = Extract<
+  WorkspaceAuthoringOperationV2,
+  { kind: 'set_brief' | 'set_routes' | 'set_spend_policy' }
+>;
+
+export type WorkspaceFilmSetupSaveInput = {
+  projectId: string;
+  expectedRevision: number;
+  projectChanges: WorkspaceFilmSetupProjectChanges | null;
+  authoringOperations: WorkspaceFilmSetupAuthoringOperation[];
+};
+
+export type WorkspaceFilmSetupSaveResult = {
+  projectSettingsSaved: boolean;
+  authoringSaved: boolean;
+};
+
+export type WorkspaceProjectEditAuthority = {
+  projectId: string;
+  expectedRevision: number;
+};
+
 export type WorkspaceMutationCallbacks = {
-  editProject: (changes: StudioEditableProjectSettingsChanges) => Promise<boolean>;
+  editProject: (
+    changes: StudioEditableProjectSettingsChanges,
+    authority?: WorkspaceProjectEditAuthority
+  ) => Promise<boolean>;
   applyAuthoring: (operations: WorkspaceAuthoringOperationV2[]) => Promise<boolean>;
+  saveFilmSetup: (input: WorkspaceFilmSetupSaveInput) => Promise<WorkspaceFilmSetupSaveResult>;
   setRules: (
     update: (latestRules: readonly StudioBriefRule[]) => StudioBriefRuleDraft[] | null,
     adoptionKey: string

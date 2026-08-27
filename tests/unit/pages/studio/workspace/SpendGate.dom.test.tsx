@@ -624,16 +624,29 @@ const routeCatalog = (
   catalogVersion: 'catalog_1',
 });
 
-const workspaceCallbacks = (): WorkspaceMutationCallbacks => ({
-  editProject: vi.fn(async () => true),
-  applyAuthoring: vi.fn(async () => true),
-  setRules: vi.fn(async () => true),
-  acknowledgeRuleAdoption: vi.fn(),
-  refreshRoutes: vi.fn(async () => true),
-  undo: vi.fn(async () => true),
-  retryConditioning: vi.fn(async () => true),
-  cancelWaiting: vi.fn(async () => true),
-});
+const workspaceCallbacks = (): WorkspaceMutationCallbacks => {
+  const callbacks = {
+    editProject: vi.fn(async () => true),
+    applyAuthoring: vi.fn(async () => true),
+    saveFilmSetup: vi.fn(),
+    setRules: vi.fn(async () => true),
+    acknowledgeRuleAdoption: vi.fn(),
+    refreshRoutes: vi.fn(async () => true),
+    undo: vi.fn(async () => true),
+    retryConditioning: vi.fn(async () => true),
+    cancelWaiting: vi.fn(async () => true),
+  } as WorkspaceMutationCallbacks;
+  vi.mocked(callbacks.saveFilmSetup).mockImplementation(async ({ projectChanges, authoringOperations }) => {
+    if (projectChanges !== null && !(await callbacks.editProject(projectChanges))) {
+      return { projectSettingsSaved: false, authoringSaved: false };
+    }
+    if (authoringOperations.length > 0 && !(await callbacks.applyAuthoring(authoringOperations))) {
+      return { projectSettingsSaved: true, authoringSaved: false };
+    }
+    return { projectSettingsSaved: true, authoringSaved: true };
+  });
+  return callbacks;
+};
 
 const beatPanelActions = (): BeatPanelActions => ({
   saveBeat: vi.fn(async () => true),
@@ -805,8 +818,6 @@ const ControlsHarness: React.FC<{
     chain === undefined ? readyChainStatus(project) : chain
   );
   const canonicalValues: Record<string, WorkspaceDraftValue> = {
-    'settings.name': project.name,
-    'settings.targetDurationSeconds': project.targetDurationSeconds,
     'settings.aspectRatio': project.aspectRatio,
     'settings.resolution': project.resolution,
     'brief.text': project.brief,
@@ -883,9 +894,7 @@ const ControlsHarness: React.FC<{
 };
 
 const openProjectMenuDialog = async (
-  title:
-    | 'conversation.creativeStudio.workspace.controls.settingsTitle'
-    | 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle'
+  title: 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle'
 ): Promise<HTMLElement> => {
   fireEvent.click(screen.getByRole('button', { name: 'common.more' }));
   const menu = await screen.findByRole('menu');
@@ -1558,7 +1567,7 @@ describe('WorkspaceControls', () => {
     }
   };
 
-  it('resets only settings while preserving a Brief draft', async () => {
+  it('resets the whole Film setup without issuing a mutation', async () => {
     window.sessionStorage.setItem(
       'aionui:creative-studio:v3:workspace-drafts:project_1',
       JSON.stringify({
@@ -1567,24 +1576,25 @@ describe('WorkspaceControls', () => {
         sourceRevision: 3,
         entries: {
           'brief.text': { baseValue: 'A launch film.', value: 'Changed brief' },
+          'settings.aspectRatio': { baseValue: '16:9', value: '9:16' },
         },
         selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
       })
     );
-    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} />);
-    const settings = await openProjectMenuDialog('conversation.creativeStudio.workspace.controls.settingsTitle');
-    fireEvent.change(within(settings).getByLabelText('conversation.creativeStudio.workspace.controls.name'), {
-      target: { value: 'Changed name' },
-    });
+    const mutations = workspaceCallbacks();
+    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} mutations={mutations} />);
+    const setup = await openProjectMenuDialog('conversation.creativeStudio.workspace.controls.briefAndRulesTitle');
     fireEvent.click(
-      within(settings).getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reset' })
+      within(setup).getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.reset' })
     );
-    expect(within(settings).getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
-      'Launch film'
+    expect(within(setup).getByLabelText('conversation.creativeStudio.workspace.controls.brief')).toHaveValue(
+      'A launch film.'
     );
-    expect(window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_1')).toContain(
+    expect(window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_1') ?? '').not.toContain(
       'Changed brief'
     );
+    expect(mutations.editProject).not.toHaveBeenCalled();
+    expect(mutations.applyAuthoring).not.toHaveBeenCalled();
   });
 
   it('does not reopen a dismissed panel when a lifted Beat returns to the active film', async () => {
@@ -1712,7 +1722,7 @@ describe('WorkspaceControls', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 
-  it('saves unlocked settings while preserving a pre-lock request-shape draft', async () => {
+  it('saves Film setup authoring while preserving a pre-lock request-shape draft', async () => {
     window.sessionStorage.setItem(
       'aionui:creative-studio:v3:workspace-drafts:project_1',
       JSON.stringify({
@@ -1720,8 +1730,8 @@ describe('WorkspaceControls', () => {
         projectId: 'project_1',
         sourceRevision: 3,
         entries: {
-          'settings.name': { baseValue: 'Launch film', value: 'Renamed while locked' },
           'settings.aspectRatio': { baseValue: '16:9', value: '9:16' },
+          'brief.text': { baseValue: 'A launch film.', value: 'Changed while locked' },
         },
         selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
       })
@@ -1736,17 +1746,18 @@ describe('WorkspaceControls', () => {
       />
     );
 
-    await openProjectMenuDialog('conversation.creativeStudio.workspace.controls.settingsTitle');
+    await openProjectMenuDialog('conversation.creativeStudio.workspace.controls.briefAndRulesTitle');
 
-    fireEvent.click(
-      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveSettings' })
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveBrief' }));
+    await waitFor(() =>
+      expect(mutations.applyAuthoring).toHaveBeenCalledWith([{ kind: 'set_brief', brief: 'Changed while locked' }])
     );
-    await waitFor(() => expect(mutations.editProject).toHaveBeenCalledWith({ name: 'Renamed while locked' }));
+    expect(mutations.editProject).not.toHaveBeenCalled();
     await waitFor(() => {
       const persisted = JSON.parse(
         window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_1') ?? '{}'
       ) as { entries?: Record<string, unknown> };
-      expect(persisted.entries).not.toHaveProperty('settings.name');
+      expect(persisted.entries).not.toHaveProperty('brief.text');
       expect(persisted.entries).toHaveProperty('settings.aspectRatio');
     });
   });
@@ -1810,26 +1821,11 @@ describe('WorkspaceControls', () => {
     await waitFor(() => expect(mutations.undo).toHaveBeenCalledExactlyOnceWith('undo_exact'));
   });
 
-  it('clears normalized no-op setting and spend drafts without issuing a commit', async () => {
+  it('clears a normalized no-op spend draft without issuing a commit', async () => {
     const mutations = workspaceCallbacks();
     render(
       <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} spendPolicy mutations={mutations} />
     );
-    const settings = await openProjectMenuDialog('conversation.creativeStudio.workspace.controls.settingsTitle');
-    fireEvent.change(within(settings).getByLabelText('conversation.creativeStudio.workspace.controls.name'), {
-      target: { value: ' Launch film ' },
-    });
-    fireEvent.click(
-      within(settings).getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.saveSettings' })
-    );
-    await waitFor(() =>
-      expect(within(settings).getByLabelText('conversation.creativeStudio.workspace.controls.name')).toHaveValue(
-        'Launch film'
-      )
-    );
-    expect(mutations.editProject).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Close' }));
     const brief = await openProjectMenuDialog('conversation.creativeStudio.workspace.controls.briefAndRulesTitle');
     fireEvent.change(within(brief).getByLabelText('conversation.creativeStudio.workspace.controls.spendCap'), {
       target: { value: '10.0' },
@@ -1842,6 +1838,7 @@ describe('WorkspaceControls', () => {
         '10.00'
       )
     );
+    expect(mutations.editProject).not.toHaveBeenCalled();
     expect(mutations.applyAuthoring).not.toHaveBeenCalled();
   });
 
@@ -1875,7 +1872,7 @@ describe('WorkspaceControls', () => {
     expect(screen.queryByText('conversation.creativeStudio.workspace.controls.invalidSpendPolicy')).toBeNull();
   });
 
-  it('opens Brief and rules directly when the spend gate requests route recovery', async () => {
+  it('opens Film setup directly when the spend gate requests route recovery', async () => {
     const view = render(
       <ControlsHarness routes={routeCatalog('selection_required', 'ready')} open={vi.fn()} briefDialogRequest={0} />
     );

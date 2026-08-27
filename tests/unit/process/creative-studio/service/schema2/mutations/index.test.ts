@@ -653,6 +653,32 @@ describe('schema-5 mutation operation contract', () => {
   });
 });
 
+describe('schema-5 project-setting consequence boundaries', () => {
+  it('blocks request-shape changes while paid work is bound but keeps name and target editable', () => {
+    const project = makeProject();
+    const take = addSucceededVideoTake(project, 'shot_1', 'take_1');
+    const job = project.jobs.job_take_1!;
+    job.status = 'running';
+    job.outputAssetIds = [];
+    job.outputAssetIdsByRole = { primary: null, poster: null };
+    job.spendReceipt = null;
+    delete project.assets[take.id];
+    project.shots.shot_1!.assetIds = project.shots.shot_1!.assetIds.filter((assetId) => assetId !== take.id);
+    project.shots.shot_1!.videoAssetId = null;
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    expectReason(project, [{ kind: 'edit_project', changes: { aspectRatio: '9:16' } }], 'dependency_blocked');
+    expectReason(project, [{ kind: 'edit_project', changes: { resolution: '720p' } }], 'dependency_blocked');
+
+    expect(apply(project, [{ kind: 'edit_project', changes: { name: 'Renamed while running' } }]).project.name).toBe(
+      'Renamed while running'
+    );
+    expect(
+      apply(project, [{ kind: 'edit_project', changes: { targetDurationSeconds: 45 } }]).project.targetDurationSeconds
+    ).toBe(45);
+  });
+});
+
 describe('schema-5 Story, Shooting script, and undo', () => {
   it('applies ordered Beat and Shot prose edits without synthesizing any other authoring field', () => {
     const project = makeProject();

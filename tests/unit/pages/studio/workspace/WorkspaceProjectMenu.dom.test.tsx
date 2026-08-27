@@ -41,8 +41,6 @@ vi.mock('react-i18next', () => ({
 const MORE = 'common.more';
 const SETTINGS_TITLE = 'conversation.creativeStudio.workspace.controls.settingsTitle';
 const BRIEF_RULES_TITLE = 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle';
-const NAME = 'conversation.creativeStudio.workspace.controls.name';
-const TARGET_DURATION = 'conversation.creativeStudio.workspace.controls.targetDuration';
 const ASPECT_RATIO = 'conversation.creativeStudio.workspace.controls.aspectRatio';
 const RESOLUTION = 'conversation.creativeStudio.workspace.controls.resolution';
 const BRIEF = 'conversation.creativeStudio.workspace.controls.brief';
@@ -51,8 +49,7 @@ const VIDEO_ROUTE = 'conversation.creativeStudio.workspace.controls.videoRoute';
 const SPEND_CURRENCY = 'conversation.creativeStudio.workspace.controls.spendCurrency';
 const SPEND_CAP = 'conversation.creativeStudio.workspace.controls.spendCap';
 const REFRESH_ROUTES = 'conversation.creativeStudio.workspace.controls.refreshRoutes';
-const RESET_SETTINGS = 'conversation.creativeStudio.workspace.controls.reset';
-const SAVE_SETTINGS = 'conversation.creativeStudio.workspace.controls.saveSettings';
+const RESET_FILM_SETUP = 'conversation.creativeStudio.workspace.controls.reset';
 const SAVE_BRIEF = 'conversation.creativeStudio.workspace.controls.saveBrief';
 const RULE_TEXT = 'conversation.creativeStudio.rules.textLabel';
 const RULE_TERMS = 'conversation.creativeStudio.rules.termsLabel';
@@ -141,28 +138,44 @@ const makeMutations = (
   callbacks: WorkspaceMutationCallbacks;
   editProject: ReturnType<typeof vi.fn>;
   applyAuthoring: ReturnType<typeof vi.fn>;
+  saveFilmSetup: ReturnType<typeof vi.fn>;
   refreshRoutes: ReturnType<typeof vi.fn>;
   acknowledgeRuleAdoption: ReturnType<typeof vi.fn>;
   setRules: typeof setRules;
 } => {
   const editProject = vi.fn(async () => true);
   const applyAuthoring = vi.fn(async () => true);
+  let callbacks: WorkspaceMutationCallbacks;
+  const saveFilmSetup = vi.fn(
+    async ({ projectChanges, authoringOperations }: Parameters<WorkspaceMutationCallbacks['saveFilmSetup']>[0]) => {
+      if (projectChanges !== null && !(await callbacks.editProject(projectChanges))) {
+        return { projectSettingsSaved: false, authoringSaved: false };
+      }
+      if (authoringOperations.length > 0 && !(await callbacks.applyAuthoring(authoringOperations))) {
+        return { projectSettingsSaved: true, authoringSaved: false };
+      }
+      return { projectSettingsSaved: true, authoringSaved: true };
+    }
+  );
   const refreshRoutes = vi.fn(async () => true);
   const acknowledgeRuleAdoption = vi.fn();
-  return {
-    callbacks: {
-      editProject,
-      applyAuthoring,
-      setRules,
-      acknowledgeRuleAdoption,
-      refreshRoutes,
-      undo: vi.fn(async () => true),
-      retryConditioning: vi.fn(async () => true),
-      cancelWaiting: vi.fn(async () => true),
-      chooseCascadeAsset: vi.fn(async () => true),
-    } as unknown as WorkspaceMutationCallbacks,
+  callbacks = {
     editProject,
     applyAuthoring,
+    saveFilmSetup,
+    setRules,
+    acknowledgeRuleAdoption,
+    refreshRoutes,
+    undo: vi.fn(async () => true),
+    retryConditioning: vi.fn(async () => true),
+    cancelWaiting: vi.fn(async () => true),
+    chooseCascadeAsset: vi.fn(async () => true),
+  } as unknown as WorkspaceMutationCallbacks;
+  return {
+    callbacks,
+    editProject,
+    applyAuthoring,
+    saveFilmSetup,
     refreshRoutes,
     acknowledgeRuleAdoption,
     setRules,
@@ -270,8 +283,6 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
     projectId: project.id,
     projectRevision: project.revision,
     canonicalValues: {
-      'settings.name': project.name,
-      'settings.targetDurationSeconds': project.targetDurationSeconds,
       'settings.aspectRatio': project.aspectRatio,
       'settings.resolution': project.resolution,
       'brief.text': project.brief,
@@ -316,12 +327,6 @@ const MenuHarness: React.FC<MenuHarnessProps> = ({
 const openMenu = async (): Promise<HTMLElement> => {
   fireEvent.click(screen.getByRole('button', { name: MORE }));
   return screen.findByRole('menu');
-};
-
-const openSettings = async (): Promise<HTMLElement> => {
-  const menu = await openMenu();
-  fireEvent.click(within(menu).getByRole('menuitem', { name: SETTINGS_TITLE }));
-  return screen.findByRole('dialog', { name: SETTINGS_TITLE });
 };
 
 const openBriefAndRules = async (): Promise<HTMLElement> => {
@@ -416,14 +421,14 @@ const editorFolderProject = (includeCanonicalVideo = true): StudioRendererProjec
 describe('WorkspaceProjectMenu', () => {
   beforeEach(() => window.sessionStorage.clear());
 
-  it('opens a named More menu with separate settings and Brief actions', async () => {
+  it('opens a named More menu with one consequence-grouped Film setup action', async () => {
     const { callbacks } = makeMutations();
     render(<MenuHarness mutations={callbacks} />);
 
     const trigger = screen.getByRole('button', { name: MORE });
     expect(trigger).toHaveAttribute('aria-haspopup', 'menu');
     const menu = await openMenu();
-    expect(within(menu).getByRole('menuitem', { name: SETTINGS_TITLE })).toBeInTheDocument();
+    expect(within(menu).queryByRole('menuitem', { name: SETTINGS_TITLE })).not.toBeInTheDocument();
     expect(within(menu).getByRole('menuitem', { name: BRIEF_RULES_TITLE })).toBeInTheDocument();
   });
 
@@ -868,26 +873,23 @@ describe('WorkspaceProjectMenu', () => {
     expect(await screen.findByText('conversation.creativeStudio.workspace.filmExport.errors.cancelled')).toBeVisible();
   });
 
-  it('keeps project settings out of the workspace until its modal opens', async () => {
-    const { callbacks } = makeMutations();
-    render(<MenuHarness mutations={callbacks} />);
-
-    expect(screen.queryByLabelText(NAME)).not.toBeInTheDocument();
-    const dialog = await openSettings();
-    expect(within(dialog).getByLabelText(NAME)).toHaveValue('Launch film');
-    expect(within(dialog).getByRole('combobox', { name: ASPECT_RATIO })).toBeInTheDocument();
-    expect(within(dialog).getByRole('combobox', { name: RESOLUTION })).toBeInTheDocument();
-    expect(within(dialog).queryByLabelText(BRIEF)).not.toBeInTheDocument();
-  });
-
-  it('keeps the Brief and rule editor out of the workspace until their modal opens', async () => {
+  it('keeps Film setup out of the workspace until its modal opens and excludes name and target', async () => {
     const { callbacks } = makeMutations();
     render(<MenuHarness mutations={callbacks} />);
 
     expect(screen.queryByLabelText(BRIEF)).not.toBeInTheDocument();
     const dialog = await openBriefAndRules();
     expect(within(dialog).getByLabelText(BRIEF)).toHaveValue('A launch film.');
-    expect(within(dialog).queryByLabelText(NAME)).not.toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: ASPECT_RATIO })).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: RESOLUTION })).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: IMAGE_ROUTE })).toBeInTheDocument();
+    expect(within(dialog).getByRole('combobox', { name: VIDEO_ROUTE })).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(SPEND_CURRENCY)).toBeInTheDocument();
+    expect(within(dialog).getByLabelText(SPEND_CAP)).toBeInTheDocument();
+    expect(within(dialog).queryByText('conversation.creativeStudio.workspace.controls.name')).not.toBeInTheDocument();
+    expect(
+      within(dialog).queryByText('conversation.creativeStudio.workspace.controls.targetDuration')
+    ).not.toBeInTheDocument();
   });
 
   it('surfaces authoritative errors, blocks stale saves, and restores trigger focus on close', async () => {
@@ -900,66 +902,68 @@ describe('WorkspaceProjectMenu', () => {
       />
     );
     const trigger = screen.getByRole('button', { name: MORE });
-    const settings = await openSettings();
+    const setup = await openBriefAndRules();
 
-    expect(within(settings).getByText('conversation.creativeStudio.workspace.errors.storage')).toBeInTheDocument();
-    expect(
-      within(settings).getByText('conversation.creativeStudio.workspace.controls.draftConflict')
-    ).toBeInTheDocument();
-    expect(within(settings).getByRole('button', { name: SAVE_SETTINGS })).toBeDisabled();
+    expect(within(setup).getByText('conversation.creativeStudio.workspace.errors.storage')).toBeInTheDocument();
+    expect(within(setup).getByText('conversation.creativeStudio.workspace.controls.draftConflict')).toBeInTheDocument();
+    expect(within(setup).getByRole('button', { name: SAVE_BRIEF })).toBeDisabled();
 
-    fireEvent.click(within(settings).getByRole('button', { name: 'Close' }));
-    await waitFor(() => expect(screen.queryByRole('dialog', { name: SETTINGS_TITLE })).not.toBeInTheDocument());
+    fireEvent.click(within(setup).getByRole('button', { name: 'Close' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: BRIEF_RULES_TITLE })).not.toBeInTheDocument());
     await waitFor(() => expect(trigger).toHaveFocus());
-
-    const brief = await openBriefAndRules();
-    expect(within(brief).getByText('conversation.creativeStudio.workspace.errors.storage')).toBeInTheDocument();
-    expect(within(brief).getByText('conversation.creativeStudio.workspace.controls.draftConflict')).toBeInTheDocument();
-    expect(within(brief).getByRole('button', { name: SAVE_BRIEF })).toBeDisabled();
   });
 
-  it('preserves the project-settings mutation boundary after moving the form', async () => {
+  it('saves request shape through edit_project before Film setup authoring', async () => {
     const { callbacks, editProject } = makeMutations();
     render(<MenuHarness mutations={callbacks} />);
-    const dialog = await openSettings();
+    const dialog = await openBriefAndRules();
 
-    fireEvent.change(within(dialog).getByLabelText(NAME), { target: { value: 'Retitled film' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_SETTINGS }));
+    fireEvent.click(within(dialog).getByRole('combobox', { name: ASPECT_RATIO }));
+    fireEvent.click(await screen.findByRole('option', { name: '9:16' }));
+    fireEvent.click(within(dialog).getByRole('combobox', { name: RESOLUTION }));
+    fireEvent.click(await screen.findByRole('option', { name: '1080p' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_BRIEF }));
 
     await waitFor(() => expect(editProject).toHaveBeenCalledTimes(1));
-    expect(editProject).toHaveBeenCalledWith({ name: 'Retitled film' });
+    expect(editProject).toHaveBeenCalledWith({ aspectRatio: '9:16', resolution: '1080p' });
   });
 
-  it('resets every project-setting draft without issuing a mutation', async () => {
-    const { callbacks, editProject } = makeMutations();
+  it('resets every Film setup draft without issuing a mutation', async () => {
+    const { callbacks, editProject, applyAuthoring } = makeMutations();
     render(<MenuHarness mutations={callbacks} />);
-    const dialog = await openSettings();
+    const dialog = await openBriefAndRules();
 
-    fireEvent.change(within(dialog).getByLabelText(NAME), { target: { value: 'Unsaved title' } });
-    fireEvent.change(within(dialog).getByLabelText(TARGET_DURATION), { target: { value: '30' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: RESET_SETTINGS }));
+    fireEvent.change(within(dialog).getByLabelText(BRIEF), { target: { value: 'Unsaved brief' } });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: ASPECT_RATIO }));
+    fireEvent.click(await screen.findByRole('option', { name: '9:16' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: RESET_FILM_SETUP }));
 
-    expect(within(dialog).getByLabelText(NAME)).toHaveValue('Launch film');
-    expect(within(dialog).getByLabelText(TARGET_DURATION)).toHaveValue('12');
+    expect(within(dialog).getByLabelText(BRIEF)).toHaveValue('A launch film.');
+    expect(within(dialog).getByRole('combobox', { name: ASPECT_RATIO })).toHaveTextContent('16:9');
     expect(editProject).not.toHaveBeenCalled();
+    expect(applyAuthoring).not.toHaveBeenCalled();
   });
 
-  it('normalizes an unchanged settings save as a local no-op and resets the draft', async () => {
-    const { callbacks, editProject } = makeMutations();
+  it('normalizes an unchanged Film setup save as a local no-op', async () => {
+    const { callbacks, editProject, applyAuthoring } = makeMutations();
     render(<MenuHarness mutations={callbacks} />);
-    const dialog = await openSettings();
+    const dialog = await openBriefAndRules();
 
-    fireEvent.change(within(dialog).getByLabelText(NAME), { target: { value: ' Launch film ' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_SETTINGS }));
+    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_BRIEF }));
 
     expect(editProject).not.toHaveBeenCalled();
-    await waitFor(() => expect(within(dialog).getByLabelText(NAME)).toHaveValue('Launch film'));
+    expect(applyAuthoring).not.toHaveBeenCalled();
   });
 
-  it('keeps request-shape fields locked while name edits remain saveable', async () => {
-    const { callbacks, editProject } = makeMutations();
-    render(<MenuHarness mutations={callbacks} requestShapeLocked />);
-    const dialog = await openSettings();
+  it('keeps request-shape fields locked and omits an already-dirty shape while saving authoring', async () => {
+    const { callbacks, editProject, applyAuthoring } = makeMutations();
+    const { rerender } = render(<MenuHarness mutations={callbacks} />);
+    const dialog = await openBriefAndRules();
+
+    fireEvent.click(within(dialog).getByRole('combobox', { name: ASPECT_RATIO }));
+    fireEvent.click(await screen.findByRole('option', { name: '9:16' }));
+    fireEvent.change(within(dialog).getByLabelText(BRIEF), { target: { value: 'Safe brief edit.' } });
+    rerender(<MenuHarness mutations={callbacks} requestShapeLocked />);
 
     expect(
       within(dialog).getByText('conversation.creativeStudio.workspace.controls.requestShapeLocked')
@@ -973,23 +977,56 @@ describe('WorkspaceProjectMenu', () => {
       'true'
     );
 
-    fireEvent.change(within(dialog).getByLabelText(NAME), { target: { value: 'Safe rename' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_SETTINGS }));
-    await waitFor(() => expect(editProject).toHaveBeenCalledWith({ name: 'Safe rename' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_BRIEF }));
+    await waitFor(() =>
+      expect(applyAuthoring).toHaveBeenCalledWith([{ kind: 'set_brief', brief: 'Safe brief edit.' }])
+    );
+    expect(editProject).not.toHaveBeenCalled();
   });
 
-  it('preserves settings input when the settings mutation fails', async () => {
+  it('preserves request-shape and authoring drafts when the shape mutation fails', async () => {
     const { callbacks } = makeMutations();
     const editProject = vi.fn(async () => false);
+    const applyAuthoring = vi.fn(async () => true);
     callbacks.editProject = editProject;
+    callbacks.applyAuthoring = applyAuthoring;
     render(<MenuHarness mutations={callbacks} />);
-    const dialog = await openSettings();
+    const dialog = await openBriefAndRules();
 
-    fireEvent.change(within(dialog).getByLabelText(NAME), { target: { value: 'Retry this title' } });
-    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_SETTINGS }));
+    fireEvent.click(within(dialog).getByRole('combobox', { name: ASPECT_RATIO }));
+    fireEvent.click(await screen.findByRole('option', { name: '9:16' }));
+    fireEvent.change(within(dialog).getByLabelText(BRIEF), { target: { value: 'Retry this brief.' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_BRIEF }));
     await waitFor(() => expect(editProject).toHaveBeenCalledTimes(1));
 
-    expect(within(dialog).getByLabelText(NAME)).toHaveValue('Retry this title');
+    expect(within(dialog).getByRole('combobox', { name: ASPECT_RATIO })).toHaveTextContent('9:16');
+    expect(within(dialog).getByLabelText(BRIEF)).toHaveValue('Retry this brief.');
+    expect(applyAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('retains only the unsaved authoring draft when the second Film setup mutation fails', async () => {
+    const { callbacks, editProject, saveFilmSetup } = makeMutations();
+    const applyAuthoring = vi.fn(async () => false);
+    callbacks.applyAuthoring = applyAuthoring;
+    render(<MenuHarness mutations={callbacks} />);
+    const dialog = await openBriefAndRules();
+
+    fireEvent.click(within(dialog).getByRole('combobox', { name: ASPECT_RATIO }));
+    fireEvent.click(await screen.findByRole('option', { name: '9:16' }));
+    fireEvent.change(within(dialog).getByLabelText(BRIEF), { target: { value: 'Retry only this brief.' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: SAVE_BRIEF }));
+
+    await waitFor(() => expect(editProject).toHaveBeenCalledWith({ aspectRatio: '9:16' }));
+    await waitFor(() =>
+      expect(applyAuthoring).toHaveBeenCalledWith([{ kind: 'set_brief', brief: 'Retry only this brief.' }])
+    );
+    expect(saveFilmSetup).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 7,
+      projectChanges: { aspectRatio: '9:16' },
+      authoringOperations: [{ kind: 'set_brief', brief: 'Retry only this brief.' }],
+    });
+    expect(within(dialog).getByLabelText(BRIEF)).toHaveValue('Retry only this brief.');
   });
 
   it('preserves the narrow Brief mutation after moving the form', async () => {

@@ -1921,7 +1921,7 @@ describe('useWorkspaceDrafts', () => {
     ['valid', '[{"id":"rule_1","text":"Keep the subject centered"}]'],
     ['malformed', '{not-json'],
   ] as const)(
-    'synchronously discards a %s legacy Brief rules draft without contaminating current draft state',
+    'synchronously discards %s retired rules, name, and target drafts without contaminating current state',
     async (_payloadKind, legacyRulesValue) => {
       window.sessionStorage.setItem(
         storageKey,
@@ -1935,6 +1935,8 @@ describe('useWorkspaceDrafts', () => {
               value: legacyRulesValue,
             },
             'settings.name': { baseValue: 'Launch film', value: 'Renamed film' },
+            'settings.targetDurationSeconds': { baseValue: 30, value: 45 },
+            'brief.text': { baseValue: 'Launch film', value: 'A tighter launch film' },
           },
           selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
         })
@@ -1947,6 +1949,8 @@ describe('useWorkspaceDrafts', () => {
           canonicalValues: {
             'brief.rules': '[]',
             'settings.name': 'Launch film',
+            'settings.targetDurationSeconds': 30,
+            'brief.text': 'Launch film',
           },
           activeBeatIds: [],
           activeShotIds: [],
@@ -1963,14 +1967,14 @@ describe('useWorkspaceDrafts', () => {
         currentGenerationAffecting: hasGenerationAffectingWorkspaceDrafts(view.result.current.dirtyKeys),
       }).toEqual({
         entries: {
-          'settings.name': { baseValue: 'Launch film', value: 'Renamed film' },
+          'brief.text': { baseValue: 'Launch film', value: 'A tighter launch film' },
         },
-        dirtyKeys: ['settings.name'],
+        dirtyKeys: ['brief.text'],
         dirtyCount: 1,
         conflictKeys: [],
         staleRevision: false,
         legacyGenerationAffecting: false,
-        currentGenerationAffecting: false,
+        currentGenerationAffecting: true,
       });
 
       await waitFor(() => {
@@ -1978,7 +1982,7 @@ describe('useWorkspaceDrafts', () => {
           entries?: Record<string, unknown>;
         };
         expect(persisted.entries).toEqual({
-          'settings.name': { baseValue: 'Launch film', value: 'Renamed film' },
+          'brief.text': { baseValue: 'Launch film', value: 'A tighter launch film' },
         });
       });
     }

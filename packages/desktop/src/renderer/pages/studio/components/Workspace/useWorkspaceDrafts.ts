@@ -82,7 +82,7 @@ const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 // Task 8's raw rule document was replaced by typed, revision-guarded rule commands. Never revive
 // that opaque scalar from an older session: it can exceed the scalar bound, conflict invisibly, and
 // overwrite rules added by the Director after the draft was captured.
-const RETIRED_DRAFT_KEYS = new Set(['brief.rules']);
+const RETIRED_DRAFT_KEYS = new Set(['brief.rules', 'settings.name', 'settings.targetDurationSeconds']);
 const WORKSPACE_DRAFT_STORAGE_PREFIX = 'aionui:creative-studio:v3:workspace-drafts:';
 const RETIRED_WORKSPACE_DRAFT_STORAGE_PREFIX = 'aionui:creative-studio:v2:workspace-drafts:';
 

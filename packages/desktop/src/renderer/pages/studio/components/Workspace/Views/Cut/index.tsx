@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Select, Slider } from '@arco-design/web-react';
+import { Alert, Button, InputNumber, Select, Slider } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -48,12 +48,18 @@ export type CutActions = {
   detachBedAudio: (assetId: string) => Promise<boolean>;
 };
 
+export type CutProjectEditAuthority = {
+  projectId: string;
+  expectedRevision: number;
+};
+
 export type CutViewProps = {
   projectId: string;
   projection: WorkspaceProjection;
   pending: boolean;
   actions: CutActions;
   onOpenBeat: (beatId: string) => void;
+  onSetTargetDuration?: (seconds: number, authority: CutProjectEditAuthority) => Promise<boolean>;
 };
 
 const moveOrder = (order: readonly string[], from: number, to: number): string[] | null => {
@@ -69,13 +75,23 @@ const selectedBedId = (projection: WorkspaceProjection): string | null =>
   projection.cut.bed.status === 'none' || projection.cut.bed.status === 'invalid' ? null : projection.cut.bed.assetId;
 
 /** Film-level Cut controls. Beat internals and paid generation remain outside this surface. */
-export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending, actions, onOpenBeat }) => {
+export const CutView: React.FC<CutViewProps> = ({
+  projectId,
+  projection,
+  pending,
+  actions,
+  onOpenBeat,
+  onSetTargetDuration,
+}) => {
   const { t } = useTranslation();
   const [announcement, setAnnouncement] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [reorderFocusId, setReorderFocusId] = useState<string | null>(null);
   const [selectedBeatId, setSelectedBeatId] = useState<string | null>(() => projection.cut.beats[0]?.id ?? null);
   const [playback, setPlayback] = useState<CutPlaybackNavigation>(EMPTY_CUT_PLAYBACK_NAVIGATION);
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [targetDraft, setTargetDraft] = useState(projection.cut.targetDurationSeconds ?? 5);
+  const [targetPending, setTargetPending] = useState(false);
   const summaryTitleId = useId();
   const actionPendingRef = useRef(false);
   const draggedBeatIdRef = useRef<string | null>(null);
@@ -96,6 +112,38 @@ export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending
   const locked = pending || actionPendingRef.current || projectId !== projection.projectId;
   const currentBedId = selectedBedId(projection);
   const currentBed = projection.cut.audioImports.find((asset) => asset.assetId === currentBedId) ?? null;
+  const canonicalTargetDuration = projection.cut.targetDurationSeconds;
+  const targetDraftValid = Number.isSafeInteger(targetDraft) && targetDraft >= 5 && targetDraft <= 1440;
+  const targetEditAuthorityRef = useRef<(CutProjectEditAuthority & { targetDurationSeconds: number | null }) | null>(
+    null
+  );
+
+  useEffect(() => {
+    setEditingTarget(false);
+    setTargetDraft(canonicalTargetDuration ?? 5);
+    setTargetPending(false);
+    targetEditAuthorityRef.current = null;
+  }, [projectId]);
+
+  useEffect(() => {
+    if (!editingTarget && canonicalTargetDuration !== null) setTargetDraft(canonicalTargetDuration);
+  }, [canonicalTargetDuration, editingTarget]);
+  useEffect(() => {
+    const authority = targetEditAuthorityRef.current;
+    if (
+      !editingTarget ||
+      targetPending ||
+      authority === null ||
+      (authority.projectId === projectId &&
+        authority.expectedRevision === projection.projectRevision &&
+        authority.targetDurationSeconds === canonicalTargetDuration)
+    ) {
+      return;
+    }
+    targetEditAuthorityRef.current = null;
+    setTargetDraft(canonicalTargetDuration ?? 5);
+    setEditingTarget(false);
+  }, [canonicalTargetDuration, editingTarget, projectId, projection.projectRevision, targetPending]);
   useEffect(() => {
     if (reorderFocusId === null || busyKey !== null) return;
     const control = segmentRefs.current.get(reorderFocusId);
@@ -169,6 +217,41 @@ export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending
     setAnnouncement(
       t(`${CUT_ROOT}.bed.${changed === true ? (assetId === null ? 'cleared' : 'selected') : 'setFailed'}`)
     );
+  };
+
+  const saveTargetDuration = async (): Promise<void> => {
+    if (onSetTargetDuration === undefined || pending || targetPending || !targetDraftValid) return;
+    const authority = targetEditAuthorityRef.current;
+    if (
+      authority === null ||
+      authority.projectId !== projectId ||
+      authority.expectedRevision !== projection.projectRevision ||
+      authority.targetDurationSeconds !== canonicalTargetDuration
+    ) {
+      targetEditAuthorityRef.current = null;
+      setTargetDraft(canonicalTargetDuration ?? 5);
+      setEditingTarget(false);
+      return;
+    }
+    if (targetDraft === canonicalTargetDuration) {
+      targetEditAuthorityRef.current = null;
+      setEditingTarget(false);
+      return;
+    }
+    setTargetPending(true);
+    try {
+      if (
+        await onSetTargetDuration(targetDraft, {
+          projectId: authority.projectId,
+          expectedRevision: authority.expectedRevision,
+        })
+      ) {
+        targetEditAuthorityRef.current = null;
+        setEditingTarget(false);
+      }
+    } finally {
+      setTargetPending(false);
+    }
   };
 
   const bedStatus = projection.cut.bed;
@@ -254,11 +337,70 @@ export const CutView: React.FC<CutViewProps> = ({ projectId, projection, pending
               </span>
             )}
             <span className={styles.filmTarget}>
-              <bdi dir='auto'>
-                {targetClock === null
-                  ? t(`${CUT_ROOT}.film.targetUnknown`)
-                  : t(`${CUT_ROOT}.film.ofTarget`, { clock: targetClock })}
-              </bdi>
+              {editingTarget ? (
+                <span className={styles.targetEditor}>
+                  <InputNumber
+                    aria-label={t('conversation.creativeStudio.workspace.controls.targetDuration')}
+                    disabled={pending || targetPending}
+                    error={!targetDraftValid}
+                    max={1440}
+                    min={5}
+                    precision={0}
+                    size='mini'
+                    value={targetDraft}
+                    onChange={(value) => setTargetDraft(value)}
+                  />
+                  <Button
+                    disabled={pending || targetPending || !targetDraftValid}
+                    loading={targetPending}
+                    size='mini'
+                    type='primary'
+                    onClick={() => void saveTargetDuration()}
+                  >
+                    {t('common.save')}
+                  </Button>
+                  <Button
+                    disabled={pending || targetPending}
+                    size='mini'
+                    onClick={() => {
+                      targetEditAuthorityRef.current = null;
+                      setTargetDraft(canonicalTargetDuration ?? 5);
+                      setEditingTarget(false);
+                    }}
+                  >
+                    {t('common.cancel')}
+                  </Button>
+                </span>
+              ) : (
+                <>
+                  <bdi dir='auto'>
+                    {targetClock === null
+                      ? t(`${CUT_ROOT}.film.targetUnknown`)
+                      : t(`${CUT_ROOT}.film.ofTarget`, { clock: targetClock })}
+                  </bdi>
+                  {onSetTargetDuration === undefined ? null : (
+                    <Button
+                      aria-label={`${t('common.edit')}: ${t(
+                        'conversation.creativeStudio.workspace.controls.targetDuration'
+                      )}`}
+                      disabled={pending}
+                      size='mini'
+                      type='text'
+                      onClick={() => {
+                        targetEditAuthorityRef.current = {
+                          projectId,
+                          expectedRevision: projection.projectRevision,
+                          targetDurationSeconds: canonicalTargetDuration,
+                        };
+                        setTargetDraft(canonicalTargetDuration ?? 5);
+                        setEditingTarget(true);
+                      }}
+                    >
+                      {t('common.edit')}
+                    </Button>
+                  )}
+                </>
+              )}
             </span>
             {film.delta === null ? null : (
               <span className={styles.filmDelta}>
