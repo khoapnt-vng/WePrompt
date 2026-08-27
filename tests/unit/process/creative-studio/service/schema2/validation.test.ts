@@ -331,7 +331,12 @@ const makeAuthorization = (
     expiresAt,
     confirmedAt,
     providerBindings: items.map((item) => ({ itemId: item.id, provider })),
-    idempotencyKeys: items.map((item) => ({ itemId: item.id, key: `idem_${id}_${item.id}` })),
+    idempotencyKeys: items.flatMap((item) =>
+      Array.from({ length: item.generationCount }, (_, attemptIndex) => ({
+        itemId: item.id,
+        key: `idem_${id}_${item.id}${attemptIndex === 0 ? '' : `_attempt_${attemptIndex + 1}`}`,
+      }))
+    ),
   };
 };
 
@@ -1625,6 +1630,112 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     addAuthorizationWithJobs(project, authorization, [makeJob('job_exact_one', authorization, item)]);
     expect(validateStudioProjectV2(project)).toBe(true);
     item.generationCount = 2;
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
+  it('admits exactly one bounded reference-grid retry under the original quote authority', () => {
+    const project = makeProject();
+    const referenceId = 'ref_background';
+    project.referencePlanStatus = 'planned';
+    project.referenceOrder = [referenceId];
+    project.references[referenceId] = {
+      id: referenceId,
+      kind: 'background',
+      label: 'Dai pai dong',
+      prompt: 'A recurring Hong Kong street-food stall.',
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    const item = makeItem(project.revision, 'shot_1', 'reference_image', seedPlan(), 2, project.id, {
+      kind: 'reference',
+      referenceId,
+    });
+    const authorization = makeAuthorization('auth_bounded_grid_retry', project.revision, [item]);
+    const first = makeJob('job_grid_first', authorization, item);
+    addAuthorizationWithJobs(project, authorization, [first]);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    first.status = 'failed';
+    first.error = {
+      code: 'seed_still_variation_grid',
+      messageKey: 'conversation.creativeStudio.jobs.errors.seedStillVariationGrid',
+    };
+    first.spendReceipt = createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId: first.id });
+    expect(validateStudioProjectV2(project)).toBe(false);
+
+    const retry = makeJob('job_grid_retry', authorization, item, {
+      idempotencyKey: authorization.idempotencyKeys[1]!.key,
+      retryOfJobId: first.id,
+      retryReason: 'variation_grid',
+    });
+    project.jobs[retry.id] = retry;
+    project.references[referenceId]!.jobIds.push(retry.id);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    retry.retryOfJobId = null;
+    retry.retryReason = null;
+    expect(validateStudioProjectV2(project)).toBe(false);
+    retry.retryOfJobId = first.id;
+    retry.retryReason = 'variation_grid';
+    retry.idempotencyKey = first.idempotencyKey;
+    expect(validateStudioProjectV2(project)).toBe(false);
+    retry.idempotencyKey = authorization.idempotencyKeys[1]!.key;
+    retry.status = 'failed';
+    retry.error = {
+      code: 'seed_still_variation_grid',
+      messageKey: 'conversation.creativeStudio.jobs.errors.referenceVariationGridRepeated',
+    };
+    retry.spendReceipt = createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId: retry.id });
+    expect(validateStudioProjectV2(project)).toBe(true);
+    expect(retry.spendReceipt).toMatchObject({ generationCount: 1, totalMinorUnits: item.rateMinorUnits });
+  });
+
+  it('accepts canonical imported references while refusing detached imports for live work', () => {
+    const project = makeProject();
+    const referenceId = 'ref_character';
+    const assetId = 'reference_imported';
+    project.referencePlanStatus = 'planned';
+    project.referenceOrder = [referenceId];
+    project.references[referenceId] = {
+      id: referenceId,
+      kind: 'character',
+      label: 'Ming',
+      prompt: 'Ming in a red rain jacket.',
+      approvedAssetId: assetId,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    project.assets[assetId] = makeImageAsset(assetId, null, 'imports', {
+      projectReferenceId: referenceId,
+    });
+    project.shots.shot_1!.referenceBinding = {
+      status: 'ready',
+      characterReferenceIds: [referenceId],
+      backgroundReferenceId: null,
+    };
+    const item = makeItem(
+      project.revision,
+      'shot_1',
+      'seed_still',
+      seedPlan({ referenceId, kind: 'character', assetId, sha256: digest })
+    );
+    const authorization = makeAuthorization('auth_imported_reference', project.revision, [item]);
+    const job = makeJob('job_imported_reference', authorization, item);
+    addAuthorizationWithJobs(project, authorization, [job]);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    project.references[referenceId]!.approvedAssetId = null;
+    expect(validateStudioProjectV2(project)).toBe(false);
+    job.status = 'failed';
+    job.error = { code: 'timeout', messageKey: 'timeout' };
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    project.assets[assetId]!.producerJobId = 'forged_producer';
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 

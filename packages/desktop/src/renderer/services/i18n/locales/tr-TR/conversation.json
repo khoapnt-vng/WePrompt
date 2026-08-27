@@ -932,7 +932,10 @@
           "tag": {
             "running": "Çalışıyor",
             "edited": "İstem düzenlendi"
-          }
+          },
+          "importPhoto": "Fotoğraf içe aktar",
+          "removePhoto": "{{handle}} öğesini kaldır",
+          "removePhotoLocked": "Yetkilendirilmiş çalışma bu fotoğrafı kullanıyor. Fotoğrafı kaldırmadan önce çalışmayı tamamlayın veya iptal edin."
         },
         "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka plan görsellerini oluşturun. Board veya ilk kare oluşturulmadan önce güncel referansları her Shot'a bağlayın.",
         "generationScope": "Oluşturma kapsamı",
@@ -1462,7 +1465,8 @@
           "references": "Çözümlenen referanslar",
           "noReferences": "Doğrudan referans girdisi yok",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
-        }
+        },
+        "referenceGridRetry": "Model bir varyasyon ızgarası döndürürse her referans bir kez otomatik olarak yeniden denenebilir. İlk denemelerin toplamı {{lower}}; yeniden denemeler gerekirse üst sınır {{upper}}."
       },
       "editorFolderExport": {
         "action": "Editör klasörünü dışa aktar…",
@@ -1930,7 +1934,8 @@
         "downloadFailed": "Oluşturma tamamlandı ancak çıktı indirilemedi.",
         "unsupported": "Bu sağlayıcı istenen işlemi desteklemiyor.",
         "seedStillVariationGrid": "Oluşturulan görüntü çok panelli bir varyasyon ızgarası içeriyor ve geçerli ilk kare veya referans olarak kullanılamaz.",
-        "unknown": "Oluşturma işi bilinmeyen bir nedenle başarısız oldu."
+        "unknown": "Oluşturma işi bilinmeyen bir nedenle başarısız oldu.",
+        "referenceVariationGridRepeated": "Model yeniden çok panelli bir varyasyon ızgarası döndürdü. Bu referansı ayarlamanın güvenilir yolu Fotoğraf içe aktar seçeneğidir."
       }
     },
     "preview": {

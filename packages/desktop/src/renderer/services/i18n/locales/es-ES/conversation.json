@@ -931,7 +931,10 @@
           "tag": {
             "running": "En curso",
             "edited": "Prompt editado"
-          }
+          },
+          "importPhoto": "Importar foto",
+          "removePhoto": "Eliminar {{handle}}",
+          "removePhotoLocked": "Un trabajo autorizado está usando esta foto. Termina o cancela ese trabajo antes de eliminarla."
         },
         "description": "Genera primero las imágenes canónicas de los personajes y después las imágenes de los fondos recurrentes. Vincula las referencias actuales a cada Shot antes de generar el Board o el primer fotograma.",
         "generationScope": "Alcance de la generación",
@@ -1461,7 +1464,8 @@
           "references": "Referencias resueltas",
           "noReferences": "Sin entradas de referencia directas",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
-        }
+        },
+        "referenceGridRetry": "Si el modelo devuelve una cuadrícula de variaciones, cada referencia se reintentará automáticamente una vez. Los primeros intentos cuestan {{lower}}; el máximo con reintentos es {{upper}}."
       },
       "editorFolderExport": {
         "action": "Exportar carpeta para edición…",
@@ -1940,7 +1944,8 @@
         "downloadFailed": "La generación ha finalizado, pero no se ha podido descargar la salida.",
         "unsupported": "Este proveedor no admite la operación solicitada.",
         "seedStillVariationGrid": "La imagen generada contiene una cuadrícula de variaciones con varios paneles y no se puede usar como primer fotograma actual ni como referencia.",
-        "unknown": "La tarea de generación ha fallado por un motivo desconocido."
+        "unknown": "La tarea de generación ha fallado por un motivo desconocido.",
+        "referenceVariationGridRepeated": "El modelo volvió a generar una cuadrícula de variaciones con varios paneles. Importar foto es la forma fiable de establecer esta referencia."
       }
     },
     "preview": {

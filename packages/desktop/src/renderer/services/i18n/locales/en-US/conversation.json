@@ -1103,7 +1103,8 @@
         "downloadFailed": "Generation completed, but the output could not be downloaded.",
         "unsupported": "This provider does not support the requested operation.",
         "unknown": "The generation job failed for an unknown reason.",
-        "seedStillVariationGrid": "The generated image contains a multi-panel variation grid and cannot be used as a current first frame or reference."
+        "seedStillVariationGrid": "The generated image contains a multi-panel variation grid and cannot be used as a current first frame or reference.",
+        "referenceVariationGridRepeated": "The model returned another multi-panel variation grid. Import photo is the reliable way to set this reference."
       }
     },
     "preview": {
@@ -1352,7 +1353,10 @@
           "tag": {
             "running": "Running",
             "edited": "Prompt edited"
-          }
+          },
+          "importPhoto": "Import photo",
+          "removePhoto": "Remove {{handle}}",
+          "removePhotoLocked": "Authorized work is using this photo. Finish or cancel that work before removing it."
         },
         "description": "Generate canonical character images first, then recurring-background images. Bind the current references to each Shot before Board or first-frame generation.",
         "generationScope": "Generation scope",
@@ -2317,7 +2321,8 @@
           "references": "Resolved references",
           "noReferences": "No direct reference inputs",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
-        }
+        },
+        "referenceGridRetry": "If the model returns a variation grid, each reference can retry once automatically. The first attempts total {{lower}}; the maximum with retries is {{upper}}."
       },
       "review": {
         "title": "Reviewed Director output"

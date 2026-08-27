@@ -127,6 +127,7 @@ import type {
   StudioEditProjectSettingsRequestV2,
   StudioImportManagedMediaResultV2,
   StudioImportBedAudioRequestV2,
+  StudioImportReferenceImageRequestV2,
   StudioImportSeedStillRequestV2,
   StudioJobRequest,
   StudioGenerationCapabilityRequestV2,
@@ -1359,6 +1360,10 @@ export const creativeStudio = {
     StudioCommandResult<StudioImportManagedMediaResultV2>,
     StudioImportSeedStillRequestV2
   >('creative-studio.import-seed-still'),
+  importReferenceImage: bridge.buildProvider<
+    StudioCommandResult<StudioImportManagedMediaResultV2>,
+    StudioImportReferenceImageRequestV2
+  >('creative-studio.import-reference-image'),
   importBedAudio: bridge.buildProvider<
     StudioCommandResult<StudioImportManagedMediaResultV2>,
     StudioImportBedAudioRequestV2

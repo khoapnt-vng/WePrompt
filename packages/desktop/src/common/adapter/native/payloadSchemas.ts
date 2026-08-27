@@ -506,6 +506,7 @@ const studioV2AuthoringOperationSchema = z.discriminatedUnion('kind', [
     })
     .strict(),
   z.object({ kind: z.literal('select_reference_image'), referenceId: safeIdSchema, assetId: safeIdSchema }).strict(),
+  z.object({ kind: z.literal('remove_reference_image'), referenceId: safeIdSchema, assetId: safeIdSchema }).strict(),
   z
     .object({
       kind: z.literal('set_shot_reference_binding'),
@@ -992,6 +993,9 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.delete-project': z.object(studioV2MutationRequestShape).strict(),
   'creative-studio.persist-captured-poster': studioV2CapturedPosterSchema,
   'creative-studio.import-seed-still': z.object({ ...studioV2MutationRequestShape, shotId: safeIdSchema }).strict(),
+  'creative-studio.import-reference-image': z
+    .object({ ...studioV2MutationRequestShape, referenceId: safeIdSchema })
+    .strict(),
   'creative-studio.import-bed-audio': z.object(studioV2MutationRequestShape).strict(),
   'creative-studio.detach-bed-audio': z.object({ ...studioV2MutationRequestShape, assetId: safeIdSchema }).strict(),
   'creative-studio.set-bed': z.object({ ...studioV2MutationRequestShape, assetId: safeIdSchema.nullable() }).strict(),

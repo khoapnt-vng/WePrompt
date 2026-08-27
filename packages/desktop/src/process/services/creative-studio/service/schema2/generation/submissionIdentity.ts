@@ -9,6 +9,7 @@ import type { StudioGenerationTargetV2, StudioQuotedGeneration } from '@/common/
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const QUOTED_GENERATION_ID_NAMESPACE = 'creative-studio/quoted-generation/v2';
+const AUTOMATIC_REFERENCE_RETRY_JOB_ID_NAMESPACE = 'creative-studio/automatic-reference-retry-job/v2';
 
 export type StudioQuotedGenerationIdentityInput = {
   projectId: string;
@@ -50,4 +51,25 @@ export const createStudioQuotedGenerationId = (input: StudioQuotedGenerationIden
     input.purpose,
   ].join('\0');
   return `item_${createHash('sha256').update(canonical, 'utf8').digest('hex')}`;
+};
+
+/**
+ * Returns the one deterministic job identity for an authorization's reserved reference retry.
+ * Re-derivation after a crash therefore finds the same durable attempt instead of minting another.
+ */
+export const createStudioAutomaticReferenceRetryJobId = (input: {
+  authorizationId: string;
+  itemId: string;
+  idempotencyKey: string;
+}): string => {
+  assertSafeId(input.authorizationId, 'authorizationId');
+  assertSafeId(input.itemId, 'itemId');
+  assertSafeId(input.idempotencyKey, 'idempotencyKey');
+  const canonical = [
+    AUTOMATIC_REFERENCE_RETRY_JOB_ID_NAMESPACE,
+    input.authorizationId,
+    input.itemId,
+    input.idempotencyKey,
+  ].join('\0');
+  return `job_${createHash('sha256').update(canonical, 'utf8').digest('hex')}`;
 };

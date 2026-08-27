@@ -80,6 +80,36 @@ describe('calculateStudioQuotedGenerationAmounts', () => {
     });
   });
 
+  it('prices one required reference attempt plus one bounded variation-grid contingency', () => {
+    expect(
+      calculateStudioQuotedGenerationAmounts(
+        makeItem({
+          target: { kind: 'reference', referenceId: 'reference_1' },
+          purpose: 'reference_image',
+          generationCount: 2,
+          requestPlan: {
+            kind: 'resolved',
+            snapshot: {
+              prompt: 'One candid portrait.',
+              aspectRatio: '16:9',
+              resolution: '1080p',
+              durationSeconds: 5,
+              referenceInputs: [],
+              conditioningInput: null,
+            },
+          },
+          rateUnit: 'generation',
+          rateMinorUnits: 25,
+        })
+      )
+    ).toEqual({ oneGenerationMinorUnits: 25, requestedTotalMinorUnits: 50 });
+    expect(
+      calculateStudioQuotedGenerationAmounts(
+        makeItem({ purpose: 'seed_still', generationCount: 2, rateUnit: 'generation' })
+      )
+    ).toBeNull();
+  });
+
   it.each([
     makeItem({ purpose: 'seed_still', rateUnit: 'second' }),
     makeItem({ purpose: 'board_still', rateUnit: 'second' }),

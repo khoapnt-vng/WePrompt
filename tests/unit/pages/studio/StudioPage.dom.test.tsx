@@ -103,6 +103,7 @@ const mocks = vi.hoisted(() => {
       editProject: { invoke: vi.fn() },
       setRules: { invoke: vi.fn() },
       importSeedStill: { invoke: vi.fn() },
+      importReferenceImage: { invoke: vi.fn() },
       persistCapturedPoster: { invoke: vi.fn() },
       parkShot: { invoke: vi.fn() },
       parkBeat: { invoke: vi.fn() },
@@ -398,6 +399,39 @@ const projectWithCandidateReference = (): StudioRendererProjectV2 => {
   value.imageRouteId = 'route_image';
   value.references.reference_3!.approvedAssetId = 'asset_reference_3';
   value.references.reference_3!.supersededAssetIds = ['asset_reference_3_old'];
+  return value;
+};
+
+const projectWithRemovableReferenceTakes = (): StudioRendererProjectV2 => {
+  const value = projectWithGenerationReferences(1);
+  const reference = value.references.reference_character!;
+  const currentAsset = value.assets.asset_reference_character!;
+  const currentJob = value.jobs.job_reference_character!;
+  const oldAssetId = 'asset_reference_character_old';
+  const oldJobId = 'job_reference_character_old';
+
+  currentAsset.createdAt = '2026-01-01T00:00:02.000Z';
+  currentJob.createdAt = '2026-01-01T00:00:02.000Z';
+  currentJob.updatedAt = '2026-01-01T00:00:02.000Z';
+  value.assets[oldAssetId] = {
+    ...structuredClone(currentAsset),
+    id: oldAssetId,
+    managedAsset: { collection: 'assets', fileName: `${oldAssetId}.png` },
+    sha256: 'e'.repeat(64),
+    producerJobId: oldJobId,
+    compositionDigest: 'f'.repeat(64),
+    createdAt: '2026-01-01T00:00:01.000Z',
+  };
+  value.jobs[oldJobId] = {
+    ...structuredClone(currentJob),
+    id: oldJobId,
+    outputAssetIds: [oldAssetId],
+    outputAssetIdsByRole: { primary: oldAssetId, poster: null },
+    createdAt: '2026-01-01T00:00:01.000Z',
+    updatedAt: '2026-01-01T00:00:01.000Z',
+  };
+  reference.supersededAssetIds = [oldAssetId];
+  reference.jobIds = [oldJobId, currentJob.id];
   return value;
 };
 
@@ -1445,6 +1479,7 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.bridge.editProject.invoke.mockResolvedValue(commit(4));
     mocks.bridge.setRules.invoke.mockResolvedValue(commit(4));
     mocks.bridge.importSeedStill.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.importReferenceImage.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
     mocks.bridge.importBedAudio.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
     mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 4 }));
     mocks.bridge.setBed.invoke.mockResolvedValue(commit(4));
@@ -2004,6 +2039,281 @@ describe('StudioPage schema-5 cutover', () => {
     expect(
       await screen.findByText('conversation.creativeStudio.workspace.referenceWorkflow.panel.status.current')
     ).toBeVisible();
+  });
+
+  it('removes only the exact current reference take, preserves durable history, and retains the final binding', async () => {
+    const authority = projectWithRemovableReferenceTakes();
+    const afterCurrentRemoval = structuredClone(authority);
+    afterCurrentRemoval.revision = 4;
+    afterCurrentRemoval.references.reference_character!.approvedAssetId = 'asset_reference_character_old';
+    afterCurrentRemoval.references.reference_character!.supersededAssetIds = [];
+    const afterFinalRemoval = structuredClone(afterCurrentRemoval);
+    afterFinalRemoval.revision = 5;
+    afterFinalRemoval.references.reference_character!.approvedAssetId = null;
+    const assetsBefore = structuredClone(authority.assets);
+    const jobsBefore = structuredClone(authority.jobs);
+    const bindingBefore = structuredClone(authority.shots.shot_0!.referenceBinding);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValueOnce(projectWorkspaceLoad(afterCurrentRemoval))
+      .mockResolvedValue(projectWorkspaceLoad(afterFinalRemoval));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValueOnce(commit(4)).mockResolvedValueOnce(commit(5));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().removeImage('reference_character', 'asset_reference_character')
+      )
+    ).resolves.toBe(true);
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().removeImage('reference_character', 'asset_reference_character_old')
+      )
+    ).resolves.toBe(true);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke.mock.calls.map(([request]) => request)).toEqual([
+      {
+        projectId: 'project_1',
+        expectedRevision: 3,
+        operations: [
+          {
+            kind: 'remove_reference_image',
+            referenceId: 'reference_character',
+            assetId: 'asset_reference_character',
+          },
+        ],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 4,
+        operations: [
+          {
+            kind: 'remove_reference_image',
+            referenceId: 'reference_character',
+            assetId: 'asset_reference_character_old',
+          },
+        ],
+      },
+    ]);
+    expect(afterFinalRemoval.assets).toEqual(assetsBefore);
+    expect(afterFinalRemoval.jobs).toEqual(jobsBefore);
+    expect(afterFinalRemoval.shots.shot_0!.referenceBinding).toEqual(bindingBefore);
+    expect(afterFinalRemoval.references.reference_character).toMatchObject({
+      approvedAssetId: null,
+      supersededAssetIds: [],
+    });
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails reference-image removal closed before IPC and after refused or malformed durable refreshes', async () => {
+    const authority = projectWithRemovableReferenceTakes();
+    const malformedRefresh = structuredClone(authority);
+    malformedRefresh.revision = 4;
+    malformedRefresh.references.reference_character!.approvedAssetId = 'asset_reference_character_old';
+    malformedRefresh.references.reference_character!.supersededAssetIds = [];
+    delete malformedRefresh.assets.asset_reference_character;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(malformedRefresh));
+    mocks.bridge.applyAuthoringBatch.invoke
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'stale_revision', messageKey: 'native.removeReferenceFailed' },
+      })
+      .mockResolvedValueOnce(commit(4));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    const references = capturedReferenceActions();
+
+    await expect(references.removeImage('missing_reference', 'asset_reference_character')).resolves.toBe(false);
+    await expect(references.removeImage('reference_character', 'asset_reference_character_old')).resolves.toBe(false);
+    await expect(
+      invokeStudioAction(() => references.removeImage('reference_character', 'asset_reference_character'))
+    ).resolves.toBe(false);
+    expect(await screen.findByText('native.removeReferenceFailed')).toBeVisible();
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().removeImage('reference_character', 'asset_reference_character')
+      )
+    ).resolves.toBe(false);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps reference removal locked while an exact frozen input has free download recovery', async () => {
+    const authority = projectWithGenerationReferences(1);
+    const referenceAsset = authority.assets.asset_reference_character!;
+    const recoverableJob: StudioRendererJobV2 = {
+      ...structuredClone(authority.jobs.job_reference_character!),
+      id: 'job_seed_download_failed',
+      target: { kind: 'shot', shotId: 'shot_0' },
+      status: 'failed',
+      outputAssetIds: [],
+      outputAssetIdsByRole: { primary: null, poster: null },
+      error: {
+        code: 'download_failed',
+        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+      },
+      canCancel: false,
+      canRetry: false,
+      canRetryDownload: true,
+      purpose: 'seed_still',
+      composition: testComposition({ kind: 'shot', shotId: 'shot_0' }, 'seed_still', {
+        referenceInputs: [
+          {
+            referenceId: 'reference_character',
+            kind: 'character',
+            assetId: referenceAsset.id,
+            sha256: referenceAsset.sha256,
+          },
+        ],
+      }),
+    };
+    authority.jobs[recoverableJob.id] = recoverableJob;
+    authority.shots.shot_0!.jobIds.push(recoverableJob.id);
+    mockSupportedProject(authority);
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    const remove = screen.getByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
+    });
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAttribute(
+      'title',
+      'conversation.creativeStudio.workspace.referenceWorkflow.panel.removePhotoLocked'
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not lock reference removal for a download failure with no free recovery', async () => {
+    const authority = projectWithGenerationReferences(1);
+    const referenceAsset = authority.assets.asset_reference_character!;
+    const terminalJob: StudioRendererJobV2 = {
+      ...structuredClone(authority.jobs.job_reference_character!),
+      id: 'job_seed_local_download_failed',
+      target: { kind: 'shot', shotId: 'shot_0' },
+      status: 'failed',
+      outputAssetIds: [],
+      outputAssetIdsByRole: { primary: null, poster: null },
+      error: {
+        code: 'download_failed',
+        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+      },
+      canCancel: false,
+      canRetry: false,
+      canRetryDownload: false,
+      purpose: 'seed_still',
+      composition: testComposition({ kind: 'shot', shotId: 'shot_0' }, 'seed_still', {
+        referenceInputs: [
+          {
+            referenceId: 'reference_character',
+            kind: 'character',
+            assetId: referenceAsset.id,
+            sha256: referenceAsset.sha256,
+          },
+        ],
+      }),
+    };
+    authority.jobs[terminalJob.id] = terminalJob;
+    authority.shots.shot_0!.jobIds.push(terminalJob.id);
+    mockSupportedProject(authority);
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    expect(
+      screen.getByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
+      })
+    ).toBeEnabled();
+  });
+
+  it('imports an exact reference photo and accepts only a preservation-complete durable refresh', async () => {
+    const authority = projectWithGenerationReferences(1);
+    const importedAssetId = 'asset_reference_character_imported';
+    const refreshed = structuredClone(authority);
+    refreshed.revision = 4;
+    refreshed.references.reference_character!.approvedAssetId = importedAssetId;
+    refreshed.references.reference_character!.supersededAssetIds = ['asset_reference_character'];
+    refreshed.assets[importedAssetId] = {
+      id: importedAssetId,
+      projectId: authority.id,
+      shotId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: `${importedAssetId}.png` },
+      byteSize: 32,
+      sha256: 'f'.repeat(64),
+      createdAt: '2026-01-01T00:00:03.000Z',
+      projectReferenceId: 'reference_character',
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
+    };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(refreshed));
+    mocks.bridge.importReferenceImage.invoke.mockResolvedValueOnce(
+      ok({ status: 'imported' as const, assetId: importedAssetId, projectRevision: 4 })
+    );
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(invokeStudioAction(() => capturedReferenceActions().importPhoto('reference_character'))).resolves.toBe(
+      true
+    );
+    expect(mocks.bridge.importReferenceImage.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      referenceId: 'reference_character',
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails reference-photo import closed for invalid, cancelled, refused, stale, and thrown results', async () => {
+    const authority = projectWithGenerationReferences(1);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(projectWorkspaceLoad(authority));
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    const references = capturedReferenceActions();
+
+    await expect(references.importPhoto('missing_reference')).resolves.toBe(false);
+    expect(mocks.bridge.importReferenceImage.invoke).not.toHaveBeenCalled();
+
+    await expect(invokeStudioAction(() => references.importPhoto('reference_character'))).resolves.toBe(false);
+    mocks.bridge.importReferenceImage.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.importReferenceFailed' },
+    });
+    await expect(invokeStudioAction(() => references.importPhoto('reference_character'))).resolves.toBe(false);
+    expect(await screen.findByText('native.importReferenceFailed')).toBeVisible();
+
+    mocks.bridge.importReferenceImage.invoke.mockResolvedValueOnce(
+      ok({ status: 'imported' as const, assetId: 'stale_import', projectRevision: 4 })
+    );
+    await expect(invokeStudioAction(() => references.importPhoto('reference_character'))).resolves.toBe(false);
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+
+    mocks.bridge.importReferenceImage.invoke.mockRejectedValueOnce(new Error('native import failed'));
+    await expect(invokeStudioAction(() => references.importPhoto('reference_character'))).resolves.toBe(false);
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('fails closed across missing, refused, malformed, and stale reference selections', async () => {

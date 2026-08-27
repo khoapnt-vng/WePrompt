@@ -193,6 +193,86 @@ const makeAuthorizationInput = () => {
   };
 };
 
+const makeReferenceAuthorizationInput = (): StudioSpendAuthorizationInputV2 => {
+  const referenceId = 'reference_1';
+  const project = {
+    ...makeProject(),
+    referencePlanStatus: 'planned' as const,
+    referenceOrder: [referenceId],
+    references: {
+      [referenceId]: {
+        id: referenceId,
+        kind: 'character' as const,
+        label: 'Ming',
+        prompt: 'One candid portrait of Ming.',
+        approvedAssetId: null,
+        supersededAssetIds: [],
+        jobIds: [],
+        createdAt: '2026-08-18T00:00:00.000Z',
+        updatedAt: '2026-08-18T00:00:00.000Z',
+      },
+    },
+  };
+  const source = {
+    kind: 'project_reference' as const,
+    referenceId,
+    referenceKind: 'character' as const,
+    prompt: project.references[referenceId].prompt,
+  };
+  const composition = composeStudioGenerationV2({
+    projectRevision: project.revision,
+    brief: 'A precise cinematic frame.',
+    rules: [],
+    source,
+    purpose: 'reference_image',
+    referenceInputs: [],
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    route: imageProvider,
+    boardStyle: null,
+    instructionProfile: deriveStudioInstructionProfileV2(imageProvider, 'reference_image', source),
+  });
+  const quote = {
+    ...createStudioSubmissionQuoteCoreV2({
+      project,
+      originReferenceHandoffId: null,
+      rateCard: createStudioRateCardV2([imageRate]),
+      baseItems: [
+        {
+          target: { kind: 'reference' as const, referenceId },
+          purpose: 'reference_image' as const,
+          routeId: imageRate.routeId,
+          generationCount: 2,
+          requestPlan: createStudioResolvedGenerationRequestPlan({
+            purpose: 'reference_image',
+            template: {
+              composition,
+              aspectRatio: '16:9',
+              resolution: '1080p',
+              durationSeconds: 5,
+              referenceInputs: [],
+            },
+            conditioningInput: null,
+          }),
+        },
+      ],
+      cascadeItems: [],
+    }),
+    id: 'authorization_reference',
+    expiresAt: '2026-08-18T00:05:00.000Z',
+  };
+  const item = quote.baseItems[0]!;
+  return {
+    quote,
+    confirmedAt: '2026-08-18T00:04:00.000Z',
+    providerBindings: [{ itemId: item.id, provider: imageProvider }],
+    idempotencyKeys: [
+      { itemId: item.id, key: 'key_reference_first' },
+      { itemId: item.id, key: 'key_reference_retry' },
+    ],
+  };
+};
+
 const makeBoardAuthorizationInput = () => {
   const project = makeProject();
   project.beats.beat_1.shotOrder = ['shot_1'];
@@ -408,6 +488,43 @@ describe('schema-2 Studio spend authorization', () => {
       generationCount: 1,
       totalMinorUnits: 56,
     });
+  });
+
+  it('freezes two distinct reference attempt keys but records each submitted attempt separately', () => {
+    const authorization = createStudioSpendAuthorizationV2(makeReferenceAuthorizationInput());
+    const item = authorization.baseItems[0]!;
+    const receipt = createStudioSpendReceiptV2({
+      authorization,
+      itemId: item.id,
+      jobId: 'job_reference_retry',
+    });
+
+    expect(authorization).toMatchObject({ lowerMinorUnits: 25, upperMinorUnits: 50 });
+    expect(authorization.idempotencyKeys).toEqual([
+      { itemId: item.id, key: 'key_reference_first' },
+      { itemId: item.id, key: 'key_reference_retry' },
+    ]);
+    expect(receipt).toMatchObject({ generationCount: 1, totalMinorUnits: 25 });
+    expect(
+      studioSpendReceiptMatchesJobV2(receipt, authorization, {
+        id: 'job_reference_retry',
+        authorizationId: authorization.id,
+        authorizationItemId: item.id,
+        idempotencyKey: 'key_reference_retry',
+        purpose: 'reference_image',
+      })
+    ).toBe(true);
+
+    const missing = makeReferenceAuthorizationInput();
+    missing.idempotencyKeys.pop();
+    expect(() => createStudioSpendAuthorizationV2(missing)).toThrow(
+      expect.objectContaining({ code: 'invalid_idempotency' })
+    );
+    const duplicate = makeReferenceAuthorizationInput();
+    duplicate.idempotencyKeys[1]!.key = duplicate.idempotencyKeys[0]!.key;
+    expect(() => createStudioSpendAuthorizationV2(duplicate)).toThrow(
+      expect.objectContaining({ code: 'invalid_idempotency' })
+    );
   });
 
   it('records a Board panel as one image generation with no billable duration', () => {

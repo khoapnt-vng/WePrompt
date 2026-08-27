@@ -936,7 +936,10 @@
           "tag": {
             "running": "Em execução",
             "edited": "Prompt editado"
-          }
+          },
+          "importPhoto": "Importar foto",
+          "removePhoto": "Remover {{handle}}",
+          "removePhotoLocked": "Um trabalho autorizado está usando esta foto. Conclua ou cancele esse trabalho antes de remover a foto."
         },
         "description": "Gere primeiro as imagens canônicas dos personagens e depois as imagens dos cenários recorrentes. Vincule as referências atuais a cada Shot antes de gerar o Board ou o primeiro quadro.",
         "generationScope": "Escopo da geração",
@@ -1466,7 +1469,8 @@
           "references": "Referências resolvidas",
           "noReferences": "Sem entradas diretas de referência",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
-        }
+        },
+        "referenceGridRetry": "Se o modelo retornar uma grade de variações, cada referência poderá ser tentada novamente uma vez de forma automática. As primeiras tentativas custam {{lower}}; o máximo com novas tentativas é {{upper}}."
       },
       "editorFolderExport": {
         "action": "Exportar pasta para edição…",
@@ -1945,7 +1949,8 @@
         "downloadFailed": "A geração foi concluída, mas não foi possível baixar a saída.",
         "unsupported": "Este provedor não aceita a operação solicitada.",
         "seedStillVariationGrid": "A imagem gerada contém uma grade de variações com vários painéis e não pode ser usada como primeiro quadro atual nem como referência.",
-        "unknown": "O trabalho de geração falhou por um motivo desconhecido."
+        "unknown": "O trabalho de geração falhou por um motivo desconhecido.",
+        "referenceVariationGridRepeated": "O modelo retornou outra grade de variações com vários painéis. Importar foto é a forma confiável de definir esta referência."
       }
     },
     "preview": {

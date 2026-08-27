@@ -129,6 +129,7 @@ type V2Harness = {
 
 type V2HarnessOptions = {
   purpose?: StudioJobV2['purpose'];
+  generationCount?: 1 | 2;
   requestPlan?: StudioGenerationRequestPlan;
   sleep?: (delayMs: number, signal: AbortSignal) => Promise<void>;
   jitterMs?: StudioJobManagerDeps['jitterMs'] | null;
@@ -202,6 +203,10 @@ const createV2Harness = async (
   const fixedNow = options.now ?? (() => '2026-08-17T12:00:02.000Z');
   const store = createCreativeStudioStore({ rootDir, fs: fsWithoutDiskBarriers, now: fixedNow });
   const purpose = options.purpose ?? 'seed_still';
+  const generationCount = options.generationCount ?? 1;
+  if (generationCount === 2 && purpose !== 'reference_image') {
+    throw new Error('Only semantic-reference fixtures may reserve a variation-grid retry');
+  }
   const providerBinding: StudioProviderRef = {
     providerId: provider.id,
     adapterId: adapter.id,
@@ -336,7 +341,7 @@ const createV2Harness = async (
     target,
     purpose,
     routeId,
-    generationCount: 1,
+    generationCount,
     requestPlan,
     rateUnit: purpose === 'video_take' ? 'second' : 'generation',
     rateMinorUnits: 3,
@@ -359,7 +364,10 @@ const createV2Harness = async (
     expiresAt: '2026-08-17T12:05:00.000Z',
     confirmedAt: '2026-08-17T12:00:01.000Z',
     providerBindings: [{ itemId: item.id, provider: providerBinding }],
-    idempotencyKeys: [{ itemId: item.id, key: idempotencyKey }],
+    idempotencyKeys: Array.from({ length: generationCount }, (_, index) => ({
+      itemId: item.id,
+      key: index === 0 ? idempotencyKey : `key_v2_${index + 1}`,
+    })),
   };
   const timestamp = quotedProject.updatedAt;
   const job: StudioJobV2 = {
@@ -1638,7 +1646,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     });
   });
 
-  it('fails a paid reference grid without publishing it as the current canonical image', async () => {
+  it('fails a single-attempt paid reference grid without publishing it as the current canonical image', async () => {
     let outputPath = '';
     const submit = vi.fn(async () => ({
       kind: 'complete' as const,
@@ -1667,7 +1675,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       purpose: 'reference_image',
       error: {
         code: 'seed_still_variation_grid',
-        messageKey: 'conversation.creativeStudio.jobs.errors.seedStillVariationGrid',
+        messageKey: 'conversation.creativeStudio.jobs.errors.referenceVariationGridRepeated',
       },
       spendReceipt: { jobId: 'job_v2_1' },
       outputAssetIds: [],
@@ -1676,6 +1684,189 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     if (loaded.status !== 'supported') throw new Error('Reference-grid project disappeared');
     expect(loaded.project.references.reference_character!.approvedAssetId).toBeNull();
     expect(Object.keys(loaded.project.assets)).toEqual([]);
+  });
+
+  it('spends the quoted contingency only after a reference grid and publishes the clean retry', async () => {
+    let outputPath = '';
+    const submit = vi.fn(async () => ({
+      kind: 'complete' as const,
+      outputs: [
+        {
+          mediaKind: 'image' as const,
+          role: 'primary' as const,
+          source: { kind: 'file' as const, path: outputPath },
+          mimeType: 'image/png' as const,
+        },
+      ],
+    }));
+    let persistenceAttempt = 0;
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      purpose: 'reference_image',
+      generationCount: 2,
+      decorateMediaStore: (mediaStore) => ({
+        ...mediaStore,
+        persistProviderOutputForJobV2: vi.fn(async (input) => {
+          persistenceAttempt += 1;
+          if (persistenceAttempt === 1) throw new CreativeStudioMediaError('seed_still_variation_grid');
+          return mediaStore.persistProviderOutputForJobV2(input);
+        }),
+      }),
+    });
+    outputPath = path.join(harness.rootDir, 'provider-reference-retry.png');
+    await writeFile(outputPath, png);
+
+    await dispatchV2(harness);
+    await waitFor(async () => {
+      const loaded = await harness.store.getProjectV2(harness.project.id);
+      if (loaded.status !== 'supported') throw new Error('Reference retry project disappeared');
+      const reference = loaded.project.references.reference_character!;
+      expect(reference.jobIds).toHaveLength(2);
+      const [firstJobId, retryJobId] = reference.jobIds;
+      expect(loaded.project.jobs[firstJobId!]).toMatchObject({
+        status: 'failed',
+        error: { code: 'seed_still_variation_grid' },
+        retryOfJobId: null,
+        retryReason: null,
+        spendReceipt: { generationCount: 1, totalMinorUnits: 3 },
+      });
+      expect(loaded.project.jobs[retryJobId!]).toMatchObject({
+        status: 'succeeded',
+        error: null,
+        retryOfJobId: firstJobId,
+        retryReason: 'variation_grid',
+        idempotencyKey: 'key_v2_2',
+        spendReceipt: { generationCount: 1, totalMinorUnits: 3 },
+      });
+      expect(reference.approvedAssetId).toEqual(expect.any(String));
+      expect(loaded.project.assets[reference.approvedAssetId!]).toMatchObject({
+        producerJobId: retryJobId,
+        projectReferenceId: reference.id,
+      });
+    });
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops after the bounded reference retry also returns a grid', async () => {
+    let outputPath = '';
+    const submit = vi.fn(async () => ({
+      kind: 'complete' as const,
+      outputs: [
+        {
+          mediaKind: 'image' as const,
+          role: 'primary' as const,
+          source: { kind: 'file' as const, path: outputPath },
+          mimeType: 'image/png' as const,
+        },
+      ],
+    }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      purpose: 'reference_image',
+      generationCount: 2,
+      decorateMediaStore: (mediaStore) => ({
+        ...mediaStore,
+        persistProviderOutputForJobV2: vi.fn(async () => {
+          throw new CreativeStudioMediaError('seed_still_variation_grid');
+        }),
+      }),
+    });
+    outputPath = path.join(harness.rootDir, 'provider-reference-repeated-grid.png');
+    await writeFile(outputPath, png);
+
+    await dispatchV2(harness);
+    await waitFor(async () => {
+      const loaded = await harness.store.getProjectV2(harness.project.id);
+      if (loaded.status !== 'supported') throw new Error('Repeated-grid project disappeared');
+      const reference = loaded.project.references.reference_character!;
+      expect(reference.jobIds).toHaveLength(2);
+      const retry = loaded.project.jobs[reference.jobIds[1]!]!;
+      expect(retry).toMatchObject({
+        status: 'failed',
+        error: {
+          code: 'seed_still_variation_grid',
+          messageKey: 'conversation.creativeStudio.jobs.errors.referenceVariationGridRepeated',
+        },
+        retryReason: 'variation_grid',
+        spendReceipt: { generationCount: 1, totalMinorUnits: 3 },
+      });
+      expect(reference.approvedAssetId).toBeNull();
+      expect(Object.keys(loaded.project.assets)).toEqual([]);
+    });
+    expect(submit).toHaveBeenCalledTimes(2);
+  });
+
+  it('resumes the atomically queued reference retry after a manager reload', async () => {
+    let outputPath = '';
+    let stopBeforeRetryDispatch: (() => void) | null = null;
+    const adapter = controllableAdapter('weprompt-image-v1', {
+      submit: vi.fn(async () => ({
+        kind: 'complete' as const,
+        outputs: [
+          {
+            mediaKind: 'image' as const,
+            role: 'primary' as const,
+            source: { kind: 'file' as const, path: outputPath },
+            mimeType: 'image/png' as const,
+          },
+        ],
+      })),
+    });
+    let persistenceAttempt = 0;
+    const harness = await createV2Harness(adapter, {
+      purpose: 'reference_image',
+      generationCount: 2,
+      decorateMediaStore: (mediaStore) => ({
+        ...mediaStore,
+        persistProviderOutputForJobV2: vi.fn(async (input) => {
+          persistenceAttempt += 1;
+          if (persistenceAttempt === 1) {
+            for await (const _chunk of input.body) {
+              // Drain the local provider stream before simulating shutdown so aborting an already
+              // rejected persistence path cannot surface an unrelated stream error in Vitest.
+            }
+            stopBeforeRetryDispatch?.();
+            throw new CreativeStudioMediaError('seed_still_variation_grid');
+          }
+          return mediaStore.persistProviderOutputForJobV2(input);
+        }),
+      }),
+    });
+    outputPath = path.join(harness.rootDir, 'provider-reference-reload-retry.png');
+    await writeFile(outputPath, png);
+    stopBeforeRetryDispatch = () => {
+      void harness.manager.dispose();
+    };
+
+    await dispatchV2(harness);
+    await waitFor(async () => {
+      const loaded = await harness.store.getProjectV2(harness.project.id);
+      if (loaded.status !== 'supported') throw new Error('Reload retry project disappeared');
+      const retryJobId = loaded.project.references.reference_character!.jobIds[1];
+      expect(retryJobId).toEqual(expect.any(String));
+      expect(loaded.project.jobs[retryJobId!]).toMatchObject({
+        status: 'queued_local',
+        retryOfJobId: 'job_v2_1',
+        retryReason: 'variation_grid',
+      });
+    });
+    await harness.manager.dispose();
+
+    harness.manager = createStudioJobManager({
+      store: harness.store,
+      mediaStore: harness.mediaStore,
+      providerResolver: harness.providerResolver,
+      adapters: new Map([[adapter.id, adapter]]),
+      listProviders: harness.listProviders,
+      jitterMs: (baseMs) => baseMs,
+    });
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+    await waitFor(async () => {
+      const loaded = await harness.store.getProjectV2(harness.project.id);
+      if (loaded.status !== 'supported') throw new Error('Reload retry project disappeared');
+      const reference = loaded.project.references.reference_character!;
+      const retryJobId = reference.jobIds[1]!;
+      expect(loaded.project.jobs[retryJobId]).toMatchObject({ status: 'succeeded', retryReason: 'variation_grid' });
+      expect(reference.approvedAssetId).toEqual(expect.any(String));
+    });
   });
 
   it('refuses adapter normalization that would change the immutable paid request snapshot', async () => {

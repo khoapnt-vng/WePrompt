@@ -761,7 +761,15 @@ const validateAsset = (assetId: string, projectId: string, value: unknown): valu
     if (
       !isSafeId(value.projectReferenceId) ||
       !isStudioReferenceImageMimeType(value.mimeType) ||
-      value.managedAsset.collection !== 'assets'
+      (value.managedAsset.collection !== 'assets' && value.managedAsset.collection !== 'imports')
+    ) {
+      return false;
+    }
+    if (
+      value.managedAsset.collection === 'imports' &&
+      (value.producerJobId !== null ||
+        value.compositionDigest !== null ||
+        value.generationReferenceAssetIds.length !== 0)
     ) {
       return false;
     }
@@ -1113,7 +1121,8 @@ const validateJob = (jobId: string, projectId: string, value: unknown): value is
     (value.retryOfJobId === null || isSafeId(value.retryOfJobId)) &&
     (value.retryReason === null ||
       value.retryReason === 'provider_failure' ||
-      value.retryReason === 'submission_unknown') &&
+      value.retryReason === 'submission_unknown' ||
+      value.retryReason === 'variation_grid') &&
     ((value.retryOfJobId === null && value.retryReason === null) ||
       (value.retryOfJobId !== null && value.retryReason !== null)) &&
     typeof value.duplicateChargeAcknowledged === 'boolean' &&
@@ -1209,7 +1218,7 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
     typeof value.purpose !== 'string' ||
     !PURPOSES.has(value.purpose) ||
     !isSafeId(value.routeId) ||
-    value.generationCount !== 1 ||
+    !isIntegerInRange(value.generationCount, 1, 2) ||
     !validateRequestPlan(value.requestPlan) ||
     typeof value.rateUnit !== 'string' ||
     !RATE_UNITS.has(value.rateUnit) ||
@@ -1220,6 +1229,7 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
   const plan = value.requestPlan as Record<string, unknown>;
   const target = value.target as StudioQuotedGeneration['target'];
   if ((value.purpose === 'reference_image') !== (target.kind === 'reference')) return false;
+  if (value.generationCount !== 1 && value.purpose !== 'reference_image') return false;
   if (value.purpose === 'seed_still' || value.purpose === 'reference_image') {
     if (
       value.rateUnit !== 'generation' ||
@@ -1350,18 +1360,22 @@ const validateAuthorizationShape = (value: unknown, projectId: string, currentRe
       return false;
     }
   }
-  if (!isDenseArray(value.idempotencyKeys, items.length) || value.idempotencyKeys.length !== items.length) {
+  const expectedIdempotencyItemIds = items.flatMap((item) =>
+    Array.from({ length: (item as StudioQuotedGeneration).generationCount }, () => (item as StudioQuotedGeneration).id)
+  );
+  if (
+    !isDenseArray(value.idempotencyKeys, STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST * 2) ||
+    value.idempotencyKeys.length !== expectedIdempotencyItemIds.length
+  ) {
     return false;
   }
   const keys = new Set<string>();
-  for (let entryIndex = 0; entryIndex < items.length; entryIndex += 1) {
-    const item = items[entryIndex];
-    const quoted = item as Record<string, unknown>;
+  for (let entryIndex = 0; entryIndex < expectedIdempotencyItemIds.length; entryIndex += 1) {
     const entry = value.idempotencyKeys[entryIndex];
     if (
       !isRecord(entry) ||
       !hasExactKeys(entry, IDEMPOTENCY_ENTRY_KEYS) ||
-      entry.itemId !== quoted.id ||
+      entry.itemId !== expectedIdempotencyItemIds[entryIndex] ||
       !isSafeId(entry.key) ||
       keys.has(entry.key)
     ) {
@@ -1593,7 +1607,7 @@ const validateReceiptAgainstJob = (
     receipt.rateUnit === item.rateUnit &&
     receipt.rateMinorUnits === item.rateMinorUnits &&
     receipt.durationSeconds === expectedDuration &&
-    receipt.generationCount === item.generationCount &&
+    receipt.generationCount === 1 &&
     receipt.totalMinorUnits === amounts.oneGenerationMinorUnits
   );
 };
@@ -1722,12 +1736,9 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         return false;
       }
     }
-    if (
-      shot.referenceBinding.status === 'ready' &&
-      bindingReferenceIds.some((referenceId) => project.references[referenceId]?.approvedAssetId === null)
-    ) {
-      return false;
-    }
+    // A semantic Shot binding survives removal of its last current reference photo. Resolution and
+    // quote preparation still fail closed on the missing approval; retaining the IDs lets a later
+    // human-approved photo restore the exact binding instead of silently rewriting Shot intent.
   }
 
   const inactiveShotIds = new Set<string>(binnedShotOwnerIds.keys());
@@ -1949,7 +1960,21 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   for (const asset of Object.values(project.assets)) {
-    if (asset.shotId === null) continue;
+    if (asset.shotId === null) {
+      if (
+        asset.mediaKind === 'image' &&
+        asset.managedAsset.collection === 'imports' &&
+        (asset.projectReferenceId === null ||
+          !Object.hasOwn(project.references, asset.projectReferenceId) ||
+          asset.producerJobId !== null ||
+          asset.compositionDigest !== null ||
+          asset.generationReferenceAssetIds.length !== 0 ||
+          outputProducerByAssetId.has(asset.id))
+      ) {
+        return false;
+      }
+      continue;
+    }
     if (asset.managedAsset.collection === 'boardStills') {
       const producer = outputProducerByAssetId.get(asset.id);
       if (
@@ -2133,7 +2158,18 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     const isExactProjectReferenceRetry = job.target.kind === 'reference';
     const isProjectReferencePollDeadline =
       isExactProjectReferenceRetry && predecessor.status === 'failed' && predecessor.error?.code === 'poll_deadline';
-    if (job.retryReason === 'submission_unknown') {
+    if (job.retryReason === 'variation_grid') {
+      if (
+        !isExactProjectReferenceRetry ||
+        predecessor.status !== 'failed' ||
+        predecessor.error?.code !== 'seed_still_variation_grid' ||
+        predecessor.authorizationId !== job.authorizationId ||
+        predecessor.authorizationItemId !== job.authorizationItemId ||
+        job.duplicateChargeAcknowledged
+      ) {
+        return false;
+      }
+    } else if (job.retryReason === 'submission_unknown') {
       const isSubmissionUnknownPredecessor =
         predecessor.error?.code === 'submission_unknown' &&
         (predecessor.status === 'failed' ||
@@ -2164,7 +2200,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     authorization: Authorization;
     item: QuotedItem;
     provider: Authorization['providerBindings'][number]['provider'];
-    idempotencyKey: string;
+    idempotencyKeys: string[];
   };
   const authorizationIds = new Set<string>();
   const referenceHandoffOriginIds = new Set<string>();
@@ -2201,14 +2237,19 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         return false;
       }
       itemPositions.set(item.id, itemIndex);
-      const idempotencyKey = authorization.idempotencyKeys[itemIndex]!.key;
-      if (globalIdempotencyKeys.has(idempotencyKey)) return false;
-      globalIdempotencyKeys.add(idempotencyKey);
+      const idempotencyKeys = authorization.idempotencyKeys
+        .filter((entry) => entry.itemId === item.id)
+        .map((entry) => entry.key);
+      if (idempotencyKeys.length !== item.generationCount) return false;
+      for (const idempotencyKey of idempotencyKeys) {
+        if (globalIdempotencyKeys.has(idempotencyKey)) return false;
+        globalIdempotencyKeys.add(idempotencyKey);
+      }
       itemLinks.set(item.id, {
         authorization,
         item,
         provider: authorization.providerBindings[itemIndex]!.provider,
-        idempotencyKey,
+        idempotencyKeys,
       });
     }
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
@@ -2243,7 +2284,6 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
   }
 
-  const jobsByLogicalEntry = new Map<string, StudioJobV2>();
   const jobsByItemId = new Map<string, StudioJobV2[]>();
   for (const job of Object.values(project.jobs)) {
     const link = itemLinks.get(job.authorizationItemId);
@@ -2254,16 +2294,13 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       link.item.purpose !== job.purpose ||
       !requestPlansEqual(link.item.requestPlan, job.requestPlan) ||
       !providersEqual(link.provider, job.provider) ||
-      link.idempotencyKey !== job.idempotencyKey
+      !link.idempotencyKeys.includes(job.idempotencyKey)
     ) {
       return false;
     }
     if (job.target.kind === 'reference' && !Object.hasOwn(project.references, job.target.referenceId)) {
       return false;
     }
-    const logicalEntry = `${job.authorizationId}\0${job.authorizationItemId}`;
-    if (jobsByLogicalEntry.has(logicalEntry)) return false;
-    jobsByLogicalEntry.set(logicalEntry, job);
     const itemJobs = jobsByItemId.get(job.authorizationItemId) ?? [];
     itemJobs.push(job);
     jobsByItemId.set(job.authorizationItemId, itemJobs);
@@ -2316,9 +2353,23 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     for (const reference of references) {
       const source = ownValue(project.assets, reference.assetId);
       const projectReference = ownValue(project.references, reference.referenceId);
+      const producer = outputProducerByAssetId.get(reference.assetId);
+      const importedReferenceSource =
+        source?.managedAsset.collection === 'imports' &&
+        source.producerJobId === null &&
+        source.compositionDigest === null &&
+        source.generationReferenceAssetIds.length === 0;
       const projectReferenceAuthority =
         projectReference?.approvedAssetId === reference.assetId ||
-        projectReference?.supersededAssetIds.includes(reference.assetId) === true;
+        projectReference?.supersededAssetIds.includes(reference.assetId) === true ||
+        (isTerminalJob(job) &&
+          ((producer?.status === 'succeeded' &&
+            producer.purpose === 'reference_image' &&
+            producer.target.kind === 'reference' &&
+            producer.target.referenceId === reference.referenceId &&
+            producer.outputAssetIdsByRole.primary === reference.assetId &&
+            projectReference?.jobIds.includes(producer.id) === true) ||
+            importedReferenceSource));
       if (!projectReferenceAuthority) return false;
       if (
         projectReference?.kind !== reference.kind ||
@@ -2326,7 +2377,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         source.projectId !== project.id ||
         source.shotId !== null ||
         source.mediaKind !== 'image' ||
-        source.managedAsset.collection !== 'assets' ||
+        (source.managedAsset.collection !== 'assets' && source.managedAsset.collection !== 'imports') ||
+        (source.managedAsset.collection === 'imports' && !importedReferenceSource) ||
         source.projectReferenceId !== reference.referenceId ||
         source.sha256 !== reference.sha256
       ) {
@@ -2423,9 +2475,29 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
 
   for (const link of itemLinks.values()) {
     const jobs = jobsByItemId.get(link.item.id);
-    if (jobs === undefined || jobs.length !== 1) return false;
-    const logicalEntry = `${link.authorization.id}\0${link.item.id}`;
-    if (!jobsByLogicalEntry.has(logicalEntry)) return false;
+    if (jobs === undefined || jobs.length < 1 || jobs.length > link.item.generationCount) return false;
+    const jobsByAttempt = link.idempotencyKeys.map((idempotencyKey) =>
+      jobs.find((job) => job.idempotencyKey === idempotencyKey)
+    );
+    const firstAttempt = jobsByAttempt[0];
+    if (firstAttempt === undefined || jobsByAttempt.slice(0, jobs.length).some((job) => job === undefined)) {
+      return false;
+    }
+    if (jobsByAttempt.slice(jobs.length).some((job) => job !== undefined)) return false;
+    if (link.item.generationCount === 2) {
+      if (link.item.purpose !== 'reference_image' || link.item.target.kind !== 'reference') return false;
+      const secondAttempt = jobsByAttempt[1];
+      const firstAttemptGridFailed =
+        firstAttempt.status === 'failed' && firstAttempt.error?.code === 'seed_still_variation_grid';
+      if (
+        (firstAttemptGridFailed && secondAttempt === undefined) ||
+        (!firstAttemptGridFailed && secondAttempt !== undefined) ||
+        (secondAttempt !== undefined &&
+          (secondAttempt.retryOfJobId !== firstAttempt.id || secondAttempt.retryReason !== 'variation_grid'))
+      ) {
+        return false;
+      }
+    }
     if (!jobs.every((job) => requestPlansEqual(job.requestPlan, link.item.requestPlan))) return false;
     if (link.item.requestPlan.kind === 'after_take_selection') {
       const concreteJobs = jobs.filter((job) => job.requestSnapshot !== null);
@@ -2459,7 +2531,9 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       }
     }
   }
-  if (jobsByLogicalEntry.size !== Object.keys(project.jobs).length) return false;
+  if ([...jobsByItemId.values()].reduce((total, jobs) => total + jobs.length, 0) !== Object.keys(project.jobs).length) {
+    return false;
+  }
 
   const liveProjectReferenceIds = new Set<string>();
   for (const job of Object.values(project.jobs)) {
@@ -2513,7 +2587,24 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
   }
 
-  const isReferenceOutput = (referenceId: string, assetId: string): boolean => {
+  const isCanonicalReferenceAsset = (referenceId: string, assetId: string): boolean => {
+    const asset = ownValue(project.assets, assetId);
+    if (
+      asset?.projectId !== project.id ||
+      asset.shotId !== null ||
+      asset.projectReferenceId !== referenceId ||
+      asset.mediaKind !== 'image'
+    ) {
+      return false;
+    }
+    if (asset.managedAsset.collection === 'imports') {
+      return (
+        asset.producerJobId === null &&
+        asset.compositionDigest === null &&
+        asset.generationReferenceAssetIds.length === 0
+      );
+    }
+    if (asset.managedAsset.collection !== 'assets') return false;
     const producer = outputProducerByAssetId.get(assetId);
     return (
       producer?.status === 'succeeded' &&
@@ -2550,8 +2641,8 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       return false;
     }
     if (
-      (reference.approvedAssetId !== null && !isReferenceOutput(referenceId, reference.approvedAssetId)) ||
-      reference.supersededAssetIds.some((assetId) => !isReferenceOutput(referenceId, assetId))
+      (reference.approvedAssetId !== null && !isCanonicalReferenceAsset(referenceId, reference.approvedAssetId)) ||
+      reference.supersededAssetIds.some((assetId) => !isCanonicalReferenceAsset(referenceId, assetId))
     ) {
       return false;
     }

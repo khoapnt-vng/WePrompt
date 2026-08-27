@@ -3992,12 +3992,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       slots,
       attributions,
       journalResidues: [
-        ...decisionResidues.map((residue) => ({ family: 'decisions' as const, ...residue })),
-        ...attributionResidues.map((residue) => ({ family: 'commits' as const, ...residue })),
+        ...decisionResidues.map((residue) => Object.assign({ family: `decisions` as const }, residue)),
+        ...attributionResidues.map((residue) => Object.assign({ family: `commits` as const }, residue)),
       ],
       writerResidues: [
-        ...pendingResidues.map((residue) => ({ family: 'pending' as const, ...residue })),
-        ...slotPublicationResidues.map((residue) => ({ family: 'slots' as const, ...residue })),
+        ...pendingResidues.map((residue) => Object.assign({ family: `pending` as const }, residue)),
+        ...slotPublicationResidues.map((residue) => Object.assign({ family: `slots` as const }, residue)),
         ...slotCleanupResidues.map(({ identified, namedFile }) => ({
           family: 'slots' as const,
           identified: { ...identified, record: null } as IdentifiedRecordV2<null>,
@@ -5276,12 +5276,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       receipts,
       generationDecisions,
       journalResidues: [
-        ...decisionResidues.map((residue) => ({ family: 'decisions' as const, ...residue })),
-        ...receiptResidues.map((residue) => ({ family: 'receipts' as const, ...residue })),
+        ...decisionResidues.map((residue) => Object.assign({ family: `decisions` as const }, residue)),
+        ...receiptResidues.map((residue) => Object.assign({ family: `receipts` as const }, residue)),
       ],
       writerResidues: [
-        ...pendingResidues.map((residue) => ({ family: 'pending' as const, ...residue })),
-        ...slotPublicationResidues.map((residue) => ({ family: 'slots' as const, ...residue })),
+        ...pendingResidues.map((residue) => Object.assign({ family: `pending` as const }, residue)),
+        ...slotPublicationResidues.map((residue) => Object.assign({ family: `slots` as const }, residue)),
         ...slotCleanupResidues.map(({ identified, namedFile }) => ({
           family: 'slots' as const,
           identified: { ...identified, record: null } as IdentifiedRecordV2<null>,
@@ -6465,7 +6465,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
             item.purpose === 'reference_image' &&
             item.target.kind === 'reference' &&
             item.target.referenceId === generationOutcome.referenceIds[index] &&
-            item.generationCount === 1 &&
+            (item.generationCount === 1 || item.generationCount === 2) &&
             item.requestPlan.kind === 'resolved' &&
             item.requestPlan.snapshot.referenceInputs.length === 0
         )

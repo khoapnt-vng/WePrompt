@@ -5,6 +5,7 @@
  */
 
 import { Alert, Button, Empty, Input, Modal, Popconfirm, Progress, Tooltip } from '@arco-design/web-react';
+import { Delete } from '@icon-park/react';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -34,6 +35,8 @@ export type ReferenceWorkspaceItem = {
   approvedAssetId: string | null;
   generatedAssetIds: readonly string[];
   assetCreatedAt: Readonly<Record<string, string>>;
+  assetOrdinalById: Readonly<Record<string, number>>;
+  removalBlocked: boolean;
   generationStatus: 'idle' | 'queued' | 'running' | 'succeeded' | 'failed';
   candidateJob: ReferenceCandidateJob | null;
 };
@@ -50,6 +53,8 @@ export type ReferencesViewActions = {
   addBackground: (background: { label: string; prompt: string }) => Promise<boolean>;
   updateDetails: (referenceId: string, details: { label: string; prompt: string }) => Promise<boolean>;
   selectImage: (referenceId: string, assetId: string) => Promise<boolean>;
+  removeImage: (referenceId: string, assetId: string) => Promise<boolean>;
+  importPhoto: (referenceId: string) => Promise<boolean>;
   regenerate: (referenceId: string, prompt: string) => Promise<boolean>;
   retryJob: (referenceId: string, jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   retryDownload: (referenceId: string, jobId: string) => Promise<boolean>;
@@ -284,7 +289,14 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
       item.approvedAssetId !== null && item.lastRunPrompt !== null && trimmedPrompt !== item.lastRunPrompt;
     const assets = orderedAssetIds(item);
     const currentIndex = assets.findIndex((assetId) => assetId === item.approvedAssetId);
-    const currentHandle = currentIndex < 0 ? null : referencePhotoHandle(draft.label.trim(), item.kind, currentIndex);
+    const currentOrdinal =
+      item.approvedAssetId === null
+        ? undefined
+        : (item.assetOrdinalById?.[item.approvedAssetId] ?? (currentIndex < 0 ? undefined : currentIndex));
+    const currentHandle =
+      currentIndex < 0 || currentOrdinal === undefined
+        ? null
+        : referencePhotoHandle(draft.label.trim(), item.kind, currentOrdinal);
     const generationDisabled =
       gateLocked ||
       generationActive ||
@@ -313,6 +325,36 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
       setCardActionPending(true);
       try {
         await actions.selectImage(item.id, assetId);
+      } finally {
+        setCardActionPending(false);
+      }
+    };
+    const removeImage = async (assetId: string): Promise<void> => {
+      if (
+        assetId !== item.approvedAssetId ||
+        actionsDisabled ||
+        generationActive ||
+        recoveryPending ||
+        downloadRecoveryPending ||
+        item.removalBlocked ||
+        cardActionPending
+      ) {
+        return;
+      }
+      setCardActionPending(true);
+      try {
+        await actions.removeImage(item.id, assetId);
+      } finally {
+        setCardActionPending(false);
+      }
+    };
+    const importPhoto = async (): Promise<void> => {
+      if (actionsDisabled || generationActive || recoveryPending || downloadRecoveryPending || cardActionPending) {
+        return;
+      }
+      setCardActionPending(true);
+      try {
+        await actions.importPhoto(item.id);
       } finally {
         setCardActionPending(false);
       }
@@ -391,6 +433,27 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
               >
                 ↓
               </a>
+              <Button
+                aria-label={t(`${PANEL_ROOT}.removePhoto`, { handle: currentHandle })}
+                className={styles.removeControl}
+                disabled={
+                  actionsDisabled ||
+                  generationActive ||
+                  recoveryPending ||
+                  downloadRecoveryPending ||
+                  item.removalBlocked ||
+                  cardActionPending
+                }
+                icon={<Delete aria-hidden='true' />}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void removeImage(item.approvedAssetId!);
+                }}
+                shape='circle'
+                size='mini'
+                title={item.removalBlocked ? t(`${PANEL_ROOT}.removePhotoLocked`) : undefined}
+                type='secondary'
+              />
               <div className={styles.fullscreenTitle}>
                 <strong>{currentHandle}</strong>
                 <span>{t(`${PANEL_ROOT}.currentReference`)}</span>
@@ -400,7 +463,11 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
         )}
         <div className={styles.takeStrip} data-reference-row='takes'>
           {assets.map((assetId, index) => {
-            const handle = referencePhotoHandle(draft.label.trim(), item.kind, index);
+            const handle = referencePhotoHandle(
+              draft.label.trim(),
+              item.kind,
+              item.assetOrdinalById?.[assetId] ?? index
+            );
             const current = assetId === item.approvedAssetId;
             return (
               <button
@@ -505,6 +572,16 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
               {t(`${JOB_ROOT}.cancel`)}
             </Button>
           ) : null}
+          <Button
+            disabled={
+              actionsDisabled || generationActive || recoveryPending || downloadRecoveryPending || cardActionPending
+            }
+            loading={cardActionPending}
+            onClick={() => void importPhoto()}
+            size='small'
+          >
+            {t(`${PANEL_ROOT}.importPhoto`)}
+          </Button>
           <Button
             aria-describedby={item.candidateJob?.error ? recoveryDescriptionId : undefined}
             className={styles.primaryAction}

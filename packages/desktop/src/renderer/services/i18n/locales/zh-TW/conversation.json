@@ -930,7 +930,10 @@
           "tag": {
             "running": "執行中",
             "edited": "提示詞已編輯"
-          }
+          },
+          "importPhoto": "匯入照片",
+          "removePhoto": "移除 {{handle}}",
+          "removePhotoLocked": "已授權的工作正在使用這張照片。請先完成或取消該工作，再移除照片。"
         },
         "description": "先產生角色的目前標準圖，再產生重複出現的背景圖。產生分鏡或首幀之前，請將目前參考圖明確綁定到每個鏡頭。",
         "generationScope": "產生範圍",
@@ -1460,7 +1463,8 @@
           "references": "已解析參考",
           "noReferences": "無直接參考輸入",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
-        }
+        },
+        "referenceGridRetry": "若模型傳回變體網格，每張參考圖可自動重試一次。首次嘗試共計 {{lower}}；需要重試時最高為 {{upper}}。"
       },
       "editorFolderExport": {
         "action": "匯出剪輯資料夾…",
@@ -1917,7 +1921,8 @@
         "downloadFailed": "產生已完成，但無法下載輸出。",
         "unsupported": "此服務供應商不支援要求的操作。",
         "seedStillVariationGrid": "產生的圖像包含多面板變體網格，不能用作目前首幀或參考圖。",
-        "unknown": "產生工作因不明原因失敗。"
+        "unknown": "產生工作因不明原因失敗。",
+        "referenceVariationGridRepeated": "模型再次傳回多面板變體網格。匯入照片是設定此參考圖的可靠方式。"
       }
     },
     "preview": {

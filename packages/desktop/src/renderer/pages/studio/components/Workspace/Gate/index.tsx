@@ -688,10 +688,20 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               {t('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')}
             </p>
             {projectReferenceIds === null ? null : (
-              <p data-project-reference-scope>
-                {t('conversation.creativeStudio.workspace.referenceWorkflow.generationScope')}:{' '}
-                <bdi dir='auto'>{projectReferenceScope.join(' · ')}</bdi>
-              </p>
+              <>
+                <p data-project-reference-scope>
+                  {t('conversation.creativeStudio.workspace.referenceWorkflow.generationScope')}:{' '}
+                  <bdi dir='auto'>{projectReferenceScope.join(' · ')}</bdi>
+                </p>
+                {summary.exactPrice ? null : (
+                  <p data-reference-grid-contingency>
+                    {t('conversation.creativeStudio.workspace.gate.referenceGridRetry', {
+                      lower: formatMoney(summary.lowerMinorUnits, summary.currency),
+                      upper: formatMoney(summary.upperMinorUnits, summary.currency),
+                    })}
+                  </p>
+                )}
+              </>
             )}
             {requiredChange ? (
               <p

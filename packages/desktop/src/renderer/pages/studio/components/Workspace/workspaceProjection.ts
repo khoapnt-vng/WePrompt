@@ -304,6 +304,18 @@ const producingJobForAsset = (
   return matches.length === 1 ? matches[0]! : null;
 };
 
+/** Returns the Shot-authored prompt frozen by the unique job that produced this exact asset. */
+const producingShotScriptForAsset = (
+  project: StudioRendererProjectV2,
+  shot: StudioShot,
+  assetId: string
+): string | null => {
+  const source = producingJobForAsset(project, shot, assetId)?.composition?.inputs?.source;
+  return source?.kind === 'shot' && source.shotId === shot.id && isDisplayText(source.shootingScript)
+    ? source.shootingScript
+    : null;
+};
+
 const videoPosterId = (project: StudioRendererProjectV2, shot: StudioShot, videoTake: StudioAssetV2): string | null => {
   const producingJobs = shot.jobIds.flatMap((jobId) => {
     const job = ownValue(project.jobs, jobId);
@@ -431,7 +443,7 @@ const projectSeedStills = (input: {
         asset.mediaKind === 'image' &&
         asset.managedAsset.collection === 'boardStills')
     ) {
-      const prompt = producingJobForAsset(input.project, input.shot, asset.id)?.composition?.prompt ?? null;
+      const prompt = producingShotScriptForAsset(input.project, input.shot, asset.id);
       seedStills.push({
         assetId: asset.id,
         createdAt: asset.createdAt,
@@ -570,10 +582,8 @@ const projectShot = (
           : null;
   const currentVideo = validCurrentVideo(project, shot);
   const firstFrameChanged = context.dirtyCauses.includes('continuity_stale');
-  const currentPicturePrompt =
-    currentVideo === null
-      ? shot.shootingScript
-      : (producingJobForAsset(project, shot, currentVideo.id)?.composition?.prompt ?? shot.shootingScript);
+  const currentPictureFiredScript =
+    currentVideo === null ? null : producingShotScriptForAsset(project, shot, currentVideo.id);
   const currentPicture =
     currentVideo === null
       ? null
@@ -582,8 +592,8 @@ const projectShot = (
           sourceDurationSeconds: validVideoSourceDuration(currentVideo)!,
           posterAssetId: videoPosterId(project, shot, currentVideo),
           createdAt: currentVideo.createdAt,
-          prompt: currentPicturePrompt,
-          promptChanged: currentPicturePrompt !== shot.shootingScript,
+          prompt: currentPictureFiredScript ?? shot.shootingScript,
+          promptChanged: currentPictureFiredScript !== null && currentPictureFiredScript !== shot.shootingScript,
           firstFrameChanged,
         };
   const seedStills = projectSeedStills({
@@ -621,15 +631,15 @@ const projectShot = (
     ) {
       return [];
     }
-    const prompt = producingJobForAsset(project, shot, asset.id)?.composition?.prompt ?? shot.shootingScript;
+    const firedScript = producingShotScriptForAsset(project, shot, asset.id);
     return [
       {
         assetId: asset.id,
         sourceDurationSeconds: duration,
         posterAssetId: videoPosterId(project, shot, asset),
         createdAt: asset.createdAt,
-        prompt,
-        promptChanged: prompt !== shot.shootingScript,
+        prompt: firedScript ?? shot.shootingScript,
+        promptChanged: firedScript !== null && firedScript !== shot.shootingScript,
         firstFrameChanged: asset.id === shot.videoAssetId && firstFrameChanged,
         current: asset.id === shot.videoAssetId,
       },

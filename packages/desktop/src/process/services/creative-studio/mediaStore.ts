@@ -320,6 +320,14 @@ export type InternalImportSeedStillInputV2 = {
   returnProject?: boolean;
 };
 
+export type InternalImportReferenceImageInputV2 = {
+  projectId: string;
+  sourcePath: string;
+  referenceId: string;
+  expectedRevision: number;
+  returnProject?: boolean;
+};
+
 export type StudioMediaImportResultV2 = { asset: StudioAssetV2; project: StudioProjectV2 };
 
 export type InternalImportBedAudioInputV2 = {
@@ -397,6 +405,10 @@ export type StudioMediaStore = {
     input: InternalImportSeedStillInputV2 & { returnProject: true }
   ): Promise<StudioMediaImportResultV2>;
   importSeedStillFromPathV2(input: InternalImportSeedStillInputV2): Promise<StudioAssetV2>;
+  importReferenceImageFromPathV2(
+    input: InternalImportReferenceImageInputV2 & { returnProject: true }
+  ): Promise<StudioMediaImportResultV2>;
+  importReferenceImageFromPathV2(input: InternalImportReferenceImageInputV2): Promise<StudioAssetV2>;
   importBedAudioFromPathV2(input: InternalImportBedAudioInputV2): Promise<StudioMediaImportResultV2>;
   detachBedAudioV2(input: InternalDetachBedAudioInputV2): Promise<StudioProjectV2>;
   persistProviderOutputForJobV2(input: PersistProviderJobOutputInputV2): Promise<StudioAssetV2>;
@@ -2276,24 +2288,33 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     await removePublishedBedMediaIntentV2(context, published);
   };
 
-  async function importSeedStillFromPathV2(
-    input: InternalImportSeedStillInputV2 & { returnProject: true }
-  ): Promise<StudioMediaImportResultV2>;
-  async function importSeedStillFromPathV2(input: InternalImportSeedStillInputV2): Promise<StudioAssetV2>;
-  async function importSeedStillFromPathV2(
-    input: InternalImportSeedStillInputV2
-  ): Promise<StudioAssetV2 | StudioMediaImportResultV2> {
+  const importManagedImageFromPathV2 = async (
+    input: InternalImportSeedStillInputV2 | InternalImportReferenceImageInputV2
+  ): Promise<StudioMediaImportResultV2> => {
+    const seedInput =
+      hasExactOwnKeys(input, ['projectId', 'sourcePath', 'shotId', 'expectedRevision']) ||
+      hasExactOwnKeys(input, ['projectId', 'sourcePath', 'shotId', 'expectedRevision', 'returnProject']);
+    const referenceInput =
+      hasExactOwnKeys(input, ['projectId', 'sourcePath', 'referenceId', 'expectedRevision']) ||
+      hasExactOwnKeys(input, ['projectId', 'sourcePath', 'referenceId', 'expectedRevision', 'returnProject']);
     if (
-      (!hasExactOwnKeys(input, ['projectId', 'sourcePath', 'shotId', 'expectedRevision']) &&
-        !hasExactOwnKeys(input, ['projectId', 'sourcePath', 'shotId', 'expectedRevision', 'returnProject'])) ||
+      seedInput === referenceInput ||
       !SAFE_ID.test(input.projectId) ||
-      !SAFE_ID.test(input.shotId) ||
       !Number.isSafeInteger(input.expectedRevision) ||
       input.expectedRevision < 1 ||
       typeof input.sourcePath !== 'string' ||
       input.sourcePath.length === 0 ||
       (input.returnProject !== undefined && input.returnProject !== true)
     ) {
+      throw new CreativeStudioMediaError('invalid_media');
+    }
+    const shotId =
+      seedInput && Object.hasOwn(input, 'shotId') ? (input as InternalImportSeedStillInputV2).shotId : null;
+    const referenceId =
+      referenceInput && Object.hasOwn(input, 'referenceId')
+        ? (input as InternalImportReferenceImageInputV2).referenceId
+        : null;
+    if ((shotId !== null && !SAFE_ID.test(shotId)) || (referenceId !== null && !SAFE_ID.test(referenceId))) {
       throw new CreativeStudioMediaError('invalid_media');
     }
     const assetId = createId();
@@ -2311,9 +2332,30 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const { projectDir, project } = context;
       authority = context.authority;
       if (project.revision !== input.expectedRevision) throw new CreativeStudioMediaError('stale_project');
-      if (!Object.hasOwn(project.shots, input.shotId)) throw new CreativeStudioMediaError('not_found');
-      if (owningBeatForShotV2(project, input.shotId) === null) {
-        throw new CreativeStudioMediaError('invalid_media');
+      if (shotId !== null) {
+        if (!Object.hasOwn(project.shots, shotId)) throw new CreativeStudioMediaError('not_found');
+        if (owningBeatForShotV2(project, shotId) === null) throw new CreativeStudioMediaError('invalid_media');
+      } else {
+        const reference = referenceId === null ? undefined : ownRecordValue(project.references, referenceId);
+        if (
+          project.referencePlanStatus !== 'planned' ||
+          reference === undefined ||
+          !project.referenceOrder.includes(reference.id)
+        ) {
+          throw new CreativeStudioMediaError('not_found');
+        }
+        if (
+          Object.values(project.jobs).some(
+            (job) =>
+              job.target.kind === 'reference' &&
+              job.target.referenceId === reference.id &&
+              job.status !== 'succeeded' &&
+              job.status !== 'failed' &&
+              job.status !== 'cancelled'
+          )
+        ) {
+          throw new CreativeStudioStoreError('busy', 'Studio reference generation is active');
+        }
       }
       const capacity = await planWriteCapacity(project, projectDir, limits.referenceMaxBytes, sourceStats.size);
       const partsDirectory = await ensureManagedDirectoryV2(authority, 'parts');
@@ -2381,13 +2423,13 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       const baseAsset: StudioAssetV2 = {
         id: assetId,
         projectId: input.projectId,
-        shotId: input.shotId,
+        shotId,
         mediaKind: 'image',
         mimeType: signature.mimeType,
         managedAsset: { collection: 'imports', fileName: `${assetId}.${signature.extension}` },
         byteSize,
         sha256: hash.digest('hex'),
-        projectReferenceId: null,
+        projectReferenceId: referenceId,
         generationReferenceAssetIds: [],
         producerJobId: null,
         compositionDigest: null,
@@ -2407,7 +2449,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           (current) => {
             assertManagedProjectCapacity(current, facts.managedByteSize, byteSize);
             const next = structuredClone(current);
-            if (owningBeatForShotV2(current, input.shotId) === null) {
+            if (shotId !== null && owningBeatForShotV2(current, shotId) === null) {
               throw new CreativeStudioMediaError('invalid_media');
             }
             const asset: StudioAssetV2 = baseAsset;
@@ -2416,6 +2458,38 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
               const shot = ownRecordValue(next.shots, asset.shotId);
               if (shot === undefined) throw new CreativeStudioMediaError('not_found');
               shot.assetIds.push(asset.id);
+            } else {
+              const reference = referenceId === null ? undefined : ownRecordValue(next.references, referenceId);
+              if (
+                next.referencePlanStatus !== 'planned' ||
+                reference === undefined ||
+                !next.referenceOrder.includes(reference.id)
+              ) {
+                throw new CreativeStudioMediaError('not_found');
+              }
+              if (
+                Object.values(next.jobs).some(
+                  (job) =>
+                    job.target.kind === 'reference' &&
+                    job.target.referenceId === reference.id &&
+                    job.status !== 'succeeded' &&
+                    job.status !== 'failed' &&
+                    job.status !== 'cancelled'
+                )
+              ) {
+                throw new CreativeStudioStoreError('busy', 'Studio reference generation is active');
+              }
+              if (
+                reference.approvedAssetId !== null &&
+                !reference.supersededAssetIds.includes(reference.approvedAssetId)
+              ) {
+                reference.supersededAssetIds.push(reference.approvedAssetId);
+              }
+              reference.approvedAssetId = asset.id;
+              reference.supersededAssetIds = reference.supersededAssetIds.filter(
+                (candidateId) => candidateId !== asset.id
+              );
+              reference.updatedAt = asset.createdAt;
             }
             importedAsset = asset;
             return next;
@@ -2429,7 +2503,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         );
       });
       if (importedAsset === null) throw new CreativeStudioMediaError('storage_error');
-      return input.returnProject ? { asset: importedAsset, project: updatedProject } : importedAsset;
+      return { asset: importedAsset, project: updatedProject };
     } catch (error) {
       await cleanupUncommittedManagedPathsV2(input.projectId, assetId, [
         { filePath: partPath, identity: partIdentity },
@@ -2437,6 +2511,28 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       ]);
       return mapStoreError(error);
     }
+  };
+
+  async function importSeedStillFromPathV2(
+    input: InternalImportSeedStillInputV2 & { returnProject: true }
+  ): Promise<StudioMediaImportResultV2>;
+  async function importSeedStillFromPathV2(input: InternalImportSeedStillInputV2): Promise<StudioAssetV2>;
+  async function importSeedStillFromPathV2(
+    input: InternalImportSeedStillInputV2
+  ): Promise<StudioAssetV2 | StudioMediaImportResultV2> {
+    const imported = await importManagedImageFromPathV2(input);
+    return input.returnProject ? imported : imported.asset;
+  }
+
+  async function importReferenceImageFromPathV2(
+    input: InternalImportReferenceImageInputV2 & { returnProject: true }
+  ): Promise<StudioMediaImportResultV2>;
+  async function importReferenceImageFromPathV2(input: InternalImportReferenceImageInputV2): Promise<StudioAssetV2>;
+  async function importReferenceImageFromPathV2(
+    input: InternalImportReferenceImageInputV2
+  ): Promise<StudioAssetV2 | StudioMediaImportResultV2> {
+    const imported = await importManagedImageFromPathV2(input);
+    return input.returnProject ? imported : imported.asset;
   }
 
   const importBedAudioFromPathV2 = async (input: InternalImportBedAudioInputV2): Promise<StudioMediaImportResultV2> => {
@@ -4526,6 +4622,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
 
   return {
     importSeedStillFromPathV2,
+    importReferenceImageFromPathV2,
     importBedAudioFromPathV2,
     detachBedAudioV2,
     persistProviderOutputForJobV2,

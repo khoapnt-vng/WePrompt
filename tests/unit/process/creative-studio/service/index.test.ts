@@ -532,6 +532,7 @@ describe('CreativeStudioServiceV2', () => {
       resolveAssetV2?: StudioMediaStore['resolveAssetV2'];
       resolveAssetWithProjectAuthorityV2?: StudioMediaStore['resolveAssetWithProjectAuthorityV2'];
       verifyConditioningFrameV2?: StudioMediaStore['verifyConditioningFrameV2'];
+      importReferenceImageFromPathV2?: StudioMediaStore['importReferenceImageFromPathV2'];
       importBedAudioFromPathV2?: StudioMediaStore['importBedAudioFromPathV2'];
       detachBedAudioV2?: StudioMediaStore['detachBedAudioV2'];
     } = {}
@@ -803,6 +804,21 @@ describe('CreativeStudioServiceV2', () => {
       sha256: 'a'.repeat(64),
       createdAt: '2026-08-17T00:00:00.000Z',
     };
+    const importedReferenceAsset: StudioAssetV2 = {
+      id: 'reference_import_service_1',
+      projectId: current.id,
+      shotId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'reference_import_service_1.png' },
+      byteSize: 8,
+      sha256: 'c'.repeat(64),
+      projectReferenceId: 'reference_ming',
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
+      createdAt: committedAt,
+    };
     const bedAsset: StudioAssetV2 = {
       id: 'bed_service_1',
       projectId: current.id,
@@ -823,6 +839,13 @@ describe('CreativeStudioServiceV2', () => {
         importedProject.assets[bedAsset.id] = structuredClone(bedAsset);
         importedProject.bedAssetId = bedAsset.id;
         return { asset: structuredClone(bedAsset), project: importedProject };
+      });
+    const importReferenceImageFromPathV2 =
+      options.importReferenceImageFromPathV2 ??
+      vi.fn<StudioMediaStore['importReferenceImageFromPathV2']>(async () => {
+        const importedProject = structuredClone(current);
+        importedProject.assets[importedReferenceAsset.id] = structuredClone(importedReferenceAsset);
+        return { asset: structuredClone(importedReferenceAsset), project: importedProject };
       });
     const detachBedAudioV2 =
       options.detachBedAudioV2 ??
@@ -949,6 +972,7 @@ describe('CreativeStudioServiceV2', () => {
         ? {}
         : {
             mediaStore: {
+              importReferenceImageFromPathV2,
               importBedAudioFromPathV2,
               detachBedAudioV2,
               persistCapturedPosterV2,
@@ -970,6 +994,7 @@ describe('CreativeStudioServiceV2', () => {
       cancelJobV2,
       retryJobV2,
       retryDownloadV2,
+      importReferenceImageFromPathV2,
       importBedAudioFromPathV2,
       detachBedAudioV2,
       persistCapturedPosterV2,
@@ -1224,6 +1249,72 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
   });
 
+  it('imports one semantic reference through the exact Main-only media boundary', async () => {
+    const harness = makeHarness();
+
+    const imported = await harness.service.importReferenceImageFromPath({
+      projectId: 'project_v2',
+      referenceId: 'reference_ming',
+      expectedRevision: 2,
+      sourcePath: '/chosen/ming.png',
+    });
+
+    expect(imported).toMatchObject({
+      asset: {
+        id: 'reference_import_service_1',
+        shotId: null,
+        managedAsset: { collection: 'imports' },
+        projectReferenceId: 'reference_ming',
+        producerJobId: null,
+        compositionDigest: null,
+      },
+      project: { id: 'project_v2' },
+    });
+    expect(harness.importReferenceImageFromPathV2).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_v2',
+      referenceId: 'reference_ming',
+      expectedRevision: 2,
+      sourcePath: '/chosen/ming.png',
+      returnProject: true,
+    });
+    expect(harness.onProjectUpdated).toHaveBeenCalledExactlyOnceWith('project_v2');
+  });
+
+  it('rejects malformed reference-image import envelopes before media storage', async () => {
+    const harness = makeHarness();
+    const attempts: Array<() => Promise<unknown>> = [
+      () => harness.service.importReferenceImageFromPath(null as never),
+      () =>
+        harness.service.importReferenceImageFromPath({
+          projectId: 'project_v2',
+          referenceId: 'reference_ming',
+          expectedRevision: 2,
+          sourcePath: '/chosen/ming.png',
+          extra: true,
+        } as never),
+      () =>
+        harness.service.importReferenceImageFromPath({
+          projectId: 'project_v2',
+          referenceId: '../reference',
+          expectedRevision: 2,
+          sourcePath: '/chosen/ming.png',
+        }),
+      () =>
+        harness.service.importReferenceImageFromPath({
+          projectId: 'project_v2',
+          referenceId: 'reference_ming',
+          expectedRevision: 2,
+          sourcePath: '',
+        }),
+    ];
+
+    for (const attempt of attempts) {
+      // eslint-disable-next-line no-await-in-loop -- each hostile envelope must refuse independently.
+      await expect(attempt()).rejects.toMatchObject({ code: 'invalid_payload' });
+    }
+    expect(harness.importReferenceImageFromPathV2).not.toHaveBeenCalled();
+  });
+
   it('imports bed audio through the exact main-only lifecycle fence', async () => {
     const harness = makeHarness();
 
@@ -1300,6 +1391,14 @@ describe('CreativeStudioServiceV2', () => {
   it('fails closed when bed media storage is unavailable', async () => {
     const harness = makeHarness(undefined, { includeMediaStore: false });
 
+    await expect(
+      harness.service.importReferenceImageFromPath({
+        projectId: 'project_v2',
+        referenceId: 'reference_ming',
+        expectedRevision: 2,
+        sourcePath: '/chosen/ming.png',
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
     await expect(
       harness.service.importBedAudioFromPath({
         projectId: 'project_v2',
@@ -2778,6 +2877,51 @@ describe('CreativeStudioServiceV2', () => {
       failedReferenceIds: [],
     });
 
+    const boundedRetry = structuredClone(project);
+    const boundedAuthorization = boundedRetry.spendAuthorizations[0]!;
+    const boundedItem = boundedAuthorization.baseItems[0]!;
+    boundedItem.generationCount = 2;
+    boundedAuthorization.upperMinorUnits = boundedAuthorization.lowerMinorUnits * 2;
+    boundedAuthorization.idempotencyKeys.push({ itemId: boundedItem.id, key: 'idempotency_reference_grid_retry' });
+    const boundedFirst = boundedRetry.jobs[SERVICE_REFERENCE_JOB_ID]!;
+    boundedFirst.status = 'failed';
+    boundedFirst.error = {
+      code: 'seed_still_variation_grid',
+      messageKey: 'conversation.creativeStudio.jobs.errors.seedStillVariationGrid',
+    };
+    boundedFirst.outputAssetIds = [];
+    boundedFirst.outputAssetIdsByRole.primary = null;
+    const boundedAssetId = 'asset_reference_grid_retry';
+    boundedRetry.assets[boundedAssetId] = {
+      ...structuredClone(boundedRetry.assets.asset_reference_background!),
+      id: boundedAssetId,
+      managedAsset: { collection: 'assets', fileName: `${boundedAssetId}.png` },
+      producerJobId: 'job_reference_grid_retry',
+    };
+    const boundedSecond = {
+      ...structuredClone(boundedFirst),
+      id: 'job_reference_grid_retry',
+      status: 'succeeded' as const,
+      idempotencyKey: 'idempotency_reference_grid_retry',
+      outputAssetIds: [boundedAssetId],
+      outputAssetIdsByRole: { primary: boundedAssetId, poster: null },
+      error: null,
+      retryOfJobId: boundedFirst.id,
+      retryReason: 'variation_grid' as const,
+    };
+    boundedRetry.jobs = {
+      [boundedSecond.id]: boundedSecond,
+      [boundedFirst.id]: boundedFirst,
+    };
+    boundedRetry.references.ref_background!.jobIds = [boundedFirst.id, boundedSecond.id];
+    boundedRetry.references.ref_background!.supersededAssetIds = ['asset_reference_background'];
+    boundedRetry.references.ref_background!.approvedAssetId = boundedAssetId;
+    expect(projectStudioReferenceGenerationHandoffV2(decision, receipt, boundedRetry)).toMatchObject({
+      counts: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+      resultAssetIds: [boundedAssetId],
+      failedReferenceIds: [],
+    });
+
     const pollDeadlineRetried = structuredClone(retried);
     pollDeadlineRetried.jobs[SERVICE_REFERENCE_JOB_ID]!.error = {
       code: 'poll_deadline',
@@ -2966,7 +3110,7 @@ describe('CreativeStudioServiceV2', () => {
           expect.objectContaining({
             target: { kind: 'reference', referenceId: 'ref_background' },
             purpose: 'reference_image',
-            generationCount: 1,
+            generationCount: 2,
           }),
         ],
         cascadeItems: [],
@@ -6942,6 +7086,7 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
   { kind: 'set_reference_label', referenceId: 'ref_ming', label: 'Ming Wong' },
   { kind: 'set_reference_prompt', referenceId: 'ref_ming', prompt: 'Updated Ming prompt.' },
   { kind: 'select_reference_image', referenceId: 'ref_ming', assetId: 'asset_ming' },
+  { kind: 'remove_reference_image', referenceId: 'ref_ming', assetId: 'asset_ming' },
   { kind: 'add_beat', beatId: 'section_new', beat: editableBeatV2(), beforeBeatId: null },
   { kind: 'edit_beat', beatId: 'section_1', changes: { targetSeconds: 12 } },
   { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
@@ -7525,13 +7670,20 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(34);
+      expect(operationKinds).toHaveLength(35);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds
       );
       const addBeat = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_beat');
       const addShot = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_shot');
+      const removeReferenceImage = operationVariants?.find(
+        (variant) => variant.properties?.kind?.const === 'remove_reference_image'
+      );
+      expect(removeReferenceImage).toMatchObject({
+        additionalProperties: false,
+        required: ['kind', 'referenceId', 'assetId'],
+      });
       expect(addBeat).toMatchObject({
         additionalProperties: false,
         required: ['kind', 'beatId', 'beat', 'beforeBeatId'],
@@ -7976,6 +8128,13 @@ describe('Studio MCP schema-2 server', () => {
         {
           name: 'studio_apply_edits',
           arguments: { expectedRevision: 7, operations: [{ kind: 'undo_last', entryId: 'undo_1' }] },
+        },
+        {
+          name: 'studio_apply_edits',
+          arguments: {
+            expectedRevision: 7,
+            operations: [{ kind: 'remove_reference_image', referenceId: 'ref_ming', assetId: 'asset_ming' }],
+          },
         },
         {
           name: 'propose_storyboard',

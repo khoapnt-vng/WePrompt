@@ -156,7 +156,7 @@ describe('exact persisted Shot reference binding resolution', () => {
     expect(resolve(unapproved)).toEqual({ ok: false, shotId: 'shot_reunion', reason: 'unapproved_reference' });
   });
 
-  it('refuses missing, cross-reference, Shot-owned, non-image, and noncanonical approved assets', () => {
+  it('refuses missing, cross-reference, Shot-owned, non-image, and forged imported approved assets', () => {
     const cases: StudioProjectV2[] = [];
     const missing = project();
     delete missing.assets.asset_ming;
@@ -170,13 +170,34 @@ describe('exact persisted Shot reference binding resolution', () => {
     const nonImage = project();
     nonImage.assets.asset_ming!.mediaKind = 'video';
     cases.push(nonImage);
-    const imported = project();
-    imported.assets.asset_ming!.managedAsset.collection = 'imports';
-    cases.push(imported);
+    const forgedImport = project();
+    forgedImport.assets.asset_ming!.managedAsset.collection = 'imports';
+    forgedImport.assets.asset_ming!.producerJobId = 'forged_producer';
+    cases.push(forgedImport);
 
     for (const value of cases) {
       expect(resolve(value)).toEqual({ ok: false, shotId: 'shot_reunion', reason: 'missing_asset' });
     }
+  });
+
+  it('freezes a canonical human import through the exact persisted Shot binding', () => {
+    const value = project();
+    value.assets.asset_ming!.managedAsset.collection = 'imports';
+
+    const result = resolve(value);
+    expect(result).toEqual({
+      ok: true,
+      referenceInputs: [
+        { referenceId: 'reference_ming', kind: 'character', assetId: 'asset_ming', sha256: 'a'.repeat(64) },
+        { referenceId: 'reference_mei', kind: 'character', assetId: 'asset_mei', sha256: 'b'.repeat(64) },
+        {
+          referenceId: 'reference_dai_pai_dong',
+          kind: 'background',
+          assetId: 'asset_dai_pai_dong',
+          sha256: 'c'.repeat(64),
+        },
+      ],
+    });
   });
 
   it('uses only the current canonical asset, not a superseded asset', () => {

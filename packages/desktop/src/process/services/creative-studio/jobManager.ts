@@ -35,14 +35,17 @@ import { CreativeStudioMediaError, type StudioMediaStore } from './mediaStore';
 import type { StudioProviderResolver } from './providerResolver';
 import { CreativeStudioStoreError, type CreativeStudioStore } from './store';
 import { createStudioSpendReceiptV2 } from './service/schema2/pricing';
-import { studioGenerationCompositionMatchesAuthorityV2 } from './service/schema2/generation';
+import {
+  createStudioAutomaticReferenceRetryJobId,
+  createStudioFrameExtractionId,
+  studioGenerationCompositionMatchesAuthorityV2,
+} from './service/schema2/generation';
 import {
   advanceStudioWaitingBindingsV2,
   terminalizeStudioUnboundDependenciesV2,
   type StudioVerifiedConditioningFrameV2,
   type StudioWaitingBindingAdvanceV2,
 } from './service/schema2/lifecycle';
-import { createStudioFrameExtractionId } from './service/schema2/generation';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 /** Longest value this log will print. A cap costs a truncated line; the alternative costs a leak. */
@@ -330,6 +333,15 @@ const providerCredentialsAreUsable = (provider: IProvider): boolean =>
 const ownValueV2 = <T>(record: Record<string, T>, id: string): T | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
 
+const defineOwnValueV2 = <T>(record: Record<string, T>, id: string, value: T): void => {
+  Object.defineProperty(record, id, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+};
+
 const isDenseArrayV2 = (value: unknown, maximumLength: number): value is unknown[] => {
   try {
     if (!Array.isArray(value) || value.length > maximumLength || Reflect.ownKeys(value).length !== value.length + 1) {
@@ -440,6 +452,11 @@ const errorMessageKey = (code: StudioJobErrorCode): string =>
 const jobError = (code: StudioJobErrorCode): StudioJobError => ({
   code,
   messageKey: errorMessageKey(code),
+});
+
+const repeatedReferenceVariationGridError = (): StudioJobError => ({
+  code: 'seed_still_variation_grid',
+  messageKey: 'conversation.creativeStudio.jobs.errors.referenceVariationGridRepeated',
 });
 
 const providerErrorCode = (error: unknown): StudioJobErrorCode | 'invalid_response' | null => {
@@ -684,6 +701,108 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       );
     }
     return job;
+  };
+
+  /**
+   * Persists the billed grid refusal and, when the quote reserved it, exactly one fresh provider
+   * attempt. Both records land in one project commit so reload can never lose or duplicate retry
+   * authority.
+   */
+  const failVariationGridAndQueueRetryV2 = async (
+    projectId: string,
+    jobId: string
+  ): Promise<{ failedJob: StudioJobV2; retryJobId: string | null }> => {
+    let retryJobId: string | null = null;
+    const failedJob = await mutateJobV2(projectId, jobId, (project, current) => {
+      const existingRetry = Object.values(project.jobs).find(
+        (candidate) => candidate.retryOfJobId === current.id && candidate.retryReason === 'variation_grid'
+      );
+      if (existingRetry !== undefined) {
+        retryJobId = existingRetry.id;
+        return false;
+      }
+      if (TERMINAL_STATUSES.has(current.status)) return false;
+
+      const authority = authorizationItemForJobV2(project, current);
+      const retryKeys = authority?.authorization.idempotencyKeys.filter(
+        (entry) => entry.itemId === current.authorizationItemId
+      );
+      const canRetry =
+        current.status === 'running' &&
+        current.purpose === 'reference_image' &&
+        current.target.kind === 'reference' &&
+        authority?.item.generationCount === 2 &&
+        retryKeys?.length === 2 &&
+        retryKeys[0]?.key === current.idempotencyKey;
+
+      current.status = 'failed';
+      current.error = canRetry ? jobError('seed_still_variation_grid') : repeatedReferenceVariationGridError();
+      delete current.progress;
+      if (!canRetry || authority === null || retryKeys === undefined || current.target.kind !== 'reference') {
+        return true;
+      }
+
+      const idempotencyKey = retryKeys[1]!.key;
+      const nextJobId = createStudioAutomaticReferenceRetryJobId({
+        authorizationId: current.authorizationId,
+        itemId: current.authorizationItemId,
+        idempotencyKey,
+      });
+      if (ownValueV2(project.jobs, nextJobId) !== undefined) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio automatic retry identity collision');
+      }
+      const reference = ownValueV2(project.references, current.target.referenceId);
+      if (reference === undefined || reference.jobIds.includes(nextJobId)) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio automatic retry owner is unavailable');
+      }
+      const capturedAt = now();
+      const retry: StudioJobV2 = {
+        id: nextJobId,
+        projectId: current.projectId,
+        target: structuredClone(current.target),
+        status: 'queued_local',
+        provider: { ...current.provider },
+        idempotencyKey,
+        providerJobId: null,
+        cancellationPolicy: current.cancellationPolicy,
+        outputAssetIds: [],
+        purpose: current.purpose,
+        authorizationId: current.authorizationId,
+        authorizationItemId: current.authorizationItemId,
+        composition: structuredClone(current.composition),
+        requestPlan: structuredClone(current.requestPlan),
+        requestSnapshot: current.requestSnapshot === null ? null : structuredClone(current.requestSnapshot),
+        spendReceipt: null,
+        outputAssetIdsByRole: { primary: null, poster: null },
+        error: null,
+        retryOfJobId: current.id,
+        retryReason: 'variation_grid',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        createdAt: capturedAt,
+        updatedAt: capturedAt,
+      };
+      if (retry.requestSnapshot === null) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio automatic retry request is unresolved');
+      }
+      defineOwnValueV2(project.jobs, retry.id, retry);
+      reference.jobIds.push(retry.id);
+      reference.updatedAt = capturedAt;
+      retryJobId = retry.id;
+      return true;
+    });
+    if (retryJobId !== null) {
+      await dispatchAuthorizedJobsV2({ projectId, jobIds: [retryJobId] }).catch((error: unknown): void => {
+        console.warn(
+          formatStudioJobLog('automatic_reference_retry_queued', {
+            projectId,
+            jobId: retryJobId,
+            code: error instanceof Error ? error.name : 'unknown',
+          })
+        );
+      });
+    }
+    return { failedJob, retryJobId };
   };
 
   const transitionRemoteFailureV2 = async (
@@ -1117,6 +1236,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
         return transitionFailureV2(context.projectId, context.jobId, 'failed', 'no_output');
       }
       if (error instanceof CreativeStudioMediaError && error.code === 'seed_still_variation_grid') {
+        if (context.purpose === 'reference_image') {
+          return (await failVariationGridAndQueueRetryV2(context.projectId, context.jobId)).failedJob;
+        }
         return transitionFailureV2(context.projectId, context.jobId, 'failed', 'seed_still_variation_grid');
       }
       return transitionFailureV2(context.projectId, context.jobId, 'failed', 'download_failed');

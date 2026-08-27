@@ -931,7 +931,10 @@
           "tag": {
             "running": "Läuft",
             "edited": "Prompt bearbeitet"
-          }
+          },
+          "importPhoto": "Foto importieren",
+          "removePhoto": "{{handle}} entfernen",
+          "removePhotoLocked": "Ein autorisierter Vorgang verwendet dieses Foto. Schließe den Vorgang ab oder brich ihn ab, bevor du das Foto entfernst."
         },
         "description": "Erzeugen Sie zuerst kanonische Charakterbilder und danach Bilder wiederkehrender Hintergründe. Binden Sie die aktuellen Referenzen an jeden Shot, bevor Sie das Board oder das erste Bild generieren.",
         "generationScope": "Generierungsumfang",
@@ -1461,7 +1464,8 @@
           "references": "Aufgelöste Referenzen",
           "noReferences": "Keine direkten Referenzeingaben",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
-        }
+        },
+        "referenceGridRetry": "Wenn das Modell ein Variationsraster ausgibt, wird jede Referenz einmal automatisch wiederholt. Die ersten Versuche kosten zusammen {{lower}}; mit Wiederholungen höchstens {{upper}}."
       },
       "editorFolderExport": {
         "action": "Editor-Ordner exportieren…",
@@ -1929,7 +1933,8 @@
         "downloadFailed": "Die Generierung wurde abgeschlossen, aber die Ausgabe konnte nicht heruntergeladen werden.",
         "unsupported": "Der Anbieter unterstützt den angeforderten Vorgang nicht.",
         "seedStillVariationGrid": "Das generierte Bild enthält ein mehrteiliges Variationsraster und kann weder als aktuelles erstes Bild noch als Referenz verwendet werden.",
-        "unknown": "Der Generierungsauftrag ist aus unbekanntem Grund fehlgeschlagen."
+        "unknown": "Der Generierungsauftrag ist aus unbekanntem Grund fehlgeschlagen.",
+        "referenceVariationGridRepeated": "Das Modell hat erneut ein mehrteiliges Variationsraster ausgegeben. „Foto importieren“ ist der zuverlässige Weg, diese Referenz festzulegen."
       }
     },
     "preview": {

@@ -357,9 +357,26 @@
     transform 140ms ease;
 }
 
+.removeControl {
+  position: absolute;
+  z-index: 4;
+  inset-block-start: 8px;
+  inset-inline-end: 80px;
+  color: rgb(var(--gray-1));
+  background: rgb(var(--danger-6));
+  opacity: 0;
+  transform: translateY(3px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
 .fullscreenFrame:hover .downloadControl,
 .fullscreenFrame:focus-within .downloadControl,
-.fullscreenFrame:fullscreen .downloadControl {
+.fullscreenFrame:fullscreen .downloadControl,
+.fullscreenFrame:hover .removeControl,
+.fullscreenFrame:focus-within .removeControl,
+.fullscreenFrame:fullscreen .removeControl {
   opacity: 1;
   transform: translateY(0);
 }
@@ -529,7 +546,8 @@
   }
 
   .pictureBandGenerating,
-  .downloadControl {
+  .downloadControl,
+  .removeControl {
     transition: none;
   }
 }
@@ -556,7 +574,8 @@
     inline-size: calc(100% - 14px);
   }
 
-  .downloadControl {
+  .downloadControl,
+  .removeControl {
     opacity: 1;
     transform: none;
   }

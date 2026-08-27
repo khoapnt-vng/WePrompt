@@ -62,7 +62,11 @@ export const resolveStudioReferenceBindingV2 = (input: {
       asset.shotId !== null ||
       asset.projectReferenceId !== reference.id ||
       asset.mediaKind !== 'image' ||
-      asset.managedAsset.collection !== 'assets' ||
+      (asset.managedAsset.collection !== 'assets' &&
+        (asset.managedAsset.collection !== 'imports' ||
+          asset.producerJobId !== null ||
+          asset.compositionDigest !== null ||
+          asset.generationReferenceAssetIds.length !== 0)) ||
       assetIds.has(asset.id)
     ) {
       return fail(input.shotId, 'missing_asset');

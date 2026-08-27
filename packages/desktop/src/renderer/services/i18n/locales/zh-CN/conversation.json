@@ -930,7 +930,10 @@
           "tag": {
             "running": "运行中",
             "edited": "提示词已编辑"
-          }
+          },
+          "importPhoto": "导入照片",
+          "removePhoto": "移除 {{handle}}",
+          "removePhotoLocked": "已授权的任务正在使用这张照片。请先完成或取消该任务，再移除照片。"
         },
         "description": "先生成角色的当前标准图，再生成重复出现的背景图。生成分镜或首帧之前，请将当前参考图明确绑定到每个镜头。",
         "generationScope": "生成范围",
@@ -1460,7 +1463,8 @@
           "references": "已解析参考",
           "noReferences": "无直接参考输入",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
-        }
+        },
+        "referenceGridRetry": "如果模型返回变体网格，每个参考图可自动重试一次。首次尝试共计 {{lower}}；需要重试时最高为 {{upper}}。"
       },
       "editorFolderExport": {
         "action": "导出剪辑文件夹…",
@@ -1917,7 +1921,8 @@
         "downloadFailed": "生成已完成，但无法下载输出。",
         "unsupported": "此服务商不支持请求的操作。",
         "seedStillVariationGrid": "生成的图像包含多面板变体网格，不能用作当前首帧或参考图。",
-        "unknown": "生成任务因未知原因失败。"
+        "unknown": "生成任务因未知原因失败。",
+        "referenceVariationGridRepeated": "模型再次返回了多面板变体网格。导入照片是设置此参考图的可靠方式。"
       }
     },
     "preview": {

@@ -1070,6 +1070,21 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
       };
     })
   );
+  ipcBridge.creativeStudio.importReferenceImage.provider((input) =>
+    runCommand(async () => {
+      const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();
+      const picked = await (dependencies.showOpenDialog ?? defaultDependencies.showOpenDialog!)(parentWindow);
+      if (picked.canceled || !picked.filePaths[0]) return { status: 'cancelled' as const };
+      const imported = await dependencies
+        .getService()
+        .importReferenceImageFromPath({ ...input, sourcePath: picked.filePaths[0] });
+      return {
+        status: 'imported' as const,
+        assetId: imported.asset.id,
+        projectRevision: imported.project.revision,
+      };
+    })
+  );
   ipcBridge.creativeStudio.importBedAudio.provider((input) =>
     runCommand(async () => {
       const parentWindow = (dependencies.getParentWindow ?? defaultDependencies.getParentWindow!)();

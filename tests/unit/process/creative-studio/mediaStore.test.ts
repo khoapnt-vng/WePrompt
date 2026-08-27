@@ -2034,6 +2034,151 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     });
   });
 
+  it('imports a human reference as the exact current canonical image while preserving history and bindings', async () => {
+    const referenceId = 'reference_character';
+    const { rootDir, store, project } = await makeStoreV2({
+      projectReferenceId: referenceId,
+      includeAuthorizedJob: false,
+    });
+    const importsDirectory = path.join(rootDir, project.id, 'imports');
+    await fs.mkdir(importsDirectory, { recursive: true });
+    await fs.writeFile(path.join(importsDirectory, 'reference_existing.png'), png);
+    const existingHash = createHash('sha256').update(png).digest('hex');
+    const prepared = await store.updateProjectV2(project.id, (current) => {
+      current.assets.reference_existing = {
+        id: 'reference_existing',
+        projectId: current.id,
+        shotId: null,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'imports', fileName: 'reference_existing.png' },
+        byteSize: png.length,
+        sha256: existingHash,
+        projectReferenceId: referenceId,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
+        createdAt: '2026-08-17T12:00:02.000Z',
+      };
+      current.references[referenceId]!.approvedAssetId = 'reference_existing';
+      current.references[referenceId]!.updatedAt = '2026-08-17T12:00:02.000Z';
+      current.shots.shot_1!.referenceBinding = {
+        status: 'ready',
+        characterReferenceIds: [referenceId],
+        backgroundReferenceId: null,
+      };
+      return current;
+    });
+    const bindingsBefore = structuredClone(prepared.shots.shot_1!.referenceBinding);
+    const existingBefore = structuredClone(prepared.assets.reference_existing);
+    const sourceBytes = Buffer.concat([png, Buffer.from([0x01])]);
+    const sourcePath = path.join(rootDir, 'ming-import.png');
+    await fs.writeFile(sourcePath, sourceBytes);
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'reference_imported',
+      now: () => '2026-08-17T12:00:03.000Z',
+    });
+
+    const imported = await media.importReferenceImageFromPathV2({
+      projectId: project.id,
+      referenceId,
+      sourcePath,
+      expectedRevision: prepared.revision,
+      returnProject: true,
+    });
+
+    expect(imported.asset).toEqual({
+      id: 'reference_imported',
+      projectId: project.id,
+      shotId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: 'reference_imported.png' },
+      byteSize: sourceBytes.length,
+      sha256: createHash('sha256').update(sourceBytes).digest('hex'),
+      projectReferenceId: referenceId,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
+      createdAt: '2026-08-17T12:00:03.000Z',
+    });
+    expect(imported.project.references[referenceId]).toMatchObject({
+      approvedAssetId: 'reference_imported',
+      supersededAssetIds: ['reference_existing'],
+      jobIds: [],
+      updatedAt: '2026-08-17T12:00:03.000Z',
+    });
+    expect(imported.project.assets.reference_existing).toEqual(existingBefore);
+    expect(imported.project.shots.shot_1!.referenceBinding).toEqual(bindingsBefore);
+    expect(imported.project.jobs).toEqual(prepared.jobs);
+    expect(imported.project.spendAuthorizations).toEqual(prepared.spendAuthorizations);
+    expect(JSON.stringify(imported.project)).not.toContain(sourcePath);
+    await expect(fs.readFile(path.join(importsDirectory, 'reference_imported.png'))).resolves.toEqual(sourceBytes);
+  });
+
+  it('refuses stale, unknown-reference, and invalid reference imports without retaining media', async () => {
+    await Promise.all(
+      (['stale', 'unknown', 'invalid_media'] as const).map(async (kind) => {
+        const referenceId = 'reference_character';
+        const { rootDir, store, project } = await makeStoreV2({
+          projectReferenceId: referenceId,
+          includeAuthorizedJob: false,
+        });
+        const sourcePath = path.join(rootDir, `${kind}.png`);
+        await fs.writeFile(sourcePath, kind === 'invalid_media' ? Buffer.from('not an image') : png);
+        const assetId = `reference_${kind}`;
+        const media = createStudioMediaStore({ store, createId: () => assetId });
+
+        await expect(
+          media.importReferenceImageFromPathV2({
+            projectId: project.id,
+            referenceId: kind === 'unknown' ? 'reference_unknown' : referenceId,
+            sourcePath,
+            expectedRevision: kind === 'stale' ? project.revision - 1 : project.revision,
+          })
+        ).rejects.toMatchObject({
+          code: kind === 'stale' ? 'stale_project' : kind === 'unknown' ? 'not_found' : 'invalid_media',
+        });
+        const loaded = await store.getProjectV2(project.id);
+        expect(loaded.status).toBe('supported');
+        expect(loaded.status === 'supported' ? loaded.project.assets[assetId] : undefined).toBeUndefined();
+        await expect(fs.access(path.join(rootDir, project.id, 'imports', `${assetId}.png`))).rejects.toMatchObject({
+          code: 'ENOENT',
+        });
+      })
+    );
+  });
+
+  it('rechecks active reference generation at final import commit and removes staged bytes', async () => {
+    const referenceId = 'reference_character';
+    const { rootDir, store, project } = await makeStoreV2({ projectReferenceId: referenceId });
+    const sourcePath = path.join(rootDir, 'concurrent-reference-import.png');
+    await fs.writeFile(sourcePath, png);
+    const initiallyIdle = structuredClone(project);
+    initiallyIdle.jobs.job_1!.status = 'cancelled';
+    initiallyIdle.jobs.job_1!.error = null;
+    const racingStore = {
+      ...store,
+      getProjectV2: vi.fn(async () => ({ status: 'supported' as const, project: structuredClone(initiallyIdle) })),
+    } as CreativeStudioStore;
+    const media = createStudioMediaStore({ store: racingStore, createId: () => 'reference_race_import' });
+
+    await expect(
+      media.importReferenceImageFromPathV2({
+        projectId: project.id,
+        referenceId,
+        sourcePath,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'busy' });
+
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded).toEqual({ status: 'supported', project });
+    expect(await fs.readdir(path.join(rootDir, project.id, 'parts')).catch(() => [])).toEqual([]);
+    expect(await fs.readdir(path.join(rootDir, project.id, 'imports')).catch(() => [])).toEqual([]);
+  });
+
   it('refuses a managed-file replacement at the final project commit authorization', async () => {
     const { rootDir, store, project } = await makeStoreV2({ includeAuthorizedJob: false });
     const sourcePath = path.join(rootDir, 'final-authorization-seed.png');
@@ -3235,6 +3380,42 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     for (const input of importCases) {
       // eslint-disable-next-line no-await-in-loop -- Every hostile envelope must refuse independently.
       await expect(media.importSeedStillFromPathV2(input as never)).rejects.toMatchObject({ code: 'invalid_media' });
+    }
+    const referenceImportCases: Array<Record<string, unknown>> = [
+      {
+        projectId: project.id,
+        referenceId: '../reference',
+        expectedRevision: project.revision,
+        sourcePath,
+      },
+      {
+        projectId: project.id,
+        referenceId: 'reference_1',
+        expectedRevision: project.revision,
+        sourcePath,
+        extra: true,
+      },
+      {
+        projectId: project.id,
+        referenceId: 'reference_1',
+        shotId: 'shot_1',
+        expectedRevision: project.revision,
+        sourcePath,
+      },
+      { projectId: project.id, expectedRevision: project.revision, sourcePath },
+      {
+        projectId: project.id,
+        referenceId: 'reference_1',
+        expectedRevision: project.revision,
+        sourcePath,
+        returnProject: 'yes',
+      },
+    ];
+    for (const input of referenceImportCases) {
+      // eslint-disable-next-line no-await-in-loop -- Every hostile envelope must refuse independently.
+      await expect(media.importReferenceImageFromPathV2(input as never)).rejects.toMatchObject({
+        code: 'invalid_media',
+      });
     }
 
     for (const input of [

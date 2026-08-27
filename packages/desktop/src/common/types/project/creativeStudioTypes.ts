@@ -105,7 +105,7 @@ export type StudioJobError = {
   messageKey: string;
 };
 
-export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown';
+export type StudioJobRetryReason = 'provider_failure' | 'submission_unknown' | 'variation_grid';
 
 export type StudioCancellationPolicy = 'none' | 'queued_only' | 'queued_and_running';
 
@@ -809,6 +809,12 @@ export type StudioImportSeedStillRequestV2 = {
   shotId: string;
 };
 
+export type StudioImportReferenceImageRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  referenceId: string;
+};
+
 export type StudioImportBedAudioRequestV2 = {
   projectId: string;
   expectedRevision: number;
@@ -861,6 +867,7 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'set_reference_label'
       | 'set_reference_prompt'
       | 'select_reference_image'
+      | 'remove_reference_image'
       | 'set_shot_reference_binding'
       | 'promote_board_panel'
       | 'trim_shot'
@@ -1530,6 +1537,7 @@ export type StudioMutationOperationV2 =
   | { kind: 'set_reference_label'; referenceId: string; label: string }
   | { kind: 'set_reference_prompt'; referenceId: string; prompt: string }
   | { kind: 'select_reference_image'; referenceId: string; assetId: string }
+  | { kind: 'remove_reference_image'; referenceId: string; assetId: string }
   | {
       kind: 'set_shot_reference_binding';
       shotId: string;
@@ -1588,6 +1596,7 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   set_reference_label: 'operation_not_permitted',
   set_reference_prompt: 'operation_not_permitted',
   select_reference_image: 'operation_not_permitted',
+  remove_reference_image: 'operation_not_permitted',
   set_shot_reference_binding: 'direct',
   add_beat: 'proposal',
   edit_beat: 'proposal',

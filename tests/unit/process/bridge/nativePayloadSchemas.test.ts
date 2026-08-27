@@ -355,6 +355,11 @@ const VALID_PAYLOADS = {
     height: 720,
   },
   'creative-studio.import-seed-still': { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1' },
+  'creative-studio.import-reference-image': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    referenceId: 'reference_1',
+  },
   'creative-studio.import-bed-audio': { projectId: 'project_1', expectedRevision: 1 },
   'creative-studio.detach-bed-audio': { projectId: 'project_1', expectedRevision: 1, assetId: 'asset_1' },
   'creative-studio.set-bed': { projectId: 'project_1', expectedRevision: 1, assetId: 'asset_1' },
@@ -1147,6 +1152,31 @@ const INVALID_PAYLOADS = [
     { projectId: 'project_1', shotId: 'shot_1', expectedRevision: 1, assetId: 'asset_1' },
   ],
   [
+    'creative-studio.import-reference-image',
+    'renderer supplied source path',
+    {
+      projectId: 'project_1',
+      referenceId: 'reference_1',
+      expectedRevision: 1,
+      sourcePath: '/tmp/reference.png',
+    },
+  ],
+  [
+    'creative-studio.import-reference-image',
+    'renderer supplied asset id',
+    { projectId: 'project_1', referenceId: 'reference_1', expectedRevision: 1, assetId: 'asset_1' },
+  ],
+  [
+    'creative-studio.import-reference-image',
+    'missing semantic reference id',
+    { projectId: 'project_1', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.import-reference-image',
+    'unsafe semantic reference id',
+    { projectId: 'project_1', referenceId: '../reference', expectedRevision: 1 },
+  ],
+  [
     'creative-studio.import-bed-audio',
     'renderer supplied source path',
     { projectId: 'project_1', expectedRevision: 1, sourcePath: '/tmp/bed.wav' },
@@ -1356,6 +1386,7 @@ describe('native bridge payload schemas', () => {
     },
     { kind: 'set_reference_prompt', referenceId: 'ming', prompt: 'Ming in a navy jacket, neutral turnaround.' },
     { kind: 'select_reference_image', referenceId: 'ming', assetId: 'asset_ming_previous' },
+    { kind: 'remove_reference_image', referenceId: 'ming', assetId: 'asset_ming_current' },
     {
       kind: 'set_shot_reference_binding',
       shotId: 'shot_1',
@@ -1418,6 +1449,20 @@ describe('native bridge payload schemas', () => {
   it.each(authoringOperations)('accepts renderer authoring operation $kind', (operation) => {
     const payload = { projectId: 'project_1', expectedRevision: 1, operations: [operation] };
     expect(parseNativeBridgePayload('creative-studio.apply-authoring-batch', payload)).toEqual(payload);
+  });
+
+  it.each([
+    { kind: 'remove_reference_image', referenceId: '', assetId: 'asset_ming_current' },
+    { kind: 'remove_reference_image', referenceId: 'ming', assetId: '' },
+    { kind: 'remove_reference_image', referenceId: 'ming', assetId: 'asset_ming_current', deleteFile: true },
+  ])('rejects an unsafe reference-image removal envelope %#', (operation) => {
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: [operation],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
   it('rejects a Director-supplied semantic reference id', () => {
@@ -2026,6 +2071,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.restore-shot',
       'creative-studio.reorder-bin',
       'creative-studio.import-seed-still',
+      'creative-studio.import-reference-image',
       'creative-studio.import-bed-audio',
       'creative-studio.detach-bed-audio',
       'creative-studio.set-bed',
@@ -2087,6 +2133,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.retry-job',
       'creative-studio.retry-job-download',
       'creative-studio.dismiss-reference-generation-handoff',
+      'creative-studio.import-reference-image',
       'creative-studio.import-bed-audio',
       'creative-studio.detach-bed-audio',
       'creative-studio.set-bed',
@@ -2109,9 +2156,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(52);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(52);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(52);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(53);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);

@@ -61,6 +61,7 @@ const providerNames = [
   'deleteProject',
   'persistCapturedPoster',
   'importSeedStill',
+  'importReferenceImage',
   'importBedAudio',
   'detachBedAudio',
   'setBed',
@@ -120,6 +121,7 @@ const mocks = vi.hoisted(() => ({
       'deleteProject',
       'persistCapturedPoster',
       'importSeedStill',
+      'importReferenceImage',
       'importBedAudio',
       'detachBedAudio',
       'setBed',
@@ -311,6 +313,10 @@ const createService = () =>
     deleteProject: vi.fn(async () => true),
     persistCapturedPoster: vi.fn(async () => ({ id: 'poster_1' })),
     importSeedStillFromPath: vi.fn(async () => ({ asset: { id: 'asset_1' }, project: rendererProject })),
+    importReferenceImageFromPath: vi.fn(async () => ({
+      asset: { id: 'reference_import_1' },
+      project: rendererProject,
+    })),
     importBedAudioFromPath: vi.fn(async () => ({ asset: { id: 'bed_1' }, project: rendererProject })),
     detachBedAudio: vi.fn(async () => rendererProject),
     createExport: vi.fn(async () => ({ revision: 2, artifacts: [] })),
@@ -1019,6 +1025,38 @@ describe('initCreativeStudioBridge', () => {
       } as never)
     ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
     expect(service.importSeedStillFromPath).not.toHaveBeenCalled();
+  });
+
+  it('imports an exact semantic reference through the native picker without exposing the path or project', async () => {
+    initCreativeStudioBridge(dependencies);
+    const input = { projectId: 'project_1', expectedRevision: 6, referenceId: 'reference_ming' };
+
+    const result = await registeredHandler('importReferenceImage')(input as never);
+
+    expect(result).toEqual({
+      ok: true,
+      data: { status: 'imported', assetId: 'reference_import_1', projectRevision: 7 },
+    });
+    expect(service.importReferenceImageFromPath).toHaveBeenCalledExactlyOnceWith({
+      ...input,
+      sourcePath: '/private/reference.png',
+    });
+    expect(JSON.stringify(result)).not.toContain('/private/reference.png');
+    expect(JSON.stringify(result)).not.toContain('referencePlanStatus');
+  });
+
+  it('keeps reference-image picker cancellation inert', async () => {
+    const showOpenDialog = vi.fn(async () => ({ canceled: true, filePaths: [] }));
+    initCreativeStudioBridge({ ...dependencies, showOpenDialog });
+
+    await expect(
+      registeredHandler('importReferenceImage')({
+        projectId: 'project_1',
+        expectedRevision: 6,
+        referenceId: 'reference_ming',
+      } as never)
+    ).resolves.toEqual({ ok: true, data: { status: 'cancelled' } });
+    expect(service.importReferenceImageFromPath).not.toHaveBeenCalled();
   });
 
   it('keeps the bed-audio picker and result free of renderer paths and media authority', async () => {

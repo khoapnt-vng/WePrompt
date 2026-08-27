@@ -254,6 +254,12 @@ export type CreativeStudioServiceV2 = {
     expectedRevision: number;
     sourcePath: string;
   }): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }>;
+  importReferenceImageFromPath(input: {
+    projectId: string;
+    referenceId: string;
+    expectedRevision: number;
+    sourcePath: string;
+  }): Promise<{ asset: StudioAssetV2; project: StudioRendererProjectV2 }>;
   importBedAudioFromPath(input: {
     projectId: string;
     expectedRevision: number;
@@ -1391,7 +1397,7 @@ export const projectStudioReferenceGenerationHandoffV2 = (
           item.target.kind !== 'reference' ||
           item.target.referenceId !== referenceIds[index] ||
           item.purpose !== 'reference_image' ||
-          item.generationCount !== 1
+          (item.generationCount !== 1 && item.generationCount !== 2)
       )
     ) {
       throw new CreativeStudioStoreError('storage_error', 'Confirmed Studio reference handoff scope mismatch');
@@ -1403,19 +1409,32 @@ export const projectStudioReferenceGenerationHandoffV2 = (
       const jobs = Object.values(project.jobs).filter(
         (candidate) => candidate.authorizationId === authorization.id && candidate.authorizationItemId === item.id
       );
+      const itemIdempotencyKeys = authorization.idempotencyKeys
+        .filter((entry) => entry.itemId === item.id)
+        .map((entry) => entry.key);
+      const jobsByIdempotencyKey = new Map(jobs.map((candidate) => [candidate.idempotencyKey, candidate]));
+      const firstJob = jobsByIdempotencyKey.get(itemIdempotencyKeys[0] ?? '');
       if (
         reference === undefined ||
-        jobs.length !== 1 ||
-        jobs[0]!.target.kind !== 'reference' ||
-        jobs[0]!.target.referenceId !== reference.id ||
-        jobs[0]!.purpose !== 'reference_image'
+        jobs.length < 1 ||
+        jobs.length > item.generationCount ||
+        itemIdempotencyKeys.length !== item.generationCount ||
+        jobsByIdempotencyKey.size !== jobs.length ||
+        firstJob === undefined ||
+        jobs.some(
+          (candidate) =>
+            candidate.target.kind !== 'reference' ||
+            candidate.target.referenceId !== reference.id ||
+            candidate.purpose !== 'reference_image' ||
+            !itemIdempotencyKeys.includes(candidate.idempotencyKey)
+        )
       ) {
         throw new CreativeStudioStoreError(
           'storage_error',
           'Confirmed Studio reference handoff job authority mismatch'
         );
       }
-      let job = jobs[0]!;
+      let job = firstJob;
       const visitedJobIds = new Set([job.id]);
       while (true) {
         const retries = Object.values(project.jobs).filter((candidate) => candidate.retryOfJobId === job.id);
@@ -1431,6 +1450,9 @@ export const projectStudioReferenceGenerationHandoffV2 = (
         }
         job = retries[0]!;
         visitedJobIds.add(job.id);
+      }
+      if (jobs.some((candidate) => !visitedJobIds.has(candidate.id))) {
+        throw new CreativeStudioStoreError('storage_error', 'Confirmed Studio reference handoff retry mismatch');
       }
       if (job.status === 'succeeded') {
         const primaryAssetId = job.outputAssetIdsByRole.primary;
@@ -2179,21 +2201,30 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         const retryReason = paidGenerationRetryReasonV2(candidate);
         return retryReason === null ? [] : [{ job: candidate, retryReason }];
       });
-      if (item.generationCount !== 1) throw invalid('Invalid Studio generation count');
+      if (
+        item.generationCount !== 1 &&
+        !(item.purpose === 'reference_image' && item.target.kind === 'reference' && item.generationCount === 2)
+      ) {
+        throw invalid('Invalid Studio generation count');
+      }
       {
         const jobId = createJobId();
-        const idempotencyKey = createIdempotencyKey();
+        const itemIdempotencyKeys = Array.from({ length: item.generationCount }, () => createIdempotencyKey());
+        const idempotencyKey = itemIdempotencyKeys[0]!;
         if (
           !isSafeId(jobId) ||
-          !isSafeId(idempotencyKey) ||
+          itemIdempotencyKeys.some((key) => !isSafeId(key)) ||
+          new Set(itemIdempotencyKeys).size !== itemIdempotencyKeys.length ||
           existingJobIds.has(jobId) ||
-          existingKeys.has(idempotencyKey)
+          itemIdempotencyKeys.some((key) => existingKeys.has(key))
         ) {
           throw invalid('Invalid or duplicate Studio paid-work identity');
         }
         existingJobIds.add(jobId);
-        existingKeys.add(idempotencyKey);
-        idempotencyKeys.push({ itemId: item.id, key: idempotencyKey });
+        for (const key of itemIdempotencyKeys) {
+          existingKeys.add(key);
+          idempotencyKeys.push({ itemId: item.id, key });
+        }
         const requestSnapshot =
           item.requestPlan.kind === 'resolved' ? structuredClone(item.requestPlan.snapshot) : null;
         if (item.target.kind === 'reference' && requestSnapshot === null) {
@@ -2711,6 +2742,27 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
       }
       const imported = await deps.mediaStore.importSeedStillFromPathV2({ ...input, returnProject: true });
+      deps.onProjectUpdated(input.projectId);
+      return { asset: structuredClone(imported.asset), project: toRendererProject(imported.project) };
+    },
+
+    async importReferenceImageFromPath(input): Promise<{
+      asset: StudioAssetV2;
+      project: StudioRendererProjectV2;
+    }> {
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedRevision', 'referenceId', 'sourcePath'])) {
+        throw invalid('Invalid Studio reference-image attachment');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertRevision(input.expectedRevision);
+      assertSafeId(input.referenceId, 'reference id');
+      if (typeof input.sourcePath !== 'string' || input.sourcePath.length === 0) {
+        throw invalid('Invalid Studio reference-image attachment');
+      }
+      if (deps.mediaStore === undefined) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio media storage is unavailable');
+      }
+      const imported = await deps.mediaStore.importReferenceImageFromPathV2({ ...input, returnProject: true });
       deps.onProjectUpdated(input.projectId);
       return { asset: structuredClone(imported.asset), project: toRendererProject(imported.project) };
     },

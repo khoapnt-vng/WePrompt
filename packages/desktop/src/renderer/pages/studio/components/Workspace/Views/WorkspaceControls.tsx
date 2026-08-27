@@ -76,6 +76,22 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           ...(reference.approvedAssetId === null ? [] : [reference.approvedAssetId]),
           ...reference.supersededAssetIds,
         ].filter((assetId, index, assetIds) => assetIds.indexOf(assetId) === index);
+        const historicalAssetIds = Object.values(project.assets)
+          .filter(
+            (asset) =>
+              asset.projectId === project.id &&
+              asset.shotId === null &&
+              asset.mediaKind === 'image' &&
+              asset.projectReferenceId === reference.id
+          )
+          .map((asset) => asset.id)
+          .toSorted((left, right) => {
+            const leftAsset = Object.hasOwn(project.assets, left) ? project.assets[left] : undefined;
+            const rightAsset = Object.hasOwn(project.assets, right) ? project.assets[right] : undefined;
+            const byCreatedAt = (leftAsset?.createdAt ?? '').localeCompare(rightAsset?.createdAt ?? '');
+            return byCreatedAt === 0 ? left.localeCompare(right) : byCreatedAt;
+          });
+        const assetOrdinalById = Object.fromEntries(historicalAssetIds.map((assetId, index) => [assetId, index]));
         const assetCreatedAt = Object.fromEntries(
           generatedAssetIds.flatMap((assetId) => {
             const asset = Object.hasOwn(project.assets, assetId) ? project.assets[assetId] : undefined;
@@ -98,14 +114,23 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           approvedSource.referenceId === reference.id
             ? approvedSource.prompt
             : null;
+        const currentIsImported =
+          currentAsset?.projectReferenceId === reference.id && currentAsset.managedAsset.collection === 'imports';
         const latestReferenceJobId =
           currentAsset?.projectReferenceId === reference.id && currentAsset.producerJobId !== null
             ? currentAsset.producerJobId
-            : ([...reference.jobIds]
-                .toReversed()
-                .find(
-                  (jobId) => Object.hasOwn(project.jobs, jobId) && project.jobs[jobId]?.target.kind === 'reference'
-                ) ?? null);
+            : ([...reference.jobIds].toReversed().find((jobId) => {
+                const job = Object.hasOwn(project.jobs, jobId) ? project.jobs[jobId] : undefined;
+                if (job?.target.kind !== 'reference') return false;
+                const nonterminal =
+                  job.status === 'waiting_for_conditioning' ||
+                  job.status === 'queued_local' ||
+                  job.status === 'submitting' ||
+                  job.status === 'queued_remote' ||
+                  job.status === 'running' ||
+                  job.status === 'needs_attention';
+                return !currentIsImported || nonterminal || job.updatedAt > currentAsset.createdAt;
+              }) ?? null);
         const candidateJob =
           latestReferenceJobId !== null && Object.hasOwn(project.jobs, latestReferenceJobId)
             ? project.jobs[latestReferenceJobId]
@@ -143,6 +168,26 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
             approvedAssetId: reference.approvedAssetId,
             generatedAssetIds,
             assetCreatedAt,
+            assetOrdinalById,
+            removalBlocked:
+              reference.approvedAssetId !== null &&
+              Object.values(project.jobs).some((job) => {
+                const usesAsset = job.composition.inputs.referenceInputs.some(
+                  (input) => input.referenceId === reference.id && input.assetId === reference.approvedAssetId
+                );
+                const nonterminal =
+                  job.status === 'waiting_for_conditioning' ||
+                  job.status === 'queued_local' ||
+                  job.status === 'submitting' ||
+                  job.status === 'queued_remote' ||
+                  job.status === 'running' ||
+                  job.status === 'needs_attention';
+                return (
+                  (nonterminal &&
+                    ((job.target.kind === 'reference' && job.target.referenceId === reference.id) || usesAsset)) ||
+                  (job.canRetryDownload && usesAsset)
+                );
+              }),
             generationStatus,
             candidateJob: candidateJobValid
               ? {
@@ -258,6 +303,8 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
               addBackground: async () => false,
               updateDetails: async () => false,
               selectImage: async () => false,
+              removeImage: async () => false,
+              importPhoto: async () => false,
               regenerate: async () => false,
               retryJob: async () => false,
               retryDownload: async () => false,

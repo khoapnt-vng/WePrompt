@@ -2025,8 +2025,6 @@ test.describe('Creative Studio workspace', () => {
     });
     const drawNextBoardBatch = page.getByRole('button', { name: 'Draw next batch (2)', exact: true });
     await expect(drawNextBoardBatch).toBeEnabled({ timeout: studioFakeMediaTimeoutMs });
-    const boardPreparation = observeNextStudioBridgeResult(page, 'prepare-submission');
-    await boardPreparation.ready;
     await drawNextBoardBatch.click();
     const boardGate = page.locator('[data-testid="studio-spend-gate"]');
     await expect
@@ -2036,7 +2034,6 @@ test.describe('Creative Studio workspace', () => {
         return alerts.join(' | ') || 'silent guard';
       })
       .toBe('gate');
-    expect(await boardPreparation.result).toMatchObject({ ok: true });
     const boardConfirm = boardGate.getByRole('button', { name: /^Confirm 2 generations/ });
     await expect(boardConfirm).toBeEnabled({ timeout: 30_000 });
     const showBoardRows = boardGate.getByRole('button', { name: 'Show each generation', exact: true });

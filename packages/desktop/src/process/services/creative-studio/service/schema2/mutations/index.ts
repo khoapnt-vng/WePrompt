@@ -107,6 +107,7 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   set_reference_label: new Set(['kind', 'referenceId', 'label']),
   set_reference_prompt: new Set(['kind', 'referenceId', 'prompt']),
   select_reference_image: new Set(['kind', 'referenceId', 'assetId']),
+  remove_reference_image: new Set(['kind', 'referenceId', 'assetId']),
   set_shot_reference_binding: new Set(['kind', 'shotId', 'characterReferenceIds', 'backgroundReferenceId']),
   add_beat: new Set(['kind', 'beatId', 'beat', 'beforeBeatId']),
   edit_beat: new Set(['kind', 'beatId', 'changes']),
@@ -486,6 +487,7 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
       }
       return;
     case 'select_reference_image':
+    case 'remove_reference_image':
       if (!isSafeId(operation.referenceId) || !isSafeId(operation.assetId)) fail('invalid_operation');
       return;
     case 'set_shot_reference_binding':
@@ -782,6 +784,11 @@ const jobTargetsShot = (job: StudioJobV2, shotId: string): boolean =>
 const jobTargetsReference = (job: StudioJobV2, referenceId: string): boolean =>
   job.target.kind === 'reference' && job.target.referenceId === referenceId;
 
+const jobUsesProjectReferenceAsset = (job: StudioJobV2, referenceId: string, assetId: string): boolean =>
+  job.composition.inputs.referenceInputs.some(
+    (input) => input.referenceId === referenceId && input.assetId === assetId
+  );
+
 const hasCanonicalProjectReferenceAsset = (
   project: StudioProjectV2,
   referenceId: string,
@@ -794,11 +801,16 @@ const hasCanonicalProjectReferenceAsset = (
     asset?.id !== assetId ||
     asset.projectId !== project.id ||
     asset.mediaKind !== 'image' ||
-    asset.managedAsset.collection !== 'assets' ||
+    (asset.managedAsset.collection !== 'assets' && asset.managedAsset.collection !== 'imports') ||
     asset.shotId !== null ||
     asset.projectReferenceId !== reference.id
   ) {
     return false;
+  }
+  if (asset.managedAsset.collection === 'imports') {
+    return (
+      asset.producerJobId === null && asset.compositionDigest === null && asset.generationReferenceAssetIds.length === 0
+    );
   }
   const producer = Object.values(project.jobs).filter(
     (job) =>
@@ -1422,6 +1434,58 @@ export const applyStudioMutationBatchV2 = (
           ...reference,
           approvedAssetId: operation.assetId,
           supersededAssetIds,
+          updatedAt: reducerContext.capturedAt,
+        });
+        break;
+      }
+
+      case 'remove_reference_image': {
+        const reference = ownValue(draft.references, operation.referenceId);
+        if (
+          draft.referencePlanStatus !== 'planned' ||
+          reference === undefined ||
+          reference.approvedAssetId !== operation.assetId ||
+          !hasCanonicalProjectReferenceAsset(draft, reference.id, operation.assetId)
+        ) {
+          fail('invalid_operation');
+        }
+        if (
+          Object.values(draft.jobs).some((job) => {
+            const usesAsset = jobUsesProjectReferenceAsset(job, reference.id, operation.assetId);
+            return (
+              (NONTERMINAL_JOB_STATUSES.has(job.status) && (jobTargetsReference(job, reference.id) || usesAsset)) ||
+              (job.status === 'failed' &&
+                job.error?.code === 'download_failed' &&
+                job.providerJobId !== null &&
+                usesAsset)
+            );
+          })
+        ) {
+          fail('dependency_blocked');
+        }
+
+        const visibleAssetIds = [...new Set([operation.assetId, ...reference.supersededAssetIds])].toSorted(
+          (left, right) => {
+            const leftAsset = ownValue(draft.assets, left);
+            const rightAsset = ownValue(draft.assets, right);
+            const byCreatedAt = (leftAsset?.createdAt ?? '').localeCompare(rightAsset?.createdAt ?? '');
+            return byCreatedAt === 0 ? left.localeCompare(right) : byCreatedAt;
+          }
+        );
+        const removedIndex = visibleAssetIds.indexOf(operation.assetId);
+        if (removedIndex < 0) fail('invalid_operation');
+        const remainingAssetIds = visibleAssetIds.filter((assetId) => assetId !== operation.assetId);
+        const approvedAssetId =
+          remainingAssetIds.length === 0
+            ? null
+            : remainingAssetIds[Math.min(Math.max(0, removedIndex - 1), remainingAssetIds.length - 1)]!;
+
+        touchReferenceCatalog(tracker, draft);
+        defineOwn(draft.references, reference.id, {
+          ...reference,
+          approvedAssetId,
+          supersededAssetIds:
+            approvedAssetId === null ? [] : remainingAssetIds.filter((assetId) => assetId !== approvedAssetId),
           updatedAt: reducerContext.capturedAt,
         });
         break;

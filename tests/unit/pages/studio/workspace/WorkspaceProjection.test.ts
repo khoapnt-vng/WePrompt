@@ -515,11 +515,16 @@ describe('projectWorkspace', () => {
           boardStyle: null,
           instructionProfile: 'openrouter-video-v1.video-take.v1',
         },
-        prompt: 'First',
+        prompt: 'System instructions\nPROJECT: A launch film.\nOUTPUT: First',
       },
     });
     project.jobs[currentJob.id] = currentJob;
     project.shots.shot_1!.jobIds.push(currentJob.id);
+
+    const cleanShot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(cleanShot.currentPicture).toMatchObject({ prompt: 'First', promptChanged: false });
+    expect(cleanShot.videoTakes).toMatchObject([{ assetId: 'video_current', prompt: 'First', promptChanged: false }]);
+
     project.shots.shot_1!.shootingScript = 'Edited after the take fired';
 
     const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
@@ -537,8 +542,61 @@ describe('projectWorkspace', () => {
         segmentState: { kind: 'rendered' },
       })
     );
-    expect(shot.videoTakes).toMatchObject([{ assetId: 'video_current', current: true }]);
+    expect(shot.videoTakes).toMatchObject([
+      { assetId: 'video_current', current: true, prompt: 'First', promptChanged: true },
+    ]);
     expect(shot).not.toHaveProperty('takeCount');
+  });
+
+  it('judges each retained video take against the Shot script frozen by its own producer', () => {
+    const project = makeProject();
+    const retained = makeAsset('video_retained', 'shot_1', 'video', 'assets', '2026-08-19T01:00:00.000Z', 9);
+    project.assets[retained.id] = retained;
+    project.shots.shot_1!.assetIds.push(retained.id);
+    project.shots.shot_1!.supersededVideoAssetIds = [retained.id];
+    const retainedJob = makeJob('job_video_retained', 'shot_1', {
+      outputAssetIds: [retained.id],
+      outputAssetIdsByRole: { primary: retained.id, poster: null },
+      composition: {
+        inputs: {
+          schemaVersion: 1,
+          projectRevision: project.revision,
+          brief: project.brief,
+          rules: project.rules,
+          source: {
+            kind: 'shot',
+            beatId: 'beat_1',
+            story: project.beats.beat_1!.story,
+            shotId: 'shot_1',
+            shootingScript: 'Earlier version of the Shot',
+          },
+          purpose: 'video_take',
+          referenceInputs: [],
+          aspectRatio: project.aspectRatio,
+          resolution: project.resolution,
+          route: {
+            providerId: 'provider_safe',
+            adapterId: 'openrouter-video-v1',
+            model: 'model_safe',
+          },
+          boardStyle: null,
+          instructionProfile: 'openrouter-video-v1.video-take.v1',
+        },
+        prompt: 'System instructions\nPROJECT: A launch film.\nOUTPUT: Earlier version of the Shot',
+      },
+    });
+    project.jobs[retainedJob.id] = retainedJob;
+    project.shots.shot_1!.jobIds.push(retainedJob.id);
+
+    const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.videoTakes).toMatchObject([
+      {
+        assetId: retained.id,
+        current: false,
+        prompt: 'Earlier version of the Shot',
+        promptChanged: true,
+      },
+    ]);
   });
 
   it('reads only own asset keys when projecting the current picture', () => {
@@ -843,6 +901,21 @@ describe('projectWorkspace', () => {
       posterAssetId: 'poster_current',
     });
     expect(result.activeBeats[0]!.shots[1]!.currentPicture).toBeNull();
+  });
+
+  it('treats missing producing-script authority as unknown rather than evidence of an edit', () => {
+    const project = makeProject();
+    addCurrentVideo(project, 'shot_1', 'video_without_source', 6);
+    const job = makeJob('job_without_source', 'shot_1', {
+      outputAssetIds: ['video_without_source'],
+      outputAssetIdsByRole: { primary: 'video_without_source', poster: null },
+    });
+    project.jobs[job.id] = job;
+    project.shots.shot_1!.jobIds.push(job.id);
+
+    const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.currentPicture).toMatchObject({ prompt: 'First', promptChanged: false });
+    expect(shot.videoTakes).toMatchObject([{ prompt: 'First', promptChanged: false }]);
   });
 
   it('retains paid work from an exact shot-owned job without exposing job identity', () => {

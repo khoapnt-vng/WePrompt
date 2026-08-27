@@ -930,7 +930,10 @@
           "tag": {
             "running": "実行中",
             "edited": "プロンプト編集済み"
-          }
+          },
+          "importPhoto": "写真を読み込む",
+          "removePhoto": "{{handle}}を削除",
+          "removePhotoLocked": "承認済みの処理がこの写真を使用しています。削除する前に、その処理を完了またはキャンセルしてください。"
         },
         "description": "まずキャラクターの正規画像を生成し、次に繰り返し登場する背景画像を生成します。Board または最初のフレームを生成する前に、現在のリファレンスを各 Shot に割り当ててください。",
         "generationScope": "生成範囲",
@@ -1460,7 +1463,8 @@
           "references": "解決済みリファレンス",
           "noReferences": "直接のリファレンス入力なし",
           "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
-        }
+        },
+        "referenceGridRetry": "モデルがバリエーショングリッドを返した場合、各参照画像は1回だけ自動的に再試行されます。最初の試行の合計は {{lower}}、再試行が必要な場合の上限は {{upper}} です。"
       },
       "editorFolderExport": {
         "action": "編集用フォルダーを書き出す…",
@@ -1917,7 +1921,8 @@
         "downloadFailed": "生成は完了しましたが、出力をダウンロードできませんでした。",
         "unsupported": "このプロバイダーは要求された操作に対応していません。",
         "seedStillVariationGrid": "生成された画像には複数パネルのバリエーショングリッドが含まれているため、現在の最初のフレームや参照画像には使用できません。",
-        "unknown": "不明な理由で生成ジョブが失敗しました。"
+        "unknown": "不明な理由で生成ジョブが失敗しました。",
+        "referenceVariationGridRepeated": "モデルが再び複数パネルのバリエーショングリッドを返しました。「写真を読み込む」が、この参照画像を設定する確実な方法です。"
       }
     },
     "preview": {

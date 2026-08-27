@@ -1452,6 +1452,8 @@ describe('schema-2 Studio estimates', () => {
       [{ kind: 'reference', referenceId: 'reference_mei' }, 'reference_image'],
     ]);
     expect(new Set(quote.baseItems.map((item) => item.id)).size).toBe(2);
+    expect(quote.baseItems.map((item) => item.generationCount)).toEqual([2, 2]);
+    expect(quote.upperMinorUnits).toBe(quote.lowerMinorUnits * 2);
     const rendererQuote = toStudioRendererSubmissionQuoteV2(
       { ...quote, id: 'quote_reference_characters', expiresAt: '2026-08-18T00:05:00.000Z' },
       null,

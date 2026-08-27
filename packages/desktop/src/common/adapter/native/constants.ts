@@ -108,6 +108,7 @@ export const NATIVE_BRIDGE_PROVIDER_KEYS = [
   'creative-studio.delete-project',
   'creative-studio.persist-captured-poster',
   'creative-studio.import-seed-still',
+  'creative-studio.import-reference-image',
   'creative-studio.import-bed-audio',
   'creative-studio.detach-bed-audio',
   'creative-studio.set-bed',

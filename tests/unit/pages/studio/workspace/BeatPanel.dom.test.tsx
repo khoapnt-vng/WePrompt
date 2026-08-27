@@ -38,7 +38,7 @@ vi.mock('@arco-design/web-react', async () => {
       { children, icon, loading: _loading, shape: _shape, size: _size, status: _status, type: _type, ...props },
       ref
     ) => (
-      <button ref={ref} {...props}>
+      <button ref={ref} data-button-type={_type} {...props}>
         {icon}
         {children}
       </button>
@@ -1885,6 +1885,39 @@ describe('BeatPanel', () => {
     expect(within(card).getByRole('button', { name: actionLabel })).toBeVisible();
     expect(card.querySelector('[data-composer-end-slot]')).toBeDisabled();
     expect(card).not.toHaveTextContent('THE SHOT HAS TO LAND ON THAT PICTURE');
+  });
+
+  it('keeps a rendered Shot quiet and its Regenerate action secondary when its fired prompt still matches', () => {
+    const currentPicture = {
+      ...makeCurrentPicture('video_rendered'),
+      prompt: 'Canonical shooting script 1',
+      promptChanged: false,
+    };
+    const shot = makeShot('shot_1', 0, { currentPicture });
+    const beat = makeBeat('beat_1', [shot]);
+    const { container } = render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]))} />
+    );
+    const card = shotCard(container, shot.id);
+
+    expect(within(card).queryByText('Edited · Not yet run')).not.toBeInTheDocument();
+    expect(within(card).getByRole('button', { name: 'Regenerate' })).toHaveAttribute('data-button-type', 'secondary');
+  });
+
+  it('marks an unsaved prompt edit and returns Regenerate to primary weight', () => {
+    const currentPicture = {
+      ...makeCurrentPicture('video_rendered'),
+      prompt: 'Canonical shooting script 1',
+      promptChanged: false,
+    };
+    const shot = makeShot('shot_1', 0, { currentPicture });
+    const beat = makeBeat('beat_1', [shot]);
+    const drafts = makeDrafts({ 'shot.shot_1.shootingScript': 'Edited after the take fired' });
+    const { container } = render(<BeatPanel {...panelProps(beat, drafts, makeActions(), makeProjection([beat]))} />);
+    const card = shotCard(container, shot.id);
+
+    expect(within(card).getByText('Edited · Not yet run')).toBeVisible();
+    expect(within(card).getByRole('button', { name: 'Regenerate' })).toHaveAttribute('data-button-type', 'primary');
   });
 
   it('opens the shipped candidate picker from START and routes REFS through the exact binding editor', () => {

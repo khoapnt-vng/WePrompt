@@ -365,6 +365,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         },
       ]);
       const initialDispatch = vi.fn(async () => []);
+      let initialReferenceIdempotencyIndex = 0;
       service = createCreativeStudioServiceV2({
         store,
         providerResolver,
@@ -372,7 +373,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         rateCard: async () => rateCard,
         createQuoteId: () => 'quote_parked_reference_initial',
         createJobId: () => 'job_parked_reference_initial',
-        createIdempotencyKey: () => 'idempotency_parked_reference_initial',
+        createIdempotencyKey: () => `idempotency_parked_reference_initial_${++initialReferenceIdempotencyIndex}`,
         onProjectUpdated: () => {},
       });
 
@@ -498,6 +499,7 @@ describe('Creative Studio generation lifecycle integration', () => {
       const loadRateCard = vi.fn(async () => rateCard);
       const createQuoteId = vi.fn(() => 'quote_parked_reference_retry');
       const onProjectUpdated = vi.fn();
+      let retryReferenceIdempotencyIndex = 0;
       service = createCreativeStudioServiceV2({
         store: restartedStore,
         providerResolver: restartedProviderResolver,
@@ -505,7 +507,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         rateCard: loadRateCard,
         createQuoteId,
         createJobId: () => 'job_parked_reference_retry',
-        createIdempotencyKey: () => 'idempotency_parked_reference_retry',
+        createIdempotencyKey: () => `idempotency_parked_reference_retry_${++retryReferenceIdempotencyIndex}`,
         onProjectUpdated,
       });
       const completedHandoffs = await waitFor(async () => {
@@ -638,6 +640,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         },
       ]);
       let initialJobIndex = 0;
+      let initialIdempotencyIndex = 0;
       service = createCreativeStudioServiceV2({
         store,
         mediaStore,
@@ -646,7 +649,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         rateCard: async () => rateCard,
         createQuoteId: () => 'quote_partial_reference_initial',
         createJobId: () => `job_partial_reference_${++initialJobIndex}`,
-        createIdempotencyKey: () => `idempotency_partial_reference_${initialJobIndex}`,
+        createIdempotencyKey: () => `idempotency_partial_reference_${++initialIdempotencyIndex}`,
         onProjectUpdated: () => {},
       });
       const planned = await service.applyMutations(
@@ -759,6 +762,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         sleep: async () => undefined,
         jitterMs: (baseMs) => baseMs,
       });
+      let retryIdempotencyIndex = 0;
       service = createCreativeStudioServiceV2({
         store: restartedStore,
         mediaStore: restartedMediaStore,
@@ -767,7 +771,7 @@ describe('Creative Studio generation lifecycle integration', () => {
         rateCard: async () => rateCard,
         createQuoteId: () => 'quote_partial_reference_retry',
         createJobId: () => 'job_partial_reference_retry',
-        createIdempotencyKey: () => 'idempotency_partial_reference_retry',
+        createIdempotencyKey: () => `idempotency_partial_reference_retry_${++retryIdempotencyIndex}`,
         onProjectUpdated: () => {},
       });
       await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([

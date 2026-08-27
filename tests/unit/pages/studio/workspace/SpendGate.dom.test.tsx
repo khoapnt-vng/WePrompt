@@ -458,10 +458,14 @@ const referenceOptions = (): StudioRendererPreparedSubmissionOptionsV2 => ({
         target: { kind: 'reference', referenceId: 'reference_ming' },
         referenceTarget: { referenceId: 'reference_ming', kind: 'character', label: 'Ming' },
         purpose: 'reference_image',
+        generationCount: 2,
         durationSeconds: null,
+        requestedTotalMinorUnits: 250,
         composition: referenceComposition('reference_ming'),
       },
     ],
+    lowerMinorUnits: 125,
+    upperMinorUnits: 250,
   },
   withCascade: null,
 });
@@ -2169,6 +2173,10 @@ describe('SpendGateModal', () => {
     );
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(modal.querySelector('[data-project-reference-scope]')).toHaveTextContent('Ming');
+    expect(modal.querySelector('[data-reference-grid-contingency]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.gate.referenceGridRetry'
+    );
+    expect(within(modal).getByRole('button', { name: /Confirm 1 generation/ })).toHaveTextContent('$2.50');
 
     showGateBreakdown(modal);
     const row = modal.querySelector('[data-project-reference-id="reference_ming"]');

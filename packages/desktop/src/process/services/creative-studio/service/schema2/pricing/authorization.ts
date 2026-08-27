@@ -234,18 +234,21 @@ export const createStudioSpendAuthorizationV2 = (input: StudioSpendAuthorization
     return { itemId: binding.itemId, provider: cloneProvider(binding.provider) };
   });
 
-  if (!dense(input.idempotencyKeys) || input.idempotencyKeys.length !== items.length) {
+  const expectedIdempotencyItemIds = items.flatMap((item) =>
+    Array.from({ length: item.generationCount }, () => item.id)
+  );
+  if (!dense(input.idempotencyKeys) || input.idempotencyKeys.length !== expectedIdempotencyItemIds.length) {
     fail('invalid_idempotency');
   }
   const seenKeys = new Set<string>();
   const idempotencyKeys: StudioSpendAuthorization['idempotencyKeys'] = [];
-  for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
-    const item = items[itemIndex]!;
-    const entry = input.idempotencyKeys[itemIndex];
+  for (let entryIndex = 0; entryIndex < expectedIdempotencyItemIds.length; entryIndex += 1) {
+    const expectedItemId = expectedIdempotencyItemIds[entryIndex]!;
+    const entry = input.idempotencyKeys[entryIndex];
     if (
       entry === undefined ||
       Reflect.ownKeys(entry).length !== 2 ||
-      entry.itemId !== item.id ||
+      entry.itemId !== expectedItemId ||
       !SAFE_ID.test(entry.key) ||
       seenKeys.has(entry.key)
     ) {
@@ -269,8 +272,8 @@ const findAuthorizationItem = (authorization: StudioSpendAuthorization, itemId: 
   const item = combinedItems(authorization).find((candidate) => candidate.id === itemId);
   if (
     item === undefined ||
-    item.generationCount !== 1 ||
-    !authorization.idempotencyKeys.some((entry) => entry.itemId === itemId)
+    calculateStudioQuotedGenerationAmounts(item) === null ||
+    authorization.idempotencyKeys.filter((entry) => entry.itemId === itemId).length !== item.generationCount
   ) {
     return fail('invalid_receipt');
   }
@@ -317,7 +320,7 @@ export const createStudioSpendReceiptV2 = (input: {
     rateUnit: item.rateUnit,
     rateMinorUnits: item.rateMinorUnits,
     durationSeconds,
-    generationCount: item.generationCount,
+    generationCount: 1,
     totalMinorUnits: amounts.oneGenerationMinorUnits,
   };
 };
@@ -334,11 +337,12 @@ export const studioSpendReceiptMatchesJobV2 = (
       itemId: job.authorizationItemId,
       jobId: job.id,
     });
-    const key = authorization.idempotencyKeys.find((entry) => entry.itemId === job.authorizationItemId);
     return (
       job.authorizationId === authorization.id &&
       job.purpose === expected.purpose &&
-      key?.key === job.idempotencyKey &&
+      authorization.idempotencyKeys.some(
+        (entry) => entry.itemId === job.authorizationItemId && entry.key === job.idempotencyKey
+      ) &&
       JSON.stringify(receipt) === JSON.stringify(expected)
     );
   } catch {

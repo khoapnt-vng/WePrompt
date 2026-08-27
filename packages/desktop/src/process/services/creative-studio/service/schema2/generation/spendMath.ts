@@ -45,7 +45,9 @@ const requestDuration = (plan: StudioGenerationRequestPlan): number =>
 export const calculateStudioQuotedGenerationAmounts = (
   item: StudioQuotedGenerationForSpend
 ): StudioQuotedGenerationAmounts | null => {
-  if (!Number.isSafeInteger(item.rateMinorUnits) || item.rateMinorUnits <= 0 || item.generationCount !== 1) {
+  const generationCountIsValid =
+    item.generationCount === 1 || (item.purpose === 'reference_image' && item.generationCount === 2);
+  if (!Number.isSafeInteger(item.rateMinorUnits) || item.rateMinorUnits <= 0 || !generationCountIsValid) {
     return null;
   }
 

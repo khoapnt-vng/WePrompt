@@ -2681,6 +2681,194 @@ const StudioProjectPage: React.FC<{
           setPendingReferenceId(null);
         }
       },
+      removeImage: async (referenceId, assetId): Promise<boolean> => {
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        if (
+          current === null ||
+          reference?.id !== referenceId ||
+          reference.approvedAssetId !== assetId ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        const visibleAssetIds = [...new Set([assetId, ...reference.supersededAssetIds])].toSorted((left, right) => {
+          const leftAsset = Object.hasOwn(current.assets, left) ? current.assets[left] : undefined;
+          const rightAsset = Object.hasOwn(current.assets, right) ? current.assets[right] : undefined;
+          const byCreatedAt = (leftAsset?.createdAt ?? '').localeCompare(rightAsset?.createdAt ?? '');
+          return byCreatedAt === 0 ? left.localeCompare(right) : byCreatedAt;
+        });
+        const removedIndex = visibleAssetIds.indexOf(assetId);
+        if (removedIndex < 0) return false;
+        const remainingAssetIds = visibleAssetIds.filter((candidateId) => candidateId !== assetId);
+        const expectedApprovedAssetId =
+          remainingAssetIds.length === 0
+            ? null
+            : remainingAssetIds[Math.min(Math.max(0, removedIndex - 1), remainingAssetIds.length - 1)]!;
+        const expectedSupersededAssetIds =
+          expectedApprovedAssetId === null
+            ? []
+            : remainingAssetIds.filter((candidateId) => candidateId !== expectedApprovedAssetId);
+        const referenceJobIdsBefore = [...reference.jobIds];
+        const referenceAssetsBefore = Object.fromEntries(
+          Object.entries(current.assets).filter(([, candidate]) => candidate.projectReferenceId === referenceId)
+        );
+        const referenceJobsBefore = Object.fromEntries(
+          reference.jobIds.flatMap((jobId) =>
+            Object.hasOwn(current.jobs, jobId) ? ([[jobId, current.jobs[jobId]]] as const) : []
+          )
+        );
+        const bindingsBefore = Object.fromEntries(
+          Object.entries(current.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding])
+        );
+        setPendingReferenceId(referenceId);
+        try {
+          const committed = await runWorkspaceCommit((latest) =>
+            ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+              projectId: latest.id,
+              expectedRevision: latest.revision,
+              operations: [{ kind: 'remove_reference_image', referenceId, assetId }],
+            })
+          );
+          if (!committed) return false;
+          const refreshed = projectRef.current;
+          if (refreshed === null || !Object.hasOwn(refreshed.references, referenceId)) return false;
+          const updated = refreshed.references[referenceId];
+          return (
+            updated?.id === referenceId &&
+            updated.approvedAssetId === expectedApprovedAssetId &&
+            JSON.stringify(updated.supersededAssetIds) === JSON.stringify(expectedSupersededAssetIds) &&
+            JSON.stringify(updated.jobIds) === JSON.stringify(referenceJobIdsBefore) &&
+            JSON.stringify(
+              Object.fromEntries(
+                Object.entries(refreshed.assets).filter(([, candidate]) => candidate.projectReferenceId === referenceId)
+              )
+            ) === JSON.stringify(referenceAssetsBefore) &&
+            JSON.stringify(
+              Object.fromEntries(
+                referenceJobIdsBefore.flatMap((jobId) =>
+                  Object.hasOwn(refreshed.jobs, jobId) ? ([[jobId, refreshed.jobs[jobId]]] as const) : []
+                )
+              )
+            ) === JSON.stringify(referenceJobsBefore) &&
+            JSON.stringify(
+              Object.fromEntries(
+                Object.entries(refreshed.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding])
+              )
+            ) === JSON.stringify(bindingsBefore)
+          );
+        } finally {
+          setPendingReferenceId(null);
+        }
+      },
+      importPhoto: async (referenceId): Promise<boolean> => {
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        if (
+          current === null ||
+          current.referencePlanStatus !== 'planned' ||
+          reference?.id !== referenceId ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        const existingAssets = structuredClone(current.assets);
+        const existingJobs = structuredClone(current.jobs);
+        const bindingsBefore = Object.fromEntries(
+          Object.entries(current.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding])
+        );
+        const approvalsBefore = Object.fromEntries(
+          current.referenceOrder.map((candidateId) => [
+            candidateId,
+            Object.hasOwn(current.references, candidateId)
+              ? current.references[candidateId]?.approvedAssetId
+              : undefined,
+          ])
+        );
+        const referenceJobIdsBefore = [...reference.jobIds];
+        const priorApprovedAssetId = reference.approvedAssetId;
+        workspacePendingRef.current = true;
+        setWorkspacePending(true);
+        setPendingReferenceId(referenceId);
+        setActionErrorMessageKey(null);
+        try {
+          const result = await ipcBridge.creativeStudio.importReferenceImage.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            referenceId,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return false;
+          }
+          if (result.data.status === 'cancelled') return false;
+          const refreshed = await refetchProjectWorkspace();
+          const updatedReference =
+            refreshed !== null && Object.hasOwn(refreshed.references, referenceId)
+              ? refreshed.references[referenceId]
+              : undefined;
+          const importedAsset =
+            refreshed !== null && Object.hasOwn(refreshed.assets, result.data.assetId)
+              ? refreshed.assets[result.data.assetId]
+              : undefined;
+          const preservedAssets = Object.entries(existingAssets).every(
+            ([assetId, asset]) =>
+              refreshed !== null &&
+              Object.hasOwn(refreshed.assets, assetId) &&
+              JSON.stringify(refreshed.assets[assetId]) === JSON.stringify(asset)
+          );
+          const preservedApprovals = Object.entries(approvalsBefore).every(
+            ([candidateId, approval]) =>
+              candidateId === referenceId ||
+              (refreshed !== null &&
+                Object.hasOwn(refreshed.references, candidateId) &&
+                refreshed.references[candidateId]?.approvedAssetId === approval)
+          );
+          if (
+            refreshed === null ||
+            refreshed.revision < result.data.projectRevision ||
+            updatedReference?.approvedAssetId !== result.data.assetId ||
+            (priorApprovedAssetId !== null && !updatedReference.supersededAssetIds.includes(priorApprovedAssetId)) ||
+            JSON.stringify(updatedReference.jobIds) !== JSON.stringify(referenceJobIdsBefore) ||
+            importedAsset?.projectReferenceId !== referenceId ||
+            importedAsset.shotId !== null ||
+            importedAsset.mediaKind !== 'image' ||
+            importedAsset.managedAsset.collection !== 'imports' ||
+            importedAsset.producerJobId !== null ||
+            importedAsset.compositionDigest !== null ||
+            !preservedAssets ||
+            JSON.stringify(refreshed.jobs) !== JSON.stringify(existingJobs) ||
+            JSON.stringify(
+              Object.fromEntries(
+                Object.entries(refreshed.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding])
+              )
+            ) !== JSON.stringify(bindingsBefore) ||
+            !preservedApprovals
+          ) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return false;
+          }
+          projectRef.current = refreshed;
+          return true;
+        } catch {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        } finally {
+          workspacePendingRef.current = false;
+          setWorkspacePending(false);
+          setPendingReferenceId(null);
+        }
+      },
       regenerate: async (referenceId, prompt): Promise<boolean> => {
         const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
         let current = projectRef.current;

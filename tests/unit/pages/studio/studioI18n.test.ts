@@ -191,6 +191,9 @@ const localizedReferencesPanelKeys = [
   'referenceWorkflow.panel.download',
   'referenceWorkflow.panel.choosePhoto',
   'referenceWorkflow.panel.addPhoto',
+  'referenceWorkflow.panel.importPhoto',
+  'referenceWorkflow.panel.removePhoto',
+  'referenceWorkflow.panel.removePhotoLocked',
   'referenceWorkflow.panel.photoCount',
   'referenceWorkflow.panel.promptLabel',
   'referenceWorkflow.panel.promptPlaceholder.character',
@@ -933,6 +936,7 @@ const expectedLeaves = [
   'controls.retryConditioningFor',
   'gate.title',
   'gate.reviewBeforeSpend',
+  'gate.referenceGridRetry',
   'gate.requestedShots',
   'gate.requestedShots_one',
   'gate.requestedShots_other',
@@ -1392,6 +1396,7 @@ const localizedWorkspaceKeys = [
   'gate.headline_other',
   'gate.confirm_one',
   'gate.confirm_other',
+  'gate.referenceGridRetry',
   'gate.hideBreakdown',
   'gate.showBreakdown',
   'gate.conditioningFrameAlt',
@@ -1963,6 +1968,7 @@ describe('Creative Studio workspace translations', () => {
         ...localizedFirstFramesPanelKeys,
         ...localizedShotComposerKeys,
         ...localizedReferencesPanelKeys,
+        'gate.referenceGridRetry',
         ...localizedAuthorizedSeedRecoveryKeys,
         'library.pictureCount',
         'library.pictureCount_one',
@@ -2034,6 +2040,8 @@ describe('Creative Studio workspace translations', () => {
       const errors = asObject(jobs.errors, `${locale}.creativeStudio.jobs.errors`);
       expect(errors.seedStillVariationGrid, locale).toBeTypeOf('string');
       expect((errors.seedStillVariationGrid as string).trim(), locale).not.toBe('');
+      expect(errors.referenceVariationGridRepeated, locale).toBeTypeOf('string');
+      expect((errors.referenceVariationGridRepeated as string).trim(), locale).not.toBe('');
     }
 
     const creativeStudio = asObject(englishConversation.creativeStudio, 'creativeStudio');
@@ -2041,6 +2049,9 @@ describe('Creative Studio workspace translations', () => {
     const errors = asObject(jobs.errors, 'creativeStudio.jobs.errors');
     expect(errors.seedStillVariationGrid).toBe(
       'The generated image contains a multi-panel variation grid and cannot be used as a current first frame or reference.'
+    );
+    expect(errors.referenceVariationGridRepeated).toBe(
+      'The model returned another multi-panel variation grid. Import photo is the reliable way to set this reference.'
     );
   });
 

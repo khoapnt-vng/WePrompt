@@ -182,8 +182,7 @@ describe('Creative Studio project recovery integration', () => {
         rateCard: async () => rateCard,
         createQuoteId: () => `quote_v2_recovery_${++quoteIndex}`,
         createJobId: () => (++jobIndex === 1 ? 'job_v2_recovery_reference' : 'job_v2_recovery'),
-        createIdempotencyKey: () =>
-          ++idempotencyIndex === 1 ? 'idempotency_v2_recovery_reference' : 'idempotency_v2_recovery',
+        createIdempotencyKey: () => `idempotency_v2_recovery_${++idempotencyIndex}`,
         onProjectUpdated: () => {},
       });
 

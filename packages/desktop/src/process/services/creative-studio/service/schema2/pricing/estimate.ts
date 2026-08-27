@@ -1051,7 +1051,9 @@ export const deriveStudioProjectReferenceSubmissionQuoteGraphV2 = (input: {
       target: { kind: 'reference', referenceId: reference.id },
       purpose: 'reference_image',
       routeId: project.imageRouteId!,
-      generationCount: 1,
+      // The upper bound reserves one stochastic retry if the provider returns a variation grid.
+      // Only submitted attempts receive receipts, so a clean first result still spends the lower line.
+      generationCount: 2,
       requestPlan,
     };
   });
@@ -1345,7 +1347,7 @@ export const createStudioSubmissionQuoteCoreV2 = (
         draft.purpose !== 'board_still' &&
         draft.purpose !== 'video_take' &&
         draft.purpose !== 'reference_image') ||
-      draft.generationCount !== 1
+      (draft.generationCount !== 1 && !(draft.generationCount === 2 && draft.purpose === 'reference_image'))
     ) {
       return fail('invalid_quote');
     }

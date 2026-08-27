@@ -41,6 +41,8 @@ const workflowReference = (overrides: Partial<ReferenceWorkspaceItem> = {}): Ref
   approvedAssetId: 'asset_ming_current',
   generatedAssetIds: ['asset_ming_current'],
   assetCreatedAt: { asset_ming_current: '2026-08-20T10:00:00.000Z' },
+  assetOrdinalById: { asset_ming_current: 0 },
+  removalBlocked: false,
   generationStatus: 'succeeded',
   candidateJob: null,
   ...overrides,
@@ -50,6 +52,8 @@ const createActions = (): ReferencesViewActions => ({
   addBackground: vi.fn(async () => true),
   updateDetails: vi.fn(async () => true),
   selectImage: vi.fn(async () => true),
+  removeImage: vi.fn(async () => true),
+  importPhoto: vi.fn(async () => true),
   regenerate: vi.fn(async () => true),
   retryJob: vi.fn(async () => true),
   retryDownload: vi.fn(async () => true),
@@ -193,6 +197,7 @@ describe('the schema-5 References workspace', () => {
             asset_new: '2026-08-21T10:00:00.000Z',
             asset_old: '2026-08-20T10:00:00.000Z',
           },
+          assetOrdinalById: { asset_old: 0, asset_new: 1 },
         }),
       ],
     });
@@ -217,6 +222,7 @@ describe('the schema-5 References workspace', () => {
               asset_new: '2026-08-21T10:00:00.000Z',
               asset_old: '2026-08-20T10:00:00.000Z',
             },
+            assetOrdinalById: { asset_old: 0, asset_new: 1 },
           }),
         ]}
       />
@@ -225,6 +231,30 @@ describe('the schema-5 References workspace', () => {
       'aria-current',
       'true'
     );
+
+    rerender(
+      <ReferencesView
+        actions={actions}
+        aspectRatio='16:9'
+        errorMessageKey={null}
+        gateLocked={false}
+        pendingReferenceId={null}
+        projectId='project_1'
+        references={[
+          workflowReference({
+            approvedAssetId: 'asset_new',
+            generatedAssetIds: ['asset_new'],
+            assetCreatedAt: { asset_new: '2026-08-21T10:00:00.000Z' },
+            assetOrdinalById: { asset_new: 1 },
+          }),
+        ]}
+      />
+    );
+    expect(screen.getByRole('button', { name: `${PANEL_KEY}.choosePhoto:{"handle":"@ming-02"}` })).toHaveAttribute(
+      'aria-current',
+      'true'
+    );
+    expect(screen.getByRole('button', { name: `${PANEL_KEY}.removePhoto:{"handle":"@ming-02"}` })).toBeEnabled();
   });
 
   it('saves inline identity edits and generates from the exact edited prompt', async () => {
@@ -245,6 +275,62 @@ describe('the schema-5 References workspace', () => {
     await waitFor(() =>
       expect(actions.regenerate).toHaveBeenCalledWith('reference_ming', 'Red jacket, round glasses, neutral turnaround')
     );
+  });
+
+  it('removes only the exact current photo and disables removal while authorized work uses it', async () => {
+    const actions = createActions();
+    const { rerender } = renderWorkflow({ actions, references: [workflowReference()] });
+    const remove = screen.getByRole('button', {
+      name: `${PANEL_KEY}.removePhoto:{"handle":"@ming-01"}`,
+    });
+    fireEvent.click(remove);
+    await waitFor(() =>
+      expect(actions.removeImage).toHaveBeenCalledExactlyOnceWith('reference_ming', 'asset_ming_current')
+    );
+
+    rerender(
+      <ReferencesView
+        actions={actions}
+        aspectRatio='16:9'
+        errorMessageKey={null}
+        gateLocked={false}
+        pendingReferenceId={null}
+        projectId='project_1'
+        references={[workflowReference({ removalBlocked: true })]}
+      />
+    );
+    expect(screen.getByRole('button', { name: `${PANEL_KEY}.removePhoto:{"handle":"@ming-01"}` })).toBeDisabled();
+  });
+
+  it('keeps Import photo available after a repeated variation-grid refusal', async () => {
+    const actions = createActions();
+    renderWorkflow({
+      actions,
+      references: [
+        workflowReference({
+          approvedAssetId: null,
+          generatedAssetIds: [],
+          assetCreatedAt: {},
+          assetOrdinalById: {},
+          generationStatus: 'failed',
+          candidateJob: {
+            id: 'job_grid_retry',
+            status: 'failed',
+            error: {
+              code: 'seed_still_variation_grid',
+              messageKey: 'conversation.creativeStudio.jobs.errors.referenceVariationGridRepeated',
+            },
+            canRetry: false,
+            canRetryDownload: false,
+            canCancel: false,
+          },
+        }),
+      ],
+    });
+
+    expect(screen.getByText('conversation.creativeStudio.jobs.errors.referenceVariationGridRepeated')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: `${PANEL_KEY}.importPhoto` }));
+    await waitFor(() => expect(actions.importPhoto).toHaveBeenCalledExactlyOnceWith('reference_ming'));
   });
 
   it('opens per-Shot binding only after every planned reference has a current image', () => {

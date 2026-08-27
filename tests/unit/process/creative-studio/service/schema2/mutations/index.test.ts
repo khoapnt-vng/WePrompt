@@ -16,6 +16,7 @@ import {
   type StudioMutationBatchV2,
   type StudioMutationOperationV2,
   type StudioProjectV2,
+  type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/factories';
 import {
@@ -144,6 +145,29 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId: string, assetId
   shot.shootingScript ||= shotId;
   const seed = project.assets[`seed_${shotId}`] ?? importImage(project, shotId, `seed_${shotId}`);
   shot.seedStillId = seed.id;
+  const boundReferenceIds =
+    shot.referenceBinding.status === 'ready'
+      ? [
+          ...shot.referenceBinding.characterReferenceIds,
+          ...(shot.referenceBinding.backgroundReferenceId === null
+            ? []
+            : [shot.referenceBinding.backgroundReferenceId]),
+        ]
+      : [];
+  const referenceInputs = boundReferenceIds.map((referenceId) => {
+    const reference = project.references[referenceId];
+    const referenceAsset =
+      reference?.approvedAssetId === null || reference === undefined
+        ? undefined
+        : project.assets[reference.approvedAssetId];
+    if (referenceAsset === undefined) throw new Error('video fixture requires approved bound references');
+    return {
+      referenceId,
+      kind: reference.kind,
+      assetId: referenceAsset.id,
+      sha256: referenceAsset.sha256,
+    };
+  });
   const composition = composeStudioGenerationV2({
     projectRevision: project.revision,
     brief: project.brief,
@@ -156,7 +180,7 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId: string, assetId
       shootingScript: shot.shootingScript,
     },
     purpose: 'video_take',
-    referenceInputs: [],
+    referenceInputs,
     aspectRatio: project.aspectRatio,
     resolution: project.resolution,
     route: videoProvider,
@@ -177,7 +201,7 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId: string, assetId
       aspectRatio: project.aspectRatio,
       resolution: project.resolution,
       durationSeconds: shot.durationSeconds,
-      referenceInputs: [],
+      referenceInputs,
       conditioningInput: { kind: 'seed_still' as const, assetId: seed.id },
     },
   };
@@ -225,7 +249,7 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId: string, assetId
     sha256: digest,
     durationSeconds: shot.durationSeconds,
     projectReferenceId: null,
-    generationReferenceAssetIds: [],
+    generationReferenceAssetIds: referenceInputs.map(({ assetId: referenceAssetId }) => referenceAssetId),
     producerJobId: jobId,
     compositionDigest: studioGenerationCompositionDigestV2(composition),
     createdAt: laterTimestamp,
@@ -278,6 +302,130 @@ const addSucceededVideoTake = (project: StudioProjectV2, shotId: string, assetId
   project.revision += 1;
   expect(validateStudioProjectV2(project)).toBe(true);
   return asset;
+};
+
+const addFailedSeedJobWithBoundReferences = (project: StudioProjectV2, shotId: string, suffix: string): void => {
+  const shot = project.shots[shotId]!;
+  shot.shootingScript ||= shotId;
+  if (shot.referenceBinding.status !== 'ready') throw new Error('seed fixture requires a ready binding');
+  const referenceInputs = [
+    ...shot.referenceBinding.characterReferenceIds,
+    ...(shot.referenceBinding.backgroundReferenceId === null ? [] : [shot.referenceBinding.backgroundReferenceId]),
+  ].map((referenceId) => {
+    const reference = project.references[referenceId];
+    const asset = reference?.approvedAssetId ? project.assets[reference.approvedAssetId] : undefined;
+    if (reference === undefined || asset === undefined) throw new Error('seed fixture requires approved references');
+    return { referenceId, kind: reference.kind, assetId: asset.id, sha256: asset.sha256 };
+  });
+  const source = {
+    kind: 'shot' as const,
+    beatId: 'beat_1',
+    story: project.beats.beat_1!.story,
+    shotId,
+    shootingScript: shot.shootingScript,
+  };
+  const composition = composeStudioGenerationV2({
+    projectRevision: project.revision,
+    brief: project.brief,
+    rules: project.rules,
+    source,
+    purpose: 'seed_still',
+    referenceInputs,
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+    route: provider,
+    boardStyle: null,
+    instructionProfile: deriveStudioInstructionProfileV2(provider, 'seed_still', source),
+  });
+  const target = { kind: 'shot' as const, shotId };
+  const requestPlan = {
+    kind: 'resolved' as const,
+    snapshot: {
+      composition,
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      durationSeconds: shot.durationSeconds,
+      referenceInputs,
+      conditioningInput: null,
+    },
+  };
+  const item = {
+    id: createStudioQuotedGenerationId({
+      projectId: project.id,
+      projectRevision: project.revision,
+      target,
+      purpose: 'seed_still',
+    }),
+    target,
+    purpose: 'seed_still' as const,
+    routeId: 'image_route',
+    generationCount: 1,
+    requestPlan,
+    rateUnit: 'generation' as const,
+    rateMinorUnits: 3,
+  };
+  const totals = calculateStudioQuoteTotals([item]);
+  if (!totals) throw new Error('seed fixture quote is invalid');
+  const authorizationId = `auth_${suffix}`;
+  const jobId = `job_${suffix}`;
+  const authorization: StudioSpendAuthorization = {
+    id: authorizationId,
+    projectId: project.id,
+    projectRevision: project.revision,
+    originReferenceHandoffId: null,
+    rateCardDigest: 'b'.repeat(64),
+    currency: 'USD',
+    baseItems: [item],
+    cascadeItems: [],
+    ...totals,
+    expiresAt: '2026-08-17T00:05:00.000Z',
+    confirmedAt: laterTimestamp,
+    providerBindings: [{ itemId: item.id, provider }],
+    idempotencyKeys: [{ itemId: item.id, key: `idem_${suffix}` }],
+  };
+  project.spendAuthorizations.push(authorization);
+  project.jobs[jobId] = {
+    id: jobId,
+    projectId: project.id,
+    target,
+    status: 'failed',
+    provider,
+    idempotencyKey: `idem_${suffix}`,
+    providerJobId: `remote_${suffix}`,
+    remoteStartedAt: timestamp,
+    cancellationPolicy: 'queued_and_running',
+    outputAssetIds: [],
+    error: { code: 'no_output', messageKey: 'conversation.creativeStudio.jobs.errors.noOutput' },
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: timestamp,
+    updatedAt: laterTimestamp,
+    purpose: 'seed_still',
+    authorizationId,
+    authorizationItemId: item.id,
+    composition,
+    requestPlan,
+    requestSnapshot: requestPlan.snapshot,
+    spendReceipt: {
+      authorizationId,
+      itemId: item.id,
+      jobId,
+      purpose: 'seed_still',
+      routeId: item.routeId,
+      currency: authorization.currency,
+      rateUnit: item.rateUnit,
+      rateMinorUnits: item.rateMinorUnits,
+      durationSeconds: null,
+      generationCount: 1,
+      totalMinorUnits: item.rateMinorUnits,
+    },
+    outputAssetIdsByRole: { primary: null, poster: null },
+  };
+  shot.jobIds.push(jobId);
+  project.revision += 1;
+  expect(validateStudioProjectV2(project)).toBe(true);
 };
 
 const addReferenceCandidate = (project: StudioProjectV2, referenceId: string, assetId: string): void => {
@@ -410,6 +558,107 @@ const addReferenceCandidate = (project: StudioProjectV2, referenceId: string, as
   expect(validateStudioProjectV2(project)).toBe(true);
 };
 
+const addQueuedReferenceJob = (project: StudioProjectV2, referenceId: string, suffix: string): void => {
+  const reference = project.references[referenceId];
+  if (!reference) throw new Error('queued reference fixture requires a planned reference');
+  const source = {
+    kind: 'project_reference' as const,
+    referenceId,
+    referenceKind: reference.kind,
+    prompt: reference.prompt,
+  };
+  const composition = composeStudioGenerationV2({
+    projectRevision: project.revision,
+    brief: project.brief,
+    rules: project.rules,
+    source,
+    purpose: 'reference_image',
+    referenceInputs: [],
+    aspectRatio: project.aspectRatio,
+    resolution: project.resolution,
+    route: provider,
+    boardStyle: null,
+    instructionProfile: deriveStudioInstructionProfileV2(provider, 'reference_image', source),
+  });
+  const target = { kind: 'reference' as const, referenceId };
+  const requestPlan = {
+    kind: 'resolved' as const,
+    snapshot: {
+      composition,
+      aspectRatio: project.aspectRatio,
+      resolution: project.resolution,
+      durationSeconds: 5,
+      referenceInputs: [],
+      conditioningInput: null,
+    },
+  };
+  const item = {
+    id: createStudioQuotedGenerationId({
+      projectId: project.id,
+      projectRevision: project.revision,
+      target,
+      purpose: 'reference_image',
+    }),
+    target,
+    purpose: 'reference_image' as const,
+    routeId: 'image_route',
+    generationCount: 1,
+    requestPlan,
+    rateUnit: 'generation' as const,
+    rateMinorUnits: 3,
+  };
+  const totals = calculateStudioQuoteTotals([item]);
+  if (!totals) throw new Error('queued reference quote is invalid');
+  const authorizationId = `auth_${suffix}`;
+  const jobId = `job_${suffix}`;
+  const idempotencyKey = `idem_${suffix}`;
+  project.spendAuthorizations.push({
+    id: authorizationId,
+    projectId: project.id,
+    projectRevision: project.revision,
+    originReferenceHandoffId: null,
+    rateCardDigest: 'b'.repeat(64),
+    currency: 'USD',
+    baseItems: [item],
+    cascadeItems: [],
+    ...totals,
+    expiresAt: '2026-08-17T00:05:00.000Z',
+    confirmedAt: laterTimestamp,
+    providerBindings: [{ itemId: item.id, provider }],
+    idempotencyKeys: [{ itemId: item.id, key: idempotencyKey }],
+  });
+  project.jobs[jobId] = {
+    id: jobId,
+    projectId: project.id,
+    target,
+    status: 'queued_local',
+    provider,
+    idempotencyKey,
+    providerJobId: null,
+    remoteStartedAt: null,
+    cancellationPolicy: 'queued_and_running',
+    outputAssetIds: [],
+    error: null,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    purpose: 'reference_image',
+    authorizationId,
+    authorizationItemId: item.id,
+    composition,
+    requestPlan,
+    requestSnapshot: requestPlan.snapshot,
+    spendReceipt: null,
+    outputAssetIdsByRole: { primary: null, poster: null },
+  };
+  reference.jobIds.push(jobId);
+  project.revision += 1;
+  expect(validateStudioProjectV2(project)).toBe(true);
+};
+
 const operationSamples: StudioMutationOperationV2[] = [
   { kind: 'edit_project', changes: { name: 'Renamed' } },
   { kind: 'set_brief', brief: 'Brief' },
@@ -422,6 +671,7 @@ const operationSamples: StudioMutationOperationV2[] = [
   { kind: 'set_reference_label', referenceId: 'ref_1', label: 'Updated name' },
   { kind: 'set_reference_prompt', referenceId: 'ref_1', prompt: 'Updated prompt' },
   { kind: 'select_reference_image', referenceId: 'ref_1', assetId: 'asset_1' },
+  { kind: 'remove_reference_image', referenceId: 'ref_1', assetId: 'asset_1' },
   { kind: 'set_shot_reference_binding', shotId: 'shot_1', characterReferenceIds: [], backgroundReferenceId: null },
   {
     kind: 'add_beat',
@@ -462,9 +712,9 @@ const operationSamples: StudioMutationOperationV2[] = [
 ];
 
 describe('schema-5 mutation operation contract', () => {
-  it('contains exactly the 34 current operations and validates each exact envelope', () => {
-    expect(operationSamples).toHaveLength(34);
-    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(34);
+  it('contains exactly the 35 current operations and validates each exact envelope', () => {
+    expect(operationSamples).toHaveLength(35);
+    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(35);
     for (const operation of operationSamples) expect(validateStudioMutationOperationV2(operation)).toBe(true);
   });
 
@@ -530,6 +780,9 @@ describe('schema-5 mutation operation contract', () => {
       { kind: 'set_reference_prompt', referenceId: 'ref_1', prompt: '' },
       { kind: 'select_reference_image', referenceId: '', assetId: 'asset_1' },
       { kind: 'select_reference_image', referenceId: 'ref_1', assetId: '' },
+      { kind: 'remove_reference_image', referenceId: '', assetId: 'asset_1' },
+      { kind: 'remove_reference_image', referenceId: 'ref_1', assetId: '' },
+      { kind: 'remove_reference_image', referenceId: 'ref_1', assetId: 'asset_1', deleteFile: true },
       {
         kind: 'set_shot_reference_binding',
         shotId: '',
@@ -1011,6 +1264,154 @@ describe('schema-5 reference lifecycle mutations', () => {
       approvedAssetId: 'asset_candidate_1',
       supersededAssetIds: ['asset_candidate_2'],
     });
+  });
+
+  it('drops only the current reference take while preserving provenance, bindings, and terminal frozen inputs', () => {
+    let project = apply(makeProject(), [
+      {
+        kind: 'set_reference_plan',
+        references: [{ kind: 'character', label: 'Ming', prompt: 'Ming character reference.' }],
+      },
+    ]).project;
+    const referenceId = project.referenceOrder[0]!;
+    project = persist(project);
+    addReferenceCandidate(project, referenceId, 'asset_reference_01');
+    project = persist(project);
+    addReferenceCandidate(project, referenceId, 'asset_reference_02');
+    project = persist(
+      apply(
+        project,
+        [
+          {
+            kind: 'set_shot_reference_binding',
+            shotId: 'shot_1',
+            characterReferenceIds: [referenceId],
+            backgroundReferenceId: null,
+          },
+        ],
+        'bind_reference_for_removal'
+      ).project
+    );
+    addFailedSeedJobWithBoundReferences(project, 'shot_1', 'seed_with_reference');
+
+    const recoverableDownload = structuredClone(project);
+    recoverableDownload.jobs.job_seed_with_reference!.error = {
+      code: 'download_failed',
+      messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+    };
+    expect(validateStudioProjectV2(recoverableDownload)).toBe(true);
+    expectReason(
+      recoverableDownload,
+      [{ kind: 'remove_reference_image', referenceId, assetId: 'asset_reference_02' }],
+      'dependency_blocked'
+    );
+
+    const localDownloadFailure = structuredClone(recoverableDownload);
+    localDownloadFailure.jobs.job_seed_with_reference!.providerJobId = null;
+    localDownloadFailure.jobs.job_seed_with_reference!.remoteStartedAt = null;
+    expect(validateStudioProjectV2(localDownloadFailure)).toBe(true);
+    expect(
+      apply(
+        localDownloadFailure,
+        [{ kind: 'remove_reference_image', referenceId, assetId: 'asset_reference_02' }],
+        'remove_after_local_download_failure'
+      ).project.references[referenceId]
+    ).toMatchObject({ approvedAssetId: 'asset_reference_01', supersededAssetIds: [] });
+
+    const assetsBefore = structuredClone(project.assets);
+    const jobsBefore = structuredClone(project.jobs);
+    const authorizationsBefore = structuredClone(project.spendAuthorizations);
+    const bindingBefore = structuredClone(project.shots.shot_1!.referenceBinding);
+    const removed = persist(
+      apply(
+        project,
+        [{ kind: 'remove_reference_image', referenceId, assetId: 'asset_reference_02' }],
+        'remove_reference_02'
+      ).project
+    );
+
+    expect(removed.references[referenceId]).toMatchObject({
+      approvedAssetId: 'asset_reference_01',
+      supersededAssetIds: [],
+    });
+    expect(removed.assets).toEqual(assetsBefore);
+    expect(removed.jobs).toEqual(jobsBefore);
+    expect(removed.spendAuthorizations).toEqual(authorizationsBefore);
+    expect(removed.shots.shot_1!.referenceBinding).toEqual(bindingBefore);
+    expect(
+      removed.jobs.job_seed_with_reference?.composition.inputs.referenceInputs.map(({ assetId }) => assetId)
+    ).toEqual(['asset_reference_02']);
+    expect(validateStudioProjectV2(removed)).toBe(true);
+
+    const lastRemoved = persist(
+      apply(
+        removed,
+        [{ kind: 'remove_reference_image', referenceId, assetId: 'asset_reference_01' }],
+        'remove_reference_01'
+      ).project
+    );
+    expect(lastRemoved.references[referenceId]).toMatchObject({ approvedAssetId: null, supersededAssetIds: [] });
+    expect(lastRemoved.shots.shot_1!.referenceBinding).toEqual(bindingBefore);
+    expect(validateStudioProjectV2(lastRemoved)).toBe(true);
+
+    const undoEntry = lastRemoved.undoHistory.at(-1);
+    if (undoEntry === undefined) throw new Error('reference removal must be undoable');
+    const undone = apply(lastRemoved, [{ kind: 'undo_last', entryId: undoEntry.id }], 'undo_reference_removal').project;
+    expect(undone.references[referenceId]?.approvedAssetId).toBe('asset_reference_01');
+    expect(undone.assets).toEqual(assetsBefore);
+    expect(undone.shots.shot_1!.referenceBinding).toEqual(bindingBefore);
+  });
+
+  it('rejects stale, cross-reference, non-current, and live reference-image removals atomically', () => {
+    let project = apply(makeProject(), [
+      {
+        kind: 'set_reference_plan',
+        references: [
+          { kind: 'character', label: 'Ming', prompt: 'Ming.' },
+          { kind: 'character', label: 'Mei', prompt: 'Mei.' },
+        ],
+      },
+    ]).project;
+    const [mingId, meiId] = project.referenceOrder;
+    if (mingId === undefined || meiId === undefined) throw new Error('expected references');
+    project = persist(project);
+    addReferenceCandidate(project, mingId, 'asset_ming_01');
+    project = persist(project);
+    addReferenceCandidate(project, mingId, 'asset_ming_02');
+
+    expectReason(
+      project,
+      [{ kind: 'remove_reference_image', referenceId: mingId, assetId: 'asset_ming_01' }],
+      'invalid_operation'
+    );
+    expectReason(
+      project,
+      [{ kind: 'remove_reference_image', referenceId: meiId, assetId: 'asset_ming_02' }],
+      'invalid_operation'
+    );
+
+    const live = structuredClone(project);
+    addQueuedReferenceJob(live, mingId, 'live_reference');
+    expectReason(
+      live,
+      [{ kind: 'remove_reference_image', referenceId: mingId, assetId: 'asset_ming_02' }],
+      'dependency_blocked'
+    );
+
+    const staleBatch = {
+      ...mutationBatch(project, [
+        { kind: 'remove_reference_image' as const, referenceId: mingId, assetId: 'asset_ming_02' },
+      ]),
+      expectedRevision: project.revision - 1,
+    };
+    const before = structuredClone(project);
+    expect(() =>
+      applyStudioMutationBatchV2(project, staleBatch, {
+        mutationId: 'stale_reference_removal',
+        capturedAt: laterTimestamp,
+      })
+    ).toThrow(expect.objectContaining({ reasonCode: 'invalid_operation' }));
+    expect(project).toEqual(before);
   });
 
   it('renames a semantic reference without replacing identity, approval, provenance, or Shot bindings', () => {
