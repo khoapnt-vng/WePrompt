@@ -531,6 +531,31 @@ const checkPersistedDirectorAuthority = (
   return promise;
 };
 
+const withCurrentDirectorPresetRules = (conversation: DirectorConversation): DirectorConversation => ({
+  ...conversation,
+  extra: { ...conversation.extra, preset_rules: DIRECTOR_PRESET_RULES },
+});
+
+/**
+ * Re-provisions only the Director rules after executable session authority has been verified.
+ * A stale rules snapshot must never become usable before its persisted update succeeds.
+ */
+const refreshDirectorPresetRules = async (conversation: DirectorConversation): Promise<DirectorConversation | null> => {
+  if (conversation.extra.preset_rules === DIRECTOR_PRESET_RULES) return conversation;
+  try {
+    const updated = await ipcBridge.conversation.update.invoke({
+      id: conversation.id,
+      merge_extra: true,
+      updates: {
+        extra: { preset_rules: DIRECTOR_PRESET_RULES } as TChatConversation['extra'],
+      },
+    });
+    return updated === true ? withCurrentDirectorPresetRules(conversation) : null;
+  } catch {
+    return null;
+  }
+};
+
 type DirectorClaimantRecovery =
   | { kind: 'none' }
   | { kind: 'trusted'; conversation: DirectorConversation }
@@ -667,8 +692,15 @@ const createDirectorConversation = async (input: {
     throw new DirectorConversationStartError(DIRECTOR_SESSION_VERIFICATION_KEY, 'require-claimant');
   }
   // After validation, so a conversation about to be rejected is never briefed.
-  if (created) seedDirectorOpeningTurn(typedConversation.id, input.brief);
-  return typedConversation;
+  if (created) {
+    seedDirectorOpeningTurn(typedConversation.id, input.brief);
+    return withCurrentDirectorPresetRules(typedConversation);
+  }
+  const refreshed = await refreshDirectorPresetRules(typedConversation);
+  if (refreshed === null) {
+    throw new DirectorConversationStartError(DIRECTOR_ATTACH_INTERRUPTED_KEY, 'require-claimant');
+  }
+  return refreshed;
 };
 
 const reconcileBinding = async (
@@ -711,6 +743,16 @@ const startDirectorConversation = async (input: StartInput): Promise<StartOutcom
       if (authority.kind === 'mismatch') {
         return { kind: 'conflict' };
       }
+      const refreshed = await refreshDirectorPresetRules(conversation);
+      if (refreshed === null) {
+        return {
+          kind: 'interrupted',
+          conversation,
+          expectedPriorBinding: input.expectedPriorBinding,
+          messageKey: DIRECTOR_ATTACH_INTERRUPTED_KEY,
+        };
+      }
+      conversation = refreshed;
     } else {
       if (input.model === undefined) {
         return {
@@ -840,7 +882,18 @@ const resolveBoundConversation = async (
     return { kind: 'dangling', projectId: project.id, conversationId };
   }
   const authority = await checkPersistedDirectorAuthority(conversation, project.id);
-  if (authority.kind === 'trusted') return { kind: 'ready', projectId: project.id, conversation };
+  if (authority.kind === 'trusted') {
+    const refreshed = await refreshDirectorPresetRules(conversation);
+    return refreshed === null
+      ? {
+          kind: 'interrupted',
+          projectId: project.id,
+          conversation,
+          expectedPriorBinding: conversationId,
+          messageKey: DIRECTOR_ATTACH_INTERRUPTED_KEY,
+        }
+      : { kind: 'ready', projectId: project.id, conversation: refreshed };
+  }
   if (authority.kind === 'mismatch') return { kind: 'conflict', projectId: project.id };
   return {
     kind: 'interrupted',

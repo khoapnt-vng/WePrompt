@@ -115,6 +115,19 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_project_status or studio_list_routes again/i);
   });
 
+  it('keeps shooting scripts bounded to shot-specific content without duplicating global composition inputs', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/shootingScript bounded to shot-specific visible depiction and action/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never repeat the project\s+brief/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/project or organization rules/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/BOARD STYLE, or STYLE boilerplate/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/app composes those\s+global instructions separately/i);
+
+    // Prompt tuning must not displace the Wave 6 status-read procedure.
+    expect(DIRECTOR_PRESET_RULES).toMatch(/start with studio_get_project_status/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/detail: true.*only/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_project_status or studio_list_routes again/i);
+  });
+
   it('describes every governed operation from the exact shared disposition policy', () => {
     for (const [operation, disposition] of Object.entries(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)) {
       const heading =

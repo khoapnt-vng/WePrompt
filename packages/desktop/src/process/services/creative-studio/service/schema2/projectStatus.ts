@@ -539,24 +539,22 @@ const deriveStoryboardStage = (
       continue;
     }
     if (beat.shotOrder.length === 0) {
-      if (beat.targetSeconds === null || !Number.isFinite(beat.targetSeconds) || beat.targetSeconds <= 0) {
-        complete = false;
-      } else plannedSeconds += beat.targetSeconds;
+      // A Beat target can make an intentional slate playable in Cut, but it is not authored
+      // storyboard coverage. Storyboard time is the sum of active Shot durations only.
+      complete = false;
       continue;
     }
     for (const shotId of beat.shotOrder) {
       const shot = ownValue(project.shots, shotId);
-      if (
-        shot?.id !== shotId ||
-        shot.shootingScript.trim().length === 0 ||
-        !Number.isFinite(shot.durationSeconds) ||
-        shot.durationSeconds <= 0
-      ) {
+      if (shot?.id !== shotId) {
         complete = false;
         continue;
       }
-      authoredShotCount += 1;
-      plannedSeconds += shot.durationSeconds;
+      const hasScript = shot.shootingScript.trim().length > 0;
+      const hasDuration = Number.isFinite(shot.durationSeconds) && shot.durationSeconds > 0;
+      if (!hasScript || !hasDuration) complete = false;
+      if (hasDuration) plannedSeconds += shot.durationSeconds;
+      if (hasScript && hasDuration) authoredShotCount += 1;
     }
   }
   const matches = complete && targetMatches(plannedSeconds, project.targetDurationSeconds);

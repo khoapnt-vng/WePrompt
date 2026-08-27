@@ -304,6 +304,7 @@ const exactConversation = (
     extra: {
       workspace: '',
       studio_project_id: 'project_1',
+      preset_rules: DIRECTOR_PRESET_RULES,
       mcp_server_ids: [],
       mcp_servers: [descriptor.name],
       mcp_statuses: [{ id: descriptor.id, name: descriptor.name, status: 'loaded' }],
@@ -1184,6 +1185,72 @@ describe('DirectorRail', () => {
     );
     expect(harness.chatMounts).toBe(1);
     expect(harness.create).not.toHaveBeenCalled();
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it('refreshes only stale preset rules before reusing a verified bound conversation', async () => {
+    const conversation = exactConversation('conversation_director', {
+      preset_rules: 'Rules from an older build.',
+      custom_workspace: true,
+      proxy: 'http://127.0.0.1:8080',
+      session_mode: 'plan',
+      skills: ['story-editor'],
+    });
+    const original = structuredClone(conversation);
+    harness.conversations = [conversation];
+
+    render(<DirectorRail project={project({ briefConversationId: conversation.id })} />);
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      conversation.id
+    );
+    expect(harness.update).toHaveBeenCalledExactlyOnceWith({
+      id: conversation.id,
+      merge_extra: true,
+      updates: { extra: { preset_rules: DIRECTOR_PRESET_RULES } },
+    });
+    expect(harness.renderedChatConversation).toEqual({
+      ...original,
+      extra: { ...original.extra, preset_rules: DIRECTOR_PRESET_RULES },
+    });
+    expect(conversation).toEqual(original);
+    expect(harness.create).not.toHaveBeenCalled();
+    expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before rendering a bound conversation when stale rule persistence is interrupted', async () => {
+    const conversation = exactConversation('conversation_director', {
+      preset_rules: 'Rules from an older build.',
+      session_mode: 'plan',
+    });
+    harness.conversations = [conversation];
+    harness.update.mockResolvedValueOnce(false);
+
+    render(<DirectorRail project={project({ briefConversationId: conversation.id })} />);
+
+    expect(
+      await screen.findByText(
+        'Director setup was interrupted before the conversation could be attached to this project.'
+      )
+    ).toBeVisible();
+    expect(screen.queryByRole('textbox', { name: 'Director composer' })).toBeNull();
+    expect(harness.update).toHaveBeenCalledExactlyOnceWith({
+      id: conversation.id,
+      merge_extra: true,
+      updates: { extra: { preset_rules: DIRECTOR_PRESET_RULES } },
+    });
+    expect(harness.create).not.toHaveBeenCalled();
+    expect(harness.bind).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      conversation.id
+    );
+    expect(harness.update).toHaveBeenCalledTimes(2);
+    expect(harness.create).not.toHaveBeenCalled();
+    expect(harness.bind).not.toHaveBeenCalled();
   });
 
   it('applies fresh same-owner history props without remounting the chat or losing its draft', async () => {

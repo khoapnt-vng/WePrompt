@@ -5210,6 +5210,34 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.importBedAudioFromPathV2).not.toHaveBeenCalled();
   });
 
+  it('reports an empty active Beat as incomplete authored coverage through the Director status read', async () => {
+    const project = makeSchema2ServiceProject();
+    project.targetDurationSeconds = 12;
+    project.beatOrder = ['section_1'];
+    project.beats = {
+      section_1: {
+        ...project.beats.section_1!,
+        targetSeconds: 12,
+        shotOrder: [],
+      },
+    };
+    project.shots = {};
+    const harness = makeHarness(project);
+
+    const status = await harness.service.getProjectStatus({ projectId: project.id });
+
+    expect(status.stages.find((stage) => stage.id === 'storyboard')).toMatchObject({
+      state: 'in_progress',
+      summary: { plannedSeconds: 0, shotCount: 0, authoredShotCount: 0, targetSeconds: 12 },
+    });
+    expect(status.stages.find((stage) => stage.id === 'cut')).toMatchObject({
+      state: 'complete',
+      summary: { structurallyPlayable: true, durationSeconds: 12, targetSeconds: 12 },
+    });
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+  });
+
   it('loads the latest project revision only after a slow fresh route discovery completes', async () => {
     const project = makeSchema2ServiceProject();
     const harness = makeHarness(project);

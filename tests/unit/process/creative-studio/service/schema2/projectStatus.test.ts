@@ -566,6 +566,44 @@ describe('projectStudioStatusV2', () => {
     });
   });
 
+  it('keeps an empty active Beat in progress and excludes its slate target from planned storyboard time', () => {
+    const value = project();
+    addBeat(value, [], 30);
+
+    const status = projectStudioStatusV2(value, readyRoutes());
+
+    expect(stage(status, 'storyboard')).toMatchObject({
+      state: 'in_progress',
+      summary: {
+        stage: 'storyboard',
+        beatCount: 1,
+        shotCount: 0,
+        authoredShotCount: 0,
+        plannedSeconds: 0,
+        targetSeconds: 30,
+      },
+    });
+    expect(stage(status, 'cut')).toMatchObject({
+      state: 'complete',
+      summary: { structurallyPlayable: true, durationSeconds: 30, targetSeconds: 30 },
+    });
+  });
+
+  it('sums valid active-Shot durations even while a Shot is still missing its script', () => {
+    const value = project();
+    addBeat(value, [shot('shot_1', 12, { shootingScript: '   ' })], 30);
+
+    expect(stage(projectStudioStatusV2(value, readyRoutes()), 'storyboard')).toMatchObject({
+      state: 'in_progress',
+      summary: {
+        shotCount: 1,
+        authoredShotCount: 0,
+        plannedSeconds: 12,
+        targetSeconds: 30,
+      },
+    });
+  });
+
   it('returns a bounded engine blocker when fresh inventory is unavailable without hiding other stages', () => {
     const value = project();
     const status = projectStudioStatusV2(value, { status: 'inventory_unavailable', catalogVersion: null });
