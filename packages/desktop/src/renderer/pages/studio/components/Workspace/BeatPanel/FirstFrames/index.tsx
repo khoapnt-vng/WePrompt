@@ -16,9 +16,9 @@ import { copyText } from '@/renderer/utils/ui/clipboard';
 
 import type { BeatPanelActions, BeatPanelImportResult } from '..';
 import type {
+  WorkspaceCurrentPictureProjection,
   WorkspaceSeedStillProjection,
   WorkspaceShotProjection,
-  WorkspaceVideoTakeProjection,
 } from '../../workspaceProjection';
 import styles from './FirstFrames.module.css';
 
@@ -32,7 +32,7 @@ export const firstFramesStatus = (shot: WorkspaceShotProjection): FirstFramesSta
   return (shot.firstFrames ?? []).some((frame) => frame.effectiveSeed) ? 'ready' : 'notReady';
 };
 
-type ViewerState = { kind: 'frame'; index: number } | { kind: 'picture'; index: number } | null;
+type ViewerState = { kind: 'frame'; index: number } | { kind: 'picture' } | null;
 
 type FirstFramesProps = {
   actions: BeatPanelActions;
@@ -52,7 +52,7 @@ type FirstFramesProps = {
   showGenerationAction?: boolean;
 };
 
-const safeDownloadName = (kind: 'frame' | 'take', shotIndex: number, index: number): string =>
+const safeDownloadName = (kind: 'frame' | 'picture', shotIndex: number, index: number): string =>
   `studio-shot-${shotIndex + 1}-${kind}-${index + 1}`;
 
 const downloadManagedAsset = (url: string, fileName: string): void => {
@@ -119,8 +119,7 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   // Workspace projection is authoritative. Empty fallbacks keep a stale renderer
   // snapshot fail-closed while Main refreshes it after a schema cutover.
   const frames = shot.firstFrames ?? [];
-  const takes = shot.videoTakes ?? [];
-  const currentTake = takes.find((take) => take.current) ?? null;
+  const currentPicture = shot.currentPicture;
   const status = firstFramesStatus(shot);
   const canSelectFrame = (frame: WorkspaceSeedStillProjection): boolean =>
     shot.segmentHead &&
@@ -135,18 +134,17 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
     const onKeyDown = (event: KeyboardEvent): void => {
       const active = document.activeElement;
       const editing = active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement;
-      const items = viewer.kind === 'frame' ? frames : takes;
       if (event.key === 'Escape') {
         setViewer(null);
         return;
       }
-      if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      if (viewer.kind === 'frame' && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
         event.preventDefault();
         const delta = event.key === 'ArrowLeft' ? -1 : 1;
         setViewer((current) =>
           current === null || current.kind !== viewer.kind
             ? current
-            : { ...current, index: (current.index + delta + items.length) % items.length }
+            : { ...current, index: (current.index + delta + frames.length) % frames.length }
         );
         return;
       }
@@ -190,15 +188,15 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
     await actions.cancelGenerationJob(job.id);
   };
 
-  const persistPoster = async (video: HTMLVideoElement, take: WorkspaceVideoTakeProjection): Promise<void> => {
-    const captureKey = `${projectId}:${shot.id}:${take.assetId}`;
+  const persistPoster = async (video: HTMLVideoElement, picture: WorkspaceCurrentPictureProjection): Promise<void> => {
+    const captureKey = `${projectId}:${shot.id}:${picture.assetId}`;
     if (posterCapturesRef.current.has(captureKey)) return;
     const captured = captureStudioVideoPoster(video);
     if (captured === null) return;
     posterCapturesRef.current.add(captureKey);
     const persisted = await actions.persistCapturedPoster({
       shotId: shot.id,
-      videoAssetId: take.assetId,
+      videoAssetId: picture.assetId,
       ...captured,
     });
     if (!persisted) posterCapturesRef.current.delete(captureKey);
@@ -232,27 +230,16 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
     );
   };
 
-  const pictureMenu = (take: WorkspaceVideoTakeProjection, index: number): React.ReactNode => {
-    const url = createManagedStudioAssetUrl(projectId, take.assetId);
+  const pictureMenu = (picture: WorkspaceCurrentPictureProjection): React.ReactNode => {
+    const url = createManagedStudioAssetUrl(projectId, picture.assetId);
     return (
       <Menu>
         <Menu.Item
           key='download'
           disabled={url === null}
-          onClick={() => url !== null && downloadManagedAsset(url, safeDownloadName('take', shotIndex, index))}
+          onClick={() => url !== null && downloadManagedAsset(url, safeDownloadName('picture', shotIndex, 0))}
         >
           <Download aria-hidden='true' /> {t(`${KEY_ROOT}.menu.download`)}
-        </Menu.Item>
-        <Menu.Item key='history' disabled={takes.length < 2} onClick={() => setViewer({ kind: 'picture', index: 0 })}>
-          {t(`${KEY_ROOT}.menu.previousTakes`)}
-        </Menu.Item>
-        <Menu.Item
-          key='remove'
-          className={styles.destructiveItem}
-          disabled={disabled || !take.current}
-          onClick={() => void actions.removeVideoTake(shot.id, take.assetId)}
-        >
-          <Delete aria-hidden='true' /> {t(`${KEY_ROOT}.menu.removeTake`)}
         </Menu.Item>
       </Menu>
     );
@@ -335,8 +322,8 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   );
 
   const viewedFrame = viewer?.kind === 'frame' ? frames[viewer.index] : null;
-  const viewedTake = viewer?.kind === 'picture' ? takes[viewer.index] : null;
-  const viewedAsset = viewedFrame ?? viewedTake;
+  const viewedPicture = viewer?.kind === 'picture' ? currentPicture : null;
+  const viewedAsset = viewedFrame ?? viewedPicture;
   const viewedUrl =
     viewedAsset === undefined || viewedAsset === null
       ? null
@@ -390,34 +377,25 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
         <header className={styles.sectionHeader}>
           <span className={styles.eyebrow}>{t(`${KEY_ROOT}.currentPicture`)}</span>
         </header>
-        {currentTake === null ? (
+        {currentPicture === null ? (
           <div className={styles.pictureEmpty}>
             <span>{t(`${KEY_ROOT}.pictureEmpty`)}</span>
-            {takes.length === 0 ? null : (
-              <Button onClick={() => setViewer({ kind: 'picture', index: 0 })} size='mini' type='text'>
-                {t(`${KEY_ROOT}.menu.previousTakes`)}
-              </Button>
-            )}
           </div>
         ) : (
-          <article className={styles.pictureCard} data-asset-id={currentTake.assetId} data-current-picture>
-            <Button
-              className={styles.pictureMediaButton}
-              onClick={() => setViewer({ kind: 'picture', index: 0 })}
-              type='text'
-            >
-              {currentTake.posterAssetId === null ? (
+          <article className={styles.pictureCard} data-asset-id={currentPicture.assetId} data-current-picture>
+            <Button className={styles.pictureMediaButton} onClick={() => setViewer({ kind: 'picture' })} type='text'>
+              {currentPicture.posterAssetId === null ? (
                 <video
                   aria-label={t(`${KEY_ROOT}.pictureAlt`, { shot: shotIndex + 1 })}
-                  onCanPlay={(event) => void persistPoster(event.currentTarget, currentTake)}
-                  onLoadedData={(event) => void persistPoster(event.currentTarget, currentTake)}
+                  onCanPlay={(event) => void persistPoster(event.currentTarget, currentPicture)}
+                  onLoadedData={(event) => void persistPoster(event.currentTarget, currentPicture)}
                   preload='auto'
-                  src={createManagedStudioAssetUrl(projectId, currentTake.assetId) ?? undefined}
+                  src={createManagedStudioAssetUrl(projectId, currentPicture.assetId) ?? undefined}
                 />
               ) : (
                 <img
                   alt={t(`${KEY_ROOT}.pictureAlt`, { shot: shotIndex + 1 })}
-                  src={createManagedStudioAssetUrl(projectId, currentTake.posterAssetId) ?? undefined}
+                  src={createManagedStudioAssetUrl(projectId, currentPicture.posterAssetId) ?? undefined}
                 />
               )}
             </Button>
@@ -433,7 +411,7 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
                   type='secondary'
                 />
               )}
-              <Dropdown droplist={pictureMenu(currentTake, 0)} position='br' trigger='click'>
+              <Dropdown droplist={pictureMenu(currentPicture)} position='br' trigger='click'>
                 <Button
                   aria-label={t('common.more')}
                   icon={<MoreOne aria-hidden='true' />}
@@ -443,10 +421,10 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
                 />
               </Dropdown>
             </div>
-            {currentTake.firstFrameChanged ? (
+            {currentPicture.firstFrameChanged ? (
               <span className={styles.changedTag}>{t(`${KEY_ROOT}.firstFrameChanged`)}</span>
             ) : null}
-            {currentTake.promptChanged ? (
+            {currentPicture.promptChanged ? (
               <span className={styles.changedTag}>{t(`${KEY_ROOT}.promptChanged`)}</span>
             ) : null}
           </article>
@@ -463,9 +441,14 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
             onClick={() => void run(status === 'rendering' ? cancelRun : onGenerateVideo)}
             type='primary'
           >
-            {t(status === 'rendering' ? `${KEY_ROOT}.cancelRun` : `${KEY_ROOT}.generateShot`, {
-              shot: shotIndex + 1,
-            })}
+            {t(
+              status === 'rendering'
+                ? `${KEY_ROOT}.cancelRun`
+                : currentPicture === null
+                  ? `${KEY_ROOT}.generateShot`
+                  : `${KEY_ROOT}.generateAgain`,
+              { shot: shotIndex + 1 }
+            )}
           </Button>
         ) : null}
       </div>
@@ -484,29 +467,26 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
               <span>
                 {t(viewer.kind === 'frame' ? `${KEY_ROOT}.viewer.currentFirstFrame` : `${KEY_ROOT}.currentPicture`)}
               </span>
-              <span>
-                {t(`${KEY_ROOT}.viewer.counter`, {
-                  current: viewer.index + 1,
-                  total: viewer.kind === 'frame' ? frames.length : takes.length,
-                })}
-              </span>
+              {viewer.kind === 'frame' ? (
+                <span>
+                  {t(`${KEY_ROOT}.viewer.counter`, {
+                    current: viewer.index + 1,
+                    total: frames.length,
+                  })}
+                </span>
+              ) : null}
             </div>
             <div className={styles.viewerStage}>
-              <Button
-                aria-label={t(`${KEY_ROOT}.viewer.previous`)}
-                disabled={(viewer.kind === 'frame' ? frames : takes).length < 2}
-                icon={<Left aria-hidden='true' />}
-                onClick={() =>
-                  setViewer({
-                    ...viewer,
-                    index:
-                      (viewer.index - 1 + (viewer.kind === 'frame' ? frames.length : takes.length)) %
-                      (viewer.kind === 'frame' ? frames.length : takes.length),
-                  })
-                }
-                shape='circle'
-                type='secondary'
-              />
+              {viewer.kind === 'frame' ? (
+                <Button
+                  aria-label={t(`${KEY_ROOT}.viewer.previous`)}
+                  disabled={frames.length < 2}
+                  icon={<Left aria-hidden='true' />}
+                  onClick={() => setViewer({ ...viewer, index: (viewer.index - 1 + frames.length) % frames.length })}
+                  shape='circle'
+                  type='secondary'
+                />
+              ) : null}
               <FullscreenMediaFrame className={styles.viewerMedia} enabled={false}>
                 {viewer.kind === 'frame' ? (
                   <img alt={t(`${KEY_ROOT}.previewAlt`, { label: viewer.index + 1 })} src={viewedUrl} />
@@ -514,43 +494,36 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
                   <video controls preload='metadata' src={viewedUrl} />
                 )}
               </FullscreenMediaFrame>
-              <Button
-                aria-label={t(`${KEY_ROOT}.viewer.next`)}
-                disabled={(viewer.kind === 'frame' ? frames : takes).length < 2}
-                icon={<Right aria-hidden='true' />}
-                onClick={() =>
-                  setViewer({
-                    ...viewer,
-                    index: (viewer.index + 1) % (viewer.kind === 'frame' ? frames.length : takes.length),
-                  })
-                }
-                shape='circle'
-                type='secondary'
-              />
+              {viewer.kind === 'frame' ? (
+                <Button
+                  aria-label={t(`${KEY_ROOT}.viewer.next`)}
+                  disabled={frames.length < 2}
+                  icon={<Right aria-hidden='true' />}
+                  onClick={() => setViewer({ ...viewer, index: (viewer.index + 1) % frames.length })}
+                  shape='circle'
+                  type='secondary'
+                />
+              ) : null}
             </div>
-            <div className={styles.viewerFilmstrip}>
-              {(viewer.kind === 'frame' ? frames : takes).map((item, index) => {
-                const thumbId =
-                  'posterAssetId' in item && item.posterAssetId !== null ? item.posterAssetId : item.assetId;
-                const thumbUrl = createManagedStudioAssetUrl(projectId, thumbId);
-                return (
-                  <Button
-                    key={item.assetId}
-                    aria-label={
-                      viewer.kind === 'frame'
-                        ? t(`${KEY_ROOT}.frameLabel`, { index: index + 1 })
-                        : t(`${KEY_ROOT}.viewer.take`, { index: index + 1 })
-                    }
-                    aria-pressed={viewer.index === index}
-                    className={styles.viewerThumb}
-                    onClick={() => setViewer({ ...viewer, index })}
-                    type='text'
-                  >
-                    {thumbUrl === null ? null : <img alt='' src={thumbUrl} />}
-                  </Button>
-                );
-              })}
-            </div>
+            {viewer.kind === 'frame' ? (
+              <div className={styles.viewerFilmstrip}>
+                {frames.map((item, index) => {
+                  const thumbUrl = createManagedStudioAssetUrl(projectId, item.assetId);
+                  return (
+                    <Button
+                      key={item.assetId}
+                      aria-label={t(`${KEY_ROOT}.frameLabel`, { index: index + 1 })}
+                      aria-pressed={viewer.index === index}
+                      className={styles.viewerThumb}
+                      onClick={() => setViewer({ ...viewer, index })}
+                      type='text'
+                    >
+                      {thumbUrl === null ? null : <img alt='' src={thumbUrl} />}
+                    </Button>
+                  );
+                })}
+              </div>
+            ) : null}
             <Input
               aria-label={t(`${KEY_ROOT}.promptLabel`)}
               disabled={disabled}
@@ -575,19 +548,7 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
                 >
                   {t(viewedFrame?.effectiveSeed ? `${KEY_ROOT}.pinned` : `${KEY_ROOT}.pin`)}
                 </Button>
-              ) : viewedTake?.current ? null : (
-                <Button
-                  disabled={disabled}
-                  onClick={() =>
-                    viewedTake !== null &&
-                    viewedTake !== undefined &&
-                    void actions.selectVideoTake(shot.id, viewedTake.assetId)
-                  }
-                  type='primary'
-                >
-                  {t(`${KEY_ROOT}.viewer.useTake`)}
-                </Button>
-              )}
+              ) : null}
               <Button
                 disabled={viewedUrl === null}
                 icon={<Download aria-hidden='true' />}
@@ -596,7 +557,11 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
                     ? undefined
                     : downloadManagedAsset(
                         viewedUrl,
-                        safeDownloadName(viewer.kind === 'frame' ? 'frame' : 'take', shotIndex, viewer.index)
+                        safeDownloadName(
+                          viewer.kind === 'frame' ? 'frame' : 'picture',
+                          shotIndex,
+                          viewer.kind === 'frame' ? viewer.index : 0
+                        )
                       )
                 }
               >
@@ -617,43 +582,19 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
                 >
                   {t(`${KEY_ROOT}.menu.remove`)}
                 </Button>
-              ) : viewer.kind === 'picture' && viewedTake?.current ? (
+              ) : null}
+              {viewer.kind === 'frame' ? (
                 <Button
-                  className={styles.destructiveButton}
-                  disabled={disabled}
-                  icon={<Delete aria-hidden='true' />}
-                  onClick={() => {
-                    const assetId = viewedTake.assetId;
-                    void run(async () => {
-                      const removed = await actions.removeVideoTake(shot.id, assetId);
-                      if (removed) setViewer(null);
-                    });
-                  }}
+                  aria-describedby={generationDescriptionId}
+                  disabled={
+                    disabled || working || (status === 'rendering' && shot.activeGenerationJob?.canCancel !== true)
+                  }
+                  loading={working}
+                  onClick={() => void run(status === 'rendering' ? cancelRun : onRegenerateFrame)}
                 >
-                  {t(`${KEY_ROOT}.menu.removeTake`)}
+                  {t(status === 'rendering' ? `${KEY_ROOT}.cancelRun` : `${KEY_ROOT}.regenerate`)}
                 </Button>
               ) : null}
-              <Button
-                aria-describedby={generationDescriptionId}
-                disabled={
-                  disabled || working || (status === 'rendering' && shot.activeGenerationJob?.canCancel !== true)
-                }
-                loading={working}
-                onClick={() =>
-                  void run(
-                    status === 'rendering' ? cancelRun : viewer.kind === 'frame' ? onRegenerateFrame : onGenerateVideo
-                  )
-                }
-              >
-                {t(
-                  status === 'rendering'
-                    ? `${KEY_ROOT}.cancelRun`
-                    : viewer.kind === 'frame'
-                      ? `${KEY_ROOT}.regenerate`
-                      : `${KEY_ROOT}.generateShot`,
-                  { shot: shotIndex + 1 }
-                )}
-              </Button>
             </div>
           </div>
         )}

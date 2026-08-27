@@ -6742,8 +6742,8 @@ describe('StudioPage schema-5 cutover', () => {
     expect(actions).not.toHaveProperty('setHardCut');
     await expectSuccessfulBeatPanelAction(() => actions.setSeedStill('shot_0', 'seed_asset'));
     await expectSuccessfulBeatPanelAction(() => actions.dismissSeedStill('shot_0', 'seed_asset'));
-    await expectSuccessfulBeatPanelAction(() => actions.selectVideoTake('shot_0', 'video_old'));
-    await expectSuccessfulBeatPanelAction(() => actions.removeVideoTake('shot_0', 'video_old'));
+    expect(actions).not.toHaveProperty('selectVideoTake');
+    expect(actions).not.toHaveProperty('removeVideoTake');
     await expectSuccessfulBeatPanelAction(() => actions.trimShot('shot_0', 1, 2));
     await expectSuccessfulBeatPanelAction(() => actions.reorderShots('beat_0', ['shot_1', 'shot_0']));
     expect(actions).not.toHaveProperty('redetachLine');
@@ -6801,60 +6801,50 @@ describe('StudioPage schema-5 cutover', () => {
       {
         projectId: 'project_1',
         expectedRevision: 7,
-        operations: [{ kind: 'select_video_take', shotId: 'shot_0', assetId: 'video_old' }],
-      },
-      {
-        projectId: 'project_1',
-        expectedRevision: 8,
-        operations: [{ kind: 'remove_video_take', shotId: 'shot_0', assetId: 'video_old' }],
-      },
-      {
-        projectId: 'project_1',
-        expectedRevision: 9,
         operations: [{ kind: 'trim_shot', shotId: 'shot_0', trimInSeconds: 1, trimOutSeconds: 2 }],
       },
       {
         projectId: 'project_1',
-        expectedRevision: 10,
+        expectedRevision: 8,
         operations: [{ kind: 'reorder_shots', beatId: 'beat_0', shotOrder: ['shot_1', 'shot_0'] }],
       },
       {
         projectId: 'project_1',
-        expectedRevision: 13,
+        expectedRevision: 11,
         operations: [{ kind: 'reorder_beats', beatOrder: ['beat_1', 'beat_0'] }],
       },
     ]);
     expect(mocks.bridge.parkShot.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 11,
+      expectedRevision: 9,
       shotId: 'shot_0',
     });
     expect(mocks.bridge.parkBeat.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 12,
+      expectedRevision: 10,
       beatId: 'beat_0',
     });
     expect(mocks.bridge.restoreBeat.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 14,
+      expectedRevision: 12,
       beatId: 'beat_2',
       beforeBeatId: 'beat_1',
     });
     expect(mocks.bridge.restoreShot.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 15,
+      expectedRevision: 13,
       shotId: 'shot_2',
       beforeShotId: 'shot_1',
     });
     expect(mocks.bridge.reorderBin.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 16,
+      expectedRevision: 14,
       bin: [
         { kind: 'beat', beatId: 'beat_2', reason: 'lifted' },
         { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
       ],
     });
-    expect(revision).toBe(17);
+    expect(revision).toBe(15);
   });
 
   it('projects malformed topology defensively through both render and close-save traversal', async () => {

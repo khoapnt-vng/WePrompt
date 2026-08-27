@@ -700,8 +700,6 @@ const operationSamples: StudioMutationOperationV2[] = [
   { kind: 'set_hard_cut', shotId: 'shot_2', hardCut: true },
   { kind: 'set_seed_still', shotId: 'shot_1', assetId: null },
   { kind: 'dismiss_seed_still', shotId: 'shot_1', assetId: 'seed_1' },
-  { kind: 'select_video_take', shotId: 'shot_1', assetId: 'video_1' },
-  { kind: 'remove_video_take', shotId: 'shot_1', assetId: 'video_1' },
   { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_1' },
   { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: null, trimOutSeconds: null },
   { kind: 'reorder_bin', bin: [] },
@@ -712,9 +710,9 @@ const operationSamples: StudioMutationOperationV2[] = [
 ];
 
 describe('schema-5 mutation operation contract', () => {
-  it('contains exactly the 35 current operations and validates each exact envelope', () => {
-    expect(operationSamples).toHaveLength(35);
-    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(35);
+  it('contains exactly the 33 current operations and validates each exact envelope', () => {
+    expect(operationSamples).toHaveLength(33);
+    expect(new Set(operationSamples.map(({ kind }) => kind))).toHaveLength(33);
     for (const operation of operationSamples) expect(validateStudioMutationOperationV2(operation)).toBe(true);
   });
 
@@ -724,6 +722,8 @@ describe('schema-5 mutation operation contract', () => {
     'restore_line',
     'set_project_references',
     'set_shot_background_reference',
+    'select_video_take',
+    'remove_video_take',
   ])('rejects retired operation %s', (kind) => expect(validateStudioMutationOperationV2({ kind })).toBe(false));
 
   it.each([
@@ -862,10 +862,6 @@ describe('schema-5 mutation operation contract', () => {
       { kind: 'set_seed_still', shotId: 'shot_1', assetId: '' },
       { kind: 'dismiss_seed_still', shotId: '', assetId: 'seed_1' },
       { kind: 'dismiss_seed_still', shotId: 'shot_1', assetId: '' },
-      { kind: 'select_video_take', shotId: '', assetId: 'video_1' },
-      { kind: 'select_video_take', shotId: 'shot_1', assetId: '' },
-      { kind: 'remove_video_take', shotId: '', assetId: 'video_1' },
-      { kind: 'remove_video_take', shotId: 'shot_1', assetId: '' },
       { kind: 'promote_board_panel', shotId: '', boardAssetId: 'asset_1' },
       { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: '' },
       { kind: 'trim_shot', shotId: '', trimInSeconds: null, trimOutSeconds: null },
@@ -1728,40 +1724,6 @@ describe('schema-5 coverage, park, and deterministic controls', () => {
     });
     expect(result.assets[imported.id]).toEqual(imported);
     expect(result.undoHistory.at(-1)?.label).toBe('dismiss_seed_still');
-  });
-
-  it('restores an older successful take for free and removes only the current pointer', () => {
-    const project = makeProject();
-    const older = addSucceededVideoTake(project, 'shot_1', 'video_older');
-    const newer = addSucceededVideoTake(project, 'shot_1', 'video_newer');
-
-    const restored = persist(
-      apply(project, [{ kind: 'select_video_take', shotId: 'shot_1', assetId: older.id }]).project
-    );
-    expect(restored.shots.shot_1).toMatchObject({
-      videoAssetId: older.id,
-      supersededVideoAssetIds: [newer.id],
-      trimInSeconds: null,
-      trimOutSeconds: null,
-    });
-    expect(restored.assets[older.id]).toEqual(older);
-    expect(restored.assets[newer.id]).toEqual(newer);
-    expect(restored.spendAuthorizations).toEqual(project.spendAuthorizations);
-    expect(restored.undoHistory.at(-1)?.label).toBe('select_video_take');
-
-    const removed = apply(
-      restored,
-      [{ kind: 'remove_video_take', shotId: 'shot_1', assetId: older.id }],
-      'remove_take'
-    ).project;
-    expect(removed.shots.shot_1).toMatchObject({
-      videoAssetId: null,
-      supersededVideoAssetIds: [older.id, newer.id],
-    });
-    expect(removed.assets[older.id]).toEqual(older);
-    expect(removed.assets[newer.id]).toEqual(newer);
-    expect(removed.spendAuthorizations).toEqual(project.spendAuthorizations);
-    expect(removed.undoHistory.at(-1)?.label).toBe('remove_video_take');
   });
 
   it('rejects missing identities, invalid placements, and exact no-op reducer requests', () => {

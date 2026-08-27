@@ -543,7 +543,7 @@ describe('projectWorkspace', () => {
 
     const cleanShot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
     expect(cleanShot.currentPicture).toMatchObject({ prompt: 'First', promptChanged: false });
-    expect(cleanShot.videoTakes).toMatchObject([{ assetId: 'video_current', prompt: 'First', promptChanged: false }]);
+    expect(cleanShot).not.toHaveProperty('videoTakes');
 
     project.shots.shot_1!.shootingScript = 'Edited after the take fired';
 
@@ -562,61 +562,8 @@ describe('projectWorkspace', () => {
         segmentState: { kind: 'rendered' },
       })
     );
-    expect(shot.videoTakes).toMatchObject([
-      { assetId: 'video_current', current: true, prompt: 'First', promptChanged: true },
-    ]);
+    expect(shot).not.toHaveProperty('videoTakes');
     expect(shot).not.toHaveProperty('takeCount');
-  });
-
-  it('judges each retained video take against the Shot script frozen by its own producer', () => {
-    const project = makeProject();
-    const retained = makeAsset('video_retained', 'shot_1', 'video', 'assets', '2026-08-19T01:00:00.000Z', 9);
-    project.assets[retained.id] = retained;
-    project.shots.shot_1!.assetIds.push(retained.id);
-    project.shots.shot_1!.supersededVideoAssetIds = [retained.id];
-    const retainedJob = makeJob('job_video_retained', 'shot_1', {
-      outputAssetIds: [retained.id],
-      outputAssetIdsByRole: { primary: retained.id, poster: null },
-      composition: {
-        inputs: {
-          schemaVersion: 1,
-          projectRevision: project.revision,
-          brief: project.brief,
-          rules: project.rules,
-          source: {
-            kind: 'shot',
-            beatId: 'beat_1',
-            story: project.beats.beat_1!.story,
-            shotId: 'shot_1',
-            shootingScript: 'Earlier version of the Shot',
-          },
-          purpose: 'video_take',
-          referenceInputs: [],
-          aspectRatio: project.aspectRatio,
-          resolution: project.resolution,
-          route: {
-            providerId: 'provider_safe',
-            adapterId: 'openrouter-video-v1',
-            model: 'model_safe',
-          },
-          boardStyle: null,
-          instructionProfile: 'openrouter-video-v1.video-take.v1',
-        },
-        prompt: 'System instructions\nPROJECT: A launch film.\nOUTPUT: Earlier version of the Shot',
-      },
-    });
-    project.jobs[retainedJob.id] = retainedJob;
-    project.shots.shot_1!.jobIds.push(retainedJob.id);
-
-    const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
-    expect(shot.videoTakes).toMatchObject([
-      {
-        assetId: retained.id,
-        current: false,
-        prompt: 'Earlier version of the Shot',
-        promptChanged: true,
-      },
-    ]);
   });
 
   it('reads only own asset keys when projecting the current picture', () => {
@@ -678,7 +625,7 @@ describe('projectWorkspace', () => {
     });
   });
 
-  it('orders seed stills newest-first and projects current-first retained take history', () => {
+  it('orders seed stills newest-first while keeping retained video history out of projection', () => {
     const project = makeProject();
     const older = makeAsset('seed_older', 'shot_1', 'image', 'assets', '2026-08-19T00:00:00.000Z');
     const newer = makeAsset('seed_newer', 'shot_1', 'image', 'imports', '2026-08-19T02:00:00.000Z');
@@ -698,10 +645,8 @@ describe('projectWorkspace', () => {
       { assetId: 'seed_older', explicitSeed: true, effectiveSeed: true },
     ]);
     expect(shot.currentPicture).toMatchObject({ assetId: 'video_current', sourceDurationSeconds: 10 });
-    expect(shot.videoTakes).toMatchObject([
-      { assetId: 'video_current', current: true },
-      { assetId: 'video_old', current: false },
-    ]);
+    expect(shot).not.toHaveProperty('videoTakes');
+    expect(project.assets.video_old).toBe(superseded);
   });
 
   it('keeps dismissed seed media retained while excluding it from the strip and automatic current choice', () => {
@@ -935,7 +880,7 @@ describe('projectWorkspace', () => {
 
     const shot = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!.shots[0]!;
     expect(shot.currentPicture).toMatchObject({ prompt: 'First', promptChanged: false });
-    expect(shot.videoTakes).toMatchObject([{ prompt: 'First', promptChanged: false }]);
+    expect(shot).not.toHaveProperty('videoTakes');
   });
 
   it('retains paid work from an exact shot-owned job without exposing job identity', () => {

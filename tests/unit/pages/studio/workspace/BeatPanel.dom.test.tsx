@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { readFileSync } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -275,12 +273,9 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.download': 'Download',
         'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.copyPrompt': 'Copy prompt',
         'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.remove': 'Remove',
-        'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.previousTakes': 'Previous takes',
-        'conversation.creativeStudio.workspace.beatPanel.firstFrames.menu.removeTake': 'Remove take',
         'conversation.creativeStudio.workspace.beatPanel.firstFrames.viewer.currentFirstFrame': 'Current first frame',
         'conversation.creativeStudio.workspace.beatPanel.firstFrames.viewer.previous': 'Previous',
         'conversation.creativeStudio.workspace.beatPanel.firstFrames.viewer.next': 'Next',
-        'conversation.creativeStudio.workspace.beatPanel.firstFrames.viewer.useTake': 'Use this take',
         'conversation.creativeStudio.models.blocked.catalogUnloaded': 'The engine list has not loaded yet.',
         'conversation.creativeStudio.models.blocked.duration': 'This engine cannot make a shot {{seconds}}s long.',
         'conversation.creativeStudio.models.blocked.notAnswering': 'The engine is not answering.',
@@ -420,7 +415,7 @@ vi.mock('react-i18next', () => ({
       }
       if (key.endsWith('.firstFrames.generateShot')) return `Generate Shot ${String(values?.shot)}`;
       if (key.endsWith('.composer.action.generate')) return `Generate Shot ${String(values?.shot)}`;
-      if (key.endsWith('.composer.action.regenerate')) return 'Regenerate';
+      if (key.endsWith('.composer.action.regenerate')) return 'Generate again';
       if (key.endsWith('.composer.action.cancelRun')) return 'Cancel run';
       if (key.endsWith('.composer.action.removeFromChain')) return 'Remove from chain';
       if (key.endsWith('.composer.action.tryAgain')) return 'Try again';
@@ -439,7 +434,6 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.firstFrames.viewer.counter')) {
         return `${String(values?.current)} of ${String(values?.total)}`;
       }
-      if (key.endsWith('.firstFrames.viewer.take')) return `Take ${String(values?.index)}`;
       if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
       if (key.endsWith('.preview.videoLabel')) {
         return `Shot ${String(values?.position)} video · ${String(values?.shootingScript)}`;
@@ -567,15 +561,6 @@ const makeShot = (
     downstreamShotIds: [],
     seedStills,
     firstFrames: seedStills,
-    videoTakes:
-      currentPicture === null
-        ? []
-        : [
-            {
-              ...currentPicture,
-              current: true,
-            },
-          ],
     generationProgressPercent: null,
     activeGenerationJob: null,
     coverAssetId: null,
@@ -684,8 +669,6 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   saveShot: vi.fn().mockResolvedValue(true),
   setSeedStill: vi.fn().mockResolvedValue(true),
   dismissSeedStill: vi.fn().mockResolvedValue(true),
-  selectVideoTake: vi.fn().mockResolvedValue(true),
-  removeVideoTake: vi.fn().mockResolvedValue(true),
   trimShot: vi.fn().mockResolvedValue(true),
   reorderShots: vi.fn().mockResolvedValue(true),
   importSeedStill: vi.fn().mockResolvedValue('cancelled' as const),
@@ -877,11 +860,6 @@ const latestModalConfirmation = (): ModalConfirmOptions => {
   const options = modalConfirm.mock.calls.at(-1)?.[0] as ModalConfirmOptions | undefined;
   if (options === undefined) throw new Error('Expected an Arco Modal.confirm call');
   return options;
-};
-
-const cssRuleBody = (source: string, selector: string): string => {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`).exec(source)?.[1] ?? '';
 };
 
 const previewVideo = (): HTMLVideoElement => {
@@ -1836,7 +1814,7 @@ describe('BeatPanel', () => {
       'rendered',
       makeShot('shot_state', 0, { currentPicture: makeCurrentPicture('video_rendered') }),
       'rendered',
-      'Regenerate',
+      'Generate again',
     ],
     [
       'edited after a run',
@@ -1844,7 +1822,7 @@ describe('BeatPanel', () => {
         currentPicture: { ...makeCurrentPicture('video_dirty'), promptChanged: true },
       }),
       'rendered',
-      'Regenerate',
+      'Generate again',
     ],
     [
       'queued',
@@ -1888,7 +1866,7 @@ describe('BeatPanel', () => {
     expect(card).not.toHaveTextContent('THE SHOT HAS TO LAND ON THAT PICTURE');
   });
 
-  it('keeps a rendered Shot quiet and its Regenerate action secondary when its fired prompt still matches', () => {
+  it('keeps a rendered Shot quiet and its Generate again action secondary when its fired prompt still matches', () => {
     const currentPicture = {
       ...makeCurrentPicture('video_rendered'),
       prompt: 'Canonical shooting script 1',
@@ -1902,10 +1880,13 @@ describe('BeatPanel', () => {
     const card = shotCard(container, shot.id);
 
     expect(within(card).queryByText('Edited · Not yet run')).not.toBeInTheDocument();
-    expect(within(card).getByRole('button', { name: 'Regenerate' })).toHaveAttribute('data-button-type', 'secondary');
+    expect(within(card).getByRole('button', { name: 'Generate again' })).toHaveAttribute(
+      'data-button-type',
+      'secondary'
+    );
   });
 
-  it('marks an unsaved prompt edit and returns Regenerate to primary weight', () => {
+  it('marks an unsaved prompt edit and returns Generate again to primary weight', () => {
     const currentPicture = {
       ...makeCurrentPicture('video_rendered'),
       prompt: 'Canonical shooting script 1',
@@ -1918,7 +1899,7 @@ describe('BeatPanel', () => {
     const card = shotCard(container, shot.id);
 
     expect(within(card).getByText('Edited · Not yet run')).toBeVisible();
-    expect(within(card).getByRole('button', { name: 'Regenerate' })).toHaveAttribute('data-button-type', 'primary');
+    expect(within(card).getByRole('button', { name: 'Generate again' })).toHaveAttribute('data-button-type', 'primary');
   });
 
   it('opens the shipped candidate picker from START and routes REFS through the exact binding editor', () => {
@@ -2336,7 +2317,7 @@ describe('BeatPanel', () => {
     expect(shot.queryByRole('button', { name: /detach|restore|re-derive/iu })).toBeNull();
   });
 
-  it('shows one current picture with a target-named generation action and a bounded history menu', async () => {
+  it('shows one current picture with Generate again and no gallery or removal action', async () => {
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     const seed = makeSeedStill('seed_existing', { effectiveSeed: true });
     const shot = makeShot('shot_1', 0, {
@@ -2357,19 +2338,16 @@ describe('BeatPanel', () => {
     );
     expect(container.querySelector('[data-asset-id="video_superseded"]')).toBeNull();
     fireEvent.click(within(picture).getByRole('button', { name: 'More actions' }));
-    expect(within(picture).getByRole('menuitem', { name: 'Previous takes' })).toBeDisabled();
     expect(
       within(picture)
         .getAllByRole('menuitem')
         .map((item) => item.textContent?.trim())
-    ).toEqual(['Download', 'Previous takes', 'Remove take']);
+    ).toEqual(['Download']);
     fireEvent.click(within(picture).getByRole('menuitem', { name: 'Download' }));
-    fireEvent.click(within(picture).getByRole('menuitem', { name: 'Remove take' }));
     expect(anchorClick).toHaveBeenCalledTimes(1);
-    expect(actions.removeVideoTake).toHaveBeenCalledWith(shot.id, 'video_current');
     expect(shotRegion.queryByRole('spinbutton', { name: /Generation count/u })).toBeNull();
 
-    fireEvent.click(shotRegion.getByRole('button', { name: 'Regenerate' }));
+    fireEvent.click(shotRegion.getByRole('button', { name: 'Generate again' }));
     await waitFor(() =>
       expect(actions.reviewShot).toHaveBeenCalledWith('shot_1', [{ shotId: 'shot_1', purpose: 'video_take' }])
     );
@@ -2414,17 +2392,12 @@ describe('BeatPanel', () => {
     toDataUrl.mockRestore();
   });
 
-  it('keeps retained takes in the picture viewer, restores one for free, and shows staleness as a tag', () => {
+  it('shows current-picture staleness in the single-picture viewer without retained history controls', () => {
     const seed = makeSeedStill('seed_existing', { effectiveSeed: true });
     const current = {
       ...makeCurrentPicture('video_current', 8, 'poster_current'),
-      current: true,
       firstFrameChanged: true,
       promptChanged: true,
-    };
-    const older = {
-      ...makeCurrentPicture('video_older', 8, 'poster_older'),
-      current: false,
     };
     const shot = makeShot('shot_1', 0, {
       currentPicture: current,
@@ -2432,7 +2405,6 @@ describe('BeatPanel', () => {
       firstFrames: [seed],
       hasEffectiveSeed: true,
       seedStills: [seed],
-      videoTakes: [current, older],
     });
     const actions = makeActions();
     const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
@@ -2445,25 +2417,19 @@ describe('BeatPanel', () => {
     fireEvent.click(within(picture).getByRole('button', { name: 'Current picture for Shot 1' }));
     const viewer = container.querySelector<HTMLElement>('[data-viewer-kind="picture"]');
     if (viewer === null) throw new Error('Missing picture viewer');
-    expect(within(viewer).getByRole('button', { name: 'Take 1' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(within(viewer).getByRole('button', { name: 'Take 2' }));
-    fireEvent.click(within(viewer).getByRole('button', { name: 'Use this take' }));
-    expect(actions.selectVideoTake).toHaveBeenCalledWith(shot.id, older.assetId);
+    expect(within(viewer).getByText('Current picture')).toBeVisible();
+    expect(within(viewer).queryByRole('button', { name: 'Previous' })).toBeNull();
+    expect(within(viewer).queryByRole('button', { name: 'Next' })).toBeNull();
+    expect(within(viewer).queryByRole('button', { name: /use this take|remove take/iu })).toBeNull();
   });
 
-  it('judges video takes full screen, removes only current, and offers the explicit last-frame handoff', async () => {
+  it('judges the current picture full screen, downloads it, and offers the explicit last-frame handoff', () => {
     const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
     const current = {
       ...makeCurrentPicture('video_current', 8, null),
-      current: true,
-    };
-    const older = {
-      ...makeCurrentPicture('video_older', 8, 'poster_older'),
-      current: false,
     };
     const shot = makeShot('shot_1', 0, {
       currentPicture: current,
-      videoTakes: [current, older],
     });
     const next = makeShot('shot_2', 1, { chainBreak: 'hard_cut', segmentHead: true });
     const beat = makeBeat('beat_1', [shot, next]);
@@ -2483,40 +2449,26 @@ describe('BeatPanel', () => {
     fireEvent.click(within(picture).getByRole('button', { name: 'Current picture for Shot 1' }));
     const viewer = container.querySelector<HTMLElement>('[data-viewer-kind="picture"]');
     if (viewer === null) throw new Error('Missing picture viewer');
-    fireEvent.click(within(viewer).getByRole('button', { name: 'Next' }));
-    expect(within(viewer).getByRole('button', { name: 'Take 2' })).toHaveAttribute('aria-pressed', 'true');
-    fireEvent.click(within(viewer).getByRole('button', { name: 'Previous' }));
-    expect(within(viewer).getByRole('button', { name: 'Take 1' })).toHaveAttribute('aria-pressed', 'true');
+    expect(viewer.querySelector('video')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_current');
     fireEvent.click(within(viewer).getByRole('button', { name: 'Download' }));
-    fireEvent.click(within(viewer).getByRole('button', { name: 'Remove take' }));
 
     expect(anchorClick).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(actions.removeVideoTake).toHaveBeenCalledWith(shot.id, current.assetId));
-    await waitFor(() => expect(container.querySelector('[data-viewer-kind="picture"]')).toBeNull());
+    expect(container.querySelector('[data-viewer-kind="picture"]')).not.toBeNull();
     anchorClick.mockRestore();
   });
 
-  it('keeps retained take history reachable after the current pointer is removed', () => {
-    const retained = {
-      ...makeCurrentPicture('video_retained', 8, 'poster_retained'),
-      current: false,
-    };
-    const shot = makeShot('shot_1', 0, {
-      currentPicture: null,
-      videoTakes: [retained],
-    });
-    const actions = makeActions();
-    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+  it('shows no picture and no hidden history affordance when no generation has succeeded', () => {
+    const shot = makeShot('shot_1', 0, { currentPicture: null });
+    const { container } = render(
+      <BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), makeActions())} />
+    );
     const picture = within(openFirstFramePicker(container, shot.id)).getByRole('region', {
       name: 'Current picture for Shot 1',
     });
 
     expect(within(picture).getByText('No picture yet')).toBeVisible();
-    fireEvent.click(within(picture).getByRole('button', { name: 'Previous takes' }));
-    const viewer = container.querySelector<HTMLElement>('[data-viewer-kind="picture"]');
-    if (viewer === null) throw new Error('Missing retained-take viewer');
-    fireEvent.click(within(viewer).getByRole('button', { name: 'Use this take' }));
-    expect(actions.selectVideoTake).toHaveBeenCalledWith(shot.id, retained.assetId);
+    expect(within(picture).queryByRole('button')).toBeNull();
+    expect(container.querySelector('[data-viewer-kind="picture"]')).toBeNull();
   });
 
   it('persists the exact edited prompt before opening paid Shot review', async () => {

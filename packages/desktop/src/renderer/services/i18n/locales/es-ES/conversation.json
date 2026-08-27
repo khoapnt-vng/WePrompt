@@ -1239,22 +1239,19 @@
           "sendLastFrame": "Enviar su último fotograma al plano {{shot}}",
           "cancelRun": "Cancelar ejecución",
           "generateShot": "Generar plano {{shot}}",
+          "generateAgain": "Generar de nuevo",
           "promptLabel": "Prompt del plano",
           "regenerate": "Volver a generar",
           "menu": {
             "download": "Descargar",
             "copyPrompt": "Copiar prompt",
-            "remove": "Eliminar",
-            "previousTakes": "Tomas anteriores",
-            "removeTake": "Eliminar toma"
+            "remove": "Eliminar"
           },
           "viewer": {
             "currentFirstFrame": "Primer fotograma actual",
             "counter": "{{current}} de {{total}}",
-            "take": "Toma {{index}}",
             "previous": "Anterior",
-            "next": "Siguiente",
-            "useTake": "Usar esta toma"
+            "next": "Siguiente"
           }
         },
         "picture": {
@@ -1285,7 +1282,7 @@
           "promptPlaceholder": "Describe this shot, or reference a frame with @…",
           "action": {
             "generate": "Generate Shot {{shot}}",
-            "regenerate": "Regenerate",
+            "regenerate": "Generar de nuevo",
             "cancelRun": "Cancel run",
             "removeFromChain": "Remove from chain",
             "tryAgain": "Try again",
@@ -1429,23 +1426,23 @@
         "promotion": {
           "title": "Usar panel como primer fotograma",
           "summary": "Promueve el panel actual del Board de Shot {{shotId}} a primer fotograma. Esto no cambia el límite de continuidad del Shot.",
-          "impactNone": "Ninguna toma actual depende de este fotograma.",
-          "impactIntro": "Tomas actuales que seguirán reproduciéndose pero quedarán obsoletas: {{count}}",
-          "impactItem": "Toma actual de Shot {{shotId}}",
-          "optionsLabel": "Elige cómo tratar las tomas actuales",
-          "promoteOnly": "Solo promover — conservar las tomas obsoletas reproducibles",
+          "impactNone": "Ninguna imagen actual depende de este fotograma.",
+          "impactIntro": "Imágenes actuales que seguirán reproduciéndose pero quedarán obsoletas: {{count}}",
+          "impactItem": "Imagen actual de Shot {{shotId}}",
+          "optionsLabel": "Elige cómo tratar las imágenes actuales",
+          "promoteOnly": "Solo promover — conservar las imágenes obsoletas reproducibles",
           "freePrice": "$0",
           "promoteAndRerender": "Promover y revisar el trabajo exacto de regeneración",
           "priceAfterReview": "El precio se muestra a continuación",
           "promoteOnlyAction": "Promover por $0",
           "reviewPaidAction": "Revisar el precio de regeneración",
-          "paidUnavailable": "Este segmento tiene demasiadas tomas actuales para una sola confirmación de pago. La opción de solo promover sigue disponible.",
+          "paidUnavailable": "Este segmento tiene demasiadas imágenes actuales para una sola confirmación de pago. La opción de solo promover sigue disponible.",
           "headline": "Promover + regenerar tomas ({{count}}) · {{cost}}",
-          "requiredWork": "Las regeneraciones indicadas son exactamente las tomas actuales que esta promoción deja obsoletas. No se incluye la cobertura que falta.",
+          "requiredWork": "Las regeneraciones indicadas son exactamente las imágenes actuales que esta promoción deja obsoletas. No se incluye la cobertura que falta.",
           "confirm": "Confirmar promoción + regenerar tomas ({{count}}) · {{cost}}",
-          "promoted": "Panel promovido. Las tomas existentes siguen reproduciéndose y se marcan como obsoletas.",
+          "promoted": "Panel promovido. Las imágenes existentes siguen reproduciéndose y se marcan como obsoletas.",
           "promoting": "Promoviendo panel…",
-          "confirmed": "Panel promovido y regeneración iniciada para las tomas confirmadas.",
+          "confirmed": "Panel promovido y regeneración iniciada para las imágenes confirmadas.",
           "close": "Cerrar"
         },
         "headline_one": "{{count}} generación · {{cost}}",

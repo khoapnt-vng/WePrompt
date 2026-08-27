@@ -1244,22 +1244,19 @@
           "sendLastFrame": "Enviar o último quadro ao plano {{shot}}",
           "cancelRun": "Cancelar execução",
           "generateShot": "Gerar plano {{shot}}",
+          "generateAgain": "Gerar novamente",
           "promptLabel": "Prompt do plano",
           "regenerate": "Gerar novamente",
           "menu": {
             "download": "Baixar",
             "copyPrompt": "Copiar prompt",
-            "remove": "Remover",
-            "previousTakes": "Tomadas anteriores",
-            "removeTake": "Remover tomada"
+            "remove": "Remover"
           },
           "viewer": {
             "currentFirstFrame": "Primeiro quadro atual",
             "counter": "{{current}} de {{total}}",
-            "take": "Tomada {{index}}",
             "previous": "Anterior",
-            "next": "Próximo",
-            "useTake": "Usar esta tomada"
+            "next": "Próximo"
           }
         },
         "picture": {
@@ -1290,7 +1287,7 @@
           "promptPlaceholder": "Describe this shot, or reference a frame with @…",
           "action": {
             "generate": "Generate Shot {{shot}}",
-            "regenerate": "Regenerate",
+            "regenerate": "Gerar novamente",
             "cancelRun": "Cancel run",
             "removeFromChain": "Remove from chain",
             "tryAgain": "Try again",
@@ -1434,23 +1431,23 @@
         "promotion": {
           "title": "Usar painel como primeiro quadro",
           "summary": "Promova o painel atual do Board do Shot {{shotId}} a primeiro quadro. Isso não altera o limite de continuidade do Shot.",
-          "impactNone": "Nenhum take atual depende deste quadro.",
-          "impactIntro": "Takes atuais que continuarão reproduzíveis, mas ficarão desatualizados: {{count}}",
-          "impactItem": "Take atual do Shot {{shotId}}",
-          "optionsLabel": "Escolha como tratar os takes atuais",
-          "promoteOnly": "Apenas promover — manter takes reproduzíveis e desatualizados",
+          "impactNone": "Nenhuma imagem atual depende deste quadro.",
+          "impactIntro": "Imagens atuais que continuarão reproduzíveis, mas ficarão desatualizadas: {{count}}",
+          "impactItem": "Imagem atual do Shot {{shotId}}",
+          "optionsLabel": "Escolha como tratar as imagens atuais",
+          "promoteOnly": "Apenas promover — manter imagens reproduzíveis e desatualizadas",
           "freePrice": "$0",
           "promoteAndRerender": "Promover e revisar o trabalho exato de nova renderização",
           "priceAfterReview": "Preço exibido a seguir",
           "promoteOnlyAction": "Promover por $0",
           "reviewPaidAction": "Revisar preço da nova renderização",
-          "paidUnavailable": "Este segmento tem takes atuais demais para uma única confirmação paga. A opção de apenas promover continua disponível.",
+          "paidUnavailable": "Este segmento tem imagens atuais demais para uma única confirmação paga. A opção de apenas promover continua disponível.",
           "headline": "Promover + renderizar takes novamente ({{count}}) · {{cost}}",
-          "requiredWork": "As novas renderizações listadas são exatamente os takes atuais que esta promoção torna desatualizados. A cobertura ausente não está incluída.",
+          "requiredWork": "As novas renderizações listadas são exatamente as imagens atuais que esta promoção torna desatualizadas. A cobertura ausente não está incluída.",
           "confirm": "Confirmar promoção + renderizar takes novamente ({{count}}) · {{cost}}",
-          "promoted": "Painel promovido. Os takes existentes continuam reproduzíveis e são marcados como desatualizados.",
+          "promoted": "Painel promovido. As imagens existentes continuam reproduzíveis e são marcadas como desatualizadas.",
           "promoting": "Promovendo painel…",
-          "confirmed": "Painel promovido e nova renderização iniciada para os takes confirmados.",
+          "confirmed": "Painel promovido e nova renderização iniciada para as imagens confirmadas.",
           "close": "Fechar"
         },
         "headline_one": "{{count}} geração · {{cost}}",

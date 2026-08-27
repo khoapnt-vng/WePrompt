@@ -516,6 +516,132 @@ const addBoardRedrawJob = async (store: CreativeStudioStore, projectId: string):
   });
 };
 
+const addVideoRedrawJob = async (
+  store: CreativeStudioStore,
+  projectId: string,
+  options: { interruptFirstDownload?: boolean } = {}
+): Promise<StudioProjectV2> => {
+  const loaded = await store.getProjectV2(projectId);
+  if (loaded.status !== 'supported') throw new Error('Video redraw fixture missing');
+  const original = loaded.project.jobs.job_1;
+  const shot = loaded.project.shots.shot_1;
+  const beat = loaded.project.beats.beat_1;
+  if (
+    original?.purpose !== 'video_take' ||
+    original.requestPlan?.kind !== 'resolved' ||
+    shot === undefined ||
+    beat === undefined ||
+    shot.seedStillId === null
+  ) {
+    throw new Error('Video redraw authority missing');
+  }
+  const target = { kind: 'shot' as const, shotId: shot.id };
+  const source = {
+    kind: 'shot' as const,
+    beatId: beat.id,
+    story: beat.story,
+    shotId: shot.id,
+    shootingScript: shot.shootingScript,
+  };
+  const provider = structuredClone(original.provider);
+  const referenceInputs = structuredClone(original.requestPlan.snapshot.referenceInputs);
+  const composition = composeStudioGenerationV2({
+    projectRevision: loaded.project.revision,
+    brief: loaded.project.brief,
+    rules: loaded.project.rules,
+    source,
+    purpose: 'video_take',
+    referenceInputs,
+    aspectRatio: loaded.project.aspectRatio,
+    resolution: loaded.project.resolution,
+    route: provider,
+    boardStyle: null,
+    instructionProfile: deriveStudioInstructionProfileV2(provider, 'video_take', source),
+  });
+  const requestPlan: Extract<StudioGenerationRequestPlan, { kind: 'resolved' }> = {
+    kind: 'resolved',
+    snapshot: {
+      composition,
+      aspectRatio: loaded.project.aspectRatio,
+      resolution: loaded.project.resolution,
+      durationSeconds: shot.durationSeconds,
+      referenceInputs,
+      conditioningInput: { kind: 'seed_still', assetId: shot.seedStillId },
+    },
+  };
+  const item: StudioQuotedGeneration = {
+    id: createStudioQuotedGenerationId({
+      projectId,
+      projectRevision: loaded.project.revision,
+      target,
+      purpose: 'video_take',
+    }),
+    target,
+    purpose: 'video_take',
+    routeId: 'route_video',
+    generationCount: 1,
+    requestPlan,
+    rateUnit: 'second',
+    rateMinorUnits: 3,
+  };
+  const totals = calculateStudioQuoteTotals([item]);
+  if (totals === null) throw new Error('Invalid video redraw total');
+  const authorization: StudioSpendAuthorization = {
+    id: 'authorization_video_redraw',
+    projectId,
+    projectRevision: loaded.project.revision,
+    originReferenceHandoffId: null,
+    rateCardDigest: 'd'.repeat(64),
+    currency: 'USD',
+    baseItems: [item],
+    cascadeItems: [],
+    lowerMinorUnits: totals.lowerMinorUnits,
+    upperMinorUnits: totals.upperMinorUnits,
+    expiresAt: '2026-08-17T12:10:00.000Z',
+    confirmedAt: '2026-08-17T12:05:01.000Z',
+    providerBindings: [{ itemId: item.id, provider }],
+    idempotencyKeys: [{ itemId: item.id, key: 'key_video_redraw' }],
+  };
+  const receipt = createStudioSpendReceiptV2({ authorization, itemId: item.id, jobId: 'job_video_redraw' });
+  return store.updateProjectV2(projectId, (current) => {
+    if (options.interruptFirstDownload === true) {
+      const interruptedDownload = current.jobs.job_1!;
+      interruptedDownload.status = 'failed';
+      interruptedDownload.providerJobId = 'remote_job_1';
+      interruptedDownload.error = { code: 'download_failed', messageKey: 'downloadFailed' };
+    }
+    current.spendAuthorizations.push(authorization);
+    current.jobs.job_video_redraw = {
+      id: 'job_video_redraw',
+      projectId,
+      target,
+      status: 'running',
+      provider,
+      idempotencyKey: 'key_video_redraw',
+      providerJobId: null,
+      cancellationPolicy: 'none',
+      outputAssetIds: [],
+      error: null,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      createdAt: '2026-08-17T12:05:01.000Z',
+      updatedAt: '2026-08-17T12:05:01.000Z',
+      purpose: 'video_take',
+      authorizationId: authorization.id,
+      authorizationItemId: item.id,
+      composition,
+      requestPlan: structuredClone(requestPlan),
+      requestSnapshot: structuredClone(requestPlan.snapshot),
+      spendReceipt: receipt,
+      outputAssetIdsByRole: { primary: null, poster: null },
+    };
+    current.shots.shot_1!.jobIds.push('job_video_redraw');
+    return current;
+  });
+};
+
 const idSequence = (...ids: string[]): (() => string) => {
   let index = 0;
   return () => ids[index++] ?? `asset_${index}`;
@@ -1660,6 +1786,145 @@ describe('createStudioMediaStore schema 2 final lifecycle', () => {
     expect(edited.assets.take_1!.durationSeconds).toBe(10);
     const restarted = await store.getProjectV2(project.id);
     expect(restarted.status === 'supported' ? restarted.project.assets.take_1!.durationSeconds : null).toBe(10);
+  });
+
+  it('keeps the newest successful video job current when an older download finishes last', async () => {
+    const { rootDir, store, project } = await makeStoreV2({ purpose: 'video_take' });
+    await addVideoRedrawJob(store, project.id, { interruptFirstDownload: true });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('video_newer', 'video_older'),
+      probeVideoDurationSecondsV2: async () => 10,
+    });
+
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_video_redraw',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.trimInSeconds = 2;
+      current.shots.shot_1!.trimOutSeconds = 1;
+      return current;
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded.status).toBe('supported');
+    if (loaded.status !== 'supported') throw new Error('Expected supported project');
+    const shot = loaded.project.shots.shot_1!;
+    expect(shot.jobIds).toEqual(['job_1', 'job_video_redraw']);
+    expect(shot.videoAssetId).toBe('video_newer');
+    expect(shot.supersededVideoAssetIds).toEqual(['video_older']);
+    expect(shot.trimInSeconds).toBe(2);
+    expect(shot.trimOutSeconds).toBe(1);
+    expect(shot.assetIds).toEqual(expect.arrayContaining(['video_newer', 'video_older']));
+    expect(loaded.project.jobs.job_1).toMatchObject({
+      status: 'succeeded',
+      outputAssetIds: ['video_older'],
+      outputAssetIdsByRole: { primary: 'video_older' },
+      spendReceipt: expect.objectContaining({ jobId: 'job_1' }),
+    });
+    expect(loaded.project.jobs.job_video_redraw).toMatchObject({
+      status: 'succeeded',
+      outputAssetIds: ['video_newer'],
+      outputAssetIdsByRole: { primary: 'video_newer' },
+      spendReceipt: expect.objectContaining({ jobId: 'job_video_redraw' }),
+    });
+    expect(loaded.project.assets.video_older).toMatchObject({
+      producerJobId: 'job_1',
+      compositionDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    expect(loaded.project.assets.video_newer).toMatchObject({
+      producerJobId: 'job_video_redraw',
+      compositionDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+    const videoAssetIds = ['video_older', 'video_newer'];
+    for (const videoAssetId of videoAssetIds) {
+      const extractionId = createStudioFrameExtractionId({
+        shotId: 'shot_1',
+        videoAssetId,
+        endpointSeconds: 10,
+      });
+      expect(loaded.project.frameExtractions[extractionId]).toMatchObject({
+        videoAssetId,
+        endpointSeconds: 10,
+        status: 'pending',
+      });
+    }
+    await Promise.all(
+      videoAssetIds.map((videoAssetId) =>
+        expect(fs.readFile(path.join(rootDir, project.id, 'assets', `${videoAssetId}.mp4`))).resolves.toEqual(mp4)
+      )
+    );
+  });
+
+  it('clears asset-specific trims when a replacement video becomes current', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('video_first', 'video_replacement'),
+      probeVideoDurationSecondsV2: async () => 10,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    await store.updateProjectV2(project.id, (current) => {
+      current.shots.shot_1!.trimInSeconds = 2;
+      current.shots.shot_1!.trimOutSeconds = 1;
+      return current;
+    });
+    await addVideoRedrawJob(store, project.id);
+
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_video_redraw',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      project: {
+        shots: {
+          shot_1: {
+            videoAssetId: 'video_replacement',
+            supersededVideoAssetIds: ['video_first'],
+            trimInSeconds: null,
+            trimOutSeconds: null,
+          },
+        },
+        frameExtractions: {
+          [createStudioFrameExtractionId({
+            shotId: 'shot_1',
+            videoAssetId: 'video_replacement',
+            endpointSeconds: 10,
+          })]: {
+            videoAssetId: 'video_replacement',
+            endpointSeconds: 10,
+            status: 'pending',
+          },
+        },
+      },
+    });
   });
 
   it('hands a verified video to production ffprobe through a seekable inherited descriptor', async () => {

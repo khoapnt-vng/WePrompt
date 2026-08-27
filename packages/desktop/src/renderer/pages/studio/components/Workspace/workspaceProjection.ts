@@ -72,8 +72,6 @@ export type WorkspaceCurrentPictureProjection = {
   firstFrameChanged: boolean;
 };
 
-export type WorkspaceVideoTakeProjection = WorkspaceCurrentPictureProjection & { current: boolean };
-
 export type WorkspaceBoardPanelFreshness = 'missing' | 'current' | 'stale' | 'status_pending';
 
 export type WorkspaceBoardPanelActivity =
@@ -124,7 +122,6 @@ export type WorkspaceShotProjection = {
   downstreamShotIds: string[];
   seedStills: WorkspaceSeedStillProjection[];
   firstFrames: WorkspaceSeedStillProjection[];
-  videoTakes: WorkspaceVideoTakeProjection[];
   generationProgressPercent: number | null;
   activeGenerationJob: { id: string; purpose: 'seed_still' | 'video_take'; canCancel: boolean } | null;
   coverAssetId: string | null;
@@ -621,32 +618,6 @@ const projectShot = (
           },
         ]
       : [];
-  const videoTakes = [shot.videoAssetId, ...shot.supersededVideoAssetIds.toReversed()].flatMap((assetId) => {
-    if (assetId === null) return [];
-    const asset = isOwnedAsset(project, shot, assetId);
-    const duration = asset === null ? null : validVideoSourceDuration(asset);
-    if (
-      asset === null ||
-      duration === null ||
-      asset.mediaKind !== 'video' ||
-      !isCanonicalStudioGeneratedTakeV2(asset, project.id, shot)
-    ) {
-      return [];
-    }
-    const firedScript = producingShotScriptForAsset(project, shot, asset.id);
-    return [
-      {
-        assetId: asset.id,
-        sourceDurationSeconds: duration,
-        posterAssetId: videoPosterId(project, shot, asset),
-        createdAt: asset.createdAt,
-        prompt: firedScript ?? shot.shootingScript,
-        promptChanged: firedScript !== null && firedScript !== shot.shootingScript,
-        firstFrameChanged: asset.id === shot.videoAssetId && firstFrameChanged,
-        current: asset.id === shot.videoAssetId,
-      },
-    ];
-  });
   const activeGenerationJobs = shot.jobIds.flatMap((jobId) => {
     const job = ownValue(project.jobs, jobId);
     return job?.id === jobId &&
@@ -702,7 +673,6 @@ const projectShot = (
     downstreamShotIds: [...context.downstreamShotIds],
     seedStills,
     firstFrames: context.segmentHead ? seedStills : inheritedFirstFrames,
-    videoTakes,
     generationProgressPercent:
       typeof progress === 'number' && Number.isFinite(progress) && progress >= 0 && progress <= 100 ? progress : null,
     activeGenerationJob,

@@ -70,10 +70,10 @@ vi.mock('react-i18next', () => ({
         return `Promote the current Board panel for Shot ${String(values?.shotId)}. This does not change the Shot's continuity boundary.`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.promotion.impactIntro') {
-        return `${String(values?.count)} current takes will remain playable but become stale:`;
+        return `${String(values?.count)} current pictures will remain playable but become stale:`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.promotion.impactItem') {
-        return `Shot ${String(values?.shotId)} current take`;
+        return `Shot ${String(values?.shotId)} current picture`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.promotion.headline') {
         return `Promote + ${String(values?.count)} rerenders · ${String(values?.cost)}`;
@@ -83,9 +83,10 @@ vi.mock('react-i18next', () => ({
       }
       const promotionCopy: Record<string, string> = {
         'conversation.creativeStudio.workspace.gate.promotion.title': 'Use panel as first frame',
-        'conversation.creativeStudio.workspace.gate.promotion.impactNone': 'No current takes depend on this frame.',
-        'conversation.creativeStudio.workspace.gate.promotion.optionsLabel': 'Choose how to handle current takes',
-        'conversation.creativeStudio.workspace.gate.promotion.promoteOnly': 'Promote only — keep playable, stale takes',
+        'conversation.creativeStudio.workspace.gate.promotion.impactNone': 'No current pictures depend on this frame.',
+        'conversation.creativeStudio.workspace.gate.promotion.optionsLabel': 'Choose how to handle current pictures',
+        'conversation.creativeStudio.workspace.gate.promotion.promoteOnly':
+          'Promote only — keep playable, stale pictures',
         'conversation.creativeStudio.workspace.gate.promotion.freePrice': '$0',
         'conversation.creativeStudio.workspace.gate.promotion.promoteAndRerender':
           'Promote and review exact rerender work',
@@ -93,11 +94,11 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction': 'Promote for $0',
         'conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction': 'Review rerender price',
         'conversation.creativeStudio.workspace.gate.promotion.requiredWork':
-          'The listed rerenders are exactly the current takes this promotion makes stale. Missing coverage is not included.',
+          'The listed rerenders are exactly the current pictures this promotion makes stale. Missing coverage is not included.',
         'conversation.creativeStudio.workspace.gate.promotion.promoted':
-          'Panel promoted. Existing takes remain playable and are marked stale.',
+          'Panel promoted. Existing pictures remain playable and are marked stale.',
         'conversation.creativeStudio.workspace.gate.promotion.confirmed':
-          'Panel promoted and rerendering started for the confirmed takes.',
+          'Panel promoted and rerendering started for the confirmed pictures.',
         'conversation.creativeStudio.workspace.gate.promotion.close': 'Close',
       };
       if (promotionCopy[key] !== undefined) return promotionCopy[key]!;
@@ -2120,7 +2121,7 @@ describe('Board first-frame promotion gate plan', () => {
     return projectWorkspace(project, status, readyChainStatus(project));
   };
 
-  it('derives only exact current takes in the selected segment and keeps the continuity boundary unchanged', () => {
+  it('derives only exact current pictures in the selected segment and keeps the continuity boundary unchanged', () => {
     const project = makeProject();
     project.boardStyle = 'grey_tone';
     const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
@@ -2148,7 +2149,7 @@ describe('Board first-frame promotion gate plan', () => {
     expect(spendGateRouteIssue(routeCatalog('ready', 'unavailable'), plan!.draft)).toBe('video');
   });
 
-  it('keeps free promotion available with no current takes while omitting paid rerender impact', () => {
+  it('keeps free promotion available with no current pictures while omitting paid rerender impact', () => {
     const project = makeProject();
     project.boardStyle = 'grey_tone';
     const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
@@ -2436,7 +2437,7 @@ describe('SpendGateModal', () => {
       })
     );
     expect(
-      await within(modal).findByText('Panel promoted. Existing takes remain playable and are marked stale.')
+      await within(modal).findByText('Panel promoted. Existing pictures remain playable and are marked stale.')
     ).toBeVisible();
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
@@ -2456,7 +2457,7 @@ describe('SpendGateModal', () => {
     expect(await within(modal).findByRole('heading', { name: 'Promote + 2 rerenders · $8.00' })).toBeVisible();
     expect(
       within(modal).getByText(
-        'The listed rerenders are exactly the current takes this promotion makes stale. Missing coverage is not included.'
+        'The listed rerenders are exactly the current pictures this promotion makes stale. Missing coverage is not included.'
       )
     ).toBeVisible();
     expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
@@ -2471,12 +2472,12 @@ describe('SpendGateModal', () => {
     );
   });
 
-  it('offers free-only promotion when there is no current take to rerender', async () => {
+  it('offers free-only promotion when there is no current picture to rerender', async () => {
     render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: [] }} />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = await screen.findByTestId('studio-spend-gate');
 
-    expect(within(modal).getByText('No current takes depend on this frame.')).toBeVisible();
+    expect(within(modal).getByText('No current pictures depend on this frame.')).toBeVisible();
     expect(within(modal).getAllByRole('radio')).toHaveLength(1);
     expect(within(modal).queryByRole('button', { name: 'Review rerender price' })).toBeNull();
     expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();

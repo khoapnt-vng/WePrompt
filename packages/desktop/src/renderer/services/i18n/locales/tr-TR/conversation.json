@@ -1240,22 +1240,19 @@
           "sendLastFrame": "Son karesini Çekim {{shot}} için gönder",
           "cancelRun": "Çalışmayı iptal et",
           "generateShot": "Çekim {{shot}} üret",
+          "generateAgain": "Yeniden oluştur",
           "promptLabel": "Çekim istemi",
           "regenerate": "Yeniden üret",
           "menu": {
             "download": "İndir",
             "copyPrompt": "İstemi kopyala",
-            "remove": "Kaldır",
-            "previousTakes": "Önceki çekimler",
-            "removeTake": "Çekimi kaldır"
+            "remove": "Kaldır"
           },
           "viewer": {
             "currentFirstFrame": "Geçerli ilk kare",
             "counter": "{{total}} içinde {{current}}",
-            "take": "Çekim {{index}}",
             "previous": "Önceki",
-            "next": "Sonraki",
-            "useTake": "Bu çekimi kullan"
+            "next": "Sonraki"
           }
         },
         "picture": {
@@ -1286,7 +1283,7 @@
           "promptPlaceholder": "Describe this shot, or reference a frame with @…",
           "action": {
             "generate": "Generate Shot {{shot}}",
-            "regenerate": "Regenerate",
+            "regenerate": "Yeniden oluştur",
             "cancelRun": "Cancel run",
             "removeFromChain": "Remove from chain",
             "tryAgain": "Try again",
@@ -1430,23 +1427,23 @@
         "promotion": {
           "title": "Paneli ilk kare olarak kullan",
           "summary": "Shot {{shotId}} için geçerli pano panelini ilk kareye yükseltin. Bu işlem Shot'ın devamlılık sınırını değiştirmez.",
-          "impactNone": "Hiçbir geçerli çekim bu kareye bağlı değil.",
-          "impactIntro": "{{count}} geçerli çekim oynatılabilir kalacak ancak eski duruma gelecek:",
-          "impactItem": "Shot {{shotId}} geçerli çekimi",
-          "optionsLabel": "Geçerli çekimlerin nasıl ele alınacağını seçin",
-          "promoteOnly": "Yalnızca yükselt — oynatılabilir eski çekimleri koru",
+          "impactNone": "Hiçbir geçerli görüntü bu kareye bağlı değil.",
+          "impactIntro": "{{count}} geçerli görüntü oynatılabilir kalacak ancak eski duruma gelecek:",
+          "impactItem": "Shot {{shotId}} geçerli görüntüsü",
+          "optionsLabel": "Geçerli görüntülerin nasıl ele alınacağını seçin",
+          "promoteOnly": "Yalnızca yükselt — oynatılabilir eski görüntüleri koru",
           "freePrice": "$0",
           "promoteAndRerender": "Yükselt ve tam yeniden oluşturma işini incele",
           "priceAfterReview": "Fiyat sonraki adımda gösterilir",
           "promoteOnlyAction": "$0 karşılığında yükselt",
           "reviewPaidAction": "Yeniden oluşturma fiyatını incele",
-          "paidUnavailable": "Bu segmentte tek bir ücretli onay için çok fazla geçerli çekim var. Yalnızca yükseltme seçeneği kullanılabilir.",
+          "paidUnavailable": "Bu segmentte tek bir ücretli onay için çok fazla geçerli görüntü var. Yalnızca yükseltme seçeneği kullanılabilir.",
           "headline": "Yükselt + {{count}} yeniden oluşturma · {{cost}}",
-          "requiredWork": "Listelenen yeniden oluşturmalar, bu yükseltmenin eskiteceği geçerli çekimlerin tam karşılığıdır. Eksik kapsam dahil değildir.",
+          "requiredWork": "Listelenen yeniden oluşturmalar, bu yükseltmenin eskiteceği geçerli görüntülerin tam karşılığıdır. Eksik kapsam dahil değildir.",
           "confirm": "Yükseltme + {{count}} yeniden oluşturmayı onayla · {{cost}}",
-          "promoted": "Panel yükseltildi. Mevcut çekimler oynatılabilir kalır ve eski olarak işaretlenir.",
+          "promoted": "Panel yükseltildi. Mevcut görüntüler oynatılabilir kalır ve eski olarak işaretlenir.",
           "promoting": "Panel yükseltiliyor…",
-          "confirmed": "Panel yükseltildi ve onaylanan çekimler için yeniden oluşturma başlatıldı.",
+          "confirmed": "Panel yükseltildi ve onaylanan görüntüler için yeniden oluşturma başlatıldı.",
           "close": "Kapat"
         },
         "headline_one": "{{count}} üretim · {{cost}}",

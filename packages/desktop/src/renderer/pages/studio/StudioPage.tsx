@@ -1708,22 +1708,6 @@ const StudioProjectPage: React.FC<{
             operations: [{ kind: 'dismiss_seed_still', shotId, assetId }],
           })
         ),
-      selectVideoTake: async (shotId, assetId) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            operations: [{ kind: 'select_video_take', shotId, assetId }],
-          })
-        ),
-      removeVideoTake: async (shotId, assetId) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            operations: [{ kind: 'remove_video_take', shotId, assetId }],
-          })
-        ),
       trimShot: async (shotId, trimInSeconds, trimOutSeconds) =>
         runWorkspaceCommit((current) =>
           ipcBridge.creativeStudio.applyAuthoringBatch.invoke({

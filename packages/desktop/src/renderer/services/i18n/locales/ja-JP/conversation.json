@@ -1238,22 +1238,19 @@
           "sendLastFrame": "最終フレームをショット {{shot}} に送る",
           "cancelRun": "実行をキャンセル",
           "generateShot": "ショット {{shot}} を生成",
+          "generateAgain": "もう一度生成",
           "promptLabel": "ショットプロンプト",
           "regenerate": "再生成",
           "menu": {
             "download": "ダウンロード",
             "copyPrompt": "プロンプトをコピー",
-            "remove": "削除",
-            "previousTakes": "以前のテイク",
-            "removeTake": "テイクを削除"
+            "remove": "削除"
           },
           "viewer": {
             "currentFirstFrame": "現在のファーストフレーム",
             "counter": "{{total}}件中{{current}}件",
-            "take": "テイク {{index}}",
             "previous": "前へ",
-            "next": "次へ",
-            "useTake": "このテイクを使用"
+            "next": "次へ"
           }
         },
         "picture": {
@@ -1284,7 +1281,7 @@
           "promptPlaceholder": "Describe this shot, or reference a frame with @…",
           "action": {
             "generate": "Generate Shot {{shot}}",
-            "regenerate": "Regenerate",
+            "regenerate": "もう一度生成",
             "cancelRun": "Cancel run",
             "removeFromChain": "Remove from chain",
             "tryAgain": "Try again",
@@ -1428,23 +1425,23 @@
         "promotion": {
           "title": "パネルを最初のフレームに使用",
           "summary": "Shot {{shotId}}の現在のボードパネルを最初のフレームに昇格します。Shotの連続性境界は変更されません。",
-          "impactNone": "このフレームに依存する現在のテイクはありません。",
-          "impactIntro": "現在のテイク {{count}}件は再生可能なままですが、古い状態になります：",
-          "impactItem": "Shot {{shotId}}の現在のテイク",
-          "optionsLabel": "現在のテイクの処理方法を選択",
-          "promoteOnly": "昇格のみ — 再生可能な古いテイクを保持",
+          "impactNone": "このフレームに依存する現在の映像はありません。",
+          "impactIntro": "現在の映像 {{count}}件は再生可能なままですが、古い状態になります：",
+          "impactItem": "Shot {{shotId}}の現在の映像",
+          "optionsLabel": "現在の映像の処理方法を選択",
+          "promoteOnly": "昇格のみ — 再生可能な古い映像を保持",
           "freePrice": "$0",
           "promoteAndRerender": "昇格して正確な再生成作業を確認",
           "priceAfterReview": "次に価格を表示",
           "promoteOnlyAction": "$0で昇格",
           "reviewPaidAction": "再生成の価格を確認",
-          "paidUnavailable": "このセグメントには現在のテイクが多すぎるため、1回の有料確認では処理できません。昇格のみは引き続き利用できます。",
+          "paidUnavailable": "このセグメントには現在の映像が多すぎるため、1回の有料確認では処理できません。昇格のみは引き続き利用できます。",
           "headline": "昇格 + {{count}}件の再生成 · {{cost}}",
-          "requiredWork": "表示された再生成は、この昇格によって古くなる現在のテイクと完全に一致します。不足しているカバレッジは含まれません。",
+          "requiredWork": "表示された再生成は、この昇格によって古くなる現在の映像と完全に一致します。不足しているカバレッジは含まれません。",
           "confirm": "昇格 + {{count}}件の再生成を確認 · {{cost}}",
-          "promoted": "パネルを昇格しました。既存のテイクは再生可能なまま、古い状態としてマークされます。",
+          "promoted": "パネルを昇格しました。既存の映像は再生可能なまま、古い状態としてマークされます。",
           "promoting": "パネルを昇格中…",
-          "confirmed": "パネルを昇格し、確認したテイクの再生成を開始しました。",
+          "confirmed": "パネルを昇格し、確認した映像の再生成を開始しました。",
           "close": "閉じる"
         },
         "headline_one": "生成 {{count}} 件 · {{cost}}",

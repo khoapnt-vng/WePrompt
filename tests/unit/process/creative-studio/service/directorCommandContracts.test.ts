@@ -388,8 +388,6 @@ describe('Studio Director V2 command contracts', () => {
       set_seed_still: 'operation_not_permitted',
       dismiss_seed_still: 'operation_not_permitted',
       promote_board_panel: 'operation_not_permitted',
-      select_video_take: 'operation_not_permitted',
-      remove_video_take: 'operation_not_permitted',
       trim_shot: 'operation_not_permitted',
       reorder_bin: 'direct',
       set_routes: 'operation_not_permitted',
@@ -401,12 +399,23 @@ describe('Studio Director V2 command contracts', () => {
     >;
 
     expect(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2).toEqual(expected);
-    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(35);
+    expect(Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toHaveLength(33);
     expect(Object.isFrozen(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)).toBe(true);
     for (const [kind, disposition] of Object.entries(expected)) {
       expect(classifyStudioDirectorOperationV2(kind), kind).toBe(disposition);
     }
-    for (const unknown of ['set_match_to', 'future_operation', 'constructor', 'toString', '__proto__', null, {}, 1]) {
+    for (const unknown of [
+      'select_video_take',
+      'remove_video_take',
+      'set_match_to',
+      'future_operation',
+      'constructor',
+      'toString',
+      '__proto__',
+      null,
+      {},
+      1,
+    ]) {
       expect(classifyStudioDirectorOperationV2(unknown)).toBeNull();
     }
   });

@@ -1151,6 +1151,9 @@ describe('validateStudioProjectV2 media, trim, and frame lineage', () => {
     project.shots.shot_1!.supersededVideoAssetIds = ['video_1'];
     project.shots.shot_1!.videoAssetId = 'video_1';
     expect(validateStudioProjectV2(project)).toBe(false);
+    project.shots.shot_1!.videoAssetId = null;
+    project.shots.shot_1!.supersededVideoAssetIds = ['video_1', 'video_2'];
+    expect(validateStudioProjectV2(project)).toBe(false);
   });
 
   it('validates trims against current picture duration, not planning duration', () => {

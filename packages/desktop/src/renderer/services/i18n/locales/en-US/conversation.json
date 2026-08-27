@@ -1860,22 +1860,19 @@
           "sendLastFrame": "Send its last frame to Shot {{shot}}",
           "cancelRun": "Cancel run",
           "generateShot": "Generate Shot {{shot}}",
+          "generateAgain": "Generate again",
           "promptLabel": "Shot prompt",
           "regenerate": "Regenerate",
           "menu": {
             "download": "Download",
             "copyPrompt": "Copy prompt",
-            "remove": "Remove",
-            "previousTakes": "Previous takes",
-            "removeTake": "Remove take"
+            "remove": "Remove"
           },
           "viewer": {
             "currentFirstFrame": "Current first frame",
             "counter": "{{current}} of {{total}}",
-            "take": "Take {{index}}",
             "previous": "Previous",
-            "next": "Next",
-            "useTake": "Use this take"
+            "next": "Next"
           }
         },
         "composer": {
@@ -1898,7 +1895,7 @@
           "promptPlaceholder": "Describe this shot, or reference a frame with @…",
           "action": {
             "generate": "Generate Shot {{shot}}",
-            "regenerate": "Regenerate",
+            "regenerate": "Generate again",
             "cancelRun": "Cancel run",
             "removeFromChain": "Remove from chain",
             "tryAgain": "Try again",
@@ -2279,23 +2276,23 @@
         "promotion": {
           "title": "Use panel as first frame",
           "summary": "Promote the current Board panel for Shot {{shotId}}. This does not change the Shot’s continuity boundary.",
-          "impactNone": "No current takes depend on this frame.",
-          "impactIntro": "{{count}} current take(s) will remain playable but become stale:",
-          "impactItem": "Shot {{shotId}} current take",
-          "optionsLabel": "Choose how to handle current takes",
-          "promoteOnly": "Promote only — keep playable, stale takes",
+          "impactNone": "No current pictures depend on this frame.",
+          "impactIntro": "{{count}} current picture(s) will remain playable but become stale:",
+          "impactItem": "Shot {{shotId}} current picture",
+          "optionsLabel": "Choose how to handle current pictures",
+          "promoteOnly": "Promote only — keep playable, stale pictures",
           "freePrice": "$0",
           "promoteAndRerender": "Promote and review exact rerender work",
           "priceAfterReview": "Price shown next",
           "promoteOnlyAction": "Promote for $0",
           "reviewPaidAction": "Review rerender price",
-          "paidUnavailable": "This segment has too many current takes for one paid confirmation. Promote-only remains available.",
+          "paidUnavailable": "This segment has too many current pictures for one paid confirmation. Promote-only remains available.",
           "headline": "Promote + {{count}} rerender(s) · {{cost}}",
-          "requiredWork": "The listed rerenders are exactly the current takes this promotion makes stale. Missing coverage is not included.",
+          "requiredWork": "The listed rerenders are exactly the current pictures this promotion makes stale. Missing coverage is not included.",
           "confirm": "Confirm promotion + {{count}} rerender(s) · {{cost}}",
-          "promoted": "Panel promoted. Existing takes remain playable and are marked stale.",
+          "promoted": "Panel promoted. Existing pictures remain playable and are marked stale.",
           "promoting": "Promoting panel…",
-          "confirmed": "Panel promoted and rerendering started for the confirmed takes.",
+          "confirmed": "Panel promoted and rerendering started for the confirmed pictures.",
           "close": "Close"
         },
         "rateCardSource": "This estimate comes from the app's configured rate card, not a provider response.",

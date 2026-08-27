@@ -4369,7 +4369,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           throw new CreativeStudioMediaError('invalid_media');
         }
         asset.projectReferenceId = job.target.kind === 'reference' ? job.target.referenceId : null;
-        asset.generationReferenceAssetIds = job.requestSnapshot.referenceInputs.map((input) => input.assetId);
+        asset.generationReferenceAssetIds = job.requestSnapshot.referenceInputs.map(
+          (referenceInput) => referenceInput.assetId
+        );
         asset.producerJobId = job.id;
         asset.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
         defineRecordValue(current.assets, asset.id, asset);
@@ -4377,7 +4379,9 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
           if (shot === undefined) throw new CreativeStudioMediaError('job_inactive');
           shot.assetIds.push(asset.id);
           if (job.purpose === 'video_take') {
-            shot.supersededVideoAssetIds = shot.jobIds.flatMap((jobId) => {
+            const previousVideoAssetId = shot.videoAssetId;
+            const successfulVideoAssetIds = shot.jobIds.flatMap((jobId) => {
+              if (jobId === job.id) return [asset.id];
               const completed = ownRecordValue(current.jobs, jobId);
               return completed?.status === 'succeeded' &&
                 completed.purpose === 'video_take' &&
@@ -4385,9 +4389,15 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
                 ? [completed.outputAssetIdsByRole.primary]
                 : [];
             });
-            shot.videoAssetId = asset.id;
+            shot.supersededVideoAssetIds = successfulVideoAssetIds.slice(0, -1);
+            shot.videoAssetId = successfulVideoAssetIds.at(-1) ?? null;
+            if (shot.videoAssetId !== previousVideoAssetId) {
+              shot.trimInSeconds = null;
+              shot.trimOutSeconds = null;
+            }
             if (asset.durationSeconds === undefined) throw new CreativeStudioMediaError('invalid_media');
-            const endpointSeconds = asset.durationSeconds - (shot.trimOutSeconds ?? 0);
+            const endpointSeconds =
+              asset.durationSeconds - (shot.videoAssetId === asset.id ? (shot.trimOutSeconds ?? 0) : 0);
             const extractionId = createStudioFrameExtractionId({
               shotId: shot.id,
               videoAssetId: asset.id,

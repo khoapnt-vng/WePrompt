@@ -7328,8 +7328,6 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
   { kind: 'set_hard_cut', shotId: 'clip_1', hardCut: true },
   { kind: 'set_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
   { kind: 'dismiss_seed_still', shotId: 'clip_1', assetId: 'asset_seed' },
-  { kind: 'select_video_take', shotId: 'clip_1', assetId: 'asset_take' },
-  { kind: 'remove_video_take', shotId: 'clip_1', assetId: 'asset_take' },
   {
     kind: 'set_shot_reference_binding',
     shotId: 'clip_1',
@@ -7894,11 +7892,13 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
-      expect(operationKinds).toHaveLength(35);
+      expect(operationKinds).toHaveLength(33);
       expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
         operationKinds
       );
+      expect(operationKinds).not.toContain('select_video_take');
+      expect(operationKinds).not.toContain('remove_video_take');
       const addBeat = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_beat');
       const addShot = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_shot');
       const removeReferenceImage = operationVariants?.find(

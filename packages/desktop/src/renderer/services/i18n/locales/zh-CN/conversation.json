@@ -1238,22 +1238,19 @@
           "sendLastFrame": "将最后一帧发送到镜头 {{shot}}",
           "cancelRun": "取消运行",
           "generateShot": "生成镜头 {{shot}}",
+          "generateAgain": "再次生成",
           "promptLabel": "镜头提示词",
           "regenerate": "重新生成",
           "menu": {
             "download": "下载",
             "copyPrompt": "复制提示词",
-            "remove": "移除",
-            "previousTakes": "历史片段",
-            "removeTake": "移除片段"
+            "remove": "移除"
           },
           "viewer": {
             "currentFirstFrame": "当前首帧",
             "counter": "第 {{current}} 个，共 {{total}} 个",
-            "take": "片段 {{index}}",
             "previous": "上一个",
-            "next": "下一个",
-            "useTake": "使用此片段"
+            "next": "下一个"
           }
         },
         "picture": {
@@ -1284,7 +1281,7 @@
           "promptPlaceholder": "Describe this shot, or reference a frame with @…",
           "action": {
             "generate": "Generate Shot {{shot}}",
-            "regenerate": "Regenerate",
+            "regenerate": "再次生成",
             "cancelRun": "Cancel run",
             "removeFromChain": "Remove from chain",
             "tryAgain": "Try again",
@@ -1428,23 +1425,23 @@
         "promotion": {
           "title": "将分镜用作首帧",
           "summary": "将 Shot {{shotId}} 的当前导演分镜提升为首帧。此操作不会更改该 Shot 的连续性边界。",
-          "impactNone": "没有当前成片依赖此帧。",
-          "impactIntro": "以下 {{count}} 个当前成片仍可播放，但会变为已过期：",
-          "impactItem": "Shot {{shotId}} 的当前成片",
-          "optionsLabel": "选择如何处理当前成片",
-          "promoteOnly": "仅提升 — 保留可播放但已过期的成片",
+          "impactNone": "没有当前画面依赖此帧。",
+          "impactIntro": "以下 {{count}} 个当前画面仍可播放，但会变为已过期：",
+          "impactItem": "Shot {{shotId}} 的当前画面",
+          "optionsLabel": "选择如何处理当前画面",
+          "promoteOnly": "仅提升 — 保留可播放但已过期的画面",
           "freePrice": "$0",
           "promoteAndRerender": "提升并查看确切的重新渲染任务",
           "priceAfterReview": "下一步显示价格",
           "promoteOnlyAction": "免费提升",
           "reviewPaidAction": "查看重新渲染价格",
-          "paidUnavailable": "此片段的当前成片过多，无法一次付费确认。仍可选择仅提升。",
+          "paidUnavailable": "此片段的当前画面过多，无法一次付费确认。仍可选择仅提升。",
           "headline": "提升 + 重新渲染 {{count}} 个 · {{cost}}",
-          "requiredWork": "所列重新渲染项正是此次提升会使其过期的当前成片。不包括缺失的覆盖内容。",
+          "requiredWork": "所列重新渲染项正是此次提升会使其过期的当前画面。不包括缺失的覆盖内容。",
           "confirm": "确认提升 + 重新渲染 {{count}} 个 · {{cost}}",
-          "promoted": "分镜已提升。现有成片仍可播放，并已标记为过期。",
+          "promoted": "分镜已提升。现有画面仍可播放，并已标记为过期。",
           "promoting": "正在提升分镜…",
-          "confirmed": "分镜已提升，并已开始重新渲染确认的成片。",
+          "confirmed": "分镜已提升，并已开始重新渲染确认的画面。",
           "close": "关闭"
         },
         "headline_one": "{{count}} 次生成 · {{cost}}",

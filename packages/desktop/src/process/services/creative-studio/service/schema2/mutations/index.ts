@@ -125,8 +125,6 @@ const OPERATION_KEYS: Readonly<Record<StudioMutationOperationV2['kind'], Readonl
   set_hard_cut: new Set(['kind', 'shotId', 'hardCut']),
   set_seed_still: new Set(['kind', 'shotId', 'assetId']),
   dismiss_seed_still: new Set(['kind', 'shotId', 'assetId']),
-  select_video_take: new Set(['kind', 'shotId', 'assetId']),
-  remove_video_take: new Set(['kind', 'shotId', 'assetId']),
   promote_board_panel: new Set(['kind', 'shotId', 'boardAssetId']),
   trim_shot: new Set(['kind', 'shotId', 'trimInSeconds', 'trimOutSeconds']),
   reorder_bin: new Set(['kind', 'bin']),
@@ -561,8 +559,6 @@ const assertOperationShape: (value: unknown) => asserts value is StudioMutationO
       if (!isSafeId(operation.shotId) || !isSafeAnchor(operation.assetId)) fail('invalid_operation');
       return;
     case 'dismiss_seed_still':
-    case 'select_video_take':
-    case 'remove_video_take':
       if (!isSafeId(operation.shotId) || !isSafeId(operation.assetId)) fail('invalid_operation');
       return;
     case 'promote_board_panel':
@@ -732,18 +728,6 @@ const assertCanonicalVideoTake = (
   if (result[1].mediaKind !== 'video' || result[1].managedAsset.collection !== 'assets') fail('invalid_operation');
   return result;
 };
-
-const successfulVideoAssetIds = (project: StudioProjectV2, shot: StudioShot): string[] =>
-  shot.jobIds.flatMap((jobId) => {
-    const job = ownValue(project.jobs, jobId);
-    return job?.status === 'succeeded' &&
-      job.purpose === 'video_take' &&
-      job.target.kind === 'shot' &&
-      job.target.shotId === shot.id &&
-      job.outputAssetIdsByRole.primary !== null
-      ? [job.outputAssetIdsByRole.primary]
-      : [];
-  });
 
 const assertCanonicalSeed = (
   project: StudioProjectV2,
@@ -1959,53 +1943,6 @@ export const applyStudioMutationBatchV2 = (
           ...shot,
           seedStillId: shot.seedStillId === asset.id ? null : shot.seedStillId,
           dismissedSeedStillIds: [...shot.dismissedSeedStillIds, asset.id],
-        });
-        break;
-      }
-
-      case 'select_video_take': {
-        const [shot] = assertCanonicalVideoTake(draft, operation.shotId, operation.assetId);
-        const successful = successfulVideoAssetIds(draft, shot);
-        if (
-          findActiveShotOwner(draft, shot.id) === undefined ||
-          shot.videoAssetId === operation.assetId ||
-          !successful.includes(operation.assetId)
-        ) {
-          fail('invalid_operation');
-        }
-        if (
-          hasBoundNonterminalJob(draft, (job) => jobTargetsShot(job, shot.id) || jobReferencesShot(draft, job, shot.id))
-        ) {
-          fail('dependency_blocked');
-        }
-        touchShot(tracker, draft, shot.id);
-        defineOwn(draft.shots, shot.id, {
-          ...shot,
-          videoAssetId: operation.assetId,
-          supersededVideoAssetIds: successful.filter((assetId) => assetId !== operation.assetId),
-          trimInSeconds: null,
-          trimOutSeconds: null,
-        });
-        break;
-      }
-
-      case 'remove_video_take': {
-        const [shot] = assertCanonicalVideoTake(draft, operation.shotId, operation.assetId);
-        if (findActiveShotOwner(draft, shot.id) === undefined || shot.videoAssetId !== operation.assetId) {
-          fail('invalid_operation');
-        }
-        if (
-          hasBoundNonterminalJob(draft, (job) => jobTargetsShot(job, shot.id) || jobReferencesShot(draft, job, shot.id))
-        ) {
-          fail('dependency_blocked');
-        }
-        touchShot(tracker, draft, shot.id);
-        defineOwn(draft.shots, shot.id, {
-          ...shot,
-          videoAssetId: null,
-          supersededVideoAssetIds: successfulVideoAssetIds(draft, shot),
-          trimInSeconds: null,
-          trimOutSeconds: null,
         });
         break;
       }

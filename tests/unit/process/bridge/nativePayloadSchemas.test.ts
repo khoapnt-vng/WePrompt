@@ -1440,6 +1440,8 @@ describe('native bridge payload schemas', () => {
     { kind: 'park_take', shotId: 'shot_1', assetId: 'asset_1' },
     { kind: 'add_alternate_take', shotId: 'shot_1', assetId: 'asset_1' },
     { kind: 'restore_take', shotId: 'shot_1', assetId: 'asset_1' },
+    { kind: 'select_video_take', shotId: 'shot_1', assetId: 'asset_1' },
+    { kind: 'remove_video_take', shotId: 'shot_1', assetId: 'asset_1' },
     { kind: 'reorder_bin', bin: [] },
     { kind: 'select_take', shotId: 'shot_1', assetId: 'asset_1' },
     { kind: 'set_match_to', shotId: null },

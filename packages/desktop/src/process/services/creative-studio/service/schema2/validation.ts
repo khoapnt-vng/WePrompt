@@ -2109,9 +2109,10 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
         ? [job.outputAssetIdsByRole.primary]
         : [];
     });
-    const expectedSupersededVideoAssetIds = successfulVideoAssetIds.filter((assetId) => assetId !== shot.videoAssetId);
+    const expectedVideoAssetId = successfulVideoAssetIds.at(-1) ?? null;
+    const expectedSupersededVideoAssetIds = successfulVideoAssetIds.slice(0, -1);
     if (
-      (shot.videoAssetId !== null && !successfulVideoAssetIds.includes(shot.videoAssetId)) ||
+      shot.videoAssetId !== expectedVideoAssetId ||
       shot.supersededVideoAssetIds.length !== expectedSupersededVideoAssetIds.length ||
       shot.supersededVideoAssetIds.some((assetId, index) => assetId !== expectedSupersededVideoAssetIds[index])
     ) {

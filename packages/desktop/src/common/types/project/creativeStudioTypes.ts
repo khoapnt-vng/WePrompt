@@ -947,8 +947,6 @@ export type StudioRendererAuthoringOperationV2 = Extract<
       | 'set_hard_cut'
       | 'set_seed_still'
       | 'dismiss_seed_still'
-      | 'select_video_take'
-      | 'remove_video_take'
       | 'set_reference_plan'
       | 'amend_reference_plan'
       | 'set_reference_label'
@@ -1658,8 +1656,6 @@ export type StudioMutationOperationV2 =
   | { kind: 'set_hard_cut'; shotId: string; hardCut: boolean }
   | { kind: 'set_seed_still'; shotId: string; assetId: string | null }
   | { kind: 'dismiss_seed_still'; shotId: string; assetId: string }
-  | { kind: 'select_video_take'; shotId: string; assetId: string }
-  | { kind: 'remove_video_take'; shotId: string; assetId: string }
   | { kind: 'promote_board_panel'; shotId: string; boardAssetId: string }
   | { kind: 'trim_shot'; shotId: string; trimInSeconds: number | null; trimOutSeconds: number | null }
   | { kind: 'reorder_bin'; bin: StudioBinItem[] }
@@ -1701,8 +1697,6 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   set_hard_cut: 'operation_not_permitted',
   set_seed_still: 'operation_not_permitted',
   dismiss_seed_still: 'operation_not_permitted',
-  select_video_take: 'operation_not_permitted',
-  remove_video_take: 'operation_not_permitted',
   promote_board_panel: 'operation_not_permitted',
   trim_shot: 'operation_not_permitted',
   reorder_bin: 'direct',

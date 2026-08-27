@@ -1238,22 +1238,19 @@
           "sendLastFrame": "마지막 프레임을 샷 {{shot}}에 보내기",
           "cancelRun": "실행 취소",
           "generateShot": "샷 {{shot}} 생성",
+          "generateAgain": "다시 생성",
           "promptLabel": "샷 프롬프트",
           "regenerate": "다시 생성",
           "menu": {
             "download": "다운로드",
             "copyPrompt": "프롬프트 복사",
-            "remove": "제거",
-            "previousTakes": "이전 테이크",
-            "removeTake": "테이크 제거"
+            "remove": "제거"
           },
           "viewer": {
             "currentFirstFrame": "현재 첫 프레임",
             "counter": "{{total}}개 중 {{current}}",
-            "take": "테이크 {{index}}",
             "previous": "이전",
-            "next": "다음",
-            "useTake": "이 테이크 사용"
+            "next": "다음"
           }
         },
         "picture": {
@@ -1284,7 +1281,7 @@
           "promptPlaceholder": "Describe this shot, or reference a frame with @…",
           "action": {
             "generate": "Generate Shot {{shot}}",
-            "regenerate": "Regenerate",
+            "regenerate": "다시 생성",
             "cancelRun": "Cancel run",
             "removeFromChain": "Remove from chain",
             "tryAgain": "Try again",
@@ -1428,23 +1425,23 @@
         "promotion": {
           "title": "패널을 첫 프레임으로 사용",
           "summary": "Shot {{shotId}}의 현재 보드 패널을 첫 프레임으로 승격합니다. Shot의 연속성 경계는 변경되지 않습니다.",
-          "impactNone": "이 프레임에 의존하는 현재 테이크가 없습니다.",
-          "impactIntro": "현재 테이크 {{count}}개는 계속 재생할 수 있지만 오래된 상태가 됩니다:",
-          "impactItem": "Shot {{shotId}}의 현재 테이크",
-          "optionsLabel": "현재 테이크 처리 방법 선택",
-          "promoteOnly": "승격만 — 재생 가능한 오래된 테이크 유지",
+          "impactNone": "이 프레임에 의존하는 현재 영상이 없습니다.",
+          "impactIntro": "현재 영상 {{count}}개는 계속 재생할 수 있지만 오래된 상태가 됩니다:",
+          "impactItem": "Shot {{shotId}}의 현재 영상",
+          "optionsLabel": "현재 영상 처리 방법 선택",
+          "promoteOnly": "승격만 — 재생 가능한 오래된 영상 유지",
           "freePrice": "$0",
           "promoteAndRerender": "승격하고 정확한 재렌더링 작업 검토",
           "priceAfterReview": "다음 단계에서 가격 표시",
           "promoteOnlyAction": "$0에 승격",
           "reviewPaidAction": "재렌더링 가격 검토",
-          "paidUnavailable": "이 구간에는 현재 테이크가 너무 많아 한 번의 유료 확인으로 처리할 수 없습니다. 승격만 하는 옵션은 계속 사용할 수 있습니다.",
+          "paidUnavailable": "이 구간에는 현재 영상이 너무 많아 한 번의 유료 확인으로 처리할 수 없습니다. 승격만 하는 옵션은 계속 사용할 수 있습니다.",
           "headline": "승격 + 재렌더링 {{count}}개 · {{cost}}",
-          "requiredWork": "표시된 재렌더링은 이 승격으로 오래된 상태가 되는 현재 테이크와 정확히 일치합니다. 누락된 커버리지는 포함되지 않습니다.",
+          "requiredWork": "표시된 재렌더링은 이 승격으로 오래된 상태가 되는 현재 영상과 정확히 일치합니다. 누락된 커버리지는 포함되지 않습니다.",
           "confirm": "승격 + 재렌더링 {{count}}개 확인 · {{cost}}",
-          "promoted": "패널을 승격했습니다. 기존 테이크는 계속 재생할 수 있으며 오래된 상태로 표시됩니다.",
+          "promoted": "패널을 승격했습니다. 기존 영상은 계속 재생할 수 있으며 오래된 상태로 표시됩니다.",
           "promoting": "패널 승격 중…",
-          "confirmed": "패널을 승격하고 확인한 테이크의 재렌더링을 시작했습니다.",
+          "confirmed": "패널을 승격하고 확인한 영상의 재렌더링을 시작했습니다.",
           "close": "닫기"
         },
         "headline_one": "생성 {{count}}개 · {{cost}}",
