@@ -967,6 +967,42 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **No live test was needed to settle it**, which is the second lesson: the original entry proposed an expensive multi-Beat reproduction when the specification and eleven lines of the gate answered the question directly. Read the contract before building the experiment.
   - **Filing it as `UNVERIFIED — NOT REPRODUCED` was correct** and is what kept it from becoming a fabricated defect in the record. Keep doing that for code-reading hypotheses.
 
+- [ ] **[BUG-150][P1][Creative Studio] The film-export commit decremented the export-catalog schema version from 5 to 1, so every catalog written before it is unreadable and its project can never export again** — found 2026-08-27 restoring the six archived pre-migration projects to verify BUG-136 live
+  - **Root cause, exact.** `13ac6ee99` ("feat(studio): export one local film file") changed one line in `creativeStudioTypes.ts:177`:
+
+        -export const STUDIO_EXPORT_SCHEMA_VERSION_V2 = 5 as const;
+        +export const STUDIO_EXPORT_SCHEMA_VERSION_V2 = 1 as const;
+
+    The version was **decremented**, presumably to restart the export catalog on its own counter rather than inherit the project's schema 5. `catalog.ts:715` and `:756` validate with `value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V2`, so every catalog on disk — all written with `5` — is now rejected. **No migration exists**, and because the number went _down_, no future bump can distinguish "old 5" from "future 5".
+
+  - **Measured effect, precisely.** Three of the six archived projects carry an `exports-v2.json`. With them present:
+
+    | project                                  | `getProject` | `listExports`               | film capability |
+    | ---------------------------------------- | ------------ | --------------------------- | --------------- |
+    | healthy, catalog written by current code | OK           | OK                          | OK              |
+    | pre-migration **with** an old catalog    | OK           | **refused `storage_error`** | OK              |
+    | pre-migration **without** a catalog      | OK           | OK                          | OK              |
+
+    So the project still opens and is otherwise usable; what dies is **exports**. And because `createExport` requires an `expectedCatalogRevision` that only `listExports` can supply, the user cannot even form a valid export request — **the project can never export again**, and its existing export folders are orphaned on disk.
+
+  - **It is as catastrophic as the log says: ONE stale catalog disables generation for the ENTIRE Studio.** Startup prints `[CreativeStudio] Schema-2 runtime activation failed: StudioExportCatalogErrorV2`, and the runtime never activates. Anything that needs the runtime is then dead **on every project**, including projects with a perfectly current catalog:
+
+    |                                                     | with the 3 stale-catalog projects present | with them removed |
+    | --------------------------------------------------- | ----------------------------------------- | ----------------- |
+    | `prepareSubmission` on **healthy** `Light on Water` | **`runtime_inactive`**                    | **quotes**        |
+    | `prepareSubmission` on **healthy** `Panel Check`    | **`runtime_inactive`**                    | **quotes**        |
+    | activation at startup                               | fails                                     | clean             |
+
+    Controlled both ways on the same build: removing the three projects restores generation, restoring them kills it again. **This is BUG-136's exact blast radius** — one unreadable record on disk takes the whole feature down for every project.
+
+  - **Correction to my own first measurement.** I initially reported this as _"not as catastrophic as the log claims"_ on the grounds that `getProject`, `listExports` and `getFilmExportCapability` all still answered. That was wrong, and wrong in a specific way worth naming: those three calls are served **without runtime activation**, so they cannot detect an inactive runtime. Probing only the operations that happen to be reachable proves nothing about the ones that are not. The first call that actually needed the runtime — `prepareSubmission` — returned `runtime_inactive` immediately.
+  - **The refusal wears the wrong label.** `listExports` reports `storage_error`; storage is fine and was read successfully. The catalog is a version the code declines to accept. Same honesty-of-failure class as BUG-140 and **BUG-147**.
+  - **Why P1.** Anyone who ran an editor-folder export before this commit cannot generate **anything, in any project**, after upgrading — the whole Studio stops producing work, and the only clue is one startup log line that names an export catalog. The affected project also loses its export history permanently. In a pilot, one such user's machine is fully blocked.
+  - **This is BUG-136's defect class, reintroduced by the very next commit** — a versioned record's schema changed with no migration for records already on disk. The BUG-136 handoff explicitly flagged this hazard for the film-export work. Worth noting the mechanism differed enough to dodge the lesson: BUG-136 was a _field_ added to an exact-key set, this is a _version constant_ moved backwards.
+  - **Fix direction.** Restore `STUDIO_EXPORT_SCHEMA_VERSION_V2` to `5` and go **forward** to `6` if a break is genuinely needed, with a migration that accepts `5` and rewrites it. A decrement is not a version change, it is a collision — after this, `5` means both "written 2026-08-26" and "some future revision". If the catalog truly warrants an independent counter, it needs a distinct field name, not a reused one with a smaller number. Separately, give the refusal a cause-specific code, and scope the startup log line so an export-catalog problem does not announce itself as a runtime activation failure.
+  - **Live reproduction.** The six archived projects at `~/weprompt-archived-projects/2026-08-27-pre-migration/` — restore with **`rsync -aH`**, not `cp -R`. Then `listExports` on `b552858f_4b3e_4f1d_ab3c_d6f6f174cf93` refuses. `6698ac0c…` and `ab864bb7…` reproduce it too; the other three have no catalog and are unaffected.
+  - **Note for whoever restores that corpus.** `cp -R` breaks the hard links the pending-publication protocol depends on — the `.tmp` and `.ready` files are hard links to one inode (`nlink=3`), and `store.ts:2316` correctly quarantines the project when they are no longer the same physical file. That quarantine is the guard working, not a bug; it cost me a false alarm before I checked `stat`.
+
 ### Verified live 2026-08-25 — schema-v5 real-model run
 
 - Exact build: `3ac63eb9f`; project: `a5502dee_3834_48a0_bfa7_bd2597546506`; OpenRouter image and first-frame-capable video routes.
