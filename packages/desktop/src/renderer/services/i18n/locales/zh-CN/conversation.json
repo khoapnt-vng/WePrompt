@@ -1493,25 +1493,12 @@
       },
       "filmExport": {
         "action": "导出影片…",
-        "title": "导出单个影片文件",
-        "description": "从当前剪辑创建可供编辑的 MP4。未覆盖的镜头会成为定时黑场。",
-        "transition": "转场",
-        "cut": "直接剪切",
-        "dissolve": "0.35 秒叠化",
-        "trimTails": "有限裁剪静止尾部（保护最后一个已渲染镜头）",
-        "noSpend": "这是本地导出，不会生成媒体或产生费用。",
-        "export": "导出影片",
+        "actionWithSlates": "导出影片 · {{count}} 个场记卡…",
+        "actionWithSlates_one": "导出影片 · {{count}} 个场记卡…",
+        "actionWithSlates_other": "导出影片 · {{count}} 个场记卡…",
         "cancel": "取消导出",
-        "reveal": "在 Finder 中显示",
-        "dismiss": "关闭",
-        "successFacts": "创作 {{nominal}} 秒 · 导出 {{rendered}} 秒 · 裁剪 {{count}} 个尾部",
-        "successQuarantine": "已移走较早的影片导出：{{count}}",
-        "phase": {
-          "preparing": "正在准备精确源媒体…",
-          "analyzing": "正在分析媒体和静止尾部…",
-          "rendering": "正在本地渲染影片…",
-          "publishing": "正在验证并发布完成的影片…"
-        },
+        "cut": "直接剪切",
+        "description": "从当前剪辑创建可供编辑的 MP4。未覆盖的镜头会成为定时黑场。",
         "disabled": {
           "no_beats": "导出前请添加 Beat",
           "duration_pending": "请为每个空 Beat 设置时长",
@@ -1521,17 +1508,38 @@
           "exportRunning": "影片导出已在运行",
           "catalogUnavailable": "影片导出存储不可用"
         },
+        "dismiss": "关闭",
+        "dissolve": "叠化",
         "errors": {
           "catalogUnavailable": "导出目录不可用。请重新加载项目。",
-          "staleAuthority": "项目或导出目录已更改，未发布陈旧影片。",
-          "unavailable": "此设备没有已验证的 FFmpeg 影片导出能力。",
+          "staleAuthority": "项目或导出目录已更改。未发布任何陈旧影片——请先检查当前项目，然后再重新导出。",
+          "unavailable": "影片导出需要 FFmpeg，但在此设备上未找到。请安装 FFmpeg，或将 FFMPEG_PATH 设置为已有副本的路径，然后重新打开项目。",
           "renderFailed": "无法验证本地影片渲染，未发布部分导出。",
           "cancelled": "影片导出已取消，项目媒体未更改。",
           "invalidMedia": "剪辑包含陈旧、非规范或无效媒体。",
           "busy": "Creative Studio 正在完成另一项操作。",
           "artifactUnavailable": "该影片已不在活动目录中。",
           "resultConflict": "确认影片前收到了更新的导出目录。"
-        }
+        },
+        "export": "导出影片",
+        "noSpend": "此操作在本机运行，不会生成媒体，也不会产生费用。",
+        "phase": {
+          "preparing": "正在准备精确源媒体…",
+          "analyzing": "正在分析媒体和静止尾部…",
+          "rendering": "正在本地渲染影片…",
+          "publishing": "正在验证并发布完成的影片…"
+        },
+        "reveal": "在 Finder 中显示",
+        "successFacts": "创作 {{nominal}} 秒 · 导出 {{rendered}} 秒 · 裁剪 {{count}} 个尾部",
+        "successFacts_one": "创作 {{nominal}} 秒 · 导出 {{rendered}} 秒 · 裁剪 {{count}} 个尾部",
+        "successFacts_other": "创作 {{nominal}} 秒 · 导出 {{rendered}} 秒 · 裁剪 {{count}} 个尾部",
+        "successQuarantine": "已移到一旁的旧影片导出：{{count}}",
+        "successQuarantine_one": "已移到一旁的旧影片导出：{{count}}",
+        "successQuarantine_other": "已移到一旁的旧影片导出：{{count}}",
+        "title": "导出影片",
+        "transition": "转场",
+        "trimTails": "裁剪每个镜头末尾的静止尾部",
+        "trimTailsHelp": "仅影响导出的文件，不会改动项目中的镜头。最后一个镜头保持完整时长。"
       }
     },
     "rules": {

@@ -1495,25 +1495,12 @@
       },
       "filmExport": {
         "action": "Filmi dışa aktar…",
-        "title": "Tek film dosyası dışa aktar",
-        "description": "Geçerli kurgudan düzenlemeye hazır bir MP4 oluşturur. Kapsanmayan çekimler süreli siyah kartlara dönüşür.",
-        "transition": "Geçişler",
-        "cut": "Düz kesmeler",
-        "dissolve": "0,35 sn çözünmeler",
-        "trimTails": "Sınırlı sessiz sonları kırp (son render çekimi korunur)",
-        "noSpend": "Bu yerel bir dışa aktarımdır. Medya üretmez veya para harcamaz.",
-        "export": "Filmi dışa aktar",
+        "actionWithSlates": "Filmi dışa aktar · {{count}} slate…",
+        "actionWithSlates_one": "Filmi dışa aktar · {{count}} slate…",
+        "actionWithSlates_other": "Filmi dışa aktar · {{count}} slate…",
         "cancel": "Dışa aktarımı iptal et",
-        "reveal": "Finder'da göster",
-        "dismiss": "Kapat",
-        "successFacts": "{{nominal}} sn yazıldı · {{rendered}} sn dışa aktarıldı · {{count}} son kırpıldı",
-        "successQuarantine": "Eski film dışa aktarımları taşındı: {{count}}",
-        "phase": {
-          "preparing": "Kesin kaynak medya hazırlanıyor…",
-          "analyzing": "Medya ve sessiz sonlar analiz ediliyor…",
-          "rendering": "Film yerel olarak render ediliyor…",
-          "publishing": "Film doğrulanıp yayımlanıyor…"
-        },
+        "cut": "Düz kesmeler",
+        "description": "Geçerli kurgudan düzenlemeye hazır bir MP4 oluşturur. Kapsanmayan çekimler süreli siyah kartlara dönüşür.",
         "disabled": {
           "no_beats": "Dışa aktarmadan önce bir Beat ekleyin",
           "duration_pending": "Her boş Beat için süre belirleyin",
@@ -1523,17 +1510,38 @@
           "exportRunning": "Bir film dışa aktarımı zaten çalışıyor",
           "catalogUnavailable": "Dışa aktarım depolaması kullanılamıyor"
         },
+        "dismiss": "Kapat",
+        "dissolve": "Zincirleme geçiş",
         "errors": {
           "catalogUnavailable": "Dışa aktarım kataloğu kullanılamıyor. Projeyi yeniden yükleyin.",
-          "staleAuthority": "Proje veya katalog değişti. Eski film yayımlanmadı.",
-          "unavailable": "Bu cihazda doğrulanmış FFmpeg film dışa aktarımı yok.",
+          "staleAuthority": "Proje veya dışa aktarım kataloğu değişti. Eski film yayımlanmadı — yeniden dışa aktarmadan önce geçerli projeyi inceleyin.",
+          "unavailable": "Film dışa aktarımı için FFmpeg gerekir, ancak bu cihazda bulunamadı. FFmpeg'i yükleyin veya FFMPEG_PATH değişkenini elinizdeki bir kopyaya ayarlayın, ardından projeyi yeniden açın.",
           "renderFailed": "Yerel render doğrulanamadı. Kısmi dışa aktarım yayımlanmadı.",
           "cancelled": "Film dışa aktarımı iptal edildi. Proje medyası değişmedi.",
           "invalidMedia": "Kurgu eski, kanonik olmayan veya geçersiz medya içeriyor.",
           "busy": "Creative Studio başka bir işlemi tamamlıyor.",
           "artifactUnavailable": "Film artık etkin katalogda değil.",
           "resultConflict": "Film doğrulanmadan önce daha yeni bir katalog geldi."
-        }
+        },
+        "export": "Filmi dışa aktar",
+        "noSpend": "Bu işlem kendi cihazınızda çalışır. Medya üretilmeyecek ve harcama yapılmayacak.",
+        "phase": {
+          "preparing": "Kesin kaynak medya hazırlanıyor…",
+          "analyzing": "Medya ve sessiz sonlar analiz ediliyor…",
+          "rendering": "Film yerel olarak render ediliyor…",
+          "publishing": "Film doğrulanıp yayımlanıyor…"
+        },
+        "reveal": "Finder'da göster",
+        "successFacts": "{{nominal}} sn planlandı · {{rendered}} sn dışa aktarıldı · {{count}} son kırpıldı",
+        "successFacts_one": "{{nominal}} sn planlandı · {{rendered}} sn dışa aktarıldı · {{count}} son kırpıldı",
+        "successFacts_other": "{{nominal}} sn planlandı · {{rendered}} sn dışa aktarıldı · {{count}} son kırpıldı",
+        "successQuarantine": "Kenara taşınan eski film dışa aktarımları: {{count}}",
+        "successQuarantine_one": "Kenara taşınan eski film dışa aktarımları: {{count}}",
+        "successQuarantine_other": "Kenara taşınan eski film dışa aktarımları: {{count}}",
+        "title": "Filmi dışa aktar",
+        "transition": "Geçiş",
+        "trimTails": "Her Çekimin durağan sonunu kırp",
+        "trimTailsHelp": "Yalnızca dışa aktarılan dosyayı etkiler; projedeki Çekimler değişmez. Son Çekim tam uzunluğunu korur."
       }
     },
     "rules": {

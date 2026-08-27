@@ -1494,25 +1494,12 @@
       },
       "filmExport": {
         "action": "Film exportieren…",
-        "title": "Eine Filmdatei exportieren",
-        "description": "Erstellt eine editorfertige MP4 aus dem aktuellen Schnitt. Nicht abgedeckte Einstellungen werden zu zeitgesteuerten schwarzen Tafeln.",
-        "transition": "Übergänge",
-        "cut": "Harte Schnitte",
-        "dissolve": "0,35-s-Überblendungen",
-        "trimTails": "Begrenzte ruhige Enden kürzen (die letzte gerenderte Einstellung bleibt geschützt)",
-        "noSpend": "Dies ist ein lokaler Export. Es werden keine Medien generiert und kein Geld ausgegeben.",
-        "export": "Film exportieren",
+        "actionWithSlates": "Film exportieren · {{count}} Platzhalter…",
+        "actionWithSlates_one": "Film exportieren · {{count}} Platzhalter…",
+        "actionWithSlates_other": "Film exportieren · {{count}} Platzhalter…",
         "cancel": "Export abbrechen",
-        "reveal": "Im Finder anzeigen",
-        "dismiss": "Schließen",
-        "successFacts": "{{nominal}} s erstellt · {{rendered}} s exportiert · {{count}} Enden gekürzt",
-        "successQuarantine": "Ältere Filmexporte verschoben: {{count}}",
-        "phase": {
-          "preparing": "Exakte Quellmedien werden vorbereitet…",
-          "analyzing": "Medien und ruhige Enden werden analysiert…",
-          "rendering": "Film wird lokal gerendert…",
-          "publishing": "Fertiger Film wird geprüft und veröffentlicht…"
-        },
+        "cut": "Harte Schnitte",
+        "description": "Erstellt eine editorfertige MP4 aus dem aktuellen Schnitt. Nicht abgedeckte Einstellungen werden zu zeitgesteuerten schwarzen Tafeln.",
         "disabled": {
           "no_beats": "Vor dem Export einen Beat hinzufügen",
           "duration_pending": "Für jeden leeren Beat eine Dauer festlegen",
@@ -1522,17 +1509,38 @@
           "exportRunning": "Ein Filmexport läuft bereits",
           "catalogUnavailable": "Filmexportspeicher ist nicht verfügbar"
         },
+        "dismiss": "Schließen",
+        "dissolve": "Überblendung",
         "errors": {
           "catalogUnavailable": "Der Exportkatalog ist nicht verfügbar. Projekt neu laden und erneut versuchen.",
-          "staleAuthority": "Projekt oder Exportkatalog wurden geändert. Kein veralteter Film wurde veröffentlicht.",
-          "unavailable": "Dieses Gerät hat keine verifizierte FFmpeg-Filmexportfunktion.",
+          "staleAuthority": "Projekt oder Exportkatalog wurden geändert. Es wurde kein veralteter Film veröffentlicht – das aktuelle Projekt vor einem erneuten Export prüfen.",
+          "unavailable": "Für den Filmexport wird FFmpeg benötigt, das auf diesem Gerät nicht gefunden wurde. FFmpeg installieren oder FFMPEG_PATH auf eine bereits vorhandene Kopie setzen und das Projekt anschließend neu öffnen.",
           "renderFailed": "Der lokale Film konnte nicht verifiziert werden. Kein Teilexport wurde veröffentlicht.",
           "cancelled": "Der Filmexport wurde abgebrochen. Projektmedien blieben unverändert.",
           "invalidMedia": "Der Schnitt enthält veraltete, nicht kanonische oder ungültige Medien.",
           "busy": "Creative Studio schließt einen anderen Vorgang ab.",
           "artifactUnavailable": "Dieser Film ist nicht mehr im aktiven Katalog.",
           "resultConflict": "Ein neuerer Exportkatalog kam an, bevor dieser Film bestätigt werden konnte."
-        }
+        },
+        "export": "Film exportieren",
+        "noSpend": "Der Export läuft lokal auf diesem Gerät. Es werden keine Medien erzeugt und keine Kosten ausgelöst.",
+        "phase": {
+          "preparing": "Exakte Quellmedien werden vorbereitet…",
+          "analyzing": "Medien und ruhige Enden werden analysiert…",
+          "rendering": "Film wird lokal gerendert…",
+          "publishing": "Fertiger Film wird geprüft und veröffentlicht…"
+        },
+        "reveal": "Im Finder anzeigen",
+        "successFacts": "{{nominal}} s erstellt · {{rendered}} s exportiert · {{count}} Enden gekürzt",
+        "successFacts_one": "{{nominal}} s erstellt · {{rendered}} s exportiert · {{count}} Ende gekürzt",
+        "successFacts_other": "{{nominal}} s erstellt · {{rendered}} s exportiert · {{count}} Enden gekürzt",
+        "successQuarantine": "Ältere Filmexporte verschoben: {{count}}",
+        "successQuarantine_one": "Älterer Filmexport verschoben: {{count}}",
+        "successQuarantine_other": "Ältere Filmexporte verschoben: {{count}}",
+        "title": "Film exportieren",
+        "transition": "Übergang",
+        "trimTails": "Ruhige Enden jedes Shots kürzen",
+        "trimTailsHelp": "Wirkt sich ausschließlich auf die exportierte Datei aus; das Projekt bleibt unverändert. Der letzte Shot behält seine volle Länge."
       }
     },
     "rules": {

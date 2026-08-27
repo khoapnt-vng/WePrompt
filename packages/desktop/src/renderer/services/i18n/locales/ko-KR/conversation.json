@@ -1493,25 +1493,12 @@
       },
       "filmExport": {
         "action": "필름 내보내기…",
-        "title": "하나의 필름 파일 내보내기",
-        "description": "현재 컷에서 편집 가능한 MP4를 만듭니다. 커버되지 않은 샷은 시간 지정 검은 슬레이트가 됩니다.",
-        "transition": "전환",
-        "cut": "직선 컷",
-        "dissolve": "0.35초 디졸브",
-        "trimTails": "조용한 꼬리를 제한적으로 자르기(마지막 렌더 샷 보호)",
-        "noSpend": "로컬 내보내기입니다. 미디어를 생성하거나 비용을 쓰지 않습니다.",
-        "export": "필름 내보내기",
+        "actionWithSlates": "필름 내보내기 · 슬레이트 {{count}}개…",
+        "actionWithSlates_one": "필름 내보내기 · 슬레이트 {{count}}개…",
+        "actionWithSlates_other": "필름 내보내기 · 슬레이트 {{count}}개…",
         "cancel": "내보내기 취소",
-        "reveal": "Finder에서 보기",
-        "dismiss": "닫기",
-        "successFacts": "작성 {{nominal}}초 · 내보냄 {{rendered}}초 · 꼬리 {{count}}개 자름",
-        "successQuarantine": "이전 필름 내보내기 이동: {{count}}",
-        "phase": {
-          "preparing": "정확한 소스 미디어 준비 중…",
-          "analyzing": "미디어와 조용한 꼬리 분석 중…",
-          "rendering": "필름을 로컬 렌더링 중…",
-          "publishing": "완료된 필름 검증 및 게시 중…"
-        },
+        "cut": "직선 컷",
+        "description": "현재 컷에서 편집 가능한 MP4를 만듭니다. 커버되지 않은 샷은 시간 지정 검은 슬레이트가 됩니다.",
         "disabled": {
           "no_beats": "내보내기 전에 Beat를 추가하세요",
           "duration_pending": "빈 Beat마다 길이를 설정하세요",
@@ -1521,17 +1508,38 @@
           "exportRunning": "필름 내보내기가 이미 실행 중입니다",
           "catalogUnavailable": "내보내기 저장소를 사용할 수 없습니다"
         },
+        "dismiss": "닫기",
+        "dissolve": "크로스 디졸브",
         "errors": {
           "catalogUnavailable": "내보내기 카탈로그를 사용할 수 없습니다. 프로젝트를 다시 로드하세요.",
-          "staleAuthority": "프로젝트 또는 카탈로그가 변경되었습니다. 오래된 필름은 게시되지 않았습니다.",
-          "unavailable": "이 장치에는 검증된 FFmpeg 내보내기 기능이 없습니다.",
+          "staleAuthority": "프로젝트 또는 내보내기 카탈로그가 변경되었습니다. 오래된 필름은 게시되지 않았습니다. 다시 내보내기 전에 현재 프로젝트를 검토하세요.",
+          "unavailable": "필름 내보내기에는 FFmpeg가 필요하지만 이 장치에서 찾을 수 없습니다. FFmpeg를 설치하거나 이미 가지고 있는 복사본의 경로를 FFMPEG_PATH에 설정한 다음 프로젝트를 다시 여세요.",
           "renderFailed": "로컬 렌더를 검증하지 못했습니다. 부분 내보내기는 게시되지 않았습니다.",
           "cancelled": "내보내기가 취소되었습니다. 프로젝트 미디어는 변경되지 않았습니다.",
           "invalidMedia": "컷에 오래되거나 비정규 또는 잘못된 미디어가 있습니다.",
           "busy": "Creative Studio가 다른 작업을 완료 중입니다.",
           "artifactUnavailable": "완료된 필름이 활성 카탈로그에 없습니다.",
           "resultConflict": "필름 확인 전에 새 카탈로그가 도착했습니다."
-        }
+        },
+        "export": "필름 내보내기",
+        "noSpend": "이 작업은 사용자 장치에서 실행됩니다. 미디어를 생성하거나 비용을 사용하지 않습니다.",
+        "phase": {
+          "preparing": "정확한 소스 미디어 준비 중…",
+          "analyzing": "미디어와 조용한 꼬리 분석 중…",
+          "rendering": "필름을 로컬 렌더링 중…",
+          "publishing": "완료된 필름 검증 및 게시 중…"
+        },
+        "reveal": "Finder에서 보기",
+        "successFacts": "작성 {{nominal}}초 · 내보냄 {{rendered}}초 · 꼬리 {{count}}개 자름",
+        "successFacts_one": "작성 {{nominal}}초 · 내보냄 {{rendered}}초 · 꼬리 {{count}}개 자름",
+        "successFacts_other": "작성 {{nominal}}초 · 내보냄 {{rendered}}초 · 꼬리 {{count}}개 자름",
+        "successQuarantine": "별도로 보관한 이전 필름 내보내기: {{count}}",
+        "successQuarantine_one": "별도로 보관한 이전 필름 내보내기: {{count}}",
+        "successQuarantine_other": "별도로 보관한 이전 필름 내보내기: {{count}}",
+        "title": "필름 내보내기",
+        "transition": "전환",
+        "trimTails": "각 샷 끝의 정지된 꼬리 잘라내기",
+        "trimTailsHelp": "내보내는 파일에만 적용되며 프로젝트 미디어는 변경되지 않습니다. 마지막 샷은 전체 길이를 유지합니다."
       }
     },
     "rules": {

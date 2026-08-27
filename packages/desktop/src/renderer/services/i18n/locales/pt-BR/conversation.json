@@ -1499,25 +1499,12 @@
       },
       "filmExport": {
         "action": "Exportar filme…",
-        "title": "Exportar um arquivo de filme",
-        "description": "Cria um MP4 pronto para edição a partir do corte atual. Planos sem cobertura viram cartelas pretas temporizadas.",
-        "transition": "Transições",
-        "cut": "Cortes secos",
-        "dissolve": "Dissolvências de 0,35 s",
-        "trimTails": "Aparar caudas silenciosas limitadas (o último plano renderizado é protegido)",
-        "noSpend": "Esta é uma exportação local. Não gera mídia nem gasta dinheiro.",
-        "export": "Exportar filme",
+        "actionWithSlates": "Exportar filme · {{count}} slates…",
+        "actionWithSlates_one": "Exportar filme · {{count}} slate…",
+        "actionWithSlates_other": "Exportar filme · {{count}} slates…",
         "cancel": "Cancelar exportação",
-        "reveal": "Mostrar no Finder",
-        "dismiss": "Fechar",
-        "successFacts": "{{nominal}} s autorados · {{rendered}} s exportados · {{count}} caudas aparadas",
-        "successQuarantine": "Exportações antigas movidas: {{count}}",
-        "phase": {
-          "preparing": "Preparando a mídia exata…",
-          "analyzing": "Analisando mídia e caudas silenciosas…",
-          "rendering": "Renderizando o filme localmente…",
-          "publishing": "Verificando e publicando o filme…"
-        },
+        "cut": "Cortes secos",
+        "description": "Cria um MP4 pronto para edição a partir do corte atual. Planos sem cobertura viram cartelas pretas temporizadas.",
         "disabled": {
           "no_beats": "Adicione um Beat antes de exportar",
           "duration_pending": "Defina a duração de cada Beat vazio",
@@ -1527,17 +1514,38 @@
           "exportRunning": "Uma exportação já está em andamento",
           "catalogUnavailable": "O armazenamento de exportação não está disponível"
         },
+        "dismiss": "Fechar",
+        "dissolve": "Dissolvência cruzada",
         "errors": {
           "catalogUnavailable": "O catálogo de exportação não está disponível. Recarregue o projeto.",
-          "staleAuthority": "O projeto ou catálogo mudou. Nenhum filme obsoleto foi publicado.",
-          "unavailable": "Este dispositivo não tem capacidade FFmpeg verificada.",
+          "staleAuthority": "O projeto ou catálogo mudou. Nenhum filme obsoleto foi publicado. Revise o projeto antes de exportar novamente.",
+          "unavailable": "A exportação de filme precisa do FFmpeg, que não foi encontrado neste dispositivo. Instale-o ou defina FFMPEG_PATH apontando para uma cópia que você já tenha e reabra o projeto.",
           "renderFailed": "A renderização local não pôde ser verificada. Nenhuma exportação parcial foi publicada.",
           "cancelled": "A exportação foi cancelada. A mídia do projeto não mudou.",
           "invalidMedia": "O corte contém mídia obsoleta, não canônica ou inválida.",
           "busy": "O Creative Studio está concluindo outra operação.",
           "artifactUnavailable": "O filme não está mais no catálogo ativo.",
           "resultConflict": "Um catálogo mais novo chegou antes da confirmação do filme."
-        }
+        },
+        "export": "Exportar filme",
+        "noSpend": "Isso é executado na sua máquina. Nenhuma mídia será gerada e nada será gasto.",
+        "phase": {
+          "preparing": "Preparando a mídia exata…",
+          "analyzing": "Analisando mídia e caudas silenciosas…",
+          "rendering": "Renderizando o filme localmente…",
+          "publishing": "Verificando e publicando o filme…"
+        },
+        "reveal": "Mostrar no Finder",
+        "successFacts": "{{nominal}} s autorados · {{rendered}} s exportados · {{count}} caudas aparadas",
+        "successFacts_one": "{{nominal}} s autorados · {{rendered}} s exportados · {{count}} cauda aparada",
+        "successFacts_other": "{{nominal}} s autorados · {{rendered}} s exportados · {{count}} caudas aparadas",
+        "successQuarantine": "Exportações de filme antigas movidas: {{count}}",
+        "successQuarantine_one": "Exportações de filme antigas movidas: {{count}}",
+        "successQuarantine_other": "Exportações de filme antigas movidas: {{count}}",
+        "title": "Exportar filme",
+        "transition": "Transição",
+        "trimTails": "Aparar caudas estáticas de cada plano",
+        "trimTailsHelp": "Afeta apenas o arquivo exportado, nunca o projeto. O último plano mantém a duração completa."
       }
     },
     "rules": {

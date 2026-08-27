@@ -1493,25 +1493,12 @@
       },
       "filmExport": {
         "action": "匯出影片…",
-        "title": "匯出單一影片檔案",
-        "description": "從目前剪輯建立可供編輯的 MP4。未覆蓋的鏡頭會成為定時黑場。",
-        "transition": "轉場",
-        "cut": "直接剪接",
-        "dissolve": "0.35 秒疊化",
-        "trimTails": "有限裁剪靜止尾端（保護最後一個已算繪鏡頭）",
-        "noSpend": "這是本機匯出，不會產生媒體或費用。",
-        "export": "匯出影片",
+        "actionWithSlates": "匯出影片 · {{count}} 個佔位畫面…",
+        "actionWithSlates_one": "匯出影片 · {{count}} 個佔位畫面…",
+        "actionWithSlates_other": "匯出影片 · {{count}} 個佔位畫面…",
         "cancel": "取消匯出",
-        "reveal": "在 Finder 中顯示",
-        "dismiss": "關閉",
-        "successFacts": "創作 {{nominal}} 秒 · 匯出 {{rendered}} 秒 · 裁剪 {{count}} 個尾端",
-        "successQuarantine": "已移開較早的影片匯出：{{count}}",
-        "phase": {
-          "preparing": "正在準備精確來源媒體…",
-          "analyzing": "正在分析媒體與靜止尾端…",
-          "rendering": "正在本機算繪影片…",
-          "publishing": "正在驗證並發佈完成的影片…"
-        },
+        "cut": "直接剪接",
+        "description": "從目前剪輯建立可供編輯的 MP4。未覆蓋的鏡頭會成為定時黑場。",
         "disabled": {
           "no_beats": "匯出前請新增 Beat",
           "duration_pending": "請為每個空 Beat 設定長度",
@@ -1521,17 +1508,38 @@
           "exportRunning": "影片匯出已在執行",
           "catalogUnavailable": "影片匯出儲存空間無法使用"
         },
+        "dismiss": "關閉",
+        "dissolve": "疊化",
         "errors": {
           "catalogUnavailable": "匯出目錄無法使用。請重新載入專案。",
-          "staleAuthority": "專案或匯出目錄已變更，未發佈過時影片。",
-          "unavailable": "此裝置沒有已驗證的 FFmpeg 影片匯出能力。",
+          "staleAuthority": "專案或匯出目錄已變更。未發佈任何過時影片——請檢查目前專案後再匯出。",
+          "unavailable": "影片匯出需要 FFmpeg，但在此裝置上找不到。請安裝 FFmpeg，或將 FFMPEG_PATH 設為你現有複本的路徑，然後重新開啟專案。",
           "renderFailed": "無法驗證本機影片算繪，未發佈部分匯出。",
           "cancelled": "影片匯出已取消，專案媒體未變更。",
           "invalidMedia": "剪輯包含過時、非規範或無效媒體。",
           "busy": "Creative Studio 正在完成另一項操作。",
           "artifactUnavailable": "該影片已不在有效目錄中。",
           "resultConflict": "確認影片前收到較新的匯出目錄。"
-        }
+        },
+        "export": "匯出影片",
+        "noSpend": "這會在你的裝置上執行。不會產生媒體，也不會產生費用。",
+        "phase": {
+          "preparing": "正在準備精確來源媒體…",
+          "analyzing": "正在分析媒體與靜止尾端…",
+          "rendering": "正在本機算繪影片…",
+          "publishing": "正在驗證並發佈完成的影片…"
+        },
+        "reveal": "在 Finder 中顯示",
+        "successFacts": "創作 {{nominal}} 秒 · 匯出 {{rendered}} 秒 · 裁剪 {{count}} 個尾端",
+        "successFacts_one": "創作 {{nominal}} 秒 · 匯出 {{rendered}} 秒 · 裁剪 {{count}} 個尾端",
+        "successFacts_other": "創作 {{nominal}} 秒 · 匯出 {{rendered}} 秒 · 裁剪 {{count}} 個尾端",
+        "successQuarantine": "已移到一旁的舊影片匯出：{{count}}",
+        "successQuarantine_one": "已移到一旁的舊影片匯出：{{count}}",
+        "successQuarantine_other": "已移到一旁的舊影片匯出：{{count}}",
+        "title": "匯出影片",
+        "transition": "轉場",
+        "trimTails": "裁剪每個鏡頭尾端的靜止畫面",
+        "trimTailsHelp": "僅影響匯出的檔案，不會變更專案內容。最後一個鏡頭會保留完整長度。"
       }
     },
     "rules": {

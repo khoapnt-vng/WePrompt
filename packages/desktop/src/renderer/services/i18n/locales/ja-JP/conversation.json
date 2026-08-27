@@ -1493,25 +1493,12 @@
       },
       "filmExport": {
         "action": "フィルムを書き出す…",
-        "title": "1本のフィルムファイルを書き出す",
-        "description": "現在のカットから編集可能なMP4を作成します。未カバーのショットは時間指定の黒スレートになります。",
-        "transition": "トランジション",
-        "cut": "ストレートカット",
-        "dissolve": "0.35秒ディゾルブ",
-        "trimTails": "静かな末尾を制限付きでトリム（最後のレンダー済みショットは保護）",
-        "noSpend": "ローカル書き出しです。メディア生成や費用発生はありません。",
-        "export": "フィルムを書き出す",
+        "actionWithSlates": "フィルムを書き出す · スレート {{count}} 件…",
+        "actionWithSlates_one": "フィルムを書き出す · スレート {{count}} 件…",
+        "actionWithSlates_other": "フィルムを書き出す · スレート {{count}} 件…",
         "cancel": "書き出しをキャンセル",
-        "reveal": "Finderで表示",
-        "dismiss": "閉じる",
-        "successFacts": "編集尺 {{nominal}}秒 · 書き出し {{rendered}}秒 · {{count}}件の末尾をトリム",
-        "successQuarantine": "退避した古い書き出し: {{count}}",
-        "phase": {
-          "preparing": "正確なソースメディアを準備中…",
-          "analyzing": "メディアと静かな末尾を解析中…",
-          "rendering": "ローカルでフィルムをレンダー中…",
-          "publishing": "完成したフィルムを検証して公開中…"
-        },
+        "cut": "ストレートカット",
+        "description": "現在のカットから編集可能なMP4を作成します。未カバーのショットは時間指定の黒スレートになります。",
         "disabled": {
           "no_beats": "書き出す前にBeatを追加してください",
           "duration_pending": "空のBeatごとに尺を設定してください",
@@ -1521,17 +1508,38 @@
           "exportRunning": "フィルム書き出しは実行中です",
           "catalogUnavailable": "書き出しストレージを利用できません"
         },
+        "dismiss": "閉じる",
+        "dissolve": "クロスディゾルブ",
         "errors": {
           "catalogUnavailable": "書き出しカタログを利用できません。プロジェクトを再読み込みしてください。",
-          "staleAuthority": "プロジェクトまたはカタログが変更されました。古いフィルムは公開されていません。",
-          "unavailable": "この端末には検証済みのFFmpeg書き出し機能がありません。",
+          "staleAuthority": "プロジェクトまたは書き出しカタログが変更されました。古いフィルムは公開されていません。もう一度書き出す前に、現在のプロジェクトを確認してください。",
+          "unavailable": "フィルムの書き出しには FFmpeg が必要ですが、この端末では見つかりませんでした。FFmpeg をインストールするか、既にあるコピーのパスを FFMPEG_PATH に設定してから、プロジェクトを開き直してください。",
           "renderFailed": "ローカルレンダーを検証できませんでした。部分書き出しは公開されていません。",
           "cancelled": "書き出しをキャンセルしました。プロジェクトメディアは変更されていません。",
           "invalidMedia": "カットに古い、非正規、または無効なメディアがあります。",
           "busy": "Creative Studioは別の処理を完了中です。",
           "artifactUnavailable": "完成したフィルムは有効なカタログにありません。",
           "resultConflict": "フィルム確認前に新しいカタログが届きました。"
-        }
+        },
+        "export": "フィルムを書き出す",
+        "noSpend": "この処理はお使いの端末で実行されます。メディア生成や課金は行われません。",
+        "phase": {
+          "preparing": "正確なソースメディアを準備中…",
+          "analyzing": "メディアと静かな末尾を解析中…",
+          "rendering": "ローカルでフィルムをレンダー中…",
+          "publishing": "完成したフィルムを検証して公開中…"
+        },
+        "reveal": "Finderで表示",
+        "successFacts": "編集尺 {{nominal}} 秒 · 書き出し {{rendered}} 秒 · 末尾トリム {{count}} 件",
+        "successFacts_one": "編集尺 {{nominal}} 秒 · 書き出し {{rendered}} 秒 · 末尾トリム {{count}} 件",
+        "successFacts_other": "編集尺 {{nominal}} 秒 · 書き出し {{rendered}} 秒 · 末尾トリム {{count}} 件",
+        "successQuarantine": "退避した古いフィルム書き出し：{{count}}",
+        "successQuarantine_one": "退避した古いフィルム書き出し：{{count}}",
+        "successQuarantine_other": "退避した古いフィルム書き出し：{{count}}",
+        "title": "フィルムを書き出す",
+        "transition": "トランジション",
+        "trimTails": "各ショットの静止した末尾をトリム",
+        "trimTailsHelp": "影響するのは書き出すファイルだけで、プロジェクトは変更されません。最後のショットは全長のまま書き出されます。"
       }
     },
     "rules": {

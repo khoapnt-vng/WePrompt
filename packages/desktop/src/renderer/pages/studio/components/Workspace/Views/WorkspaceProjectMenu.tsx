@@ -1502,9 +1502,13 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
             setFilmDialogOpen(true);
           }}
         >
-          {filmExportDisabledKey === null
-            ? t('conversation.creativeStudio.workspace.filmExport.action')
-            : t(filmExportDisabledKey)}
+          {filmExportDisabledKey !== null
+            ? t(filmExportDisabledKey)
+            : editorFolderPreview.status === 'ready' && editorFolderPreview.slateCount > 0
+              ? t('conversation.creativeStudio.workspace.filmExport.actionWithSlates', {
+                  count: editorFolderPreview.slateCount,
+                })
+              : t('conversation.creativeStudio.workspace.filmExport.action')}
         </Menu.Item>
       ) : null}
     </Menu>
@@ -1701,9 +1705,12 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
               </Select.Option>
             </Select>
           </label>
-          <Checkbox checked={filmTrimTails} onChange={setFilmTrimTails}>
-            {t('conversation.creativeStudio.workspace.filmExport.trimTails')}
-          </Checkbox>
+          <div>
+            <Checkbox checked={filmTrimTails} onChange={setFilmTrimTails}>
+              {t('conversation.creativeStudio.workspace.filmExport.trimTails')}
+            </Checkbox>
+            <p className={styles.fieldHint}>{t('conversation.creativeStudio.workspace.filmExport.trimTailsHelp')}</p>
+          </div>
           <p>{t('conversation.creativeStudio.workspace.filmExport.noSpend')}</p>
         </div>
       </Modal>

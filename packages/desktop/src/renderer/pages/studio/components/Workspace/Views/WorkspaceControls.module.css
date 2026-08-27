@@ -93,6 +93,14 @@
   color: var(--color-text-3);
 }
 
+/* Secondary note under a form control. The inline offset lines it up with the
+   control's label rather than its box: 14px Arco checkbox mask plus its 8px gap. */
+.fieldHint {
+  margin: 4px 0 0 22px;
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
 .ruleList,
 .ruleLegend {
   display: grid;

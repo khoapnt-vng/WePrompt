@@ -2353,25 +2353,12 @@
       },
       "filmExport": {
         "action": "Export film…",
-        "title": "Export one film file",
-        "description": "Create an editor-ready MP4 from the current Cut. Uncovered Shots become timed black slates.",
-        "transition": "Transitions",
-        "cut": "Straight cuts",
-        "dissolve": "0.35s dissolves",
-        "trimTails": "Trim bounded quiet tails (the final rendered Shot is protected)",
-        "noSpend": "This is local export work. It does not generate media or spend money.",
-        "export": "Export film",
+        "actionWithSlates": "Export film · {{count}} slates…",
+        "actionWithSlates_one": "Export film · {{count}} slate…",
+        "actionWithSlates_other": "Export film · {{count}} slates…",
         "cancel": "Cancel export",
-        "reveal": "Reveal in Finder",
-        "dismiss": "Dismiss",
-        "successFacts": "{{nominal}}s authored · {{rendered}}s exported · {{count}} tails trimmed",
-        "successQuarantine": "Older film exports moved aside: {{count}}",
-        "phase": {
-          "preparing": "Preparing exact source media…",
-          "analyzing": "Analyzing media and quiet tails…",
-          "rendering": "Rendering the film locally…",
-          "publishing": "Verifying and publishing the completed film…"
-        },
+        "cut": "Straight cuts",
+        "description": "Create an editor-ready MP4 from the current Cut. Uncovered Shots become timed black slates.",
         "disabled": {
           "no_beats": "Add a Beat before exporting a film",
           "duration_pending": "Set a duration for every empty Beat before exporting",
@@ -2381,17 +2368,38 @@
           "exportRunning": "A film export is already running",
           "catalogUnavailable": "Film export storage is unavailable"
         },
+        "dismiss": "Dismiss",
+        "dissolve": "Cross dissolve",
         "errors": {
           "catalogUnavailable": "The export catalog is unavailable. Reload the project and try again.",
-          "staleAuthority": "The project or export catalog changed. No stale film was published.",
-          "unavailable": "This device does not have a verified FFmpeg film-export capability.",
+          "staleAuthority": "The project or export catalog changed. No stale film was published — review the current project before exporting again.",
+          "unavailable": "Film export needs FFmpeg, which was not found on this device. Install it, or set FFMPEG_PATH to a copy you already have, then reopen the project.",
           "renderFailed": "The local film render could not be verified. No partial export was published.",
           "cancelled": "Film export was cancelled. Completed project media was not changed.",
           "invalidMedia": "The Cut contains stale, noncanonical, or invalid media. Review it before exporting.",
           "busy": "Creative Studio is finishing another workspace operation. Try again when it completes.",
           "artifactUnavailable": "That completed film is no longer in the active catalog. Reload before revealing it.",
           "resultConflict": "A newer export catalog arrived before this film could be confirmed. Reload and review exports."
-        }
+        },
+        "export": "Export film",
+        "noSpend": "This runs on your machine. No media will be generated and nothing will be spent.",
+        "phase": {
+          "preparing": "Preparing exact source media…",
+          "analyzing": "Analyzing media and quiet tails…",
+          "rendering": "Rendering the film locally…",
+          "publishing": "Verifying and publishing the completed film…"
+        },
+        "reveal": "Reveal in Finder",
+        "successFacts": "{{nominal}}s authored · {{rendered}}s exported · {{count}} tails trimmed",
+        "successFacts_one": "{{nominal}}s authored · {{rendered}}s exported · {{count}} tail trimmed",
+        "successFacts_other": "{{nominal}}s authored · {{rendered}}s exported · {{count}} tails trimmed",
+        "successQuarantine": "Older film exports moved aside: {{count}}",
+        "successQuarantine_one": "Older film exports moved aside: {{count}}",
+        "successQuarantine_other": "Older film exports moved aside: {{count}}",
+        "title": "Export film",
+        "transition": "Transition",
+        "trimTails": "Trim still tails from each Shot",
+        "trimTailsHelp": "Affects the exported file only — the project is unchanged. The last Shot keeps its full length."
       }
     }
   },

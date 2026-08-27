@@ -554,7 +554,9 @@ describe('WorkspaceProjectMenu', () => {
 
     const menu = await openMenu();
     fireEvent.click(
-      within(menu).getByRole('menuitem', { name: 'conversation.creativeStudio.workspace.filmExport.action' })
+      within(menu).getByRole('menuitem', {
+        name: /conversation\.creativeStudio\.workspace\.filmExport\.actionWithSlates/,
+      })
     );
     const dialog = await screen.findByRole('dialog', {
       name: 'conversation.creativeStudio.workspace.filmExport.title',
@@ -855,7 +857,9 @@ describe('WorkspaceProjectMenu', () => {
     );
     menu = await openMenu();
     fireEvent.click(
-      within(menu).getByRole('menuitem', { name: 'conversation.creativeStudio.workspace.filmExport.action' })
+      within(menu).getByRole('menuitem', {
+        name: /conversation\.creativeStudio\.workspace\.filmExport\.actionWithSlates/,
+      })
     );
     const dialog = await screen.findByRole('dialog', {
       name: 'conversation.creativeStudio.workspace.filmExport.title',

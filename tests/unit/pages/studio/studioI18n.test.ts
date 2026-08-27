@@ -205,6 +205,9 @@ const localizedReferencesPanelKeys = [
 
 const localizedFilmExportKeys = [
   'filmExport.action',
+  'filmExport.actionWithSlates',
+  'filmExport.actionWithSlates_one',
+  'filmExport.actionWithSlates_other',
   'filmExport.cancel',
   'filmExport.cut',
   'filmExport.description',
@@ -234,10 +237,15 @@ const localizedFilmExportKeys = [
   'filmExport.phase.rendering',
   'filmExport.reveal',
   'filmExport.successFacts',
+  'filmExport.successFacts_one',
+  'filmExport.successFacts_other',
   'filmExport.successQuarantine',
+  'filmExport.successQuarantine_one',
+  'filmExport.successQuarantine_other',
   'filmExport.title',
   'filmExport.transition',
   'filmExport.trimTails',
+  'filmExport.trimTailsHelp',
 ] as const;
 
 const expectedLeaves = [
@@ -1738,7 +1746,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(18);
+    expect(pluralBases).toHaveLength(21);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
