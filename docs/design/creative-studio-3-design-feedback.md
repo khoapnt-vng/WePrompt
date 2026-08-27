@@ -47,8 +47,8 @@ The same README then specifies three status words of its own (line 99) — `NO P
 no queue, no chain and no predecessor, so `QUEUED` and `FAILED` have nothing to describe on it. The
 card shape and accent genuinely are shared; only the sentence overreaches.
 
-**What was built:** the three. Suggested correction — *"same card shape and accent; its own three
-status words."*
+**What was built:** the three. Suggested correction — _"same card shape and accent; its own three
+status words."_
 
 ## 3 · Open question — where does the rendered take live in the composer?
 
@@ -58,8 +58,8 @@ The composer card is defined as eight rows of **inputs**: identity, frames row, 
 (start / end / refs), prompt, action row. There is no region for the Shot's **output**.
 
 That conflicts with an owner ruling already made against the First Frames panel (ruling 3, recorded
-in [the First Frames doc](creative-studio-3-first-frames-panel.md)): *the current picture gets its
-own full-screen view, and it is where take history lives* — its filmstrip navigating takes rather
+in [the First Frames doc](creative-studio-3-first-frames-panel.md)): _the current picture gets its
+own full-screen view, and it is where take history lives_ — its filmstrip navigating takes rather
 than frames. That ruling is still binding and still wanted; it simply has nowhere to attach in the
 new layout.
 

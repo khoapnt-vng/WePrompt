@@ -1,7 +1,7 @@
 # Creative Studio 3 — Project status: one truth about where a film is
 
-> Owner direction, 2026-08-27: *"Can we build some kind of status so that Directors can look into
-> and act?"* This document designs that status. It is the companion to
+> Owner direction, 2026-08-27: _"Can we build some kind of status so that Directors can look into
+> and act?"_ This document designs that status. It is the companion to
 > [the Director as first responder](creative-studio-3-director-troubleshooting.md) — the charter
 > says what the Director may do; this says what it looks at first.
 
@@ -11,16 +11,16 @@ On 2026-08-26 the owner drove four films and was stopped by "why is this not mov
 times**. Every answer was derivable from store state that an operator read by hand. A project
 status would have answered seven of the eight in place:
 
-| Stuck moment | What status would have said |
-| --- | --- |
-| Sunday Kitchen — Director asking for a phantom approval | `references: complete — nothing awaits approval` |
-| "The engine list has not loaded yet" on 15 shots | `engines: complete — image ready · video ready` (the dialog's snapshot was stale, not the routes) |
-| "Kitchen Wakes Up" — Shot 3 `NEVER DISPATCHED` | `production: blocked — shot_lny_prep_03 start frame failed to extract · fix is free` |
-| French table beat dead after shot 2 | `production: blocked — shot_table_02 engine failure, followers dependency_failed · re-render $2.40` |
-| Trim beat `provider_unavailable` | `production: blocked — shot_pot_trim_02 provider refused, nothing charged · re-render $0.60` |
-| VNG piece "not running" | `production: not started — nothing has been submitted` |
-| Trung Thu — Director refusing to author | `storyboard: not started — 0 beats` (and the Director *can* author; BUG-139) |
-| Black thumbnails read as "still rendering" | `production: 4 of 5 shots have current takes` (the black poster is BUG-135, not progress) |
+| Stuck moment                                            | What status would have said                                                                         |
+| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Sunday Kitchen — Director asking for a phantom approval | `references: complete — nothing awaits approval`                                                    |
+| "The engine list has not loaded yet" on 15 shots        | `engines: complete — image ready · video ready` (the dialog's snapshot was stale, not the routes)   |
+| "Kitchen Wakes Up" — Shot 3 `NEVER DISPATCHED`          | `production: blocked — shot_lny_prep_03 start frame failed to extract · fix is free`                |
+| French table beat dead after shot 2                     | `production: blocked — shot_table_02 engine failure, followers dependency_failed · re-render $2.40` |
+| Trim beat `provider_unavailable`                        | `production: blocked — shot_pot_trim_02 provider refused, nothing charged · re-render $0.60`        |
+| VNG piece "not running"                                 | `production: not started — nothing has been submitted`                                              |
+| Trung Thu — Director refusing to author                 | `storyboard: not started — 0 beats` (and the Director _can_ author; BUG-139)                        |
+| Black thumbnails read as "still rendering"              | `production: 4 of 5 shots have current takes` (the black poster is BUG-135, not progress)           |
 
 The eighth (the quarantined-runtime day-opener) is owner-level by design — a project status cannot
 describe a project the runtime refuses to load.
@@ -53,15 +53,15 @@ handles: derived, never stored.)
 Each stage reports `not_started | in_progress | complete | blocked`, a one-line summary, and a
 `blockers[]` list. Stages, with their completion tests, all already computable from the record:
 
-| Stage | Complete when |
-| --- | --- |
-| `brief` | `brief.md` is non-empty (true at create) |
-| `engines` | both routes selected and reporting `ready` for this project |
-| `references` | every planned reference has an `approvedAssetId`; characters-before-backgrounds ordering satisfied |
+| Stage        | Complete when                                                                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `brief`      | `brief.md` is non-empty (true at create)                                                                                                                                            |
+| `engines`    | both routes selected and reporting `ready` for this project                                                                                                                         |
+| `references` | every planned reference has an `approvedAssetId`; characters-before-backgrounds ordering satisfied                                                                                  |
 | `storyboard` | ≥1 beat, every shot has a script and a duration; planned seconds vs `targetDurationSeconds` reported (a mismatch is `in_progress` with a note, not `blocked` — the 18s-vs-30s case) |
-| `bindings` | every active shot's binding `status === 'ready'` and within `maxConditioningImages` |
-| `production` | every active shot has a current take; chain heads seeded; extractions ready where a follower needs them |
-| `cut` | film assembled to target; playable |
+| `bindings`   | every active shot's binding `status === 'ready'` and within `maxConditioningImages`                                                                                                 |
+| `production` | every active shot has a current take; chain heads seeded; extractions ready where a follower needs them                                                                             |
+| `cut`        | film assembled to target; playable                                                                                                                                                  |
 
 `boards` is deliberately **not a stage** — The Potter shipped 30 shots with zero board stills.
 It is reported as an advisory count only.
