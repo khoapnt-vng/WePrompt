@@ -1221,6 +1221,14 @@
           "order": "顺序"
         }
       },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed"
+      },
       "beatPanel": {
         "seeds": {
           "stillLabel": "镜头 {{shotIndex}} 的首帧 {{stillIndex}}",
@@ -1287,14 +1295,6 @@
           "videoPreview": "播放器 · {{label}}"
         },
         "composer": {
-          "status": {
-            "notReady": "Not ready",
-            "ready": "Ready to render",
-            "queued": "Queued",
-            "rendering": "Rendering",
-            "rendered": "Rendered",
-            "failed": "Failed"
-          },
           "framesSet": "Frames · {{count}} set",
           "start": "Start",
           "end": "End",

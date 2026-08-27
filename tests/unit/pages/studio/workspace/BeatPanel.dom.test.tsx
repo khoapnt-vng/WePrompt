@@ -420,12 +420,12 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.composer.action.removeFromChain')) return 'Remove from chain';
       if (key.endsWith('.composer.action.tryAgain')) return 'Try again';
       if (key.endsWith('.composer.action.fixStartFrame')) return 'Fix start frame — free';
-      if (key.endsWith('.composer.status.notReady')) return 'Not ready';
-      if (key.endsWith('.composer.status.ready')) return 'Ready to render';
-      if (key.endsWith('.composer.status.queued')) return 'Queued';
-      if (key.endsWith('.composer.status.rendering')) return 'Rendering';
-      if (key.endsWith('.composer.status.rendered')) return 'Rendered';
-      if (key.endsWith('.composer.status.failed')) return 'Failed';
+      if (key.endsWith('.shotStatus.notReady')) return 'Not ready';
+      if (key.endsWith('.shotStatus.ready')) return 'Ready to render';
+      if (key.endsWith('.shotStatus.queued')) return 'Queued';
+      if (key.endsWith('.shotStatus.rendering')) return 'Rendering';
+      if (key.endsWith('.shotStatus.rendered')) return 'Rendered';
+      if (key.endsWith('.shotStatus.failed')) return 'Failed';
       if (key.endsWith('.composer.chain.generate')) return `Generate all ${String(values?.count)} · chained`;
       if (key.endsWith('.composer.chain.stop')) return 'Stop the chain';
       if (key.endsWith('.composer.referencesBudget')) {
@@ -1825,6 +1825,24 @@ describe('BeatPanel', () => {
       'Generate again',
     ],
     [
+      'stale after a run',
+      makeShot('shot_state', 0, {
+        currentPicture: makeCurrentPicture('video_stale'),
+        segmentState: { kind: 'stale' },
+      }),
+      'rendered',
+      'Generate again',
+    ],
+    [
+      'needing a re-render',
+      makeShot('shot_state', 0, {
+        currentPicture: makeCurrentPicture('video_needs_rerender'),
+        segmentState: { kind: 'needs_rerender' },
+      }),
+      'rendered',
+      'Generate again',
+    ],
+    [
       'queued',
       makeShot('shot_state', 0, {
         activeGenerationJob: { id: 'job_queued', purpose: 'video_take', canCancel: true },
@@ -1859,8 +1877,21 @@ describe('BeatPanel', () => {
     const card = shotCard(container, shot.id);
 
     expect(card).toHaveAttribute('data-composer-status', status);
+    const expectedStale = shot.segmentState.kind === 'stale' || shot.segmentState.kind === 'needs_rerender';
+    expect(card).toHaveAttribute('data-composer-status-stale', String(expectedStale));
     expect(card.querySelectorAll('[data-composer-row]')).toHaveLength(8);
     expect(card.querySelectorAll('[data-composer-status-word]')).toHaveLength(1);
+    expect(card.querySelector('[data-composer-status-word]')).toHaveAttribute('data-stale', String(expectedStale));
+    expect(container.querySelector(`button[aria-pressed][data-shot-id="${shot.id}"] small`)).toHaveTextContent(
+      {
+        notReady: 'Not ready',
+        ready: 'Ready to render',
+        queued: 'Queued',
+        rendering: 'Rendering',
+        rendered: 'Rendered',
+        failed: 'Failed',
+      }[status]
+    );
     expect(within(card).getByRole('button', { name: actionLabel })).toBeVisible();
     expect(card.querySelector('[data-composer-end-slot]')).toBeDisabled();
     expect(card).not.toHaveTextContent('THE SHOT HAS TO LAND ON THAT PICTURE');

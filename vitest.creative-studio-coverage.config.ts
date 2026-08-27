@@ -111,6 +111,8 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/studio/components/Workspace/index.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/Gate/generationBlockers.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/spendGate.ts',
+  'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/beatDisplayState.ts',
+  'packages/desktop/src/renderer/pages/studio/components/Workspace/Views/shotStatus.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/useWorkspaceDrafts.ts',
   'packages/desktop/src/renderer/pages/studio/components/Workspace/workspaceProjection.ts',
   'packages/desktop/src/renderer/pages/studio/components/index.ts',

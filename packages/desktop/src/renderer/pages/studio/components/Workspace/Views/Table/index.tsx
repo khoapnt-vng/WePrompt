@@ -17,6 +17,7 @@ import {
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
+import { WORKSPACE_BEAT_DISPLAY_STATE_KEYS } from '../beatDisplayState';
 import type { WorkspaceBeatProjection, WorkspaceBoardPanelProjection } from '../../workspaceProjection';
 import type { ReferenceWorkspaceItem, StudioReferenceFocusIntent } from '../References';
 import styles from './Table.module.css';
@@ -45,19 +46,6 @@ const COLUMNS = [
   { id: 'length', labelKey: 'conversation.creativeStudio.workspace.table.columns.length', fixedInlineSize: 96 },
   { id: 'state', labelKey: 'conversation.creativeStudio.workspace.table.columns.state', fixedInlineSize: 96 },
 ] as const satisfies readonly TableColumn[];
-
-const STATE_KEYS = {
-  duration_pending: 'conversation.creativeStudio.workspace.table.state.durationPending',
-  no_coverage: 'conversation.creativeStudio.workspace.table.state.noCoverage',
-  seed_pending: 'conversation.creativeStudio.workspace.table.state.seedPending',
-  part_done: 'conversation.creativeStudio.workspace.table.state.partDone',
-  needs_attention: 'conversation.creativeStudio.workspace.table.state.needsAttention',
-  rendering: 'conversation.creativeStudio.workspace.table.state.rendering',
-  stale: 'conversation.creativeStudio.workspace.table.state.stale',
-  status_pending: 'conversation.creativeStudio.workspace.table.state.statusPending',
-  ready: 'conversation.creativeStudio.workspace.table.state.ready',
-  draft: 'conversation.creativeStudio.workspace.table.state.draft',
-} as const satisfies Record<WorkspaceBeatProjection['displayState'], string>;
 
 type FocusedCell = {
   row: number;
@@ -973,7 +961,7 @@ export const TableView: React.FC<TableViewProps> = ({
                   content: (
                     <span className={styles.state} data-state={beat.displayState}>
                       <span aria-hidden='true' className={styles.stateDot} />
-                      <span>{t(STATE_KEYS[beat.displayState])}</span>
+                      <span>{t(WORKSPACE_BEAT_DISPLAY_STATE_KEYS[beat.displayState])}</span>
                     </span>
                   ),
                 },

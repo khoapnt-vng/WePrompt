@@ -1704,6 +1704,14 @@
           "anchorUnavailable": "No valid current restore position is available."
         }
       },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed"
+      },
       "beatPanel": {
         "title": "Beat panel — {{title}}",
         "label": "Beat panel for {{title}}",
@@ -1876,14 +1884,6 @@
           }
         },
         "composer": {
-          "status": {
-            "notReady": "Not ready",
-            "ready": "Ready to render",
-            "queued": "Queued",
-            "rendering": "Rendering",
-            "rendered": "Rendered",
-            "failed": "Failed"
-          },
           "framesSet": "Frames · {{count}} set",
           "start": "Start",
           "end": "End",

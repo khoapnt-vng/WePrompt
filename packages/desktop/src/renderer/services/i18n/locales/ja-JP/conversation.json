@@ -1221,6 +1221,14 @@
           "order": "順序"
         }
       },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed"
+      },
       "beatPanel": {
         "seeds": {
           "stillLabel": "ショット{{shotIndex}}の最初のフレーム{{stillIndex}}",
@@ -1287,14 +1295,6 @@
           "videoPreview": "プレーヤー · {{label}}"
         },
         "composer": {
-          "status": {
-            "notReady": "Not ready",
-            "ready": "Ready to render",
-            "queued": "Queued",
-            "rendering": "Rendering",
-            "rendered": "Rendered",
-            "failed": "Failed"
-          },
           "framesSet": "Frames · {{count}} set",
           "start": "Start",
           "end": "End",

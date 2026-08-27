@@ -111,13 +111,16 @@ const localizedFirstFramesPanelKeys = [
   'beatPanel.firstFrames.viewer.next',
 ] as const;
 
+const localizedShotStatusKeys = [
+  'shotStatus.notReady',
+  'shotStatus.ready',
+  'shotStatus.queued',
+  'shotStatus.rendering',
+  'shotStatus.rendered',
+  'shotStatus.failed',
+] as const;
+
 const localizedShotComposerKeys = [
-  'beatPanel.composer.status.notReady',
-  'beatPanel.composer.status.ready',
-  'beatPanel.composer.status.queued',
-  'beatPanel.composer.status.rendering',
-  'beatPanel.composer.status.rendered',
-  'beatPanel.composer.status.failed',
   'beatPanel.composer.framesSet',
   'beatPanel.composer.start',
   'beatPanel.composer.end',
@@ -272,6 +275,7 @@ const localizedFilmExportKeys = [
 
 const expectedLeaves = [
   ...localizedFirstFramesPanelKeys,
+  ...localizedShotStatusKeys,
   ...localizedShotComposerKeys,
   'director.title',
   'director.show',
@@ -1285,6 +1289,7 @@ const localizedOnePicturePresentationKeys = [
 
 const localizedWorkspaceKeys = [
   ...localizedFirstFramesPanelKeys,
+  ...localizedShotStatusKeys,
   ...localizedShotComposerKeys,
   ...localizedReferencesPanelKeys,
   'proposals.proposalId',
@@ -1551,6 +1556,26 @@ describe('Creative Studio workspace translations', () => {
     expect(placeholders(leaves['bin.coverAlt']!)).toEqual(['kind', 'title']);
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
+    }
+  });
+
+  it('keeps the six shared Shot status values byte-identical in their neutral namespace', () => {
+    const expected = {
+      'shotStatus.notReady': 'Not ready',
+      'shotStatus.ready': 'Ready to render',
+      'shotStatus.queued': 'Queued',
+      'shotStatus.rendering': 'Rendering',
+      'shotStatus.rendered': 'Rendered',
+      'shotStatus.failed': 'Failed',
+    } as const;
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenLeaves(workspaceOf(loadConversation(locale))!);
+      expect(Object.fromEntries(localizedShotStatusKeys.map((key) => [key, leaves[key]])), locale).toEqual(expected);
+      expect(
+        Object.keys(leaves).some((key) => key.startsWith('beatPanel.composer.status.')),
+        locale
+      ).toBe(false);
     }
   });
 
@@ -2094,6 +2119,7 @@ describe('Creative Studio workspace translations', () => {
         ...localizedBeatSegmentKeys,
         ...localizedCurrentPictureKeys,
         ...localizedFirstFramesPanelKeys,
+        ...localizedShotStatusKeys,
         ...localizedShotComposerKeys,
         ...localizedReferencesPanelKeys,
         'gate.referenceGridRetry',

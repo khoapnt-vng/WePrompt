@@ -9,7 +9,8 @@ import React, { useCallback, useEffect, useId, useLayoutEffect, useRef, useState
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
-import type { WorkspaceBeatProjection, WorkspaceProjection } from '../../workspaceProjection';
+import { WORKSPACE_BEAT_DISPLAY_STATE_KEYS } from '../beatDisplayState';
+import type { WorkspaceProjection } from '../../workspaceProjection';
 import {
   CutPlayer,
   EMPTY_CUT_PLAYBACK_NAVIGATION,
@@ -21,19 +22,6 @@ import { buildCutFilmstrip } from './filmstrip';
 import styles from './Cut.module.css';
 
 const CUT_ROOT = 'conversation.creativeStudio.workspace.cut';
-
-const CUT_STATE_KEYS = {
-  duration_pending: 'conversation.creativeStudio.workspace.table.state.durationPending',
-  no_coverage: 'conversation.creativeStudio.workspace.table.state.noCoverage',
-  seed_pending: 'conversation.creativeStudio.workspace.table.state.seedPending',
-  part_done: 'conversation.creativeStudio.workspace.table.state.partDone',
-  needs_attention: 'conversation.creativeStudio.workspace.table.state.needsAttention',
-  rendering: 'conversation.creativeStudio.workspace.table.state.rendering',
-  stale: 'conversation.creativeStudio.workspace.table.state.stale',
-  status_pending: 'conversation.creativeStudio.workspace.table.state.statusPending',
-  ready: 'conversation.creativeStudio.workspace.table.state.ready',
-  draft: 'conversation.creativeStudio.workspace.table.state.draft',
-} as const satisfies Record<WorkspaceBeatProjection['displayState'], string>;
 
 // Cut workspace copy is currently authored in en-US and eagerly merged into deferred locales.
 // Resolve the source language's one/other category before translation so an active locale cannot
@@ -596,7 +584,7 @@ export const CutView: React.FC<CutViewProps> = ({
                       <span className={styles.srOnly}>
                         {t(`${CUT_ROOT}.beatPosition`, { position: index + 1, total: beatOrder.length })}
                       </span>
-                      <span className={styles.srOnly}>{t(CUT_STATE_KEYS[displayState])}</span>
+                      <span className={styles.srOnly}>{t(WORKSPACE_BEAT_DISPLAY_STATE_KEYS[displayState])}</span>
                     </Button>
                   </li>
                 );

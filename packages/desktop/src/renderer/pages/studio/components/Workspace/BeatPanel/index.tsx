@@ -25,6 +25,7 @@ import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManag
 import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../workspaceProjection';
 import { generationBlockAction, generationBlockMessage } from '../Gate/generationBlockers';
+import { deriveWorkspaceShotStatus } from '../Views/shotStatus';
 import styles from './BeatPanel.module.css';
 import { BeatPlayer } from './BeatPlayer';
 import { CoverageBar } from './CoverageBar';
@@ -235,32 +236,6 @@ const useLatestDrafts = (drafts: UseWorkspaceDraftsResult): React.MutableRefObje
   const ref = useRef(drafts);
   ref.current = drafts;
   return ref;
-};
-
-type ShotComposerStatus = 'notReady' | 'ready' | 'queued' | 'rendering' | 'rendered' | 'failed';
-
-const shotComposerStatus = (shot: WorkspaceShotProjection, conditioningFailed: boolean): ShotComposerStatus => {
-  if (conditioningFailed || shot.segmentState.kind === 'never_dispatched') return 'failed';
-  if (
-    shot.segmentState.kind === 'failed_unbilled' ||
-    shot.segmentState.kind === 'needs_attention' ||
-    shot.attentionJobs.length > 0
-  ) {
-    return 'failed';
-  }
-  if (shot.segmentState.kind === 'rendering') {
-    return 'rendering';
-  }
-  if (
-    shot.segmentState.kind === 'queued' ||
-    shot.segmentState.kind === 'waiting_on_shot' ||
-    shot.segmentState.kind === 'waiting_on_frame'
-  ) {
-    return 'queued';
-  }
-  if (shot.videoGenerationInFlight || shot.seedGenerationInFlight) return 'rendering';
-  if (shot.currentPicture !== null) return 'rendered';
-  return shot.hasEffectiveSeed ? 'ready' : 'notReady';
 };
 
 type ShotCardProps = {
@@ -627,7 +602,10 @@ const ShotCard: React.FC<ShotCardProps> = ({
     </Menu>
   );
   const conditioningFailure = projection.conditioningFailures.find((failure) => failure.dependentShotId === shot.id);
-  const composerStatus = shotComposerStatus(shot, conditioningFailure !== undefined);
+  const { word: composerStatus, stale: composerStatusStale } = deriveWorkspaceShotStatus(
+    shot,
+    conditioningFailure !== undefined
+  );
   const effectiveFrame = shot.firstFrames.find((frame) => frame.effectiveSeed) ?? null;
   const effectiveFrameUrl =
     effectiveFrame === null ? null : createManagedStudioAssetUrl(projectId, effectiveFrame.assetId);
@@ -715,6 +693,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
       ref={shotCardRef}
       className={styles.shotCard}
       data-composer-status={composerStatus}
+      data-composer-status-stale={composerStatusStale}
       data-shot-card
       data-shot-id={shot.id}
       hidden={hidden}
@@ -731,8 +710,8 @@ const ShotCard: React.FC<ShotCardProps> = ({
                 : t(`${KEY_ROOT}.chain.continuous`, { position: String(index).padStart(2, '0') })}
           </bdi>
         </p>
-        <span className={styles.shotStatus} data-composer-status-word={composerStatus}>
-          {t(`${KEY_ROOT}.composer.status.${composerStatus}`)}
+        <span className={styles.shotStatus} data-composer-status-word={composerStatus} data-stale={composerStatusStale}>
+          {t(`conversation.creativeStudio.workspace.shotStatus.${composerStatus}`)}
           {composerStatus === 'rendering' && shot.generationProgressPercent !== null
             ? ` · ${Math.round(shot.generationProgressPercent)}%`
             : ''}
@@ -1732,65 +1711,64 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
                 </Button>
               </header>
               <div className={styles.shotChips}>
-                {beat.shots.map((shot, index) => (
-                  <React.Fragment key={shot.id}>
-                    {index === 0 ? null : (
-                      <>
-                        <Button
-                          aria-describedby={`${shot.id}-chain-change-description`}
-                          aria-haspopup='dialog'
-                          aria-label={t(
-                            shot.chainBreak === 'hard_cut'
-                              ? `${KEY_ROOT}.chain.reviewRejoin`
-                              : `${KEY_ROOT}.chain.reviewSever`
-                          )}
-                          className={styles.joinButton}
-                          data-chain-change-intent={shot.chainBreak === 'hard_cut' ? 'rejoin' : 'sever'}
-                          data-chain-change-trigger
-                          data-shot-id={shot.id}
-                          disabled={
-                            mutationLocked ||
-                            drafts.staleRevision ||
-                            coverageDraftDirty ||
-                            reviewBlockedMessageKey !== null ||
-                            shot.seedAuthorizationLock !== null
-                          }
-                          onClick={() => actions.reviewContinuity(shot.id, shot.chainBreak !== 'hard_cut')}
-                          size='mini'
-                        >
-                          ×
-                        </Button>
-                        <span className={styles.srOnly} id={`${shot.id}-chain-change-description`}>
-                          {t(
-                            shot.chainBreak === 'hard_cut'
-                              ? `${KEY_ROOT}.chain.reviewRejoinDescription`
-                              : `${KEY_ROOT}.chain.reviewSeverDescription`,
-                            { shot: index + 1, previous: index }
-                          )}
-                        </span>
-                      </>
-                    )}
-                    <button
-                      aria-pressed={shot.id === inspectedShotId}
-                      className={styles.shotChip}
-                      data-active={shot.id === inspectedShotId}
-                      data-shot-id={shot.id}
-                      onClick={() => inspectShot(shot.id)}
-                      type='button'
-                    >
-                      <span>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</span>
-                      {shot.id === inspectedShotId ? <b>{t(`${KEY_ROOT}.firstFrames.on`)}</b> : null}
-                      <small>
-                        {t(
-                          `${KEY_ROOT}.composer.status.${shotComposerStatus(
-                            shot,
-                            projection.conditioningFailures.some((failure) => failure.dependentShotId === shot.id)
-                          )}`
-                        )}
-                      </small>
-                    </button>
-                  </React.Fragment>
-                ))}
+                {beat.shots.map((shot, index) => {
+                  const { word: composerStatus } = deriveWorkspaceShotStatus(
+                    shot,
+                    projection.conditioningFailures.some((failure) => failure.dependentShotId === shot.id)
+                  );
+                  return (
+                    <React.Fragment key={shot.id}>
+                      {index === 0 ? null : (
+                        <>
+                          <Button
+                            aria-describedby={`${shot.id}-chain-change-description`}
+                            aria-haspopup='dialog'
+                            aria-label={t(
+                              shot.chainBreak === 'hard_cut'
+                                ? `${KEY_ROOT}.chain.reviewRejoin`
+                                : `${KEY_ROOT}.chain.reviewSever`
+                            )}
+                            className={styles.joinButton}
+                            data-chain-change-intent={shot.chainBreak === 'hard_cut' ? 'rejoin' : 'sever'}
+                            data-chain-change-trigger
+                            data-shot-id={shot.id}
+                            disabled={
+                              mutationLocked ||
+                              drafts.staleRevision ||
+                              coverageDraftDirty ||
+                              reviewBlockedMessageKey !== null ||
+                              shot.seedAuthorizationLock !== null
+                            }
+                            onClick={() => actions.reviewContinuity(shot.id, shot.chainBreak !== 'hard_cut')}
+                            size='mini'
+                          >
+                            ×
+                          </Button>
+                          <span className={styles.srOnly} id={`${shot.id}-chain-change-description`}>
+                            {t(
+                              shot.chainBreak === 'hard_cut'
+                                ? `${KEY_ROOT}.chain.reviewRejoinDescription`
+                                : `${KEY_ROOT}.chain.reviewSeverDescription`,
+                              { shot: index + 1, previous: index }
+                            )}
+                          </span>
+                        </>
+                      )}
+                      <button
+                        aria-pressed={shot.id === inspectedShotId}
+                        className={styles.shotChip}
+                        data-active={shot.id === inspectedShotId}
+                        data-shot-id={shot.id}
+                        onClick={() => inspectShot(shot.id)}
+                        type='button'
+                      >
+                        <span>{t(`${KEY_ROOT}.shots.heading`, { index: index + 1 })}</span>
+                        {shot.id === inspectedShotId ? <b>{t(`${KEY_ROOT}.firstFrames.on`)}</b> : null}
+                        <small>{t(`conversation.creativeStudio.workspace.shotStatus.${composerStatus}`)}</small>
+                      </button>
+                    </React.Fragment>
+                  );
+                })}
               </div>
               <CoverageBar
                 disabled={coverageDisabled}

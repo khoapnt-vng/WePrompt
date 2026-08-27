@@ -1222,6 +1222,14 @@
           "order": "Orden"
         }
       },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed"
+      },
       "beatPanel": {
         "seeds": {
           "stillLabel": "Primer fotograma {{stillIndex}} del plano {{shotIndex}}",
@@ -1288,14 +1296,6 @@
           "videoPreview": "Reproductor · {{label}}"
         },
         "composer": {
-          "status": {
-            "notReady": "Not ready",
-            "ready": "Ready to render",
-            "queued": "Queued",
-            "rendering": "Rendering",
-            "rendered": "Rendered",
-            "failed": "Failed"
-          },
           "framesSet": "Frames · {{count}} set",
           "start": "Start",
           "end": "End",

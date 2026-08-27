@@ -16,25 +16,13 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
+import { WORKSPACE_BEAT_DISPLAY_STATE_KEYS } from '../beatDisplayState';
 import type { WorkspaceBeatProjection, WorkspaceProjection } from '../../workspaceProjection';
 import { Bin, binItemFocusKey } from './Bin';
 import styles from './Board.module.css';
 
 const KEY_ROOT = 'conversation.creativeStudio.workspace.board';
 const BEAT_PANEL_ROOT = 'conversation.creativeStudio.workspace.beatPanel';
-
-const STATE_KEYS = {
-  duration_pending: 'conversation.creativeStudio.workspace.table.state.durationPending',
-  no_coverage: 'conversation.creativeStudio.workspace.table.state.noCoverage',
-  seed_pending: 'conversation.creativeStudio.workspace.table.state.seedPending',
-  part_done: 'conversation.creativeStudio.workspace.table.state.partDone',
-  needs_attention: 'conversation.creativeStudio.workspace.table.state.needsAttention',
-  rendering: 'conversation.creativeStudio.workspace.table.state.rendering',
-  stale: 'conversation.creativeStudio.workspace.table.state.stale',
-  status_pending: 'conversation.creativeStudio.workspace.table.state.statusPending',
-  ready: 'conversation.creativeStudio.workspace.table.state.ready',
-  draft: 'conversation.creativeStudio.workspace.table.state.draft',
-} as const satisfies Record<WorkspaceBeatProjection['displayState'], string>;
 
 const BLOCKER_KEYS = {
   own_nonterminal_job: `${BEAT_PANEL_ROOT}.blocker.ownNonterminalJob`,
@@ -328,7 +316,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
 
                 <p className={styles.state} data-state={beat.displayState}>
                   <span aria-hidden='true' className={styles.stateDot} />
-                  <span>{t(STATE_KEYS[beat.displayState])}</span>
+                  <span>{t(WORKSPACE_BEAT_DISPLAY_STATE_KEYS[beat.displayState])}</span>
                 </p>
 
                 {selected ? (
