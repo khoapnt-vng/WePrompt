@@ -3824,7 +3824,11 @@ describe('StudioPage schema-5 cutover', () => {
 
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.shared.renameProject' }));
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.phase.shared.renameProject: Launch film',
+      })
+    );
     const input = screen.getByRole('textbox', {
       name: 'conversation.creativeStudio.phase.shared.renameProject',
     });

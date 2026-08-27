@@ -1356,6 +1356,7 @@ describe('schema-5 reference lifecycle mutations', () => {
 
     const undoEntry = lastRemoved.undoHistory.at(-1);
     if (undoEntry === undefined) throw new Error('reference removal must be undoable');
+    expect(undoEntry.label).toBe('remove_reference_image');
     const undone = apply(lastRemoved, [{ kind: 'undo_last', entryId: undoEntry.id }], 'undo_reference_removal').project;
     expect(undone.references[referenceId]?.approvedAssetId).toBe('asset_reference_01');
     expect(undone.assets).toEqual(assetsBefore);
@@ -1694,6 +1695,7 @@ describe('schema-5 coverage, park, and deterministic controls', () => {
       assetIds: [imported.id],
     });
     expect(result.assets[imported.id]).toEqual(imported);
+    expect(result.undoHistory.at(-1)?.label).toBe('dismiss_seed_still');
   });
 
   it('restores an older successful take for free and removes only the current pointer', () => {
@@ -1713,6 +1715,7 @@ describe('schema-5 coverage, park, and deterministic controls', () => {
     expect(restored.assets[older.id]).toEqual(older);
     expect(restored.assets[newer.id]).toEqual(newer);
     expect(restored.spendAuthorizations).toEqual(project.spendAuthorizations);
+    expect(restored.undoHistory.at(-1)?.label).toBe('select_video_take');
 
     const removed = apply(
       restored,
@@ -1726,6 +1729,7 @@ describe('schema-5 coverage, park, and deterministic controls', () => {
     expect(removed.assets[older.id]).toEqual(older);
     expect(removed.assets[newer.id]).toEqual(newer);
     expect(removed.spendAuthorizations).toEqual(project.spendAuthorizations);
+    expect(removed.undoHistory.at(-1)?.label).toBe('remove_video_take');
   });
 
   it('rejects missing identities, invalid placements, and exact no-op reducer requests', () => {

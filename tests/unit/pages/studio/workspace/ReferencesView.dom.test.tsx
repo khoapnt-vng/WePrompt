@@ -283,6 +283,7 @@ describe('the schema-5 References workspace', () => {
     const remove = screen.getByRole('button', {
       name: `${PANEL_KEY}.removePhoto:{"handle":"@ming-01"}`,
     });
+    expect(remove).toHaveClass('arco-btn-status-danger');
     fireEvent.click(remove);
     await waitFor(() =>
       expect(actions.removeImage).toHaveBeenCalledExactlyOnceWith('reference_ming', 'asset_ming_current')
@@ -299,7 +300,11 @@ describe('the schema-5 References workspace', () => {
         references={[workflowReference({ removalBlocked: true })]}
       />
     );
-    expect(screen.getByRole('button', { name: `${PANEL_KEY}.removePhoto:{"handle":"@ming-01"}` })).toBeDisabled();
+    const blockedRemove = screen.getByRole('button', {
+      name: `${PANEL_KEY}.removePhoto:{"handle":"@ming-01"}`,
+    });
+    expect(blockedRemove).toBeDisabled();
+    expect(blockedRemove).toHaveClass('arco-btn-status-danger');
   });
 
   it('keeps Import photo available after a repeated variation-grid refusal', async () => {

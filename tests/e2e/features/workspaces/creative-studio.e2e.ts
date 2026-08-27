@@ -40,6 +40,8 @@ const workspaceSelector = '[data-studio-workspace]';
 const projectHeaderSelector = '[data-studio-project-header]';
 const viewNavigationSelector = '[data-studio-view-navigation]';
 const activeViewSelector = '[data-studio-view]';
+const nativeBridgeChannel = 'office-ai-bridge-adapter';
+const editProjectCallbackPrefix = 'subscribe.callback-creative-studio.edit-projectcreative-studio.edit-project';
 const studioFakeMediaTimeoutMs = 60_000;
 const briefAndRulesTitle = 'Film setup';
 const studioStorageDirectory = (userDataDirectory: string): string =>
@@ -170,6 +172,132 @@ const readStudioE2ENativeHarness = async (electronApp: ElectronApplication): Pro
       saveRequestCount: state.saveRequestCount,
       remainingSavePaths: state.savePaths.length,
       revealedPaths: [...state.revealedPaths],
+    };
+  });
+
+const installEditProjectResponseHold = async (electronApp: ElectronApplication, pageUrl: string): Promise<void> => {
+  await electronApp.evaluate(
+    ({ BrowserWindow }, input) => {
+      type ResponseHoldState = {
+        captured: boolean;
+        release: () => void;
+      };
+      type ResponseHoldGlobal = typeof globalThis & {
+        __studioE2EEditProjectResponseHold?: ResponseHoldState;
+      };
+      const scope = globalThis as ResponseHoldGlobal;
+      if (scope.__studioE2EEditProjectResponseHold !== undefined) {
+        throw new Error('Creative Studio E2E edit-project response hold was already installed');
+      }
+
+      const window = BrowserWindow.getAllWindows().find(
+        (candidate) => !candidate.isDestroyed() && candidate.webContents.getURL() === input.pageUrl
+      );
+      if (window === undefined || window.webContents.isDestroyed()) {
+        throw new Error('Creative Studio E2E main window was unavailable');
+      }
+
+      const webContents = window.webContents;
+      const ownSendDescriptor = Object.getOwnPropertyDescriptor(webContents, 'send');
+      const originalSend = webContents.send;
+      let heldResponse: Parameters<typeof webContents.send> | null = null;
+      let released = false;
+      const state: ResponseHoldState = {
+        captured: false,
+        release: () => {
+          if (released) return;
+          released = true;
+          if (ownSendDescriptor === undefined) {
+            Reflect.deleteProperty(webContents, 'send');
+          } else {
+            Object.defineProperty(webContents, 'send', ownSendDescriptor);
+          }
+          if (heldResponse !== null) {
+            originalSend.apply(webContents, heldResponse);
+            heldResponse = null;
+          }
+        },
+      };
+
+      Object.defineProperty(webContents, 'send', {
+        configurable: true,
+        value: (...args: Parameters<typeof webContents.send>) => {
+          const [channel, serialized] = args;
+          if (!state.captured && channel === input.channel && typeof serialized === 'string') {
+            let envelope: unknown;
+            try {
+              envelope = JSON.parse(serialized);
+            } catch {
+              envelope = null;
+            }
+            if (
+              typeof envelope === 'object' &&
+              envelope !== null &&
+              'name' in envelope &&
+              typeof envelope.name === 'string' &&
+              envelope.name.startsWith(input.callbackPrefix)
+            ) {
+              state.captured = true;
+              heldResponse = args;
+              return;
+            }
+          }
+          originalSend.apply(webContents, args);
+        },
+      });
+      scope.__studioE2EEditProjectResponseHold = state;
+    },
+    { callbackPrefix: editProjectCallbackPrefix, channel: nativeBridgeChannel, pageUrl }
+  );
+};
+
+const hasCapturedEditProjectResponse = async (electronApp: ElectronApplication): Promise<boolean> =>
+  electronApp.evaluate(() => {
+    type ResponseHoldGlobal = typeof globalThis & {
+      __studioE2EEditProjectResponseHold?: { captured: boolean };
+    };
+    return (globalThis as ResponseHoldGlobal).__studioE2EEditProjectResponseHold?.captured ?? false;
+  });
+
+const releaseEditProjectResponseHold = async (electronApp: ElectronApplication): Promise<void> => {
+  await electronApp.evaluate(() => {
+    type ResponseHoldGlobal = typeof globalThis & {
+      __studioE2EEditProjectResponseHold?: { release: () => void };
+    };
+    const scope = globalThis as ResponseHoldGlobal;
+    try {
+      scope.__studioE2EEditProjectResponseHold?.release();
+    } finally {
+      delete scope.__studioE2EEditProjectResponseHold;
+    }
+  });
+};
+
+const readTitleButtonLayout = async (button: Locator) =>
+  button.evaluate((element) => {
+    const style = getComputedStyle(element);
+    const rect = element.getBoundingClientRect();
+    return {
+      geometry: {
+        height: rect.height,
+        width: rect.width,
+        x: rect.x,
+        y: rect.y,
+      },
+      padding: {
+        bottom: style.paddingBottom,
+        left: style.paddingLeft,
+        right: style.paddingRight,
+        top: style.paddingTop,
+      },
+      typography: {
+        family: style.fontFamily,
+        letterSpacing: style.letterSpacing,
+        lineHeight: style.lineHeight,
+        size: style.fontSize,
+        style: style.fontStyle,
+        weight: style.fontWeight,
+      },
     };
   });
 
@@ -1580,7 +1708,10 @@ test.describe('Creative Studio workspace', () => {
   test.describe.configure({ timeout: 60_000 });
   test.skip(process.env.AIONUI_E2E_TEST !== '1', 'Creative Studio E2E requires an isolated test profile.');
 
-  test('creates and reloads a Beat/Shot project across the shared Table, Board, and Cut routes', async ({ page }) => {
+  test('creates and reloads a Beat/Shot project across the shared Table, Board, and Cut routes', async ({
+    electronApp,
+    page,
+  }) => {
     const projectBrief = `A quiet paper-airplane launch story ${Date.now()}.`;
     const renamedProject = `${projectBrief} — renamed ${'with a deliberately extended title '.repeat(12)}`.slice(
       0,
@@ -1603,7 +1734,7 @@ test.describe('Creative Studio workspace', () => {
     await expectProjectConfigurationOutsideActiveView(page);
 
     const projectTitle = page.locator(projectHeaderSelector).getByRole('heading', { level: 1 });
-    await projectTitle.getByRole('button', { name: 'Rename project' }).click();
+    await projectTitle.getByRole('button', { name: `Rename project: ${projectBrief}` }).click();
     const nameDraft = projectTitle.getByRole('textbox', { name: 'Rename project' });
     await nameDraft.fill(' ');
     await nameDraft.press('Enter');
@@ -1626,6 +1757,11 @@ test.describe('Creative Studio workspace', () => {
     });
     expect(titleGeometry.textRight).toBeLessThanOrEqual(titleGeometry.headingRight + 1);
     expect(titleGeometry.scrollWidth).toBeGreaterThan(titleGeometry.clientWidth);
+    const renameButton = projectTitle.getByRole('button', { name: `Rename project: ${renamedProject}` });
+    const titlePalette = await projectTitle.evaluate((heading) => getComputedStyle(heading).color);
+    await expect(renameButton).toHaveCSS('color', titlePalette);
+    await renameButton.hover();
+    await expect(renameButton).not.toHaveCSS('border-bottom-color', 'rgba(0, 0, 0, 0)');
 
     await navigation.getByRole('link', { name: 'Board' }).click();
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/board$/);
@@ -1643,7 +1779,24 @@ test.describe('Creative Studio workspace', () => {
     const targetDraft = page.getByRole('spinbutton', { name: 'Target duration (seconds)' });
     await expect(targetDraft).toBeFocused();
     await targetDraft.fill('30');
-    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await page.mouse.move(0, 0);
+    const enabledTitleLayout = await readTitleButtonLayout(renameButton);
+    await installEditProjectResponseHold(electronApp, page.url());
+    try {
+      await page.getByRole('button', { name: 'Save', exact: true }).click();
+      await expect.poll(() => hasCapturedEditProjectResponse(electronApp)).toBe(true);
+      await expect(renameButton).toBeDisabled();
+      const pendingTitleLayout = await readTitleButtonLayout(renameButton);
+      expect(pendingTitleLayout.typography).toEqual(enabledTitleLayout.typography);
+      expect(pendingTitleLayout.padding).toEqual(enabledTitleLayout.padding);
+      for (const dimension of ['height', 'width', 'x', 'y'] as const) {
+        expect(
+          Math.abs(pendingTitleLayout.geometry[dimension] - enabledTitleLayout.geometry[dimension])
+        ).toBeLessThanOrEqual(0.5);
+      }
+    } finally {
+      await releaseEditProjectResponseHold(electronApp);
+    }
     await expect(page.locator('[data-cut-film]')).toContainText('of 0:30');
     await expect(page.getByRole('button', { name: 'Edit: Target duration (seconds)' })).toBeFocused();
 

@@ -1376,6 +1376,10 @@
           "set_reference_label": "referans adı",
           "set_reference_prompt": "referans istemi",
           "select_reference_image": "geçerli referans görseli",
+          "remove_reference_image": "referans görselini kaldır",
+          "dismiss_seed_still": "ilk kareyi göz ardı et",
+          "select_video_take": "video çekimini seç",
+          "remove_video_take": "çekimi kaldır",
           "set_shot_reference_binding": "Shot referans bağlaması"
         }
       },

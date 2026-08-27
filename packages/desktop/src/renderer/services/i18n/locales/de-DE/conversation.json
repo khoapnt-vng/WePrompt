@@ -1375,6 +1375,10 @@
           "set_reference_label": "Referenzname",
           "set_reference_prompt": "Referenzprompt",
           "select_reference_image": "aktuelles Referenzbild",
+          "remove_reference_image": "Referenzbild entfernen",
+          "dismiss_seed_still": "erstes Bild verwerfen",
+          "select_video_take": "Video-Take auswählen",
+          "remove_video_take": "Take entfernen",
           "set_shot_reference_binding": "Shot-Referenzzuordnung"
         }
       },

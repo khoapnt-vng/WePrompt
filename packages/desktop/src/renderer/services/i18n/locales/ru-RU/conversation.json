@@ -1374,6 +1374,10 @@
           "set_reference_label": "название референса",
           "set_reference_prompt": "промпт референса",
           "select_reference_image": "текущее изображение референса",
+          "remove_reference_image": "удалить изображение референса",
+          "dismiss_seed_still": "отклонить первый кадр",
+          "select_video_take": "выбрать видеодубль",
+          "remove_video_take": "удалить дубль",
           "set_shot_reference_binding": "привязка референсов шота"
         }
       },

@@ -362,8 +362,6 @@
   z-index: 4;
   inset-block-start: 8px;
   inset-inline-end: 80px;
-  color: rgb(var(--gray-1));
-  background: rgb(var(--danger-6));
   opacity: 0;
   transform: translateY(3px);
   transition:

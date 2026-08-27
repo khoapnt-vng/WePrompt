@@ -65,16 +65,26 @@
 .projectTitleButton {
   min-inline-size: 0;
   max-inline-size: 100%;
+}
+
+/* Tooltip wraps disabled buttons and moves their module class onto the wrapper. Anchor the button
+   metrics and palette to the stable heading instead, with enough specificity to beat Arco text-button defaults. */
+.projectTitle :global(.arco-btn.arco-btn-text) {
+  min-inline-size: 0;
+  max-inline-size: 100%;
   padding-block: 2px;
   padding-inline: 4px;
   border-block-end: 1px solid transparent;
-  color: inherit;
   font: inherit;
   letter-spacing: inherit;
 }
 
-.projectTitleButton:global(.arco-btn-text):hover,
-.projectTitleButton:global(.arco-btn-text):focus-visible {
+.projectTitle :global(.arco-btn.arco-btn-text):not(:global(.arco-btn-disabled)) {
+  color: inherit;
+}
+
+.projectTitle :global(.arco-btn.arco-btn-text):not(:global(.arco-btn-disabled)):hover,
+.projectTitle :global(.arco-btn.arco-btn-text):not(:global(.arco-btn-disabled)):focus-visible {
   border-block-end-color: var(--color-border-3);
   color: var(--text-primary);
   background: var(--color-fill-2);

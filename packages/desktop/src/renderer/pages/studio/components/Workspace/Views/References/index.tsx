@@ -451,6 +451,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
                 }}
                 shape='circle'
                 size='mini'
+                status='danger'
                 title={item.removalBlocked ? t(`${PANEL_ROOT}.removePhotoLocked`) : undefined}
                 type='secondary'
               />

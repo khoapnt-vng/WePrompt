@@ -1374,6 +1374,10 @@
           "set_reference_label": "레퍼런스 이름",
           "set_reference_prompt": "레퍼런스 프롬프트",
           "select_reference_image": "현재 레퍼런스 이미지",
+          "remove_reference_image": "참조 이미지 제거",
+          "dismiss_seed_still": "첫 프레임 제외",
+          "select_video_take": "비디오 테이크 선택",
+          "remove_video_take": "테이크 제거",
           "set_shot_reference_binding": "Shot 참조 바인딩"
         }
       },

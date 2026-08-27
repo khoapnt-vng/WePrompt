@@ -156,6 +156,12 @@ export const WorkspaceProjectTitle: React.FC<WorkspaceProjectTitleProps> = ({
                 cancelledRef.current = false;
                 return;
               }
+              if (invalid) {
+                editAuthorityRef.current = null;
+                setDraft(name);
+                setEditing(false);
+                return;
+              }
               void commit();
             }}
             onChange={setDraft}
@@ -187,7 +193,7 @@ export const WorkspaceProjectTitle: React.FC<WorkspaceProjectTitleProps> = ({
       ) : (
         <Tooltip content={renameLabel}>
           <Button
-            aria-label={renameLabel}
+            aria-label={`${renameLabel}: ${name}`}
             className={styles.projectTitleButton}
             disabled={pending}
             type='text'

@@ -1375,6 +1375,10 @@
           "set_reference_label": "nombre de referencia",
           "set_reference_prompt": "prompt de referencia",
           "select_reference_image": "imagen de referencia actual",
+          "remove_reference_image": "eliminar imagen de referencia",
+          "dismiss_seed_still": "descartar primer fotograma",
+          "select_video_take": "seleccionar toma de vídeo",
+          "remove_video_take": "eliminar toma",
           "set_shot_reference_binding": "vínculo de referencias del Shot"
         }
       },

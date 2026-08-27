@@ -1374,6 +1374,10 @@
           "set_reference_label": "參考名稱",
           "set_reference_prompt": "參考提示詞",
           "select_reference_image": "目前參考圖",
+          "remove_reference_image": "移除參考圖像",
+          "dismiss_seed_still": "忽略首幀",
+          "select_video_take": "選擇影片片段",
+          "remove_video_take": "移除影片片段",
           "set_shot_reference_binding": "Shot 參考綁定"
         }
       },

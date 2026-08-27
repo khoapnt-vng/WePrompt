@@ -1374,6 +1374,10 @@
           "set_reference_label": "リファレンス名",
           "set_reference_prompt": "リファレンスプロンプト",
           "select_reference_image": "現在のリファレンス画像",
+          "remove_reference_image": "リファレンス画像を削除",
+          "dismiss_seed_still": "最初のフレームを却下",
+          "select_video_take": "動画テイクを選択",
+          "remove_video_take": "テイクを削除",
           "set_shot_reference_binding": "Shot リファレンスのバインド"
         }
       },

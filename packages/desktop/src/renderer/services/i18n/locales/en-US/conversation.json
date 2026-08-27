@@ -2179,6 +2179,10 @@
           "set_reference_label": "reference name",
           "set_reference_prompt": "reference prompt",
           "select_reference_image": "current reference image",
+          "remove_reference_image": "remove reference image",
+          "dismiss_seed_still": "dismiss first frame",
+          "select_video_take": "choose video take",
+          "remove_video_take": "remove take",
           "set_shot_reference_binding": "Shot reference binding"
         },
         "dirtyShot": "Shot {{shotId}} needs review: {{causes}}",

@@ -1374,6 +1374,10 @@
           "set_reference_label": "نام مرجع",
           "set_reference_prompt": "پرامپت مرجع",
           "select_reference_image": "تصویر مرجع فعلی",
+          "remove_reference_image": "حذف تصویر مرجع",
+          "dismiss_seed_still": "کنار گذاشتن فریم نخست",
+          "select_video_take": "انتخاب برداشت ویدیو",
+          "remove_video_take": "حذف برداشت",
           "set_shot_reference_binding": "اتصال مرجع Shot"
         }
       },

@@ -11,12 +11,23 @@ import { describe, expect, it } from 'vitest';
 
 import i18nConfig from '@/common/config/i18n-config.json';
 import { mergeWithFallback } from '@/common/config/i18n';
+import { STUDIO_PERSISTED_UNDO_OPERATION_KINDS_V2 } from '@/common/types/project/creativeStudioTypes';
 
 type JsonObject = Record<string, unknown>;
 
 const localeRoot = join(process.cwd(), 'packages/desktop/src/renderer/services/i18n/locales');
 const referenceLocale = i18nConfig.referenceLanguage;
 const deferredLocales = i18nConfig.supportedLanguages.filter((locale) => locale !== referenceLocale);
+
+const persistedUndoLabelKeys = STUDIO_PERSISTED_UNDO_OPERATION_KINDS_V2.map(
+  (operation) => `controls.undoLabel.${operation}` as const
+);
+const localizedMediaUndoLabelKeys = [
+  'controls.undoLabel.remove_reference_image',
+  'controls.undoLabel.dismiss_seed_still',
+  'controls.undoLabel.select_video_take',
+  'controls.undoLabel.remove_video_take',
+] as const;
 
 const localizedFirstFrameTerms: Record<string, RegExp> = {
   'de-DE': /erste(?:s|n|m)? Bild/iu,
@@ -890,36 +901,7 @@ const expectedLeaves = [
   'controls.shotState.draft',
   'controls.shotState.seed_ready',
   'controls.undo',
-  'controls.undoLabel.edit_project',
-  'controls.undoLabel.set_brief',
-  'controls.undoLabel.set_rules',
-  'controls.undoLabel.set_reference_plan',
-  'controls.undoLabel.amend_reference_plan',
-  'controls.undoLabel.set_reference_label',
-  'controls.undoLabel.set_reference_prompt',
-  'controls.undoLabel.select_reference_image',
-  'controls.undoLabel.set_shot_reference_binding',
-  'controls.undoLabel.add_beat',
-  'controls.undoLabel.edit_beat',
-  'controls.undoLabel.reorder_beats',
-  'controls.undoLabel.park_beat',
-  'controls.undoLabel.restore_beat',
-  'controls.undoLabel.add_binned_beat',
-  'controls.undoLabel.add_shot',
-  'controls.undoLabel.edit_shot',
-  'controls.undoLabel.delete_shot',
-  'controls.undoLabel.park_shot',
-  'controls.undoLabel.restore_shot',
-  'controls.undoLabel.reorder_shots',
-  'controls.undoLabel.apply_coverage',
-  'controls.undoLabel.set_hard_cut',
-  'controls.undoLabel.set_seed_still',
-  'controls.undoLabel.promote_board_panel',
-  'controls.undoLabel.trim_shot',
-  'controls.undoLabel.reorder_bin',
-  'controls.undoLabel.set_routes',
-  'controls.undoLabel.set_spend_policy',
-  'controls.undoLabel.set_bed',
+  ...persistedUndoLabelKeys,
   'controls.undoLabel.mutation_batch',
   'controls.undoLabel.unknown',
   'controls.dirtyShot',
@@ -1395,6 +1377,7 @@ const localizedWorkspaceKeys = [
   'controls.undoLabel.set_reference_prompt',
   'controls.undoLabel.select_reference_image',
   'controls.undoLabel.set_shot_reference_binding',
+  ...localizedMediaUndoLabelKeys,
   'gate.headline_one',
   'gate.headline_other',
   'gate.confirm_one',
@@ -1472,6 +1455,26 @@ describe('Creative Studio workspace translations', () => {
     expect(placeholders(leaves['bin.coverAlt']!)).toEqual(['kind', 'title']);
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
+    }
+  });
+
+  it('defines one exact undo label for every mutation operation that can be persisted', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(STUDIO_PERSISTED_UNDO_OPERATION_KINDS_V2).not.toContain('undo_last');
+    expect(new Set(STUDIO_PERSISTED_UNDO_OPERATION_KINDS_V2).size).toBe(
+      STUDIO_PERSISTED_UNDO_OPERATION_KINDS_V2.length
+    );
+    for (const operation of STUDIO_PERSISTED_UNDO_OPERATION_KINDS_V2) {
+      const key = `controls.undoLabel.${operation}` as const;
+      expect(leaves[key]?.trim(), operation).not.toBe('');
+    }
+  });
+
+  it('localizes every media-selection undo label in all twelve configured locales', () => {
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenLeaves(workspaceOf(loadConversation(locale))!);
+      for (const key of localizedMediaUndoLabelKeys) expect(leaves[key]?.trim(), `${locale}:${key}`).not.toBe('');
     }
   });
 

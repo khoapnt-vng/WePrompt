@@ -1625,6 +1625,19 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   undo_last: 'operation_not_permitted',
 } as const satisfies Readonly<Record<StudioMutationOperationV2['kind'], StudioDirectorOperationDispositionV2>>);
 
+export type StudioPersistedUndoOperationKindV2 = Exclude<StudioMutationOperationV2['kind'], 'undo_last'>;
+
+/**
+ * Runtime inventory for every single-operation mutation kind that can become an undo label.
+ * The authority map above is compile-time exhaustive, so adding an operation updates this inventory
+ * once its required authority disposition is declared.
+ */
+export const STUDIO_PERSISTED_UNDO_OPERATION_KINDS_V2: readonly StudioPersistedUndoOperationKindV2[] = Object.freeze(
+  (Object.keys(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2) as StudioMutationOperationV2['kind'][]).filter(
+    (kind): kind is StudioPersistedUndoOperationKindV2 => kind !== 'undo_last'
+  )
+);
+
 const studioDirectorOperationsWithDispositionV2 = (disposition: StudioDirectorOperationDispositionV2): string =>
   Object.entries(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)
     .filter((entry) => entry[1] === disposition)
