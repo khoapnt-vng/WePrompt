@@ -1438,8 +1438,12 @@ export const applyStudioMutationBatchV2 = (
 
       case 'set_shot_reference_binding': {
         const shot = ownValue(draft.shots, operation.shotId);
+        // An empty decision references nothing, so it has nothing to validate against the plan. A
+        // film with no named characters and no recurring places never leaves `unplanned`, and
+        // requiring a plan there left every Shot permanently `unassigned` and unrenderable.
+        const bindsNothing = operation.characterReferenceIds.length === 0 && operation.backgroundReferenceId === null;
         if (
-          draft.referencePlanStatus !== 'planned' ||
+          (draft.referencePlanStatus !== 'planned' && !bindsNothing) ||
           shot === undefined ||
           findActiveShotOwner(draft, shot.id) === undefined
         ) {
