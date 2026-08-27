@@ -194,7 +194,7 @@ type ActivationGraph = {
   jobManager: RuntimeJobManager;
   directorCommitTracker: StudioDirectorCommitTrackerV2;
   directorCommandMailbox: StudioDirectorCommandMailboxV2;
-  directorCommandService: StudioDirectorCommandServiceV2;
+  directorCommandService: StudioDirectorCommandProcessorDepsV2['service'];
   directorCommandProcessor: StudioDirectorCommandProcessorV2;
   fakeBundle: StudioE2EFakeBundle | null;
   briefWatcher: (() => Promise<void>) | null;
@@ -498,12 +498,19 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     });
     const directorCommitTracker = factories.createDirectorCommitTracker();
     const directorCommandMailbox = factories.createDirectorCommandMailbox({ rootDir: deps.rootDir, store });
-    const directorCommandService = factories.createDirectorCommandService({ store });
+    const directorMutationService = factories.createDirectorCommandService({ store });
+    const directorCommandService: StudioDirectorCommandProcessorDepsV2['service'] = {
+      ...directorMutationService,
+      getProjectStatus: (input) => coldService.getProjectStatus(input),
+      listRoutes: (input) => coldService.listRoutes(input),
+    };
     const directorCommandProcessor = factories.createDirectorCommandProcessor({
       store,
       mailbox: directorCommandMailbox,
       service: directorCommandService,
       tracker: directorCommitTracker,
+      queryAuthorityActive: () =>
+        !disposed && activationState === 'active' && activeGraph?.authorityToken === authorityToken,
       onProjectUpdated: deps.onProjectUpdated,
     });
     const graph: ActivationGraph = {
@@ -556,7 +563,9 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       try {
         await disposeGraph(graph);
       } catch (rollbackError) {
-        throw new AggregateError([error, rollbackError], 'Creative Studio activation rollback failed');
+        throw new AggregateError([error, rollbackError], 'Creative Studio activation rollback failed', {
+          cause: rollbackError,
+        });
       }
       throw error;
     }

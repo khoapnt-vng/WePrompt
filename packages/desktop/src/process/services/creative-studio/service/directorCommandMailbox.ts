@@ -26,6 +26,7 @@ import {
   parseStudioDirectorCommandSlotV2,
   parseStudioDirectorPendingRecordV2,
   isSafeStudioDirectorId,
+  studioDirectorCommandReceiptMatchesRecordV2,
   type StudioDirectorCommandParseResultV2,
   type StudioDirectorSidecarParseResultV2,
 } from './directorCommandContracts';
@@ -62,7 +63,11 @@ export type StudioDirectorCommandMailboxV2 = {
   snapshotPendingPage(cursor: string | null, limit: number): Promise<StudioDirectorCommandPage>;
   readPending(projectId: string, commandId: string): Promise<StudioDirectorPendingReadV2 | null>;
   readReceipt(projectId: string, commandId: string): Promise<StudioDirectorReceiptReadV2 | null>;
-  writeReceipt(projectId: string, receipt: StudioDirectorCommandReceiptV2): Promise<void>;
+  writeReceipt(
+    projectId: string,
+    receipt: StudioDirectorCommandReceiptV2,
+    authorizeBeforePublish?: () => boolean
+  ): Promise<void>;
   finish(projectId: string, commandId: string): Promise<void>;
   listPendingPage(cursor: string | null, limit: number): Promise<StudioDirectorCommandPage>;
   releaseOrphanedSlotsPage(cursor: string | null, now: string, limit: number): Promise<StudioDirectorMaintenancePage>;
@@ -390,7 +395,8 @@ const createStudioDirectorCommandMailboxInternal = (
     finalFile: string,
     authorizeBeforeLink?: () => Promise<void>,
     onLinkAttempt?: () => void,
-    observeLinkOutcome?: (existingPath: string, newPath: string) => Promise<void>
+    observeLinkOutcome?: (existingPath: string, newPath: string) => Promise<void>,
+    authorizeSynchronouslyBeforeLink?: () => boolean
   ): RecordIoFileSystem =>
     new Proxy(fs, {
       get(target, property) {
@@ -405,6 +411,12 @@ const createStudioDirectorCommandMailboxInternal = (
             await authorizeBeforeLink?.();
             await assertDirectoryAuthorityV2(authority);
             await assertProjectAuthorityV2(projectAuthority);
+            // Ephemeral runtime/query authority is checked synchronously at the
+            // final point before link. Awaiting this predicate would reopen a
+            // microtask-sized graph-revocation window.
+            if (authorizeSynchronouslyBeforeLink !== undefined && !authorizeSynchronouslyBeforeLink()) {
+              throw new RecordIoError('storage_error');
+            }
             onLinkAttempt?.();
             try {
               await target.link(existingPath, newPath);
@@ -1271,7 +1283,11 @@ const createStudioDirectorCommandMailboxInternal = (
       return exactReceiptFrom(await canonicalRootPromise, directories, projectId, commandId);
     },
 
-    async writeReceipt(projectId: string, receipt: StudioDirectorCommandReceiptV2): Promise<void> {
+    async writeReceipt(
+      projectId: string,
+      receipt: StudioDirectorCommandReceiptV2,
+      authorizeBeforePublish?: () => boolean
+    ): Promise<void> {
       requireIdentity(projectId, receipt.commandId);
       const publicationKey = receiptPublicationKey(projectId, receipt.commandId);
       if (indeterminateReceiptPublications.has(publicationKey)) throw storageError();
@@ -1294,9 +1310,17 @@ const createStudioDirectorCommandMailboxInternal = (
         const receiptDirectoryAuthority = await captureDirectoryAuthorityV2(directories.receipts);
         const receiptFile = path.join(directories.receipts, `${receipt.commandId}.json`);
         await publishImmutableRecord({
-          fs: withExactLinkAuthorityV2(receiptDirectoryAuthority, projectAuthority, receiptFile, undefined, () => {
-            linkAttempted = true;
-          }),
+          fs: withExactLinkAuthorityV2(
+            receiptDirectoryAuthority,
+            projectAuthority,
+            receiptFile,
+            undefined,
+            () => {
+              linkAttempted = true;
+            },
+            undefined,
+            authorizeBeforePublish
+          ),
           canonicalRoot: await canonicalRootPromise,
           file: receiptFile,
           bytes,
@@ -1371,7 +1395,7 @@ const createStudioDirectorCommandMailboxInternal = (
         if (validReceiptV2 === undefined) throw storageError();
         if (
           validPendingV2 !== undefined &&
-          validReceiptV2?.expectedRevision !== validPendingV2.record.expectedRevision
+          !studioDirectorCommandReceiptMatchesRecordV2(validReceiptV2, validPendingV2.record)
         ) {
           throw storageError();
         }
@@ -1433,8 +1457,8 @@ const createStudioDirectorCommandMailboxInternal = (
           if (validPendingV2 !== undefined) {
             return (
               pending.status === 'valid' &&
-              pending.record.expectedRevision === validPendingV2.record.expectedRevision &&
-              pending.record.expectedRevision === validReceiptV2?.expectedRevision
+              JSON.stringify(pending.record) === JSON.stringify(validPendingV2.record) &&
+              studioDirectorCommandReceiptMatchesRecordV2(validReceiptV2, pending.record)
             );
           }
           return (

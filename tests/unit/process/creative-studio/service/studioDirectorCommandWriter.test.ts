@@ -593,6 +593,141 @@ describe('Studio Director subprocess command writer', () => {
     expect(command.operations).toEqual(input.operations);
   });
 
+  it.each([
+    ['omitted detail', undefined, false],
+    ['explicit false detail', { detail: false }, false],
+    ['explicit true detail', { detail: true }, true],
+  ] as const)('normalizes %s in one exact durable status-query identity', async (_label, input, detail) => {
+    let currentMs = START_MS;
+    let durableCommand: StudioDirectorCommandRecordV2 | null = null;
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: PROJECT_ID, projectDir },
+      {
+        now: () => currentMs,
+        createId: vi.fn<() => string>().mockReturnValueOnce('query_status').mockReturnValueOnce('lease_status'),
+        sleep: async (milliseconds) => {
+          currentMs += milliseconds;
+          if (durableCommand !== null) return;
+          durableCommand = JSON.parse(
+            await readFile(path.join(pendingDir, 'query_status.json'), 'utf8')
+          ) as StudioDirectorCommandRecordV2;
+          await writeFile(
+            path.join(receiptsDir, 'query_status.json'),
+            JSON.stringify({
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+              commandId: 'query_status',
+              projectId: PROJECT_ID,
+              decidedAt: new Date(currentMs).toISOString(),
+              status: 'failed',
+              query: { kind: 'get_project_status', detail },
+              reasonCode: 'project_read_unavailable',
+            })
+          );
+        },
+      }
+    );
+
+    const result = input === undefined ? await writer.getProjectStatus() : await writer.getProjectStatus({ ...input });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      commandId: 'query_status',
+      query: { kind: 'get_project_status', detail },
+      reasonCode: 'project_read_unavailable',
+    });
+    expect(durableCommand).toEqual({
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'query_status',
+      projectId: PROJECT_ID,
+      createdAt: new Date(START_MS).toISOString(),
+      deadlineAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString(),
+      policy: 'get_project_status',
+      detail,
+    });
+  });
+
+  it('persists list_routes through the same writer and rejects a cross-query receipt', async () => {
+    let currentMs = START_MS;
+    let durableCommand: StudioDirectorCommandRecordV2 | null = null;
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: PROJECT_ID, projectDir },
+      {
+        now: () => currentMs,
+        createId: vi.fn<() => string>().mockReturnValueOnce('query_routes').mockReturnValueOnce('lease_routes'),
+        sleep: async (milliseconds) => {
+          currentMs += milliseconds;
+          if (durableCommand !== null) return;
+          durableCommand = JSON.parse(
+            await readFile(path.join(pendingDir, 'query_routes.json'), 'utf8')
+          ) as StudioDirectorCommandRecordV2;
+          await writeFile(
+            path.join(receiptsDir, 'query_routes.json'),
+            JSON.stringify({
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+              commandId: 'query_routes',
+              projectId: PROJECT_ID,
+              decidedAt: new Date(currentMs).toISOString(),
+              status: 'failed',
+              query: { kind: 'get_project_status', detail: false },
+              reasonCode: 'route_inventory_unavailable',
+            })
+          );
+        },
+      }
+    );
+
+    await expect(writer.listRoutes()).resolves.toEqual({ status: 'storage_error', commandId: 'query_routes' });
+    expect(durableCommand).toMatchObject({ policy: 'list_routes' });
+    expect(durableCommand).not.toHaveProperty('detail');
+    expect(durableCommand).not.toHaveProperty('expectedRevision');
+  });
+
+  it('rejects hostile getProjectStatus input before minting identity or touching storage', async () => {
+    const createId = vi.fn<() => string>().mockReturnValue('must_not_mint');
+    const lstat = vi.fn(nodeFs.lstat.bind(nodeFs));
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: PROJECT_ID, projectDir },
+      { createId, fs: bindMethods(nodeFs, { lstat }) }
+    );
+    let getterCalls = 0;
+    const accessor = {};
+    Object.defineProperty(accessor, 'detail', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return true;
+      },
+    });
+    const inherited = Object.assign(Object.create({ detail: true }), {});
+    const revoked = Proxy.revocable({}, {});
+    revoked.revoke();
+
+    for (const input of [{ detail: 'yes' }, { detail: true, extra: 'secret' }, accessor, inherited, revoked.proxy]) {
+      await expect(writer.getProjectStatus(input as never)).resolves.toEqual({
+        status: 'storage_error',
+        commandId: 'unavailable',
+      });
+    }
+    expect(getterCalls).toBe(0);
+    expect(createId).not.toHaveBeenCalled();
+    expect(lstat).not.toHaveBeenCalled();
+  });
+
+  it('returns an exact historical read-query receipt from getStatus', async () => {
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'historical_query',
+      projectId: PROJECT_ID,
+      decidedAt: new Date(START_MS).toISOString(),
+      status: 'failed',
+      query: { kind: 'list_routes' },
+      reasonCode: 'route_inventory_unavailable',
+    } as const;
+    await writeFile(path.join(receiptsDir, `${receipt.commandId}.json`), JSON.stringify(receipt));
+
+    await expect(writerWithIdsV2(['unused']).getStatus({ commandId: receipt.commandId })).resolves.toEqual(receipt);
+  });
+
   it('returns exact schema-2 receipts with ordered created identity arrays', async () => {
     const writer = writerWithIdsV2(['command_v2_receipt', 'lease_v2_receipt']);
     await writer.apply({ expectedRevision: 7, operations: [{ kind: 'set_brief', brief: 'Schema two' }] });

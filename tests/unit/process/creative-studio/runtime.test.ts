@@ -33,6 +33,7 @@ import type { StudioDirectorCommandMailboxV2 } from '@process/services/creative-
 import type { StudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
 import type {
   StudioDirectorCommandProcessorV2,
+  StudioDirectorCommandProcessorDepsV2,
   StudioDirectorCommitTrackerV2,
 } from '@process/services/creative-studio/service/directorCommandProcessor';
 import { describe, expect, it, vi } from 'vitest';
@@ -102,6 +103,7 @@ const createHarness = (
   let holdNextInventory = input.holdFirstInventory ?? false;
   let resolverDependencies: Parameters<CreativeStudioRuntimeFactories['createProviderResolver']>[0] | undefined;
   let mediaStoreAssertActive: (() => void) | undefined;
+  let directorProcessorDependencies: StudioDirectorCommandProcessorDepsV2 | undefined;
   const mediaStoreAssertActives: Array<() => void> = [];
   const inventoryCaptured = new Promise<void>((resolve) => {
     markInventoryCaptured = resolve;
@@ -331,8 +333,9 @@ const createHarness = (
       factoryCalls.directorService += 1;
       return directorService;
     },
-    createDirectorCommandProcessor: () => {
+    createDirectorCommandProcessor: (dependencies) => {
       factoryCalls.processor += 1;
+      directorProcessorDependencies = dependencies;
       return processor;
     },
   };
@@ -392,6 +395,7 @@ const createHarness = (
     referenceDisposer,
     getResolverDependencies: () => resolverDependencies,
     getMediaStoreAssertActives: () => [...mediaStoreAssertActives],
+    getDirectorProcessorDependencies: () => directorProcessorDependencies,
     inventoryCaptured,
     cleanupStarted,
     activationHeld,
@@ -432,6 +436,40 @@ const activatedFactoryCounts = (harness: RuntimeHarness) => ({
 });
 
 describe('Creative Studio schema-2 runtime activation', () => {
+  it('defers Director reads until the exact graph is active and routes them through the live service', async () => {
+    const getProjectStatus = vi.fn(async (input: { projectId: string; detail?: boolean }) => ({
+      projectId: input.projectId,
+      detail: input.detail === true,
+    })) as unknown as CreativeStudioServiceV2['getProjectStatus'];
+    const listRoutes = vi.fn(async (input: { projectId: string }) => ({
+      projectId: input.projectId,
+    })) as unknown as CreativeStudioServiceV2['listRoutes'];
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      holdActivationAt: 'processor',
+      service: { getProjectStatus, listRoutes },
+    });
+
+    const starting = harness.runtime.start();
+    await harness.activationHeld;
+    const dependencies = harness.getDirectorProcessorDependencies();
+    expect(dependencies).toBeDefined();
+    expect(dependencies!.queryAuthorityActive?.()).toBe(false);
+    harness.releaseActivation();
+    await starting;
+    expect(dependencies!.queryAuthorityActive?.()).toBe(true);
+
+    await dependencies!.service.getProjectStatus({ projectId: 'project_v2', detail: true });
+    await dependencies!.service.listRoutes({ projectId: 'project_v2' });
+    expect(getProjectStatus).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_v2', detail: true });
+    expect(listRoutes).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_v2' });
+    expect(harness.store.getProjectV2).not.toHaveBeenCalled();
+
+    const disposing = harness.runtime.dispose();
+    expect(dependencies!.queryAuthorityActive?.()).toBe(false);
+    await disposing;
+  });
+
   it('classifies a V1-only root and stays inactive without constructing a lifecycle boundary', async () => {
     const harness = createHarness({
       initialInventory: {

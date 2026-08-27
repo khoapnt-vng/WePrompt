@@ -92,6 +92,7 @@ import {
 } from '@process/services/creative-studio/service/filmExporter';
 import {
   createListRoutesHandler,
+  createStudioGetProjectStatusHandlerV2,
   createProposeBriefRuleHandlerV2,
   createProposeStoryboardHandlerV2,
   createReadStoryboardHandlerV2,
@@ -99,6 +100,7 @@ import {
   parseStudioServerEnv,
   registerStudioToolsV2,
   studioApplyEditsInputSchemaV2,
+  studioGetProjectStatusInputSchemaV2,
   studioProposeStoryboardInputSchemaV2,
   studioRequestReferenceImagesInputSchemaV2,
 } from '@process/resources/builtinMcp/studioServer';
@@ -7612,19 +7614,26 @@ describe('Studio MCP schema-2 server', () => {
   });
 
   it('reports route-catalog absence without exposing a partial catalog', async () => {
-    await expect(createListRoutesHandler(null)({})).resolves.toEqual({
-      content: [{ type: 'text', text: 'Creative Studio route catalog is unavailable.' }],
-      isError: true,
-    });
-    await expect(
-      createListRoutesHandler({
-        projectId: 'project_v2',
-        projectDir: '/unused',
-        pendingDir: '/unused/proposals/pending',
-        referencePendingDir: '/unused/reference-requests/pending',
-        routeCatalog: null,
-      })({})
-    ).resolves.toMatchObject({ isError: true });
+    const unavailable = await createListRoutesHandler(null)({});
+    expect(JSON.parse(unavailable.content[0]!.text)).toMatchObject({ status: 'storage_error' });
+    const absent = await createListRoutesHandler({
+      projectId: 'project_v2',
+      projectDir: '/unused',
+      pendingDir: '/unused/proposals/pending',
+      referencePendingDir: '/unused/reference-requests/pending',
+      routeCatalog: null,
+    })({});
+    expect(JSON.parse(absent.content[0]!.text)).toMatchObject({ status: 'storage_error' });
+    const staleEnvironment = await createListRoutesHandler({
+      projectId: 'project_v2',
+      projectDir: '/unused',
+      pendingDir: '/unused/proposals/pending',
+      referencePendingDir: '/unused/reference-requests/pending',
+      routeCatalog: { image: { status: 'ready' }, video: { status: 'ready' } } as never,
+    })({});
+    expect(JSON.parse(staleEnvironment.content[0]!.text)).toMatchObject({ status: 'storage_error' });
+    const statusUnavailable = await createStudioGetProjectStatusHandlerV2(null)({});
+    expect(JSON.parse(statusUnavailable.content[0]!.text)).toMatchObject({ status: 'storage_error' });
   });
 
   it.each(['ordinary file', 'symbolic link'] as const)(
@@ -7796,6 +7805,7 @@ describe('Studio MCP schema-2 server', () => {
         'read_storyboard',
         'studio_apply_edits',
         'studio_get_command_status',
+        'studio_get_project_status',
         'studio_list_routes',
         'studio_request_reference_images',
       ]);
@@ -7884,6 +7894,24 @@ describe('Studio MCP schema-2 server', () => {
         })
       ).toMatchObject({ valid: false });
       expect(applyEdits?.description).toMatch(/never starts paid generation/i);
+
+      const projectStatusTool = tools.find((tool) => tool.name === 'studio_get_project_status');
+      const projectStatusValidator = new AjvJsonSchemaValidator().getValidator(projectStatusTool?.inputSchema as never);
+      expect(projectStatusTool?.inputSchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+      });
+      expect(projectStatusValidator({})).toMatchObject({ valid: true });
+      expect(projectStatusValidator({ detail: false })).toMatchObject({ valid: true });
+      expect(projectStatusValidator({ detail: true })).toMatchObject({ valid: true });
+      expect(projectStatusValidator({ detail: 'yes' })).toMatchObject({ valid: false });
+      expect(projectStatusValidator({ detail: true, extra: 'secret' })).toMatchObject({ valid: false });
+      expect(studioGetProjectStatusInputSchemaV2.safeParse({ detail: true }).success).toBe(true);
+      expect(studioGetProjectStatusInputSchemaV2.safeParse({ detail: 1 }).success).toBe(false);
+      expect(projectStatusTool?.description).toMatch(/without writing, generating, or spending/i);
+      const commandStatus = tools.find((tool) => tool.name === 'studio_get_command_status');
+      expect(commandStatus?.description).toMatch(/durable.*mutation or read-query status/i);
+      expect(commandStatus?.description).not.toMatch(/schema-5/i);
 
       const referenceSchema = tools.find((tool) => tool.name === 'studio_request_reference_images')?.inputSchema;
       const referenceValidator = new AjvJsonSchemaValidator().getValidator(referenceSchema as never);
@@ -10131,9 +10159,8 @@ describe('Studio MCP schema-2 server', () => {
     const config = { projectId: project.id, projectDir, pendingDir, referencePendingDir };
 
     await expect(createReadStoryboardHandlerV2(null)({})).resolves.toMatchObject({ isError: true });
-    await expect(createListRoutesHandler({ ...config, routeCatalog: null })({})).resolves.toMatchObject({
-      isError: true,
-    });
+    const unavailableRoutes = await createListRoutesHandler({ ...config, routeCatalog: null })({});
+    expect(JSON.parse(unavailableRoutes.content[0]!.text)).toMatchObject({ status: 'storage_error' });
     await expect(
       createProposeStoryboardHandlerV2(null)({
         base_revision: project.revision,

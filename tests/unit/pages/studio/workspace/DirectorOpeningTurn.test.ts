@@ -103,6 +103,16 @@ describe('the Director preset rules', () => {
 
   it('leaves the free reads free, so asking well is not also blocked', () => {
     expect(DIRECTOR_PRESET_RULES).toContain('read_storyboard');
+    expect(DIRECTOR_PRESET_RULES).toContain('studio_get_project_status');
+    expect(DIRECTOR_PRESET_RULES).toContain('studio_list_routes');
+    expect(DIRECTOR_PRESET_RULES).toMatch(/start with studio_get_project_status/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/detail: true.*only/i);
+  });
+
+  it('distinguishes historical receipts from fresh status and route reads', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_command_status reports one exact past command or query outcome/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/not a fresh project or\s+route read/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_project_status or studio_list_routes again/i);
   });
 
   it('describes every governed operation from the exact shared disposition policy', () => {

@@ -18,6 +18,8 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
+  type StudioDirectorMutationReceiptV2,
+  type StudioDirectorQueryReceiptV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
   type StudioDirectorOperationV2,
@@ -30,6 +32,7 @@ import {
   parseStudioDirectorCommandSlotLeaseV2,
   parseStudioDirectorCommandSlotV2,
   parseStudioDirectorPendingRecordV2,
+  studioDirectorCommandReceiptMatchesRecordV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 import { validateStudioMutationOperationV2 } from '@process/services/creative-studio/service/schema2';
 import {
@@ -57,8 +60,10 @@ export type StudioApplyEditsInputV2 = {
 
 export type StudioGetCommandStatusInput = { commandId: string };
 
+export type StudioGetProjectStatusDirectorInputV2 = { detail?: boolean };
+
 export type StudioDirectorToolApplyResultV2 =
-  | StudioDirectorCommandReceiptV2
+  | StudioDirectorMutationReceiptV2
   | {
       status: 'busy' | 'unconfirmed' | 'storage_error' | 'unsupported_prototype_schema';
       commandId: string;
@@ -68,6 +73,13 @@ export type StudioDirectorToolStatusResultV2 =
   | StudioDirectorCommandReceiptV2
   | {
       status: 'pending' | 'not_found' | 'storage_error' | 'unsupported_prototype_schema';
+      commandId: string;
+    };
+
+export type StudioDirectorToolQueryResultV2 =
+  | StudioDirectorQueryReceiptV2
+  | {
+      status: 'busy' | 'unconfirmed' | 'storage_error' | 'unsupported_prototype_schema';
       commandId: string;
     };
 
@@ -85,10 +97,34 @@ export type StudioDirectorCommandWriterDeps = {
 
 export type StudioDirectorCommandWriterV2 = {
   apply(input: StudioApplyEditsInputV2): Promise<StudioDirectorToolApplyResultV2>;
+  getProjectStatus(input?: StudioGetProjectStatusDirectorInputV2): Promise<StudioDirectorToolQueryResultV2>;
+  listRoutes(): Promise<StudioDirectorToolQueryResultV2>;
   getStatus(input: StudioGetCommandStatusInput): Promise<StudioDirectorToolStatusResultV2>;
 };
 
 const MAX_SAFE_STUDIO_ID_PREVIEW = 'x'.repeat(256);
+
+const normalizedProjectStatusDetailV2 = (input: unknown): boolean | null => {
+  try {
+    if (
+      typeof input !== 'object' ||
+      input === null ||
+      Array.isArray(input) ||
+      Object.getPrototypeOf(input) !== Object.prototype
+    ) {
+      return null;
+    }
+    const keys = Reflect.ownKeys(input);
+    if (keys.length === 0) return false;
+    if (keys.length !== 1 || keys[0] !== 'detail') return null;
+    const descriptor = Object.getOwnPropertyDescriptor(input, 'detail');
+    return descriptor !== undefined && Object.hasOwn(descriptor, 'value') && typeof descriptor.value === 'boolean'
+      ? descriptor.value
+      : null;
+  } catch {
+    return null;
+  }
+};
 
 /** Conservative pure preview used by the direct writer before any command identity is minted. */
 export const studioDirectorToolInputFitsDurableRecordV2 = (
@@ -145,6 +181,11 @@ type PreparedCommandV2 = {
   slotBytes: string;
   leaseBytes: string;
 };
+
+type StudioDirectorWriterRequestV2 =
+  | { policy: 'auto_apply'; input: StudioApplyEditsInputV2 }
+  | { policy: 'get_project_status'; detail: boolean }
+  | { policy: 'list_routes' };
 
 type IdentifiedJsonRecord = {
   value: unknown;
@@ -502,11 +543,14 @@ const parsePendingRecordForWriterV2 = (input: {
 
 const prepareCommandV2 = (input: {
   config: StudioDirectorCommandWriterConfig | null;
-  toolInput: StudioApplyEditsInputV2;
+  request: StudioDirectorWriterRequestV2;
   now: () => number;
   createId: () => string;
 }): { commandId: string; prepared: PreparedCommandV2 | null } => {
-  if (!studioDirectorToolInputFitsDurableRecordV2(input.toolInput, input.config?.projectId)) {
+  if (
+    input.request.policy === 'auto_apply' &&
+    !studioDirectorToolInputFitsDurableRecordV2(input.request.input, input.config?.projectId)
+  ) {
     return { commandId: 'unavailable', prepared: null };
   }
   const commandId = input.createId();
@@ -521,16 +565,24 @@ const prepareCommandV2 = (input: {
   const createdAt = new Date(createdAtMs).toISOString();
   const deadlineAt = new Date(createdAtMs + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString();
   const projectId = input.config?.projectId ?? '';
-  const command: StudioDirectorCommandRecordV2 = {
+  const base = {
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId,
     projectId,
-    expectedRevision: input.toolInput.expectedRevision,
     createdAt,
     deadlineAt,
-    policy: 'auto_apply',
-    operations: input.toolInput.operations,
-  };
+  } as const;
+  const command: StudioDirectorCommandRecordV2 =
+    input.request.policy === 'auto_apply'
+      ? {
+          ...base,
+          policy: 'auto_apply',
+          expectedRevision: input.request.input.expectedRevision,
+          operations: input.request.input.operations,
+        }
+      : input.request.policy === 'get_project_status'
+        ? { ...base, policy: 'get_project_status', detail: input.request.detail }
+        : { ...base, policy: 'list_routes' };
   const slot: StudioDirectorCommandSlotV2 = {
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId,
@@ -715,7 +767,7 @@ const preflightCommandAuthorityV2 = async (input: {
   const receiptPendingRevisionMismatch =
     receipt.status === 'valid' &&
     pending.status === 'valid' &&
-    receipt.record.expectedRevision !== pending.record.expectedRevision;
+    !studioDirectorCommandReceiptMatchesRecordV2(receipt.record, pending.record);
   const invalidPendingRejectionForValidPending =
     receipt.status === 'valid' && pending.status === 'valid' && receiptRequiresInvalidPendingV2(receipt.record);
   const pendingCandidate =
@@ -1448,8 +1500,10 @@ export const createStudioDirectorCommandWriterV2 = (
     }
   };
 
-  const apply = async (toolInput: StudioApplyEditsInputV2): Promise<StudioDirectorToolApplyResultV2> => {
-    const { commandId, prepared } = prepareCommandV2({ config, toolInput, now, createId });
+  const submit = async (
+    request: StudioDirectorWriterRequestV2
+  ): Promise<StudioDirectorToolApplyResultV2 | StudioDirectorToolQueryResultV2> => {
+    const { commandId, prepared } = prepareCommandV2({ config, request, now, createId });
     if (prepared === null || config === null) return storageError(commandId);
     let directories: CommandDirectories;
     let projectAuthority: ProjectAuthorityV2;
@@ -1571,7 +1625,7 @@ export const createStudioDirectorCommandWriterV2 = (
       if (slotPublished || (error instanceof CommandImmutablePublicationErrorV2 && error.outcome === 'ambiguous')) {
         return storageError(commandId);
       }
-      let result: StudioDirectorToolApplyResultV2 = storageError(commandId);
+      let result: StudioDirectorToolApplyResultV2 | StudioDirectorToolQueryResultV2 = storageError(commandId);
       if (
         error instanceof CommandImmutablePublicationErrorV2 &&
         (error.outcome === 'already_exists' ||
@@ -1728,7 +1782,7 @@ export const createStudioDirectorCommandWriterV2 = (
     try {
       let receipt = await readReceipt();
       if (receipt.status === 'valid') {
-        return receipt.record.expectedRevision === prepared.command.expectedRevision &&
+        return studioDirectorCommandReceiptMatchesRecordV2(receipt.record, prepared.command) &&
           !receiptRequiresInvalidPendingV2(receipt.record)
           ? receipt.record
           : storageError(commandId);
@@ -1743,7 +1797,7 @@ export const createStudioDirectorCommandWriterV2 = (
         // eslint-disable-next-line no-await-in-loop
         receipt = await readReceipt();
         if (receipt.status === 'valid') {
-          return receipt.record.expectedRevision === prepared.command.expectedRevision &&
+          return studioDirectorCommandReceiptMatchesRecordV2(receipt.record, prepared.command) &&
             !receiptRequiresInvalidPendingV2(receipt.record)
             ? receipt.record
             : storageError(commandId);
@@ -1753,7 +1807,7 @@ export const createStudioDirectorCommandWriterV2 = (
       }
       receipt = await readReceipt();
       if (receipt.status === 'valid') {
-        return receipt.record.expectedRevision === prepared.command.expectedRevision &&
+        return studioDirectorCommandReceiptMatchesRecordV2(receipt.record, prepared.command) &&
           !receiptRequiresInvalidPendingV2(receipt.record)
           ? receipt.record
           : storageError(commandId);
@@ -1766,5 +1820,20 @@ export const createStudioDirectorCommandWriterV2 = (
     }
   };
 
-  return { apply, getStatus };
+  const apply = async (input: StudioApplyEditsInputV2): Promise<StudioDirectorToolApplyResultV2> =>
+    (await submit({ policy: 'auto_apply', input })) as StudioDirectorToolApplyResultV2;
+
+  const getProjectStatus = async (
+    input: StudioGetProjectStatusDirectorInputV2 = {}
+  ): Promise<StudioDirectorToolQueryResultV2> => {
+    const detail = normalizedProjectStatusDetailV2(input);
+    return detail === null
+      ? storageError('unavailable')
+      : ((await submit({ policy: 'get_project_status', detail })) as StudioDirectorToolQueryResultV2);
+  };
+
+  const listRoutes = async (): Promise<StudioDirectorToolQueryResultV2> =>
+    (await submit({ policy: 'list_routes' })) as StudioDirectorToolQueryResultV2;
+
+  return { apply, getProjectStatus, listRoutes, getStatus };
 };

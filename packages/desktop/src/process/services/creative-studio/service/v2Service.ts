@@ -3257,8 +3257,9 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
 
     async listRoutes(input = {}): Promise<StudioRouteCatalogV2> {
       if (input.projectId !== undefined) assertSafeId(input.projectId, 'project id');
+      const generation = await refreshGenerationRoutes();
       const project = input.projectId === undefined ? null : await loadSupported(input.projectId);
-      return toRouteCatalog(await refreshGenerationRoutes(), project);
+      return toRouteCatalog(generation, project);
     },
 
     async getProjectStatus(input): Promise<StudioProjectStatusV2> {

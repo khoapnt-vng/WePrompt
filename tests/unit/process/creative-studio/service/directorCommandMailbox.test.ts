@@ -369,6 +369,63 @@ describe('Studio Director schema-2 command mailbox', () => {
     );
   });
 
+  it('checks transient query authority synchronously at the final immutable receipt link', async () => {
+    await mailbox.ensure(projectId);
+    let active = true;
+    let activeAtLink: boolean | null = null;
+    const racingFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'link') {
+          const value = Reflect.get(target, property, receiver) as unknown;
+          return typeof value === 'function' ? value.bind(target) : value;
+        }
+        return async (...args: Parameters<typeof nodeFs.link>) => {
+          activeAtLink = active;
+          return nodeFs.link(...args);
+        };
+      },
+    }) as typeof nodeFs;
+    const racingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: racingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+    const receipt: StudioDirectorCommandReceiptV2 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'query_fence',
+      projectId,
+      decidedAt: NOW,
+      status: 'failed',
+      query: { kind: 'list_routes' },
+      reasonCode: 'route_inventory_unavailable',
+    };
+
+    await racingMailbox.writeReceipt(projectId, receipt, () => {
+      queueMicrotask(() => {
+        active = false;
+      });
+      return active;
+    });
+
+    expect(activeAtLink).toBe(true);
+    expect(active).toBe(false);
+    await expect(racingMailbox.readReceipt(projectId, receipt.commandId)).resolves.toEqual({
+      status: 'valid',
+      record: receipt,
+    });
+
+    const denied: StudioDirectorCommandReceiptV2 = { ...receipt, commandId: 'query_fence_denied' };
+    await expect(racingMailbox.writeReceipt(projectId, denied, () => false)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    expect(existsSync(path.join(commandDirectories(rootDir, projectId).receipts, `${denied.commandId}.json`))).toBe(
+      false
+    );
+    await racingMailbox.dispose();
+  });
+
   it('keeps a published receipt immutable across an exact duplicate write', async () => {
     const receipt = makeReceiptV2(projectId, 'immutable_receipt');
     await mailbox.writeReceipt(projectId, receipt);
@@ -607,12 +664,12 @@ describe('Studio Director schema-2 command mailbox', () => {
       }),
     },
     {
-      label: 'future schema-6 record',
+      label: 'future Director command schema record',
       expectedRevision: 1,
       reasonCode: 'unsupported_version' as const,
       pending: (boundProjectId: string, commandId: string): unknown => ({
         ...makeCommandV2(boundProjectId, commandId),
-        schemaVersion: 6,
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 + 1,
       }),
     },
   ])('finishes an exactly rejected $label while retaining its receipt', async (testCase) => {
@@ -1708,6 +1765,38 @@ describe('Studio Director schema-2 command mailbox', () => {
       status: 'unsupported_prototype_schema',
     });
     await expect(mailbox.finish(projectId, 'command_v1')).rejects.toMatchObject({ code: 'storage_error' });
+    await mailbox.releaseOrphanedSlotsPage(null, '2026-08-16T12:00:20.000Z', 64);
+    await mailbox.pruneReceiptsPage(null, '2026-08-17T12:00:00.000Z', 64);
+
+    expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
+  });
+
+  it('reports immediate-prior schema-5 command sidecars as unsupported and leaves every byte untouched', async () => {
+    await mailbox.ensure(projectId);
+    const directories = commandDirectories(rootDir, projectId);
+    const commandId = 'command_v5';
+    const command = { ...makeCommandV2(projectId, commandId), schemaVersion: 5 };
+    const slot = { ...makeSlotV2(commandId), schemaVersion: 5 };
+    const lease = {
+      ...makeLeaseV2({ leaseId: 'lease_v5', owner: 'writer', slot: makeSlotV2(commandId) }),
+      schemaVersion: 5,
+    };
+    const receipt = { ...makeReceiptV2(projectId, commandId), schemaVersion: 5 };
+    await nodeFs.writeFile(path.join(directories.pending, `${commandId}.json`), JSON.stringify(command));
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot'), JSON.stringify(slot));
+    await nodeFs.writeFile(path.join(directories.slots, '0.slot.lease'), JSON.stringify(lease));
+    await nodeFs.writeFile(path.join(directories.receipts, `${commandId}.json`), JSON.stringify(receipt));
+    const before = await snapshotDirectoryBytes(directories.root);
+
+    await expect(mailbox.readPending(projectId, commandId)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      commandId,
+      expectedRevision: 1,
+    });
+    await expect(mailbox.readReceipt(projectId, commandId)).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+    await expect(mailbox.finish(projectId, commandId)).rejects.toMatchObject({ code: 'storage_error' });
     await mailbox.releaseOrphanedSlotsPage(null, '2026-08-16T12:00:20.000Z', 64);
     await mailbox.pruneReceiptsPage(null, '2026-08-17T12:00:00.000Z', 64);
 

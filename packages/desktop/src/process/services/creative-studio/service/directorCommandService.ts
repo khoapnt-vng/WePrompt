@@ -6,7 +6,7 @@
 
 import {
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
-  type StudioDirectorCommandRecordV2,
+  type StudioDirectorAutoApplyCommandRecordV2,
   type StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { CreativeStudioStoreError, type CreativeStudioStore } from '@process/services/creative-studio/store';
@@ -46,7 +46,7 @@ export class StudioDirectorCommandApplyErrorV2 extends Error {
 
 export type StudioDirectorCommandServiceV2 = {
   apply(
-    command: StudioDirectorCommandRecordV2,
+    command: StudioDirectorAutoApplyCommandRecordV2,
     latestApplyStartMs: number,
     attribution: StudioDirectorCommitAttribution
   ): Promise<StudioDirectorCommandApplyResultV2>;

@@ -11,12 +11,16 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
   type CreateStudioProjectInputV2,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
+  type StudioDirectorQueryCommandRecordV2,
   type StudioProjectV2,
+  type StudioProjectStatusV2,
+  type StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createStudioDirectorCommandProcessorV2,
@@ -33,6 +37,7 @@ import {
   type StudioDirectorCommandMailboxV2,
 } from '@process/services/creative-studio/service/directorCommandMailbox';
 import { createStudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
+import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
 import { createCreativeStudioStore, CreativeStudioStoreError } from '@process/services/creative-studio/store';
 
 const NOW_MS = Date.parse('2026-08-16T12:00:10.000Z');
@@ -59,7 +64,7 @@ const realCommandDirectories = (rootDir: string, projectId: string) => {
 const snapshotDirectoryBytes = async (root: string): Promise<Record<string, string>> => {
   const result: Record<string, string> = {};
   const visit = async (directory: string): Promise<void> => {
-    const entries = (await nodeFs.readdir(directory, { withFileTypes: true })).sort((left, right) =>
+    const entries = (await nodeFs.readdir(directory, { withFileTypes: true })).toSorted((left, right) =>
       left.name.localeCompare(right.name)
     );
     for (const entry of entries) {
@@ -126,6 +131,149 @@ const makeCommandV2 = (
   ...overrides,
 });
 
+const makeQueryCommandV2 = (
+  policy: 'get_project_status' | 'list_routes',
+  commandId = 'query_v2',
+  detail = false
+): StudioDirectorQueryCommandRecordV2 =>
+  policy === 'get_project_status'
+    ? {
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+        commandId,
+        projectId: 'project_v2',
+        createdAt: '2026-08-16T12:00:00.000Z',
+        deadlineAt: '2026-08-16T12:00:15.000Z',
+        policy,
+        detail,
+      }
+    : {
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+        commandId,
+        projectId: 'project_v2',
+        createdAt: '2026-08-16T12:00:00.000Z',
+        deadlineAt: '2026-08-16T12:00:15.000Z',
+        policy,
+      };
+
+const makeProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
+  projectId: 'project_v2',
+  projectRevision: 2,
+  catalogVersion: '0123456789abcdef',
+  stages: [
+    { id: 'brief', state: 'complete', summary: { stage: 'brief', hasBrief: true }, blockers: [] },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state: 'complete',
+      summary: { stage: 'references', plannedCount: 0, approvedCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'storyboard',
+      state: 'not_started',
+      summary: {
+        stage: 'storyboard',
+        beatCount: 0,
+        shotCount: 0,
+        authoredShotCount: 0,
+        plannedSeconds: 0,
+        targetSeconds: 30,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state: 'complete',
+      summary: { stage: 'bindings', readyShotCount: 0, shotCount: 0, maxConditioningImages: 3 },
+      blockers: [],
+    },
+    {
+      id: 'production',
+      state: 'not_started',
+      summary: { stage: 'production', currentTakeCount: 0, shotCount: 0, activeJobCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'cut',
+      state: 'not_started',
+      summary: {
+        stage: 'cut',
+        currentTakeCount: 0,
+        shotCount: 0,
+        durationSeconds: null,
+        targetSeconds: 30,
+        structurallyPlayable: false,
+      },
+      blockers: [],
+    },
+  ],
+  blockerCount: 0,
+  advisories: [],
+  boards: { currentPictureCount: 0, shotCount: 0 },
+  detail: detail ? { shots: [], references: [] } : null,
+});
+
+const makeUnavailableRoutesV2 = (): StudioRouteCatalogV2 => ({
+  catalogVersion: 'fedcba9876543210',
+  image: {
+    status: 'unavailable',
+    selected: null,
+    selectedRoute: null,
+    selectionIssue: { code: 'health' },
+    options: [],
+  },
+  video: {
+    status: 'unavailable',
+    selected: null,
+    selectedRoute: null,
+    selectionIssue: { code: 'health' },
+    options: [],
+  },
+});
+
+const makeRouteOptionV2 = (role: 'image' | 'video', index: number, padded = false) => ({
+  choiceId: `choice_${index.toString(16).padStart(24, '0')}`,
+  providerId: padded ? `p${'x'.repeat(255)}` : `provider_${role}`,
+  providerName: padded ? 'P'.repeat(256) : `${role} provider`,
+  model: padded ? 'M'.repeat(256) : `${role} model`,
+  integrationLabelKey: role === 'image' ? ('imageApi' as const) : ('bytePlusSeedance' as const),
+  health: 'available' as const,
+  kind: role,
+  constraints: {
+    aspectRatios: ['16:9' as const],
+    resolutions: ['1080p' as const],
+    minDurationSeconds: 4,
+    maxDurationSeconds: 8,
+    supportedDurationSeconds: [4, 8],
+    supportsFirstFrame: role === 'video',
+    maxConditioningImages: role === 'image' ? 3 : 0,
+    silentOutput: role === 'video',
+  },
+});
+
+const makeOversizedRoutesV2 = (): StudioRouteCatalogV2 => ({
+  catalogVersion: 'fedcba9876543210',
+  image: {
+    status: 'selection_required',
+    selected: null,
+    selectedRoute: null,
+    selectionIssue: null,
+    options: Array.from({ length: 256 }, (_, index) => makeRouteOptionV2('image', index + 1, true)),
+  },
+  video: {
+    status: 'selection_required',
+    selected: null,
+    selectedRoute: null,
+    selectionIssue: null,
+    options: Array.from({ length: 256 }, (_, index) => makeRouteOptionV2('video', index + 1, true)),
+  },
+});
+
 const makeProjectV2 = (projectId = 'project_v2', revision = 1): StudioProjectV2 =>
   ({
     id: projectId,
@@ -142,7 +290,18 @@ type HarnessV2 = {
   receipts: Map<string, StudioDirectorCommandReceiptV2>;
   projects: Map<string, StudioProjectV2 | 'unsupported_prototype_schema'>;
   serviceApply: ReturnType<typeof vi.fn<StudioDirectorCommandServiceV2['apply']>>;
-  writeReceipt: ReturnType<typeof vi.fn<(projectId: string, receipt: StudioDirectorCommandReceiptV2) => Promise<void>>>;
+  serviceGetProjectStatus: ReturnType<typeof vi.fn>;
+  serviceListRoutes: ReturnType<typeof vi.fn>;
+  storeGetProject: ReturnType<typeof vi.fn>;
+  writeReceipt: ReturnType<
+    typeof vi.fn<
+      (
+        projectId: string,
+        receipt: StudioDirectorCommandReceiptV2,
+        authorizeBeforePublish?: () => boolean
+      ) => Promise<void>
+    >
+  >;
   finish: ReturnType<typeof vi.fn<(projectId: string, commandId: string) => Promise<void>>>;
   notify: ReturnType<typeof vi.fn<(projectId: string) => void>>;
   releaseOrphans: ReturnType<typeof vi.fn<StudioDirectorCommandMailboxV2['releaseOrphanedSlotsPage']>>;
@@ -158,6 +317,10 @@ const createHarnessV2 = (
     nowMs?: number;
     startupRefs?: Array<{ projectId: string; commandId: string }>;
     serviceApply?: StudioDirectorCommandServiceV2['apply'];
+    serviceGetProjectStatus?: (input: { projectId: string; detail?: boolean }) => Promise<StudioProjectStatusV2>;
+    serviceListRoutes?: (input: { projectId: string }) => Promise<StudioRouteCatalogV2>;
+    queryAuthorityActive?: () => boolean;
+    beforeReceiptPublish?: () => Promise<void>;
   } = {}
 ): HarnessV2 => {
   const pendings = new Map<string, Awaited<ReturnType<StudioDirectorCommandMailboxV2['readPending']>>>();
@@ -169,14 +332,20 @@ const createHarnessV2 = (
   let watcher: ((projectId: string, commandId?: string) => void) | null = null;
   let remainingReceiptFailures = 0;
   let remainingFinishFailures = 0;
-  const writeReceipt = vi.fn(async (projectId: string, receipt: StudioDirectorCommandReceiptV2) => {
-    if (remainingReceiptFailures > 0) {
-      remainingReceiptFailures -= 1;
-      throw new CreativeStudioStoreError('storage_error', 'receipt write failed');
+  const writeReceipt = vi.fn(
+    async (projectId: string, receipt: StudioDirectorCommandReceiptV2, authorizeBeforePublish?: () => boolean) => {
+      if (remainingReceiptFailures > 0) {
+        remainingReceiptFailures -= 1;
+        throw new CreativeStudioStoreError('storage_error', 'receipt write failed');
+      }
+      await input.beforeReceiptPublish?.();
+      if (authorizeBeforePublish !== undefined && !authorizeBeforePublish()) {
+        throw new CreativeStudioStoreError('storage_error', 'receipt publication fenced');
+      }
+      receipts.set(keyOf(projectId, receipt.commandId), structuredClone(receipt));
+      receiptReads.set(keyOf(projectId, receipt.commandId), { status: 'valid', record: structuredClone(receipt) });
     }
-    receipts.set(keyOf(projectId, receipt.commandId), structuredClone(receipt));
-    receiptReads.set(keyOf(projectId, receipt.commandId), { status: 'valid', record: structuredClone(receipt) });
-  });
+  );
   const finish = vi.fn(async (projectId: string, commandId: string) => {
     if (remainingFinishFailures > 0) {
       remainingFinishFailures -= 1;
@@ -232,19 +401,25 @@ const createHarnessV2 = (
     };
   };
   const serviceApply = vi.fn(input.serviceApply ?? defaultApply);
+  const serviceGetProjectStatus = vi.fn(
+    input.serviceGetProjectStatus ?? (async ({ detail }) => makeProjectStatusV2(detail === true))
+  );
+  const serviceListRoutes = vi.fn(input.serviceListRoutes ?? (async () => makeUnavailableRoutesV2()));
+  const storeGetProject = vi.fn(async (projectId: string) => {
+    const project = projects.get(projectId);
+    if (project === undefined) return { status: 'not_found' as const, projectId };
+    if (project === 'unsupported_prototype_schema') {
+      return { status: 'unsupported_prototype_schema' as const, projectId };
+    }
+    return { status: 'supported' as const, project };
+  });
   const notify = vi.fn<(projectId: string) => void>();
   const processor = createStudioDirectorCommandProcessorV2({
-    store: {
-      getProjectV2: async (projectId) => {
-        const project = projects.get(projectId);
-        if (project === undefined) return { status: 'not_found', projectId };
-        if (project === 'unsupported_prototype_schema') return { status: 'unsupported_prototype_schema', projectId };
-        return { status: 'supported', project };
-      },
-    },
+    store: { getProjectV2: storeGetProject },
     mailbox,
-    service: { apply: serviceApply },
+    service: { apply: serviceApply, getProjectStatus: serviceGetProjectStatus, listRoutes: serviceListRoutes },
     tracker,
+    queryAuthorityActive: input.queryAuthorityActive,
     onProjectUpdated: notify,
     now: () => input.nowMs ?? NOW_MS,
     setInterval: (callback, delayMs) => {
@@ -266,6 +441,9 @@ const createHarnessV2 = (
     receipts,
     projects,
     serviceApply,
+    serviceGetProjectStatus,
+    serviceListRoutes,
+    storeGetProject,
     writeReceipt,
     finish,
     notify,
@@ -285,7 +463,9 @@ const createHarnessV2 = (
 };
 
 const addLiveCommandV2 = (harness: HarnessV2, command: StudioDirectorCommandRecordV2): void => {
-  harness.projects.set(command.projectId, makeProjectV2(command.projectId, command.expectedRevision));
+  if (command.policy === 'auto_apply') {
+    harness.projects.set(command.projectId, makeProjectV2(command.projectId, command.expectedRevision));
+  }
   harness.pendings.set(keyOf(command.projectId, command.commandId), { status: 'valid', record: command });
 };
 
@@ -366,6 +546,256 @@ describe('Studio Director schema-2 commit tracker', () => {
 });
 
 describe('Studio Director schema-2 command processor', () => {
+  it('answers an exact status query without loading, mutating, tracking, notifying, or spending', async () => {
+    const harness = createHarnessV2();
+    const trackerExpect = vi.spyOn(harness.tracker, 'expect');
+    const trackerPending = vi.spyOn(harness.tracker, 'pendingReceipt');
+    const trackerMaterialize = vi.spyOn(harness.tracker, 'materialize');
+    const trackerClear = vi.spyOn(harness.tracker, 'clear');
+    await harness.processor.start();
+    const command = makeQueryCommandV2('get_project_status', 'status_query', true);
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+    expect(receipt).toEqual({
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      decidedAt: new Date(NOW_MS).toISOString(),
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: true },
+      result: makeProjectStatusV2(true),
+    });
+    expect(harness.serviceGetProjectStatus).toHaveBeenCalledExactlyOnceWith({
+      projectId: command.projectId,
+      detail: true,
+    });
+    expect(harness.storeGetProject).not.toHaveBeenCalled();
+    expect(harness.serviceApply).not.toHaveBeenCalled();
+    expect(harness.serviceListRoutes).not.toHaveBeenCalled();
+    expect(harness.notify).not.toHaveBeenCalled();
+    expect(trackerExpect).not.toHaveBeenCalled();
+    expect(trackerPending).not.toHaveBeenCalled();
+    expect(trackerMaterialize).not.toHaveBeenCalled();
+    expect(trackerClear).not.toHaveBeenCalled();
+  });
+
+  it('defers a live route query until the exact read graph activates, then answers on the 500 ms sweep', async () => {
+    let active = false;
+    const harness = createHarnessV2({ queryAuthorityActive: () => active });
+    await harness.processor.start();
+    const command = makeQueryCommandV2('list_routes', 'routes_query');
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    await vi.waitFor(() => expect(harness.mailbox.readPending).toHaveBeenCalled());
+    expect(harness.serviceListRoutes).not.toHaveBeenCalled();
+    expect(harness.receipts.size).toBe(0);
+
+    active = true;
+    harness.intervals.find(({ delayMs }) => delayMs === STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS)?.callback();
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+    expect(receipt).toEqual({
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      decidedAt: new Date(NOW_MS).toISOString(),
+      status: 'answered',
+      query: { kind: 'list_routes' },
+      result: makeUnavailableRoutesV2(),
+    });
+    expect(harness.storeGetProject).not.toHaveBeenCalled();
+    expect(harness.notify).not.toHaveBeenCalled();
+  });
+
+  it('expires snapshot queries before execution and gives a live elapsed deadline fixed precedence', async () => {
+    const snapshot = makeQueryCommandV2('get_project_status', 'snapshot_query', true);
+    const startup = createHarnessV2({
+      startupRefs: [{ projectId: snapshot.projectId, commandId: snapshot.commandId }],
+      queryAuthorityActive: () => false,
+    });
+    startup.pendings.set(keyOf(snapshot.projectId, snapshot.commandId), { status: 'valid', record: snapshot });
+    await startup.processor.start();
+    const startupReceipt = await waitForReceiptV2(startup, snapshot.projectId, snapshot.commandId);
+    expect(startupReceipt).toMatchObject({
+      status: 'expired',
+      query: { kind: 'get_project_status', detail: true },
+      reasonCode: 'expired_after_restart',
+    });
+    expect(startup.serviceGetProjectStatus).not.toHaveBeenCalled();
+
+    const elapsed = createHarnessV2({ nowMs: Date.parse('2026-08-16T12:00:15.000Z') });
+    await elapsed.processor.start();
+    const deadline = makeQueryCommandV2('list_routes', 'deadline_query');
+    addLiveCommandV2(elapsed, deadline);
+    elapsed.processor.trigger(deadline.projectId, deadline.commandId);
+    const elapsedReceipt = await waitForReceiptV2(elapsed, deadline.projectId, deadline.commandId);
+    expect(elapsedReceipt).toMatchObject({
+      status: 'expired',
+      query: { kind: 'list_routes' },
+      reasonCode: 'deadline_elapsed',
+    });
+    expect(elapsed.serviceListRoutes).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['status unknown error', 'get_project_status', new Error('provider secret'), 'project_read_unavailable'],
+    [
+      'active quarantined project',
+      'get_project_status',
+      new CreativeStudioServiceError('project_quarantined', 'project_v2'),
+      'project_read_unavailable',
+    ],
+    ['routes unknown error', 'list_routes', new Error('provider secret'), 'route_inventory_unavailable'],
+  ] as const)('terminalizes %s once with bounded copy', async (_label, policy, error, reasonCode) => {
+    const harness = createHarnessV2({
+      serviceGetProjectStatus: async () => {
+        throw error;
+      },
+      serviceListRoutes: async () => {
+        throw error;
+      },
+    });
+    await harness.processor.start();
+    const command = makeQueryCommandV2(policy, 'failed_query', true);
+    addLiveCommandV2(harness, command);
+    harness.processor.trigger(command.projectId, command.commandId);
+
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+    expect(receipt).toMatchObject({ status: 'failed', reasonCode });
+    expect(JSON.stringify(receipt)).not.toContain('provider secret');
+    expect(
+      policy === 'get_project_status' ? harness.serviceGetProjectStatus : harness.serviceListRoutes
+    ).toHaveBeenCalledOnce();
+    expect(harness.serviceApply).not.toHaveBeenCalled();
+    expect(harness.storeGetProject).not.toHaveBeenCalled();
+    expect(harness.notify).not.toHaveBeenCalled();
+  });
+
+  it('does not publish when read authority is revoked during service or at the atomic receipt fence', async () => {
+    let serviceActive = true;
+    let resolveStatus!: (status: StudioProjectStatusV2) => void;
+    const serviceResult = new Promise<StudioProjectStatusV2>((resolve) => {
+      resolveStatus = resolve;
+    });
+    const serviceRace = createHarnessV2({
+      queryAuthorityActive: () => serviceActive,
+      serviceGetProjectStatus: async () => serviceResult,
+    });
+    await serviceRace.processor.start();
+    const serviceCommand = makeQueryCommandV2('get_project_status', 'service_race');
+    addLiveCommandV2(serviceRace, serviceCommand);
+    serviceRace.processor.trigger(serviceCommand.projectId, serviceCommand.commandId);
+    await vi.waitFor(() => expect(serviceRace.serviceGetProjectStatus).toHaveBeenCalledOnce());
+    serviceActive = false;
+    resolveStatus(makeProjectStatusV2(false));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(serviceRace.writeReceipt).not.toHaveBeenCalled();
+    expect(serviceRace.pendings.has(keyOf(serviceCommand.projectId, serviceCommand.commandId))).toBe(true);
+
+    let publishActive = true;
+    let releasePublish!: () => void;
+    const publishGate = new Promise<void>((resolve) => {
+      releasePublish = resolve;
+    });
+    const publicationRace = createHarnessV2({
+      queryAuthorityActive: () => publishActive,
+      beforeReceiptPublish: async () => publishGate,
+    });
+    await publicationRace.processor.start();
+    const publicationCommand = makeQueryCommandV2('get_project_status', 'publication_race');
+    addLiveCommandV2(publicationRace, publicationCommand);
+    publicationRace.processor.trigger(publicationCommand.projectId, publicationCommand.commandId);
+    await vi.waitFor(() => expect(publicationRace.writeReceipt).toHaveBeenCalledOnce());
+    publishActive = false;
+    releasePublish();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(publicationRace.receipts.size).toBe(0);
+    expect(publicationRace.finish).not.toHaveBeenCalled();
+    expect(publicationRace.pendings.has(keyOf(publicationCommand.projectId, publicationCommand.commandId))).toBe(true);
+    expect(publicationRace.notify).not.toHaveBeenCalled();
+  });
+
+  it('keeps query receipt recovery completely outside the mutation commit tracker', async () => {
+    const harness = createHarnessV2();
+    const trackerExpect = vi.spyOn(harness.tracker, 'expect');
+    const trackerPending = vi.spyOn(harness.tracker, 'pendingReceipt');
+    const trackerMaterialize = vi.spyOn(harness.tracker, 'materialize');
+    const trackerClear = vi.spyOn(harness.tracker, 'clear');
+    await harness.processor.start();
+    const command = makeQueryCommandV2('get_project_status', 'cleanup_query');
+    addLiveCommandV2(harness, command);
+    harness.failNextFinishes(100);
+    harness.processor.trigger(command.projectId, command.commandId);
+    await vi.waitFor(() => expect(harness.receipts.has(keyOf(command.projectId, command.commandId))).toBe(true));
+    await vi.waitFor(() => expect(harness.finish).toHaveBeenCalled());
+    expect(harness.pendings.has(keyOf(command.projectId, command.commandId))).toBe(true);
+
+    harness.failNextFinishes(0);
+    harness.processor.trigger(command.projectId, command.commandId);
+    await vi.waitFor(() => expect(harness.pendings.has(keyOf(command.projectId, command.commandId))).toBe(false));
+    expect(harness.serviceGetProjectStatus).toHaveBeenCalledOnce();
+    expect(harness.finish.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(trackerExpect).not.toHaveBeenCalled();
+    expect(trackerPending).not.toHaveBeenCalled();
+    expect(trackerMaterialize).not.toHaveBeenCalled();
+    expect(trackerClear).not.toHaveBeenCalled();
+    expect(harness.notify).not.toHaveBeenCalled();
+  });
+
+  it('classifies malformed and oversized service answers without leaking or writing project state', async () => {
+    let getterCalls = 0;
+    const accessorResult = makeProjectStatusV2(false) as StudioProjectStatusV2 & Record<string, unknown>;
+    Object.defineProperty(accessorResult, 'detail', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return null;
+      },
+    });
+    const accessor = createHarnessV2({ serviceGetProjectStatus: async () => accessorResult });
+    await accessor.processor.start();
+    const accessorCommand = makeQueryCommandV2('get_project_status', 'accessor_query');
+    addLiveCommandV2(accessor, accessorCommand);
+    accessor.processor.trigger(accessorCommand.projectId, accessorCommand.commandId);
+    expect(await waitForReceiptV2(accessor, accessorCommand.projectId, accessorCommand.commandId)).toMatchObject({
+      status: 'failed',
+      reasonCode: 'result_mismatch',
+    });
+    expect(getterCalls).toBe(0);
+
+    const mismatch = createHarnessV2({
+      serviceGetProjectStatus: async () => ({ ...makeProjectStatusV2(false), projectId: 'other' }),
+    });
+    await mismatch.processor.start();
+    const mismatchCommand = makeQueryCommandV2('get_project_status', 'mismatch_query');
+    addLiveCommandV2(mismatch, mismatchCommand);
+    mismatch.processor.trigger(mismatchCommand.projectId, mismatchCommand.commandId);
+    expect(await waitForReceiptV2(mismatch, mismatchCommand.projectId, mismatchCommand.commandId)).toMatchObject({
+      status: 'failed',
+      reasonCode: 'result_mismatch',
+    });
+
+    const largeResult = makeOversizedRoutesV2();
+    expect(Buffer.byteLength(JSON.stringify(largeResult), 'utf8')).toBeGreaterThan(
+      STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES
+    );
+    const oversized = createHarnessV2({ serviceListRoutes: async () => largeResult });
+    await oversized.processor.start();
+    const oversizedCommand = makeQueryCommandV2('list_routes', 'oversized_query');
+    addLiveCommandV2(oversized, oversizedCommand);
+    oversized.processor.trigger(oversizedCommand.projectId, oversizedCommand.commandId);
+    expect(await waitForReceiptV2(oversized, oversizedCommand.projectId, oversizedCommand.commandId)).toMatchObject({
+      status: 'failed',
+      reasonCode: 'response_too_large',
+    });
+    expect(oversized.storeGetProject).not.toHaveBeenCalled();
+    expect(oversized.serviceApply).not.toHaveBeenCalled();
+    expect(oversized.notify).not.toHaveBeenCalled();
+  });
+
   it('writes one exact applied receipt, cleans once, and notifies exactly once', async () => {
     const harness = createHarnessV2();
     await harness.processor.start();

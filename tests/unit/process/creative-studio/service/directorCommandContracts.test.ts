@@ -18,6 +18,7 @@ import {
   isValidProviderJobId,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
+  type StudioDirectorQueryCommandRecordV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
   type StudioDirectorOperationV2,
@@ -29,6 +30,8 @@ import {
   type StudioReferenceRequestDecisionV2,
   type StudioReferenceRequestSlotV2,
   type StudioReferenceRequestV2,
+  type StudioProjectStatusV2,
+  type StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
 import * as directorCommandContracts from '@process/services/creative-studio/service/directorCommandContracts';
 import {
@@ -45,6 +48,7 @@ import {
   parseStudioReferenceRequestSlotV2,
   parseStudioReferenceRequestV2,
   STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
+  studioDirectorCommandReceiptMatchesRecordV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 
 const NOW = '2026-08-16T12:00:00.000Z';
@@ -126,6 +130,137 @@ const parsePendingV2 = (value: unknown, slot: unknown = validSlotV2()) =>
     waitMs: WAIT_MS,
   });
 
+const validQueryCommandV2 = (
+  policy: 'get_project_status' | 'list_routes',
+  detail = false
+): StudioDirectorQueryCommandRecordV2 =>
+  policy === 'get_project_status'
+    ? {
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+        commandId: 'command_1',
+        projectId: 'project_1',
+        createdAt: NOW,
+        deadlineAt: '2026-08-16T12:00:15.000Z',
+        policy,
+        detail,
+      }
+    : {
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+        commandId: 'command_1',
+        projectId: 'project_1',
+        createdAt: NOW,
+        deadlineAt: '2026-08-16T12:00:15.000Z',
+        policy,
+      };
+
+const validProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
+  projectId: 'project_1',
+  projectRevision: 4,
+  catalogVersion: '0123456789abcdef',
+  stages: [
+    { id: 'brief', state: 'complete', summary: { stage: 'brief', hasBrief: true }, blockers: [] },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state: 'complete',
+      summary: { stage: 'references', plannedCount: 0, approvedCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'storyboard',
+      state: 'not_started',
+      summary: {
+        stage: 'storyboard',
+        beatCount: 0,
+        shotCount: 0,
+        authoredShotCount: 0,
+        plannedSeconds: 0,
+        targetSeconds: 30,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state: 'complete',
+      summary: { stage: 'bindings', readyShotCount: 0, shotCount: 0, maxConditioningImages: 3 },
+      blockers: [],
+    },
+    {
+      id: 'production',
+      state: 'not_started',
+      summary: { stage: 'production', currentTakeCount: 0, shotCount: 0, activeJobCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'cut',
+      state: 'not_started',
+      summary: {
+        stage: 'cut',
+        currentTakeCount: 0,
+        shotCount: 0,
+        durationSeconds: null,
+        targetSeconds: 30,
+        structurallyPlayable: false,
+      },
+      blockers: [],
+    },
+  ],
+  blockerCount: 0,
+  advisories: [],
+  boards: { currentPictureCount: 0, shotCount: 0 },
+  detail: detail ? { shots: [], references: [] } : null,
+});
+
+const routeEntryV2 = (role: 'image' | 'video', suffix: string) => ({
+  choiceId: `choice_${suffix.padStart(24, '0')}`,
+  providerId: `provider_${role}`,
+  providerName: role === 'image' ? 'Image provider' : 'Video provider',
+  model: role === 'image' ? 'image-model' : 'video-model',
+  integrationLabelKey: role === 'image' ? ('imageApi' as const) : ('bytePlusSeedance' as const),
+  health: 'available' as const,
+  kind: role,
+  constraints: {
+    aspectRatios: ['16:9' as const],
+    resolutions: ['1080p' as const],
+    minDurationSeconds: 4,
+    maxDurationSeconds: 8,
+    supportedDurationSeconds: [4, 8],
+    supportsFirstFrame: role === 'video',
+    maxConditioningImages: role === 'image' ? 3 : 0,
+    silentOutput: role === 'video',
+  },
+});
+
+const validRouteCatalogV2 = (): StudioRouteCatalogV2 => {
+  const image = routeEntryV2('image', '1');
+  const video = routeEntryV2('video', '2');
+  return {
+    catalogVersion: 'fedcba9876543210',
+    image: {
+      status: 'ready',
+      selected: { choiceId: image.choiceId, providerId: image.providerId, model: image.model },
+      selectedRoute: image,
+      selectionIssue: null,
+      options: [image],
+    },
+    video: {
+      status: 'ready',
+      selected: { choiceId: video.choiceId, providerId: video.providerId, model: video.model },
+      selectedRoute: video,
+      selectionIssue: null,
+      options: [video],
+    },
+  };
+};
+
+const parseReceiptV2 = (value: unknown) =>
+  parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value });
+
 describe('Studio Director V2 command contracts', () => {
   const operations: StudioDirectorOperationV2[] = [
     { kind: 'set_brief', brief: '' },
@@ -189,7 +324,7 @@ describe('Studio Director V2 command contracts', () => {
     ]) {
       expect(parsePendingV2(validCommandV2({ operations: [operation] })).status).toBe('valid');
     }
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(5);
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(6);
     expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
   });
 
@@ -424,6 +559,35 @@ describe('Studio Director V2 command contracts', () => {
     });
   });
 
+  it('treats the immediate-prior schema-5 command family as unsupported without migration', () => {
+    const command = { ...validCommandV2(), schemaVersion: 5 };
+    const slot = { ...validSlotV2(), schemaVersion: 5 };
+    const lease = { ...validLeaseV2(), schemaVersion: 5 };
+    const receipt = {
+      schemaVersion: 5,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      expectedRevision: 4,
+      decidedAt: NOW,
+      status: 'rejected',
+      observedRevision: 4,
+      reasonCode: 'validation_failed',
+    };
+
+    expect(parsePendingV2(command, slot)).toEqual({
+      status: 'unsupported_prototype_schema',
+      commandId: 'command_1',
+      expectedRevision: 4,
+    });
+    expect(parseStudioDirectorCommandSlotV2(slot, NOW, WAIT_MS)).toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+    expect(parseStudioDirectorCommandSlotLeaseV2(lease, NOW, WAIT_MS)).toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+    expect(parseReceiptV2(receipt)).toEqual({ status: 'unsupported_prototype_schema' });
+  });
+
   it('distinguishes unknown versions from malformed schema-2 records', () => {
     expect(
       parsePendingV2({ ...validCommandV2(), schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 + 1 })
@@ -506,6 +670,550 @@ describe('Studio Director V2 command contracts', () => {
 
     expect(parsePendingV2(command)).toMatchObject({ status: 'invalid', reasonCode: 'malformed_record' });
     expect(toJsonCalls).toBe(0);
+  });
+});
+
+describe('Studio Director V2 read-query contracts', () => {
+  it('accepts only exact normalized status and route commands while sidecar versions remain independent', () => {
+    const status = validQueryCommandV2('get_project_status', true);
+    const routes = validQueryCommandV2('list_routes');
+
+    expect(parsePendingV2(status)).toEqual({ status: 'valid', record: status });
+    expect(parsePendingV2(routes)).toEqual({ status: 'valid', record: routes });
+    expect(parsePendingV2({ ...status, detail: undefined })).toMatchObject({ status: 'invalid' });
+    expect(parsePendingV2({ ...status, expectedRevision: 4 })).toMatchObject({ status: 'invalid' });
+    expect(parsePendingV2({ ...routes, detail: false })).toMatchObject({ status: 'invalid' });
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(6);
+    expect(STUDIO_PROPOSAL_SCHEMA_VERSION_V2).toBe(5);
+    expect(STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION).toBe(5);
+  });
+
+  it('accepts exact answered, failed, and expired query receipts and correlates immutable query identity', () => {
+    const statusCommand = validQueryCommandV2('get_project_status', true);
+    const routeCommand = validQueryCommandV2('list_routes');
+    const statusReceipt: StudioDirectorCommandReceiptV2 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: true },
+      result: validProjectStatusV2(true),
+    };
+    const routeReceipt: StudioDirectorCommandReceiptV2 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'list_routes' },
+      result: validRouteCatalogV2(),
+    };
+    const failed: StudioDirectorCommandReceiptV2 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'failed',
+      query: { kind: 'get_project_status', detail: true },
+      reasonCode: 'project_read_unavailable',
+    };
+    const expired: StudioDirectorCommandReceiptV2 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'expired',
+      query: { kind: 'list_routes' },
+      reasonCode: 'deadline_elapsed',
+    };
+
+    for (const receipt of [statusReceipt, routeReceipt, failed, expired]) {
+      expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
+    }
+    expect(studioDirectorCommandReceiptMatchesRecordV2(statusReceipt, statusCommand)).toBe(true);
+    expect(studioDirectorCommandReceiptMatchesRecordV2(routeReceipt, routeCommand)).toBe(true);
+    expect(
+      studioDirectorCommandReceiptMatchesRecordV2(
+        { ...statusReceipt, query: { kind: 'get_project_status', detail: false } },
+        statusCommand
+      )
+    ).toBe(false);
+    expect(studioDirectorCommandReceiptMatchesRecordV2(routeReceipt, statusCommand)).toBe(false);
+  });
+
+  it('rejects a status result whose detail or catalog digest contradicts the exact query', () => {
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: false },
+      result: validProjectStatusV2(false),
+    } as const;
+
+    expect(parseReceiptV2(receipt).status).toBe('valid');
+    expect(
+      parseReceiptV2({ ...receipt, result: { ...receipt.result, detail: { shots: [], references: [] } } })
+    ).toEqual({ status: 'invalid' });
+    for (const catalogVersion of ['abc', 'ABCDEF0123456789', '0123456789abcdeg', 'x'.repeat(512)]) {
+      expect(parseReceiptV2({ ...receipt, result: { ...receipt.result, catalogVersion } })).toEqual({
+        status: 'invalid',
+      });
+    }
+  });
+
+  it('recursively rejects authority-bearing status fields and impossible aggregate counts', () => {
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: false },
+      result: validProjectStatusV2(false),
+    };
+    const withSecret = structuredClone(receipt) as any;
+    withSecret.result.stages[0].summary.rawPrompt = 'secret';
+    const countMismatch = structuredClone(receipt) as any;
+    countMismatch.result.stages[3].summary.shotCount = 1;
+    const blockedWithoutBlocker = structuredClone(receipt) as any;
+    blockedWithoutBlocker.result.stages[0].state = 'blocked';
+
+    for (const invalid of [withSecret, countMismatch, blockedWithoutBlocker]) {
+      expect(parseReceiptV2(invalid)).toEqual({ status: 'invalid' });
+      expect(JSON.stringify(parseReceiptV2(invalid))).not.toContain('secret');
+    }
+  });
+
+  it('accepts fieldwise-equivalent routes and rejects contradictory or over-cap catalogs', () => {
+    const catalog = validRouteCatalogV2();
+    const reordered = structuredClone(catalog);
+    const constraints = reordered.image.selectedRoute!.constraints;
+    reordered.image.selectedRoute!.constraints = {
+      silentOutput: constraints.silentOutput,
+      maxConditioningImages: constraints.maxConditioningImages,
+      supportsFirstFrame: constraints.supportsFirstFrame,
+      supportedDurationSeconds: constraints.supportedDurationSeconds,
+      maxDurationSeconds: constraints.maxDurationSeconds,
+      minDurationSeconds: constraints.minDurationSeconds,
+      resolutions: constraints.resolutions,
+      aspectRatios: constraints.aspectRatios,
+    };
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'list_routes' },
+      result: reordered,
+    };
+    expect(parseReceiptV2(receipt).status).toBe('valid');
+
+    const contradictions = [
+      { ...catalog, image: { ...catalog.image, status: 'selection_required' } },
+      { ...catalog, image: { ...catalog.image, selected: null } },
+      {
+        ...catalog,
+        image: { ...catalog.image, selectedRoute: { ...catalog.image.selectedRoute!, model: 'different' } },
+      },
+      { ...catalog, catalogVersion: 'not-a-digest' },
+    ];
+    for (const result of contradictions) {
+      expect(parseReceiptV2({ ...receipt, result })).toEqual({ status: 'invalid' });
+    }
+
+    const tooMany = validRouteCatalogV2();
+    tooMany.image = {
+      status: 'selection_required',
+      selected: null,
+      selectedRoute: null,
+      selectionIssue: null,
+      options: Array.from({ length: 257 }, (_, index) => routeEntryV2('image', `${index + 1}`)),
+    };
+    expect(parseReceiptV2({ ...receipt, result: tooMany })).toEqual({ status: 'invalid' });
+  });
+
+  it('accepts every bounded route-selection state and continuous-duration route shape', () => {
+    const continuous = routeEntryV2('image', '3');
+    continuous.health = 'unknown';
+    delete (continuous.constraints as Partial<typeof continuous.constraints>).supportedDurationSeconds;
+    continuous.constraints.minDurationSeconds = 1;
+    continuous.constraints.maxDurationSeconds = 60;
+    const variants: StudioRouteCatalogV2['image'][] = [
+      {
+        status: 'selection_required',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: null,
+        options: [continuous],
+      },
+      {
+        status: 'setup_required',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: null,
+        options: [],
+      },
+      {
+        status: 'unavailable',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: { code: 'health' },
+        options: [],
+      },
+      {
+        status: 'unavailable',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: { code: 'retired' },
+        options: [],
+      },
+      {
+        status: 'unavailable',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: { code: 'needs_setup', providerName: 'Image provider' },
+        options: [],
+      },
+      {
+        status: 'unavailable',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: { code: 'frame', aspectRatio: '16:9', resolution: '1080p' },
+        options: [continuous],
+      },
+    ];
+    const baseReceipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'list_routes' },
+    } as const;
+
+    for (const image of variants) {
+      const result = validRouteCatalogV2();
+      result.image = image;
+      expect(parseReceiptV2({ ...baseReceipt, result }).status).toBe('valid');
+    }
+  });
+
+  it('accepts a detailed status spanning every remedy lane and nested diagnostic shape', () => {
+    const result = validProjectStatusV2(true);
+    result.catalogVersion = null;
+    result.advisories = [
+      {
+        cause: 'target_duration_mismatch',
+        stage: 'storyboard',
+        actualSeconds: 8,
+        targetSeconds: 30,
+      },
+      {
+        cause: 'current_take_stale',
+        stage: 'production',
+        shotId: 'shot_1',
+        staleCauses: ['continuity_stale', 'generation_out_of_date'],
+      },
+    ];
+
+    const engines = result.stages.find((stage) => stage.id === 'engines')!;
+    engines.state = 'blocked';
+    engines.summary = { stage: 'engines', image: 'selection_required', video: 'unavailable' };
+    engines.blockers = [
+      {
+        cause: 'route_inventory_unavailable',
+        where: { kind: 'project' },
+        remedy: { kind: 'owner_only', reason: 'repair_engine_health' },
+      },
+      {
+        cause: 'route_duration_unsupported',
+        where: {
+          kind: 'shot',
+          beatId: 'beat_1',
+          shotId: 'shot_2',
+          beatPosition: 1,
+          shotPosition: 2,
+          jobId: null,
+        },
+        remedy: { kind: 'owner_only', reason: 'choose_compatible_engine' },
+      },
+    ];
+
+    const references = result.stages.find((stage) => stage.id === 'references')!;
+    references.state = 'blocked';
+    references.summary = { stage: 'references', plannedCount: 2, approvedCount: 1 };
+    references.blockers = [
+      {
+        cause: 'reference_generation_required',
+        where: { kind: 'reference', referenceId: 'background_1', jobId: null },
+        remedy: {
+          kind: 'proposal',
+          prepare: { kind: 'project_references', referenceIds: ['background_1'] },
+          estimatedMinorUnits: null,
+          currency: null,
+        },
+      },
+    ];
+
+    const storyboard = result.stages.find((stage) => stage.id === 'storyboard')!;
+    storyboard.state = 'in_progress';
+    storyboard.summary = {
+      stage: 'storyboard',
+      beatCount: 1,
+      shotCount: 2,
+      authoredShotCount: 2,
+      plannedSeconds: 8,
+      targetSeconds: 30,
+    };
+
+    const bindings = result.stages.find((stage) => stage.id === 'bindings')!;
+    bindings.state = 'blocked';
+    bindings.summary = { stage: 'bindings', readyShotCount: 1, shotCount: 2, maxConditioningImages: null };
+    bindings.blockers = [
+      {
+        cause: 'reference_binding_capacity_exceeded',
+        where: {
+          kind: 'shot',
+          beatId: 'beat_1',
+          shotId: 'shot_2',
+          beatPosition: 1,
+          shotPosition: 2,
+          jobId: null,
+        },
+        remedy: { kind: 'free_fix', op: 'set_shot_reference_binding', shotId: 'shot_2' },
+      },
+    ];
+
+    const production = result.stages.find((stage) => stage.id === 'production')!;
+    production.state = 'blocked';
+    production.summary = { stage: 'production', currentTakeCount: 1, shotCount: 2, activeJobCount: 1 };
+    production.blockers = [
+      {
+        cause: 'conditioning_frame_required',
+        where: {
+          kind: 'shot',
+          beatId: 'beat_1',
+          shotId: 'shot_2',
+          beatPosition: 1,
+          shotPosition: 2,
+          jobId: null,
+        },
+        remedy: { kind: 'free_fix', op: 'retry_conditioning_frame', dependentShotId: 'shot_2' },
+      },
+      {
+        cause: 'generation_content_rejected',
+        where: {
+          kind: 'shot',
+          beatId: 'beat_1',
+          shotId: 'shot_2',
+          beatPosition: 1,
+          shotPosition: 2,
+          jobId: 'job_refused',
+        },
+        remedy: { kind: 'free_fix', op: 'terminalize_refused_job', jobId: 'job_refused' },
+      },
+      {
+        cause: 'seed_generation_required',
+        where: {
+          kind: 'shot',
+          beatId: 'beat_1',
+          shotId: 'shot_2',
+          beatPosition: 1,
+          shotPosition: 2,
+          jobId: null,
+        },
+        remedy: {
+          kind: 'proposal',
+          prepare: {
+            kind: 'generation',
+            baseChoices: [],
+            cascadeChoices: [],
+            continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+          },
+          estimatedMinorUnits: null,
+          currency: null,
+        },
+      },
+      {
+        cause: 'seed_generation_required',
+        where: {
+          kind: 'shot',
+          beatId: 'beat_1',
+          shotId: 'shot_1',
+          beatPosition: 1,
+          shotPosition: 1,
+          jobId: null,
+        },
+        remedy: {
+          kind: 'proposal',
+          prepare: {
+            kind: 'generation',
+            baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+            cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'board_still' }],
+            continuityChange: null,
+          },
+          estimatedMinorUnits: null,
+          currency: null,
+        },
+      },
+    ];
+
+    const cut = result.stages.find((stage) => stage.id === 'cut')!;
+    cut.state = 'blocked';
+    cut.summary = {
+      stage: 'cut',
+      currentTakeCount: 1,
+      shotCount: 2,
+      durationSeconds: 8,
+      targetSeconds: 30,
+      structurallyPlayable: false,
+    };
+    cut.blockers = [
+      {
+        cause: 'cut_invalid_media',
+        where: { kind: 'cut' },
+        remedy: { kind: 'owner_only', reason: 'edit_cut' },
+      },
+    ];
+
+    result.boards = { currentPictureCount: 1, shotCount: 2 };
+    result.blockerCount = result.stages.reduce((count, stage) => count + stage.blockers.length, 0);
+    result.detail = {
+      shots: [
+        {
+          beatId: 'beat_1',
+          shotId: 'shot_1',
+          beatPosition: 1,
+          shotPosition: 1,
+          seedStillAssetId: 'seed_1',
+          videoAssetId: 'video_1',
+          latestGenerationJob: {
+            jobId: 'job_video_1',
+            purpose: 'video_take',
+            status: 'succeeded',
+            errorCode: null,
+          },
+          binding: { status: 'ready', selectedCount: 2, limit: null },
+          conditioning: null,
+        },
+        {
+          beatId: 'beat_1',
+          shotId: 'shot_2',
+          beatPosition: 1,
+          shotPosition: 2,
+          seedStillAssetId: null,
+          videoAssetId: null,
+          latestGenerationJob: {
+            jobId: 'job_seed_2',
+            purpose: 'seed_still',
+            status: 'failed',
+            errorCode: 'content_rejected',
+          },
+          binding: { status: 'invalid', reason: 'capacity_exceeded', selectedCount: 4, limit: 3 },
+          conditioning: {
+            upstreamShotId: 'shot_1',
+            recordStatus: 'failed',
+            mediaVerified: false,
+            extractionId: 'extraction_1',
+            errorCode: 'decode_failed',
+            attemptCount: 3,
+          },
+        },
+      ],
+      references: [
+        {
+          referenceId: 'character_1',
+          kind: 'character',
+          approved: true,
+          latestJob: { jobId: 'job_character_1', status: 'succeeded', errorCode: null },
+        },
+        {
+          referenceId: 'background_1',
+          kind: 'background',
+          approved: false,
+          latestJob: { jobId: 'job_background_1', status: 'needs_attention', errorCode: 'content_rejected' },
+        },
+      ],
+    };
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: true },
+      result,
+    } as const;
+
+    expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
+  });
+
+  it('keeps current-segment recovery valid when a downstream blocker prepares an earlier Shot root', () => {
+    const result = validProjectStatusV2(false);
+    const storyboard = result.stages.find((stage) => stage.id === 'storyboard')!;
+    storyboard.summary = {
+      stage: 'storyboard',
+      beatCount: 1,
+      shotCount: 2,
+      authoredShotCount: 2,
+      plannedSeconds: 8,
+      targetSeconds: 30,
+    };
+    const bindings = result.stages.find((stage) => stage.id === 'bindings')!;
+    bindings.summary = { stage: 'bindings', readyShotCount: 2, shotCount: 2, maxConditioningImages: 3 };
+    const production = result.stages.find((stage) => stage.id === 'production')!;
+    production.summary = { stage: 'production', currentTakeCount: 0, shotCount: 2, activeJobCount: 0 };
+    production.state = 'blocked';
+    production.blockers = [
+      {
+        cause: 'generation_timeout',
+        where: {
+          kind: 'shot',
+          beatId: 'beat_1',
+          shotId: 'shot_downstream',
+          beatPosition: 0,
+          shotPosition: 1,
+          jobId: 'job_failed',
+        },
+        remedy: {
+          kind: 'proposal',
+          estimatedMinorUnits: null,
+          currency: null,
+          prepare: {
+            kind: 'generation',
+            baseChoices: [{ target: { kind: 'shot', shotId: 'shot_root' }, purpose: 'video_take' }],
+            cascadeChoices: [],
+            continuityChange: null,
+          },
+        },
+      },
+    ];
+    const cut = result.stages.find((stage) => stage.id === 'cut')!;
+    cut.summary = {
+      stage: 'cut',
+      currentTakeCount: 0,
+      shotCount: 2,
+      durationSeconds: null,
+      targetSeconds: 30,
+      structurallyPlayable: false,
+    };
+    result.boards.shotCount = 2;
+    result.blockerCount = 1;
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: false },
+      result,
+    };
+
+    expect(parseReceiptV2(receipt).status).toBe('valid');
   });
 });
 

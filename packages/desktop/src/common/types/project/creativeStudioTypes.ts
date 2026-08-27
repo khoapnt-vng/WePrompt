@@ -169,7 +169,7 @@ export const isValidProviderJobId = (value: string): boolean =>
 
 export const STUDIO_MAX_DIRTY_DRAFTS_REPORTED = 24;
 /** Durable Beat/Shot Director command schema. */
-export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 5 as const;
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 6 as const;
 export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 5 as const;
 export const STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION = 5 as const;
 export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
@@ -206,16 +206,38 @@ export type StudioDirectorOperationV2 = Extract<
   }
 >;
 
-export type StudioDirectorCommandRecordV2 = {
+type StudioDirectorCommandRecordBaseV2 = {
   schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   commandId: string;
   projectId: string;
-  expectedRevision: number;
   createdAt: string;
   deadlineAt: string;
+};
+
+export type StudioDirectorAutoApplyCommandRecordV2 = StudioDirectorCommandRecordBaseV2 & {
   policy: 'auto_apply';
+  expectedRevision: number;
   operations: StudioDirectorOperationV2[];
 };
+
+export type StudioDirectorGetProjectStatusCommandRecordV2 = StudioDirectorCommandRecordBaseV2 & {
+  policy: 'get_project_status';
+  /** Normalized by the writer so durable identity never depends on omission semantics. */
+  detail: boolean;
+};
+
+export type StudioDirectorListRoutesCommandRecordV2 = StudioDirectorCommandRecordBaseV2 & {
+  policy: 'list_routes';
+};
+
+export type StudioDirectorQueryCommandRecordV2 =
+  | StudioDirectorGetProjectStatusCommandRecordV2
+  | StudioDirectorListRoutesCommandRecordV2;
+
+/** One durable lane carries both direct mutations and read-only Director queries. */
+export type StudioDirectorCommandRecordV2 = StudioDirectorAutoApplyCommandRecordV2 | StudioDirectorQueryCommandRecordV2;
+
+export type StudioDirectorQueryV2 = { kind: 'get_project_status'; detail: boolean } | { kind: 'list_routes' };
 
 export type StudioDirectorCommandSlotV2 = {
   schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
@@ -296,11 +318,57 @@ export type StudioDirectorIndeterminateReceiptV2 = {
   reasonCode: StudioDirectorCommandIndeterminateCode;
 };
 
-export type StudioDirectorCommandReceiptV2 =
+export type StudioDirectorQueryFailureCodeV2 =
+  | 'project_not_found'
+  | 'unsupported_prototype_schema'
+  | 'route_inventory_unavailable'
+  | 'project_read_unavailable'
+  | 'response_too_large'
+  | 'result_mismatch';
+
+type StudioDirectorQueryReceiptBaseV2 = {
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
+  commandId: string;
+  projectId: string;
+  decidedAt: string;
+};
+
+export type StudioDirectorAnsweredReceiptV2 =
+  | (StudioDirectorQueryReceiptBaseV2 & {
+      status: 'answered';
+      query: Extract<StudioDirectorQueryV2, { kind: 'get_project_status' }>;
+      result: StudioProjectStatusV2;
+    })
+  | (StudioDirectorQueryReceiptBaseV2 & {
+      status: 'answered';
+      query: Extract<StudioDirectorQueryV2, { kind: 'list_routes' }>;
+      result: StudioRouteCatalogV2;
+    });
+
+export type StudioDirectorFailedQueryReceiptV2 = StudioDirectorQueryReceiptBaseV2 & {
+  status: 'failed';
+  query: StudioDirectorQueryV2;
+  reasonCode: StudioDirectorQueryFailureCodeV2;
+};
+
+export type StudioDirectorExpiredQueryReceiptV2 = StudioDirectorQueryReceiptBaseV2 & {
+  status: 'expired';
+  query: StudioDirectorQueryV2;
+  reasonCode: StudioDirectorCommandExpiryCode;
+};
+
+export type StudioDirectorQueryReceiptV2 =
+  | StudioDirectorAnsweredReceiptV2
+  | StudioDirectorFailedQueryReceiptV2
+  | StudioDirectorExpiredQueryReceiptV2;
+
+export type StudioDirectorMutationReceiptV2 =
   | StudioDirectorAppliedReceiptV2
   | StudioDirectorRejectedReceiptV2
   | StudioDirectorExpiredReceiptV2
   | StudioDirectorIndeterminateReceiptV2;
+
+export type StudioDirectorCommandReceiptV2 = StudioDirectorMutationReceiptV2 | StudioDirectorQueryReceiptV2;
 
 export type StudioBeat = {
   id: string;

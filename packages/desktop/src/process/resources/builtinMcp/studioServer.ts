@@ -607,6 +607,8 @@ export const studioApplyEditsInputSchemaV2 = z4
 
 export const studioGetCommandStatusInputSchemaV2 = z4.object({ commandId: studioDirectorIdSchemaV2 }).strict();
 
+export const studioGetProjectStatusInputSchemaV2 = z4.object({ detail: z4.boolean().optional() }).strict();
+
 export const studioProposeStoryboardInputSchemaV2 = z4
   .object({
     base_revision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
@@ -1007,12 +1009,14 @@ export function createReadStoryboardHandlerV2(
 }
 
 export function createListRoutesHandler(
-  config: StudioServerEnv | null
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
 ): (_input: Record<string, never>) => Promise<StudioToolResult> {
-  return async () => {
-    if (!config?.routeCatalog) return errorResult('Creative Studio route catalog is unavailable.');
-    return { content: [{ type: 'text', text: JSON.stringify(config.routeCatalog, null, 2) }] };
-  };
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async () => commandToolResult(await writer.listRoutes());
 }
 
 export function createProposeStoryboardHandlerV2(
@@ -1261,6 +1265,17 @@ export function createStudioGetCommandStatusHandlerV2(
   return async (input) => commandToolResult(await writer.getStatus(input));
 }
 
+export function createStudioGetProjectStatusHandlerV2(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: { detail?: boolean }) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => commandToolResult(await writer.getProjectStatus(input));
+}
+
 /** Registers the sole production Beat/Shot catalog after the atomic Task 7 cutover. */
 export function registerStudioToolsV2(
   server: Pick<McpServer, 'registerTool'>,
@@ -1274,7 +1289,7 @@ export function registerStudioToolsV2(
         'Read the generation routes available to this project and their constraints before drafting shot durations.',
       inputSchema: z.object({}).strict(),
     },
-    createListRoutesHandler(config)
+    createListRoutesHandler(config, writerDeps)
   );
   server.registerTool(
     'read_storyboard',
@@ -1332,10 +1347,19 @@ export function registerStudioToolsV2(
     createStudioApplyEditsHandlerV2(config, writerDeps)
   );
   server.registerTool(
+    'studio_get_project_status',
+    {
+      description:
+        'Read the fresh derived project pipeline status without writing, generating, or spending. Set detail to true only when per-Shot generation, binding, reference, or conditioning diagnosis is needed.',
+      inputSchema: studioGetProjectStatusInputSchemaV2,
+    },
+    createStudioGetProjectStatusHandlerV2(config, writerDeps)
+  );
+  server.registerTool(
     'studio_get_command_status',
     {
       description:
-        'Read the exact durable or pending schema-5 status for one commandId. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
+        'Read the exact durable or pending current Director mutation or read-query status for one commandId. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
       inputSchema: studioGetCommandStatusInputSchemaV2,
     },
     createStudioGetCommandStatusHandlerV2(config, writerDeps)

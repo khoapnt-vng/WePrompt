@@ -11,8 +11,12 @@ import {
   STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
-  type StudioDirectorCommandReceiptV2,
-  type StudioDirectorCommandRecordV2,
+  STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
+  type StudioDirectorAutoApplyCommandRecordV2,
+  type StudioDirectorMutationReceiptV2,
+  type StudioDirectorQueryCommandRecordV2,
+  type StudioDirectorQueryFailureCodeV2,
+  type StudioDirectorQueryReceiptV2,
   type StudioDirectorCommandRejectionCodeV2,
   type StudioDirectorCommandExpiryCode,
   type StudioDirectorCommandIndeterminateCode,
@@ -23,7 +27,16 @@ import {
   type StudioProjectCommitFacts,
 } from '@process/services/creative-studio/store';
 import { StudioDirectorCommandApplyErrorV2, type StudioDirectorCommandServiceV2 } from './directorCommandService';
+import type { CreativeStudioServiceV2 } from './v2Service';
+import { CreativeStudioServiceError } from './projectMutations';
 import type { StudioDirectorCommandMailboxV2 } from './directorCommandMailbox';
+import {
+  isStudioDirectorQueryCommandV2,
+  isStudioDirectorQueryReceiptV2,
+  parseStudioDirectorCommandReceiptV2,
+  snapshotStudioDirectorQueryResultV2,
+  studioDirectorQueryForCommandV2,
+} from './directorCommandContracts';
 
 export type StudioDirectorCommandProcessorV2 = {
   start(): Promise<void>;
@@ -32,10 +45,10 @@ export type StudioDirectorCommandProcessorV2 = {
 };
 
 export type StudioDirectorCommitTrackerV2 = {
-  expect(command: StudioDirectorCommandRecordV2): void;
+  expect(command: StudioDirectorAutoApplyCommandRecordV2): void;
   observe(facts: StudioProjectCommitFacts): void;
-  materialize(receipt: StudioDirectorCommandReceiptV2): void;
-  pendingReceipt(projectId: string, commandId: string): StudioDirectorCommandReceiptV2 | null;
+  materialize(receipt: StudioDirectorMutationReceiptV2): void;
+  pendingReceipt(projectId: string, commandId: string): StudioDirectorMutationReceiptV2 | null;
   clear(projectId: string, commandId: string): void;
 };
 
@@ -44,8 +57,9 @@ type IntervalHandle = unknown;
 export type StudioDirectorCommandProcessorDepsV2 = {
   store: Pick<CreativeStudioStore, 'getProjectV2'>;
   mailbox: StudioDirectorCommandMailboxV2;
-  service: StudioDirectorCommandServiceV2;
+  service: StudioDirectorCommandServiceV2 & Pick<CreativeStudioServiceV2, 'getProjectStatus' | 'listRoutes'>;
   tracker: StudioDirectorCommitTrackerV2;
+  queryAuthorityActive?: () => boolean;
   onProjectUpdated(projectId: string): void;
   now?: () => number;
   setInterval?: (callback: () => void, delayMs: number) => IntervalHandle;
@@ -66,9 +80,9 @@ const stateKey = (projectId: string, commandId: string): string => `${projectId}
 /** Tracks the schema-2 project-write-to-receipt crash window without filesystem authority. */
 export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrackerV2 => {
   const expectations = new Map<string, ExpectedCommitV2>();
-  const terminals = new Map<string, StudioDirectorCommandReceiptV2>();
+  const terminals = new Map<string, StudioDirectorMutationReceiptV2>();
 
-  const materialize = (receipt: StudioDirectorCommandReceiptV2): void => {
+  const materialize = (receipt: StudioDirectorMutationReceiptV2): void => {
     const key = stateKey(receipt.projectId, receipt.commandId);
     if (terminals.has(key)) return;
     terminals.set(key, Object.freeze(structuredClone(receipt)));
@@ -116,7 +130,7 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
 
     materialize,
 
-    pendingReceipt(projectId, commandId): StudioDirectorCommandReceiptV2 | null {
+    pendingReceipt(projectId, commandId): StudioDirectorMutationReceiptV2 | null {
       const receipt = terminals.get(stateKey(projectId, commandId));
       return receipt === undefined ? null : structuredClone(receipt);
     },
@@ -142,6 +156,7 @@ export const createStudioDirectorCommandProcessorV2 = (
     deps.clearInterval ??
     ((handle: IntervalHandle) => globalThis.clearInterval(handle as ReturnType<typeof setInterval>));
   const logError = deps.logError ?? (() => undefined);
+  const queryAuthorityActive = deps.queryAuthorityActive ?? (() => true);
   const preStart = new Set<string>();
   const projectQueues = new Map<string, Promise<void>>();
   const globalOperations = new Set<Promise<void>>();
@@ -167,7 +182,7 @@ export const createStudioDirectorCommandProcessorV2 = (
 
   const decidedAt = (): string => new Date(now()).toISOString();
 
-  const materialize = (receipt: StudioDirectorCommandReceiptV2): StudioDirectorCommandReceiptV2 => {
+  const materialize = (receipt: StudioDirectorMutationReceiptV2): StudioDirectorMutationReceiptV2 => {
     deps.tracker.materialize(receipt);
     return deps.tracker.pendingReceipt(receipt.projectId, receipt.commandId) ?? receipt;
   };
@@ -175,7 +190,7 @@ export const createStudioDirectorCommandProcessorV2 = (
   const completeTerminal = async (
     projectId: string,
     commandId: string,
-    receipt: StudioDirectorCommandReceiptV2,
+    receipt: StudioDirectorMutationReceiptV2,
     ownedByCurrentProcess: boolean
   ): Promise<void> => {
     await deps.mailbox.writeReceipt(projectId, receipt);
@@ -190,6 +205,20 @@ export const createStudioDirectorCommandProcessorV2 = (
     }
   };
 
+  const completeQueryTerminal = async (
+    projectId: string,
+    commandId: string,
+    receipt: StudioDirectorQueryReceiptV2
+  ): Promise<void> => {
+    await deps.mailbox.writeReceipt(
+      projectId,
+      receipt,
+      receipt.status === 'expired' ? undefined : queryAuthorityActive
+    );
+    await deps.mailbox.finish(projectId, commandId);
+    preStart.delete(stateKey(projectId, commandId));
+  };
+
   const observedRevisionAfter = async (projectId: string, fallback: number | null): Promise<number | null> => {
     try {
       const loaded = await deps.store.getProjectV2(projectId);
@@ -200,10 +229,10 @@ export const createStudioDirectorCommandProcessorV2 = (
   };
 
   const rejected = (
-    command: StudioDirectorCommandRecordV2,
+    command: StudioDirectorAutoApplyCommandRecordV2,
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandRejectionCodeV2
-  ): StudioDirectorCommandReceiptV2 => ({
+  ): StudioDirectorMutationReceiptV2 => ({
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId: command.commandId,
     projectId: command.projectId,
@@ -215,10 +244,10 @@ export const createStudioDirectorCommandProcessorV2 = (
   });
 
   const expired = (
-    command: StudioDirectorCommandRecordV2,
+    command: StudioDirectorAutoApplyCommandRecordV2,
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandExpiryCode
-  ): StudioDirectorCommandReceiptV2 => ({
+  ): StudioDirectorMutationReceiptV2 => ({
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId: command.commandId,
     projectId: command.projectId,
@@ -230,10 +259,10 @@ export const createStudioDirectorCommandProcessorV2 = (
   });
 
   const indeterminate = (
-    command: StudioDirectorCommandRecordV2,
+    command: StudioDirectorAutoApplyCommandRecordV2,
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandIndeterminateCode
-  ): StudioDirectorCommandReceiptV2 => ({
+  ): StudioDirectorMutationReceiptV2 => ({
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId: command.commandId,
     projectId: command.projectId,
@@ -243,6 +272,97 @@ export const createStudioDirectorCommandProcessorV2 = (
     observedRevision,
     reasonCode,
   });
+
+  const expiredQuery = (
+    command: StudioDirectorQueryCommandRecordV2,
+    reasonCode: StudioDirectorCommandExpiryCode
+  ): StudioDirectorQueryReceiptV2 => ({
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+    commandId: command.commandId,
+    projectId: command.projectId,
+    decidedAt: decidedAt(),
+    status: 'expired',
+    query: studioDirectorQueryForCommandV2(command),
+    reasonCode,
+  });
+
+  const failedQuery = (
+    command: StudioDirectorQueryCommandRecordV2,
+    reasonCode: StudioDirectorQueryFailureCodeV2
+  ): StudioDirectorQueryReceiptV2 => ({
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+    commandId: command.commandId,
+    projectId: command.projectId,
+    decidedAt: decidedAt(),
+    status: 'failed',
+    query: studioDirectorQueryForCommandV2(command),
+    reasonCode,
+  });
+
+  const queryFailureCode = (
+    command: StudioDirectorQueryCommandRecordV2,
+    error: unknown
+  ): StudioDirectorQueryFailureCodeV2 | null => {
+    if (error instanceof CreativeStudioStoreError) {
+      if (error.code === 'not_found') return 'project_not_found';
+      if (error.code === 'unsupported_prototype_schema') return 'unsupported_prototype_schema';
+      if (error.code === 'storage_error') {
+        return command.policy === 'list_routes' ? 'route_inventory_unavailable' : 'project_read_unavailable';
+      }
+      return 'project_read_unavailable';
+    }
+    if (error instanceof CreativeStudioServiceError) {
+      if (error.code === 'provider_error') return 'route_inventory_unavailable';
+      if (error.code === 'runtime_inactive') return null;
+      if (error.code === 'project_quarantined') return 'project_read_unavailable';
+    }
+    return command.policy === 'list_routes' ? 'route_inventory_unavailable' : 'project_read_unavailable';
+  };
+
+  const answeredQuery = (
+    command: StudioDirectorQueryCommandRecordV2,
+    result: unknown
+  ): StudioDirectorQueryReceiptV2 => {
+    const snapshot = snapshotStudioDirectorQueryResultV2(result);
+    if (snapshot === null) return failedQuery(command, 'result_mismatch');
+    const candidate: StudioDirectorQueryReceiptV2 =
+      command.policy === 'get_project_status'
+        ? {
+            schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+            commandId: command.commandId,
+            projectId: command.projectId,
+            decidedAt: decidedAt(),
+            status: 'answered',
+            query: studioDirectorQueryForCommandV2(command) as Extract<
+              ReturnType<typeof studioDirectorQueryForCommandV2>,
+              { kind: 'get_project_status' }
+            >,
+            result: snapshot as Awaited<ReturnType<CreativeStudioServiceV2['getProjectStatus']>>,
+          }
+        : {
+            schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+            commandId: command.commandId,
+            projectId: command.projectId,
+            decidedAt: decidedAt(),
+            status: 'answered',
+            query: { kind: 'list_routes' },
+            result: snapshot as Awaited<ReturnType<CreativeStudioServiceV2['listRoutes']>>,
+          };
+    let bytes: number;
+    try {
+      bytes = Buffer.byteLength(JSON.stringify(candidate), 'utf8');
+    } catch {
+      return failedQuery(command, 'result_mismatch');
+    }
+    if (bytes > STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES) return failedQuery(command, 'response_too_large');
+    const parsed = parseStudioDirectorCommandReceiptV2({
+      projectId: command.projectId,
+      commandId: command.commandId,
+      value: candidate,
+    });
+    if (parsed.status !== 'valid') return failedQuery(command, 'result_mismatch');
+    return parsed.record as StudioDirectorQueryReceiptV2;
+  };
 
   const processCommand = async (projectId: string, commandId: string): Promise<void> => {
     try {
@@ -255,6 +375,11 @@ export const createStudioDirectorCommandProcessorV2 = (
               new Error('InvalidStudioDirectorCommandReceipt')
             );
           }
+          return;
+        }
+        if (isStudioDirectorQueryReceiptV2(durableReceipt.record)) {
+          await deps.mailbox.finish(projectId, commandId);
+          preStart.delete(stateKey(projectId, commandId));
           return;
         }
         const marker = deps.tracker.pendingReceipt(projectId, commandId);
@@ -271,14 +396,13 @@ export const createStudioDirectorCommandProcessorV2 = (
         return;
       }
 
-      const repairMarker = deps.tracker.pendingReceipt(projectId, commandId);
-      if (repairMarker !== null) {
-        await completeTerminal(projectId, commandId, repairMarker, true);
-        return;
-      }
-
       const pending = await deps.mailbox.readPending(projectId, commandId);
       if (pending === null) {
+        const repairMarker = deps.tracker.pendingReceipt(projectId, commandId);
+        if (repairMarker !== null) {
+          await completeTerminal(projectId, commandId, repairMarker, true);
+          return;
+        }
         preStart.delete(stateKey(projectId, commandId));
         return;
       }
@@ -302,6 +426,40 @@ export const createStudioDirectorCommandProcessorV2 = (
       }
 
       const command = pending.record;
+      if (isStudioDirectorQueryCommandV2(command)) {
+        if (preStart.has(stateKey(projectId, commandId))) {
+          await completeQueryTerminal(projectId, commandId, expiredQuery(command, 'expired_after_restart'));
+          return;
+        }
+        if (now() >= Date.parse(command.deadlineAt)) {
+          await completeQueryTerminal(projectId, commandId, expiredQuery(command, 'deadline_elapsed'));
+          return;
+        }
+        if (!queryAuthorityActive()) return;
+        try {
+          const result =
+            command.policy === 'get_project_status'
+              ? await deps.service.getProjectStatus({ projectId: command.projectId, detail: command.detail })
+              : await deps.service.listRoutes({ projectId: command.projectId });
+          // The active graph may be revoked while provider or project I/O is
+          // in flight. A superseded graph must not publish a fresh answer.
+          if (!queryAuthorityActive()) return;
+          await completeQueryTerminal(projectId, commandId, answeredQuery(command, result));
+        } catch (error) {
+          const reasonCode = queryFailureCode(command, error);
+          if (reasonCode !== null) {
+            await completeQueryTerminal(projectId, commandId, failedQuery(command, reasonCode));
+          }
+        }
+        return;
+      }
+
+      const repairMarker = deps.tracker.pendingReceipt(projectId, commandId);
+      if (repairMarker !== null) {
+        await completeTerminal(projectId, commandId, repairMarker, true);
+        return;
+      }
+
       let loaded: Awaited<ReturnType<typeof deps.store.getProjectV2>>;
       try {
         loaded = await deps.store.getProjectV2(projectId);
@@ -321,7 +479,7 @@ export const createStudioDirectorCommandProcessorV2 = (
 
       const isPreStart = preStart.has(stateKey(projectId, commandId));
       if (isPreStart) {
-        const receipt: StudioDirectorCommandReceiptV2 =
+        const receipt: StudioDirectorMutationReceiptV2 =
           project.revision === command.expectedRevision
             ? expired(command, project.revision, 'expired_after_restart')
             : project.revision < command.expectedRevision
@@ -332,7 +490,7 @@ export const createStudioDirectorCommandProcessorV2 = (
       }
 
       const latestApplyStartMs = Date.parse(command.deadlineAt) - STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS;
-      let terminal: StudioDirectorCommandReceiptV2 | null = null;
+      let terminal: StudioDirectorMutationReceiptV2 | null = null;
       if (now() >= latestApplyStartMs) {
         terminal = expired(command, project.revision, 'deadline_elapsed');
       } else if (project.revision > command.expectedRevision) {
