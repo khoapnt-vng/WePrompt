@@ -58,6 +58,18 @@
   gap: 6px;
 }
 
+/* Arco renders Checkbox and Radio as <label>, so the stacked field-label rule
+   above also catches them and pushes the control onto its own row. Restore the
+   inline layout Arco ships. Switch is a <button> and is unaffected. */
+.modalBody :global(.arco-checkbox),
+.modalBody :global(.arco-radio),
+.ruleEditor :global(.arco-checkbox),
+.ruleEditor :global(.arco-radio),
+.ruleAddForm :global(.arco-checkbox),
+.ruleAddForm :global(.arco-radio) {
+  display: inline-block;
+}
+
 .modalSection {
   display: grid;
   min-inline-size: 0;
