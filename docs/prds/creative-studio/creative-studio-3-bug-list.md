@@ -839,6 +839,26 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Do not weaken.** Keep the refusal. A grid must never become a current reference or first frame — that is the whole point of BUG-132, and this entry exists because the guard worked.
   - **Live reproduction preserved.** `Morning Post` (`2f363667_3732_4eb9_b427_b5eb808ac4ce`) is retained unmodified: `referencePlanStatus: 'planned'`, two references planned, `The Postman` at `NO PHOTO` after two failed generations (one `submission_unknown`, uncharged; one `seed_still_variation_grid`, charged), both routes `ready`, 0 Beats. Pressing `Generate` on that card reproduces the loop.
 
+
+- [ ] **[BUG-142][P2][Creative Studio] Every rendered Shot permanently claims `EDITED · NOT YET RUN`, because the composed prompt is compared against the Shot's script** — found 2026-08-27 driving the new Beat panel composer on a completed film
+  - **Actual.** On `Light on Water` (`dc0168b3…`, 3/3 Shots rendered, 30s, nothing edited since it was authored), every rendered Shot card shows the **`EDITED · NOT YET RUN`** tag and offers a primary-weighted `Regenerate`. No prompt was ever edited on that project.
+  - **Root cause, exact.** `workspaceProjection.ts:573-586`:
+
+        const currentPicturePrompt =
+          currentVideo === null
+            ? shot.shootingScript
+            : (producingJobForAsset(project, shot, currentVideo.id)?.composition?.prompt ?? shot.shootingScript);
+        …
+        promptChanged: currentPicturePrompt !== shot.shootingScript,
+
+    `composition.prompt` is the **fully composed generation prompt** — brief, rules, instruction profile, the `OUTPUT` block and the shooting script combined. `shot.shootingScript` is the Shot's own text alone. The two are different kinds of string and can never be equal, so `promptChanged` is **structurally always true** the moment a Shot has a current video. Measured on a real job: composed prompt **911** characters, shooting script **251**, never equal.
+  - **The correct field is already stored one level down.** `composition.inputs.source.shootingScript` is the script **as fired**, and on the same job it is byte-identical to the Shot's current `shootingScript`. Comparing against that yields the intended `dirty = prompt !== promptRanWith` semantics from the composer handoff.
+  - **Main already knows the truth.** `getProjectWorkspace` returns `workspaceStatus.dirtyShots: []` for this project — the main-side derivation (`deriveStudioDirtyShotsV2`, `chain.ts:280-315`) correctly reports nothing dirty. This is a renderer-side projection defect contradicting a correct main-side status, not a disagreement about state.
+  - **Why it matters beyond a stray tag.** The composer handoff makes the tag load-bearing: *"Tags are exceptions… so a tag always means something needs attention"*, and an edited prompt is specified to **return primary weight to the button**. So the defect permanently nudges the user toward a **paid re-render** of work that is already correct and current, on every rendered Shot, while simultaneously destroying the tag's meaning — if it is always on, it signals nothing.
+  - **Fix direction.** Compare `composition.inputs.source.shootingScript` against `shot.shootingScript`. Fall back to "not changed" when the producing job or its source is unavailable, rather than to `shot.shootingScript` against a composed prompt — an absent record is not evidence of an edit. Consider deriving this from the main-side `dirtyShots` instead, which is already correct and is the authority the rest of the workspace uses.
+  - **Do not weaken.** Keep the tag itself and its rule that a tag means attention is needed; the defect is the comparison, not the concept. Note the same projection also computes `promptChanged` at `workspaceProjection.ts:447` from a draft value, which is a different and apparently correct path — do not conflate them.
+  - **Live reproduction.** `Light on Water` (`dc0168b3_8386_4cb3_bd59_233afd364ce4`) is retained: 1 Beat, 3 Shots, all rendered, no prompt ever edited. Opening its Beat panel shows the tag on Shot 1 immediately.
+
 ### Verified live 2026-08-25 — schema-v5 real-model run
 
 - Exact build: `3ac63eb9f`; project: `a5502dee_3834_48a0_bfa7_bd2597546506`; OpenRouter image and first-frame-capable video routes.
