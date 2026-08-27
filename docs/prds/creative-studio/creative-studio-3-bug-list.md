@@ -696,6 +696,32 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Verification.** Beat-panel DOM coverage proves the readable-frame event captures one 1280×720 PNG and de-duplicates later media events. Studio-page coverage proves the exact current identity reaches IPC and a superseded identity fails closed before IPC; existing service and media-store tests retain the owned-poster contract.
 
 - [ ] **[BUG-136][P1][Creative Studio] A required shot field shipped without a migration, so every project written before it becomes permanently unopenable** — found 2026-08-26 by the owner immediately after relaunching on `b79254f6e`
+  - **HANDOFF TO CODEX — read this first; the detail is below.** Two independent breakages quarantine
+    every pre-existing project. One is fixed, one is not.
+
+    | # | Breakage | State |
+    | --- | --- | --- |
+    | 1 | `dismissedSeedStillIds` migrated only in the live `shots` map, not in `undoHistory[].patches[].before` (`SHOT_BEFORE_KEYS` derives from `SHOT_KEYS`) | **Fixed** on branch `fix/studio-legacy-manifest-traversal` — merge or rebuild on it. 6/6 focused, typecheck clean, lint 0 errors |
+    | 2 | `validateComposition` **recomposes from current code** and demands exact equality, so `3eefd4ad5`'s prompt rewrite invalidated every job stored before it | **Open — yours.** Root-caused and proven; see the recommended fix below |
+
+    **What to do, in order.**
+    1. Take the branch for breakage 1 — it is necessary but not sufficient on its own.
+    2. Fix breakage 2. Preferred: **stop validating stored compositions by recomputation.** A
+       composition records what was *sent*; re-deriving it makes history depend on present code.
+       Validate its shape and internal consistency, and keep `requestPlanCompositionEquals`
+       (stored-to-stored) — that is the check that actually protects integrity. If recomputation must
+       stay, bump `instructionProfile` when its text changes and recompose against **the profile the
+       job recorded**, never the current one. Do **not** migrate stored prompts: that would falsify
+       the record of what went to the provider.
+    3. Add the regression test this entry has always lacked — a decode probe over
+       `~/weprompt-archived-projects/2026-08-27-pre-migration/` (six projects, the only pre-migration
+       data in existence). Existing fixtures pass because none carry undo history or a pre-`3eefd4ad5`
+       job.
+
+    **Before you start end-frame conditioning:** it adds a new required schema field, which is what
+    caused breakage 1. Landing this first makes that migration correct by construction rather than by
+    remembering. Also note breakage 2's general hazard — **generation prompt text is a breaking schema
+    change** — which applies to any future wording edit in `generation/composition.ts`.
   - **Actual.** Relaunching the app on the fixed build quarantined **every project on the machine**:
     `[CreativeStudio] Quarantined corrupt schema-2 project manifest: b552858f… / 0b9a44d8… / b3e03d44… CreativeStudioStoreError: Malformed schema-2 Studio project manifest`, followed by `Schema-2 runtime activation failed`. With no supported project the runtime never activated, so every call failed and the whole feature was unusable. Three finished or in-progress films — one complete 25-shot 5:00 film, one at 23/25, one at 5/5 — were inaccessible.
   - **Root cause, exact.** `b79254f6e` added `dismissedSeedStillIds` to `SHOT_KEYS` (`validation.ts:168`), which is an **exact-key** set, and validates it with `isUniqueSafeIdArray(value.dismissedSeedStillIds)` (`validation.ts:650`). `undefined` fails that predicate, and an exact-key record rejects a shot that lacks the key. **Measured: 0 of 25 shots** in the newest project carried the field; no project written before this commit can, because nothing ever wrote it. So the check is not detecting corruption — it is rejecting every file the previous build produced.
