@@ -1779,6 +1779,18 @@ build it alongside that assignment, not independently.
   only `select_reference_image`, which re-points and never deletes. If removal ships it needs its own
   operation, plus an explicit rule for a reference whose last take is removed
   (`approvedAssetId → null`, back to `NO PHOTO`).
+- **Fold BUG-141 into this same workstream** (owner-agreed 2026-08-27). Removal and BUG-141 are the
+  same problem from two directions: removal discards a reference image the **user** rejects, BUG-141
+  handles one the **system** rejects. Both live in `mediaStore.ts`, both end with a reference losing
+  its current image and returning to `NO PHOTO`, and the "last take removed" rule above is exactly
+  the state a refused grid leaves behind. Doing them together avoids two passes over the same code
+  and one merge. BUG-141's ask is narrow: **auto-retry once** on `seed_still_variation_grid` before
+  surfacing anything (generation is stochastic and a second roll frequently is not a sheet), then —
+  if it recurs — say that the model is returning character sheets for this prompt and that
+  `Import photo` is the reliable path. Today the panel refuses correctly but bills for each rejected
+  attempt and offers no way out of the loop.
+  **Do not weaken:** the refusal itself stays. A grid must never become a current reference or first
+  frame — that guard is BUG-132's fix and it is working.
 - **Panel width.** 1000px here versus 1320px for the composer, inside the same Studio shell. Confirm
   the two agree about their container before both are built.
 
