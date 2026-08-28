@@ -18,6 +18,7 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import { describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
   STUDIO_EXPORT_SCHEMA_VERSION_V2,
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION,
@@ -93,6 +94,7 @@ import {
 } from '@process/services/creative-studio/service/filmExporter';
 import {
   createListRoutesHandler,
+  createStudioApplyEditsHandlerV2,
   createStudioGetProposalHandlerV2,
   createStudioGetProjectStatusHandlerV2,
   createProposeBriefRuleHandlerV2,
@@ -7425,6 +7427,23 @@ const mutationCatalogV2 = (): StudioMutationOperationV2[] => [
   { kind: 'undo_last', entryId: 'undo_1' },
 ];
 
+const studioDirectorReferenceDirectOperationKindsV2 = new Set<StudioMutationOperationV2['kind']>([
+  'set_reference_plan',
+  'amend_reference_plan',
+  'set_shot_reference_binding',
+]);
+
+const studioDirectorApplyToolAcceptsV2 = (operation: StudioMutationOperationV2): boolean =>
+  STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2[operation.kind] === 'direct';
+
+const studioDirectorProposalToolAcceptsV2 = (operation: StudioMutationOperationV2): boolean => {
+  const disposition = STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2[operation.kind];
+  return (
+    disposition === 'proposal' ||
+    (disposition === 'direct' && !studioDirectorReferenceDirectOperationKindsV2.has(operation.kind))
+  );
+};
+
 const capturePendingProjectAuthorityV2 = async (projectRoot: string) => {
   const canonicalRoot = await nodeFs.realpath(projectRoot);
   const stats = await nodeFs.lstat(canonicalRoot);
@@ -7926,7 +7945,7 @@ describe('Studio MCP schema-2 server', () => {
     );
   });
 
-  it('publishes all Beat/Shot operations as strict bounded schemas through real MCP tools/list', async () => {
+  it('publishes strict bounded authority-specific schemas through real MCP tools/list', async () => {
     const harness = await createStudioMcpProtocolHarnessV2();
     try {
       const { tools } = await harness.client.listTools();
@@ -7946,7 +7965,8 @@ describe('Studio MCP schema-2 server', () => {
         | undefined;
       const proposalOperationVariants = (proposalOperationItems?.items?.anyOf ??
         proposalOperationItems?.items?.oneOf) as typeof operationVariants;
-      const advertisedValidator = new AjvJsonSchemaValidator().getValidator(applySchema as never);
+      const applyValidator = new AjvJsonSchemaValidator().getValidator(applySchema as never);
+      const proposalValidator = new AjvJsonSchemaValidator().getValidator(proposalSchema as never);
 
       expect(tools.map(({ name }) => name).toSorted()).toEqual([
         'propose_brief_rule',
@@ -7968,22 +7988,29 @@ describe('Studio MCP schema-2 server', () => {
       const operationKinds = mutationCatalogV2()
         .map((operation) => operation.kind)
         .toSorted();
+      const applyOperationKinds = mutationCatalogV2()
+        .filter(studioDirectorApplyToolAcceptsV2)
+        .map((operation) => operation.kind)
+        .toSorted();
+      const proposalOperationKinds = mutationCatalogV2()
+        .filter(studioDirectorProposalToolAcceptsV2)
+        .map((operation) => operation.kind)
+        .toSorted();
       expect(operationKinds).toHaveLength(33);
-      expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(operationKinds);
+      expect(operationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
+        applyOperationKinds
+      );
       expect(proposalOperationVariants?.map((variant) => variant.properties?.kind?.const).toSorted()).toEqual(
-        operationKinds
+        proposalOperationKinds
       );
       expect(operationKinds).not.toContain('select_video_take');
       expect(operationKinds).not.toContain('remove_video_take');
-      const addBeat = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_beat');
-      const addShot = operationVariants?.find((variant) => variant.properties?.kind?.const === 'add_shot');
-      const removeReferenceImage = operationVariants?.find(
+      const addBeat = proposalOperationVariants?.find((variant) => variant.properties?.kind?.const === 'add_beat');
+      const addShot = proposalOperationVariants?.find((variant) => variant.properties?.kind?.const === 'add_shot');
+      const removeReferenceImage = proposalOperationVariants?.find(
         (variant) => variant.properties?.kind?.const === 'remove_reference_image'
       );
-      expect(removeReferenceImage).toMatchObject({
-        additionalProperties: false,
-        required: ['kind', 'referenceId', 'assetId'],
-      });
+      expect(removeReferenceImage).toBeUndefined();
       expect(addBeat).toMatchObject({
         additionalProperties: false,
         required: ['kind', 'beatId', 'beat', 'beforeBeatId'],
@@ -7995,7 +8022,7 @@ describe('Studio MCP schema-2 server', () => {
         required: ['kind', 'beatId', 'shotId', 'shot', 'beforeShotId'],
       });
       expect(
-        advertisedValidator({
+        applyValidator({
           expectedRevision: 7,
           operations: [
             {
@@ -8006,8 +8033,15 @@ describe('Studio MCP schema-2 server', () => {
         })
       ).toMatchObject({ valid: false });
 
-      const canonicalBatch = {
+      const canonicalDirectBatch = {
         expectedRevision: 8,
+        operations: [
+          { kind: 'set_brief', brief: '...' },
+          { kind: 'reorder_beats', beatOrder: ['beat_2', 'beat_1'] },
+        ],
+      };
+      const canonicalProposalBatch = {
+        base_revision: 8,
         operations: [
           { kind: 'set_brief', brief: '...' },
           { kind: 'edit_beat', beatId: 'beat_1', changes: { title: '...' } },
@@ -8015,10 +8049,25 @@ describe('Studio MCP schema-2 server', () => {
           { kind: 'reorder_beats', beatOrder: ['beat_2', 'beat_1'] },
         ],
       };
-      expect(advertisedValidator(canonicalBatch)).toMatchObject({ valid: true });
+      expect(applyValidator(canonicalDirectBatch)).toMatchObject({ valid: true });
+      expect(proposalValidator(canonicalProposalBatch)).toMatchObject({ valid: true });
       expect(
-        advertisedValidator({
-          ...canonicalBatch,
+        applyValidator({
+          expectedRevision: 8,
+          operations: [
+            {
+              kind: 'add_shot',
+              beatId: 'section_1',
+              shotId: 'caller_id',
+              shot: editableShotV2(),
+              beforeShotId: null,
+            },
+          ],
+        })
+      ).toMatchObject({ valid: false });
+      expect(
+        proposalValidator({
+          base_revision: 8,
           operations: [
             {
               kind: 'add_shot',
@@ -8031,8 +8080,8 @@ describe('Studio MCP schema-2 server', () => {
         })
       ).toMatchObject({ valid: true });
       expect(
-        advertisedValidator({
-          expectedRevision: 8,
+        proposalValidator({
+          base_revision: 8,
           operations: [
             {
               kind: 'add_beat',
@@ -8062,15 +8111,15 @@ describe('Studio MCP schema-2 server', () => {
       expect(studioGetProjectStatusInputSchemaV2.safeParse({ detail: 1 }).success).toBe(false);
       expect(projectStatusTool?.description).toMatch(/without writing, generating, or spending/i);
       const proposalTool = tools.find((tool) => tool.name === 'studio_get_proposal');
-      const proposalValidator = new AjvJsonSchemaValidator().getValidator(proposalTool?.inputSchema as never);
+      const getProposalValidator = new AjvJsonSchemaValidator().getValidator(proposalTool?.inputSchema as never);
       expect(proposalTool?.inputSchema).toMatchObject({
         type: 'object',
         additionalProperties: false,
         required: ['proposalId'],
       });
-      expect(proposalValidator({ proposalId: 'proposal_exact' })).toMatchObject({ valid: true });
-      expect(proposalValidator({ proposalId: 'proposal_exact', extra: true })).toMatchObject({ valid: false });
-      expect(proposalValidator({ proposalId: '../unsafe' })).toMatchObject({ valid: false });
+      expect(getProposalValidator({ proposalId: 'proposal_exact' })).toMatchObject({ valid: true });
+      expect(getProposalValidator({ proposalId: 'proposal_exact', extra: true })).toMatchObject({ valid: false });
+      expect(getProposalValidator({ proposalId: '../unsafe' })).toMatchObject({ valid: false });
       expect(studioGetProposalInputSchemaV2.safeParse({ proposalId: 'proposal_exact' }).success).toBe(true);
       expect(proposalTool?.description).toMatch(/never authors the project, generates, authorizes, or spends/i);
       expect(proposalTool?.description).toMatch(/never silently rebase, apply, or replace/i);
@@ -8133,32 +8182,26 @@ describe('Studio MCP schema-2 server', () => {
             },
           ],
         },
-        {
-          expectedRevision: 7,
-          operations: [
-            {
-              kind: 'add_shot',
-              beatId: 'section_1',
-              shotId: 'clip_new',
-              shot: { ...editableShotV2(), durationSeconds: 3 },
-              beforeShotId: null,
-            },
-          ],
-        },
-        {
-          expectedRevision: 7,
-          operations: [
-            {
-              kind: 'edit_shot',
-              shotId: 'clip_1',
-              changes: { durationSeconds: 3 },
-            },
-          ],
-        },
       ];
 
       for (const input of invalidApplyInputs) {
         expect(applyValidator(input), JSON.stringify(input)).toMatchObject({ valid: false });
+      }
+      for (const operations of [
+        [
+          {
+            kind: 'add_shot',
+            beatId: 'section_1',
+            shotId: 'clip_new',
+            shot: { ...editableShotV2(), durationSeconds: 3 },
+            beforeShotId: null,
+          },
+        ],
+        [{ kind: 'edit_shot', shotId: 'clip_1', changes: { durationSeconds: 3 } }],
+      ]) {
+        expect(proposalValidator({ base_revision: 7, operations }), JSON.stringify(operations)).toMatchObject({
+          valid: false,
+        });
       }
       expect(
         proposalValidator({
@@ -8180,7 +8223,7 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('keeps the full catalog structural in tools/list while handlers own capability and size policy', async () => {
+  it('advertises only each Director tool authority while retaining handler size policy', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-policy-'));
     const createId = vi.fn(() => 'must_not_mint');
     const harness = await createStudioMcpProtocolHarnessV2(
@@ -8207,12 +8250,15 @@ describe('Studio MCP schema-2 server', () => {
 
       for (const operation of mutationCatalogV2()) {
         expect(applyValidator({ expectedRevision: 7, operations: [operation] }), operation.kind).toMatchObject({
-          valid: true,
+          valid: studioDirectorApplyToolAcceptsV2(operation),
         });
         expect(proposalValidator({ base_revision: 7, operations: [operation] }), operation.kind).toMatchObject({
-          valid: true,
+          valid: studioDirectorProposalToolAcceptsV2(operation),
         });
       }
+      const forbiddenRules = mutationCatalogV2().find((operation) => operation.kind === 'set_rules')!;
+      expect(applyValidator({ expectedRevision: 7, operations: [forbiddenRules] })).toMatchObject({ valid: false });
+      expect(proposalValidator({ base_revision: 7, operations: [forbiddenRules] })).toMatchObject({ valid: false });
       expect(applyValidator(oversizedApply)).toMatchObject({ valid: true });
       expect(proposalValidator(oversizedProposal)).toMatchObject({ valid: true });
       expect(studioApplyEditsInputSchemaV2.safeParse(oversizedApply).success).toBe(true);
@@ -8220,11 +8266,9 @@ describe('Studio MCP schema-2 server', () => {
 
       for (const description of [applyTool?.description, proposalTool?.description]) {
         expect(description).toMatch(/256 KiB/i);
-        expect(description).toMatch(/operation_not_permitted/i);
+        expect(description).toMatch(/invalid arguments/i);
       }
-      expect(applyTool?.description).toMatch(/rejected atomically at capability preflight/i);
-      expect(applyTool?.description).toMatch(/no operation reaches command evaluation or is applied/i);
-      expect(applyTool?.description).toMatch(/zero-based index/i);
+      expect(applyTool?.description).toMatch(/capability preflight remains a fail-closed backstop/i);
       expect(applyTool?.description).toMatch(/whole proposal-eligible subset to propose_storyboard/i);
       expect(applyTool?.description).toMatch(/only when the direct subset is independently valid/i);
     } finally {
@@ -8240,11 +8284,11 @@ describe('Studio MCP schema-2 server', () => {
       expect(
         studioApplyEditsInputSchemaV2.safeParse({ expectedRevision: 7, operations: [operation] }).success,
         operation.kind
-      ).toBe(true);
+      ).toBe(studioDirectorApplyToolAcceptsV2(operation));
       expect(
         studioProposeStoryboardInputSchemaV2.safeParse({ base_revision: 7, operations: [operation] }).success,
         operation.kind
-      ).toBe(true);
+      ).toBe(studioDirectorProposalToolAcceptsV2(operation));
     }
 
     const invalidBatches = [
@@ -8374,13 +8418,7 @@ describe('Studio MCP schema-2 server', () => {
       studioApplyEditsInputSchemaV2.safeParse({
         expectedRevision: 7,
         operations: [
-          {
-            kind: 'add_shot',
-            beatId: 'section_1',
-            shotId: 'clip_new',
-            shot: editableShotV2(),
-            beforeShotId: null,
-          },
+          { kind: 'set_brief', brief: 'A valid direct edit.' },
           { kind: 'reorder_shots', beatId: 'section_2', shotOrder: ['clip_2'] },
         ],
       }).success
@@ -8435,7 +8473,7 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('returns capability denials through the SDK before IDs or sidecar IO', async () => {
+  it('rejects operations outside each advertised tool authority before IDs or sidecar IO', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-'));
     const createId = vi.fn(() => 'must_not_mint');
     const harness = await createStudioMcpProtocolHarnessV2(
@@ -8500,24 +8538,9 @@ describe('Studio MCP schema-2 server', () => {
         // eslint-disable-next-line no-await-in-loop
         const result = await harness.client.callTool(call);
         expect(result.isError).toBe(true);
-        if (call.name === 'studio_apply_edits') {
-          const content = result.content[0];
-          expect(content?.type).toBe('text');
-          expect(JSON.parse(content?.type === 'text' ? content.text : '')).toMatchObject({
-            code: 'operation_not_permitted',
-            rejectedOperations: [{ index: 0, kind: call.arguments.operations[0]?.kind }],
-            directCapableOperationIndexes: [],
-          });
-        } else if (
-          call.arguments.operations[0]?.kind === 'select_take' ||
-          call.arguments.operations[0]?.kind === 'set_match_to'
-        ) {
-          const content = result.content[0];
-          expect(content?.type).toBe('text');
-          expect(content?.type === 'text' ? content.text : '').toMatch(/Input validation error|Invalid arguments/u);
-        } else {
-          expect(result.content).toEqual([{ type: 'text', text: 'operation_not_permitted' }]);
-        }
+        const content = result.content[0];
+        expect(content?.type).toBe('text');
+        expect(content?.type === 'text' ? content.text : '').toMatch(/Input validation error|Invalid arguments/iu);
       }
       expect(createId).not.toHaveBeenCalled();
       await expect(nodeFs.readdir(path.join(projectDir, 'commands'))).rejects.toMatchObject({ code: 'ENOENT' });
@@ -8528,14 +8551,14 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
-  it('explains every mixed-batch capability rejection without applying its direct operations', async () => {
+  it('keeps handler capability preflight as a fail-closed backstop behind the narrow schema', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-mixed-capability-'));
     const createId = vi.fn(() => 'must_not_mint');
     const writerFsAccess = vi.fn(() => {
       throw new Error('studio_apply_edits capability rejection must not reach writer IO');
     });
     const writerFs = new Proxy(nodeFs, { get: writerFsAccess });
-    const harness = await createStudioMcpProtocolHarnessV2(
+    const handler = createStudioApplyEditsHandlerV2(
       {
         projectId: 'project_v2',
         projectDir,
@@ -8545,63 +8568,38 @@ describe('Studio MCP schema-2 server', () => {
       { createId, fs: writerFs }
     );
     try {
-      const result = await harness.client.callTool({
-        name: 'studio_apply_edits',
-        arguments: {
-          expectedRevision: 7,
-          operations: [
-            { kind: 'set_brief', brief: 'Direct work must remain identifiable' },
-            { kind: 'edit_shot', shotId: 'clip_1', changes: { shootingScript: 'Proposal only' } },
-            { kind: 'set_rules', rules: [] },
-            { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Also direct' } },
-          ],
-        },
+      const result = await handler({
+        expectedRevision: 7,
+        operations: [
+          { kind: 'set_brief', brief: 'Direct work must remain identifiable' },
+          { kind: 'edit_shot', shotId: 'clip_1', changes: { shootingScript: 'Proposal only' } },
+          { kind: 'set_rules', rules: [] },
+          { kind: 'edit_beat', beatId: 'section_1', changes: { title: 'Also direct' } },
+        ],
       });
       const content = result.content[0];
 
       expect(result.isError).toBe(true);
       expect(content?.type).toBe('text');
-      expect(JSON.parse(content?.type === 'text' ? content.text : '')).toEqual({
+      expect(JSON.parse(content?.type === 'text' ? content.text : '')).toMatchObject({
         code: 'operation_not_permitted',
-        message:
-          'studio_apply_edits rejected the batch at capability preflight; no operation reached command evaluation or was applied.',
         operationIndexBase: 0,
         rejectedOperations: [
-          {
-            index: 1,
-            kind: 'edit_shot',
-            disposition: 'proposal',
-            reason: 'requires_user_review',
-          },
+          { index: 1, kind: 'edit_shot', disposition: 'proposal', reason: 'requires_user_review' },
           {
             index: 2,
             kind: 'set_rules',
             disposition: 'operation_not_permitted',
             reason: 'unavailable_to_director',
           },
-          {
-            index: 3,
-            kind: 'edit_beat',
-            disposition: 'proposal',
-            reason: 'requires_user_review',
-          },
+          { index: 3, kind: 'edit_beat', disposition: 'proposal', reason: 'requires_user_review' },
         ],
         directCapableOperationIndexes: [0],
-        guidance: {
-          proposal:
-            'After omitting unavailable and reference-direct operations, submit the full ordered proposal-eligible subset to propose_storyboard when it still expresses the intended atomic change.',
-          unavailable:
-            'Omit unavailable operations or ask the user to perform them manually in Creative Studio when supported.',
-          direct:
-            'Only if the direct-capable operations are independently valid, call read_storyboard and submit them in a new studio_apply_edits batch against the fresh revision.',
-          retry: 'Do not retry this batch unchanged.',
-        },
       });
       expect(createId).not.toHaveBeenCalled();
       expect(writerFsAccess).not.toHaveBeenCalled();
       await expect(nodeFs.readdir(projectDir)).resolves.toEqual([]);
     } finally {
-      await harness.close();
       await rm(projectDir, { recursive: true, force: true });
     }
   });

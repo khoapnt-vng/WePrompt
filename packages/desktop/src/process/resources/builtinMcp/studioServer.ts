@@ -546,13 +546,39 @@ export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
   studioMutationOperationSchemasV2.undoLast,
 ]);
 
-/** Kept as an export for callers that named the old staged schema; capability is a handler policy. */
-export const studioDirectorOperationSchemaV2 = studioMutationOperationSchemaV2;
+/**
+ * Keep each Director tool's advertised JSON schema inside its real authority.
+ *
+ * Runtime capability checks remain a fail-closed backstop, but advertising the full mutation
+ * catalog invites a model to select an operation that the handler can only reject. In a live
+ * Director turn that produced an unbounded retry loop around the same forbidden `set_rules`
+ * proposal. These unions are deliberately explicit so a policy change must update both the
+ * authority table and the tool surface under focused tests.
+ */
+const studioDirectorDirectMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
+  studioMutationOperationSchemasV2.setBrief,
+  studioMutationOperationSchemasV2.setReferencePlan,
+  studioMutationOperationSchemasV2.amendReferencePlan,
+  studioMutationOperationSchemasV2.setShotReferenceBinding,
+  studioMutationOperationSchemasV2.reorderBeats,
+  studioMutationOperationSchemasV2.deleteShot,
+  studioMutationOperationSchemasV2.reorderShots,
+  studioMutationOperationSchemasV2.reorderBin,
+]);
 
-const studioMutationOperationsSchemaV2 = z4
-  .array(studioMutationOperationSchemaV2)
-  .min(1)
-  .max(STUDIO_MAX_MUTATION_OPERATIONS);
+const studioDirectorProposalMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
+  studioMutationOperationSchemasV2.setBrief,
+  studioMutationOperationSchemasV2.addBeat,
+  studioMutationOperationSchemasV2.editBeat,
+  studioMutationOperationSchemasV2.reorderBeats,
+  studioMutationOperationSchemasV2.addBinnedBeat,
+  studioMutationOperationSchemasV2.addShot,
+  studioMutationOperationSchemasV2.editShot,
+  studioMutationOperationSchemasV2.deleteShot,
+  studioMutationOperationSchemasV2.reorderShots,
+  studioMutationOperationSchemasV2.applyCoverage,
+  studioMutationOperationSchemasV2.reorderBin,
+]);
 
 const proposalInputFitsDurableRecordV2 = (value: unknown): boolean => {
   try {
@@ -582,7 +608,7 @@ export type StudioApplyEditsToolInputV2 = {
 export const studioApplyEditsInputSchemaV2 = z4
   .object({
     expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    operations: studioMutationOperationsSchemaV2,
+    operations: z4.array(studioDirectorDirectMutationOperationSchemaV2).min(1).max(STUDIO_MAX_MUTATION_OPERATIONS),
   })
   .strict();
 
@@ -595,7 +621,7 @@ export const studioGetProposalInputSchemaV2 = z4.object({ proposalId: studioDire
 export const studioProposeStoryboardInputSchemaV2 = z4
   .object({
     base_revision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    operations: studioMutationOperationsSchemaV2,
+    operations: z4.array(studioDirectorProposalMutationOperationSchemaV2).min(1).max(STUDIO_MAX_MUTATION_OPERATIONS),
   })
   .strict();
 
@@ -1308,7 +1334,7 @@ export function registerStudioToolsV2(
     'propose_storyboard',
     {
       description:
-        'Record one ordered schema-5 authoring mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Reference planning and shot-reference binding are Director-direct operations and must use studio_apply_edits; approval remains renderer-only. Unavailable operations return operation_not_permitted before any ID or I/O. Rejections identify a zero-based operation index; do not retry a rejected batch unchanged. The final serialized proposal record must fit within 256 KiB.',
+        'Record one ordered schema-5 authoring mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. The input schema exposes only proposal-capable authoring operations plus the non-reference direct operations that may be needed in the same atomic review. Reference planning and shot-reference binding are Director-direct operations and must use studio_apply_edits; approval remains renderer-only. Unavailable operations are invalid arguments and must not be retried or translated into another tool. The final serialized proposal record must fit within 256 KiB.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
     },
     async (input) =>
@@ -1336,10 +1362,17 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. Reference planning and binding are separate Director-direct phases: first set_reference_plan; if a recurring background is discovered later, append it with amend_reference_plan instead of replacing the plan; then request canonical reference images; a human-confirmed generation makes each newest image current; then read the fresh revision and set_shot_reference_binding to current references. Beat Story and Shot Shooting-script authoring belongs in propose_storyboard for human review. set_reference_label, set_reference_prompt, select_reference_image and remove_reference_image are renderer-only and never Director-callable. This never starts paid generation. A batch containing proposal-only or unavailable operations returns operation_not_permitted and is rejected atomically at capability preflight; no operation reaches command evaluation or is applied. The error reports each zero-based index. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. The input schema exposes only direct-capable operations. Reference planning and binding are separate Director-direct phases: first set_reference_plan; if a recurring background is discovered later, append it with amend_reference_plan instead of replacing the plan; then request canonical reference images; a human-confirmed generation makes each newest image current; then read the fresh revision and set_shot_reference_binding to current references. Beat Story and Shot Shooting-script authoring belongs in propose_storyboard for human review. set_reference_label, set_reference_prompt, select_reference_image and remove_reference_image are renderer-only and never Director-callable. This never starts paid generation. Proposal-only and unavailable operations are invalid arguments; capability preflight remains a fail-closed backstop and no rejected operation reaches command evaluation or is applied. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected or invalid batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
-    createStudioApplyEditsHandlerV2(config, writerDeps)
+    async (input) =>
+      createStudioApplyEditsHandlerV2(
+        config,
+        writerDeps
+      )({
+        expectedRevision: input.expectedRevision,
+        operations: input.operations as StudioMutationOperationV2[],
+      })
   );
   server.registerTool(
     'studio_get_project_status',
