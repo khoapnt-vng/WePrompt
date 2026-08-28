@@ -289,7 +289,23 @@ const sources = (): StudioFilmVerifiedSourceV2[] => [
   sourceFor(BED, BED_BYTES),
 ];
 
-describe('schema-2 film runtime', () => {
+/**
+ * Every case in this file writes a fake ffmpeg/ffprobe pair to disk and runs the real exporter
+ * over it, so each one is dominated by process spawning rather than by its assertions. Measured
+ * in isolation on a quiet machine the eleven cases run 0ms-3.9s, but under full-suite parallelism
+ * one of them exceeded the 10s global testTimeout — and the case that lost the race was a 1.35s
+ * one, not the slowest, so no per-case ceiling derived from isolated timings would be safe.
+ *
+ * The suite-wide ceiling below matches the reasoning already recorded for the fake POSIX
+ * toolchain cases in tests/unit/assets/prepareAioncoreActionsArtifact.test.ts, where 30s was
+ * tried and still proved too tight. These cases are I/O bound, so a generous ceiling costs
+ * nothing and only prevents false failures; a genuine hang still fails, just later. The
+ * assertions are untouched by it. Do not lower this toward the global default without
+ * re-measuring under full-suite load.
+ */
+const FAKE_FFMPEG_TIMEOUT_MS = 120_000;
+
+describe('schema-2 film runtime', { timeout: FAKE_FFMPEG_TIMEOUT_MS }, () => {
   it('accepts both FFmpeg 8 and FFmpeg 9 filter-inventory column formats', async () => {
     for (const filters of [FFMPEG_8_FILTER_INVENTORY, FFMPEG_9_FILTER_INVENTORY]) {
       const binaries = await fakeFfmpegPair({ filters });

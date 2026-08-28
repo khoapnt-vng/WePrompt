@@ -1742,7 +1742,22 @@ const invokeStudioAction = async <Result,>(invoke: () => Promise<Result>): Promi
   return result;
 };
 
-describe('StudioPage schema-5 cutover', () => {
+/**
+ * This file renders the whole Studio page and drives it through real navigation, so its cases are
+ * dominated by render and effect settling rather than by their assertions. Measured with the
+ * coverage config: its tests run ~26s in isolation but ~155s inside the full suite, a 5.4x
+ * inflation. Under that load its heaviest case — the Table/Board/Cut navigation check, 3.4s-4.7s
+ * quiet — exceeded the 10s global testTimeout and failed the push gate.
+ *
+ * The ceiling is set on the suite rather than on that one case deliberately: which case loses the
+ * race under load is arbitrary, so a per-case ceiling derived from isolated timings would only
+ * move the failure. It is a hang-detector, not a performance budget — a genuine hang still fails,
+ * just later, and no assertion is weakened by it. See the fake-toolchain note in
+ * tests/unit/assets/prepareAioncoreActionsArtifact.test.ts for the same reasoning.
+ */
+const STUDIO_PAGE_DOM_TIMEOUT_MS = 60_000;
+
+describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
