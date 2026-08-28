@@ -3,7 +3,7 @@
 **For:** the designer of the Beat and Shot prototype
 **From:** engineering, 2026-08-28
 **About:** the Beat panel's Shot bands — [BUG-171](./creative-studio-3-bug-list.md) and the owner's review of 2026-08-28
-**Needs:** a drawing, and answers to the four questions in _What we are asking_
+**Needs:** a drawing, and answers to the five questions in _What we are asking_
 
 ## The short version
 
@@ -13,9 +13,12 @@ time? what is a more standardised design for movie editing?"_
 
 Our answer to the first is no. Our answer to the second is that the standard is **one clip track under
 one time ruler**, which is what every editor the owner has ever used does — Premiere, Resolve, Final
-Cut, Avid. We could collapse the bands ourselves, but there is a reason they were split, and
-collapsing them naively would destroy it. That reason is money, and it is the actual design problem.
-So we are commissioning rather than improvising.
+Cut, Avid.
+
+The bands were split for a reason — money, explained below — and collapsing them naively would have
+destroyed that safeguard. The owner has since cut the knot: **the rail will not trim**. That removes
+the hard part, and what we are commissioning is now the simple version: a track that shows the Beat
+and moves through it, with every mutating action stated explicitly rather than dragged.
 
 ## What is there now
 
@@ -43,9 +46,22 @@ the rows are not self-evident.
 - **Seeking** is free.
 
 So the current design put free actions and paid actions on separate rows and captioned them. It is a
-defensible instinct and it is why we are not just deleting two rows. **The question is how one track
-can make a paid drag feel different from a free drag at the moment of the gesture** — before the money
-is spent, not after.
+defensible instinct and it is why we are not just deleting two rows.
+
+## The decision that simplifies this: no trimming on the rail
+
+**The owner's direction, 2026-08-28: the rail does not trim. Keep it simple first.**
+
+This is a deliberate reduction of scope and it changes the shape of the answer, so please read it
+before drawing. Direct manipulation of duration — dragging a Shot's edge to change its in or out
+point — is **out** of this version. The rail is for reading the Beat and moving through it, not for
+editing its lengths by hand.
+
+That removes the ambiguity the three bands were built to manage. With no trim gesture there is no
+free drag sitting a few pixels from a paid one, so the track no longer has to teach the difference
+mid-gesture. What remains is a track that **shows** structure and time, and **seeks**. Any change to
+duration or structure happens through an explicit, named action — the Director, or a control that
+says what it will do and what it costs — rather than by dragging.
 
 ## What we are asking
 
@@ -54,18 +70,25 @@ is spent, not after.
    separate from a temporal one? If one track: what happens to the `×` boundary control — does it live
    at the block seam, and what does it look like when the join is chained versus a hard cut?
 
-2. **How does the track distinguish a free drag from a paid one?** This is the real commission. Edge
-   trim is free, boundary drag costs a re-render. Both are horizontal drags on the same block, a few
-   pixels apart. We need a treatment that makes the difference legible **before** the drag commits —
-   cursor, handle shape, colour, a confirm step, something else. Note the product's rule: **the cut has
-   no undo, ever**, so a mistaken paid drag cannot be taken back, only paid for again.
+2. **What is the track's full interactive vocabulary, now that trimming is out?** Our reading is that
+   it reduces to two things: **seek**, and **select a Shot**. If that is right, say so — a track that
+   only reads and seeks can be drawn much more plainly than one built for direct manipulation, and we
+   would rather have the plain version. If you think one editing gesture genuinely belongs here even
+   under the simplification, name it and say why it earns its place. Bear in mind the product rule:
+   **the cut has no undo, ever**, so any gesture that mutates has no way back.
 
-3. **Does `plan` versus `source` survive as two numbers?** In an NLE this distinction is not two rows;
-   it is one clip whose trimmed extent is shown against its untrimmed source at the handles.
-   `6s source / 6s plan` is a clip trimmed to its own edges. Can we express both with one block plus
-   trim handles, or is there a reason the owner needs the planned duration stated as its own text?
+3. **Where does a paid action live, if not on the track?** Breaking or moving a join re-renders the
+   next Shot and costs money. With dragging gone, that becomes an explicit control. Should it sit on
+   the selected Shot, at the seam between blocks, or outside the track entirely? It needs to state
+   its consequence before it is taken, not after.
 
-4. **What does the ruler measure?** Beat-relative (`0s … 31s`) or film-relative (this Beat starts at
+4. **How should `plan` and `source` read without trim handles?** In an NLE these are one clip and its
+   trimmed extent, expressed at the handles — but we no longer have handles. Are two numbers still
+   warranted, or does the block simply show its duration? If a Shot's planned length and its actual
+   footage length can differ, the track has to show that they differ; how, without implying the owner
+   can drag to fix it?
+
+5. **What does the ruler measure?** Beat-relative (`0s … 31s`) or film-relative (this Beat starts at
    1:47)? The Beat panel is entered from the Board, so the owner arrives with film context and may
    want to keep it.
 
@@ -93,6 +116,9 @@ is spent, not after.
   [the sound and progressive-workspace plan](./creative-studio-3-sound-and-progressive-workspace.md))
   and no waveform or audio track is wanted here yet. If your track has an obvious place for one later,
   a note is welcome; a drawn audio lane is not.
+- Not trimming. Direct manipulation of duration is deliberately out of this version (see _The decision
+  that simplifies this_). If your drawing implies trim handles, we will not build them, so please draw
+  the version without.
 - Not the cut editor on the Cut view. That is its own surface.
 
 ## For reference
