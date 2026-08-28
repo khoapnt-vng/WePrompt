@@ -336,7 +336,7 @@ describe('Studio Director V2 command contracts', () => {
     ]) {
       expect(parsePendingV2(validCommandV2({ operations: [operation] })).status).toBe('valid');
     }
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(7);
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(8);
     expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
   });
 
@@ -580,12 +580,12 @@ describe('Studio Director V2 command contracts', () => {
     });
   });
 
-  it('treats the immediate-prior schema-6 query family as unsupported without migration', () => {
-    const command = { ...validQueryCommandV2('get_proposal'), schemaVersion: 6 };
-    const slot = { ...validSlotV2(), schemaVersion: 6 };
-    const lease = { ...validLeaseV2(), schemaVersion: 6 };
+  it('treats the immediate-prior schema-7 query family as unsupported without migration', () => {
+    const command = { ...validQueryCommandV2('get_proposal'), schemaVersion: 7 };
+    const slot = { ...validSlotV2(), schemaVersion: 7 };
+    const lease = { ...validLeaseV2(), schemaVersion: 7 };
     const receipt = {
-      schemaVersion: 6,
+      schemaVersion: 7,
       commandId: 'command_1',
       projectId: 'project_1',
       decidedAt: NOW,
@@ -707,7 +707,7 @@ describe('Studio Director V2 read-query contracts', () => {
     expect(parsePendingV2({ ...routes, detail: false })).toMatchObject({ status: 'invalid' });
     expect(parsePendingV2({ ...proposal, proposalId: '../unsafe' })).toMatchObject({ status: 'invalid' });
     expect(parsePendingV2({ ...proposal, detail: false })).toMatchObject({ status: 'invalid' });
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(7);
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(8);
     expect(STUDIO_PROPOSAL_SCHEMA_VERSION_V2).toBe(5);
     expect(STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION).toBe(5);
     expect(STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES).toBeGreaterThan(256 * 1024);
@@ -1156,15 +1156,29 @@ describe('Studio Director V2 read-query contracts', () => {
     ];
 
     const storyboard = result.stages.find((stage) => stage.id === 'storyboard')!;
-    storyboard.state = 'in_progress';
+    storyboard.state = 'blocked';
     storyboard.summary = {
       stage: 'storyboard',
       beatCount: 1,
       shotCount: 2,
-      authoredShotCount: 2,
+      authoredShotCount: 1,
       plannedSeconds: 8,
       targetSeconds: 30,
     };
+    storyboard.blockers = [
+      {
+        cause: 'shooting_script_required',
+        where: {
+          kind: 'shot',
+          beatId: 'beat_1',
+          shotId: 'shot_2',
+          beatPosition: 1,
+          shotPosition: 2,
+          jobId: null,
+        },
+        remedy: { kind: 'owner_only', reason: 'review_project_data' },
+      },
+    ];
 
     const bindings = result.stages.find((stage) => stage.id === 'bindings')!;
     bindings.state = 'blocked';
@@ -1346,6 +1360,49 @@ describe('Studio Director V2 read-query contracts', () => {
     } as const;
 
     expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
+  });
+
+  it('accepts a Shooting-script blocker only at an exact Shot location', () => {
+    const makeReceipt = (where: StudioProjectStatusV2['stages'][number]['blockers'][number]['where']) => {
+      const result = validProjectStatusV2(false);
+      const storyboard = result.stages.find((stage) => stage.id === 'storyboard')!;
+      storyboard.state = 'blocked';
+      storyboard.blockers = [
+        {
+          cause: 'shooting_script_required',
+          where,
+          remedy: { kind: 'owner_only', reason: 'review_project_data' },
+        },
+      ];
+      result.blockerCount = 1;
+      return {
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+        commandId: 'command_1',
+        projectId: 'project_1',
+        decidedAt: NOW,
+        status: 'answered',
+        query: { kind: 'get_project_status', detail: false },
+        result,
+      } as const;
+    };
+    const shotWhere = {
+      kind: 'shot',
+      beatId: 'beat_1',
+      shotId: 'shot_1',
+      beatPosition: 1,
+      shotPosition: 1,
+      jobId: null,
+    } as const;
+
+    expect(parseReceiptV2(makeReceipt(shotWhere)).status).toBe('valid');
+    for (const where of [
+      { kind: 'project' },
+      { kind: 'route', routeKind: 'image' },
+      { kind: 'reference', referenceId: 'reference_1', jobId: null },
+      { kind: 'cut' },
+    ] as const) {
+      expect(parseReceiptV2(makeReceipt(where)).status).toBe('invalid');
+    }
   });
 
   it('keeps current-segment recovery valid when a downstream blocker prepares an earlier Shot root', () => {

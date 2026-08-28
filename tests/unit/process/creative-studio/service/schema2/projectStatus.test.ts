@@ -589,18 +589,48 @@ describe('projectStudioStatusV2', () => {
     });
   });
 
-  it('sums valid active-Shot durations even while a Shot is still missing its script', () => {
+  it('blocks the exact active Shot with a blank Shooting script without losing its planned duration', () => {
     const value = project();
     addBeat(value, [shot('shot_1', 12, { shootingScript: '   ' })], 30);
 
-    expect(stage(projectStudioStatusV2(value, readyRoutes()), 'storyboard')).toMatchObject({
-      state: 'in_progress',
+    const status = projectStudioStatusV2(value, readyRoutes());
+
+    expect(stage(status, 'storyboard')).toMatchObject({
+      state: 'blocked',
       summary: {
         shotCount: 1,
         authoredShotCount: 0,
         plannedSeconds: 12,
         targetSeconds: 30,
       },
+      blockers: [
+        {
+          cause: 'shooting_script_required',
+          where: {
+            kind: 'shot',
+            beatId: 'beat_1',
+            shotId: 'shot_1',
+            beatPosition: 1,
+            shotPosition: 1,
+            jobId: null,
+          },
+          remedy: { kind: 'owner_only', reason: 'review_project_data' },
+        },
+      ],
+    });
+    expect(status.blockerCount).toBe(1);
+  });
+
+  it('ignores blank Shooting scripts retained only in the Bin', () => {
+    const value = project();
+    addBeat(value, [shot('shot_active', 12)], 30);
+    value.shots.shot_binned = shot('shot_binned', 8, { shootingScript: '\n  ' });
+    value.bin.push({ kind: 'shot', beatId: 'beat_1', shotId: 'shot_binned', reason: 'lifted' });
+
+    expect(stage(projectStudioStatusV2(value, readyRoutes()), 'storyboard')).toMatchObject({
+      state: 'in_progress',
+      summary: { shotCount: 1, authoredShotCount: 1, plannedSeconds: 12, targetSeconds: 30 },
+      blockers: [],
     });
   });
 

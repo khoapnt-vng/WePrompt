@@ -141,6 +141,8 @@ export type WorkspaceBeatProjection = {
   title: string;
   story: string;
   targetSeconds: number | null;
+  /** Main-model planning sum derived once from the canonical active Shot boundaries. */
+  sumSeconds: number | null;
   actualSeconds: number | null;
   displayState: WorkspaceBeatDisplayState;
   shots: WorkspaceShotProjection[];
@@ -1138,6 +1140,7 @@ const projectStoredBeat = (input: {
     title: input.beat.title,
     story: input.beat.story,
     targetSeconds: input.beat.targetSeconds,
+    sumSeconds: planningBoundaries.at(-1)?.endSeconds ?? null,
     actualSeconds: projectBeatActualSeconds(input.project, input.beat),
     displayState: projectBeatDisplayState({
       beat: input.beat,
@@ -1538,6 +1541,7 @@ export const projectWorkspace = (
         title: beat.title,
         story: beat.story,
         targetSeconds: beat.targetSeconds,
+        sumSeconds: planningBoundaries?.at(-1)?.endSeconds ?? null,
         actualSeconds: projectBeatActualSeconds(project, beat),
         displayState: projectBeatDisplayState({
           beat,

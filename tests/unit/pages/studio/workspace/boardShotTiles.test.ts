@@ -8,21 +8,34 @@ import { describe, expect, it } from 'vitest';
 
 import type {
   StudioProjectStatusBlockerV2,
+  StudioProjectStatusRouteCatalogV2,
   StudioProjectStatusShotDetailV2,
   StudioProjectStatusStageIdV2,
   StudioProjectStatusStageV2,
   StudioProjectStatusV2,
+  StudioRendererProjectV2,
+  StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
+import {
+  createEmptyStudioProjectV2,
+  projectStudioChainStatusV2,
+  projectStudioStatusV2,
+  projectStudioWorkspaceStatusV2,
+} from '@/process/services/creative-studio/service/schema2';
 import {
   BOARD_SHOT_TILE_MAX_BLOCKERS,
   deriveBoardShotTiles,
 } from '@/renderer/pages/studio/components/Workspace/Views/Board/boardShotTiles';
-import type {
-  WorkspaceBeatProjection,
-  WorkspaceProjection,
-  WorkspaceShotProjection,
+import {
+  projectWorkspace,
+  type WorkspaceBeatProjection,
+  type WorkspaceProjection,
+  type WorkspaceShotProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
-
+/*
+ * Keep the hand-built renderer fixtures below for malformed-boundary coverage. The focused
+ * cross-layer test also builds this projection from Main authority so the join cannot drift.
+ */
 const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}): WorkspaceShotProjection => ({
   id,
   shootingScript: `Script ${id}`,
@@ -63,6 +76,7 @@ const makeBeat = (id: string, shots: WorkspaceShotProjection[]): WorkspaceBeatPr
   title: `Beat ${id}`,
   story: `Story ${id}`,
   targetSeconds: 8,
+  sumSeconds: shots.length === 0 ? null : shots.reduce((total, shot) => total + shot.durationSeconds, 0),
   actualSeconds: null,
   displayState: 'draft',
   shots,
@@ -243,7 +257,120 @@ const withStageBlockers = (
       : stage
   );
 
+const makeAuthorityShot = (id: string, shootingScript: string): StudioShot => ({
+  id,
+  shootingScript,
+  durationSeconds: 4,
+  trimInSeconds: null,
+  trimOutSeconds: null,
+  chainBreak: 'none',
+  referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
+  seedStillId: null,
+  dismissedSeedStillIds: [],
+  boardAssetId: null,
+  supersededBoardAssetIds: [],
+  videoAssetId: null,
+  supersededVideoAssetIds: [],
+  assetIds: [],
+  jobIds: [],
+});
+
+const readyStatusRoutes = (): StudioProjectStatusRouteCatalogV2 => {
+  const route = (kind: 'image' | 'video') => ({
+    choiceId: `${kind}_route`,
+    providerId: `${kind}_provider`,
+    providerName: `${kind} provider`,
+    model: `${kind}_model`,
+    integrationLabelKey: kind === 'image' ? ('imageApi' as const) : ('openRouterVideo' as const),
+    health: 'available' as const,
+    kind,
+    constraints: {
+      aspectRatios: ['16:9' as const],
+      resolutions: ['1080p' as const],
+      minDurationSeconds: 1,
+      maxDurationSeconds: 60,
+      supportsFirstFrame: true,
+      maxConditioningImages: kind === 'image' ? 3 : 0,
+      silentOutput: true,
+    },
+  });
+  const image = route('image');
+  const video = route('video');
+  return {
+    status: 'available',
+    catalog: {
+      catalogVersion: 'catalog_1',
+      image: {
+        status: 'ready',
+        selected: { choiceId: image.choiceId, providerId: image.providerId, model: image.model },
+        selectedRoute: image,
+        selectionIssue: null,
+        options: [image],
+      },
+      video: {
+        status: 'ready',
+        selected: { choiceId: video.choiceId, providerId: video.providerId, model: video.model },
+        selectedRoute: video,
+        selectionIssue: null,
+        options: [video],
+      },
+    },
+  };
+};
+
 describe('Board Shot tile projection', () => {
+  it('joins Main-derived blank-script authority to only the exact renderer Shot', () => {
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Cross-layer blocker',
+        brief: 'One blank script and one authored script.',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 8,
+        resolution: '1080p',
+      },
+      'project_1',
+      '2026-08-28T00:00:00.000Z'
+    );
+    project.imageRouteId = 'image_route';
+    project.videoRouteId = 'video_route';
+    project.referencePlanStatus = 'planned';
+    project.beatOrder = ['beat_1'];
+    project.beats.beat_1 = {
+      id: 'beat_1',
+      title: 'Opening',
+      story: 'An exact two-Shot story.',
+      targetSeconds: null,
+      shotOrder: ['shot_blank', 'shot_authored'],
+    };
+    project.shots.shot_blank = makeAuthorityShot('shot_blank', ' \n ');
+    project.shots.shot_authored = makeAuthorityShot('shot_authored', 'A complete Shooting script.');
+
+    const projection = projectWorkspace(
+      project as unknown as StudioRendererProjectV2,
+      projectStudioWorkspaceStatusV2(project),
+      projectStudioChainStatusV2(project)
+    );
+    const status = projectStudioStatusV2(project, readyStatusRoutes(), { detail: true });
+    const result = deriveBoardShotTiles(projection, status);
+
+    expect(result).not.toBeNull();
+    expect(result!.blockerStatusAvailable).toBe(true);
+    expect(
+      result!.beats[0]!.shots[0]!.blockers.filter((item) => item.value.cause === 'shooting_script_required')
+    ).toEqual([
+      expect.objectContaining({
+        stage: 'storyboard',
+        value: expect.objectContaining({
+          cause: 'shooting_script_required',
+          where: expect.objectContaining({ shotId: 'shot_blank' }),
+        }),
+      }),
+    ]);
+    expect(result!.beats[0]!.shots[1]!.blockers).not.toContainEqual(
+      expect.objectContaining({ value: expect.objectContaining({ cause: 'shooting_script_required' }) })
+    );
+  });
+
   it('derives isolated media, six-word status, chain labels, and Beat counts only from live Shot facts', () => {
     const stalePicture = {
       assetId: 'video_stale',

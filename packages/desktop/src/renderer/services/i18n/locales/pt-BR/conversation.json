@@ -1129,7 +1129,6 @@
           "chainHead": "Início da cadeia",
           "chainAfter": "Depois de {{beat}}.{{shot}}",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
-          "scriptUnavailable": "Roteiro de filmagem não escrito",
           "statusUnavailable": "Os detalhes dos bloqueios não estão disponíveis para esta revisão do projeto.",
           "blocker": {
             "heading": "Bloqueado por",
@@ -1596,6 +1595,7 @@
             "invalidDependency": "A dependência da continuação não é mais válida. Atualize o projeto e prepare novamente.",
             "invalidPrepareRequest": "Não foi possível preparar a seleção de geração com segurança. Revise-a e prepare novamente.",
             "invalidReference": "Uma referência selecionada não é mais válida para esta geração. Escolha outra referência.",
+            "missingShootingScript": "Escreva o roteiro de filmagem deste Shot antes de gerar mídia.",
             "missingConditioning": "Uma tomada de vídeo não tem um primeiro quadro nem um quadro predecessor elegível. Adicione ou selecione a imagem necessária.",
             "unsafeTotal": "Não foi possível representar com segurança o total da estimativa. Reduza a seleção; nada foi enviado."
           }

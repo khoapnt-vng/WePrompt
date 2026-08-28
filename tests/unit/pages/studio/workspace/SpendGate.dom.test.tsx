@@ -3222,21 +3222,22 @@ describe('SpendGateModal', () => {
     expect(mocks.confirm).not.toHaveBeenCalled();
   });
 
-  it('renders the structured pricing refusal reason without retrying or confirming', async () => {
+  it.each([
+    ['missing_conditioning', 'missingConditioning'],
+    ['missing_shooting_script', 'missingShootingScript'],
+  ] as const)('renders structured pricing refusal %s without retrying or confirming', async (reason, key) => {
     mocks.prepare.mockResolvedValue({
       ok: false,
       error: {
         code: 'pricing_refused',
-        reason: 'missing_conditioning',
+        reason,
         messageKey: 'conversation.creativeStudio.errors.pricingRefused',
       },
     });
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
 
-    expect(
-      await screen.findByText('conversation.creativeStudio.workspace.gate.errors.pricing.missingConditioning')
-    ).toBeVisible();
+    expect(await screen.findByText(`conversation.creativeStudio.workspace.gate.errors.pricing.${key}`)).toBeVisible();
     expect(mocks.prepare).toHaveBeenCalledTimes(1);
     expect(mocks.confirm).not.toHaveBeenCalled();
   });

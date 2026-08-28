@@ -178,6 +178,7 @@ const makeBeat = (
   title,
   story: `Story ${id}`,
   targetSeconds: 8,
+  sumSeconds: shots.length === 0 ? null : shots.reduce((total, shot) => total + shot.durationSeconds, 0),
   actualSeconds: null,
   displayState: shots.length === 0 ? 'no_coverage' : 'draft',
   shots,

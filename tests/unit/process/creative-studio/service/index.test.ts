@@ -3447,6 +3447,29 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
+  it('preserves a blank Shooting-script refusal before provider, cache, pricing, or paid work', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.shots.clip_1!.shootingScript = ' \n ';
+    const preparedSubmissionCache = new StudioPreparedSubmissionCacheV2();
+    const admit = vi.spyOn(preparedSubmissionCache, 'admit');
+    const harness = makeHarness(project, { preparedSubmissionCache });
+
+    await expect(
+      harness.service.prepareSubmission({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [shotChoiceV2('clip_1', 'seed_still')],
+        cascadeChoices: [],
+      })
+    ).rejects.toMatchObject({ name: 'StudioPricingErrorV2', code: 'missing_shooting_script' });
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
   it('keeps a 12-second target advisory when a spendable Board-only batch plans 10 seconds', async () => {
     const project = makeSchema2ServiceProject();
     project.boardStyle = 'grey_tone';
@@ -5281,6 +5304,38 @@ describe('CreativeStudioServiceV2', () => {
     });
     expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
     expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+  });
+
+  it('reports the exact blank-script Shot through the read-only Director status path', async () => {
+    const project = makeSchema2ServiceProject();
+    project.shots.clip_2!.shootingScript = ' \n ';
+    const harness = makeHarness(project);
+
+    const status = await harness.service.getProjectStatus({ projectId: project.id, detail: true });
+
+    expect(status.stages.find((stage) => stage.id === 'storyboard')).toMatchObject({
+      state: 'blocked',
+      summary: { shotCount: 2, authoredShotCount: 1, plannedSeconds: 10 },
+      blockers: [
+        {
+          cause: 'shooting_script_required',
+          where: {
+            kind: 'shot',
+            beatId: 'section_2',
+            shotId: 'clip_2',
+            beatPosition: 2,
+            shotPosition: 1,
+            jobId: null,
+          },
+          remedy: { kind: 'owner_only', reason: 'review_project_data' },
+        },
+      ],
+    });
+    expect(harness.store.applyMutationBatchV2).not.toHaveBeenCalled();
+    expect(harness.store.updateProjectV2).not.toHaveBeenCalled();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
   it('loads the latest project revision only after a slow fresh route discovery completes', async () => {

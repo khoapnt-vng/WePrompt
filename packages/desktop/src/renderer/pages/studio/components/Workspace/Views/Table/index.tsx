@@ -9,7 +9,6 @@ import { Alert, Button, Select } from '@arco-design/web-react';
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { STUDIO_MAX_SHOT_SECONDS, STUDIO_MIN_SHOT_SECONDS } from '@/common/types/project/creativeStudioTypes';
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
@@ -87,31 +86,6 @@ const exactFilmOrderBoardPanels = (
     return shotIds.map(statusPendingPanel);
   }
   return panels.map((panel) => ({ ...panel, staleCauses: [...panel.staleCauses] }));
-};
-
-const plannedSecondsForBeat = (beat: WorkspaceBeatProjection): number | null => {
-  if (beat.shots.length === 0) return null;
-  let cursor = 0;
-  for (const shot of beat.shots) {
-    const boundary = shot.planningBoundary;
-    if (
-      boundary === null ||
-      boundary.shotId !== shot.id ||
-      !Number.isSafeInteger(shot.durationSeconds) ||
-      shot.durationSeconds < STUDIO_MIN_SHOT_SECONDS ||
-      shot.durationSeconds > STUDIO_MAX_SHOT_SECONDS ||
-      !Number.isSafeInteger(boundary.startSeconds) ||
-      boundary.startSeconds < 0 ||
-      !Number.isSafeInteger(boundary.endSeconds) ||
-      boundary.endSeconds < 0 ||
-      boundary.startSeconds !== cursor ||
-      boundary.endSeconds - boundary.startSeconds !== shot.durationSeconds
-    ) {
-      return null;
-    }
-    cursor = boundary.endSeconds;
-  }
-  return cursor;
 };
 
 const moveOrder = (order: readonly string[], from: number, to: number): string[] | null => {
@@ -695,7 +669,7 @@ export const TableView: React.FC<TableViewProps> = ({
               const beatAriaRowIndex =
                 row + 2 + (openBoardBeatIndex >= 0 && row > openBoardBeatIndex ? openShotCount : 0);
               const durationKind = hasCoverage ? 'planned' : 'target';
-              const durationSeconds = hasCoverage ? plannedSecondsForBeat(beat) : beat.targetSeconds;
+              const durationSeconds = hasCoverage ? beat.sumSeconds : beat.targetSeconds;
               const duration =
                 durationSeconds === null
                   ? t(

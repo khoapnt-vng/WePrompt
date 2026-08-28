@@ -169,7 +169,7 @@ export const isValidProviderJobId = (value: string): boolean =>
 
 export const STUDIO_MAX_DIRTY_DRAFTS_REPORTED = 24;
 /** Durable Beat/Shot Director command schema. */
-export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 7 as const;
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 8 as const;
 export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 5 as const;
 export const STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION = 5 as const;
 export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
@@ -660,6 +660,7 @@ export const STUDIO_PRICING_REFUSAL_REASONS_V2 = [
   'invalid_dependency',
   'invalid_prepare_request',
   'invalid_reference',
+  'missing_shooting_script',
   'missing_conditioning',
   'unsafe_total',
 ] as const;
@@ -2125,6 +2126,7 @@ export const STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2 = [
   'reference_binding_unapproved_reference',
   'reference_binding_missing_asset',
   'reference_binding_capacity_exceeded',
+  'shooting_script_required',
   'seed_selection_required',
   'seed_generation_required',
   'conditioning_frame_required',

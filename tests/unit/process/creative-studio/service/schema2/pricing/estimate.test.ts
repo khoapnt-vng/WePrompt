@@ -515,6 +515,57 @@ const boardPromotionRequest = (shotId: string, boardAssetId: string): StudioPrep
 });
 
 describe('schema-2 Studio estimates', () => {
+  it.each(['seed_still', 'video_take'] as const)(
+    'refuses an ordinary %s quote for a whitespace-only Shooting script before route composition',
+    (purpose) => {
+      const project = makeDerivationProject();
+      project.shots.shot_1!.shootingScript = ' \n ';
+
+      expect(() =>
+        deriveStudioSubmissionQuoteGraphV2({
+          project,
+          request: prepareRequest([choice('shot_1', purpose)], []),
+          resolveRoute: () => {
+            throw new Error('route composition must not run');
+          },
+        })
+      ).toThrow(expect.objectContaining({ code: 'missing_shooting_script' }));
+    }
+  );
+
+  it('refuses a canonical ordinary cascade when an implicit downstream Shot has a blank Shooting script', () => {
+    const project = makeDerivationProject();
+    project.shots.shot_3!.shootingScript = '\t';
+
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project,
+        request: prepareRequest([choice('shot_1', 'seed_still')], []),
+        resolveRoute: () => {
+          throw new Error('route composition must not run');
+        },
+      })
+    ).toThrow(expect.objectContaining({ code: 'missing_shooting_script' }));
+  });
+
+  it('refuses an entire Board batch when any selected Shot has a blank Shooting script', () => {
+    const project = makeBoardDerivationProject();
+    project.shots.shot_2!.shootingScript = '';
+
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project,
+        request: prepareRequest(
+          [choice('shot_1', 'board_still'), choice('shot_2', 'board_still'), choice('shot_3', 'board_still')],
+          []
+        ),
+        resolveRoute: () => {
+          throw new Error('route composition must not run');
+        },
+      })
+    ).toThrow(expect.objectContaining({ code: 'missing_shooting_script' }));
+  });
+
   it('derives one image-priced resolved Board item per selected Shot in film order', () => {
     const project = makeBoardDerivationProject();
     const request = prepareRequest(
@@ -703,6 +754,24 @@ describe('schema-2 Studio estimates', () => {
     );
     expect(project.shots.shot_1!.seedStillId).toBeNull();
     expect(JSON.stringify(options)).not.toContain('shot_4');
+  });
+
+  it('refuses paid Board promotion when a selected downstream Shot has a blank Shooting script', () => {
+    const project = makeBoardDerivationProject();
+    const panel = addCurrentBoardPanel(project, 'shot_1');
+    addSelectedVideo(project, 'shot_1');
+    addSelectedVideo(project, 'shot_2');
+    project.shots.shot_2!.shootingScript = '\t';
+
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project,
+        request: boardPromotionRequest('shot_1', panel.id),
+        resolveRoute: () => {
+          throw new Error('route composition must not run');
+        },
+      })
+    ).toThrow(expect.objectContaining({ code: 'missing_shooting_script' }));
   });
 
   it('refuses paid Board promotion when no selected take would be made stale', () => {
@@ -910,6 +979,21 @@ describe('schema-2 Studio estimates', () => {
     );
   });
 
+  it('refuses a continuity sever when any affected Shot has a blank Shooting script', () => {
+    const project = makeDerivationProject();
+    project.shots.shot_3!.shootingScript = '   ';
+
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project,
+        request: continuityRequest('shot_2', true, true),
+        resolveRoute: () => {
+          throw new Error('route composition must not run');
+        },
+      })
+    ).toThrow(expect.objectContaining({ code: 'missing_shooting_script' }));
+  });
+
   it('snapshots the exact trim-aware existing predecessor for one mandatory rejoin graph', () => {
     const project = makeDerivationProject();
     project.shots.shot_2!.chainBreak = 'hard_cut';
@@ -951,6 +1035,30 @@ describe('schema-2 Studio estimates', () => {
         },
       })
     );
+  });
+
+  it('refuses a continuity rejoin when any affected Shot has a blank Shooting script', () => {
+    const project = makeDerivationProject();
+    project.shots.shot_2!.chainBreak = 'hard_cut';
+    const predecessorTake = addDerivationAsset(project, {
+      id: 'take_for_blank_rejoin',
+      shotId: 'shot_1',
+      mediaKind: 'video',
+      managedAsset: { collection: 'assets', fileName: 'take_for_blank_rejoin.mp4' },
+      durationSeconds: 10,
+    });
+    project.shots.shot_1!.videoAssetId = predecessorTake.id;
+    project.shots.shot_3!.shootingScript = '\n';
+
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project,
+        request: continuityRequest('shot_2', false, false),
+        resolveRoute: () => {
+          throw new Error('route composition must not run');
+        },
+      })
+    ).toThrow(expect.objectContaining({ code: 'missing_shooting_script' }));
   });
 
   it.each([

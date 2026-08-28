@@ -558,6 +558,7 @@ const validatesBlockerV2 = (value: unknown): boolean => {
       cause === 'reference_binding_unapproved_reference' ||
       cause === 'reference_binding_missing_asset' ||
       cause === 'reference_binding_capacity_exceeded' ||
+      cause === 'shooting_script_required' ||
       cause === 'seed_selection_required' ||
       cause === 'seed_generation_required' ||
       cause === 'conditioning_frame_required' ||

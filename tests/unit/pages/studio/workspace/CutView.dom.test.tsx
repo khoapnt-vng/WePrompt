@@ -389,6 +389,7 @@ const playbackBeat = (
   title,
   story: `Story ${id}`,
   targetSeconds,
+  sumSeconds: shots.length === 0 ? null : shots.reduce((total, shot) => total + shot.durationSeconds, 0),
   actualSeconds:
     shots.length === 0
       ? null

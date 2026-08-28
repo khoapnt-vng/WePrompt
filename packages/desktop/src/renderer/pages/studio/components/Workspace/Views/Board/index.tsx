@@ -44,6 +44,7 @@ const SHOT_BLOCKER_CAUSE_KEYS = {
   reference_binding_unapproved_reference: `${KEY_ROOT}.shot.blocker.cause.referenceBindingUnapprovedReference`,
   reference_binding_missing_asset: `${KEY_ROOT}.shot.blocker.cause.referenceBindingMissingAsset`,
   reference_binding_capacity_exceeded: `${KEY_ROOT}.shot.blocker.cause.referenceBindingCapacityExceeded`,
+  shooting_script_required: 'conversation.creativeStudio.workspace.gate.errors.pricing.missingShootingScript',
   seed_selection_required: `${KEY_ROOT}.shot.blocker.cause.seedSelectionRequired`,
   seed_generation_required: `${KEY_ROOT}.shot.blocker.cause.seedGenerationRequired`,
   conditioning_frame_required: `${KEY_ROOT}.shot.blocker.cause.conditioningFrameRequired`,
@@ -335,7 +336,11 @@ const ShotTile: React.FC<ShotTileProps> = ({
   onReviewReferenceBinding,
 }) => {
   const { t } = useTranslation();
-  const canReviewReferenceBinding = shot.blockers.some((blocker) => blocker.reviewReferenceBinding);
+  const shootingScriptMissing = shot.shootingScript.trim().length === 0;
+  const visibleBlockers = shootingScriptMissing
+    ? shot.blockers.filter((blocker) => blocker.value.cause !== 'shooting_script_required')
+    : shot.blockers;
+  const canReviewReferenceBinding = visibleBlockers.some((blocker) => blocker.reviewReferenceBinding);
   const panelStatusId = useId();
   const panelCardRef = useRef<HTMLDivElement | null>(null);
   const shotLabel = t(`${KEY_ROOT}.shot.position`, {
@@ -454,17 +459,18 @@ const ShotTile: React.FC<ShotTileProps> = ({
           </span>
         </div>
         <p className={styles.shotScript} dir='auto'>
-          {shot.shootingScript.trim() || t(`${KEY_ROOT}.shot.scriptUnavailable`)}
+          {shot.shootingScript.trim() ||
+            t('conversation.creativeStudio.workspace.gate.errors.pricing.missingShootingScript')}
         </p>
         {!shot.blockersAvailable ? (
           <p className={styles.shotStatusUnavailable} data-blocker-status='unavailable'>
             {t(`${KEY_ROOT}.shot.statusUnavailable`)}
           </p>
-        ) : shot.blockers.length === 0 ? null : (
+        ) : visibleBlockers.length === 0 ? null : (
           <div className={styles.shotBlockers} data-blocker-status='available'>
             <p className={styles.shotBlockerHeading}>{t(`${KEY_ROOT}.shot.blocker.heading`)}</p>
             <ul>
-              {shot.blockers.map((blocker, index) => (
+              {visibleBlockers.map((blocker, index) => (
                 <li key={`${blocker.stage}:${blocker.value.cause}:${index}`}>
                   {t(SHOT_BLOCKER_CAUSE_KEYS[blocker.value.cause])}
                 </li>

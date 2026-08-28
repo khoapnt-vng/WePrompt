@@ -27,6 +27,7 @@ import {
   type StudioRendererMediaModelRef,
   type StudioRendererQuotedGenerationV2,
   type StudioRendererSubmissionQuoteV2,
+  type StudioShot,
   type StudioSpendPolicy,
   type StudioSubmissionQuote,
   type StudioSubmissionQuoteCore,
@@ -112,6 +113,7 @@ export type StudioPricingErrorCodeV2 =
   | 'invalid_dependency'
   | 'invalid_prepare_request'
   | 'invalid_reference'
+  | 'missing_shooting_script'
   | 'missing_route'
   | 'missing_conditioning'
   | 'unsafe_total';
@@ -546,6 +548,36 @@ const hasInFlightProjectReferenceItem = (
   projectReferenceId: string
 ): boolean => hasInFlightItem(project, { kind: 'reference', referenceId: projectReferenceId }, 'reference_image');
 
+const requireShootingScript = (shot: Pick<StudioShot, 'shootingScript'>): void => {
+  if (shot.shootingScript.trim().length === 0) fail('missing_shooting_script');
+};
+
+const requireShootingScripts = (project: StudioProjectV2, shotIds: Iterable<string>): void => {
+  for (const shotId of shotIds) {
+    const shot = ownValue(project.shots, shotId);
+    if (shot !== undefined) requireShootingScript(shot);
+  }
+};
+
+const affectedSegmentShotIds = (
+  project: StudioProjectV2,
+  shotId: string,
+  locations: ReadonlyMap<string, ActiveFilmShotLocation>
+): string[] => {
+  const location = locations.get(shotId);
+  const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
+  if (location === undefined || beat === undefined) return [];
+  const result: string[] = [];
+  for (let shotIndex = location.shotIndex; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+    const affectedShotId = beat.shotOrder[shotIndex]!;
+    const affectedShot = ownValue(project.shots, affectedShotId);
+    if (affectedShot === undefined) return [];
+    if (shotIndex > location.shotIndex && affectedShot.chainBreak === 'hard_cut') break;
+    result.push(affectedShotId);
+  }
+  return result;
+};
+
 const createChoiceTemplate = (
   project: StudioProjectV2,
   choice: StudioPrepareGenerationChoiceV2,
@@ -557,6 +589,7 @@ const createChoiceTemplate = (
   const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
   const shot = ownValue(project.shots, shotId);
   if (location === undefined || beat === undefined || shot === undefined) return fail('inactive_shot');
+  requireShootingScript(shot);
   const routeId = choice.purpose === 'video_take' ? project.videoRouteId : project.imageRouteId;
   if (routeId === null) return fail('missing_route');
   const authority = resolveRoute(routeId, choice.purpose);
@@ -667,7 +700,22 @@ export const preflightStudioSubmissionPreparationV2 = (input: {
 }): StudioPrepareSubmissionRequestV2 => {
   let request = parsePrepareRequest(input.request, input.project);
   const locations = activeFilmShotLocations(input.project);
-  if (request.boardPromotion !== undefined || request.continuityChange !== undefined) return request;
+  if (request.boardPromotion !== undefined) {
+    requireShootingScripts(
+      input.project,
+      affectedSegmentShotIds(input.project, request.boardPromotion.shotId, locations).filter(
+        (shotId) => selectedVideoAsset(input.project, shotId) !== null
+      )
+    );
+    return request;
+  }
+  if (request.continuityChange !== undefined) {
+    requireShootingScripts(
+      input.project,
+      affectedSegmentShotIds(input.project, request.continuityChange.shotId, locations)
+    );
+    return request;
+  }
   validateChoiceOrderAndIdentity(request, locations);
   const choices = [...request.baseChoices, ...request.cascadeChoices];
   const boardChoiceCount = choices.filter((choice) => choice.purpose === 'board_still').length;
@@ -675,12 +723,14 @@ export const preflightStudioSubmissionPreparationV2 = (input: {
     if (boardChoiceCount !== choices.length || request.cascadeChoices.length > 0 || input.project.boardStyle === null) {
       return fail('invalid_prepare_request');
     }
+    requireShootingScripts(input.project, choices.map(choiceShotId));
     if (input.project.imageRouteId === null || !SAFE_ID.test(input.project.imageRouteId)) return fail('missing_route');
     return request;
   }
   validateIndependentBaseAnchors(input.project, request.baseChoices, locations);
   request = canonicalizeExactCascade(input.project, request, locations);
   validateChoiceOrderAndIdentity(request, locations);
+  requireShootingScripts(input.project, [...request.baseChoices, ...request.cascadeChoices].map(choiceShotId));
 
   const earlierPairs = new Set<string>();
   for (const choice of [...request.baseChoices, ...request.cascadeChoices]) {
@@ -799,6 +849,16 @@ const deriveBoardUnpricedItems = (
   const routeId = project.imageRouteId;
   if (routeId === null || !SAFE_ID.test(routeId)) fail('missing_route');
   if (project.boardStyle === null) fail('invalid_prepare_request');
+  for (const choice of choices) {
+    const shotId = choiceShotId(choice);
+    const location = locations.get(shotId);
+    const beat = location === undefined ? undefined : ownValue(project.beats, location.beatId);
+    const shot = ownValue(project.shots, shotId);
+    if (choice.purpose !== 'board_still' || location === undefined || beat === undefined || shot === undefined) {
+      fail(location === undefined || shot === undefined ? 'inactive_shot' : 'invalid_prepare_request');
+    }
+    requireShootingScript(shot);
+  }
   const authority = resolveRoute(routeId, 'board_still');
   return choices.map((choice) => {
     const shotId = choiceShotId(choice);

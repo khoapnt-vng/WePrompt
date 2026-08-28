@@ -1123,7 +1123,6 @@
           "chainHead": "チェーンの先頭",
           "chainAfter": "{{beat}}.{{shot}}の後",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
-          "scriptUnavailable": "撮影台本が未作成です",
           "statusUnavailable": "このプロジェクトリビジョンではブロッカーの詳細を利用できません。",
           "blocker": {
             "heading": "次の理由でブロック",
@@ -1590,6 +1589,7 @@
             "invalidDependency": "続行の依存関係が無効になっています。プロジェクトを更新して、もう一度準備してください。",
             "invalidPrepareRequest": "生成の選択を安全に準備できませんでした。選択を確認して、もう一度準備してください。",
             "invalidReference": "選択した参照の1つは、この生成では無効になっています。別の参照を選択してください。",
+            "missingShootingScript": "メディアを生成する前に、この Shot の撮影台本を作成してください。",
             "missingConditioning": "動画テイクに利用可能な最初のフレームまたは前のフレームがありません。必要な画像を追加または選択してください。",
             "unsafeTotal": "見積もり合計を安全に表現できませんでした。選択を減らしてください。何も送信されていません。"
           }

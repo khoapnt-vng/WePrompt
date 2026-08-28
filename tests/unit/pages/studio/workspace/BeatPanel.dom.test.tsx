@@ -587,6 +587,7 @@ const makeBeat = (
   title: 'Opening',
   story: 'Open the film',
   targetSeconds: shots.length * 8,
+  sumSeconds: shots.length === 0 ? null : shots.reduce((total, shot) => total + shot.durationSeconds, 0),
   actualSeconds: shots.length * 8,
   displayState: 'draft',
   shots,

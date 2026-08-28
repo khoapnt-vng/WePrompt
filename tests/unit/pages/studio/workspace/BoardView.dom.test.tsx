@@ -162,7 +162,8 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.board.shot.videoPreview': 'Current Shot video',
         'conversation.creativeStudio.workspace.board.shot.stale': 'Stale',
         'conversation.creativeStudio.workspace.board.shot.chainHead': 'Chain head',
-        'conversation.creativeStudio.workspace.board.shot.scriptUnavailable': 'Shooting script not written',
+        'conversation.creativeStudio.workspace.gate.errors.pricing.missingShootingScript':
+          'Write this Shot’s Shooting script before generating media.',
         'conversation.creativeStudio.workspace.board.shot.statusUnavailable': 'Blocker details unavailable',
         'conversation.creativeStudio.workspace.board.shot.blocker.heading': 'Blocked by',
         'conversation.creativeStudio.workspace.board.shot.blocker.referenceBindingTable':
@@ -360,6 +361,7 @@ const makeBeat = (id: string, overrides: Partial<WorkspaceBeatProjection> = {}):
   title: `Beat ${id.toUpperCase()}`,
   story: `Story ${id}`,
   targetSeconds: 8,
+  sumSeconds: 8,
   actualSeconds: 8,
   displayState: 'ready',
   shots: [makeShot(`${id}_shot`)],
@@ -989,6 +991,46 @@ describe('BoardView', () => {
     expect(onReviewReferenceBinding).toHaveBeenCalledTimes(1);
     expect(onReviewReferenceBinding).toHaveBeenCalledWith('a_shot');
     expect(onOpenBeat).not.toHaveBeenCalled();
+  });
+
+  it('shows the shared blank-script refusal once on only the affected Shot', () => {
+    const blank = makeShot('blank_shot', { shootingScript: ' \n ' });
+    const authored = makeShot('authored_shot');
+    const projection = makeProjection([makeBeat('a', { shots: [blank, authored] })]);
+    const status = makeProjectStatus(projection);
+    status.stages = status.stages.map((stage) =>
+      stage.id === 'storyboard'
+        ? ({
+            ...stage,
+            state: 'blocked',
+            blockers: [
+              {
+                cause: 'shooting_script_required',
+                where: {
+                  kind: 'shot',
+                  beatId: 'a',
+                  shotId: 'blank_shot',
+                  beatPosition: 1,
+                  shotPosition: 1,
+                  jobId: null,
+                },
+                remedy: { kind: 'owner_only', reason: 'review_project_data' },
+              },
+            ],
+          } as StudioProjectStatusStageV2)
+        : stage
+    );
+    status.blockerCount = 1;
+
+    const result = render(<BoardView {...boardProps(projection)} projectStatus={status} />);
+    const blankTile = result.container.querySelector<HTMLElement>('[data-shot-id="blank_shot"]')!;
+    const authoredTile = result.container.querySelector<HTMLElement>('[data-shot-id="authored_shot"]')!;
+    const copy = 'Write this Shot’s Shooting script before generating media.';
+
+    expect(within(blankTile).getAllByText(copy)).toHaveLength(1);
+    expect(blankTile.querySelector('[data-blocker-status="available"]')).toBeNull();
+    expect(blankTile).not.toHaveTextContent('Blocked by');
+    expect(authoredTile).not.toHaveTextContent(copy);
   });
 
   it('withholds actionable blocker copy for stale or malformed status while keeping live Shot status', () => {

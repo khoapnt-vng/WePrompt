@@ -166,16 +166,20 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
   ...overrides,
 });
 
-const makeBeat = (id: string, overrides: Partial<WorkspaceBeatProjection> = {}): WorkspaceBeatProjection => ({
-  id,
-  title: `Beat ${id}`,
-  story: `Story ${id}`,
-  targetSeconds: 8,
-  actualSeconds: 8,
-  displayState: 'ready',
-  shots: [makeShot(`${id}_shot`)],
-  ...overrides,
-});
+const makeBeat = (id: string, overrides: Partial<WorkspaceBeatProjection> = {}): WorkspaceBeatProjection => {
+  const shots = overrides.shots ?? [makeShot(`${id}_shot`)];
+  return {
+    id,
+    title: `Beat ${id}`,
+    story: `Story ${id}`,
+    targetSeconds: 8,
+    sumSeconds: shots.length === 0 ? null : shots.reduce((total, shot) => total + shot.durationSeconds, 0),
+    actualSeconds: 8,
+    displayState: 'ready',
+    shots,
+    ...overrides,
+  };
+};
 
 const makeBoardPanel = (
   shotId: string,
@@ -1360,6 +1364,25 @@ describe('TableView', () => {
     expect(sum).not.toHaveTextContent('8s');
   });
 
+  it('renders Main-supplied Beat sum authority without recomputing Shot facts in Table', () => {
+    const beats = [
+      makeBeat('sum_authority', {
+        sumSeconds: 11,
+        shots: [
+          makeShot('authority_shot', {
+            durationSeconds: 4,
+            planningBoundary: { shotId: 'authority_shot', startSeconds: 0, endSeconds: 4 },
+          }),
+        ],
+      }),
+    ];
+
+    render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
+    const sum = cellAt(rowForBeat('sum_authority'), 5);
+    expect(sum).toHaveTextContent('11s');
+    expect(sum).not.toHaveTextContent('4s');
+  });
+
   it('shows exactly one coverage-appropriate duration fact and never invents zero seconds', () => {
     const beats = [
       makeBeat('duration_pending', {
@@ -1376,6 +1399,7 @@ describe('TableView', () => {
       }),
       makeBeat('covered_pending', {
         targetSeconds: 7,
+        sumSeconds: null,
         actualSeconds: 23,
         shots: [makeShot('missing_boundary', { planningBoundary: null })],
       }),
@@ -1477,7 +1501,7 @@ describe('TableView', () => {
   ] satisfies ReadonlyArray<readonly [string, WorkspaceShotProjection[]]>)(
     'fails closed instead of borrowing rendered seconds for %s',
     (_case, shots) => {
-      const beats = [makeBeat('invalid_plan', { actualSeconds: 41, shots })];
+      const beats = [makeBeat('invalid_plan', { sumSeconds: null, actualSeconds: 41, shots })];
       render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
       const sum = cellAt(rowForBeat('invalid_plan'), 5);
       expect(sum).toHaveTextContent('No planned sum');

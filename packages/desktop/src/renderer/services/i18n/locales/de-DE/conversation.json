@@ -1124,7 +1124,6 @@
           "chainHead": "Kettenanfang",
           "chainAfter": "Nach {{beat}}.{{shot}}",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
-          "scriptUnavailable": "Drehbuch noch nicht geschrieben",
           "statusUnavailable": "Blockerdetails sind für diese Projektversion nicht verfügbar.",
           "blocker": {
             "heading": "Blockiert durch",
@@ -1591,6 +1590,7 @@
             "invalidDependency": "Die Abhängigkeit der Fortsetzung ist nicht mehr gültig. Aktualisieren Sie das Projekt und bereiten Sie erneut vor.",
             "invalidPrepareRequest": "Die Generierungsauswahl konnte nicht sicher vorbereitet werden. Prüfen Sie sie und versuchen Sie es erneut.",
             "invalidReference": "Eine ausgewählte Referenz ist für diese Generierung nicht mehr gültig. Wählen Sie eine andere Referenz.",
+            "missingShootingScript": "Schreibe das Drehbuch für diesen Shot, bevor du Medien generierst.",
             "missingConditioning": "Für eine Videoaufnahme fehlt ein geeignetes erstes Bild oder Vorgängerbild. Fügen Sie das erforderliche Bild hinzu oder wählen Sie es aus.",
             "unsafeTotal": "Die Gesamtsumme der Schätzung konnte nicht sicher dargestellt werden. Reduzieren Sie die Auswahl; es wurde nichts übermittelt."
           }

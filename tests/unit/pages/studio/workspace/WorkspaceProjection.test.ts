@@ -907,7 +907,7 @@ describe('projectWorkspace', () => {
 
     const beat = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
 
-    expect(beat).toMatchObject({ targetSeconds: 8, actualSeconds: 7, displayState: 'ready' });
+    expect(beat).toMatchObject({ targetSeconds: 8, sumSeconds: 8, actualSeconds: 7, displayState: 'ready' });
     expect(beat.actualSeconds).not.toBe(project.shots.shot_1!.durationSeconds);
     expect(beat.shots[0]).toMatchObject({
       durationSeconds: 8,
@@ -924,6 +924,7 @@ describe('projectWorkspace', () => {
 
     project.assets.video_10s!.durationSeconds = Number.NaN;
     const unresolved = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
+    expect(unresolved.sumSeconds).toBe(8);
     expect(unresolved.actualSeconds).toBeNull();
     expect(unresolved.shots[0]).toMatchObject({
       currentPicture: null,
@@ -982,11 +983,21 @@ describe('projectWorkspace', () => {
     project.beats.beat_1!.targetSeconds = null;
 
     let beat = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
-    expect(beat).toMatchObject({ actualSeconds: null, targetSeconds: null, displayState: 'duration_pending' });
+    expect(beat).toMatchObject({
+      actualSeconds: null,
+      targetSeconds: null,
+      sumSeconds: null,
+      displayState: 'duration_pending',
+    });
 
     project.beats.beat_1!.targetSeconds = 8;
     beat = projectWorkspace(project, cleanWorkspaceStatus(), cleanChainStatus()).activeBeats[0]!;
-    expect(beat).toMatchObject({ actualSeconds: null, targetSeconds: 8, displayState: 'no_coverage' });
+    expect(beat).toMatchObject({
+      actualSeconds: null,
+      targetSeconds: 8,
+      sumSeconds: null,
+      displayState: 'no_coverage',
+    });
   });
 
   it('requires an effective seed for the first Shot and every later hard-cut segment head', () => {

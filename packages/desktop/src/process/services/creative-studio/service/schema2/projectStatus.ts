@@ -529,6 +529,18 @@ const deriveStoryboardStage = (
   locations: readonly ActiveShotLocation[],
   advisories: StudioProjectStatusAdvisoryV2[]
 ): StudioProjectStatusStageV2 => {
+  const blockers = locations.flatMap<StudioProjectStatusBlockerV2>((location) => {
+    const shot = ownValue(project.shots, location.shotId);
+    return shot?.shootingScript.trim().length === 0
+      ? [
+          {
+            cause: 'shooting_script_required',
+            where: shotWhere(location, null),
+            remedy: { kind: 'owner_only', reason: 'review_project_data' },
+          },
+        ]
+      : [];
+  });
   let plannedSeconds = 0;
   let authoredShotCount = 0;
   let complete = project.beatOrder.length > 0;
@@ -568,7 +580,13 @@ const deriveStoryboardStage = (
   }
   return stage(
     'storyboard',
-    project.beatOrder.length === 0 ? 'not_started' : complete && matches ? 'complete' : 'in_progress',
+    project.beatOrder.length === 0
+      ? 'not_started'
+      : blockers.length > 0
+        ? 'blocked'
+        : complete && matches
+          ? 'complete'
+          : 'in_progress',
     {
       stage: 'storyboard',
       beatCount: project.beatOrder.length,
@@ -576,7 +594,8 @@ const deriveStoryboardStage = (
       authoredShotCount,
       plannedSeconds,
       targetSeconds: project.targetDurationSeconds,
-    }
+    },
+    blockers
   );
 };
 

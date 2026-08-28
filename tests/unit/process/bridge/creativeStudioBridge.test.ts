@@ -1034,34 +1034,37 @@ describe('initCreativeStudioBridge', () => {
     });
   });
 
-  it('returns only the allowlisted structured pricing refusal without internal diagnostics', async () => {
-    const refusal = Object.assign(new StudioPricingErrorV2('missing_conditioning'), {
-      body: 'apiKey=secret-provider-body',
-      internalDetails: { stack: 'private stack' },
-    });
-    vi.mocked(service.prepareSubmission).mockRejectedValueOnce(refusal);
-    initCreativeStudioBridge(dependencies);
+  it.each(['missing_conditioning', 'missing_shooting_script'] as const)(
+    'returns only the allowlisted structured pricing refusal %s without internal diagnostics',
+    async (reason) => {
+      const refusal = Object.assign(new StudioPricingErrorV2(reason), {
+        body: 'apiKey=secret-provider-body',
+        internalDetails: { stack: 'private stack' },
+      });
+      vi.mocked(service.prepareSubmission).mockRejectedValueOnce(refusal);
+      initCreativeStudioBridge(dependencies);
 
-    const result = await registeredHandler('prepareSubmission')({
-      projectId: 'project_1',
-      expectedRevision: 7,
-      originReferenceHandoffId: null,
-      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
-      cascadeChoices: [],
-    } as never);
+      const result = await registeredHandler('prepareSubmission')({
+        projectId: 'project_1',
+        expectedRevision: 7,
+        originReferenceHandoffId: null,
+        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+        cascadeChoices: [],
+      } as never);
 
-    expect(result).toEqual({
-      ok: false,
-      error: {
-        code: 'pricing_refused',
-        reason: 'missing_conditioning',
-        details: null,
-        messageKey: 'conversation.creativeStudio.errors.pricingRefused',
-      },
-    });
-    expect(JSON.stringify(result)).not.toContain('secret-provider-body');
-    expect(JSON.stringify(result)).not.toContain('private stack');
-  });
+      expect(result).toEqual({
+        ok: false,
+        error: {
+          code: 'pricing_refused',
+          reason,
+          details: null,
+          messageKey: 'conversation.creativeStudio.errors.pricingRefused',
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain('secret-provider-body');
+      expect(JSON.stringify(result)).not.toContain('private stack');
+    }
+  );
 
   it('does not project an unknown pricing classification or attached diagnostics', async () => {
     const refusal = Object.assign(new StudioPricingErrorV2('route_secret_apiKey' as never), {

@@ -1123,7 +1123,6 @@
           "chainHead": "체인 시작",
           "chainAfter": "{{beat}}.{{shot}} 다음",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
-          "scriptUnavailable": "촬영 대본이 작성되지 않음",
           "statusUnavailable": "이 프로젝트 리비전의 차단 요인 세부 정보를 사용할 수 없습니다.",
           "blocker": {
             "heading": "차단 요인",
@@ -1590,6 +1589,7 @@
             "invalidDependency": "연속 생성의 종속 관계가 더 이상 유효하지 않습니다. 프로젝트를 새로 고친 후 다시 준비하세요.",
             "invalidPrepareRequest": "생성 선택을 안전하게 준비할 수 없습니다. 선택을 검토한 후 다시 준비하세요.",
             "invalidReference": "선택한 참조 중 하나가 이 생성에 더 이상 유효하지 않습니다. 다른 참조를 선택하세요.",
+            "missingShootingScript": "미디어를 생성하기 전에 이 Shot의 촬영 대본을 작성하세요.",
             "missingConditioning": "비디오 테이크에 사용할 수 있는 첫 프레임이나 이전 프레임이 없습니다. 필요한 이미지를 추가하거나 선택하세요.",
             "unsafeTotal": "견적 합계를 안전하게 표시할 수 없습니다. 선택을 줄이세요. 아무것도 제출되지 않았습니다."
           }

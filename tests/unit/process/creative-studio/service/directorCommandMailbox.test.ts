@@ -1823,12 +1823,12 @@ describe('Studio Director schema-2 command mailbox', () => {
     expect(await snapshotDirectoryBytes(directories.root)).toEqual(before);
   });
 
-  it('reports immediate-prior schema-6 proposal-query sidecars as unsupported and leaves every byte untouched', async () => {
+  it('reports immediate-prior schema-7 proposal-query sidecars as unsupported and leaves every byte untouched', async () => {
     await mailbox.ensure(projectId);
     const directories = commandDirectories(rootDir, projectId);
-    const commandId = 'command_v6';
+    const commandId = 'command_v7';
     const command = {
-      schemaVersion: 6,
+      schemaVersion: 7,
       commandId,
       projectId,
       createdAt: NOW,
@@ -1836,13 +1836,13 @@ describe('Studio Director schema-2 command mailbox', () => {
       policy: 'get_proposal',
       proposalId: 'proposal_exact',
     };
-    const slot = { ...makeSlotV2(commandId), schemaVersion: 6 };
+    const slot = { ...makeSlotV2(commandId), schemaVersion: 7 };
     const lease = {
-      ...makeLeaseV2({ leaseId: 'lease_v6', owner: 'writer', slot: makeSlotV2(commandId) }),
-      schemaVersion: 6,
+      ...makeLeaseV2({ leaseId: 'lease_v7', owner: 'writer', slot: makeSlotV2(commandId) }),
+      schemaVersion: 7,
     };
     const receipt = {
-      schemaVersion: 6,
+      schemaVersion: 7,
       commandId,
       projectId,
       decidedAt: NOW,

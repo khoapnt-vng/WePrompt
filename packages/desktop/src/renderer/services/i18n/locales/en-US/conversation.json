@@ -1546,7 +1546,6 @@
           "chainHead": "Chain head",
           "chainAfter": "After {{beat}}.{{shot}}",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
-          "scriptUnavailable": "Shooting script not written",
           "statusUnavailable": "Blocker details are unavailable for this project revision.",
           "blocker": {
             "heading": "Blocked by",
@@ -2430,6 +2429,7 @@
             "invalidDependency": "The continuation dependency is no longer valid. Refresh the project and prepare again.",
             "invalidPrepareRequest": "The generation selection could not be prepared safely. Review it and prepare again.",
             "invalidReference": "A selected reference is no longer valid for this generation. Choose another reference and prepare again.",
+            "missingShootingScript": "Write this Shot’s Shooting script before generating media.",
             "missingConditioning": "A video has no eligible first frame or predecessor frame. Add the required image, then prepare again.",
             "unsafeTotal": "The estimate total could not be represented safely. Reduce the selection; nothing was submitted."
           }

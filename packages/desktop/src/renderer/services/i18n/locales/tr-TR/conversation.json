@@ -1125,7 +1125,6 @@
           "chainHead": "Zincir başlangıcı",
           "chainAfter": "{{beat}}.{{shot}} sonrasında",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
-          "scriptUnavailable": "Çekim senaryosu yazılmamış",
           "statusUnavailable": "Bu proje revizyonu için engel ayrıntıları kullanılamıyor.",
           "blocker": {
             "heading": "Engelleyen nedenler",
@@ -1592,6 +1591,7 @@
             "invalidDependency": "Devam bağımlılığı artık geçerli değil. Projeyi yenileyip yeniden hazırlayın.",
             "invalidPrepareRequest": "Üretim seçimi güvenli biçimde hazırlanamadı. Seçimi gözden geçirip yeniden hazırlayın.",
             "invalidReference": "Seçili bir referans artık bu üretim için geçerli değil. Başka bir referans seçin.",
+            "missingShootingScript": "Medya oluşturmadan önce bu Shot'ın çekim senaryosunu yazın.",
             "missingConditioning": "Bir video çekimi için uygun ilk kare veya önceki kare yok. Gerekli görseli ekleyin ya da seçin.",
             "unsafeTotal": "Tahmin toplamı güvenli biçimde gösterilemedi. Seçimi azaltın; hiçbir şey gönderilmedi."
           }

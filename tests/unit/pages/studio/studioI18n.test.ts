@@ -290,7 +290,6 @@ const localizedBoardShotTileKeys = [
   'board.shot.chainHead',
   'board.shot.chainAfter',
   'board.shot.duration',
-  'board.shot.scriptUnavailable',
   'board.shot.statusUnavailable',
   'board.shot.blocker.heading',
   'board.shot.blocker.referenceBindingTable',
@@ -1139,6 +1138,7 @@ const expectedLeaves = [
   'gate.errors.pricing.invalidDependency',
   'gate.errors.pricing.invalidPrepareRequest',
   'gate.errors.pricing.invalidReference',
+  'gate.errors.pricing.missingShootingScript',
   'gate.errors.pricing.missingConditioning',
   'gate.errors.pricing.unsafeTotal',
   'gate.reviewShotBinding',
@@ -1311,6 +1311,7 @@ const localizedBoardKeys = [
   'table.panel.status.failed',
   'table.panel.status.cancelled',
   'gate.purpose.board_still',
+  'gate.errors.pricing.missingShootingScript',
 ] as const;
 
 const localizedBoardPromotionKeys = [
