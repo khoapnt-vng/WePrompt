@@ -7,12 +7,18 @@ someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallie
 
 ---
 
-## 1. The two P1s
+## 1. The P1s — one active, one deferred
 
 | Bug         | What is broken                                                                            | Note                                      |
 | ----------- | ----------------------------------------------------------------------------------------- | ----------------------------------------- |
 | **BUG-144** | Film export needs an ffmpeg the product never ships                                       | Needs a bundling decision, not only a fix |
 | **BUG-165** | Chained generation — the product's central mechanism — succeeds about a third of the time | Root cause only partly proven             |
+
+**BUG-144 is deferred** by the owner: what remains is a distribution and counsel decision, not
+engineering. The mechanism is already in place — the resolver looks in
+`resourcesPath/bundled-ffmpeg/<platform>-<arch>` and `electron-builder.yml:107` already declares
+`extraResources`, the same route `bundled-aioncore` ships by. Only binaries and the decision are
+missing.
 
 **BUG-136 and BUG-140 closed 2026-08-28.** Both were already fixed in the working branch and were
 verified live: `Plateau` opens at revision 1218 with 97 stored job compositions written before the
@@ -90,7 +96,6 @@ vocabulary, which is twelve locale values and touches the Board as well as the t
 ## 4. What is waiting on a person
 
 - **Piece 3 needs slicing** — the only planned work that cannot start.
-- **BUG-144 needs a bundling decision** — ship ffmpeg or state the dependency.
 - **9 commits held unpushed** at the owner's instruction: the sound and workspace plan, four rounds of
   bug filings, the Beat timeline commission and its decisions, and one real fix (`843806ec3`).
 
