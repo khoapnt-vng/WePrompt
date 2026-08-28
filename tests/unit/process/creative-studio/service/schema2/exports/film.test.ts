@@ -123,7 +123,21 @@ if (args.includes('-version')) {
   return { root, ffmpeg, ffprobe };
 };
 
-describe('schema-2 film export contract', () => {
+/**
+ * Cases here spawn export children and wait on their settlement, so they are bound by process
+ * scheduling rather than by their assertions. The duration sweep of 2026-08-28 measured one at 5.7s.
+ *
+ * Two separate budgets are needed. The suite ceiling covers the test itself, which exceeded the 10s
+ * global testTimeout under full-suite parallelism. `vi.waitFor` keeps its own 1000ms default, which
+ * the suite ceiling does not raise — the push gate failed here on `expect(failedChild).not.toBeNull()`,
+ * which is waitFor rethrowing its last assertion after giving up on a child that had not yet been
+ * spawned, not a logic error. Both are hang-detectors rather than performance budgets: a genuine hang
+ * still fails, just later, and no assertion is weakened.
+ */
+const FILM_EXPORT_TIMEOUT_MS = 120_000;
+const FILM_EXPORT_WAIT = { timeout: 30_000 } as const;
+
+describe('schema-2 film export contract', { timeout: FILM_EXPORT_TIMEOUT_MS }, () => {
   it('derives a bounded frame-quantized quiet-tail cut only from a three-delta suffix', () => {
     expect(deriveStudioQuietTailTrimSecondsV2([frame(20), frame(20), frame(20), frame(20)], 4, 1)).toBe(0.375);
     expect(deriveStudioQuietTailTrimSecondsV2([frame(0), frame(50), frame(100), frame(150)], 4, 1)).toBe(0);
@@ -292,7 +306,7 @@ describe('schema-2 film export contract', () => {
         settled = true;
       });
       const outcome = expect(observed).rejects.toMatchObject({ code: 'child_settlement_failed' });
-      await vi.waitFor(() => expect(children).toHaveLength(5));
+      await vi.waitFor(() => expect(children).toHaveLength(5), FILM_EXPORT_WAIT);
       exporter.dispose();
       await vi.advanceTimersByTimeAsync(4_999);
       expect(settled).toBe(false);
@@ -344,9 +358,9 @@ describe('schema-2 film export contract', () => {
       onProgress: () => undefined,
     });
     const outcome = expect(pending).rejects.toMatchObject({ code: 'render_failed' });
-    await vi.waitFor(() => expect(failedChild).not.toBeNull());
+    await vi.waitFor(() => expect(failedChild).not.toBeNull(), FILM_EXPORT_WAIT);
     failedChild!.emit('error', new Error('render child failed first'));
-    await vi.waitFor(() => expect(vi.mocked(failedChild!.kill)).toHaveBeenCalledWith('SIGKILL'));
+    await vi.waitFor(() => expect(vi.mocked(failedChild!.kill)).toHaveBeenCalledWith('SIGKILL'), FILM_EXPORT_WAIT);
     controller.abort();
     failedChild!.emit('close', null, 'SIGKILL');
     await outcome;
@@ -392,7 +406,7 @@ describe('schema-2 film export contract', () => {
       onProgress: () => undefined,
     });
     const outcome = expect(pending).rejects.toMatchObject({ code: 'child_settlement_failed' });
-    await vi.waitFor(() => expect(stubbornChild).not.toBeNull());
+    await vi.waitFor(() => expect(stubbornChild).not.toBeNull(), FILM_EXPORT_WAIT);
     controller.abort();
     await outcome;
     expect(vi.mocked(stubbornChild!.kill)).toHaveBeenCalledWith('SIGKILL');

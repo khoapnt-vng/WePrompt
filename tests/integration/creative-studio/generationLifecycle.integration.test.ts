@@ -86,7 +86,20 @@ class ControlledPollClock {
   }
 }
 
-describe('Creative Studio generation lifecycle integration', () => {
+/**
+ * An integration file: 5 cases, each standing up a temporary project root and driving a whole
+ * generation lifecycle through it. The sweep measured one at 11.1s even on a quiet machine.
+ *
+ * Under full-suite parallelism these exceeded the 10s global testTimeout and failed the push gate on
+ * timing rather than on merit. The ceiling is set on the suite because which case loses the race
+ * under load is arbitrary — the first such failure in this file family was a 1.35s case, not the
+ * slowest. It is a hang-detector, not a performance budget: a genuine hang still fails, just later,
+ * and no assertion is weakened. See tests/unit/assets/prepareAioncoreActionsArtifact.test.ts, where
+ * 30s was tried for the same class of case and proved too tight.
+ */
+const GENERATION_LIFECYCLE_TIMEOUT_MS = 120_000;
+
+describe('Creative Studio generation lifecycle integration', { timeout: GENERATION_LIFECYCLE_TIMEOUT_MS }, () => {
   it('persists two direct semantic-reference jobs across a store reload', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-direct-reference-integration-'));
     const fake = createStudioE2EFakeBundle({ rootDir });

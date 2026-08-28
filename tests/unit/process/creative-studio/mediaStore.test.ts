@@ -733,7 +733,20 @@ afterEach(async () => {
   await Promise.all(created.splice(0).map((directory) => fs.rm(directory, { recursive: true, force: true })));
 });
 
-describe('createStudioMediaStore schema 2 final lifecycle', () => {
+/**
+ * 76 cases that write real bytes, hashes and quota state to disk. The same sweep found 7 of them
+ * over 2s, second only to the job manager.
+ *
+ * Under full-suite parallelism these exceeded the 10s global testTimeout and failed the push gate on
+ * timing rather than on merit. The ceiling is set on the suite because which case loses the race
+ * under load is arbitrary — the first such failure in this file family was a 1.35s case, not the
+ * slowest. It is a hang-detector, not a performance budget: a genuine hang still fails, just later,
+ * and no assertion is weakened. See tests/unit/assets/prepareAioncoreActionsArtifact.test.ts, where
+ * 30s was tried for the same class of case and proved too tight.
+ */
+const MEDIA_STORE_TIMEOUT_MS = 120_000;
+
+describe('createStudioMediaStore schema 2 final lifecycle', { timeout: MEDIA_STORE_TIMEOUT_MS }, () => {
   it('detects repeated quartile sheet seams without rejecting one strong central edge', () => {
     const image = (panelValues: readonly number[]): Uint8Array => {
       const width = 40;

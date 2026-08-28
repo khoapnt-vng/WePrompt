@@ -550,7 +550,21 @@ afterEach(async () => {
   }
 });
 
-describe('StudioJobManager V2 durable authorized lifecycle', () => {
+/**
+ * 55 cases that drive the durable job lifecycle over a real store, and the heaviest file in the
+ * suite by a distance: the duration sweep of 2026-08-28 found 13 of its cases over 2s, more than any
+ * other file, topping out near 8s. `e206f37e4` then added 226 lines to it.
+ *
+ * Under full-suite parallelism these exceeded the 10s global testTimeout and failed the push gate on
+ * timing rather than on merit. The ceiling is set on the suite because which case loses the race
+ * under load is arbitrary — the first such failure in this file family was a 1.35s case, not the
+ * slowest. It is a hang-detector, not a performance budget: a genuine hang still fails, just later,
+ * and no assertion is weakened. See tests/unit/assets/prepareAioncoreActionsArtifact.test.ts, where
+ * 30s was tried for the same class of case and proved too tight.
+ */
+const JOB_MANAGER_TIMEOUT_MS = 120_000;
+
+describe('StudioJobManager V2 durable authorized lifecycle', { timeout: JOB_MANAGER_TIMEOUT_MS }, () => {
   it('derives cancellation authority from durable status, provider identity, policy, and spend', async () => {
     const harness = await createV2Harness(controllableAdapter('weprompt-image-v1'));
     const job = harness.jobs[0]!;
