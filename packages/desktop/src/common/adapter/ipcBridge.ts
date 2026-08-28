@@ -2095,6 +2095,8 @@ export interface ICreateConversationParams {
     project_id?: string;
     /** Creative Studio project that owns this Brief conversation. */
     studio_project_id?: string;
+    /** Public cache identity for redacted Creative Studio Director preset rules. */
+    studio_director_rules_profile?: string;
     workspace?: string;
     custom_workspace?: boolean;
     default_files?: string[];

@@ -15,6 +15,7 @@ import {
 
 import {
   DIRECTOR_PRESET_RULES,
+  DIRECTOR_PRESET_RULES_PROFILE,
   directorOpeningTurn,
   directorOpeningTurnStorageKey,
   seedDirectorOpeningTurn,
@@ -93,6 +94,13 @@ describe('the Director opening turn', () => {
 });
 
 describe('the Director preset rules', () => {
+  it('publishes a compact profile marker for the renderer-visible readback', () => {
+    expect(DIRECTOR_PRESET_RULES_PROFILE).toMatch(/^studio-director-rules-v1:[0-9a-f]+:[0-9a-f]{8}$/u);
+    const [, encodedLength] = DIRECTOR_PRESET_RULES_PROFILE.split(':');
+    expect(Number.parseInt(encodedLength!, 16)).toBe(DIRECTOR_PRESET_RULES.length);
+    expect(DIRECTOR_PRESET_RULES_PROFILE).not.toContain(DIRECTOR_PRESET_RULES);
+  });
+
   it('tells the Director to ask before it builds', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/ask/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/before/i);

@@ -247,6 +247,8 @@ export type GuidPresentationHandoffClaim = {
 type StudioConversationBindingExtra = {
   /** Back-reference validated against the Studio project's authoritative Brief conversation id. */
   studio_project_id?: string;
+  /** Public cache marker for the redacted Aionrs preset-rules payload. */
+  studio_director_rules_profile?: string;
   /** Durable renderer-to-backend claimant for a crash-safe Guid presentation handoff. */
   weprompt_presentation_handoff?: GuidPresentationHandoffClaim;
 };

@@ -151,3 +151,19 @@ export const DIRECTOR_PRESET_RULES = [
   '',
   'Answer in the language the person writes to you in.',
 ].join('\n');
+
+/**
+ * AionCore deliberately redacts `preset_rules` from conversation responses. This public marker lets
+ * the rail verify which exact rules payload was persisted without copying the private prompt back
+ * into renderer-visible conversation history. It is cache identity, not a security digest.
+ */
+const directorPresetRulesProfile = (rules: string): string => {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < rules.length; index += 1) {
+    hash ^= rules.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return `studio-director-rules-v1:${rules.length.toString(16)}:${(hash >>> 0).toString(16).padStart(8, '0')}`;
+};
+
+export const DIRECTOR_PRESET_RULES_PROFILE = directorPresetRulesProfile(DIRECTOR_PRESET_RULES);

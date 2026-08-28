@@ -38,7 +38,7 @@ import type { MessageListInlineItem } from '@/renderer/pages/conversation/Messag
 import { useAionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
 import styles from './DirectorRail.module.css';
-import { DIRECTOR_PRESET_RULES, seedDirectorOpeningTurn } from './openingTurn';
+import { DIRECTOR_PRESET_RULES, DIRECTOR_PRESET_RULES_PROFILE, seedDirectorOpeningTurn } from './openingTurn';
 
 type DirectorConversation = Extract<TChatConversation, { type: 'aionrs' }>;
 
@@ -375,40 +375,48 @@ export const hasSafeRouteCatalog = (value: string): boolean => {
 };
 
 /** A persisted restart candidate must retain the closed Studio stdio shape before authority comparison. */
-export const hasSafeDirectorTransport = (server: ISessionMcpServer, projectId: string): boolean => {
+export const hasSafeDirectorTransport = (server: unknown, projectId: string): server is ISessionMcpServer => {
+  if (!isRecord(server) || !isRecord(server.transport)) return false;
   const transport = server.transport;
-  if (transport.type !== 'stdio' || !hasExactKeys(transport, ['type', 'command', 'args', 'env'])) return false;
-  const scriptPath = normalizedAbsolutePath(transport.args?.[0]);
+  if (
+    transport.type !== 'stdio' ||
+    !hasExactKeys(transport, ['type', 'command', 'args', 'env']) ||
+    !Array.isArray(transport.args)
+  ) {
+    return false;
+  }
+  const scriptPath = normalizedAbsolutePath(transport.args[0]);
   if (
     transport.command !== 'node' ||
-    transport.args?.length !== 1 ||
+    transport.args.length !== 1 ||
     scriptPath === null ||
     !scriptPath.endsWith('/out/main/builtin-mcp-studio.js')
   ) {
     return false;
   }
   const env = transport.env;
-  if (env === undefined || !hasExactKeys(env, Object.values(STUDIO_ENV))) return false;
+  if (!isRecord(env) || !hasExactKeys(env, Object.values(STUDIO_ENV))) return false;
   if (env[STUDIO_ENV.projectId] !== projectId) return false;
   const projectDir = normalizedAbsolutePath(env[STUDIO_ENV.projectDir]);
   const pendingDir = normalizedAbsolutePath(env[STUDIO_ENV.pendingDir]);
   const referencePendingDir = normalizedAbsolutePath(env[STUDIO_ENV.referencePendingDir]);
+  const routeCatalog = env[STUDIO_ENV.routeCatalog];
   return (
     projectDir !== null &&
     projectDir.endsWith(`/${projectId}`) &&
     pendingDir === `${projectDir}/proposals/pending` &&
     referencePendingDir === `${projectDir}/reference-requests/pending` &&
-    typeof env[STUDIO_ENV.routeCatalog] === 'string' &&
-    env[STUDIO_ENV.routeCatalog].length <= 1_000_000 &&
-    hasSafeRouteCatalog(env[STUDIO_ENV.routeCatalog])
+    typeof routeCatalog === 'string' &&
+    routeCatalog.length <= 1_000_000 &&
+    hasSafeRouteCatalog(routeCatalog)
   );
 };
 
-const hasExactUniqueMembers = (actual: readonly string[] | undefined, expected: readonly string[]): boolean => {
+const hasExactUniqueMembers = (actual: unknown, expected: readonly string[]): boolean => {
   if (!Array.isArray(actual) || actual.length !== expected.length || new Set(actual).size !== actual.length) {
     return false;
   }
-  return actual.every((value) => expected.includes(value));
+  return actual.every((value) => typeof value === 'string' && expected.includes(value));
 };
 
 /** The persisted conversation must contain the Studio server and no ambient MCP attachment. */
@@ -438,40 +446,53 @@ const withOrderedKeys = (value: unknown): unknown => {
 const canonicalJson = (value: unknown): string => JSON.stringify(withOrderedKeys(value));
 
 export const hasExactDirectorMcpSnapshot = (
-  conversation: TChatConversation,
+  conversation: unknown,
   projectId: string,
   descriptor?: ISessionMcpServer
 ): conversation is DirectorConversation => {
   if (
+    !isRecord(conversation) ||
+    !isRecord(conversation.extra) ||
     !isSafeDirectorConversationId(conversation.id) ||
     conversation.type !== 'aionrs' ||
     conversation.extra.studio_project_id !== projectId
   ) {
     return false;
   }
+  const extra = conversation.extra;
   const serverId = expectedServerId(projectId);
   if (descriptor !== undefined && (descriptor.id !== serverId || descriptor.name !== BUILTIN_STUDIO_NAME)) return false;
 
-  const statuses = conversation.extra.mcp_statuses;
-  const sessionServers = conversation.extra.session_mcp_servers;
+  const statuses = extra.mcp_statuses;
+  const sessionServers = extra.session_mcp_servers;
+  if (
+    !Array.isArray(statuses) ||
+    statuses.some((status) => !isRecord(status)) ||
+    !Array.isArray(sessionServers) ||
+    sessionServers.some((server) => !isRecord(server))
+  ) {
+    return false;
+  }
+  const statusRecords = statuses as Record<string, unknown>[];
+  const sessionServerRecords = sessionServers as Record<string, unknown>[];
+  const sessionServer = sessionServerRecords[0];
   const snapshotMatches =
-    hasExactUniqueMembers(conversation.extra.mcp_server_ids, []) &&
-    hasExactUniqueMembers(conversation.extra.mcp_servers, [BUILTIN_STUDIO_NAME]) &&
+    hasExactUniqueMembers(extra.mcp_server_ids, []) &&
+    hasExactUniqueMembers(extra.mcp_servers, [BUILTIN_STUDIO_NAME]) &&
     hasExactUniqueMembers(
-      statuses?.map((status) => status.id),
+      statusRecords.map((status) => status.id),
       [serverId]
     ) &&
-    statuses?.every((status) => status.name === BUILTIN_STUDIO_NAME) === true &&
+    statusRecords.every((status) => status.name === BUILTIN_STUDIO_NAME) &&
     hasExactUniqueMembers(
-      sessionServers?.map((server) => server.id),
+      sessionServerRecords.map((server) => server.id),
       [serverId]
     ) &&
-    sessionServers?.every((server) => server.name === BUILTIN_STUDIO_NAME) === true;
-  if (!snapshotMatches || !hasSafeDirectorTransport(sessionServers[0], projectId)) return false;
+    sessionServerRecords.every((server) => server.name === BUILTIN_STUDIO_NAME);
+  if (!snapshotMatches || !hasSafeDirectorTransport(sessionServer, projectId)) return false;
 
   if (descriptor === undefined) return true;
-  const persistedDescriptor = sessionServers?.[0];
-  return canonicalJson(persistedDescriptor?.transport) === canonicalJson(descriptor.transport);
+  return canonicalJson(sessionServer.transport) === canonicalJson(descriptor.transport);
 };
 
 /** Compares every executable/path-bearing field with fresh, read-only main-process authority. */
@@ -504,6 +525,7 @@ type DirectorAuthorityOutcome =
   | { kind: 'unavailable'; messageKey: string };
 type DirectorAuthorityCheck = { snapshot: string; promise: Promise<DirectorAuthorityOutcome> };
 const directorAuthorityChecks = new Map<string, DirectorAuthorityCheck>();
+const directorRulesRefreshes = new Map<string, Promise<boolean>>();
 
 const checkPersistedDirectorAuthority = (
   conversation: TChatConversation,
@@ -536,31 +558,6 @@ const checkPersistedDirectorAuthority = (
     });
   directorAuthorityChecks.set(key, { snapshot, promise });
   return promise;
-};
-
-const withCurrentDirectorPresetRules = (conversation: DirectorConversation): DirectorConversation => ({
-  ...conversation,
-  extra: { ...conversation.extra, preset_rules: DIRECTOR_PRESET_RULES },
-});
-
-/**
- * Re-provisions only the Director rules after executable session authority has been verified.
- * A stale rules snapshot must never become usable before its persisted update succeeds.
- */
-const refreshDirectorPresetRules = async (conversation: DirectorConversation): Promise<DirectorConversation | null> => {
-  if (conversation.extra.preset_rules === DIRECTOR_PRESET_RULES) return conversation;
-  try {
-    const updated = await ipcBridge.conversation.update.invoke({
-      id: conversation.id,
-      merge_extra: true,
-      updates: {
-        extra: { preset_rules: DIRECTOR_PRESET_RULES } as TChatConversation['extra'],
-      },
-    });
-    return updated === true ? withCurrentDirectorPresetRules(conversation) : null;
-  } catch {
-    return null;
-  }
 };
 
 type DirectorClaimantRecovery =
@@ -615,6 +612,80 @@ const recoverDirectorClaimant = async (
   return authority;
 };
 
+const directorRulesRefreshKey = (conversation: DirectorConversation): string | null => {
+  const projectId = conversation.extra.studio_project_id;
+  return typeof projectId === 'string' ? `${projectId}\0${conversation.id}\0${DIRECTOR_PRESET_RULES_PROFILE}` : null;
+};
+
+const hasCurrentDirectorPresetRules = (conversation: DirectorConversation): boolean =>
+  conversation.extra.studio_director_rules_profile === DIRECTOR_PRESET_RULES_PROFILE;
+
+const withCurrentDirectorPresetRulesProfile = (conversation: DirectorConversation): DirectorConversation => ({
+  ...conversation,
+  extra: {
+    ...conversation.extra,
+    studio_director_rules_profile: DIRECTOR_PRESET_RULES_PROFILE,
+  },
+});
+
+/**
+ * Re-provisions only the Director rules after executable session authority has been verified.
+ * AionCore redacts the rules themselves, so success is an exact public-profile readback from the
+ * persisted conversation. Each project/conversation/profile tuple is attempted at most once until
+ * the person explicitly retries; history refreshes can never turn this into a write loop.
+ */
+const refreshDirectorPresetRules = (conversation: DirectorConversation): Promise<DirectorConversation | null> => {
+  if (hasCurrentDirectorPresetRules(conversation)) return Promise.resolve(conversation);
+  const key = directorRulesRefreshKey(conversation);
+  const projectId = conversation.extra.studio_project_id;
+  const descriptor = conversation.extra.session_mcp_servers?.[0];
+  if (key === null || typeof projectId !== 'string' || descriptor === undefined) return Promise.resolve(null);
+  let proof = directorRulesRefreshes.get(key);
+  if (proof === undefined) {
+    proof = (async (): Promise<boolean> => {
+      try {
+        const updated = await ipcBridge.conversation.update.invoke({
+          id: conversation.id,
+          merge_extra: true,
+          updates: {
+            extra: {
+              preset_rules: DIRECTOR_PRESET_RULES,
+              studio_director_rules_profile: DIRECTOR_PRESET_RULES_PROFILE,
+            } as TChatConversation['extra'],
+          },
+        });
+        if (updated !== true) return false;
+      } catch {
+        return false;
+      }
+
+      let persisted: unknown;
+      try {
+        persisted = await ipcBridge.conversation.get.invoke({ id: conversation.id });
+      } catch {
+        return false;
+      }
+      if (!isRecord(persisted) || !isRecord(persisted.extra)) return false;
+      const typedPersisted = persisted as TChatConversation;
+      if (
+        typedPersisted.id !== conversation.id ||
+        !hasExactDirectorMcpSnapshot(typedPersisted, projectId, descriptor)
+      ) {
+        return false;
+      }
+      const authority = await checkPersistedDirectorAuthority(typedPersisted, projectId);
+      return authority.kind === 'trusted' && hasCurrentDirectorPresetRules(typedPersisted);
+    })();
+    directorRulesRefreshes.set(key, proof);
+  }
+  return proof.then((verified) => (verified ? withCurrentDirectorPresetRulesProfile(conversation) : null));
+};
+
+const allowDirectorPresetRulesRetry = (conversation: DirectorConversation): void => {
+  const key = directorRulesRefreshKey(conversation);
+  if (key !== null) directorRulesRefreshes.delete(key);
+};
+
 const createDirectorConversation = async (input: {
   projectId: string;
   projectName: string;
@@ -645,6 +716,7 @@ const createDirectorConversation = async (input: {
     extra: {
       studio_project_id: input.projectId,
       preset_rules: DIRECTOR_PRESET_RULES,
+      studio_director_rules_profile: DIRECTOR_PRESET_RULES_PROFILE,
       workspace: '',
       custom_workspace: false,
       selected_mcp_server_ids: [],
@@ -699,15 +771,8 @@ const createDirectorConversation = async (input: {
     throw new DirectorConversationStartError(DIRECTOR_SESSION_VERIFICATION_KEY, 'require-claimant');
   }
   // After validation, so a conversation about to be rejected is never briefed.
-  if (created) {
-    seedDirectorOpeningTurn(typedConversation.id, input.brief);
-    return withCurrentDirectorPresetRules(typedConversation);
-  }
-  const refreshed = await refreshDirectorPresetRules(typedConversation);
-  if (refreshed === null) {
-    throw new DirectorConversationStartError(DIRECTOR_ATTACH_INTERRUPTED_KEY, 'require-claimant');
-  }
-  return refreshed;
+  if (created) seedDirectorOpeningTurn(typedConversation.id, input.brief);
+  return typedConversation;
 };
 
 const reconcileBinding = async (
@@ -750,16 +815,6 @@ const startDirectorConversation = async (input: StartInput): Promise<StartOutcom
       if (authority.kind === 'mismatch') {
         return { kind: 'conflict' };
       }
-      const refreshed = await refreshDirectorPresetRules(conversation);
-      if (refreshed === null) {
-        return {
-          kind: 'interrupted',
-          conversation,
-          expectedPriorBinding: input.expectedPriorBinding,
-          messageKey: DIRECTOR_ATTACH_INTERRUPTED_KEY,
-        };
-      }
-      conversation = refreshed;
     } else {
       if (input.model === undefined) {
         return {
@@ -777,6 +832,16 @@ const startDirectorConversation = async (input: StartInput): Promise<StartOutcom
         claimantPolicy: input.claimantPolicy ?? 'scan-before-create',
       });
     }
+    const refreshed = await refreshDirectorPresetRules(conversation);
+    if (refreshed === null) {
+      return {
+        kind: 'interrupted',
+        conversation,
+        expectedPriorBinding: input.expectedPriorBinding,
+        messageKey: DIRECTOR_ATTACH_INTERRUPTED_KEY,
+      };
+    }
+    conversation = refreshed;
   } catch (error) {
     if (error instanceof DirectorConversationConflictError) return { kind: 'conflict' };
     if (error instanceof DirectorConversationStartError) {
@@ -835,11 +900,15 @@ export const forgetDirectorConversationStart = (projectId?: string): void => {
   if (projectId === undefined) {
     directorAttempts.clear();
     directorAuthorityChecks.clear();
+    directorRulesRefreshes.clear();
     return;
   }
   directorAttempts.delete(projectId);
   for (const key of directorAuthorityChecks.keys()) {
     if (key.startsWith(`${projectId}\0`)) directorAuthorityChecks.delete(key);
+  }
+  for (const key of directorRulesRefreshes.keys()) {
+    if (key.startsWith(`${projectId}\0`)) directorRulesRefreshes.delete(key);
   }
 };
 
@@ -1252,6 +1321,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
 
   const handleRecovery = useCallback((): void => {
     if (visibleState.kind === 'interrupted') {
+      allowDirectorPresetRulesRetry(visibleState.conversation);
       runExplicitAttempt(visibleState.conversation, visibleState.expectedPriorBinding);
       return;
     }

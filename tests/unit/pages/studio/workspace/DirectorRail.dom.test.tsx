@@ -13,7 +13,10 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioRendererProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { DIRECTOR_PRESET_RULES } from '@/renderer/pages/studio/components/Workspace/DirectorRail/openingTurn';
+import {
+  DIRECTOR_PRESET_RULES,
+  DIRECTOR_PRESET_RULES_PROFILE,
+} from '@/renderer/pages/studio/components/Workspace/DirectorRail/openingTurn';
 
 const harness = vi.hoisted(() => ({
   conversations: [] as TChatConversation[],
@@ -31,6 +34,7 @@ const harness = vi.hoisted(() => ({
   descriptor: vi.fn(),
   authority: vi.fn(),
   create: vi.fn(),
+  getConversation: vi.fn(),
   listConversations: vi.fn(),
   bind: vi.fn(),
   getProject: vi.fn(),
@@ -49,6 +53,7 @@ vi.mock('@/common', () => ({
     },
     conversation: {
       create: { invoke: harness.create },
+      get: { invoke: harness.getConversation },
       update: { invoke: harness.update },
       sendMessage: { invoke: harness.send },
     },
@@ -309,7 +314,7 @@ const exactConversation = (
     extra: {
       workspace: '',
       studio_project_id: 'project_1',
-      preset_rules: DIRECTOR_PRESET_RULES,
+      studio_director_rules_profile: DIRECTOR_PRESET_RULES_PROFILE,
       mcp_server_ids: [],
       mcp_servers: [descriptor.name],
       mcp_statuses: [{ id: descriptor.id, name: descriptor.name, status: 'loaded' }],
@@ -359,6 +364,9 @@ describe('DirectorRail', () => {
     harness.create
       .mockReset()
       .mockImplementation(async (input: { id?: string }) => exactConversation(input.id ?? 'conversation_director'));
+    harness.getConversation
+      .mockReset()
+      .mockImplementation(async (input: { id: string }) => exactConversation(input.id));
     harness.listConversations.mockReset().mockResolvedValue({ items: [], total: 0, has_more: false });
     harness.bind.mockReset().mockResolvedValue(commit());
     harness.getProject.mockReset().mockResolvedValue(supportedProject(null));
@@ -682,7 +690,43 @@ describe('DirectorRail', () => {
   it('carries the ask-first rules into the conversation it creates', async () => {
     render(<DirectorRail project={project()} />);
     await screen.findByRole('textbox', { name: 'Director composer' });
-    expect(harness.create.mock.calls[0][0].extra.preset_rules).toBe(DIRECTOR_PRESET_RULES);
+    expect(harness.create.mock.calls[0][0].extra).toMatchObject({
+      preset_rules: DIRECTOR_PRESET_RULES,
+      studio_director_rules_profile: DIRECTOR_PRESET_RULES_PROFILE,
+    });
+    expect(harness.update).not.toHaveBeenCalled();
+    expect(harness.getConversation).not.toHaveBeenCalled();
+  });
+
+  it('retries one failed fresh-create rules repair without creating another conversation', async () => {
+    const createdWithoutProfile = exactConversation('conversation_director', {
+      studio_director_rules_profile: undefined,
+    });
+    harness.create.mockResolvedValueOnce(createdWithoutProfile);
+    harness.update.mockResolvedValueOnce(false);
+    harness.getConversation.mockResolvedValueOnce(exactConversation('conversation_director'));
+
+    render(<DirectorRail project={project()} />);
+
+    expect(
+      await screen.findByText(
+        'Director setup was interrupted before the conversation could be attached to this project.'
+      )
+    ).toBeVisible();
+    expect(harness.create).toHaveBeenCalledTimes(1);
+    expect(harness.update).toHaveBeenCalledTimes(1);
+    expect(harness.getConversation).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      createdWithoutProfile.id
+    );
+    expect(harness.create).toHaveBeenCalledTimes(1);
+    expect(harness.update).toHaveBeenCalledTimes(2);
+    expect(harness.getConversation).toHaveBeenCalledExactlyOnceWith({ id: createdWithoutProfile.id });
+    expect(harness.bind).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -1230,7 +1274,13 @@ describe('DirectorRail', () => {
 
   it('refreshes only stale preset rules before reusing a verified bound conversation', async () => {
     const conversation = exactConversation('conversation_director', {
-      preset_rules: 'Rules from an older build.',
+      studio_director_rules_profile: 'studio-director-rules-v1:old',
+      custom_workspace: true,
+      proxy: 'http://127.0.0.1:8080',
+      session_mode: 'plan',
+      skills: ['story-editor'],
+    });
+    const refreshed = exactConversation('conversation_director', {
       custom_workspace: true,
       proxy: 'http://127.0.0.1:8080',
       session_mode: 'plan',
@@ -1238,6 +1288,7 @@ describe('DirectorRail', () => {
     });
     const original = structuredClone(conversation);
     harness.conversations = [conversation];
+    harness.getConversation.mockResolvedValueOnce(refreshed);
 
     render(<DirectorRail project={project({ briefConversationId: conversation.id })} />);
 
@@ -1248,24 +1299,74 @@ describe('DirectorRail', () => {
     expect(harness.update).toHaveBeenCalledExactlyOnceWith({
       id: conversation.id,
       merge_extra: true,
-      updates: { extra: { preset_rules: DIRECTOR_PRESET_RULES } },
+      updates: {
+        extra: {
+          preset_rules: DIRECTOR_PRESET_RULES,
+          studio_director_rules_profile: DIRECTOR_PRESET_RULES_PROFILE,
+        },
+      },
     });
-    expect(harness.renderedChatConversation).toEqual({
-      ...original,
-      extra: { ...original.extra, preset_rules: DIRECTOR_PRESET_RULES },
-    });
+    expect(harness.renderedChatConversation).toEqual(refreshed);
     expect(conversation).toEqual(original);
+    expect(harness.getConversation).toHaveBeenCalledExactlyOnceWith({ id: conversation.id });
+    expect(harness.listConversations).not.toHaveBeenCalled();
     expect(harness.create).not.toHaveBeenCalled();
     expect(harness.bind).not.toHaveBeenCalled();
   });
 
-  it('fails closed before rendering a bound conversation when stale rule persistence is interrupted', async () => {
-    const conversation = exactConversation('conversation_director', {
-      preset_rules: 'Rules from an older build.',
+  it('reuses only the rules proof while preserving a newer same-owner history snapshot', async () => {
+    const staleConversation = exactConversation('conversation_director', {
+      studio_director_rules_profile: 'studio-director-rules-v1:old',
       session_mode: 'plan',
     });
+    harness.conversations = [staleConversation];
+    harness.getConversation.mockResolvedValueOnce(exactConversation('conversation_director'));
+    const rendered = render(<DirectorRail project={project({ briefConversationId: staleConversation.id })} />);
+    await screen.findByRole('textbox', { name: 'Director composer' });
+
+    const newerHistory = exactConversation('conversation_director', {
+      studio_director_rules_profile: 'studio-director-rules-v1:old',
+      session_mode: 'yolo',
+    });
+    newerHistory.model = { ...model, use_model: 'model_2' };
+    harness.conversations = [newerHistory];
+    rendered.rerender(<DirectorRail project={project({ revision: 4, briefConversationId: newerHistory.id })} />);
+
+    await waitFor(() =>
+      expect(harness.renderedChatConversation).toMatchObject({
+        id: newerHistory.id,
+        model: { use_model: 'model_2' },
+        extra: {
+          session_mode: 'yolo',
+          studio_director_rules_profile: DIRECTOR_PRESET_RULES_PROFILE,
+        },
+      })
+    );
+    expect(harness.update).toHaveBeenCalledTimes(1);
+    expect(harness.getConversation).toHaveBeenCalledTimes(1);
+  });
+
+  it('trusts the current rules profile when AionCore redacts the rules text', async () => {
+    const conversation = exactConversation();
+    expect(conversation.extra.preset_rules).toBeUndefined();
+    harness.conversations = [conversation];
+
+    render(<DirectorRail project={project({ briefConversationId: conversation.id })} />);
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toBeVisible();
+    expect(harness.update).not.toHaveBeenCalled();
+    expect(harness.getConversation).not.toHaveBeenCalled();
+  });
+
+  it('fails closed before rendering a bound conversation when stale rule persistence is interrupted', async () => {
+    const conversation = exactConversation('conversation_director', {
+      studio_director_rules_profile: 'studio-director-rules-v1:old',
+      session_mode: 'plan',
+    });
+    const refreshed = exactConversation('conversation_director', { session_mode: 'plan' });
     harness.conversations = [conversation];
     harness.update.mockResolvedValueOnce(false);
+    harness.getConversation.mockResolvedValueOnce(refreshed);
 
     render(<DirectorRail project={project({ briefConversationId: conversation.id })} />);
 
@@ -1278,10 +1379,16 @@ describe('DirectorRail', () => {
     expect(harness.update).toHaveBeenCalledExactlyOnceWith({
       id: conversation.id,
       merge_extra: true,
-      updates: { extra: { preset_rules: DIRECTOR_PRESET_RULES } },
+      updates: {
+        extra: {
+          preset_rules: DIRECTOR_PRESET_RULES,
+          studio_director_rules_profile: DIRECTOR_PRESET_RULES_PROFILE,
+        },
+      },
     });
     expect(harness.create).not.toHaveBeenCalled();
     expect(harness.bind).not.toHaveBeenCalled();
+    expect(harness.getConversation).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
@@ -1289,8 +1396,100 @@ describe('DirectorRail', () => {
       conversation.id
     );
     expect(harness.update).toHaveBeenCalledTimes(2);
+    expect(harness.getConversation).toHaveBeenCalledExactlyOnceWith({ id: conversation.id });
     expect(harness.create).not.toHaveBeenCalled();
     expect(harness.bind).not.toHaveBeenCalled();
+  });
+
+  it('bounds stale Director rule readback across repeated history refreshes', async () => {
+    const staleConversation = exactConversation('conversation_director', {
+      studio_director_rules_profile: 'studio-director-rules-v1:old',
+    });
+    harness.conversations = [staleConversation];
+    harness.getConversation.mockResolvedValue(staleConversation);
+
+    const rendered = render(<DirectorRail project={project({ briefConversationId: staleConversation.id })} />);
+
+    expect(
+      await screen.findByText(
+        'Director setup was interrupted before the conversation could be attached to this project.'
+      )
+    ).toBeVisible();
+    expect(harness.update).toHaveBeenCalledTimes(1);
+    expect(harness.getConversation).toHaveBeenCalledTimes(1);
+
+    for (let revision = 4; revision < 24; revision += 1) {
+      harness.conversations = [structuredClone(staleConversation)];
+      rendered.rerender(<DirectorRail project={project({ revision, briefConversationId: staleConversation.id })} />);
+    }
+    await act(async () => Promise.resolve());
+
+    expect(harness.update).toHaveBeenCalledTimes(1);
+    expect(harness.getConversation).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeVisible();
+    expect(screen.queryByRole('textbox', { name: 'Director composer' })).toBeNull();
+  });
+
+  it.each([
+    ['the wrong conversation', () => exactConversation('conversation_other')],
+    ['the wrong project', () => exactConversation('conversation_director', { studio_project_id: 'project_other' })],
+    [
+      'the wrong MCP authority',
+      () =>
+        exactConversation('conversation_director', {
+          mcp_servers: [],
+          mcp_statuses: [],
+          session_mcp_servers: [],
+        }),
+    ],
+    [
+      'malformed MCP state',
+      () => {
+        const malformed = exactConversation('conversation_director') as TChatConversation & {
+          extra: Record<string, unknown>;
+        };
+        malformed.extra.mcp_statuses = {};
+        return malformed;
+      },
+    ],
+  ])('fails closed when the rules readback returns %s', async (_case, readback) => {
+    const staleConversation = exactConversation('conversation_director', {
+      studio_director_rules_profile: 'studio-director-rules-v1:old',
+    });
+    harness.conversations = [staleConversation];
+    harness.getConversation.mockResolvedValueOnce(readback());
+
+    render(<DirectorRail project={project({ briefConversationId: staleConversation.id })} />);
+
+    expect(
+      await screen.findByText(
+        'Director setup was interrupted before the conversation could be attached to this project.'
+      )
+    ).toBeVisible();
+    expect(harness.update).toHaveBeenCalledTimes(1);
+    expect(harness.getConversation).toHaveBeenCalledExactlyOnceWith({ id: staleConversation.id });
+    expect(harness.listConversations).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: 'Director composer' })).toBeNull();
+  });
+
+  it('fails closed when the exact rules readback is unavailable', async () => {
+    const staleConversation = exactConversation('conversation_director', {
+      studio_director_rules_profile: 'studio-director-rules-v1:old',
+    });
+    harness.conversations = [staleConversation];
+    harness.getConversation.mockRejectedValueOnce(new Error('offline'));
+
+    render(<DirectorRail project={project({ briefConversationId: staleConversation.id })} />);
+
+    expect(
+      await screen.findByText(
+        'Director setup was interrupted before the conversation could be attached to this project.'
+      )
+    ).toBeVisible();
+    expect(harness.update).toHaveBeenCalledTimes(1);
+    expect(harness.getConversation).toHaveBeenCalledExactlyOnceWith({ id: staleConversation.id });
+    expect(harness.listConversations).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: 'Director composer' })).toBeNull();
   });
 
   it('applies fresh same-owner history props without remounting the chat or losing its draft', async () => {
