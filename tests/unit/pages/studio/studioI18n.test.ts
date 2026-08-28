@@ -951,6 +951,11 @@ const expectedLeaves = [
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
+  'proposals.terminalCount',
+  'proposals.terminalCount_one',
+  'proposals.terminalCount_other',
+  'proposals.showTerminal',
+  'proposals.hideTerminal',
   'proposals.reviewDetails',
   'proposals.emptyAuthoredField',
   'proposals.reviewStale',
@@ -1379,6 +1384,11 @@ const localizedWorkspaceKeys = [
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
+  'proposals.terminalCount',
+  'proposals.terminalCount_one',
+  'proposals.terminalCount_other',
+  'proposals.showTerminal',
+  'proposals.hideTerminal',
   'proposals.reviewDetails',
   'proposals.ownerBeat',
   'proposals.before',
@@ -1674,6 +1684,25 @@ describe('Creative Studio workspace translations', () => {
       'proposals.authorityUnavailable':
         'Proposal authority could not be verified. The proposal remains pending and its actions are unavailable.',
     });
+  });
+
+  it('localizes the collapsed terminal-proposal disclosure in all twelve locales', () => {
+    expect(flattenLeaves(englishWorkspace)).toMatchObject({
+      'proposals.terminalCount': '{{count}} Director proposals cannot be accepted',
+      'proposals.terminalCount_one': '{{count}} Director proposal cannot be accepted',
+      'proposals.terminalCount_other': '{{count}} Director proposals cannot be accepted',
+      'proposals.showTerminal': 'Review past proposals',
+      'proposals.hideTerminal': 'Hide past proposals',
+    });
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenLeaves(workspaceOf(loadConversation(locale))!);
+      for (const key of ['proposals.terminalCount', 'proposals.terminalCount_one', 'proposals.terminalCount_other']) {
+        expect(placeholders(leaves[key]!)).toEqual(['count']);
+      }
+      expect(leaves['proposals.showTerminal']?.trim(), locale).not.toBe('');
+      expect(leaves['proposals.hideTerminal']?.trim(), locale).not.toBe('');
+    }
   });
 
   it('defines one exact undo label for every mutation operation that can be persisted', () => {
@@ -1986,7 +2015,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(26);
+    expect(pluralBases).toHaveLength(27);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));

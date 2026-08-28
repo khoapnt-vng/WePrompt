@@ -152,6 +152,7 @@ const project = (): StudioRendererProjectV2 => ({
 describe('DirectorProposals', () => {
   const onAcceptProposal = vi.fn(async () => undefined);
   const onRejectProposal = vi.fn(async () => undefined);
+  const onRequestUpdatedProposal = vi.fn(async () => undefined);
   const onGenerateReferences = vi.fn(async () => undefined);
   const onRejectReferences = vi.fn(async () => undefined);
   const onReviewHandoff = vi.fn();
@@ -178,6 +179,7 @@ describe('DirectorProposals', () => {
         pendingAction={null}
         onAcceptProposal={onAcceptProposal}
         onRejectProposal={onRejectProposal}
+        onRequestUpdatedProposal={onRequestUpdatedProposal}
         onGenerateReferences={onGenerateReferences}
         onRejectReferences={onRejectReferences}
         onReviewHandoff={onReviewHandoff}
@@ -199,6 +201,118 @@ describe('DirectorProposals', () => {
     expect(screen.getByTestId('studio-proposal-pending')).toHaveTextContent('A new Brief');
     expect(screen.queryByTestId('studio-proposal-accepted')).toBeNull();
     expect(screen.queryByTestId('studio-proposal-rejected')).toBeNull();
+  });
+
+  it('collapses only verified terminal proposals while keeping actionable and uncertain work visible', () => {
+    const stale = {
+      ...proposal('stale'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    const refused = {
+      ...proposal('refused'),
+      review: {
+        status: 'unavailable' as const,
+        groups: [],
+        reason: 'reducer_rejected' as const,
+        refusal: null,
+      },
+    };
+    const refreshing = proposal('refreshing');
+    const unverified = proposal('unverified');
+    renderList([proposal('ready'), stale, refused, refreshing, unverified], [], [], {
+      proposalAuthorityState: (candidate) => {
+        if (candidate.id === 'refreshing') return 'refreshing';
+        if (candidate.id === 'unverified') return 'unavailable';
+        return candidate.review.status;
+      },
+      proposalAuthorityVerified: (candidate) => candidate.id !== 'refreshing' && candidate.id !== 'unverified',
+    });
+
+    expect(screen.getByTestId('studio-proposal-ready')).toBeVisible();
+    expect(screen.getByTestId('studio-proposal-refreshing')).toBeVisible();
+    expect(screen.getByTestId('studio-proposal-unverified')).toBeVisible();
+    expect(screen.queryByTestId('studio-proposal-stale')).toBeNull();
+    expect(screen.queryByTestId('studio-proposal-refused')).toBeNull();
+    expect(screen.getByTestId('studio-terminal-proposals')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.proposals.terminalCount(count=2)'
+    );
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.showTerminal' })
+    ).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('keeps exact re-propose and reject actions available inside the terminal disclosure', async () => {
+    const stale = {
+      ...proposal('stale'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    const refused = {
+      ...proposal('refused'),
+      review: {
+        status: 'unavailable' as const,
+        groups: [],
+        reason: 'reducer_rejected' as const,
+        refusal: null,
+      },
+    };
+    renderList([stale, refused]);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.showTerminal' })
+    );
+
+    const staleCard = within(screen.getByTestId('studio-proposal-stale'));
+    const refusedCard = within(screen.getByTestId('studio-proposal-refused'));
+    expect(screen.getByTestId('studio-terminal-proposal-list')).toBeVisible();
+    expect(staleCard.getByRole('alert')).toHaveTextContent('workspace.proposals.reviewStale');
+    expect(refusedCard.getByRole('alert')).toHaveTextContent('workspace.proposals.reviewUnavailable');
+    expect(staleCard.getByRole('button', { name: /workspace\.proposals\.accept/ })).toBeDisabled();
+    expect(staleCard.getByRole('button', { name: /workspace\.proposals\.requestUpdated/ })).toHaveClass(
+      'arco-btn-primary'
+    );
+
+    fireEvent.click(staleCard.getByRole('button', { name: /workspace\.proposals\.requestUpdated/ }));
+    fireEvent.click(refusedCard.getByRole('button', { name: /workspace\.proposals\.reject/ }));
+    await waitFor(() => {
+      expect(onRequestUpdatedProposal).toHaveBeenCalledWith('stale', false);
+      expect(onRejectProposal).toHaveBeenCalledWith('refused');
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.hideTerminal' })
+    );
+    expect(screen.queryByTestId('studio-terminal-proposal-list')).toBeNull();
+    expect(screen.queryByTestId('studio-proposal-stale')).toBeNull();
+  });
+
+  it('keeps an in-flight terminal proposal visible and leaves disclosure review available while actions are locked', () => {
+    const stale = {
+      ...proposal('stale'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    const sibling = {
+      ...proposal('sibling'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    const secondSibling = {
+      ...proposal('second-sibling'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    renderList([stale, sibling, secondSibling], [], [], {
+      actionsLocked: true,
+      pendingAction: { kind: 'proposal', id: 'stale' },
+    });
+
+    expect(screen.getByTestId('studio-proposal-stale')).toBeVisible();
+    expect(screen.getByTestId('studio-terminal-proposals')).toHaveTextContent('terminalCount(count=2)');
+    const show = screen.getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.showTerminal',
+    });
+    expect(show).toBeEnabled();
+    fireEvent.click(show);
+    const siblingCard = within(screen.getByTestId('studio-proposal-sibling'));
+    expect(siblingCard.getByRole('button', { name: /workspace\.proposals\.reject/ })).toBeDisabled();
+    expect(siblingCard.getByRole('button', { name: /workspace\.proposals\.requestUpdated/ })).toBeDisabled();
   });
 
   it('keeps semantic reference generation behind an explicit reviewed human decision', async () => {

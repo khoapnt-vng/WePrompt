@@ -350,8 +350,14 @@ describe('DirectorProposalCard semantic review', () => {
       screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
     ).toBeDisabled();
     expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).not.toHaveClass('arco-btn-primary');
+    expect(
       screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
     ).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toHaveClass('arco-btn-primary');
 
     rerender(
       <DirectorProposalCard

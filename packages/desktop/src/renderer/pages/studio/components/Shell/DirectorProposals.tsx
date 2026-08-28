@@ -47,6 +47,18 @@ export type DirectorProposalsProps = {
 export const pendingDirectorProposals = (proposals: readonly StudioRendererProposalV2[]): StudioRendererProposalV2[] =>
   proposals.filter((proposal) => proposal.status === 'pending');
 
+type ResolvedProposal = {
+  proposal: StudioRendererProposalV2;
+  authorityState: 'ready' | 'stale' | 'unavailable' | 'refreshing';
+  authorityVerified: boolean;
+};
+
+const isTerminalProposal = (entry: ResolvedProposal, pendingAction: DirectorProposalsProps['pendingAction']): boolean =>
+  entry.authorityVerified &&
+  !(pendingAction?.kind === 'proposal' && pendingAction.id === entry.proposal.id) &&
+  ((entry.authorityState === 'stale' && entry.proposal.review.status === 'stale') ||
+    (entry.authorityState === 'unavailable' && entry.proposal.review.status === 'unavailable'));
+
 const uniqueHandoffs = (
   handoffs: readonly StudioRendererReferenceGenerationHandoffV2[]
 ): StudioRendererReferenceGenerationHandoffV2[] => {
@@ -86,6 +98,20 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
 }) => {
   const { t } = useTranslation();
   const pendingProposals = pendingDirectorProposals(proposals);
+  const [expandedTerminalProjectId, setExpandedTerminalProjectId] = React.useState<string | null>(null);
+  const resolvedProposals = pendingProposals.map(
+    (proposal): ResolvedProposal => ({
+      proposal,
+      authorityState: proposalAuthorityState(proposal),
+      authorityVerified: proposalAuthorityVerified(proposal),
+    })
+  );
+  const activeProposals = resolvedProposals.filter((entry) => !isTerminalProposal(entry, pendingAction));
+  const terminalProposals = resolvedProposals.filter((entry) => isTerminalProposal(entry, pendingAction));
+  const collapseTerminalProposals = terminalProposals.length > 1;
+  const visibleProposals = collapseTerminalProposals ? activeProposals : resolvedProposals;
+  const terminalProposalsOpen = expandedTerminalProjectId === project.id;
+  const terminalProposalListId = React.useId();
   const handoffs = uniqueHandoffs(referenceGenerationHandoffs);
   const referenceName = (referenceId: string): string => {
     const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
@@ -106,15 +132,15 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
       <h2>{t('conversation.creativeStudio.workspace.review.title')}</h2>
       {proposalErrorMessageKey !== null ? <div role='alert'>{t(proposalErrorMessageKey)}</div> : null}
       {referenceErrorMessageKey !== null ? <div role='alert'>{t(referenceErrorMessageKey)}</div> : null}
-      {pendingProposals.map((proposal) => (
+      {visibleProposals.map(({ proposal, authorityState, authorityVerified }) => (
         <DirectorProposalCard
           key={proposal.id}
           project={project}
           proposal={proposal}
           pending={pendingAction?.kind === 'proposal' && pendingAction.id === proposal.id}
           actionsLocked={actionsLocked}
-          authorityState={proposalAuthorityState(proposal)}
-          authorityVerified={proposalAuthorityVerified(proposal)}
+          authorityState={authorityState}
+          authorityVerified={authorityVerified}
           draftBlocker={proposalDraftBlocker(proposal)}
           acceptBlockedMessageKey={null}
           onAccept={onAcceptProposal}
@@ -124,6 +150,58 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           onEditShotsDirectly={onEditProposalShots}
         />
       ))}
+      {!collapseTerminalProposals ? null : (
+        <>
+          <Card data-testid='studio-terminal-proposals'>
+            <div className='flex items-center justify-between gap-8px'>
+              <p className='m-0'>
+                {t('conversation.creativeStudio.workspace.proposals.terminalCount', {
+                  count: terminalProposals.length,
+                })}
+              </p>
+              <Button
+                aria-controls={terminalProposalListId}
+                aria-expanded={terminalProposalsOpen}
+                onClick={() => setExpandedTerminalProjectId(terminalProposalsOpen ? null : project.id)}
+                size='mini'
+                type='text'
+              >
+                {t(
+                  terminalProposalsOpen
+                    ? 'conversation.creativeStudio.workspace.proposals.hideTerminal'
+                    : 'conversation.creativeStudio.workspace.proposals.showTerminal'
+                )}
+              </Button>
+            </div>
+          </Card>
+          {terminalProposalsOpen ? (
+            <div
+              className='flex flex-col gap-8px'
+              data-testid='studio-terminal-proposal-list'
+              id={terminalProposalListId}
+            >
+              {terminalProposals.map(({ proposal, authorityState, authorityVerified }) => (
+                <DirectorProposalCard
+                  key={proposal.id}
+                  project={project}
+                  proposal={proposal}
+                  pending={pendingAction?.kind === 'proposal' && pendingAction.id === proposal.id}
+                  actionsLocked={actionsLocked}
+                  authorityState={authorityState}
+                  authorityVerified={authorityVerified}
+                  draftBlocker={proposalDraftBlocker(proposal)}
+                  acceptBlockedMessageKey={null}
+                  onAccept={onAcceptProposal}
+                  onReject={onRejectProposal}
+                  onRequestUpdated={onRequestUpdatedProposal}
+                  onReviewRuleDrafts={onReviewRuleDrafts}
+                  onEditShotsDirectly={onEditProposalShots}
+                />
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
       {referenceRequests.map((request) => (
         <Card
           key={request.id}

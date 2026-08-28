@@ -4769,6 +4769,58 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(screen.getByTestId('studio-proposal-proposal_1')).toBeVisible();
   });
 
+  it('keeps the Board visible while four stale proposals remain available in one collapsed disclosure', async () => {
+    const authority = projectWithBoardJobs(1, false);
+    authority.revision = 4;
+    const staleProposals = Array.from({ length: 4 }, (_, index) =>
+      staleProposal({ ...proposal(), id: `stale_${index + 1}` }, authority.revision)
+    );
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog(staleProposals, authority.revision)));
+
+    renderStudio('/studio/project_1/board');
+
+    expect(await screen.findByTestId('studio-terminal-proposals')).toHaveTextContent('"count":4');
+    expect(screen.queryByTestId('studio-proposal-stale_1')).toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.board.openBeat:{"title":"Board Beat 1"}',
+      })
+    ).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.showTerminal' })
+    );
+    expect(screen.getByTestId('studio-proposal-stale_1')).toBeVisible();
+    expect(
+      within(screen.getByTestId('studio-proposal-stale_1')).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
+      })
+    ).toBeEnabled();
+  });
+
+  it('moves a proposal out of the terminal disclosure when refreshed authority makes it ready', async () => {
+    const authority = { ...project(), revision: 4 };
+    const stale = staleProposal(proposal(), authority.revision);
+    const staleSibling = staleProposal({ ...proposal(), id: 'proposal_2' }, authority.revision);
+    const ready = { ...proposal(), baseRevision: authority.revision };
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke
+      .mockResolvedValueOnce(ok(proposalCatalog([stale, staleSibling], authority.revision)))
+      .mockResolvedValue(ok(proposalCatalog([ready, staleSibling], authority.revision)));
+
+    renderStudio('/studio/project_1/board');
+    expect(await screen.findByTestId('studio-terminal-proposals')).toBeVisible();
+
+    act(() => mocks.listeners.proposalUpdated?.({ projectId: authority.id }));
+
+    expect(await screen.findByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'ready');
+    expect(screen.queryByTestId('studio-terminal-proposals')).toBeNull();
+    expect(screen.getByTestId('studio-proposal-proposal_2')).toHaveAttribute('data-proposal-state', 'stale');
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
   it('keeps the last proposal cards visible but unavailable through refresh and a mismatched catalog', async () => {
     const mismatch = deferred<{ ok: true; data: StudioRendererProposalCatalogV2 }>();
     mocks.bridge.listProposals.invoke

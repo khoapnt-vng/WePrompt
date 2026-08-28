@@ -356,7 +356,7 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
       )}
       <div className={styles.actions}>
         <Button
-          type='primary'
+          type={reviewUnavailable ? undefined : 'primary'}
           aria-describedby={effectiveAcceptBlockedMessageKey === null ? undefined : acceptBlockId}
           disabled={actionsLocked || effectiveAcceptBlockedMessageKey !== null || reviewUnavailable}
           loading={pending}
@@ -381,6 +381,7 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
           </Button>
         ) : authorityState !== 'ready' || draftBlocker === 'workspace' ? (
           <Button
+            type={actionsUnavailable ? undefined : 'primary'}
             disabled={actionsLocked || actionsUnavailable}
             loading={pending}
             onClick={() => void onRequestUpdated(proposal.id, draftBlocker === 'workspace')}
