@@ -3,7 +3,7 @@
 **For:** the designer of the Beat and Shot prototype
 **From:** engineering, 2026-08-28
 **About:** the Beat panel's Shot bands — [BUG-171](./creative-studio-3-bug-list.md) and the owner's review of 2026-08-28
-**Needs:** a drawing. Two of the five questions are already settled by the owner; three remain
+**Needs:** a drawing. All five decisions are settled — this is a visual commission, not an open question
 
 ## The short version
 
@@ -63,10 +63,11 @@ mid-gesture. What remains is a track that **shows** structure and time, and **se
 duration or structure happens through an explicit, named action — the Director, or a control that
 says what it will do and what it costs — rather than by dragging.
 
-## Settled by the owner, 2026-08-28 — not open for redesign
+## The five decisions, all settled — not open for redesign
 
-These two were the structural questions, and the owner answered them directly. They are given here as
-constraints, not as options.
+1 and 2 were answered directly by the owner; 4 likewise. 3 and 5 were decided by engineering on the
+reasoning given. They are constraints, not options. If any of them looks wrong to you, say so before
+drawing rather than drawing around it.
 
 1. **One track.** One clip track under one ruler. Each Shot is a block whose **width is its duration**.
    The chip row and the plan strip go away; their content is carried by the block and the ruler.
@@ -75,26 +76,56 @@ constraints, not as options.
    no dragging of any kind, no reordering by hand. A block can be selected and the playhead can be
    moved. Everything that changes the film happens elsewhere, through a named action.
 
-Please draw the plainest thing that satisfies those two. The track is a **reading instrument**, and
-its job is to let someone see the shape of a 30-second Beat at a glance and move around inside it.
+3. **The paid action lives on the selected Shot, not at the seam.** Decided by engineering, and the
+   reason is that the data model already agrees: the chain is stored as `chainBreak` **on the Shot**,
+   not as a separate join entity, and the Board's Shot tiles already say `Chain head` or `After 2.1`.
+   So a join is already expressed as the downstream Shot's start condition, and the control should
+   read the same way — _how does this Shot start?_ — in the selected Shot's own detail area, using the
+   same two words the Board uses. Two further reasons it is not at the seam: at a 4s minimum in a
+   track narrowed by the Director rail, seams are a few pixels apart, and we have just filed
+   [BUG-176](./creative-studio-3-bug-list.md) for a 19px click target on this very screen; and the cut
+   has **no undo**, so a mis-click at a seam would spend money with no way back. Please still draw how
+   a chained join versus a hard cut **reads** at the seam — the seam should show the state, it just
+   should not be the control.
 
-## What we are still asking
+4. **`plan` is reference only.** The owner's answer: the planned length is not authoritative, so it
+   must not be what the eye reads first. Block width comes from the **actual** footage length, since
+   that is what will really play. One caveat for the drawing: an unrendered Shot has no actual length
+   yet, only a plan — so a block's width comes from its actual duration where one exists and its plan
+   where it does not, and the block has to make clear which of the two it is currently showing.
+   Where both exist and disagree, that is worth seeing but is not an error and should not be dressed
+   as one.
 
-3. **Where does a paid action live, now that it is off the track?** Breaking or moving a join re-renders the
-   next Shot and costs money. With dragging gone it must become an explicit, labelled control. Should
-   it sit on the selected Shot, at the seam between blocks, or outside the track entirely? It needs to
-   state its consequence before it is taken, not after — and since selection is now one of only two
-   gestures, the selected block is the obvious host unless you see better.
+5. **The ruler is Beat-relative, with the film position stated once in the header.** Decided by
+   engineering. Ticks run `0s … 31s`, because the owner's stated job for this track is reading the
+   rhythm _inside_ a ~30-second Beat, and rhythm is far easier to read from a ruler that starts at
+   zero than from one running 1:47 to 2:18. The film context is not lost: state it once as text near
+   the Beat's name — something of the form `Beat 3 · 1:47-2:18 of 3:04` — rather than pushing timecode
+   into every tick.
 
-4. **How should `plan` and `source` read without trim handles?** In an NLE these are one clip and its
-   trimmed extent, expressed at the handles — but we no longer have handles. Are two numbers still
-   warranted, or does the block simply show its duration? If a Shot's planned length and its actual
-   footage length can differ, the track has to show that they differ; how, without implying the owner
-   can drag to fix it?
+## What we are asking you to draw
 
-5. **What does the ruler measure?** Beat-relative (`0s … 31s`) or film-relative (this Beat starts at
-   1:47)? The Beat panel is entered from the Board, so the owner arrives with film context and may
-   want to keep it.
+Draw the plainest thing that satisfies the five. The track is a **reading instrument**: its job is to
+let someone see the shape of a 30-second Beat at a glance and move around inside it.
+
+With every decision settled the commission is narrow and entirely visual. We need **one narrow track
+drawn well**, which is the part we would get wrong on our own:
+
+- **The block at realistic size.** Six blocks of 4-6s each, in a track narrowed by the permanent
+  Director rail. Each block still has to carry a name, a status word and a thumbnail. That is the hard
+  problem: it is a lot of information in very little width, and it is why we are asking rather than
+  improvising.
+- **The ruler and its relationship to the blocks** — tick density at ~30s, and how the playhead reads
+  across both.
+- **Selection.** What a selected block looks like, given selection is now one of only two gestures and
+  is the route to every action on a Shot.
+- **The seam.** How a chained join reads differently from a hard cut, as a state rather than a control.
+- **Status inside the block**, including the two-part case `RENDERED · LATEST ATTEMPT FAILED`, which is
+  long and has to survive at block width.
+- **The plan-versus-actual distinction** from decision 4, including the unrendered case where only a
+  plan exists.
+- **The empty and partial states.** A Beat whose Shots are not yet rendered still has a track; show
+  what it looks like with nothing, and with some, generated.
 
 ## Constraints the drawing has to live within
 
