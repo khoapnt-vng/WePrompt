@@ -19,6 +19,7 @@ import {
   STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
+  type StudioDirectorFreeRecoveryCommandRecordV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
   type StudioProposalRecordV2,
@@ -27,6 +28,7 @@ import * as studioDirectorCommandWriter from '@process/resources/builtinMcp/stud
 import {
   createStudioDirectorCommandWriterV2,
   type StudioApplyEditsInputV2,
+  type StudioApplyFreeFixInputV2,
   type StudioDirectorCommandWriterDeps,
 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import { writePendingRecordV2 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
@@ -592,6 +594,125 @@ describe('Studio Director subprocess command writer', () => {
       await readFile(path.join(pendingDir, 'command_v2_ops.json'), 'utf8')
     ) as StudioDirectorCommandRecordV2;
     expect(command.operations).toEqual(input.operations);
+  });
+
+  it.each([
+    {
+      label: 'conditioning-frame retry',
+      commandId: 'command_free_frame',
+      leaseId: 'lease_free_frame',
+      input: {
+        expectedRevision: 9,
+        recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_2' },
+      } satisfies StudioApplyFreeFixInputV2,
+    },
+    {
+      label: 'refused-job terminalization',
+      commandId: 'command_free_refused',
+      leaseId: 'lease_free_refused',
+      input: {
+        expectedRevision: 11,
+        recovery: { op: 'terminalize_refused_job', jobId: 'job_refused_1' },
+      } satisfies StudioApplyFreeFixInputV2,
+    },
+  ])('persists one exact $label as an unconfirmed apply_free_fix write', async ({ commandId, leaseId, input }) => {
+    const writer = writerWithIdsV2([commandId, leaseId]);
+
+    await expect(writer.applyFreeFix(input)).resolves.toEqual({ status: 'unconfirmed', commandId });
+    const command = JSON.parse(
+      await readFile(path.join(pendingDir, `${commandId}.json`), 'utf8')
+    ) as StudioDirectorFreeRecoveryCommandRecordV2;
+    expect(command).toEqual({
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId,
+      projectId: PROJECT_ID,
+      expectedRevision: input.expectedRevision,
+      createdAt: new Date(START_MS).toISOString(),
+      deadlineAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString(),
+      policy: 'apply_free_fix',
+      recovery: input.recovery,
+    });
+  });
+
+  it('returns and later reads the exact applied receipt for its durable free recovery', async () => {
+    const commandId = 'command_free_receipt';
+    const input = {
+      expectedRevision: 7,
+      recovery: { op: 'terminalize_refused_job' as const, jobId: 'job_refused_2' },
+    };
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId,
+      projectId: PROJECT_ID,
+      expectedRevision: input.expectedRevision,
+      decidedAt: new Date(START_MS + 1).toISOString(),
+      status: 'applied' as const,
+      appliedRevision: input.expectedRevision + 1,
+      recovery: input.recovery,
+    };
+    let currentMs = START_MS;
+    let receiptPublished = false;
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: PROJECT_ID, projectDir },
+      {
+        now: () => currentMs,
+        createId: vi.fn<() => string>().mockReturnValueOnce(commandId).mockReturnValueOnce('lease_free_receipt'),
+        sleep: async (milliseconds) => {
+          currentMs += milliseconds;
+          if (receiptPublished) return;
+          receiptPublished = true;
+          await writeFile(path.join(receiptsDir, `${commandId}.json`), JSON.stringify(receipt));
+        },
+      }
+    );
+
+    await expect(writer.applyFreeFix(input)).resolves.toEqual(receipt);
+    await expect(writer.getStatus({ commandId })).resolves.toEqual(receipt);
+  });
+
+  it('rejects malformed or authority-expanding free recoveries before identity or filesystem side effects', async () => {
+    const createId = vi.fn<() => string>().mockReturnValue('must_not_mint');
+    const lstat = vi.fn(nodeFs.lstat.bind(nodeFs));
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: PROJECT_ID, projectDir },
+      { createId, fs: bindMethods(nodeFs, { lstat }) }
+    );
+    let getterCalls = 0;
+    const accessor = { expectedRevision: 7 };
+    Object.defineProperty(accessor, 'recovery', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return { op: 'retry_conditioning_frame', dependentShotId: 'shot_2' };
+      },
+    });
+    const invalidInputs = [
+      { expectedRevision: 0, recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_2' } },
+      {
+        expectedRevision: 7,
+        recovery: { op: 'terminalize_refused_job', jobId: 'job_1' },
+        extra: 'authority',
+      },
+      { expectedRevision: 7, recovery: { op: 'retry_conditioning_frame', jobId: 'job_1' } },
+      { expectedRevision: 7, recovery: { op: 'terminalize_refused_job', jobId: '../job_1' } },
+      {
+        expectedRevision: 7,
+        recovery: { op: 'terminalize_refused_job', jobId: 'job_1', acknowledgePossibleDuplicateCharge: true },
+      },
+      accessor,
+    ];
+
+    for (const input of invalidInputs) {
+      await expect(writer.applyFreeFix(input as never)).resolves.toEqual({
+        status: 'storage_error',
+        commandId: 'unavailable',
+      });
+    }
+    expect(getterCalls).toBe(0);
+    expect(createId).not.toHaveBeenCalled();
+    expect(lstat).not.toHaveBeenCalled();
+    await expect(readdir(slotsDir)).resolves.toEqual([]);
+    await expect(readdir(pendingDir)).resolves.toEqual([]);
   });
 
   it.each([
@@ -1162,6 +1283,37 @@ describe('Studio Director subprocess command writer', () => {
     });
     await expect(readFile(receiptFile, 'utf8')).resolves.toBe(legacyReceipt);
     await expect(readFile(pendingFile, 'utf8')).resolves.toBe(legacyPending);
+  });
+
+  it('reports an immediate-prior schema-8 free recovery as unsupported without changing its bytes', async () => {
+    const commandId = 'schema_8_free_recovery';
+    const pendingFile = path.join(pendingDir, `${commandId}.json`);
+    const slotFile = path.join(slotsDir, '0.slot');
+    const pending = JSON.stringify({
+      schemaVersion: 8,
+      commandId,
+      projectId: PROJECT_ID,
+      expectedRevision: 7,
+      createdAt: new Date(START_MS).toISOString(),
+      deadlineAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString(),
+      policy: 'apply_free_fix',
+      recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_2' },
+    });
+    const slot = JSON.stringify({
+      schemaVersion: 8,
+      commandId,
+      reservedAt: new Date(START_MS).toISOString(),
+      deadlineAt: new Date(START_MS + STUDIO_DIRECTOR_COMMAND_WAIT_MS).toISOString(),
+    });
+    await writeFile(pendingFile, pending);
+    await writeFile(slotFile, slot);
+
+    await expect(writerWithIdsV2(['unused']).getStatus({ commandId })).resolves.toEqual({
+      status: 'unsupported_prototype_schema',
+      commandId,
+    });
+    await expect(readFile(pendingFile, 'utf8')).resolves.toBe(pending);
+    await expect(readFile(slotFile, 'utf8')).resolves.toBe(slot);
   });
 
   it.each([1, 2, 3, 4])(

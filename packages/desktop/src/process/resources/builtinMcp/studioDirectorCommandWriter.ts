@@ -23,6 +23,7 @@ import {
   type StudioDirectorQueryReceiptV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
+  type StudioDirectorFreeRecoveryV2,
   type StudioDirectorOperationV2,
   type StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -34,6 +35,7 @@ import {
   parseStudioDirectorCommandSlotV2,
   parseStudioDirectorPendingRecordV2,
   studioDirectorCommandReceiptMatchesRecordV2,
+  validateStudioDirectorFreeRecoveryV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 import { validateStudioMutationOperationV2 } from '@process/services/creative-studio/service/schema2';
 import {
@@ -57,6 +59,11 @@ export type StudioDirectorToolOperationV2 = StudioDirectorOperationV2;
 export type StudioApplyEditsInputV2 = {
   expectedRevision: number;
   operations: StudioDirectorToolOperationV2[];
+};
+
+export type StudioApplyFreeFixInputV2 = {
+  expectedRevision: number;
+  recovery: StudioDirectorFreeRecoveryV2;
 };
 
 export type StudioGetCommandStatusInput = { commandId: string };
@@ -100,6 +107,7 @@ export type StudioDirectorCommandWriterDeps = {
 
 export type StudioDirectorCommandWriterV2 = {
   apply(input: StudioApplyEditsInputV2): Promise<StudioDirectorToolApplyResultV2>;
+  applyFreeFix(input: StudioApplyFreeFixInputV2): Promise<StudioDirectorToolApplyResultV2>;
   getProjectStatus(input?: StudioGetProjectStatusDirectorInputV2): Promise<StudioDirectorToolQueryResultV2>;
   listRoutes(): Promise<StudioDirectorToolQueryResultV2>;
   getProposal(input: StudioGetProposalDirectorInputV2): Promise<StudioDirectorToolQueryResultV2>;
@@ -186,6 +194,46 @@ export const studioDirectorToolInputFitsDurableRecordV2 = (
   }
 };
 
+export const studioDirectorFreeFixInputFitsDurableRecordV2 = (
+  toolInput: StudioApplyFreeFixInputV2,
+  projectId = MAX_SAFE_STUDIO_ID_PREVIEW
+): boolean => {
+  try {
+    const expectedRevision = Object.getOwnPropertyDescriptor(toolInput, 'expectedRevision');
+    const recovery = Object.getOwnPropertyDescriptor(toolInput, 'recovery');
+    if (
+      typeof toolInput !== 'object' ||
+      toolInput === null ||
+      Array.isArray(toolInput) ||
+      Object.getPrototypeOf(toolInput) !== Object.prototype ||
+      Reflect.ownKeys(toolInput).length !== 2 ||
+      expectedRevision === undefined ||
+      recovery === undefined ||
+      !Object.hasOwn(expectedRevision, 'value') ||
+      !Object.hasOwn(recovery, 'value') ||
+      !Number.isSafeInteger(expectedRevision.value) ||
+      Number(expectedRevision.value) < 1 ||
+      !validateStudioDirectorFreeRecoveryV2(recovery.value)
+    ) {
+      return false;
+    }
+    const recoverySnapshot = structuredClone(recovery.value) as StudioDirectorFreeRecoveryV2;
+    const preview: StudioDirectorCommandRecordV2 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: MAX_SAFE_STUDIO_ID_PREVIEW,
+      projectId,
+      expectedRevision: Number(expectedRevision.value),
+      createdAt: '9999-12-31T23:59:59.999Z',
+      deadlineAt: '9999-12-31T23:59:59.999Z',
+      policy: 'apply_free_fix',
+      recovery: recoverySnapshot,
+    };
+    return Buffer.byteLength(JSON.stringify(preview), 'utf8') <= STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES;
+  } catch {
+    return false;
+  }
+};
+
 type CommandDirectories = {
   canonicalRoot: string;
   pending: string;
@@ -209,6 +257,7 @@ type PreparedCommandV2 = {
 
 type StudioDirectorWriterRequestV2 =
   | { policy: 'auto_apply'; input: StudioApplyEditsInputV2 }
+  | { policy: 'apply_free_fix'; input: StudioApplyFreeFixInputV2 }
   | { policy: 'get_project_status'; detail: boolean }
   | { policy: 'list_routes' }
   | { policy: 'get_proposal'; proposalId: string };
@@ -577,8 +626,10 @@ const prepareCommandV2 = (input: {
   createId: () => string;
 }): { commandId: string; prepared: PreparedCommandV2 | null } => {
   if (
-    input.request.policy === 'auto_apply' &&
-    !studioDirectorToolInputFitsDurableRecordV2(input.request.input, input.config?.projectId)
+    (input.request.policy === 'auto_apply' &&
+      !studioDirectorToolInputFitsDurableRecordV2(input.request.input, input.config?.projectId)) ||
+    (input.request.policy === 'apply_free_fix' &&
+      !studioDirectorFreeFixInputFitsDurableRecordV2(input.request.input, input.config?.projectId))
   ) {
     return { commandId: 'unavailable', prepared: null };
   }
@@ -609,11 +660,18 @@ const prepareCommandV2 = (input: {
           expectedRevision: input.request.input.expectedRevision,
           operations: input.request.input.operations,
         }
-      : input.request.policy === 'get_project_status'
-        ? { ...base, policy: 'get_project_status', detail: input.request.detail }
-        : input.request.policy === 'list_routes'
-          ? { ...base, policy: 'list_routes' }
-          : { ...base, policy: 'get_proposal', proposalId: input.request.proposalId };
+      : input.request.policy === 'apply_free_fix'
+        ? {
+            ...base,
+            policy: 'apply_free_fix',
+            expectedRevision: input.request.input.expectedRevision,
+            recovery: input.request.input.recovery,
+          }
+        : input.request.policy === 'get_project_status'
+          ? { ...base, policy: 'get_project_status', detail: input.request.detail }
+          : input.request.policy === 'list_routes'
+            ? { ...base, policy: 'list_routes' }
+            : { ...base, policy: 'get_proposal', proposalId: input.request.proposalId };
   const slot: StudioDirectorCommandSlotV2 = {
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId,
@@ -1854,6 +1912,9 @@ export const createStudioDirectorCommandWriterV2 = (
   const apply = async (input: StudioApplyEditsInputV2): Promise<StudioDirectorToolApplyResultV2> =>
     (await submit({ policy: 'auto_apply', input })) as StudioDirectorToolApplyResultV2;
 
+  const applyFreeFix = async (input: StudioApplyFreeFixInputV2): Promise<StudioDirectorToolApplyResultV2> =>
+    (await submit({ policy: 'apply_free_fix', input })) as StudioDirectorToolApplyResultV2;
+
   const getProjectStatus = async (
     input: StudioGetProjectStatusDirectorInputV2 = {}
   ): Promise<StudioDirectorToolQueryResultV2> => {
@@ -1873,5 +1934,5 @@ export const createStudioDirectorCommandWriterV2 = (
       : ((await submit({ policy: 'get_proposal', proposalId })) as StudioDirectorToolQueryResultV2);
   };
 
-  return { apply, getProjectStatus, listRoutes, getProposal, getStatus };
+  return { apply, applyFreeFix, getProjectStatus, listRoutes, getProposal, getStatus };
 };

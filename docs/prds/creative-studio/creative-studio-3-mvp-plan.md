@@ -1824,19 +1824,26 @@ build it alongside that assignment, not independently.
 
 ## Assignable follow-on — Director troubleshooting: diagnose freely, repair free things, propose the rest
 
-**Status:** owner-directed 2026-08-27. Full direction and the fourteen-action inventory live in
+**Status:** implementation in progress; items 1–2 implemented and verified 2026-08-28, items 3–5
+remain. Full direction and the fourteen-action inventory live in
 [the Director as first responder](../../design/creative-studio-3-director-troubleshooting.md).
 Charter: **diagnose freely · repair freely when free · propose when it costs · never confirm its
 own spend.**
 
-1. **Build `studio_get_project_status`** — the stage rollup with actionable blockers designed in
+1. **Implemented and verified 2026-08-28 — `studio_get_project_status`** is the stage rollup with
+   actionable blockers designed in
    [Project status](../../design/creative-studio-3-project-status.md), with a `detail: true` mode
    returning the per-Shot/job/extraction detail originally specified here as
    `studio_get_generation_state`. One tool, two granularities. Read-only; the prerequisite for
    everything else.
-2. **Grant two free recoveries as `direct`:** `retry_conditioning_frame`, and terminalizing a
-   _refused_ submission (never the submission-unknown shape, which keeps its owner-only
-   duplicate-charge acknowledgement).
+2. **Implemented and verified 2026-08-28 — grant two free recoveries as `direct`:**
+   `retry_conditioning_frame`, and terminalizing a _refused_ submission (never the
+   submission-unknown shape, which keeps its owner-only duplicate-charge acknowledgement).
+   `studio_apply_free_fix` accepts exactly one typed remedy returned by an immediately preceding
+   detailed status read. Main rederives that exact remedy at the claimed revision before applying
+   it, attributes the resulting commit to a durable receipt, and fails closed if either the remedy
+   or commit proof differs. Neither operation creates a quote, authorization, job, generation
+   request, or spend; a conditioning repair may only release work the owner already authorized.
 3. **Extend proposals to carry a prepared quote** so recovery that costs money arrives as a card
    with the number on it; the owner's Confirm stays the only spend. Composes with the
    "show the estimate" assignment.

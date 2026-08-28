@@ -142,6 +142,7 @@ export type StudioJobManagerDeps = {
 export type StudioJobManagerV2 = {
   dispatchAuthorizedJobsV2(input: StudioDispatchAuthorizedJobsRequestV2): Promise<StudioJobV2[]>;
   cancelJobV2(input: StudioJobRequest): Promise<StudioJobV2>;
+  terminalizeRefusedJobV2(input: StudioJobRequest, commitTag: string): Promise<StudioJobV2>;
   retryJobV2(input: StudioRetryJobRequest): Promise<StudioJobV2>;
   retryDownloadV2(input: StudioRetryDownloadRequest): Promise<StudioJobV2>;
   resumePendingJobsV2(supportedProjectIds: readonly string[]): Promise<void>;
@@ -649,7 +650,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     projectId: string,
     jobId: string,
     mutate: (project: StudioProjectV2, job: StudioJobV2) => boolean,
-    expectedRevision?: number
+    expectedRevision?: number,
+    commitTag = 'studio_job_manager_v2',
+    notifyAfterCommit = true
   ): Promise<StudioJobV2> => {
     try {
       const updated = await deps.store.updateProjectV2(
@@ -664,9 +667,9 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
           return project;
         },
         expectedRevision,
-        'studio_job_manager_v2'
+        commitTag
       );
-      notify(projectId);
+      if (notifyAfterCommit) notify(projectId);
       return ownValueV2(updated.jobs, jobId)!;
     } catch (error) {
       if (error instanceof JobMutationSkippedV2) return error.job;
@@ -1730,6 +1733,55 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     return operation;
   };
 
+  const terminalizeRefusedJobV2 = async (input: StudioJobRequest, commitTag: string): Promise<StudioJobV2> => {
+    if (disposed) throw new StudioJobManagerError('invalid_request');
+    requireSafeId(input.projectId);
+    requireSafeId(input.jobId);
+    requireSafeId(commitTag);
+    const project = await requireExpectedProjectV2(input.projectId, input.expectedRevision);
+    if (disposed) throw new StudioJobManagerError('invalid_request');
+    const previous = ownValueV2(project.jobs, input.jobId);
+    if (previous === undefined) throw new CreativeStudioStoreError('not_found', 'Studio job not found');
+    const owner = activeOwnerForJobV2(project, previous);
+    if (owner === null) throw new CreativeStudioStoreError('not_found', 'Studio generation target not found');
+    const hasRetrySuccessor = Object.values(project.jobs).some((job) => job.retryOfJobId === previous.id);
+    if (hasRetrySuccessor) throw new StudioJobManagerError('busy');
+    if (
+      previous.spendReceipt !== null ||
+      previous.status !== 'needs_attention' ||
+      previous.providerJobId !== null ||
+      previous.error === null ||
+      previous.error === undefined ||
+      !SUBMISSION_REFUSED_CODES.has(previous.error.code)
+    ) {
+      throw new StudioJobManagerError('invalid_request');
+    }
+    const terminalized = await mutateJobV2(
+      project.id,
+      previous.id,
+      (_currentProject, currentJob) => {
+        const code = currentJob.error?.code;
+        if (
+          currentJob.spendReceipt !== null ||
+          currentJob.status !== 'needs_attention' ||
+          currentJob.providerJobId !== null ||
+          code === undefined ||
+          !SUBMISSION_REFUSED_CODES.has(code)
+        ) {
+          return false;
+        }
+        currentJob.status = 'failed';
+        return true;
+      },
+      input.expectedRevision,
+      commitTag,
+      // The Director processor notifies only after its exact durable receipt is published.
+      false
+    );
+    if (terminalized.status !== 'failed') throw new StudioJobManagerError('invalid_request');
+    return terminalized;
+  };
+
   const retryJobV2 = async (input: StudioRetryJobRequest): Promise<StudioJobV2> => {
     if (disposed) throw new StudioJobManagerError('invalid_request');
     requireSafeId(input.projectId);
@@ -2081,6 +2133,7 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
   return {
     dispatchAuthorizedJobsV2: (input) => admitOperation(() => dispatchAuthorizedJobsV2(input)),
     cancelJobV2: (input) => admitOperation(() => cancelJobV2(input)),
+    terminalizeRefusedJobV2: (input, commitTag) => admitOperation(() => terminalizeRefusedJobV2(input, commitTag)),
     retryJobV2: (input) => admitOperation(() => retryJobV2(input)),
     retryDownloadV2: (input) => admitOperation(() => retryDownloadV2(input)),
     resumePendingJobsV2,

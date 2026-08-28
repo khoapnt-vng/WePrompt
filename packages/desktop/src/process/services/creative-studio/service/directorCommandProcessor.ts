@@ -14,6 +14,8 @@ import {
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
   type StudioDirectorAutoApplyCommandRecordV2,
+  type StudioDirectorFreeRecoveryCommandRecordV2,
+  type StudioDirectorFreeRecoveryV2,
   type StudioDirectorMutationReceiptV2,
   type StudioDirectorQueryCommandRecordV2,
   type StudioDirectorQueryFailureCodeV2,
@@ -23,6 +25,7 @@ import {
   type StudioDirectorCommandIndeterminateCode,
   type StudioDirectorProposalLookupV2,
   type StudioProposalV2,
+  type StudioJobRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   CreativeStudioStoreError,
@@ -35,6 +38,7 @@ import { CreativeStudioServiceError } from './projectMutations';
 import type { StudioDirectorCommandMailboxV2 } from './directorCommandMailbox';
 import {
   isStudioDirectorQueryCommandV2,
+  isStudioDirectorFreeRecoveryCommandV2,
   isStudioDirectorQueryReceiptV2,
   parseStudioDirectorCommandReceiptV2,
   snapshotStudioDirectorQueryResultV2,
@@ -48,7 +52,7 @@ export type StudioDirectorCommandProcessorV2 = {
 };
 
 export type StudioDirectorCommitTrackerV2 = {
-  expect(command: StudioDirectorAutoApplyCommandRecordV2): void;
+  expect(command: StudioDirectorWriteCommandRecordV2): void;
   observe(facts: StudioProjectCommitFacts): void;
   materialize(receipt: StudioDirectorMutationReceiptV2): void;
   pendingReceipt(projectId: string, commandId: string): StudioDirectorMutationReceiptV2 | null;
@@ -60,7 +64,10 @@ type IntervalHandle = unknown;
 export type StudioDirectorCommandProcessorDepsV2 = {
   store: Pick<CreativeStudioStore, 'getProjectV2' | 'listProposalsV2'>;
   mailbox: StudioDirectorCommandMailboxV2;
-  service: StudioDirectorCommandServiceV2 & Pick<CreativeStudioServiceV2, 'getProjectStatus' | 'listRoutes'>;
+  service: StudioDirectorCommandServiceV2 &
+    Pick<CreativeStudioServiceV2, 'getProjectStatus' | 'listRoutes' | 'retryConditioningFrame'> & {
+      terminalizeRefusedJob(input: StudioJobRequest, commitTag: string): Promise<unknown>;
+    };
   tracker: StudioDirectorCommitTrackerV2;
   queryAuthorityActive?: () => boolean;
   onProjectUpdated(projectId: string): void;
@@ -70,12 +77,17 @@ export type StudioDirectorCommandProcessorDepsV2 = {
   logError?: (message: string, error: unknown) => void;
 };
 
+type StudioDirectorWriteCommandRecordV2 =
+  | StudioDirectorAutoApplyCommandRecordV2
+  | StudioDirectorFreeRecoveryCommandRecordV2;
+
 type ExpectedCommitV2 = Readonly<{
   projectId: string;
   commandId: string;
   expectedRevision: number;
   createdBeatIds: readonly string[];
   createdShotIds: readonly string[];
+  recovery: StudioDirectorFreeRecoveryV2 | null;
 }>;
 
 const stateKey = (projectId: string, commandId: string): string => `${projectId}\0${commandId}`;
@@ -103,6 +115,7 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
           expectedRevision: command.expectedRevision,
           createdBeatIds: Object.freeze([]),
           createdShotIds: Object.freeze([]),
+          recovery: command.policy === 'apply_free_fix' ? Object.freeze(structuredClone(command.recovery)) : null,
         })
       );
     },
@@ -118,17 +131,30 @@ export const createStudioDirectorCommitTrackerV2 = (): StudioDirectorCommitTrack
       ) {
         return;
       }
-      materialize({
-        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
-        commandId: expected.commandId,
-        projectId: expected.projectId,
-        expectedRevision: expected.expectedRevision,
-        decidedAt: facts.committedAt,
-        status: 'applied',
-        appliedRevision: facts.committedRevision,
-        createdBeatIds: [...expected.createdBeatIds],
-        createdShotIds: [...expected.createdShotIds],
-      });
+      materialize(
+        expected.recovery === null
+          ? {
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+              commandId: expected.commandId,
+              projectId: expected.projectId,
+              expectedRevision: expected.expectedRevision,
+              decidedAt: facts.committedAt,
+              status: 'applied',
+              appliedRevision: facts.committedRevision,
+              createdBeatIds: [...expected.createdBeatIds],
+              createdShotIds: [...expected.createdShotIds],
+            }
+          : {
+              schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+              commandId: expected.commandId,
+              projectId: expected.projectId,
+              expectedRevision: expected.expectedRevision,
+              decidedAt: facts.committedAt,
+              status: 'applied',
+              appliedRevision: facts.committedRevision,
+              recovery: structuredClone(expected.recovery),
+            }
+      );
     },
 
     materialize,
@@ -232,7 +258,7 @@ export const createStudioDirectorCommandProcessorV2 = (
   };
 
   const rejected = (
-    command: StudioDirectorAutoApplyCommandRecordV2,
+    command: StudioDirectorWriteCommandRecordV2,
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandRejectionCodeV2
   ): StudioDirectorMutationReceiptV2 => ({
@@ -247,7 +273,7 @@ export const createStudioDirectorCommandProcessorV2 = (
   });
 
   const expired = (
-    command: StudioDirectorAutoApplyCommandRecordV2,
+    command: StudioDirectorWriteCommandRecordV2,
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandExpiryCode
   ): StudioDirectorMutationReceiptV2 => ({
@@ -262,7 +288,7 @@ export const createStudioDirectorCommandProcessorV2 = (
   });
 
   const indeterminate = (
-    command: StudioDirectorAutoApplyCommandRecordV2,
+    command: StudioDirectorWriteCommandRecordV2,
     observedRevision: number | null,
     reasonCode: StudioDirectorCommandIndeterminateCode
   ): StudioDirectorMutationReceiptV2 => ({
@@ -392,6 +418,35 @@ export const createStudioDirectorCommandProcessorV2 = (
     });
     if (parsed.status !== 'valid') return failedQuery(command, 'result_mismatch');
     return parsed.record as StudioDirectorQueryReceiptV2;
+  };
+
+  const sameFreeRecoveryV2 = (left: StudioDirectorFreeRecoveryV2, right: StudioDirectorFreeRecoveryV2): boolean =>
+    left.op === right.op &&
+    (left.op === 'retry_conditioning_frame'
+      ? right.op === 'retry_conditioning_frame' && left.dependentShotId === right.dependentShotId
+      : right.op === 'terminalize_refused_job' && left.jobId === right.jobId);
+
+  const statusOffersExactFreeRecoveryV2 = async (
+    command: StudioDirectorFreeRecoveryCommandRecordV2
+  ): Promise<boolean> => {
+    const status = await deps.service.getProjectStatus({ projectId: command.projectId, detail: true });
+    if (status.projectId !== command.projectId || status.projectRevision !== command.expectedRevision) {
+      throw new CreativeStudioStoreError('stale_project', 'Studio project changed during free-recovery preflight');
+    }
+    return (
+      status.stages
+        .flatMap((stage) => stage.blockers)
+        .filter((blocker) => {
+          const remedy = blocker.remedy;
+          if (
+            remedy.kind !== 'free_fix' ||
+            (remedy.op !== 'retry_conditioning_frame' && remedy.op !== 'terminalize_refused_job')
+          ) {
+            return false;
+          }
+          return sameFreeRecoveryV2(remedy, command.recovery);
+        }).length === 1
+    );
   };
 
   const processCommand = async (projectId: string, commandId: string): Promise<void> => {
@@ -537,18 +592,51 @@ export const createStudioDirectorCommandProcessorV2 = (
 
       deps.tracker.expect(command);
       try {
-        const result = await deps.service.apply(command, latestApplyStartMs, { commitTag: command.commandId });
-        terminal = {
-          schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
-          commandId,
-          projectId,
-          expectedRevision: command.expectedRevision,
-          decidedAt: result.project.updatedAt,
-          status: 'applied',
-          appliedRevision: result.appliedRevision,
-          createdBeatIds: [...result.createdBeatIds],
-          createdShotIds: [...result.createdShotIds],
-        };
+        if (isStudioDirectorFreeRecoveryCommandV2(command)) {
+          if (!(await statusOffersExactFreeRecoveryV2(command))) {
+            throw new StudioDirectorCommandApplyErrorV2('dependency_blocked');
+          }
+          if (now() >= latestApplyStartMs) throw new StudioDirectorCommandApplyErrorV2('deadline_elapsed');
+          if (command.recovery.op === 'retry_conditioning_frame') {
+            await deps.service.retryConditioningFrame(
+              {
+                projectId: command.projectId,
+                expectedRevision: command.expectedRevision,
+                dependentShotId: command.recovery.dependentShotId,
+              },
+              command.commandId
+            );
+          } else {
+            await deps.service.terminalizeRefusedJob(
+              {
+                projectId: command.projectId,
+                expectedRevision: command.expectedRevision,
+                jobId: command.recovery.jobId,
+              },
+              command.commandId
+            );
+          }
+          terminal =
+            deps.tracker.pendingReceipt(projectId, commandId) ??
+            indeterminate(
+              command,
+              await observedRevisionAfter(projectId, project.revision),
+              'commit_attribution_unknown'
+            );
+        } else {
+          const result = await deps.service.apply(command, latestApplyStartMs, { commitTag: command.commandId });
+          terminal = {
+            schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+            commandId,
+            projectId,
+            expectedRevision: command.expectedRevision,
+            decidedAt: result.project.updatedAt,
+            status: 'applied',
+            appliedRevision: result.appliedRevision,
+            createdBeatIds: [...result.createdBeatIds],
+            createdShotIds: [...result.createdShotIds],
+          };
+        }
       } catch (error) {
         const provenCommit = deps.tracker.pendingReceipt(projectId, commandId);
         if (provenCommit !== null) {

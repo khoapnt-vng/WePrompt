@@ -17,6 +17,8 @@ import {
   type CreateStudioProjectInputV2,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
+  type StudioDirectorFreeRecoveryCommandRecordV2,
+  type StudioDirectorFreeRecoveryV2,
   type StudioDirectorQueryCommandRecordV2,
   type StudioProjectV2,
   type StudioProjectStatusV2,
@@ -28,6 +30,7 @@ import {
   createStudioDirectorCommandProcessorV2,
   createStudioDirectorCommitTrackerV2,
   type StudioDirectorCommandProcessorV2,
+  type StudioDirectorCommandProcessorDepsV2,
   type StudioDirectorCommitTrackerV2,
 } from '@process/services/creative-studio/service/directorCommandProcessor';
 import {
@@ -167,6 +170,21 @@ const makeQueryCommandV2 = (
           proposalId: 'proposal_exact_b',
         };
 
+const makeFreeRecoveryCommandV2 = (
+  recovery: StudioDirectorFreeRecoveryV2,
+  commandId = 'free_recovery_v2',
+  expectedRevision = 1
+): StudioDirectorFreeRecoveryCommandRecordV2 => ({
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  commandId,
+  projectId: 'project_v2',
+  expectedRevision,
+  createdAt: '2026-08-16T12:00:00.000Z',
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  policy: 'apply_free_fix',
+  recovery,
+});
+
 const makeProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
   projectId: 'project_v2',
   projectRevision: 2,
@@ -229,6 +247,33 @@ const makeProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
   boards: { currentPictureCount: 0, shotCount: 0 },
   detail: detail ? { shots: [], references: [] } : null,
 });
+
+const makeFreeRecoveryStatusV2 = (
+  recovery: StudioDirectorFreeRecoveryV2,
+  projectRevision = 1
+): StudioProjectStatusV2 => {
+  const status = makeProjectStatusV2(true);
+  status.projectRevision = projectRevision;
+  const production = status.stages.find((stage) => stage.id === 'production')!;
+  production.state = 'blocked';
+  production.blockers = [
+    {
+      cause:
+        recovery.op === 'retry_conditioning_frame' ? 'conditioning_frame_required' : 'generation_provider_unavailable',
+      where: {
+        kind: 'shot',
+        beatId: 'beat_1',
+        shotId: recovery.op === 'retry_conditioning_frame' ? recovery.dependentShotId : 'shot_1',
+        beatPosition: 1,
+        shotPosition: 1,
+        jobId: recovery.op === 'terminalize_refused_job' ? recovery.jobId : null,
+      },
+      remedy: { kind: 'free_fix', ...structuredClone(recovery) },
+    },
+  ];
+  status.blockerCount = 1;
+  return status;
+};
 
 const makeUnavailableRoutesV2 = (): StudioRouteCatalogV2 => ({
   catalogVersion: 'fedcba9876543210',
@@ -321,6 +366,8 @@ type HarnessV2 = {
   serviceApply: ReturnType<typeof vi.fn<StudioDirectorCommandServiceV2['apply']>>;
   serviceGetProjectStatus: ReturnType<typeof vi.fn>;
   serviceListRoutes: ReturnType<typeof vi.fn>;
+  serviceRetryConditioningFrame: ReturnType<typeof vi.fn>;
+  serviceTerminalizeRefusedJob: ReturnType<typeof vi.fn>;
   storeGetProject: ReturnType<typeof vi.fn>;
   storeListProposals: ReturnType<typeof vi.fn>;
   writeReceipt: ReturnType<
@@ -349,6 +396,8 @@ const createHarnessV2 = (
     serviceApply?: StudioDirectorCommandServiceV2['apply'];
     serviceGetProjectStatus?: (input: { projectId: string; detail?: boolean }) => Promise<StudioProjectStatusV2>;
     serviceListRoutes?: (input: { projectId: string }) => Promise<StudioRouteCatalogV2>;
+    serviceRetryConditioningFrame?: StudioDirectorCommandProcessorDepsV2['service']['retryConditioningFrame'];
+    serviceTerminalizeRefusedJob?: StudioDirectorCommandProcessorDepsV2['service']['terminalizeRefusedJob'];
     proposals?: StudioProposalV2[];
     queryAuthorityActive?: () => boolean;
     beforeReceiptPublish?: () => Promise<void>;
@@ -436,6 +485,29 @@ const createHarnessV2 = (
     input.serviceGetProjectStatus ?? (async ({ detail }) => makeProjectStatusV2(detail === true))
   );
   const serviceListRoutes = vi.fn(input.serviceListRoutes ?? (async () => makeUnavailableRoutesV2()));
+  const recordRecoveryCommit = (request: { projectId: string; expectedRevision: number }, commandId: string): void => {
+    projects.set(request.projectId, makeProjectV2(request.projectId, request.expectedRevision + 1));
+    tracker.observe({
+      projectId: request.projectId,
+      previousRevision: request.expectedRevision,
+      committedRevision: request.expectedRevision + 1,
+      committedAt: new Date(input.nowMs ?? NOW_MS).toISOString(),
+      commitTag: commandId,
+    });
+  };
+  const serviceRetryConditioningFrame = vi.fn(
+    input.serviceRetryConditioningFrame ??
+      (async (request, commandId) => {
+        recordRecoveryCommit(request, commandId!);
+        return undefined as never;
+      })
+  );
+  const serviceTerminalizeRefusedJob = vi.fn(
+    input.serviceTerminalizeRefusedJob ??
+      (async (request, commandId) => {
+        recordRecoveryCommit(request, commandId);
+      })
+  );
   const storeGetProject = vi.fn(async (projectId: string) => {
     const project = projects.get(projectId);
     if (project === undefined) return { status: 'not_found' as const, projectId };
@@ -449,7 +521,13 @@ const createHarnessV2 = (
   const processor = createStudioDirectorCommandProcessorV2({
     store: { getProjectV2: storeGetProject, listProposalsV2: storeListProposals },
     mailbox,
-    service: { apply: serviceApply, getProjectStatus: serviceGetProjectStatus, listRoutes: serviceListRoutes },
+    service: {
+      apply: serviceApply,
+      getProjectStatus: serviceGetProjectStatus,
+      listRoutes: serviceListRoutes,
+      retryConditioningFrame: serviceRetryConditioningFrame,
+      terminalizeRefusedJob: serviceTerminalizeRefusedJob,
+    },
     tracker,
     queryAuthorityActive: input.queryAuthorityActive,
     onProjectUpdated: notify,
@@ -475,6 +553,8 @@ const createHarnessV2 = (
     serviceApply,
     serviceGetProjectStatus,
     serviceListRoutes,
+    serviceRetryConditioningFrame,
+    serviceTerminalizeRefusedJob,
     storeGetProject,
     storeListProposals,
     writeReceipt,
@@ -496,7 +576,7 @@ const createHarnessV2 = (
 };
 
 const addLiveCommandV2 = (harness: HarnessV2, command: StudioDirectorCommandRecordV2): void => {
-  if (command.policy === 'auto_apply') {
+  if (command.policy === 'auto_apply' || command.policy === 'apply_free_fix') {
     harness.projects.set(command.projectId, makeProjectV2(command.projectId, command.expectedRevision));
   }
   harness.pendings.set(keyOf(command.projectId, command.commandId), { status: 'valid', record: command });
@@ -536,6 +616,33 @@ describe('Studio Director schema-2 commit tracker', () => {
       appliedRevision: 2,
       createdBeatIds: [],
       createdShotIds: [],
+    });
+  });
+
+  it('materializes the exact tagged free recovery instead of mutation identities', () => {
+    const tracker = createStudioDirectorCommitTrackerV2();
+    const command = makeFreeRecoveryCommandV2({
+      op: 'retry_conditioning_frame',
+      dependentShotId: 'shot_waiting',
+    });
+    tracker.expect(command);
+    tracker.observe({
+      projectId: command.projectId,
+      previousRevision: command.expectedRevision,
+      committedRevision: command.expectedRevision + 1,
+      committedAt: COMMITTED_AT,
+      commitTag: command.commandId,
+    });
+
+    expect(tracker.pendingReceipt(command.projectId, command.commandId)).toEqual({
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: COMMITTED_AT,
+      status: 'applied',
+      appliedRevision: command.expectedRevision + 1,
+      recovery: command.recovery,
     });
   });
 
@@ -867,6 +974,166 @@ describe('Studio Director schema-2 command processor', () => {
     expect(oversized.storeGetProject).not.toHaveBeenCalled();
     expect(oversized.serviceApply).not.toHaveBeenCalled();
     expect(oversized.notify).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      label: 'conditioning-frame retry',
+      recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_waiting' } as const,
+    },
+    {
+      label: 'refused-submission terminalization',
+      recovery: { op: 'terminalize_refused_job', jobId: 'job_refused' } as const,
+    },
+  ])('applies the exact fresh $label remedy through its bounded recovery service', async ({ recovery }) => {
+    const harness = createHarnessV2({
+      serviceGetProjectStatus: async () => makeFreeRecoveryStatusV2(recovery),
+    });
+    await harness.processor.start();
+    const command = makeFreeRecoveryCommandV2(recovery);
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+    expect(receipt).toEqual({
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: new Date(NOW_MS).toISOString(),
+      status: 'applied',
+      appliedRevision: command.expectedRevision + 1,
+      recovery,
+    });
+    expect(harness.serviceGetProjectStatus).toHaveBeenCalledExactlyOnceWith({
+      projectId: command.projectId,
+      detail: true,
+    });
+    if (recovery.op === 'retry_conditioning_frame') {
+      expect(harness.serviceRetryConditioningFrame).toHaveBeenCalledExactlyOnceWith(
+        {
+          projectId: command.projectId,
+          expectedRevision: command.expectedRevision,
+          dependentShotId: recovery.dependentShotId,
+        },
+        command.commandId
+      );
+      expect(harness.serviceTerminalizeRefusedJob).not.toHaveBeenCalled();
+    } else {
+      expect(harness.serviceTerminalizeRefusedJob).toHaveBeenCalledExactlyOnceWith(
+        {
+          projectId: command.projectId,
+          expectedRevision: command.expectedRevision,
+          jobId: recovery.jobId,
+        },
+        command.commandId
+      );
+      expect(harness.serviceRetryConditioningFrame).not.toHaveBeenCalled();
+    }
+    expect(harness.serviceApply).not.toHaveBeenCalled();
+    expect(harness.notify).toHaveBeenCalledExactlyOnceWith(command.projectId);
+    await harness.processor.stop();
+  });
+
+  it('fails indeterminate instead of claiming a recovery that lacks exact commit attribution', async () => {
+    const recovery = { op: 'terminalize_refused_job', jobId: 'job_refused' } as const;
+    const harness = createHarnessV2({
+      serviceGetProjectStatus: async () => makeFreeRecoveryStatusV2(recovery),
+      serviceTerminalizeRefusedJob: async () => undefined,
+    });
+    await harness.processor.start();
+    const command = makeFreeRecoveryCommandV2(recovery);
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+    expect(receipt).toMatchObject({
+      status: 'indeterminate',
+      observedRevision: command.expectedRevision,
+      reasonCode: 'commit_attribution_unknown',
+    });
+    expect(harness.serviceTerminalizeRefusedJob).toHaveBeenCalledOnce();
+    expect(harness.notify).not.toHaveBeenCalled();
+    await harness.processor.stop();
+  });
+
+  it('fails closed when fresh status has no exact singleton free remedy', async () => {
+    const requested = { op: 'terminalize_refused_job', jobId: 'job_refused' } as const;
+    const statuses = [
+      makeProjectStatusV2(true),
+      makeFreeRecoveryStatusV2({ op: 'terminalize_refused_job', jobId: 'job_other' }),
+      (() => {
+        const duplicate = makeFreeRecoveryStatusV2(requested);
+        const production = duplicate.stages.find((stage) => stage.id === 'production')!;
+        production.blockers.push(structuredClone(production.blockers[0]!));
+        duplicate.blockerCount = 2;
+        return duplicate;
+      })(),
+    ];
+    statuses[0]!.projectRevision = 1;
+
+    for (const [index, status] of statuses.entries()) {
+      const harness = createHarnessV2({ serviceGetProjectStatus: async () => status });
+      await harness.processor.start();
+      const command = makeFreeRecoveryCommandV2(requested, `free_fix_mismatch_${index}`);
+      addLiveCommandV2(harness, command);
+      harness.processor.trigger(command.projectId, command.commandId);
+      // eslint-disable-next-line no-await-in-loop
+      const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+      expect(receipt).toMatchObject({ status: 'rejected', reasonCode: 'dependency_blocked' });
+      expect(harness.serviceGetProjectStatus).toHaveBeenCalledExactlyOnceWith({
+        projectId: command.projectId,
+        detail: true,
+      });
+      expect(harness.serviceTerminalizeRefusedJob).not.toHaveBeenCalled();
+      expect(harness.serviceRetryConditioningFrame).not.toHaveBeenCalled();
+      expect(harness.serviceApply).not.toHaveBeenCalled();
+      // eslint-disable-next-line no-await-in-loop
+      await harness.processor.stop();
+    }
+  });
+
+  it('rejects a recovery whose fresh status revision is stale before invoking either recovery', async () => {
+    const recovery = { op: 'retry_conditioning_frame', dependentShotId: 'shot_waiting' } as const;
+    const harness = createHarnessV2({
+      serviceGetProjectStatus: async () => makeFreeRecoveryStatusV2(recovery, 2),
+    });
+    await harness.processor.start();
+    const command = makeFreeRecoveryCommandV2(recovery);
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+    expect(receipt).toMatchObject({ status: 'rejected', reasonCode: 'stale_revision' });
+    expect(harness.serviceGetProjectStatus).toHaveBeenCalledOnce();
+    expect(harness.serviceRetryConditioningFrame).not.toHaveBeenCalled();
+    expect(harness.serviceTerminalizeRefusedJob).not.toHaveBeenCalled();
+    expect(harness.serviceApply).not.toHaveBeenCalled();
+    await harness.processor.stop();
+  });
+
+  it('expires a free recovery before status preflight when its acknowledgement window elapsed', async () => {
+    const harness = createHarnessV2({ nowMs: Date.parse('2026-08-16T12:00:13.000Z') });
+    await harness.processor.start();
+    const command = makeFreeRecoveryCommandV2({
+      op: 'terminalize_refused_job',
+      jobId: 'job_refused',
+    });
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+    expect(receipt).toMatchObject({ status: 'expired', reasonCode: 'deadline_elapsed' });
+    expect(harness.serviceGetProjectStatus).not.toHaveBeenCalled();
+    expect(harness.serviceTerminalizeRefusedJob).not.toHaveBeenCalled();
+    expect(harness.serviceRetryConditioningFrame).not.toHaveBeenCalled();
+    expect(harness.serviceApply).not.toHaveBeenCalled();
+    await harness.processor.stop();
   });
 
   it('writes one exact applied receipt, cleans once, and notifies exactly once', async () => {

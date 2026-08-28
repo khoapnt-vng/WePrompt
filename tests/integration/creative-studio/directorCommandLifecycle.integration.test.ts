@@ -18,8 +18,10 @@ import {
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   type StudioAssetV2,
+  type StudioJobRequest,
   type StudioJobV2,
   type StudioProjectV2,
+  type StudioProjectStatusV2,
   type StudioQuotedGeneration,
   type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
@@ -44,7 +46,7 @@ import {
   deriveStudioInstructionProfileV2,
   studioGenerationCompositionDigestV2,
 } from '@process/services/creative-studio/service/schema2/generation';
-import { createCreativeStudioStore } from '@process/services/creative-studio/store';
+import { createCreativeStudioStore, type StudioProjectCommitFacts } from '@process/services/creative-studio/store';
 
 const roots: string[] = [];
 
@@ -79,6 +81,86 @@ const idSequence = (ids: string[]): (() => string) => {
   let index = 0;
   return () => ids[index++] ?? `generated_${index}`;
 };
+
+const refusedJobRecoveryStatusV2 = (
+  projectId: string,
+  projectRevision: number,
+  jobId: string
+): StudioProjectStatusV2 => ({
+  projectId,
+  projectRevision,
+  catalogVersion: '0123456789abcdef',
+  stages: [
+    { id: 'brief', state: 'complete', summary: { stage: 'brief', hasBrief: true }, blockers: [] },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state: 'complete',
+      summary: { stage: 'references', plannedCount: 0, approvedCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'storyboard',
+      state: 'not_started',
+      summary: {
+        stage: 'storyboard',
+        beatCount: 0,
+        shotCount: 0,
+        authoredShotCount: 0,
+        plannedSeconds: 0,
+        targetSeconds: 5,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state: 'complete',
+      summary: { stage: 'bindings', readyShotCount: 0, shotCount: 0, maxConditioningImages: 3 },
+      blockers: [],
+    },
+    {
+      id: 'production',
+      state: 'blocked',
+      summary: { stage: 'production', currentTakeCount: 0, shotCount: 0, activeJobCount: 0 },
+      blockers: [
+        {
+          cause: 'generation_provider_unavailable',
+          where: {
+            kind: 'shot',
+            beatId: 'beat_1',
+            shotId: 'shot_1',
+            beatPosition: 1,
+            shotPosition: 1,
+            jobId,
+          },
+          remedy: { kind: 'free_fix', op: 'terminalize_refused_job', jobId },
+        },
+      ],
+    },
+    {
+      id: 'cut',
+      state: 'not_started',
+      summary: {
+        stage: 'cut',
+        currentTakeCount: 0,
+        shotCount: 0,
+        durationSeconds: null,
+        targetSeconds: 5,
+        structurallyPlayable: false,
+      },
+      blockers: [],
+    },
+  ],
+  blockerCount: 1,
+  advisories: [],
+  boards: { currentPictureCount: 0, shotCount: 0 },
+  detail: { shots: [], references: [] },
+});
 
 const addTerminalPaidShotLineage = (project: StudioProjectV2, shotId: string): StudioProjectV2 => {
   const next = structuredClone(project);
@@ -892,6 +974,144 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
       service.dispose();
       await server.close();
     }
+  });
+
+  it('repairs a free refused-job recovery receipt after publication failure without replaying its commit', async () => {
+    const rootDir = await mkdtemp(path.join(tmpdir(), 'studio-director-free-recovery-repair-'));
+    roots.push(rootDir);
+    const tracker = createStudioDirectorCommitTrackerV2();
+    const commitFacts: StudioProjectCommitFacts[] = [];
+    const store = createCreativeStudioStore({
+      rootDir,
+      createId: () => 'project_free_recovery_repair',
+      onProjectCommitted: (facts) => {
+        commitFacts.push(facts);
+        tracker.observe(facts);
+      },
+    });
+    const project = await store.createProjectV2({
+      name: 'Director free recovery repair',
+      brief: 'A refused job is waiting for free terminalization.',
+      aspectRatio: '16:9',
+      targetDurationSeconds: 5,
+      resolution: '720p',
+    });
+    commitFacts.length = 0;
+    const mailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      watchCommandTree: () => ({ close: () => undefined }),
+    });
+    await mailbox.ensure(project.id);
+    let receiptWriteAttempts = 0;
+    const processorMailbox: StudioDirectorCommandMailboxV2 = {
+      ...mailbox,
+      writeReceipt: async (projectId, receipt) => {
+        receiptWriteAttempts += 1;
+        if (receiptWriteAttempts === 1) throw new Error('injected free-recovery receipt publication failure');
+        await mailbox.writeReceipt(projectId, receipt);
+      },
+    };
+    const recovery = { op: 'terminalize_refused_job' as const, jobId: 'job_refused' };
+    const reducerService = createStudioDirectorCommandServiceV2({ store });
+    // Job-state eligibility is covered at the real job-manager boundary. This seam isolates the
+    // command lifecycle while still committing through the real store with the command tag.
+    const terminalizeRefusedJob = vi.fn(async (input: StudioJobRequest, commitTag: string) =>
+      store.updateProjectV2(
+        input.projectId,
+        (current) => {
+          current.brief = `Terminalized ${input.jobId}`;
+          return current;
+        },
+        input.expectedRevision,
+        commitTag
+      )
+    );
+    const onProjectUpdated = vi.fn();
+    const processor = createStudioDirectorCommandProcessorV2({
+      store,
+      mailbox: processorMailbox,
+      service: {
+        ...reducerService,
+        getProjectStatus: async ({ projectId }) =>
+          refusedJobRecoveryStatusV2(projectId, project.revision, recovery.jobId),
+        listRoutes: async () => {
+          throw new Error('route inventory must not be read by free recovery');
+        },
+        retryConditioningFrame: async () => {
+          throw new Error('conditioning recovery must not run for a refused job');
+        },
+        terminalizeRefusedJob,
+      },
+      tracker,
+      onProjectUpdated,
+    });
+    await processor.start();
+    const projectDir = await store.getVerifiedProjectDirectoryV2(project.id);
+    if (projectDir === null) throw new Error('free-recovery project directory missing');
+    const commandId = 'command_free_recovery_repair';
+    const writer = createStudioDirectorCommandWriterV2(
+      { projectId: project.id, projectDir },
+      { createId: idSequence([commandId, 'lease_free_recovery_repair']) }
+    );
+    const pendingFile = path.join(projectDir, 'commands', 'pending', `${commandId}.json`);
+    const slotFile = path.join(projectDir, 'commands', 'slots', '0.slot');
+    const applying = writer.applyFreeFix({ expectedRevision: project.revision, recovery });
+    await waitForCondition(async () => ((await fileExists(pendingFile)) ? true : null), 'free-recovery pending');
+
+    processor.trigger(project.id, commandId);
+    await waitForCondition(
+      () => (receiptWriteAttempts === 1 && commitFacts.length === 1 ? true : null),
+      'failed first recovery receipt publication'
+    );
+    expect(terminalizeRefusedJob).toHaveBeenCalledExactlyOnceWith(
+      { projectId: project.id, expectedRevision: project.revision, jobId: recovery.jobId },
+      commandId
+    );
+    expect(commitFacts).toEqual([
+      expect.objectContaining({
+        projectId: project.id,
+        previousRevision: project.revision,
+        committedRevision: project.revision + 1,
+        commitTag: commandId,
+      }),
+    ]);
+    expect(await fileExists(pendingFile)).toBe(true);
+
+    processor.trigger(project.id, commandId);
+    const expectedReceipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId,
+      projectId: project.id,
+      expectedRevision: project.revision,
+      decidedAt: commitFacts[0]!.committedAt,
+      status: 'applied' as const,
+      appliedRevision: project.revision + 1,
+      recovery,
+    };
+    await expect(applying).resolves.toEqual(expectedReceipt);
+    await expect(mailbox.readReceipt(project.id, commandId)).resolves.toEqual({
+      status: 'valid',
+      record: expectedReceipt,
+    });
+    await waitForCondition(
+      async () => (!(await fileExists(pendingFile)) && !(await fileExists(slotFile)) ? true : null),
+      'free-recovery receipt-first cleanup'
+    );
+    const loaded = await store.getProjectV2(project.id);
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision + 1, brief: `Terminalized ${recovery.jobId}` },
+    });
+
+    processor.trigger(project.id, commandId);
+    await processor.stop();
+    expect(terminalizeRefusedJob).toHaveBeenCalledOnce();
+    expect(commitFacts).toHaveLength(1);
+    expect(receiptWriteAttempts).toBe(2);
+    expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(project.id);
+    expect(await readdir(path.join(projectDir, 'commands', 'pending'))).toEqual([]);
+    expect(await readdir(path.join(projectDir, 'commands', 'slots'))).toEqual([]);
   });
 
   it('repairs the real CAS crash window after receipt publication fails without replaying the reducer', async () => {

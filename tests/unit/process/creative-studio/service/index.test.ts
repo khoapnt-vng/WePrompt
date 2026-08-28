@@ -95,6 +95,7 @@ import {
 import {
   createListRoutesHandler,
   createStudioApplyEditsHandlerV2,
+  createStudioApplyFreeFixHandlerV2,
   createStudioGetProposalHandlerV2,
   createStudioGetProjectStatusHandlerV2,
   createProposeBriefRuleHandlerV2,
@@ -104,6 +105,7 @@ import {
   parseStudioServerEnv,
   registerStudioToolsV2,
   studioApplyEditsInputSchemaV2,
+  studioApplyFreeFixInputSchemaV2,
   studioGetProjectStatusInputSchemaV2,
   studioGetProposalInputSchemaV2,
   studioProposeStoryboardInputSchemaV2,
@@ -5802,14 +5804,24 @@ describe('CreativeStudioServiceV2', () => {
     const waitingJob = Object.values(ready.jobs).find(
       (job) => job.purpose === 'video_take' && job.status === 'waiting_for_conditioning'
     )!;
+    harness.store.updateProjectV2.mockClear();
+    harness.onProjectUpdated.mockClear();
 
     await expect(
-      harness.service.retryConditioningFrame({
-        projectId: project.id,
-        expectedRevision: ready.revision,
-        dependentShotId: 'clip_2',
-      })
+      harness.service.retryConditioningFrame(
+        {
+          projectId: project.id,
+          expectedRevision: ready.revision,
+          dependentShotId: 'clip_2',
+        },
+        'command_free_fix_1'
+      )
     ).resolves.toMatchObject({ cascadeProgress: [] });
+    expect(harness.store.updateProjectV2.mock.calls.map((call) => [call[2], call[3]])).toEqual([
+      [ready.revision, 'command_free_fix_1'],
+      [undefined, 'bind_conditioning_retry:clip_2'],
+    ]);
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
     expect(harness.extractConditioningFrameV2).toHaveBeenCalledExactlyOnceWith({
       projectId: project.id,
       extractionId,
@@ -5839,6 +5851,7 @@ describe('CreativeStudioServiceV2', () => {
     harness.store.updateProjectV2.mockClear();
     harness.extractConditioningFrameV2.mockClear();
     harness.submitShots.mockClear();
+    harness.onProjectUpdated.mockClear();
     harness.verifyConditioningFrameV2.mockReset().mockResolvedValueOnce({
       extractionId,
       shotId: 'clip_1',
@@ -5865,6 +5878,9 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       jobIds: [waitingJob.id],
     });
+    expect(harness.onProjectUpdated).toHaveBeenCalledTimes(2);
+    expect(harness.onProjectUpdated).toHaveBeenNthCalledWith(1, project.id);
+    expect(harness.onProjectUpdated).toHaveBeenNthCalledWith(2, project.id);
 
     const wrongAuthority = structuredClone(ready);
     const wrongPlan = wrongAuthority.jobs[waitingJob.id]!.requestPlan;
@@ -7973,6 +7989,7 @@ describe('Studio MCP schema-2 server', () => {
         'propose_storyboard',
         'read_storyboard',
         'studio_apply_edits',
+        'studio_apply_free_fix',
         'studio_get_command_status',
         'studio_get_project_status',
         'studio_get_proposal',
@@ -8095,6 +8112,58 @@ describe('Studio MCP schema-2 server', () => {
         })
       ).toMatchObject({ valid: false });
       expect(applyEdits?.description).toMatch(/never starts paid generation/i);
+
+      const freeFixTool = tools.find((tool) => tool.name === 'studio_apply_free_fix');
+      const freeFixValidator = new AjvJsonSchemaValidator().getValidator(freeFixTool?.inputSchema as never);
+      expect(freeFixTool?.inputSchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+        required: ['expectedRevision', 'recovery'],
+      });
+      expect(
+        freeFixValidator({
+          expectedRevision: 8,
+          recovery: { op: 'retry_conditioning_frame', dependentShotId: 'clip_2' },
+        })
+      ).toMatchObject({ valid: true });
+      expect(
+        freeFixValidator({
+          expectedRevision: 8,
+          recovery: { op: 'terminalize_refused_job', jobId: 'job_refused' },
+        })
+      ).toMatchObject({ valid: true });
+      for (const invalidInput of [
+        {
+          expectedRevision: 8,
+          recovery: { op: 'retry_conditioning_frame', dependentShotId: '../unsafe' },
+        },
+        {
+          expectedRevision: 8,
+          recovery: { op: 'terminalize_refused_job', jobId: 'job_refused', acknowledgePossibleDuplicateCharge: true },
+        },
+        { expectedRevision: 8, recovery: { op: 'acknowledge_possible_duplicate_charge', jobId: 'job_unknown' } },
+        { expectedRevision: 8, recovery: { op: 'generation_submission_unknown', jobId: 'job_unknown' } },
+        {
+          expectedRevision: 8,
+          recovery: { op: 'retry_conditioning_frame', dependentShotId: 'clip_2' },
+          extra: true,
+        },
+      ]) {
+        expect(freeFixValidator(invalidInput), JSON.stringify(invalidInput)).toMatchObject({ valid: false });
+        expect(studioApplyFreeFixInputSchemaV2.safeParse(invalidInput).success).toBe(false);
+      }
+      expect(
+        studioApplyFreeFixInputSchemaV2.safeParse({
+          expectedRevision: 8,
+          recovery: { op: 'retry_conditioning_frame', dependentShotId: 'clip_2' },
+        }).success
+      ).toBe(true);
+      expect(freeFixTool?.description).toMatch(/immediately preceding studio_get_project_status.*detail: true/i);
+      expect(freeFixTool?.description).toMatch(
+        /submission_unknown.*duplicate-charge acknowledgement remain owner-only/i
+      );
+      expect(freeFixTool?.description).toMatch(/creates no quote, authorization, job, generation request, or spend/i);
+      expect(freeFixTool?.description).toMatch(/never infer or reuse a stale remedy/i);
 
       const projectStatusTool = tools.find((tool) => tool.name === 'studio_get_project_status');
       const projectStatusValidator = new AjvJsonSchemaValidator().getValidator(projectStatusTool?.inputSchema as never);
@@ -8220,6 +8289,49 @@ describe('Studio MCP schema-2 server', () => {
       expect(referenceValidator({ referenceIds: ['clip_1', 'clip_1'] })).toMatchObject({ valid: false });
     } finally {
       await harness.close();
+    }
+  });
+
+  it('keeps the free-fix handler bounded before command IDs or sidecar IO', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-free-fix-'));
+    const createId = vi.fn(() => 'must_not_mint');
+    const writerFsAccess = vi.fn(() => {
+      throw new Error('invalid free recovery must not reach writer IO');
+    });
+    const handler = createStudioApplyFreeFixHandlerV2(
+      {
+        projectId: 'project_v2',
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      },
+      { createId, fs: new Proxy(nodeFs, { get: writerFsAccess }) }
+    );
+    try {
+      const invalid = await handler({
+        expectedRevision: 7,
+        recovery: { op: 'terminalize_refused_job', jobId: '../unsafe' },
+      });
+      expect(invalid.isError).toBe(true);
+      expect(invalid.content[0]).toMatchObject({ type: 'text', text: expect.stringMatching(/invalid|size cap/i) });
+      expect(createId).not.toHaveBeenCalled();
+      expect(writerFsAccess).not.toHaveBeenCalled();
+
+      const contextIds = ['command_free_fix', 'lease_free_fix'];
+      const unavailable = await createStudioApplyFreeFixHandlerV2(null, {
+        createId: vi.fn(() => contextIds.shift() ?? 'unexpected_id'),
+      })({
+        expectedRevision: 7,
+        recovery: { op: 'retry_conditioning_frame', dependentShotId: 'clip_2' },
+      });
+      expect(unavailable.content[0]).toMatchObject({ type: 'text', text: expect.any(String) });
+      const unavailableContent = unavailable.content[0];
+      expect(JSON.parse(unavailableContent?.type === 'text' ? unavailableContent.text : '')).toMatchObject({
+        status: 'storage_error',
+        commandId: 'command_free_fix',
+      });
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 

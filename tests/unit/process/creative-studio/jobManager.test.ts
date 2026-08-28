@@ -139,6 +139,7 @@ type V2HarnessOptions = {
   providerResolver?: StudioJobManagerDeps['providerResolver'];
   listProviders?: StudioJobManagerDeps['listProviders'];
   outputDownloader?: StudioJobManagerDeps['outputDownloader'];
+  onProjectUpdated?: StudioJobManagerDeps['onProjectUpdated'];
   decorateMediaStore?: (mediaStore: StudioMediaStore) => StudioMediaStore;
   probeVideoDurationSecondsV2?: StudioMediaStoreDeps['probeVideoDurationSecondsV2'];
   jobOverrides?: () => Partial<StudioJobV2>;
@@ -440,6 +441,7 @@ const createV2Harness = async (
     ...(options.jitterMs === null ? {} : { jitterMs: options.jitterMs ?? ((baseMs) => baseMs) }),
     now: options.now,
     nowEpochMs: options.nowEpochMs,
+    onProjectUpdated: options.onProjectUpdated,
     ...(options.outputDownloader === undefined ? {} : { outputDownloader: options.outputDownloader }),
   });
   const harness = {
@@ -2915,6 +2917,224 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(loaded.status === 'supported' ? Object.keys(loaded.project.jobs) : null).toEqual(['job_v2_1']);
   });
 
+  it.each(['provider_unavailable', 'rate_limited', 'quota', 'invalid_request', 'auth'] as const)(
+    'directly terminalizes the refused %s state without consulting provider or spend seams',
+    async (code) => {
+      const submit = vi.fn(async () => {
+        throw new Error('must not submit');
+      });
+      const poll = vi.fn(async () => {
+        throw new Error('must not poll');
+      });
+      const cancel = vi.fn(async () => {
+        throw new Error('must not cancel');
+      });
+      const listProviders = vi.fn(async () => [provider]);
+      const onProjectUpdated = vi.fn();
+      const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit, poll, cancel }), {
+        listProviders,
+        onProjectUpdated,
+      });
+      const attention = await harness.store.updateProjectV2(harness.project.id, (project) => {
+        const job = project.jobs.job_v2_1!;
+        job.status = 'needs_attention';
+        job.providerJobId = null;
+        job.remoteStartedAt = null;
+        job.spendReceipt = null;
+        job.error = { code, messageKey: `refused.${code}` };
+        return project;
+      });
+      const beforeAuthorizations = structuredClone(attention.spendAuthorizations);
+      const beforeJobIds = Object.keys(attention.jobs);
+      const listConnectionCandidates = vi.spyOn(harness.providerResolver, 'listConnectionCandidates');
+      const listGenerationRoutes = vi.spyOn(harness.providerResolver, 'listGenerationRoutes');
+      const isGenerationRouteAvailable = vi.spyOn(harness.providerResolver, 'isGenerationRouteAvailable');
+
+      await expect(
+        harness.manager.terminalizeRefusedJobV2(
+          { projectId: attention.id, jobId: 'job_v2_1', expectedRevision: attention.revision },
+          `command_refused_${code}`
+        )
+      ).resolves.toMatchObject({
+        id: 'job_v2_1',
+        status: 'failed',
+        providerJobId: null,
+        spendReceipt: null,
+        error: { code },
+      });
+
+      const loaded = await harness.store.getProjectV2(attention.id);
+      if (loaded.status !== 'supported') throw new Error('terminalized project disappeared');
+      expect(loaded.project.spendAuthorizations).toEqual(beforeAuthorizations);
+      expect(Object.keys(loaded.project.jobs)).toEqual(beforeJobIds);
+      expect(loaded.project.jobs.job_v2_1).toMatchObject({
+        status: 'failed',
+        providerJobId: null,
+        spendReceipt: null,
+        error: { code },
+      });
+      expect(submit).not.toHaveBeenCalled();
+      expect(poll).not.toHaveBeenCalled();
+      expect(cancel).not.toHaveBeenCalled();
+      expect(listProviders).not.toHaveBeenCalled();
+      expect(listConnectionCandidates).not.toHaveBeenCalled();
+      expect(listGenerationRoutes).not.toHaveBeenCalled();
+      expect(isGenerationRouteAvailable).not.toHaveBeenCalled();
+      expect(onProjectUpdated).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    [
+      'an unknown submission',
+      {
+        providerJobId: null,
+        remoteStartedAt: null,
+        error: { code: 'submission_unknown' as const, messageKey: 'submissionUnknown' },
+      },
+    ],
+    [
+      'a provider-backed refusal',
+      {
+        providerJobId: 'remote_refused',
+        remoteStartedAt: '2026-08-17T12:00:02.000Z',
+        error: { code: 'provider_unavailable' as const, messageKey: 'providerUnavailable' },
+      },
+    ],
+  ] as const)('refuses to directly terminalize %s', async (_label, state) => {
+    const submit = vi.fn(async () => {
+      throw new Error('must not submit');
+    });
+    const poll = vi.fn(async () => {
+      throw new Error('must not poll');
+    });
+    const cancel = vi.fn(async () => {
+      throw new Error('must not cancel');
+    });
+    const listProviders = vi.fn(async () => [provider]);
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit, poll, cancel }), {
+      listProviders,
+    });
+    const attention = await harness.store.updateProjectV2(harness.project.id, (project) => {
+      Object.assign(project.jobs.job_v2_1!, state, { status: 'needs_attention' as const, spendReceipt: null });
+      return project;
+    });
+    const before = structuredClone(attention);
+
+    await expect(
+      harness.manager.terminalizeRefusedJobV2(
+        { projectId: attention.id, jobId: 'job_v2_1', expectedRevision: attention.revision },
+        'command_refused_invalid'
+      )
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    const loaded = await harness.store.getProjectV2(attention.id);
+    expect(loaded.status === 'supported' ? loaded.project : null).toEqual(before);
+    expect(submit).not.toHaveBeenCalled();
+    expect(poll).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(listProviders).not.toHaveBeenCalled();
+  });
+
+  it('refuses to directly terminalize a job carrying a spend receipt', async () => {
+    const submit = vi.fn(async () => {
+      throw new Error('must not submit');
+    });
+    const poll = vi.fn(async () => {
+      throw new Error('must not poll');
+    });
+    const cancel = vi.fn(async () => {
+      throw new Error('must not cancel');
+    });
+    const listProviders = vi.fn(async () => [provider]);
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit, poll, cancel }), {
+      listProviders,
+    });
+    const attention = await harness.store.updateProjectV2(harness.project.id, (project) => {
+      const job = project.jobs.job_v2_1!;
+      job.status = 'failed';
+      job.providerJobId = null;
+      job.remoteStartedAt = null;
+      job.error = { code: 'no_output', messageKey: 'noOutput' };
+      job.spendReceipt = createStudioSpendReceiptV2({
+        authorization: project.spendAuthorizations[0]!,
+        itemId: job.authorizationItemId,
+        jobId: job.id,
+      });
+      return project;
+    });
+    const before = structuredClone(attention);
+
+    await expect(
+      harness.manager.terminalizeRefusedJobV2(
+        { projectId: attention.id, jobId: 'job_v2_1', expectedRevision: attention.revision },
+        'command_refused_paid'
+      )
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+    const loaded = await harness.store.getProjectV2(attention.id);
+    expect(loaded.status === 'supported' ? loaded.project : null).toEqual(before);
+    expect(submit).not.toHaveBeenCalled();
+    expect(poll).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(listProviders).not.toHaveBeenCalled();
+  });
+
+  it('refuses to directly terminalize any job after a retry successor exists', async () => {
+    const submit = vi.fn(async () => {
+      throw new Error('must not submit');
+    });
+    const poll = vi.fn(async () => {
+      throw new Error('must not poll');
+    });
+    const cancel = vi.fn(async () => {
+      throw new Error('must not cancel');
+    });
+    const listProviders = vi.fn(async () => [provider]);
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit, poll, cancel }), {
+      purpose: 'reference_image',
+      generationCount: 2,
+      listProviders,
+    });
+    const attention = await harness.store.updateProjectV2(harness.project.id, (project) => {
+      const job = project.jobs.job_v2_1!;
+      job.status = 'failed';
+      job.providerJobId = null;
+      job.remoteStartedAt = null;
+      job.spendReceipt = createStudioSpendReceiptV2({
+        authorization: project.spendAuthorizations[0]!,
+        itemId: job.authorizationItemId,
+        jobId: job.id,
+      });
+      job.error = { code: 'seed_still_variation_grid', messageKey: 'seedStillVariationGrid' };
+      const successor: StudioJobV2 = {
+        ...structuredClone(job),
+        id: 'job_v2_2',
+        status: 'queued_local',
+        idempotencyKey: 'key_v2_2',
+        spendReceipt: null,
+        error: null,
+        retryOfJobId: job.id,
+        retryReason: 'variation_grid',
+      };
+      project.jobs[successor.id] = successor;
+      project.references.reference_character!.jobIds.push(successor.id);
+      return project;
+    });
+    const before = structuredClone(attention);
+
+    await expect(
+      harness.manager.terminalizeRefusedJobV2(
+        { projectId: attention.id, jobId: 'job_v2_1', expectedRevision: attention.revision },
+        'command_refused_successor'
+      )
+    ).rejects.toMatchObject({ code: 'busy' });
+    const loaded = await harness.store.getProjectV2(attention.id);
+    expect(loaded.status === 'supported' ? loaded.project : null).toEqual(before);
+    expect(submit).not.toHaveBeenCalled();
+    expect(poll).not.toHaveBeenCalled();
+    expect(cancel).not.toHaveBeenCalled();
+    expect(listProviders).not.toHaveBeenCalled();
+  });
+
   it('terminalizes a refused submission without demanding a duplicate-charge acknowledgement', async () => {
     // The provider answered before taking the work, so nothing was created and nothing can be charged
     // twice. Offering retry and then rejecting the request left a Shot stranded with a button that
@@ -2922,7 +3142,10 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     const submit = vi.fn(async () => {
       throw new Error('must not submit again');
     });
-    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }));
+    const onProjectUpdated = vi.fn();
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      onProjectUpdated,
+    });
     const attention = await harness.store.updateProjectV2(harness.project.id, (project) => {
       const job = project.jobs.job_v2_1!;
       job.status = 'needs_attention';
@@ -2948,6 +3171,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       spendReceipt: null,
     });
     expect(submit).not.toHaveBeenCalled();
+    expect(onProjectUpdated).toHaveBeenCalledExactlyOnceWith(attention.id);
   });
 
   it('requires explicit duplicate-charge acknowledgement before terminalizing an unknown submission', async () => {

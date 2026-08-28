@@ -314,7 +314,11 @@ export type CreativeStudioServiceV2 = {
   ): Promise<StudioRendererPreparedSubmissionOptionsV2>;
   prepareSubmission(input: StudioPrepareSubmissionRequestV2): Promise<StudioRendererPreparedSubmissionOptionsV2>;
   confirmSubmission(input: StudioConfirmSubmissionRequestV2): Promise<StudioConfirmSubmissionResultV2>;
-  retryConditioningFrame(input: StudioCascadeBarrierActionRequestV2): Promise<StudioRendererWorkspaceStatusV2>;
+  /** Internal Director command attribution; renderer calls omit this argument. */
+  retryConditioningFrame(
+    input: StudioCascadeBarrierActionRequestV2,
+    commitTag?: string
+  ): Promise<StudioRendererWorkspaceStatusV2>;
   cancelWaitingCascade(input: StudioCascadeBarrierActionRequestV2): Promise<StudioRendererWorkspaceStatusV2>;
   dispatchAuthorizedJobs(input: StudioDispatchAuthorizedJobsRequestV2): Promise<StudioRendererJobV2[]>;
   cancelJob(input: StudioJobRequest): Promise<StudioRendererJobV2>;
@@ -3808,9 +3812,12 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
     },
 
-    async retryConditioningFrame(input): Promise<StudioRendererWorkspaceStatusV2> {
+    async retryConditioningFrame(input, commitTag): Promise<StudioRendererWorkspaceStatusV2> {
       assertServiceActive();
       assertBarrierRequest(input);
+      if (commitTag !== undefined) assertSafeId(commitTag, 'commit tag');
+      // A tagged Director recovery publishes one durable command receipt before notifying.
+      const notifyDirectly = commitTag === undefined;
       const loaded = await loadSupported(input.projectId);
       if (loaded.revision !== input.expectedRevision) {
         throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
@@ -3856,9 +3863,9 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           return project;
         },
         input.expectedRevision,
-        `retry_conditioning_frame:${input.dependentShotId}`
+        commitTag ?? `retry_conditioning_frame:${input.dependentShotId}`
       );
-      deps.onProjectUpdated(committed.id);
+      if (notifyDirectly) deps.onProjectUpdated(committed.id);
       if (candidate.status === 'ready' && mediaStore !== undefined) {
         try {
           let verification = readyVerification;
@@ -3896,12 +3903,12 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
               undefined,
               `bind_conditioning_retry:${input.dependentShotId}`
             );
-            deps.onProjectUpdated(bound.id);
+            if (notifyDirectly) deps.onProjectUpdated(bound.id);
             await dispatchBoundJobs(bound.id, boundAdvance.dispatchJobIds);
             return projectStudioWorkspaceStatusV2(bound);
           }
           const repaired = await loadSupported(committed.id);
-          deps.onProjectUpdated(repaired.id);
+          if (notifyDirectly) deps.onProjectUpdated(repaired.id);
           return projectStudioWorkspaceStatusV2(repaired);
         } catch (error) {
           logStudioConditioningFrameFailure(committed.id, candidate.extractionId, error);

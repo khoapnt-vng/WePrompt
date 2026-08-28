@@ -169,7 +169,7 @@ export const isValidProviderJobId = (value: string): boolean =>
 
 export const STUDIO_MAX_DIRTY_DRAFTS_REPORTED = 24;
 /** Durable Beat/Shot Director command schema. */
-export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 8 as const;
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 9 as const;
 export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 5 as const;
 export const STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION = 5 as const;
 export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
@@ -211,6 +211,11 @@ export type StudioDirectorOperationV2 = Extract<
   }
 >;
 
+/** Free, deterministic recovery authority exposed to the project-scoped Director. */
+export type StudioDirectorFreeRecoveryV2 =
+  | { op: 'retry_conditioning_frame'; dependentShotId: string }
+  | { op: 'terminalize_refused_job'; jobId: string };
+
 type StudioDirectorCommandRecordBaseV2 = {
   schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
   commandId: string;
@@ -223,6 +228,12 @@ export type StudioDirectorAutoApplyCommandRecordV2 = StudioDirectorCommandRecord
   policy: 'auto_apply';
   expectedRevision: number;
   operations: StudioDirectorOperationV2[];
+};
+
+export type StudioDirectorFreeRecoveryCommandRecordV2 = StudioDirectorCommandRecordBaseV2 & {
+  policy: 'apply_free_fix';
+  expectedRevision: number;
+  recovery: StudioDirectorFreeRecoveryV2;
 };
 
 export type StudioDirectorGetProjectStatusCommandRecordV2 = StudioDirectorCommandRecordBaseV2 & {
@@ -245,8 +256,11 @@ export type StudioDirectorQueryCommandRecordV2 =
   | StudioDirectorListRoutesCommandRecordV2
   | StudioDirectorGetProposalCommandRecordV2;
 
-/** One durable lane carries both direct mutations and read-only Director queries. */
-export type StudioDirectorCommandRecordV2 = StudioDirectorAutoApplyCommandRecordV2 | StudioDirectorQueryCommandRecordV2;
+/** One durable lane carries direct mutations, bounded free recovery, and read-only Director queries. */
+export type StudioDirectorCommandRecordV2 =
+  | StudioDirectorAutoApplyCommandRecordV2
+  | StudioDirectorFreeRecoveryCommandRecordV2
+  | StudioDirectorQueryCommandRecordV2;
 
 export type StudioDirectorQueryV2 =
   | { kind: 'get_project_status'; detail: boolean }
@@ -297,6 +311,17 @@ export type StudioDirectorAppliedReceiptV2 = {
   appliedRevision: number;
   createdBeatIds: string[];
   createdShotIds: string[];
+};
+
+export type StudioDirectorFreeRecoveryAppliedReceiptV2 = {
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'applied';
+  appliedRevision: number;
+  recovery: StudioDirectorFreeRecoveryV2;
 };
 
 export type StudioDirectorRejectedReceiptV2 = {
@@ -383,6 +408,7 @@ export type StudioDirectorQueryReceiptV2 =
 
 export type StudioDirectorMutationReceiptV2 =
   | StudioDirectorAppliedReceiptV2
+  | StudioDirectorFreeRecoveryAppliedReceiptV2
   | StudioDirectorRejectedReceiptV2
   | StudioDirectorExpiredReceiptV2
   | StudioDirectorIndeterminateReceiptV2;
@@ -1709,6 +1735,12 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   undo_last: 'operation_not_permitted',
 } as const satisfies Readonly<Record<StudioMutationOperationV2['kind'], StudioDirectorOperationDispositionV2>>);
 
+/** Operational recovery is direct but deliberately excluded from reducer and undo inventories. */
+export const STUDIO_DIRECTOR_FREE_RECOVERY_DISPOSITIONS_V2 = Object.freeze({
+  retry_conditioning_frame: 'direct',
+  terminalize_refused_job: 'direct',
+} as const satisfies Readonly<Record<StudioDirectorFreeRecoveryV2['op'], 'direct'>>);
+
 export type StudioPersistedUndoOperationKindV2 = Exclude<StudioMutationOperationV2['kind'], 'undo_last'>;
 
 /**
@@ -1737,6 +1769,9 @@ export const studioDirectorCapabilityRulesV2 = (): string =>
     'direction, or directly asks you to build or draft the film, author the storyboard with propose_storyboard;',
     'do not say Studio denies that permission.',
     `Permitted directly through studio_apply_edits: ${studioDirectorOperationsWithDispositionV2('direct')}.`,
+    `Permitted directly through studio_apply_free_fix when fresh project status offers the exact free_fix: ${Object.keys(
+      STUDIO_DIRECTOR_FREE_RECOVERY_DISPOSITIONS_V2
+    ).join(', ')}.`,
     `Unavailable to you: ${studioDirectorOperationsWithDispositionV2('operation_not_permitted')}.`,
     'Paid generation is separate from authoring. Never start or confirm paid generation; after the reviewed',
     'storyboard is accepted, explain that the person chooses when to review a quote and spend.',
@@ -2178,8 +2213,7 @@ export type StudioProjectStatusPrepareIntentV2 =
     };
 
 export type StudioProjectStatusFreeFixV2 =
-  | { op: 'retry_conditioning_frame'; dependentShotId: string }
-  | { op: 'terminalize_refused_job'; jobId: string }
+  | StudioDirectorFreeRecoveryV2
   | { op: 'set_shot_reference_binding'; shotId: string };
 
 export type StudioProjectStatusOwnerReasonV2 =

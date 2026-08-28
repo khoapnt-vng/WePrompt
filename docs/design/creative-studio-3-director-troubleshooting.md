@@ -6,9 +6,8 @@
 > This document answers with an inventory. On 2026-08-26 an operator drove four films end to end
 > through the renderer bridge and performed **fourteen distinct kinds of troubleshooting action**.
 > Each is classified below against the Director's real surface — the frozen capability table in
-> `directorCommandContracts.ts` and its four MCP tools (`studio_apply_edits`,
-> `studio_get_command_status`, `studio_list_routes`, `studio_request_reference_images`) — into what
-> it can already do, what it should be granted, what it may only propose, and what it must never do.
+> `directorCommandContracts.ts` and the typed Studio MCP surface — into what it can already do,
+> what it should be granted, what it may only propose, and what it must never do.
 
 ## The charter in one line
 
@@ -40,15 +39,19 @@ that guards money stays with the human; everything that guards nothing should no
 
 ## What to build
 
-1. **`studio_get_generation_state` — the diagnosis read.** One tool returning, for a project: per-Shot
-   status and current media, latest job per Shot with its **cause-specific error code**, extraction
-   states including `failed`/exhausted, and active quotes. Everything in it already crosses the IPC
-   boundary for the workspace; this is a read, not a power. Without it every other item is moot —
-   a first responder that cannot see the patient is a chatbot.
-2. **Free recovery operations, dispositioned `direct`:** `retry_conditioning_frame` and
-   `terminalize_refused_job` (refused shape only — no `providerJobId`, no receipt; the
-   submission-unknown shape keeps its owner-only acknowledgement). Both verified free and
-   deterministic across every occurrence on 2026-08-26.
+1. **Implemented and verified 2026-08-28 — `studio_get_project_status(detail: true)`, the diagnosis
+   read.** It returns per-Shot status and current media, the latest job with its **cause-specific
+   error code**, extraction states including `failed`/exhausted, and active quotes. Everything in
+   it already crosses the IPC boundary for the workspace; this is a read, not a power.
+2. **Implemented and verified 2026-08-28 — free recovery operations, dispositioned `direct`:**
+   `retry_conditioning_frame` and `terminalize_refused_job` (refused shape only — no
+   `providerJobId`, no job `spendReceipt`; the submission-unknown shape keeps its owner-only
+   acknowledgement). The dedicated singleton `studio_apply_free_fix` command accepts only those
+   two typed operations, rederives an exact fresh `studio_get_project_status(detail: true)` remedy
+   in Main, and requires tagged commit attribution before reporting success. Neither path creates
+   a quote, authorization, job, generation request, or spend; conditioning recovery can only
+   resume work that the owner already authorized. Both were verified free and deterministic
+   across every occurrence on 2026-08-26.
 3. **Recovery proposals that carry a prepared quote.** The proposal card pattern exists; extend it so
    the Director can attach a prepared (free) quote — "Shot 4's seed was refused by the content
    filter; rejoining costs $1.23 — Confirm / Reject." The owner's Confirm remains the only spend.

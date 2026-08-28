@@ -139,6 +139,30 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_project_status or studio_list_routes again/i);
   });
 
+  it('grants only fresh status-proven free recoveries and never owner-only spend authority', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_project_status with detail: true immediately before acting/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/studio_apply_free_fix only when.*exact blocker remedy.*kind free_fix/is);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/retry_conditioning_frame or terminalize_refused_job/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/projectRevision as\s+expectedRevision/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/copy its exact dependentShotId or jobId/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never infer, translate, or reuse an older\s+remedy/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never use studio_apply_free_fix for a proposal or owner_only remedy/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /set_shot_reference_binding remains a normal studio_apply_edits operation, not a recovery/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /generation_submission_unknown and.*acknowledge_possible_duplicate_charge always stay owner-only/is
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never terminalize or acknowledge them/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /terminalizing a refused submission.*never resubmits, authorizes, generates, or.*spends/is
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/conditioning repair may release only work the owner already authorized/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /read fresh detailed project status again before claiming the blocker cleared/i
+    );
+  });
+
   it('keeps shooting scripts bounded to shot-specific content without duplicating global composition inputs', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/shootingScript bounded to shot-specific visible depiction and action/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/never repeat the project\s+brief/i);

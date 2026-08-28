@@ -221,6 +221,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
   let supportedProjectIds: string[] = [];
   let quarantinedProjectIds: string[] = [];
   let activeGraph: ActivationGraph | null = null;
+  let activatingDirectorCommitTracker: StudioDirectorCommitTrackerV2 | null = null;
   let activationPromise: Promise<void> | null = null;
   let inventoryPromise: Promise<void> | null = null;
   let inventoryRefreshQueued = false;
@@ -241,7 +242,11 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
   let refreshInventoryImpl: () => Promise<void> = async () => undefined;
 
   const observeProjectCommit = (facts: StudioProjectCommitFacts): void => {
-    activeGraph?.directorCommitTracker.observe(facts);
+    const activeTracker = activeGraph?.directorCommitTracker ?? null;
+    activeTracker?.observe(facts);
+    if (activatingDirectorCommitTracker !== null && activatingDirectorCommitTracker !== activeTracker) {
+      activatingDirectorCommitTracker.observe(facts);
+    }
     if (!deps.enabled || disposed) return;
     void refreshInventoryImpl().catch((error: unknown) => {
       report('[CreativeStudio] Failed to refresh the schema-2 project inventory:', error);
@@ -503,6 +508,8 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       ...directorMutationService,
       getProjectStatus: (input) => coldService.getProjectStatus(input),
       listRoutes: (input) => coldService.listRoutes(input),
+      retryConditioningFrame: (input, commitTag) => coldService.retryConditioningFrame(input, commitTag),
+      terminalizeRefusedJob: (input, commitTag) => jobManager.terminalizeRefusedJobV2(input, commitTag),
     };
     const directorCommandProcessor = factories.createDirectorCommandProcessor({
       store,
@@ -550,6 +557,9 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
       graph.referenceWatcher = await store.watchReferenceRequestsV2(deps.onReferenceUpdated);
       if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
+      // The processor performs its initial sweep before this graph gains active authority. Route
+      // tagged commits from that sweep to its tracker without exposing the graph as active.
+      activatingDirectorCommitTracker = directorCommitTracker;
       graph.processorStartAttempted = true;
       await directorCommandProcessor.start();
       if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
@@ -560,6 +570,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       if (disposed) throw new Error('Creative Studio runtime was disposed during activation');
       return graph;
     } catch (error) {
+      if (activatingDirectorCommitTracker === directorCommitTracker) activatingDirectorCommitTracker = null;
       try {
         await disposeGraph(graph);
       } catch (rollbackError) {
@@ -580,16 +591,21 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       try {
         graph = await buildActivationGraph();
         if (disposed) {
+          if (activatingDirectorCommitTracker === graph.directorCommitTracker) activatingDirectorCommitTracker = null;
           await disposeGraph(graph);
           return;
         }
         activeGraph = graph;
+        if (activatingDirectorCommitTracker === graph.directorCommitTracker) activatingDirectorCommitTracker = null;
         await recoverGraph(graph);
         if (!disposed && activeGraph === graph) {
           activationState = 'active';
           startRunLoop(graph);
         }
       } catch (error) {
+        if (graph !== null && activatingDirectorCommitTracker === graph.directorCommitTracker) {
+          activatingDirectorCommitTracker = null;
+        }
         if (!disposed && graph !== null && activeGraph === graph) {
           await degradeInstalledGraph(graph, error);
         } else if (!disposed) {

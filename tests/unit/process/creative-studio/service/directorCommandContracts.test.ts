@@ -13,6 +13,7 @@ import {
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  STUDIO_DIRECTOR_FREE_RECOVERY_DISPOSITIONS_V2,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
@@ -20,6 +21,7 @@ import {
   isValidProviderJobId,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
+  type StudioDirectorFreeRecoveryCommandRecordV2,
   type StudioDirectorQueryCommandRecordV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
@@ -38,6 +40,8 @@ import {
 import * as directorCommandContracts from '@process/services/creative-studio/service/directorCommandContracts';
 import {
   classifyStudioDirectorOperationV2,
+  isStudioDirectorFreeRecoveryCommandV2,
+  isStudioDirectorQueryCommandV2,
   parseStudioDirectorCommandReceiptV2,
   parseStudioDirectorCommandSlotLeaseV2,
   parseStudioDirectorCommandSlotV2,
@@ -99,6 +103,20 @@ const validCommandV2 = (overrides: Partial<StudioDirectorCommandRecordV2> = {}):
   deadlineAt: '2026-08-16T12:00:15.000Z',
   policy: 'auto_apply',
   operations: [{ kind: 'set_brief', brief: 'A quieter launch story.' }],
+  ...overrides,
+});
+
+const validFreeRecoveryCommandV2 = (
+  overrides: Partial<StudioDirectorFreeRecoveryCommandRecordV2> = {}
+): StudioDirectorFreeRecoveryCommandRecordV2 => ({
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  commandId: 'command_1',
+  projectId: 'project_1',
+  expectedRevision: 4,
+  createdAt: NOW,
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  policy: 'apply_free_fix',
+  recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_2' },
   ...overrides,
 });
 
@@ -336,8 +354,73 @@ describe('Studio Director V2 command contracts', () => {
     ]) {
       expect(parsePendingV2(validCommandV2({ operations: [operation] })).status).toBe('valid');
     }
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(8);
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(9);
     expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
+  });
+
+  it('accepts both exact free recoveries as writes outside the reducer and query lanes', () => {
+    const commands: StudioDirectorFreeRecoveryCommandRecordV2[] = [
+      validFreeRecoveryCommandV2(),
+      validFreeRecoveryCommandV2({ recovery: { op: 'terminalize_refused_job', jobId: 'job_refused_1' } }),
+    ];
+
+    for (const command of commands) {
+      expect(parsePendingV2(command)).toEqual({ status: 'valid', record: command });
+      expect(isStudioDirectorFreeRecoveryCommandV2(command)).toBe(true);
+      expect(isStudioDirectorQueryCommandV2(command)).toBe(false);
+    }
+  });
+
+  it('keeps the direct free-recovery inventory exact and outside reference-binding authority', () => {
+    expect(Object.isFrozen(STUDIO_DIRECTOR_FREE_RECOVERY_DISPOSITIONS_V2)).toBe(true);
+    expect(STUDIO_DIRECTOR_FREE_RECOVERY_DISPOSITIONS_V2).toEqual({
+      retry_conditioning_frame: 'direct',
+      terminalize_refused_job: 'direct',
+    });
+    expect(STUDIO_DIRECTOR_FREE_RECOVERY_DISPOSITIONS_V2).not.toHaveProperty('set_shot_reference_binding');
+    expect(STUDIO_DIRECTOR_FREE_RECOVERY_DISPOSITIONS_V2).not.toHaveProperty('acknowledge_possible_duplicate_charge');
+  });
+
+  it.each([
+    [
+      'extra command fields',
+      { ...validFreeRecoveryCommandV2(), operations: [{ kind: 'set_brief', brief: 'Cross-shape' }] },
+    ],
+    [
+      'extra recovery fields',
+      {
+        ...validFreeRecoveryCommandV2(),
+        recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_2', jobId: 'job_1' },
+      },
+    ],
+    [
+      'a cross-shaped conditioning recovery',
+      { ...validFreeRecoveryCommandV2(), recovery: { op: 'retry_conditioning_frame', jobId: 'job_1' } },
+    ],
+    [
+      'a cross-shaped refused-job recovery',
+      {
+        ...validFreeRecoveryCommandV2(),
+        recovery: { op: 'terminalize_refused_job', dependentShotId: 'shot_2' },
+      },
+    ],
+    [
+      'duplicate-charge acknowledgement authority',
+      {
+        ...validFreeRecoveryCommandV2(),
+        recovery: { op: 'terminalize_refused_job', jobId: 'job_1', acknowledgePossibleDuplicateCharge: true },
+      },
+    ],
+    [
+      'a status-only binding remedy',
+      { ...validFreeRecoveryCommandV2(), recovery: { op: 'set_shot_reference_binding', shotId: 'shot_2' } },
+    ],
+    [
+      'an unsafe target identity',
+      { ...validFreeRecoveryCommandV2(), recovery: { op: 'terminalize_refused_job', jobId: '../job_1' } },
+    ],
+  ])('rejects %s from the bounded free-recovery lane', (_label, command) => {
+    expect(parsePendingV2(command)).toMatchObject({ status: 'invalid', reasonCode: 'malformed_record' });
   });
 
   it('does not expose schema-1 command parser entrypoints', () => {
@@ -580,24 +663,25 @@ describe('Studio Director V2 command contracts', () => {
     });
   });
 
-  it('treats the immediate-prior schema-7 query family as unsupported without migration', () => {
-    const command = { ...validQueryCommandV2('get_proposal'), schemaVersion: 7 };
-    const slot = { ...validSlotV2(), schemaVersion: 7 };
-    const lease = { ...validLeaseV2(), schemaVersion: 7 };
+  it('treats the immediate-prior schema-8 free-recovery family as unsupported without migration', () => {
+    const command = { ...validFreeRecoveryCommandV2(), schemaVersion: 8 };
+    const slot = { ...validSlotV2(), schemaVersion: 8 };
+    const lease = { ...validLeaseV2(), schemaVersion: 8 };
     const receipt = {
-      schemaVersion: 7,
+      schemaVersion: 8,
       commandId: 'command_1',
       projectId: 'project_1',
+      expectedRevision: 4,
       decidedAt: NOW,
-      status: 'answered',
-      query: { kind: 'get_proposal', proposalId: 'proposal_exact_2' },
-      result: { status: 'not_found' },
+      status: 'applied',
+      appliedRevision: 5,
+      recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_2' },
     };
 
     expect(parsePendingV2(command, slot)).toEqual({
       status: 'unsupported_prototype_schema',
       commandId: 'command_1',
-      expectedRevision: null,
+      expectedRevision: 4,
     });
     expect(parseStudioDirectorCommandSlotV2(slot, NOW, WAIT_MS)).toEqual({
       status: 'unsupported_prototype_schema',
@@ -707,7 +791,7 @@ describe('Studio Director V2 read-query contracts', () => {
     expect(parsePendingV2({ ...routes, detail: false })).toMatchObject({ status: 'invalid' });
     expect(parsePendingV2({ ...proposal, proposalId: '../unsafe' })).toMatchObject({ status: 'invalid' });
     expect(parsePendingV2({ ...proposal, detail: false })).toMatchObject({ status: 'invalid' });
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(8);
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(9);
     expect(STUDIO_PROPOSAL_SCHEMA_VERSION_V2).toBe(5);
     expect(STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION).toBe(5);
     expect(STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES).toBeGreaterThan(256 * 1024);
@@ -1570,6 +1654,71 @@ describe('Studio Director V2 receipt contracts', () => {
         parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value: receipt })
       )
     ).toEqual(receipts.map((receipt) => ({ status: 'valid', record: receipt })));
+  });
+
+  it('accepts and exactly correlates each free-recovery applied receipt', () => {
+    const cases = [
+      {
+        command: validFreeRecoveryCommandV2(),
+        recovery: { op: 'retry_conditioning_frame' as const, dependentShotId: 'shot_2' },
+      },
+      {
+        command: validFreeRecoveryCommandV2({
+          recovery: { op: 'terminalize_refused_job', jobId: 'job_refused_1' },
+        }),
+        recovery: { op: 'terminalize_refused_job' as const, jobId: 'job_refused_1' },
+      },
+    ];
+
+    for (const { command, recovery } of cases) {
+      const receipt = {
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+        commandId: command.commandId,
+        projectId: command.projectId,
+        expectedRevision: command.expectedRevision,
+        decidedAt: NOW,
+        status: 'applied' as const,
+        appliedRevision: command.expectedRevision + 1,
+        recovery,
+      };
+      expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
+      expect(studioDirectorCommandReceiptMatchesRecordV2(receipt, command)).toBe(true);
+    }
+  });
+
+  it('rejects cross-shaped recovery receipts and never matches a different applied recovery', () => {
+    const command = validFreeRecoveryCommandV2();
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: NOW,
+      status: 'applied' as const,
+      appliedRevision: command.expectedRevision + 1,
+      recovery: command.recovery,
+    };
+
+    expect(
+      parseReceiptV2({
+        ...receipt,
+        recovery: { op: 'terminalize_refused_job', dependentShotId: 'shot_2' },
+      })
+    ).toEqual({ status: 'invalid' });
+    expect(
+      parseReceiptV2({
+        ...receipt,
+        createdBeatIds: [],
+        createdShotIds: [],
+      })
+    ).toEqual({ status: 'invalid' });
+    expect(
+      studioDirectorCommandReceiptMatchesRecordV2(
+        { ...receipt, recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_other' } },
+        command
+      )
+    ).toBe(false);
+    expect(studioDirectorCommandReceiptMatchesRecordV2(receipt, validCommandV2())).toBe(false);
   });
 
   it('accepts the largest safe applied revision when its expected revision is one lower', () => {

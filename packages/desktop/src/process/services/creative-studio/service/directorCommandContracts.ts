@@ -23,6 +23,9 @@ import {
   STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
+  type StudioDirectorFreeRecoveryAppliedReceiptV2,
+  type StudioDirectorFreeRecoveryCommandRecordV2,
+  type StudioDirectorFreeRecoveryV2,
   type StudioDirectorQueryCommandRecordV2,
   type StudioDirectorQueryReceiptV2,
   type StudioDirectorQueryV2,
@@ -47,6 +50,7 @@ type JsonRecord = Record<string, unknown>;
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const COMMAND_BASE_KEYS = ['schemaVersion', 'commandId', 'projectId', 'createdAt', 'deadlineAt', 'policy'] as const;
 const AUTO_APPLY_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'expectedRevision', 'operations']);
+const FREE_FIX_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'expectedRevision', 'recovery']);
 const PROJECT_STATUS_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'detail']);
 const LIST_ROUTES_COMMAND_KEYS = new Set(COMMAND_BASE_KEYS);
 const GET_PROPOSAL_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'proposalId']);
@@ -165,6 +169,16 @@ const V2_APPLIED_RECEIPT_KEYS = new Set([
   'appliedRevision',
   'createdBeatIds',
   'createdShotIds',
+]);
+const V2_FREE_FIX_APPLIED_RECEIPT_KEYS = new Set([
+  'schemaVersion',
+  'commandId',
+  'projectId',
+  'expectedRevision',
+  'decidedAt',
+  'status',
+  'appliedRevision',
+  'recovery',
 ]);
 const V2_REJECTION_CODES = new Set([
   'malformed_record',
@@ -1170,6 +1184,22 @@ const validateDirectorOperationListV2 = (value: unknown): value is StudioDirecto
           operation.changes.durationSeconds <= STUDIO_MAX_SHOT_SECONDS))
   );
 
+/** Exact singleton recovery grammar; status derivation remains the runtime authority for admissibility. */
+export const validateStudioDirectorFreeRecoveryV2 = (value: unknown): value is StudioDirectorFreeRecoveryV2 => {
+  const recovery = snapshotDataRecordV2(value);
+  if (recovery === null || typeof recovery.op !== 'string') return false;
+  if (recovery.op === 'retry_conditioning_frame') {
+    return (
+      hasExactKeysV2(recovery, new Set(['op', 'dependentShotId'])) && isSafeStudioDirectorId(recovery.dependentShotId)
+    );
+  }
+  return (
+    recovery.op === 'terminalize_refused_job' &&
+    hasExactKeysV2(recovery, new Set(['op', 'jobId'])) &&
+    isSafeStudioDirectorId(recovery.jobId)
+  );
+};
+
 const recoverExpectedRevisionV2 = (value: unknown, projectId: string, commandId: string): number | null => {
   try {
     if (!isRecord(value)) return null;
@@ -1347,6 +1377,10 @@ export function parseStudioDirectorPendingRecordV2(input: {
       hasExactKeysV2(value, AUTO_APPLY_COMMAND_KEYS) &&
       isRevision(value.expectedRevision) &&
       validateDirectorOperationListV2(value.operations)) ||
+    (value.policy === 'apply_free_fix' &&
+      hasExactKeysV2(value, FREE_FIX_COMMAND_KEYS) &&
+      isRevision(value.expectedRevision) &&
+      validateStudioDirectorFreeRecoveryV2(value.recovery)) ||
     (value.policy === 'get_project_status' &&
       hasExactKeysV2(value, PROJECT_STATUS_COMMAND_KEYS) &&
       typeof value.detail === 'boolean') ||
@@ -1427,6 +1461,18 @@ export function parseStudioDirectorCommandReceiptV2(input: {
   }
   if (!fitsCommandRecord(value)) return invalidSidecarV2();
   if (value.status === 'applied') {
+    if (Object.hasOwn(value, 'recovery')) {
+      if (
+        !hasExactKeysV2(value, V2_FREE_FIX_APPLIED_RECEIPT_KEYS) ||
+        !isRevision(value.expectedRevision) ||
+        !isRevision(value.appliedRevision) ||
+        value.appliedRevision !== value.expectedRevision + 1 ||
+        !validateStudioDirectorFreeRecoveryV2(value.recovery)
+      ) {
+        return invalidSidecarV2();
+      }
+      return validSidecarV2(value as StudioDirectorFreeRecoveryAppliedReceiptV2);
+    }
     if (
       !hasExactKeysV2(value, V2_APPLIED_RECEIPT_KEYS) ||
       !isRevision(value.expectedRevision) ||
@@ -1466,7 +1512,16 @@ export function parseStudioDirectorCommandReceiptV2(input: {
 
 export const isStudioDirectorQueryCommandV2 = (
   command: StudioDirectorCommandRecordV2
-): command is StudioDirectorQueryCommandRecordV2 => command.policy !== 'auto_apply';
+): command is StudioDirectorQueryCommandRecordV2 =>
+  command.policy === 'get_project_status' || command.policy === 'list_routes' || command.policy === 'get_proposal';
+
+export const isStudioDirectorFreeRecoveryCommandV2 = (
+  command: StudioDirectorCommandRecordV2
+): command is StudioDirectorFreeRecoveryCommandRecordV2 => command.policy === 'apply_free_fix';
+
+export const isStudioDirectorFreeRecoveryAppliedReceiptV2 = (
+  receipt: StudioDirectorCommandReceiptV2
+): receipt is StudioDirectorFreeRecoveryAppliedReceiptV2 => receipt.status === 'applied' && 'recovery' in receipt;
 
 export const isStudioDirectorQueryReceiptV2 = (
   receipt: StudioDirectorCommandReceiptV2
@@ -1486,7 +1541,22 @@ export const studioDirectorCommandReceiptMatchesRecordV2 = (
 ): boolean => {
   if (receipt.commandId !== command.commandId || receipt.projectId !== command.projectId) return false;
   if (command.policy === 'auto_apply') {
-    return !isStudioDirectorQueryReceiptV2(receipt) && receipt.expectedRevision === command.expectedRevision;
+    return (
+      !isStudioDirectorQueryReceiptV2(receipt) &&
+      !isStudioDirectorFreeRecoveryAppliedReceiptV2(receipt) &&
+      receipt.expectedRevision === command.expectedRevision
+    );
+  }
+  if (isStudioDirectorFreeRecoveryCommandV2(command)) {
+    if (isStudioDirectorQueryReceiptV2(receipt) || receipt.expectedRevision !== command.expectedRevision) return false;
+    if (receipt.status !== 'applied') return true;
+    if (!isStudioDirectorFreeRecoveryAppliedReceiptV2(receipt) || receipt.recovery.op !== command.recovery.op) {
+      return false;
+    }
+    return command.recovery.op === 'retry_conditioning_frame'
+      ? receipt.recovery.op === 'retry_conditioning_frame' &&
+          receipt.recovery.dependentShotId === command.recovery.dependentShotId
+      : receipt.recovery.op === 'terminalize_refused_job' && receipt.recovery.jobId === command.recovery.jobId;
   }
   if (!isStudioDirectorQueryReceiptV2(receipt)) return false;
   const query = studioDirectorQueryForCommandV2(command);

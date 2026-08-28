@@ -208,6 +208,7 @@ const createHarness = (
     ),
   } as unknown as StudioProviderResolver;
   const jobManager = {
+    terminalizeRefusedJobV2: vi.fn(async () => undefined as never),
     resumePendingJobsV2: vi.fn(async (projectIds: readonly string[]) => {
       calls.push(`resume-jobs:${projectIds.join(',')}`);
       if (remainingRecoveryFailures > 0) {
@@ -413,13 +414,14 @@ const createHarness = (
     holdNextRecovery: () => {
       holdNextRecovery = true;
     },
-    commit: () =>
+    commit: (overrides: Partial<StudioProjectCommitFacts> = {}) =>
       commitObserver?.({
         projectId: 'project_v2',
         previousRevision: 0,
         committedRevision: 1,
         committedAt: '2026-08-19T00:00:00.000Z',
         commitTag: null,
+        ...overrides,
       }),
   };
 };
@@ -468,6 +470,84 @@ describe('Creative Studio schema-2 runtime activation', () => {
     const disposing = harness.runtime.dispose();
     expect(dependencies!.queryAuthorityActive?.()).toBe(false);
     await disposing;
+  });
+
+  it('wires Director free recoveries to the live service and job manager with exact commit attribution', async () => {
+    const retryConditioningFrame = vi.fn(async () => undefined as never);
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      service: {
+        retryConditioningFrame: retryConditioningFrame as CreativeStudioServiceV2['retryConditioningFrame'],
+      },
+    });
+    await harness.runtime.start();
+    const dependencies = harness.getDirectorProcessorDependencies();
+    expect(dependencies).toBeDefined();
+
+    await dependencies!.service.retryConditioningFrame(
+      {
+        projectId: 'project_v2',
+        expectedRevision: 7,
+        dependentShotId: 'shot_waiting',
+      },
+      'command_conditioning'
+    );
+    await dependencies!.service.terminalizeRefusedJob(
+      {
+        projectId: 'project_v2',
+        expectedRevision: 8,
+        jobId: 'job_refused',
+      },
+      'command_refused'
+    );
+
+    expect(retryConditioningFrame).toHaveBeenCalledExactlyOnceWith(
+      {
+        projectId: 'project_v2',
+        expectedRevision: 7,
+        dependentShotId: 'shot_waiting',
+      },
+      'command_conditioning'
+    );
+    expect(harness.jobManager.terminalizeRefusedJobV2).toHaveBeenCalledExactlyOnceWith(
+      {
+        projectId: 'project_v2',
+        expectedRevision: 8,
+        jobId: 'job_refused',
+      },
+      'command_refused'
+    );
+    await harness.runtime.dispose();
+  });
+
+  it('routes commits from the Director startup sweep to the graph-under-construction tracker', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      holdActivationAt: 'protocol',
+    });
+
+    const starting = harness.runtime.start();
+    await harness.activationHeld;
+    const dependencies = harness.getDirectorProcessorDependencies();
+    expect(dependencies).toBeDefined();
+    expect(harness.runtime.activationState).toBe('activating');
+    expect(dependencies!.queryAuthorityActive?.()).toBe(false);
+
+    harness.commit({ commitTag: 'command_startup_recovery' });
+
+    expect(dependencies!.tracker.observe).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_v2',
+      previousRevision: 0,
+      committedRevision: 1,
+      committedAt: '2026-08-19T00:00:00.000Z',
+      commitTag: 'command_startup_recovery',
+    });
+
+    harness.releaseActivation();
+    await starting;
+    harness.commit();
+    expect(dependencies!.tracker.observe).toHaveBeenCalledTimes(2);
+    await harness.runtime.dispose();
   });
 
   it('classifies a V1-only root and stays inactive without constructing a lifecycle boundary', async () => {

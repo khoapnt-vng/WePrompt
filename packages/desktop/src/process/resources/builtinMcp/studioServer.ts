@@ -41,6 +41,7 @@ import {
   STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
   type StudioDirectorOperationV2,
+  type StudioDirectorFreeRecoveryV2,
   type StudioMutationOperationV2,
   type StudioProjectV2,
   type StudioRouteCatalogV2,
@@ -58,8 +59,10 @@ import {
 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
 import {
   createStudioDirectorCommandWriterV2,
+  studioDirectorFreeFixInputFitsDurableRecordV2,
   studioDirectorToolInputFitsDurableRecordV2,
   type StudioApplyEditsInputV2,
+  type StudioApplyFreeFixInputV2,
   type StudioDirectorCommandWriterDeps,
   type StudioGetCommandStatusInput,
   type StudioGetProposalDirectorInputV2,
@@ -609,6 +612,28 @@ export const studioApplyEditsInputSchemaV2 = z4
   .object({
     expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
     operations: z4.array(studioDirectorDirectMutationOperationSchemaV2).min(1).max(STUDIO_MAX_MUTATION_OPERATIONS),
+  })
+  .strict();
+
+const studioDirectorFreeRecoverySchemaV2 = z4.discriminatedUnion('op', [
+  z4
+    .object({
+      op: z4.literal('retry_conditioning_frame'),
+      dependentShotId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  z4
+    .object({
+      op: z4.literal('terminalize_refused_job'),
+      jobId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+]);
+
+export const studioApplyFreeFixInputSchemaV2 = z4
+  .object({
+    expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    recovery: studioDirectorFreeRecoverySchemaV2,
   })
   .strict();
 
@@ -1264,6 +1289,22 @@ export function createStudioApplyEditsHandlerV2(
   };
 }
 
+export function createStudioApplyFreeFixHandlerV2(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: StudioApplyFreeFixInputV2) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => {
+    if (!studioDirectorFreeFixInputFitsDurableRecordV2(input)) {
+      return errorResult('Free-fix input is invalid or exceeds the durable record size cap.');
+    }
+    return commandToolResult(await writer.applyFreeFix(input));
+  };
+}
+
 export function createStudioGetCommandStatusHandlerV2(
   config: StudioServerEnv | null,
   deps: StudioDirectorCommandWriterDeps = {}
@@ -1362,7 +1403,7 @@ export function registerStudioToolsV2(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. The input schema exposes only direct-capable operations. Reference planning and binding are separate Director-direct phases: first set_reference_plan; if a recurring background is discovered later, append it with amend_reference_plan instead of replacing the plan; then request canonical reference images; a human-confirmed generation makes each newest image current; then read the fresh revision and set_shot_reference_binding to current references. Beat Story and Shot Shooting-script authoring belongs in propose_storyboard for human review. set_reference_label, set_reference_prompt, select_reference_image and remove_reference_image are renderer-only and never Director-callable. This never starts paid generation. Proposal-only and unavailable operations are invalid arguments; capability preflight remains a fail-closed backstop and no rejected operation reaches command evaluation or is applied. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected or invalid batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. The input schema exposes only direct-capable authoring operations; operational recovery uses studio_apply_free_fix instead. Reference planning and binding are separate Director-direct phases: first set_reference_plan; if a recurring background is discovered later, append it with amend_reference_plan instead of replacing the plan; then request canonical reference images; a human-confirmed generation makes each newest image current; then read the fresh revision and set_shot_reference_binding to current references. Beat Story and Shot Shooting-script authoring belongs in propose_storyboard for human review. set_reference_label, set_reference_prompt, select_reference_image and remove_reference_image are renderer-only and never Director-callable. This never starts paid generation. Proposal-only and unavailable operations are invalid arguments; capability preflight remains a fail-closed backstop and no rejected operation reaches command evaluation or is applied. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected or invalid batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
     },
     async (input) =>
@@ -1372,6 +1413,22 @@ export function registerStudioToolsV2(
       )({
         expectedRevision: input.expectedRevision,
         operations: input.operations as StudioMutationOperationV2[],
+      })
+  );
+  server.registerTool(
+    'studio_apply_free_fix',
+    {
+      description:
+        "Apply one exact free recovery only after an immediately preceding studio_get_project_status call with detail: true returned the same free_fix remedy. Copy that result's projectRevision to expectedRevision and copy its exact dependentShotId or jobId. Only retry_conditioning_frame and terminalize_refused_job are accepted. A refused submission is local terminal cleanup only; submission_unknown and duplicate-charge acknowledgement remain owner-only. This creates no quote, authorization, job, generation request, or spend, although a successful conditioning repair may release work the owner already authorized. Never infer or reuse a stale remedy, and read fresh detailed status again afterward. Unconfirmed results must not be retried; call studio_get_command_status with the commandId.",
+      inputSchema: studioApplyFreeFixInputSchemaV2,
+    },
+    async (input) =>
+      createStudioApplyFreeFixHandlerV2(
+        config,
+        writerDeps
+      )({
+        expectedRevision: input.expectedRevision,
+        recovery: input.recovery as StudioDirectorFreeRecoveryV2,
       })
   );
   server.registerTool(
