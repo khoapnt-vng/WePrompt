@@ -138,7 +138,18 @@ const createDeferredV2 = <T>(): {
   return { promise, resolve, reject };
 };
 
-describe('schema-2 creative studio project store', () => {
+/**
+ * The store's cases write and re-read whole project files, so they are bound by disk rather than by
+ * their assertions. The duration sweep of 2026-08-28 found 6 of them over 2s — third heaviest file in
+ * the suite, behind only the job manager and the media store.
+ *
+ * Under full-suite parallelism one exceeded the 10s global testTimeout and failed the push gate on
+ * timing rather than on merit. As with the sibling suites, the ceiling is set on the describe because
+ * which case loses the race under load is arbitrary. It is a hang-detector, not a performance budget.
+ */
+const STORE_TIMEOUT_MS = 120_000;
+
+describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }, () => {
   const timestamp = '2026-08-17T12:00:00.000Z';
   const inputV2: CreateStudioProjectInputV2 = {
     name: 'Schema Two Film',
