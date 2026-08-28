@@ -507,6 +507,35 @@ const httpErrorEvidence = async (
   };
 };
 
+/**
+ * Evidence for a generation the provider accepted and then failed. The transport succeeded, so the
+ * HTTP error path never runs and the reason would otherwise be discarded — `poll` can only answer
+ * `unknown`, which makes every chained-generation failure indistinguishable. `error.message` stays
+ * redacted; only the nested upstream code is lifted, through the same identifier filter the HTTP
+ * path uses.
+ */
+const terminalBodyEvidence = (
+  body: unknown,
+  operation: OpenRouterHttpOperation,
+  model: string
+): OpenRouterHttpErrorEvidence => {
+  const error = record(record(body)?.error);
+  const metadata = record(error?.metadata);
+  return {
+    operation,
+    model,
+    httpStatus: 200,
+    stableCode: 'unknown',
+    jsonReadable: true,
+    errorCode: safeEvidenceTag(error?.code),
+    errorType: safeEvidenceTag(metadata?.error_type),
+    providerCode: safeEvidenceTag(metadata?.provider_code),
+    limitSource: safeEvidenceTag(metadata?.limit_source),
+    upstreamCode: nestedUpstreamCode(error?.message),
+    messagePresent: typeof error?.message === 'string' && error.message.length > 0,
+  };
+};
+
 const defaultEmitHttpErrorEvidence = (evidence: OpenRouterHttpErrorEvidence): void => {
   console.warn('[CreativeStudio:OpenRouterVideo:http-error]', evidence);
 };
@@ -700,7 +729,10 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
         if (!outputs) throw new OpenRouterVideoAdapterError('no_output');
         return { kind: 'complete', outputs };
       }
-      if (status === 'failed') throw new OpenRouterVideoAdapterError('unknown');
+      if (status === 'failed') {
+        await emitHttpErrorEvidence(terminalBodyEvidence(body, 'submit', provider.use_model));
+        throw new OpenRouterVideoAdapterError('unknown');
+      }
       const id = jobId(body);
       if (!id) throw new OpenRouterVideoAdapterError('invalid_response');
       return { kind: 'remote', providerJobId: id };
@@ -736,6 +768,7 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
         case 'canceled':
           return { status: 'cancelled', error: { code: 'unknown' } };
         case 'failed':
+          await emitHttpErrorEvidence(terminalBodyEvidence(body, 'poll', provider.use_model));
           return { status: 'failed', error: { code: 'unknown' } };
         default:
           throw new OpenRouterVideoAdapterError('invalid_response');

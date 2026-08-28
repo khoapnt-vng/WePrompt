@@ -835,4 +835,32 @@ describe('OpenRouter video generation adapter', () => {
       supportsFirstFrame: false,
     });
   });
+
+  it('reports the upstream code when a poll says the generation failed', async () => {
+    const emitHttpErrorEvidence = vi.fn();
+    const fetch = vi.fn(async () =>
+      response(200, {
+        id: 'remote_1',
+        status: 'failed',
+        error: {
+          message: 'Generation failed {"error":{"code":"InputImageSensitiveContentDetected.PrivacyInformation"}}',
+        },
+      })
+    ) as unknown as ProviderFetch;
+    const adapter = createOpenRouterVideoAdapter({
+      fetch,
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
+    const snapshot = await adapter.poll('remote_1', provider(), new AbortController().signal);
+    expect(snapshot.status).toBe('failed');
+    // The provider's own reason must reach the diagnostic channel; without it every
+    // chained-generation failure is indistinguishable and uninvestigable.
+    expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'poll',
+        upstreamCode: 'InputImageSensitiveContentDetected.PrivacyInformation',
+      })
+    );
+  });
 });
