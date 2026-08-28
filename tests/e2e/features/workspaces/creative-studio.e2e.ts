@@ -1437,7 +1437,7 @@ const expectBeatAuthoringBandGeometry = async (panel: Locator, reference: Studio
 };
 
 const expectFoldedTableFits = async (table: Locator): Promise<void> => {
-  await expect(table.getByRole('columnheader')).toHaveCount(7);
+  await expect(table.getByRole('columnheader')).toHaveCount(6);
   const geometry = await table.evaluate((element) => {
     const scroll = element.closest<HTMLElement>('[data-studio-table-scroll]');
     if (scroll === null) throw new Error('Table scrollport was unavailable');
@@ -2500,7 +2500,9 @@ test.describe('Creative Studio workspace', () => {
     await expectFoldedTableFits(grid);
     await expect(grid.getByRole('row')).toHaveCount(25);
     const rows = grid.getByRole('row');
-    await expect(rows.nth(1).getByRole('gridcell')).toHaveCount(7);
+    await expect(rows.nth(1).getByRole('gridcell')).toHaveCount(6);
+    await expect(grid.locator('[data-grid-column-name="state"]')).toHaveCount(0);
+    await expect(grid.locator('[data-state]')).toHaveCount(0);
     await expect(rows.nth(1).locator('[data-grid-column-name="shots"]')).toContainText('8 shots');
     await expect(rows.nth(1).locator('[data-duration-kind="planned"]')).toHaveText('120s');
     await expect(rows.nth(1).locator('[data-duration-kind]')).toHaveCount(1);
@@ -2511,22 +2513,22 @@ test.describe('Creative Studio workspace', () => {
     await expect(directorToggle).toHaveAttribute('aria-expanded', 'true');
     await directorToggle.evaluate((element: HTMLElement) => element.click());
     await expect(directorToggle).toHaveAttribute('aria-expanded', 'false');
-    await expect(grid.getByRole('columnheader')).toHaveCount(7);
+    await expect(grid.getByRole('columnheader')).toHaveCount(6);
 
-    const firstStateCell = rows.nth(1).locator('[data-grid-column-name="state"]');
-    await firstStateCell.focus();
-    const firstStateHandle = await firstStateCell.elementHandle();
-    if (firstStateHandle === null) throw new Error('Table State cell was unavailable');
+    const firstLengthCell = rows.nth(1).locator('[data-grid-column-name="length"]');
+    await firstLengthCell.focus();
+    const firstLengthHandle = await firstLengthCell.elementHandle();
+    if (firstLengthHandle === null) throw new Error('Table Sum cell was unavailable');
     await directorToggle.evaluate((element: HTMLElement) => element.click());
     await expect(directorToggle).toHaveAttribute('aria-expanded', 'true');
     await expectFoldedTableFits(grid);
-    expect(await firstStateHandle.evaluate((element) => element === document.activeElement)).toBe(true);
-    await expect(firstStateCell).toBeFocused();
+    expect(await firstLengthHandle.evaluate((element) => element === document.activeElement)).toBe(true);
+    await expect(firstLengthCell).toBeFocused();
     await expect(grid.locator('[role="gridcell"][tabindex="0"]')).toHaveCount(1);
 
     await directorToggle.evaluate((element: HTMLElement) => element.click());
-    await expect(grid.getByRole('columnheader')).toHaveCount(7);
-    expect(await firstStateHandle.evaluate((element) => element === document.activeElement)).toBe(true);
+    await expect(grid.getByRole('columnheader')).toHaveCount(6);
+    expect(await firstLengthHandle.evaluate((element) => element === document.activeElement)).toBe(true);
     const firstStoryCell = rows.nth(1).locator('[data-grid-column-name="story"]');
     await firstStoryCell.focus();
     await directorToggle.evaluate((element: HTMLElement) => element.click());
@@ -2582,9 +2584,7 @@ test.describe('Creative Studio workspace', () => {
     await expect(rows.nth(24)).toHaveAttribute('aria-selected', 'true');
 
     await expect(rows.nth(1)).not.toContainText(/\b0s\b/);
-    await expect(rows.nth(2)).toContainText('No coverage');
     await expect(rows.nth(2)).toContainText('No planned sum');
-    await expect(rows.nth(3)).toContainText('Duration pending');
     await expect(rows.nth(3)).toContainText('No planned sum');
 
     const beforeNavigation = await readStudioProject(page, projectId);

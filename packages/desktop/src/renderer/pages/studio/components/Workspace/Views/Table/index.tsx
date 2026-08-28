@@ -12,7 +12,6 @@ import { useTranslation } from 'react-i18next';
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
-import { WORKSPACE_BEAT_DISPLAY_STATE_KEYS } from '../beatDisplayState';
 import type { WorkspaceBeatProjection, WorkspaceBoardPanelProjection } from '../../workspaceProjection';
 import type { ReferenceWorkspaceItem, StudioReferenceFocusIntent } from '../References';
 import styles from './Table.module.css';
@@ -20,7 +19,7 @@ import styles from './Table.module.css';
 const REFERENCE_ROOT = 'conversation.creativeStudio.workspace.referenceWorkflow';
 const REFERENCE_HIGHLIGHT_MS = 1_600;
 
-type TableColumnId = 'position' | 'panel' | 'beat' | 'story' | 'shots' | 'length' | 'state';
+type TableColumnId = 'position' | 'panel' | 'beat' | 'story' | 'shots' | 'length';
 
 type TableColumn = {
   id: TableColumnId;
@@ -39,7 +38,6 @@ const COLUMNS = [
   { id: 'story', labelKey: 'conversation.creativeStudio.workspace.table.columns.story' },
   { id: 'shots', labelKey: 'conversation.creativeStudio.workspace.table.columns.shots', fixedInlineSize: 68 },
   { id: 'length', labelKey: 'conversation.creativeStudio.workspace.table.columns.length', fixedInlineSize: 96 },
-  { id: 'state', labelKey: 'conversation.creativeStudio.workspace.table.columns.state', fixedInlineSize: 96 },
 ] as const satisfies readonly TableColumn[];
 
 type FocusedCell = {
@@ -862,15 +860,6 @@ export const TableView: React.FC<TableViewProps> = ({
                     </span>
                   ),
                 },
-                {
-                  column: 'state',
-                  content: (
-                    <span className={styles.state} data-state={beat.displayState}>
-                      <span aria-hidden='true' className={styles.stateDot} />
-                      <span>{t(WORKSPACE_BEAT_DISPLAY_STATE_KEYS[beat.displayState])}</span>
-                    </span>
-                  ),
-                },
               ];
 
               return (
@@ -929,7 +918,6 @@ export const TableView: React.FC<TableViewProps> = ({
                         const detailsOpen = openShotDetailId === shot.id;
                         const rowId = shotRowId(row, shotIndex);
                         const detailsId = shotDetailId(row, shotIndex);
-                        const panelStatusId = `${rowId}-status`;
                         const detailLabel = t('conversation.creativeStudio.workspace.table.panel.shotDetails', {
                           position: shotIndex + 1,
                         });
@@ -1040,19 +1028,6 @@ export const TableView: React.FC<TableViewProps> = ({
                                     seconds: shot.durationSeconds,
                                   })}
                                 </bdi>
-                              </span>
-                            ),
-                          },
-                          {
-                            column: 'state',
-                            content: (
-                              <span
-                                className={styles.panelStatus}
-                                data-panel-activity={panel.activity}
-                                data-panel-freshness={panel.freshness}
-                                id={panelStatusId}
-                              >
-                                {status}
                               </span>
                             ),
                           },

@@ -37,7 +37,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.columns.story': 'Story',
         'conversation.creativeStudio.workspace.table.columns.shots': 'Shots',
         'conversation.creativeStudio.workspace.table.columns.length': 'Sum',
-        'conversation.creativeStudio.workspace.table.columns.state': 'State',
         'conversation.creativeStudio.workspace.table.reorder.failed': 'Beat order was not changed.',
         'conversation.creativeStudio.workspace.table.plannedPending': 'No planned sum',
         'conversation.creativeStudio.workspace.table.empty': 'No beats yet',
@@ -264,7 +263,7 @@ describe('TableView', () => {
     window.sessionStorage.clear();
   });
 
-  it('renders the seven columns and one semantic data row per Beat in film order', () => {
+  it('renders the six planning columns and one semantic data row per Beat in film order', () => {
     const beats = [
       makeBeat('opening', { title: 'Opening', story: '', shots: [makeShot('shot_1'), makeShot('shot_2')] }),
       makeBeat('close', { title: 'Close' }),
@@ -273,18 +272,21 @@ describe('TableView', () => {
 
     const grid = screen.getByRole('grid', { name: 'Beat table' });
     const rows = within(grid).getAllByRole('row');
+    expect(grid).toHaveAttribute('aria-colcount', '6');
     expect(
       within(rows[0]!)
         .getAllByRole('columnheader')
         .map((cell) => cell.textContent)
-    ).toEqual(['#', 'Panel', 'Beat', 'Story', 'Shots', 'Sum', 'State']);
+    ).toEqual(['#', 'Panel', 'Beat', 'Story', 'Shots', 'Sum']);
     expect(
       within(rows[0]!)
         .getAllByRole('columnheader')
         .map((cell) => cell.dataset.gridColumnName)
-    ).toEqual(['position', 'panel', 'beat', 'story', 'shots', 'length', 'state']);
+    ).toEqual(['position', 'panel', 'beat', 'story', 'shots', 'length']);
     expect(rows.slice(1).map((row) => cellAt(row, 2).textContent)).toEqual(['Opening', 'Close']);
-    expect(rows.slice(1).every((row) => within(row).getAllByRole('gridcell').length === 7)).toBe(true);
+    expect(rows.slice(1).every((row) => within(row).getAllByRole('gridcell').length === 6)).toBe(true);
+    expect(grid.querySelector('[data-grid-column-name="state"]')).toBeNull();
+    expect(grid.querySelector('[data-state]')).toBeNull();
     expect(rowForBeat('opening')).toHaveTextContent('2 shots');
     expect(cellAt(rowForBeat('opening'), 3)).toHaveTextContent('');
   });
@@ -736,7 +738,7 @@ describe('TableView', () => {
     expect(within(rowForBeat('opening')).queryByRole('toolbar')).toBeNull();
     expect(openingRows.every((shot) => within(shot).queryByRole('toolbar') === null)).toBe(true);
     expect(openingRows.map((shot) => shot.getAttribute('aria-rowindex'))).toEqual(['3', '4', '5', '6', '7', '8']);
-    expect(openingRows.every((shot) => within(shot).getAllByRole('gridcell').length === 7)).toBe(true);
+    expect(openingRows.every((shot) => within(shot).getAllByRole('gridcell').length === 6)).toBe(true);
     expect(rowForBeat('close')).toHaveAttribute('aria-rowindex', '9');
     await user.click(openingRows[0]!);
     expect(onOpenBeat).not.toHaveBeenCalled();
@@ -838,7 +840,7 @@ describe('TableView', () => {
     expect(disclosure).toHaveFocus();
   });
 
-  it('renders one seven-cell row per Shot with script, chain position, status, duration, and fullscreen access', async () => {
+  it('renders one six-cell row per Shot with script, chain position, duration, and fullscreen access', async () => {
     const user = userEvent.setup();
     const beats = [
       makeBeat('opening', {
@@ -869,15 +871,20 @@ describe('TableView', () => {
     const shotRows = ['shot_1', 'shot_2', 'shot_3'].map(rowForShot);
     expect(screen.queryByRole('toolbar', { name: 'Board panels for Opening' })).toBeNull();
     expect(shotRows).toHaveLength(3);
-    expect(shotRows.every((shot) => within(shot).getAllByRole('gridcell').length === 7)).toBe(true);
+    expect(shotRows.every((shot) => within(shot).getAllByRole('gridcell').length === 6)).toBe(true);
     expect(screen.getAllByText('Chain head')).toHaveLength(2);
     expect(rowForShot('shot_1').querySelector('[data-chain-position="head"]')).toHaveTextContent('Chain head');
     expect(rowForShot('shot_1')).toHaveTextContent('Ming enters the market.');
     expect(rowForShot('shot_2')).toHaveTextContent('Mei turns toward Ming.');
     expect(rowForShot('shot_2').querySelector('[data-chain-position="predecessor:1"]')).toHaveTextContent('← Shot 1');
     expect(rowForShot('shot_2')).toHaveTextContent('6s');
-    expect(screen.getByRole('row', { name: 'Shot 2: Stale' })).toHaveTextContent('Stale');
-    expect(screen.getByRole('row', { name: 'Shot 3: Drawing' })).toHaveTextContent('Drawing');
+    expect(screen.getByRole('row', { name: 'Shot 2: Stale' }).querySelector('[data-activity="idle"]')).toHaveAttribute(
+      'data-freshness',
+      'stale'
+    );
+    expect(
+      screen.getByRole('row', { name: 'Shot 3: Drawing' }).querySelector('[data-activity="drawing"]')
+    ).not.toBeNull();
     expect(tableCss).toMatch(/\.shotPanelFrame\s*{[^}]*inline-size:\s*144px[^}]*block-size:\s*81px/s);
 
     const currentPanel = screen.getByRole('row', { name: 'Shot 1: Current' });
@@ -919,7 +926,8 @@ describe('TableView', () => {
 
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
     const shotRow = rowForShot('opening_shot');
-    expect(shotRow).toHaveTextContent('Needs attention');
+    expect(shotRow).toHaveAccessibleName('Shot 1: Needs attention');
+    expect(shotRow.querySelector('[data-activity="needs_attention"]')).not.toBeNull();
     expect(result.container.querySelector('[data-reference-binding-progress]')).toHaveTextContent('0 of 1 Shots bound');
     expect(result.container.querySelector('[data-board-recovery-job-id]')).toBeNull();
     expect(screen.queryByRole('region', { name: 'Director Board controls' })).toBeNull();
@@ -961,7 +969,11 @@ describe('TableView', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
-    expect(result.container.querySelectorAll('[data-panel-activity="status_pending"]')).toHaveLength(2);
+    expect(
+      result.container.querySelectorAll('[role="row"][data-shot-id] [data-activity="status_pending"]')
+    ).toHaveLength(2);
+    expect(screen.getByRole('row', { name: 'Shot 1: Status pending' })).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: 'Shot 2: Status pending' })).toBeInTheDocument();
     expect(result.container.querySelector('[data-asset-id]')).toBeNull();
     expect(result.container.querySelector('[data-board-recovery-job-id]')).toBeNull();
   });
@@ -1156,12 +1168,12 @@ describe('TableView', () => {
     await user.keyboard('{ArrowLeft}{ArrowRight}');
     expect(cellAt(rows[0]!, 1)).toHaveFocus();
     await user.keyboard('{End}');
-    expect(cellAt(rows[0]!, 6)).toHaveFocus();
+    expect(cellAt(rows[0]!, 5)).toHaveFocus();
     await user.keyboard('{ArrowRight}');
-    expect(cellAt(rows[0]!, 6)).toHaveFocus();
-    fireEvent.keyDown(cellAt(rows[0]!, 6), { key: 'End', ctrlKey: true });
-    expect(cellAt(rows[1]!, 6)).toHaveFocus();
-    fireEvent.keyDown(cellAt(rows[1]!, 6), { key: 'Home', metaKey: true });
+    expect(cellAt(rows[0]!, 5)).toHaveFocus();
+    fireEvent.keyDown(cellAt(rows[0]!, 5), { key: 'End', ctrlKey: true });
+    expect(cellAt(rows[1]!, 5)).toHaveFocus();
+    fireEvent.keyDown(cellAt(rows[1]!, 5), { key: 'Home', metaKey: true });
     expect(first).toHaveFocus();
   });
 
@@ -1508,44 +1520,17 @@ describe('TableView', () => {
       expect(sum.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'planned');
     }
   );
-
-  it('names every Beat state in text rather than relying on color', () => {
-    const states: Array<[WorkspaceBeatProjection['displayState'], string]> = [
-      ['duration_pending', 'Duration pending'],
-      ['no_coverage', 'No coverage'],
-      ['seed_pending', 'First frame pending'],
-      ['part_done', 'Part done'],
-      ['needs_attention', 'Needs attention'],
-      ['rendering', 'Rendering'],
-      ['stale', 'Stale'],
-      ['status_pending', 'Status pending'],
-      ['ready', 'Ready'],
-      ['draft', 'Draft'],
-    ];
-    const beats = states.map(([state]) => makeBeat(state, { displayState: state }));
-    render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
-
-    for (const [state, label] of states) {
-      const stateCell = cellAt(rowForBeat(state), 6);
-      expect(stateCell).toHaveTextContent(label);
-      expect(stateCell.querySelector('[data-state]')).toHaveAttribute('data-state', state);
-      expect(tableCss).toContain(`.state[data-state='${state}']`);
-    }
-    expect(tableCss).toMatch(
-      /\.state\[data-state='needs_attention'\]\s*\{[^}]*color:\s*var\(--color-danger-7\)[^}]*font-weight:\s*var\(--fw-bold\)/s
-    );
-    expect(tableCss).toMatch(/\.state\[data-state='stale'\][^{]*\{[^}]*color:\s*var\(--color-danger-6\)/s);
-  });
 });
 
 describe('the Table layout contract', () => {
-  it('keeps one seven-column grid and addresses columns semantically', () => {
+  it('keeps one six-column grid and addresses columns semantically', () => {
     // The pane must never blow out horizontally, and the shrinking element that guarantees that is
     // the scroll container, not the table. The table itself holds a floor so columns keep readable
     // widths and overflow becomes a scrollbar rather than squeezed cells.
     expect(tableCss).toMatch(/\.scroll\s*{[^}]*min-inline-size:\s*0/s);
     expect(tableCss).toMatch(/\.scroll\s*{[^}]*overflow-x:\s*auto/s);
-    expect(tableCss).toMatch(/\.grid\s*{[^}]*min-inline-size:\s*\d+px/s);
+    expect(tableCss).toMatch(/\.grid\s*{[^}]*min-inline-size:\s*944px/s);
+    expect(tableCss).not.toContain('.state');
     expect(tableCss).not.toContain('nth-child');
     const durationRule = tableCss.match(/\.durationFact\s*{([^}]*)}/s)?.[1] ?? '';
     expect(durationRule).not.toContain('overflow: hidden');

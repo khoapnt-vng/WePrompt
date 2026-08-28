@@ -497,7 +497,6 @@ const expectedLeaves = [
   'table.columns.shots',
   'table.columns.panel',
   'table.columns.length',
-  'table.columns.state',
   'table.panel.openDetails',
   'table.panel.closeDetails',
   'table.panel.cardLabel',

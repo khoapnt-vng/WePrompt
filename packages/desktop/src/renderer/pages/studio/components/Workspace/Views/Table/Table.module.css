@@ -55,7 +55,7 @@
      squeezing every cell to fit the pane. The floor is the sum of the fixed columns plus a
      readable minimum for the flexible Story column. */
   inline-size: 100%;
-  min-inline-size: 1040px;
+  min-inline-size: 944px;
   border-collapse: collapse;
   table-layout: fixed;
   color: var(--text-secondary);
@@ -134,8 +134,7 @@
 
 .position,
 .shotCount,
-.durationFact,
-.state {
+.durationFact {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
@@ -201,53 +200,6 @@
 .pendingDuration {
   color: var(--color-text-3);
   font-weight: var(--fw-regular);
-}
-
-.state {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--color-text-2);
-  font-size: 10px;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-}
-
-.stateDot {
-  inline-size: 6px;
-  block-size: 6px;
-  flex: none;
-  border-radius: 50%;
-  background: currentColor;
-}
-
-.state[data-state='ready'] {
-  color: var(--color-success-6);
-}
-
-.state[data-state='rendering'] {
-  color: var(--color-primary-6);
-}
-
-.state[data-state='duration_pending'],
-.state[data-state='seed_pending'],
-.state[data-state='part_done'] {
-  color: var(--color-warning-6);
-}
-
-.state[data-state='no_coverage'],
-.state[data-state='stale'] {
-  color: var(--color-danger-6);
-}
-
-.state[data-state='needs_attention'] {
-  color: var(--color-danger-7);
-  font-weight: var(--fw-bold);
-}
-
-.state[data-state='status_pending'],
-.state[data-state='draft'] {
-  color: var(--color-text-3);
 }
 
 .empty {
@@ -448,14 +400,6 @@
 
 .bindingHighlighted {
   animation: binding-highlight 1.6s ease-out;
-}
-
-.panelStatus {
-  overflow: hidden;
-  grid-column: 1 / -1;
-  color: var(--color-text-2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .bindingEditor {
