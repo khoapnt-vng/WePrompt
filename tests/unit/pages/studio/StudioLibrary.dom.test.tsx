@@ -525,6 +525,155 @@ describe('StudioLibrary current-schema projects', () => {
     expect(mocks.projectUpdatedListener).not.toBeNull();
   });
 
+  it('keeps the previous complete card snapshot visible while a focus refresh is pending', async () => {
+    const refreshedStatus = projectStatus();
+    refreshedStatus.stages = refreshedStatus.stages.map((stage) =>
+      stage.id === 'production' || stage.id === 'cut'
+        ? ({ ...stage, state: 'complete', blockers: [] } as StudioProjectStatusStageV2)
+        : stage
+    );
+    refreshedStatus.blockerCount = 0;
+    const pendingStatus = deferred<ReturnType<typeof ok<StudioProjectStatusV2>>>();
+    mocks.bridge.getProjectStatus.invoke
+      .mockResolvedValueOnce(ok(projectStatus()))
+      .mockReturnValueOnce(pendingStatus.promise);
+
+    renderLibrary();
+
+    const initial = await screen.findByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/);
+    expect(initial.closest('[data-status]')).toHaveAttribute('data-status', 'blocked');
+
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByRole('button', { name: 'Launch film' })).toBeVisible();
+    expect(
+      screen
+        .getByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/)
+        .closest('[data-status]')
+    ).toHaveAttribute('data-status', 'blocked');
+    expect(screen.queryByText('conversation.creativeStudio.workspace.library.projectStatus.unavailable')).toBeNull();
+
+    await act(async () => {
+      pendingStatus.resolve(ok(refreshedStatus));
+      await pendingStatus.promise;
+    });
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/)
+          .closest('[data-status]')
+      ).toHaveAttribute('data-status', 'complete')
+    );
+  });
+
+  it('publishes a refreshed project, revision, and status as one coherent snapshot', async () => {
+    const refreshedListing = ok({
+      projects: [summary({ name: 'Renamed film', updatedAt: '2026-01-02T00:00:00.000Z' })],
+      projectRevisions: [{ projectId: 'project_1', revision: 8 }],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    const pendingStatus = deferred<ReturnType<typeof ok<StudioProjectStatusV2>>>();
+    mocks.bridge.listProjects.invoke
+      .mockResolvedValueOnce(
+        ok({
+          projects: [summary()],
+          projectRevisions: [{ projectId: 'project_1', revision: 7 }],
+          unsupportedProjectIds: [],
+          quarantinedProjectIds: [],
+        })
+      )
+      .mockResolvedValueOnce(refreshedListing);
+    mocks.bridge.getProjectStatus.invoke
+      .mockResolvedValueOnce(ok(projectStatus()))
+      .mockReturnValueOnce(pendingStatus.promise);
+
+    renderLibrary();
+
+    expect(await screen.findByRole('button', { name: 'Launch film' })).toBeVisible();
+    act(() => window.dispatchEvent(new Event('focus')));
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(2));
+
+    expect(screen.getByRole('button', { name: 'Launch film' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Renamed film' })).toBeNull();
+    expect(
+      screen
+        .getByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/)
+        .closest('[data-status]')
+    ).toHaveAttribute('data-status', 'blocked');
+
+    const refreshed = projectStatus({ projectRevision: 8, blockerCount: 0 });
+    refreshed.stages = refreshed.stages.map((stage) =>
+      stage.id === 'production' || stage.id === 'cut'
+        ? ({ ...stage, state: 'complete', blockers: [] } as StudioProjectStatusStageV2)
+        : stage
+    );
+    await act(async () => {
+      pendingStatus.resolve(ok(refreshed));
+      await pendingStatus.promise;
+    });
+
+    expect(await screen.findByRole('button', { name: 'Renamed film' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Launch film' })).toBeNull();
+    expect(
+      screen
+        .getByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/)
+        .closest('[data-status]')
+    ).toHaveAttribute('data-status', 'complete');
+  });
+
+  it('keeps the initial loading state until project status authority resolves', async () => {
+    const pendingStatus = deferred<ReturnType<typeof ok<StudioProjectStatusV2>>>();
+    mocks.bridge.getProjectStatus.invoke.mockReturnValueOnce(pendingStatus.promise);
+
+    renderLibrary();
+
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('conversation.creativeStudio.workspace.library.loading')).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Launch film' })).toBeNull();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.library.projectStatus.unavailable')).toBeNull();
+
+    await act(async () => {
+      pendingStatus.resolve(ok(projectStatus()));
+      await pendingStatus.promise;
+    });
+
+    expect(await screen.findByRole('button', { name: 'Launch film' })).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.library.loading')).toBeNull();
+  });
+
+  it('preserves the last complete snapshot when a focus list refresh fails', async () => {
+    mocks.bridge.listProjects.invoke
+      .mockResolvedValueOnce(
+        ok({
+          projects: [summary()],
+          projectRevisions: [{ projectId: 'project_1', revision: 7 }],
+          unsupportedProjectIds: [],
+          quarantinedProjectIds: [],
+        })
+      )
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'storage_error' as const, messageKey: 'native.refreshFailed' },
+      });
+
+    renderLibrary();
+
+    const initial = await screen.findByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/);
+    expect(initial.closest('[data-status]')).toHaveAttribute('data-status', 'blocked');
+    act(() => window.dispatchEvent(new Event('focus')));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('native.refreshFailed');
+    expect(screen.getByRole('button', { name: 'Launch film' })).toBeVisible();
+    expect(
+      screen
+        .getByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/)
+        .closest('[data-status]')
+    ).toHaveAttribute('data-status', 'blocked');
+  });
+
   it('coalesces project update bursts into one trailing status refresh', async () => {
     const firstList = deferred<{
       ok: true;

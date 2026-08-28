@@ -30,14 +30,27 @@ type LibraryRefreshFlight = {
   trailing: { promise: Promise<void>; resolve: () => void } | null;
 };
 
+type LibrarySnapshot = {
+  projects: StudioProjectSummaryV2[];
+  projectRevisions: Record<string, number>;
+  projectStatuses: Record<string, StudioProjectStatusV2 | null>;
+  unsupportedProjectIds: string[];
+  quarantinedProjectIds: string[];
+};
+
+const EMPTY_LIBRARY_SNAPSHOT: LibrarySnapshot = {
+  projects: [],
+  projectRevisions: {},
+  projectStatuses: {},
+  unsupportedProjectIds: [],
+  quarantinedProjectIds: [],
+};
+
 export const StudioLibrary: React.FC = () => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
-  const [projects, setProjects] = useState<StudioProjectSummaryV2[]>([]);
-  const [projectRevisions, setProjectRevisions] = useState<Record<string, number>>({});
-  const [projectStatuses, setProjectStatuses] = useState<Record<string, StudioProjectStatusV2 | null>>({});
-  const [unsupportedProjectIds, setUnsupportedProjectIds] = useState<string[]>([]);
-  const [quarantinedProjectIds, setQuarantinedProjectIds] = useState<string[]>([]);
+  const [librarySnapshot, setLibrarySnapshot] = useState<LibrarySnapshot>(EMPTY_LIBRARY_SNAPSHOT);
+  const { projects, projectRevisions, projectStatuses, unsupportedProjectIds, quarantinedProjectIds } = librarySnapshot;
   const [projectsLoading, setProjectsLoading] = useState(true);
   const [listErrorMessageKey, setListErrorMessageKey] = useState<string | null>(null);
   const [createErrorMessageKey, setCreateErrorMessageKey] = useState<string | null>(null);
@@ -54,8 +67,6 @@ export const StudioLibrary: React.FC = () => {
   const performRefreshProjects = useCallback(async (): Promise<void> => {
     const request = ++listRequestRef.current;
     setProjectsLoading(true);
-    setProjectRevisions({});
-    setProjectStatuses({});
     try {
       const result = await ipcBridge.creativeStudio.listProjects.invoke();
       if (listRequestRef.current !== request) return;
@@ -79,11 +90,6 @@ export const StudioLibrary: React.FC = () => {
         }
         revisionByProjectId.set(entry.projectId, entry.revision);
       }
-      setProjects(listing.projects);
-      setProjectRevisions(Object.fromEntries(revisionByProjectId));
-      setUnsupportedProjectIds(listing.unsupportedProjectIds);
-      setQuarantinedProjectIds(listing.quarantinedProjectIds);
-      setListErrorMessageKey(null);
       const statusEntries = await Promise.all(
         listing.projects.map(async (project): Promise<readonly [string, StudioProjectStatusV2 | null]> => {
           const projectRevision = revisionByProjectId.get(project.id);
@@ -104,7 +110,14 @@ export const StudioLibrary: React.FC = () => {
         })
       );
       if (listRequestRef.current !== request) return;
-      setProjectStatuses(Object.fromEntries(statusEntries));
+      setLibrarySnapshot({
+        projects: listing.projects,
+        projectRevisions: Object.fromEntries(revisionByProjectId),
+        projectStatuses: Object.fromEntries(statusEntries),
+        unsupportedProjectIds: listing.unsupportedProjectIds,
+        quarantinedProjectIds: listing.quarantinedProjectIds,
+      });
+      setListErrorMessageKey(null);
     } catch {
       if (listRequestRef.current === request) {
         setListErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
