@@ -273,6 +273,69 @@ const localizedFilmExportKeys = [
   'filmExport.trimTailsHelp',
 ] as const;
 
+const localizedBoardShotTileKeys = [
+  'board.statusUnavailable',
+  'board.renderedCount',
+  'board.staleCount',
+  'board.staleCount_one',
+  'board.staleCount_other',
+  'board.inFlightCount',
+  'board.inFlightCount_one',
+  'board.inFlightCount_other',
+  'board.shot.ariaLabel',
+  'board.shot.listLabel',
+  'board.shot.position',
+  'board.shot.videoPreview',
+  'board.shot.stale',
+  'board.shot.chainHead',
+  'board.shot.chainAfter',
+  'board.shot.duration',
+  'board.shot.scriptUnavailable',
+  'board.shot.statusUnavailable',
+  'board.shot.blocker.heading',
+  'board.shot.blocker.referenceBindingTable',
+  'board.shot.blocker.reviewOnTable',
+  'board.shot.blocker.cause.routeInventoryUnavailable',
+  'board.shot.blocker.cause.routeNotSelected',
+  'board.shot.blocker.cause.routeSetupRequired',
+  'board.shot.blocker.cause.routeUnavailable',
+  'board.shot.blocker.cause.routeRetired',
+  'board.shot.blocker.cause.routeIncompatibleFrame',
+  'board.shot.blocker.cause.routeFirstFrameUnsupported',
+  'board.shot.blocker.cause.routeDurationUnsupported',
+  'board.shot.blocker.cause.referencePlanInvalid',
+  'board.shot.blocker.cause.referenceGenerationRequired',
+  'board.shot.blocker.cause.referenceApprovalRequired',
+  'board.shot.blocker.cause.referenceGenerationFailed',
+  'board.shot.blocker.cause.referenceBindingUnassigned',
+  'board.shot.blocker.cause.referenceBindingUnknownReference',
+  'board.shot.blocker.cause.referenceBindingWrongKind',
+  'board.shot.blocker.cause.referenceBindingUnapprovedReference',
+  'board.shot.blocker.cause.referenceBindingMissingAsset',
+  'board.shot.blocker.cause.referenceBindingCapacityExceeded',
+  'board.shot.blocker.cause.seedSelectionRequired',
+  'board.shot.blocker.cause.seedGenerationRequired',
+  'board.shot.blocker.cause.conditioningFrameRequired',
+  'board.shot.blocker.cause.extractionFailed',
+  'board.shot.blocker.cause.dependencyFailed',
+  'board.shot.blocker.cause.generationInvalidRequest',
+  'board.shot.blocker.cause.generationContentRejected',
+  'board.shot.blocker.cause.generationAuth',
+  'board.shot.blocker.cause.generationQuota',
+  'board.shot.blocker.cause.generationRateLimited',
+  'board.shot.blocker.cause.generationProviderUnavailable',
+  'board.shot.blocker.cause.generationTimeout',
+  'board.shot.blocker.cause.generationPollDeadline',
+  'board.shot.blocker.cause.generationNoOutput',
+  'board.shot.blocker.cause.generationVariationGrid',
+  'board.shot.blocker.cause.generationSubmissionUnknown',
+  'board.shot.blocker.cause.generationDownloadFailed',
+  'board.shot.blocker.cause.generationUnsupported',
+  'board.shot.blocker.cause.generationUnknown',
+  'board.shot.blocker.cause.cutInvalidMedia',
+  'board.shot.blocker.cause.cutBedTooShort',
+] as const;
+
 const expectedLeaves = [
   ...localizedFirstFramesPanelKeys,
   ...localizedShotStatusKeys,
@@ -471,6 +534,7 @@ const expectedLeaves = [
   'board.liftDirtyDraft',
   'board.liftSucceeded',
   'board.liftFailed',
+  ...localizedBoardShotTileKeys,
   'cut.ariaLabel',
   'cut.description',
   'cut.railLabel',
@@ -1208,6 +1272,7 @@ const localizedMoveToBinKeys = [
 ] as const;
 
 const localizedBoardKeys = [
+  ...localizedBoardShotTileKeys,
   'table.authoring.label',
   'table.authoring.coverageGap',
   'table.authoring.coverageGap_one',
@@ -1553,6 +1618,7 @@ describe('Creative Studio workspace translations', () => {
     expect(Object.keys(leaves).toSorted()).toEqual(expectedLeaves.toSorted());
     expect(leaves['table.columns.position']).toBe('#');
     expect(leaves['table.columns.length']).toBe('Sum');
+    expect(leaves['board.shot.duration']).toBe('{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s');
     expect(placeholders(leaves['bin.coverAlt']!)).toEqual(['kind', 'title']);
     for (const [key, value] of Object.entries(leaves)) {
       expect(value.trim(), key).not.toBe('');
@@ -1904,7 +1970,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(23);
+    expect(pluralBases).toHaveLength(25);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
@@ -1970,6 +2036,7 @@ describe('Creative Studio workspace translations', () => {
   it.each([
     ['table.actualDuration', 15.069002, '15s'],
     ['board.actualDuration', 15.069002, '15s actual'],
+    ['board.shot.duration', 15.069002, '15.1s'],
     ['cut.filmDuration', 178.069002, '178s film'],
     ['cut.filmstripDuration', 15.069002, '15s'],
     ['cut.actualDuration', 15.069002, '15s actual'],

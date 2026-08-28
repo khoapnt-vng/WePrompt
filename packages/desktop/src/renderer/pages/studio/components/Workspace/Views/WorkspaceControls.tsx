@@ -23,6 +23,7 @@ import styles from './WorkspaceControls.module.css';
 export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   activeView,
   project,
+  projectStatus,
   projection,
   drafts,
   pending,
@@ -44,6 +45,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   onReferenceFocusIntentConsumed,
   shotEditFocusIntent = null,
   onShotEditFocusIntentConsumed,
+  onReviewShotReferenceBinding,
 }) => {
   const { t } = useTranslation();
   const [openPanel, setOpenPanel] = useState<{
@@ -531,8 +533,10 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           dirtyBeatIds={dirtyBeatIds}
           onBinFocusItemSettled={() => setBinFocusIntent(null)}
           onOpenBeat={selectAndOpenBeat}
+          onReviewReferenceBinding={onReviewShotReferenceBinding}
           pending={pending}
           projectId={project.id}
+          projectStatus={projectStatus}
           projection={projection}
           selectedBeatId={drafts.selection.selectedBeatId}
         />

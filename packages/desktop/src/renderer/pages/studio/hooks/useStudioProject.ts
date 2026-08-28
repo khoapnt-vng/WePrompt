@@ -24,6 +24,7 @@ import type {
   StudioGenerationCapabilityV2,
   StudioFilmExportCapabilityV2,
   StudioGenerationCapabilityItemV2,
+  StudioProjectStatusV2,
   StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -39,6 +40,7 @@ export type UseStudioProjectResult = {
   referenceGenerationHandoffs: StudioRendererReferenceGenerationHandoffV2[];
   workspaceStatus: StudioRendererWorkspaceStatusV2 | null;
   chainStatus: StudioRendererChainStatusV2 | null;
+  projectStatus: StudioProjectStatusV2 | null;
   routeCatalog: StudioRouteCatalogV2 | null;
   generationCapability: StudioGenerationCapabilityV2 | null;
   filmExportCapability: StudioFilmExportCapabilityV2 | null;
@@ -290,6 +292,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     chainStatus: null,
   });
   const { project, workspaceStatus, chainStatus } = projectWorkspace;
+  const [projectStatus, setProjectStatus] = useState<StudioProjectStatusV2 | null>(null);
   const [proposals, setProposals] = useState<StudioRendererProposalV2[]>([]);
   const [proposalCatalog, setProposalCatalog] = useState<StudioRendererProposalCatalogV2 | null>(null);
   const [proposalRefreshing, setProposalRefreshing] = useState(false);
@@ -320,7 +323,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const routeRefreshActiveRef = useRef<number | null>(null);
   const capabilityRefreshPendingRef = useRef(false);
   const exportRequestRef = useRef(0);
+  const projectStatusRequestRef = useRef(0);
   const projectRef = useRef<StudioRendererProjectV2 | null>(null);
+  const projectStatusRef = useRef<StudioProjectStatusV2 | null>(null);
   const routeCatalogRef = useRef<StudioRouteCatalogV2 | null>(null);
   const exportCatalogRef = useRef<StudioRendererExportCatalogV2 | null>(null);
 
@@ -370,6 +375,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       if (initial) {
         projectRef.current = null;
         setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
+        projectStatusRequestRef.current += 1;
+        projectStatusRef.current = null;
+        setProjectStatus(null);
         setLoadState('loading');
       }
       setErrorMessageKey(null);
@@ -423,6 +431,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
         if (outcome.kind === 'error') {
           const current = projectRef.current?.id === requestedProjectId ? projectRef.current : null;
           setProjectWorkspace({ project: current, workspaceStatus: null, chainStatus: null });
+          projectStatusRequestRef.current += 1;
+          projectStatusRef.current = null;
+          setProjectStatus(null);
           routeRequestRef.current += 1;
           capabilityRequestRef.current += 1;
           exportRequestRef.current += 1;
@@ -448,6 +459,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
         if (loaded.status !== 'supported') {
           projectRef.current = null;
           setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
+          projectStatusRequestRef.current += 1;
+          projectStatusRef.current = null;
+          setProjectStatus(null);
           routeRequestRef.current += 1;
           capabilityRequestRef.current += 1;
           exportRequestRef.current += 1;
@@ -477,6 +491,14 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           setRouteErrorMessageKey(null);
         }
         projectRef.current = loaded.snapshot.project;
+        if (
+          projectStatusRef.current?.projectId !== loaded.snapshot.project.id ||
+          projectStatusRef.current.projectRevision !== loaded.snapshot.project.revision
+        ) {
+          projectStatusRequestRef.current += 1;
+          projectStatusRef.current = null;
+          setProjectStatus(null);
+        }
         setProjectWorkspace(loaded.snapshot);
         setLoadState('supported');
         setErrorMessageKey(null);
@@ -530,6 +552,75 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
         return flight.promise;
       };
       return startFlight();
+    },
+    []
+  );
+
+  const loadProjectStatus = useCallback(
+    async (requestedBinding: StudioProjectBinding, generation: number): Promise<StudioProjectStatusV2 | null> => {
+      const requestedProjectId = requestedBinding.projectId;
+      if (
+        requestedProjectId === undefined ||
+        activeBindingRef.current !== requestedBinding ||
+        generationRef.current !== generation
+      ) {
+        return null;
+      }
+      const boundProject = projectRef.current;
+      if (boundProject?.id !== requestedProjectId) return null;
+      const request = ++projectStatusRequestRef.current;
+      projectStatusRef.current = null;
+      setProjectStatus(null);
+      try {
+        const result = await ipcBridge.creativeStudio.getProjectStatus.invoke({
+          projectId: requestedProjectId,
+          detail: true,
+        });
+        if (
+          activeBindingRef.current !== requestedBinding ||
+          generationRef.current !== generation ||
+          projectStatusRequestRef.current !== request
+        ) {
+          return null;
+        }
+        const current = projectRef.current;
+        if (current?.id !== requestedProjectId || current.revision !== boundProject.revision) return null;
+        const currentCatalogVersion = routeCatalogRef.current?.catalogVersion ?? null;
+        if (
+          result.ok === false ||
+          result.data.projectId !== requestedProjectId ||
+          result.data.projectRevision !== boundProject.revision ||
+          result.data.detail === null
+        ) {
+          projectStatusRef.current = null;
+          setProjectStatus(null);
+          return null;
+        }
+        if (result.data.catalogVersion !== currentCatalogVersion) {
+          routeRequestRef.current += 1;
+          capabilityRequestRef.current += 1;
+          routeCatalogRef.current = null;
+          setRouteCatalog(null);
+          setGenerationCapability(null);
+          projectStatusRef.current = null;
+          setProjectStatus(null);
+          return null;
+        }
+        const installed = structuredClone(result.data) as StudioProjectStatusV2;
+        projectStatusRef.current = installed;
+        setProjectStatus(installed);
+        return installed;
+      } catch {
+        if (
+          activeBindingRef.current === requestedBinding &&
+          generationRef.current === generation &&
+          projectStatusRequestRef.current === request
+        ) {
+          projectStatusRef.current = null;
+          setProjectStatus(null);
+        }
+        return null;
+      }
     },
     []
   );
@@ -802,6 +893,9 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       const request = ++routeRequestRef.current;
       routeRefreshActiveRef.current = request;
       capabilityRequestRef.current += 1;
+      projectStatusRequestRef.current += 1;
+      projectStatusRef.current = null;
+      setProjectStatus(null);
       try {
         const result = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: requestedProjectId });
         if (
@@ -1010,6 +1104,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     routeRequestRef.current += 1;
     capabilityRequestRef.current += 1;
     filmCapabilityRequestRef.current += 1;
+    projectStatusRequestRef.current += 1;
     routeRefreshActiveRef.current = null;
     capabilityRefreshPendingRef.current = false;
     const boundProjectId = binding.projectId;
@@ -1017,6 +1112,8 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     if (!boundProjectId) {
       projectRef.current = null;
       setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
+      projectStatusRef.current = null;
+      setProjectStatus(null);
       setProposals([]);
       setProposalCatalog(null);
       setProposalRefreshing(false);
@@ -1047,6 +1144,8 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     setReferenceErrorMessageKey(null);
     projectRef.current = null;
     setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
+    projectStatusRef.current = null;
+    setProjectStatus(null);
     routeCatalogRef.current = null;
     setRouteCatalog(null);
     setGenerationCapability(null);
@@ -1061,10 +1160,15 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       if (updatedProjectId === boundProjectId && activeBindingRef.current === binding) {
         void (async () => {
           if ((await loadProjectWorkspace(binding, generation, false)) !== null) {
-            await loadProposals(binding, generation);
-            await (routeCatalogRef.current === null
-              ? loadRoutes(binding, generation)
-              : loadGenerationCapability(binding, generation));
+            await Promise.all([
+              loadProposals(binding, generation),
+              (async () => {
+                await (routeCatalogRef.current === null
+                  ? loadRoutes(binding, generation)
+                  : loadGenerationCapability(binding, generation));
+                await loadProjectStatus(binding, generation);
+              })(),
+            ]);
           }
         })();
         // Reference handoff progress is projected from project-owned job state. Job transitions emit
@@ -1087,7 +1191,10 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       if ((await loadProjectWorkspace(binding, generation, true)) !== null) {
         await Promise.all([
           loadProposals(binding, generation),
-          loadRoutes(binding, generation),
+          (async () => {
+            await loadRoutes(binding, generation);
+            await loadProjectStatus(binding, generation);
+          })(),
           loadExports(binding, generation),
           loadFilmExportCapability(binding, generation),
         ]);
@@ -1107,6 +1214,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     loadFilmExportCapability,
     loadGenerationCapability,
     loadProjectWorkspace,
+    loadProjectStatus,
     loadProposals,
     loadReferences,
     loadRoutes,
@@ -1115,8 +1223,15 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const refetchProjectWorkspace = useCallback(async (): Promise<StudioRendererProjectV2 | null> => {
     if (binding.projectId === undefined || activeBindingRef.current !== binding) return null;
     const generation = generationRef.current;
-    return loadProjectWorkspace(binding, generation, false);
-  }, [binding, loadProjectWorkspace]);
+    const refreshed = await loadProjectWorkspace(binding, generation, false);
+    if (refreshed !== null) {
+      void (async () => {
+        if (routeCatalogRef.current !== null) await loadGenerationCapability(binding, generation);
+        await loadProjectStatus(binding, generation);
+      })();
+    }
+    return refreshed;
+  }, [binding, loadGenerationCapability, loadProjectStatus, loadProjectWorkspace]);
 
   const refetchProposals = useCallback(async (): Promise<StudioRendererProposalCatalogV2 | null> => {
     if (binding.projectId === undefined || activeBindingRef.current !== binding) return null;
@@ -1133,8 +1248,10 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   const refetchRoutes = useCallback(async (): Promise<boolean> => {
     if (binding.projectId === undefined || activeBindingRef.current !== binding) return false;
     const generation = generationRef.current;
-    return loadRoutes(binding, generation);
-  }, [binding, loadRoutes]);
+    const refreshed = await loadRoutes(binding, generation);
+    await loadProjectStatus(binding, generation);
+    return refreshed;
+  }, [binding, loadProjectStatus, loadRoutes]);
 
   const refetchExports = useCallback(async (): Promise<boolean> => {
     if (binding.projectId === undefined || activeBindingRef.current !== binding) return false;
@@ -1165,11 +1282,14 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       await Promise.all([
         loadProposals(binding, generation),
         loadReferences(binding, generation),
-        loadRoutes(binding, generation),
+        (async () => {
+          await loadRoutes(binding, generation);
+          await loadProjectStatus(binding, generation);
+        })(),
         loadExports(binding, generation),
       ]);
     }
-  }, [binding, loadExports, loadProjectWorkspace, loadProposals, loadReferences, loadRoutes]);
+  }, [binding, loadExports, loadProjectStatus, loadProjectWorkspace, loadProposals, loadReferences, loadRoutes]);
 
   return {
     project,
@@ -1180,6 +1300,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     referenceGenerationHandoffs,
     workspaceStatus,
     chainStatus,
+    projectStatus,
     routeCatalog,
     generationCapability,
     filmExportCapability,

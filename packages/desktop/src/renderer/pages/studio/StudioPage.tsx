@@ -322,6 +322,7 @@ const StudioProjectPage: React.FC<{
     referenceGenerationHandoffs,
     workspaceStatus,
     chainStatus,
+    projectStatus,
     routeCatalog,
     generationCapability,
     filmExportCapability,
@@ -3984,7 +3985,18 @@ const StudioProjectPage: React.FC<{
   const reviewShotBinding = useCallback(
     (shotId: string): void => {
       const current = projectRef.current;
-      if (current === null || !Object.hasOwn(current.shots, shotId) || current.shots[shotId]?.id !== shotId) return;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        currentProjection.projectId !== current.id ||
+        currentProjection.projectRevision !== current.revision ||
+        !currentProjection.activeShotIds.includes(shotId) ||
+        !Object.hasOwn(current.shots, shotId) ||
+        current.shots[shotId]?.id !== shotId
+      ) {
+        return;
+      }
       openReferenceFocus({ shotIds: [shotId] });
     },
     [openReferenceFocus]
@@ -4261,6 +4273,7 @@ const StudioProjectPage: React.FC<{
             tableBoardActions={tableBoardActions}
             cutActions={cutActions}
             project={project}
+            projectStatus={projectStatus}
             projection={projection}
             drafts={drafts}
             pending={workspacePending}
@@ -4288,6 +4301,7 @@ const StudioProjectPage: React.FC<{
             onReferenceFocusIntentConsumed={consumeReferenceFocusIntent}
             shotEditFocusIntent={shotEditFocusIntent}
             onShotEditFocusIntentConsumed={consumeShotEditFocusIntent}
+            onReviewShotReferenceBinding={reviewShotBinding}
           />
         )}
       </WorkspaceShell>

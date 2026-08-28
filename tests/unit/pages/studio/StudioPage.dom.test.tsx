@@ -10,6 +10,8 @@ import type {
   StudioGenerationCompositionV2,
   StudioGenerationCapabilityItemV2,
   StudioReferenceRequestV2,
+  StudioProjectStatusStageV2,
+  StudioProjectStatusV2,
   StudioRendererExportCatalogV2,
   StudioRendererChainStatusV2,
   StudioRendererJobV2,
@@ -63,11 +65,16 @@ const mocks = vi.hoisted(() => {
     referenceActions: null as ReferencesViewActions | null,
     workspaceMutations: null as WorkspaceMutationCallbacks | null,
     projectMenuProps: null as WorkspaceProjectMenuProps | null,
+    workspaceControlsProps: null as null | {
+      onReviewShotReferenceBinding: (shotId: string) => void;
+      projectStatus: StudioProjectStatusV2 | null;
+    },
     directorProposalIntent: null as null | ((intent: DirectorProposalChatIntent) => Promise<void>),
     directorDraftRequest: null as null | { requestId: number; projectId: string; prompt: string },
     bridge: {
       getProject: { invoke: vi.fn() },
       getProjectWorkspace: { invoke: vi.fn() },
+      getProjectStatus: { invoke: vi.fn() },
       listProposals: { invoke: vi.fn() },
       acceptProposal: { invoke: vi.fn() },
       rejectProposal: { invoke: vi.fn() },
@@ -146,6 +153,10 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
       mocks.cutActions = props.cutActions;
       mocks.referenceActions = props.referenceActions ?? null;
       mocks.workspaceMutations = props.mutations;
+      mocks.workspaceControlsProps = {
+        onReviewShotReferenceBinding: props.onReviewShotReferenceBinding,
+        projectStatus: props.projectStatus,
+      };
       return React.createElement(actual.WorkspaceControls, props);
     },
     WorkspaceProjectMenu: (props: React.ComponentProps<typeof actual.WorkspaceProjectMenu>) => {
@@ -1190,6 +1201,181 @@ const chainStatus = (source: number | StudioRendererProjectV2): StudioRendererCh
   };
 };
 
+const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV2 => {
+  const positions = authority.beatOrder.flatMap((beatId, beatIndex) => {
+    const beat = authority.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.flatMap((shotId, shotIndex) => {
+      const shot = authority.shots[shotId];
+      return shot?.id === shotId ? [{ beat, beatIndex, shot, shotIndex }] : [];
+    });
+  });
+  const shotCount = positions.length;
+  const currentTakeCount = positions.filter(({ shot }) => shot.videoAssetId !== null).length;
+  const plannedSeconds = positions.reduce((sum, { shot }) => sum + shot.durationSeconds, 0);
+  const referenceDetails = authority.referenceOrder.flatMap((referenceId) => {
+    const reference = authority.references[referenceId];
+    return reference?.id === referenceId
+      ? [
+          {
+            referenceId,
+            kind: reference.kind,
+            approved: reference.approvedAssetId !== null,
+            latestJob: null,
+          },
+        ]
+      : [];
+  });
+  const referenceBlockers = referenceDetails.flatMap((reference) =>
+    reference.approved
+      ? []
+      : [
+          {
+            cause: 'reference_approval_required' as const,
+            where: { kind: 'reference' as const, referenceId: reference.referenceId, jobId: null },
+            remedy: { kind: 'owner_only' as const, reason: 'approve_reference' as const },
+          },
+        ]
+  );
+  const bindingDetails = positions.map(({ beat, beatIndex, shot, shotIndex }) => {
+    const selectedCount =
+      shot.referenceBinding.characterReferenceIds.length +
+      (shot.referenceBinding.backgroundReferenceId === null ? 0 : 1);
+    return {
+      beat,
+      beatIndex,
+      shot,
+      shotIndex,
+      binding:
+        shot.referenceBinding.status === 'unassigned'
+          ? ({ status: 'unassigned', selectedCount, limit: 3 } as const)
+          : ({ status: 'ready', selectedCount, limit: 3 } as const),
+    };
+  });
+  const bindingBlockers = bindingDetails.flatMap(({ beat, beatIndex, shot, shotIndex, binding }) =>
+    binding.status === 'ready'
+      ? []
+      : [
+          {
+            cause: 'reference_binding_unassigned' as const,
+            where: {
+              kind: 'shot' as const,
+              beatId: beat.id,
+              shotId: shot.id,
+              beatPosition: beatIndex + 1,
+              shotPosition: shotIndex + 1,
+              jobId: null,
+            },
+            remedy: {
+              kind: 'free_fix' as const,
+              op: 'set_shot_reference_binding' as const,
+              shotId: shot.id,
+            },
+          },
+        ]
+  );
+  const stages: StudioProjectStatusStageV2[] = [
+    {
+      id: 'brief',
+      state: authority.brief.trim() === '' ? 'not_started' : 'complete',
+      summary: { stage: 'brief', hasBrief: authority.brief.trim() !== '' },
+      blockers: [],
+    },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state: referenceDetails.length === 0 ? 'not_started' : referenceBlockers.length === 0 ? 'complete' : 'blocked',
+      summary: {
+        stage: 'references',
+        plannedCount: referenceDetails.length,
+        approvedCount: referenceDetails.filter((reference) => reference.approved).length,
+      },
+      blockers: referenceBlockers,
+    },
+    {
+      id: 'storyboard',
+      state: shotCount === 0 ? 'not_started' : 'complete',
+      summary: {
+        stage: 'storyboard',
+        beatCount: authority.beatOrder.length,
+        shotCount,
+        authoredShotCount: positions.filter(({ shot }) => shot.shootingScript.trim() !== '').length,
+        plannedSeconds,
+        targetSeconds: authority.targetDurationSeconds,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state: shotCount === 0 ? 'not_started' : bindingBlockers.length === 0 ? 'complete' : 'blocked',
+      summary: {
+        stage: 'bindings',
+        readyShotCount: bindingDetails.filter(({ binding }) => binding.status === 'ready').length,
+        shotCount,
+        maxConditioningImages: 3,
+      },
+      blockers: bindingBlockers,
+    },
+    {
+      id: 'production',
+      state:
+        currentTakeCount === 0
+          ? 'not_started'
+          : currentTakeCount === shotCount && shotCount > 0
+            ? 'complete'
+            : 'in_progress',
+      summary: { stage: 'production', currentTakeCount, shotCount, activeJobCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'cut',
+      state:
+        currentTakeCount === 0
+          ? 'not_started'
+          : currentTakeCount === shotCount && shotCount > 0
+            ? 'complete'
+            : 'in_progress',
+      summary: {
+        stage: 'cut',
+        currentTakeCount,
+        shotCount,
+        durationSeconds: currentTakeCount === shotCount && shotCount > 0 ? plannedSeconds : null,
+        targetSeconds: authority.targetDurationSeconds,
+        structurallyPlayable: currentTakeCount === shotCount && shotCount > 0,
+      },
+      blockers: [],
+    },
+  ];
+  return {
+    projectId: authority.id,
+    projectRevision: authority.revision,
+    catalogVersion: 'catalog_1',
+    stages,
+    blockerCount: referenceBlockers.length + bindingBlockers.length,
+    advisories: [],
+    boards: { currentPictureCount: currentTakeCount, shotCount },
+    detail: {
+      shots: bindingDetails.map(({ beat, beatIndex, shot, shotIndex, binding }) => ({
+        beatId: beat.id,
+        shotId: shot.id,
+        beatPosition: beatIndex + 1,
+        shotPosition: shotIndex + 1,
+        seedStillAssetId: shot.seedStillId,
+        videoAssetId: shot.videoAssetId,
+        latestGenerationJob: null,
+        binding,
+        conditioning: null,
+      })),
+      references: referenceDetails,
+    },
+  };
+};
+
 const projectWorkspaceLoad = (
   authority: StudioRendererProjectV2,
   workspace = workspaceStatus(authority),
@@ -1204,6 +1390,7 @@ const mockSupportedProject = (authority: StudioRendererProjectV2): void => {
   mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: authority }));
   mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(authority)));
   mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(authority)));
+  mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(authority)));
 };
 
 const installCompositeProjectWorkspaceRead = (): void => {
@@ -1602,6 +1789,7 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.referenceActions = null;
     mocks.workspaceMutations = null;
     mocks.projectMenuProps = null;
+    mocks.workspaceControlsProps = null;
     mocks.directorProposalIntent = null;
     mocks.directorDraftRequest = null;
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
@@ -1610,6 +1798,7 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([]));
     mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(3)));
     mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(3)));
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(project())));
     installCompositeProjectWorkspaceRead();
     mocks.bridge.listRoutes.invoke.mockResolvedValue(
       ok({
@@ -3277,7 +3466,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('wires exact generation remedies to the affected route role and Shot reference editor', async () => {
+  it('wires exact generation remedies and Board review to the affected route and active Shot editor', async () => {
     const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
     mockSupportedProject(authority);
     renderStudio();
@@ -3289,19 +3478,30 @@ describe('StudioPage schema-5 cutover', () => {
     expect(within(dialog).getByRole('combobox', { name: IMAGE_ROUTE })).not.toHaveFocus();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
 
-    act(() =>
-      capturedBeatPanelActions().resolveGenerationBlock('shot_0', {
-        code: 'reference_binding',
-        role: 'image',
-        reason: 'unassigned',
-        selectedCount: 0,
-        limit: 3,
-      })
-    );
+    await waitFor(() => expect(mocks.workspaceControlsProps?.projectStatus?.projectRevision).toBe(authority.revision));
+    act(() => mocks.workspaceControlsProps?.onReviewShotReferenceBinding('shot_0'));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
     await waitFor(() =>
       expect(document.querySelector('[data-shot-id="shot_0"]')).toHaveAttribute('data-shot-binding-highlighted', 'true')
     );
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('refuses Board reference focus for retained or unknown Shot identities without navigation or spend', async () => {
+    const authority = projectWithRetainedReferenceDownloadBlocker('shot');
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1/board');
+    await waitFor(() => expect(mocks.workspaceControlsProps).not.toBeNull());
+
+    act(() => {
+      mocks.workspaceControlsProps?.onReviewShotReferenceBinding('shot_0');
+      mocks.workspaceControlsProps?.onReviewShotReferenceBinding('shot_unknown');
+    });
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('filters a Main-blocked independent Film anchor out of paid review', async () => {
@@ -5502,6 +5702,186 @@ describe('StudioPage schema-5 cutover', () => {
     expect(latestHookResult?.routeErrorMessageKey).toBe('conversation.creativeStudio.workspace.errors.storage');
   });
 
+  it('loads detailed project status and refreshes it only after the exact project revision installs', async () => {
+    const initial = project();
+    const revised = { ...project(), revision: 4, name: 'Revision four' };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockReset()
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(revised));
+    mocks.bridge.getProjectStatus.invoke
+      .mockResolvedValueOnce(ok(projectStatus(initial)))
+      .mockResolvedValue(ok(projectStatus(revised)));
+
+    render(<HookProbe projectId={initial.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(initial.revision));
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: initial.id,
+      detail: true,
+    });
+
+    act(() => mocks.listeners.projectUpdated?.({ projectId: initial.id }));
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(revised.revision));
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(revised.revision));
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenLastCalledWith({ projectId: initial.id, detail: true });
+
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    await act(async () => {
+      await latestHookResult!.refetchProjectWorkspace();
+    });
+    await waitFor(() =>
+      expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: initial.id,
+        detail: true,
+      })
+    );
+
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    await act(async () => {
+      await latestHookResult!.refetchAll();
+    });
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: initial.id,
+      detail: true,
+    });
+  });
+
+  it('does not place a deferred read-only status refresh on the workspace mutation completion path', async () => {
+    const authority = project();
+    const delayedStatus = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    render(<HookProbe projectId={authority.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockReturnValueOnce(delayedStatus.promise);
+
+    let refreshed: StudioRendererProjectV2 | null = null;
+    await act(async () => {
+      refreshed = await latestHookResult!.refetchProjectWorkspace();
+    });
+
+    expect(refreshed?.revision).toBe(authority.revision);
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledOnce());
+    expect(latestHookResult?.projectStatus).toBeNull();
+
+    await act(async () => {
+      delayedStatus.resolve(ok(projectStatus(authority)));
+      await delayedStatus.promise;
+    });
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+  });
+
+  it('marks same-revision status unavailable while an explicit route refresh is still resolving it', async () => {
+    const authority = project();
+    const delayedStatus = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    render(<HookProbe projectId={authority.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockReturnValueOnce(delayedStatus.promise);
+
+    let refreshPromise!: Promise<boolean>;
+    act(() => {
+      refreshPromise = latestHookResult!.refetchRoutes();
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledOnce());
+    expect(latestHookResult?.projectStatus).toBeNull();
+
+    await act(async () => {
+      delayedStatus.resolve(ok(projectStatus(authority)));
+      expect(await refreshPromise).toBe(true);
+    });
+    expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision);
+  });
+
+  it('fails route and status snapshots closed without a false storage error when inventory versions move', async () => {
+    const authority = project();
+    render(<HookProbe projectId={authority.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+    mocks.bridge.listRoutes.invoke.mockResolvedValueOnce(
+      ok({
+        image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_2',
+      })
+    );
+    mocks.bridge.getGenerationCapability.invoke.mockImplementationOnce(
+      async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) =>
+        supportedCapabilityResult(input, 'catalog_2')
+    );
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValueOnce(ok(projectStatus(authority)));
+
+    await act(async () => {
+      expect(await latestHookResult!.refetchRoutes()).toBe(true);
+    });
+
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.routeCatalog).toBeNull();
+    expect(latestHookResult?.generationCapability).toBeNull();
+    expect(latestHookResult?.routeErrorMessageKey).toBeNull();
+  });
+
+  it('discards delayed status from an obsolete project binding and installs only the current project status', async () => {
+    const projectA = project();
+    const projectB = { ...project(), id: 'project_2', revision: 6, name: 'Project B' };
+    const delayedA = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) =>
+      Promise.resolve(projectWorkspaceLoad(projectId === projectB.id ? projectB : projectA))
+    );
+    mocks.bridge.getProjectStatus.invoke.mockImplementation(({ projectId }: { projectId: string }) =>
+      projectId === projectA.id ? delayedA.promise : Promise.resolve(ok(projectStatus(projectB)))
+    );
+
+    const view = render(<HookProbe projectId={projectA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
+    expect(latestHookResult?.projectStatus).toBeNull();
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectId).toBe(projectB.id));
+
+    await act(async () => {
+      delayedA.resolve(ok(projectStatus(projectA)));
+      await delayedA.promise;
+    });
+    expect(latestHookResult?.project?.id).toBe(projectB.id);
+    expect(latestHookResult?.projectStatus?.projectId).toBe(projectB.id);
+    expect(latestHookResult?.projectStatus?.projectRevision).toBe(projectB.revision);
+  });
+
+  it('keeps the latest same-binding status request when an older response arrives last', async () => {
+    const authority = project();
+    const older = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    const latest = { ...projectStatus(authority), blockerCount: 7 };
+    mocks.bridge.getProjectStatus.invoke.mockReturnValueOnce(older.promise).mockResolvedValue(ok(latest));
+
+    render(<HookProbe projectId={authority.id} />);
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(1));
+    act(() => mocks.listeners.projectUpdated?.({ projectId: authority.id }));
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(latestHookResult?.projectStatus?.blockerCount).toBe(7));
+
+    await act(async () => {
+      older.resolve(ok(projectStatus(authority)));
+      await older.promise;
+    });
+    expect(latestHookResult?.projectStatus?.blockerCount).toBe(7);
+  });
+
+  it('clears status on status-provider failure without demoting the supported project shell', async () => {
+    render(<HookProbe projectId='project_1' />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(3));
+    mocks.bridge.getProjectStatus.invoke.mockRejectedValueOnce(new Error('status offline'));
+
+    let refreshed = false;
+    await act(async () => {
+      refreshed = await latestHookResult!.refetchRoutes();
+    });
+
+    expect(refreshed).toBe(true);
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.project?.id).toBe('project_1');
+    expect(latestHookResult?.loadState).toBe('supported');
+    expect(latestHookResult?.errorMessageKey).toBeNull();
+  });
+
   it('coalesces each active composite read into one trailing epoch without starving earlier callers', async () => {
     const initial = project();
     const revision4 = { ...project(), revision: 4, name: 'Revision four' };
@@ -5736,6 +6116,7 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.bridge.listReferenceGenerationHandoffs.invoke.mockClear();
     mocks.bridge.listRoutes.invoke.mockClear();
     mocks.bridge.listExports.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockClear();
 
     let staleProject: StudioRendererProjectV2 | null = reboundA;
     let staleRouteResult = true;
@@ -5759,6 +6140,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.listRoutes.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.listExports.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.getProjectStatus.invoke).not.toHaveBeenCalled();
     expect(latestHookResult?.project?.revision).toBe(reboundA.revision);
   });
 

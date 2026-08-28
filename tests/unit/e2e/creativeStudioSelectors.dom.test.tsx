@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => {
       decideReferenceRequest: { invoke: vi.fn() },
       listReferenceGenerationHandoffs: { invoke: vi.fn() },
       getProjectWorkspace: { invoke: vi.fn() },
+      getProjectStatus: { invoke: vi.fn() },
       listRoutes: { invoke: vi.fn() },
       getFilmExportCapability: { invoke: vi.fn() },
       getFilmExportStatus: { invoke: vi.fn() },
@@ -68,6 +69,7 @@ const project: StudioRendererProjectV2 = {
   beatOrder: [],
   beats: {},
   shots: {},
+  referencePlanStatus: 'unplanned',
   referenceOrder: [],
   references: {},
   bin: [],
@@ -127,6 +129,71 @@ describe('Creative Studio E2E selectors', () => {
         },
       },
     });
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue({
+      ok: true,
+      data: {
+        projectId: project.id,
+        projectRevision: project.revision,
+        catalogVersion: '0123456789abcdef',
+        stages: [
+          { id: 'brief', state: 'complete', summary: { stage: 'brief', hasBrief: true }, blockers: [] },
+          {
+            id: 'engines',
+            state: 'complete',
+            summary: { stage: 'engines', image: 'ready', video: 'ready' },
+            blockers: [],
+          },
+          {
+            id: 'references',
+            state: 'not_started',
+            summary: { stage: 'references', plannedCount: 0, approvedCount: 0 },
+            blockers: [],
+          },
+          {
+            id: 'storyboard',
+            state: 'not_started',
+            summary: {
+              stage: 'storyboard',
+              beatCount: 0,
+              shotCount: 0,
+              authoredShotCount: 0,
+              plannedSeconds: 0,
+              targetSeconds: 18,
+            },
+            blockers: [],
+          },
+          {
+            id: 'bindings',
+            state: 'not_started',
+            summary: { stage: 'bindings', readyShotCount: 0, shotCount: 0, maxConditioningImages: 3 },
+            blockers: [],
+          },
+          {
+            id: 'production',
+            state: 'not_started',
+            summary: { stage: 'production', currentTakeCount: 0, shotCount: 0, activeJobCount: 0 },
+            blockers: [],
+          },
+          {
+            id: 'cut',
+            state: 'not_started',
+            summary: {
+              stage: 'cut',
+              currentTakeCount: 0,
+              shotCount: 0,
+              durationSeconds: null,
+              targetSeconds: 18,
+              structurallyPlayable: false,
+            },
+            blockers: [],
+          },
+        ],
+        blockerCount: 0,
+        advisories: [],
+        boards: { currentPictureCount: 0, shotCount: 0 },
+        detail: { shots: [], references: [] },
+      },
+    });
     mocks.bridge.listRoutes.invoke.mockResolvedValue({
       ok: true,
       data: {
@@ -155,6 +222,10 @@ describe('Creative Studio E2E selectors', () => {
     );
 
     await screen.findByRole('heading', { level: 1, name: 'Launch film' });
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      detail: true,
+    });
     const selectors = studioSpecSelectors();
     expect(selectors).toEqual([
       '[data-studio-workspace]',

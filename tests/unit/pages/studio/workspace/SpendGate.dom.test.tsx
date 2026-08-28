@@ -12,6 +12,8 @@ import type {
   StudioRendererSubmissionQuoteV2,
   StudioRendererWorkspaceStatusV2,
   StudioRouteCatalogV2,
+  StudioProjectStatusStageV2,
+  StudioProjectStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 
 const mocks = vi.hoisted(() => ({
@@ -789,6 +791,116 @@ const readyChainStatus = (source: number | StudioRendererProjectV2 = 3): StudioR
 const readyProjection = (project: StudioRendererProjectV2) =>
   projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
 
+const projectStatus = (project: StudioRendererProjectV2): StudioProjectStatusV2 => {
+  const positions = project.beatOrder.flatMap((beatId, beatIndex) => {
+    const beat = project.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.flatMap((shotId, shotIndex) => {
+      const shot = project.shots[shotId];
+      return shot?.id === shotId ? [{ beatId, beatIndex, shot, shotIndex }] : [];
+    });
+  });
+  const unassigned = positions.filter(({ shot }) => shot.referenceBinding.status === 'unassigned');
+  const bindingBlockers = unassigned.map(({ beatId, beatIndex, shot, shotIndex }) => ({
+    cause: 'reference_binding_unassigned' as const,
+    where: {
+      kind: 'shot' as const,
+      beatId,
+      shotId: shot.id,
+      beatPosition: beatIndex + 1,
+      shotPosition: shotIndex + 1,
+      jobId: null,
+    },
+    remedy: { kind: 'free_fix' as const, op: 'set_shot_reference_binding' as const, shotId: shot.id },
+  }));
+  const shotCount = positions.length;
+  const plannedSeconds = positions.reduce((sum, { shot }) => sum + shot.durationSeconds, 0);
+  const stages: StudioProjectStatusStageV2[] = [
+    { id: 'brief', state: 'complete', summary: { stage: 'brief', hasBrief: true }, blockers: [] },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state: 'not_started',
+      summary: { stage: 'references', plannedCount: 0, approvedCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'storyboard',
+      state: 'complete',
+      summary: {
+        stage: 'storyboard',
+        beatCount: project.beatOrder.length,
+        shotCount,
+        authoredShotCount: shotCount,
+        plannedSeconds,
+        targetSeconds: project.targetDurationSeconds,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state: bindingBlockers.length === 0 ? 'complete' : 'blocked',
+      summary: {
+        stage: 'bindings',
+        readyShotCount: shotCount - bindingBlockers.length,
+        shotCount,
+        maxConditioningImages: 3,
+      },
+      blockers: bindingBlockers,
+    },
+    {
+      id: 'production',
+      state: 'not_started',
+      summary: { stage: 'production', currentTakeCount: 0, shotCount, activeJobCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'cut',
+      state: 'not_started',
+      summary: {
+        stage: 'cut',
+        currentTakeCount: 0,
+        shotCount,
+        durationSeconds: null,
+        targetSeconds: project.targetDurationSeconds,
+        structurallyPlayable: false,
+      },
+      blockers: [],
+    },
+  ];
+  return {
+    projectId: project.id,
+    projectRevision: project.revision,
+    catalogVersion: '0123456789abcdef',
+    stages,
+    blockerCount: bindingBlockers.length,
+    advisories: [],
+    boards: { currentPictureCount: 0, shotCount },
+    detail: {
+      shots: positions.map(({ beatId, beatIndex, shot, shotIndex }) => ({
+        beatId,
+        shotId: shot.id,
+        beatPosition: beatIndex + 1,
+        shotPosition: shotIndex + 1,
+        seedStillAssetId: null,
+        videoAssetId: null,
+        latestGenerationJob: null,
+        binding:
+          shot.referenceBinding.status === 'unassigned'
+            ? { status: 'unassigned' as const, selectedCount: 0, limit: 3 }
+            : { status: 'ready' as const, selectedCount: 0, limit: 3 },
+        conditioning: null,
+      })),
+      references: [],
+    },
+  };
+};
+
 const ControlsHarness: React.FC<{
   routes: StudioRouteCatalogV2 | null;
   open: ReturnType<typeof vi.fn>;
@@ -804,6 +916,8 @@ const ControlsHarness: React.FC<{
   activeView?: 'table' | 'board' | 'cut';
   shotEditFocusIntent?: StudioShotEditFocusIntent | null;
   onShotEditFocusIntentConsumed?: (intentId: string) => void;
+  projectStatus?: StudioProjectStatusV2 | null;
+  onReviewShotReferenceBinding?: (shotId: string) => void;
 }> = ({
   routes,
   open: _open,
@@ -819,6 +933,8 @@ const ControlsHarness: React.FC<{
   activeView = 'table',
   shotEditFocusIntent = null,
   onShotEditFocusIntentConsumed,
+  projectStatus: statusAuthority = null,
+  onReviewShotReferenceBinding = vi.fn(),
 }) => {
   const project = projectOverride === undefined ? makeProject() : { ...projectOverride };
   if (spendPolicy) project.spendPolicy = { currency: 'USD', maxPerBatchMinorUnits: 1_000 };
@@ -884,6 +1000,7 @@ const ControlsHarness: React.FC<{
         activeView={activeView}
         project={project}
         projection={projection}
+        projectStatus={statusAuthority}
         exportCatalog={null}
         drafts={drafts}
         pending={pending}
@@ -900,6 +1017,7 @@ const ControlsHarness: React.FC<{
         beatPanelReviewBlockedMessageKey={null}
         shotEditFocusIntent={shotEditFocusIntent}
         onShotEditFocusIntentConsumed={onShotEditFocusIntentConsumed}
+        onReviewShotReferenceBinding={onReviewShotReferenceBinding}
       />
     </>
   );
@@ -1543,6 +1661,37 @@ describe('Board spend gate draft', () => {
 
 describe('WorkspaceControls', () => {
   beforeEach(() => window.sessionStorage.clear());
+
+  it('forwards an exact Board reference-binding review without preparing or confirming spend', async () => {
+    const authority = makeProject();
+    authority.shots.shot_1!.referenceBinding = {
+      status: 'unassigned',
+      characterReferenceIds: [],
+      backgroundReferenceId: null,
+    };
+    const review = vi.fn();
+    mocks.prepare.mockClear();
+    mocks.confirm.mockClear();
+    render(
+      <ControlsHarness
+        activeView='board'
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        project={authority}
+        projectStatus={projectStatus(authority)}
+        onReviewShotReferenceBinding={review}
+      />
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.board.shot.blocker.reviewOnTable',
+      })
+    );
+    expect(review).toHaveBeenCalledExactlyOnceWith('shot_1');
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    expect(mocks.confirm).not.toHaveBeenCalled();
+  });
 
   it('appends one opaque Beat and opens it only after the refreshed projection contains that identity', async () => {
     const initial = makeProject();

@@ -16,6 +16,7 @@ import type {
   StudioRendererAuthoringOperationV2,
   StudioRendererExportCatalogV2,
   StudioRendererProjectV2,
+  StudioProjectStatusV2,
   StudioResolution,
   StudioRouteCatalogV2,
   StudioView,
@@ -77,6 +78,7 @@ export type WorkspaceMutationCallbacks = {
 export type WorkspaceControlsProps = {
   activeView: StudioView;
   project: StudioRendererProjectV2;
+  projectStatus: StudioProjectStatusV2 | null;
   projection: WorkspaceProjection;
   drafts: UseWorkspaceDraftsResult;
   pending: boolean;
@@ -98,6 +100,7 @@ export type WorkspaceControlsProps = {
   onReferenceFocusIntentConsumed?: (intentId: string) => void;
   shotEditFocusIntent?: StudioShotEditFocusIntent | null;
   onShotEditFocusIntentConsumed?: (intentId: string) => void;
+  onReviewShotReferenceBinding: (shotId: string) => void;
 };
 
 export type WorkspaceProjectMenuProps = Pick<
