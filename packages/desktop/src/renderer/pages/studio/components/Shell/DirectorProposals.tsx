@@ -9,6 +9,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
+  StudioPaidRecoveryQuoteSummaryV2,
   StudioRendererProposalV2,
   StudioReferenceRequestV2,
   StudioRendererProjectV2,
@@ -31,6 +32,9 @@ export type DirectorProposalsProps = {
   referenceErrorMessageKey?: string | null;
   onAcceptProposal: (proposalId: string) => Promise<void>;
   onRejectProposal: (proposalId: string) => Promise<void>;
+  paidRecoveryQuote?: (proposal: StudioRendererProposalV2) => StudioPaidRecoveryQuoteSummaryV2 | null;
+  paidRecoveryStatusMessageKey?: (proposal: StudioRendererProposalV2) => string | null;
+  onPaidRecoveryAction?: (proposalId: string) => Promise<void>;
   onRequestUpdatedProposal?: (proposalId: string, saveWorkspaceDrafts: boolean) => Promise<void>;
   onReviewRuleDrafts?: () => void;
   onEditProposalShots?: (beatId: string, shotIds: readonly string[]) => void;
@@ -84,6 +88,9 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   referenceErrorMessageKey = null,
   onAcceptProposal,
   onRejectProposal,
+  paidRecoveryQuote = () => null,
+  paidRecoveryStatusMessageKey = () => null,
+  onPaidRecoveryAction,
   onRequestUpdatedProposal = async () => undefined,
   onReviewRuleDrafts = () => undefined,
   onEditProposalShots = () => undefined,
@@ -145,6 +152,9 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
           acceptBlockedMessageKey={null}
           onAccept={onAcceptProposal}
           onReject={onRejectProposal}
+          paidRecoveryQuote={paidRecoveryQuote(proposal)}
+          paidRecoveryStatusMessageKey={paidRecoveryStatusMessageKey(proposal)}
+          onPaidRecoveryAction={onPaidRecoveryAction}
           onRequestUpdated={onRequestUpdatedProposal}
           onReviewRuleDrafts={onReviewRuleDrafts}
           onEditShotsDirectly={onEditProposalShots}
@@ -193,6 +203,9 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
                   acceptBlockedMessageKey={null}
                   onAccept={onAcceptProposal}
                   onReject={onRejectProposal}
+                  paidRecoveryQuote={paidRecoveryQuote(proposal)}
+                  paidRecoveryStatusMessageKey={paidRecoveryStatusMessageKey(proposal)}
+                  onPaidRecoveryAction={onPaidRecoveryAction}
                   onRequestUpdated={onRequestUpdatedProposal}
                   onReviewRuleDrafts={onReviewRuleDrafts}
                   onEditShotsDirectly={onEditProposalShots}

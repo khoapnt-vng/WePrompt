@@ -374,6 +374,29 @@ const localizedTableReorderKeys = [
   'table.reorder.failed',
 ] as const;
 
+const localizedPaidRecoveryKeys = [
+  'proposals.paidRecovery.heading',
+  'proposals.paidRecovery.explanation',
+  'proposals.paidRecovery.blockedBy',
+  'proposals.paidRecovery.affectedWork',
+  'proposals.paidRecovery.price',
+  'proposals.paidRecovery.priceRange',
+  'proposals.paidRecovery.generations',
+  'proposals.paidRecovery.generationCount',
+  'proposals.paidRecovery.includesCascade',
+  'proposals.paidRecovery.expires',
+  'proposals.paidRecovery.expired',
+  'proposals.paidRecovery.confirm',
+  'proposals.paidRecovery.refresh',
+  'proposals.paidRecovery.refreshed',
+  'proposals.paidRecovery.cardOnly',
+  'proposals.paidRecovery.location.project',
+  'proposals.paidRecovery.location.cut',
+  'proposals.paidRecovery.location.route',
+  'proposals.paidRecovery.location.reference',
+  'proposals.paidRecovery.location.shot',
+] as const;
+
 const expectedLeaves = [
   ...localizedFirstFramesPanelKeys,
   ...localizedShotStatusKeys,
@@ -960,6 +983,7 @@ const expectedLeaves = [
   'proposals.emptyAuthoredField',
   'proposals.reviewStale',
   'proposals.noChanges',
+  ...localizedPaidRecoveryKeys,
   'proposals.subject.project',
   'proposals.subject.beat',
   'proposals.subject.shot',
@@ -1431,6 +1455,7 @@ const localizedWorkspaceKeys = [
   'proposals.chatDirty',
   'proposals.reviewStale',
   'proposals.noChanges',
+  ...localizedPaidRecoveryKeys,
   'proposals.subject.project',
   'proposals.subject.beat',
   'proposals.subject.shot',
@@ -2244,6 +2269,7 @@ describe('Creative Studio workspace translations', () => {
         ...localizedMoveToBinKeys,
         ...localizedBoardKeys,
         ...localizedBoardPromotionKeys,
+        ...localizedPaidRecoveryKeys,
         'table.columns.length',
         'table.columns.story',
         'table.plannedPending',

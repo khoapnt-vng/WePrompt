@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { isDeepStrictEqual } from 'node:util';
+
 import {
   STUDIO_DIRECTOR_COMMAND_CLOCK_SKEW_MS,
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
@@ -13,8 +15,10 @@ import {
   STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2,
   STUDIO_PROJECT_STATUS_STAGE_ORDER_V2,
   STUDIO_REFERENCE_BINDING_FAILURE_REASONS_V2,
+  STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_PREPARED_QUOTE_TTL_SECONDS,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
@@ -26,6 +30,8 @@ import {
   type StudioDirectorFreeRecoveryAppliedReceiptV2,
   type StudioDirectorFreeRecoveryCommandRecordV2,
   type StudioDirectorFreeRecoveryV2,
+  type StudioDirectorPaidRecoveryCommandRecordV2,
+  type StudioDirectorPaidRecoveryRecordedReceiptV2,
   type StudioDirectorQueryCommandRecordV2,
   type StudioDirectorQueryReceiptV2,
   type StudioDirectorQueryV2,
@@ -48,9 +54,11 @@ import { validateStudioMutationOperationV2 } from './schema2/mutations';
 type JsonRecord = Record<string, unknown>;
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
+const CURRENCY = /^[A-Z]{3}$/;
 const COMMAND_BASE_KEYS = ['schemaVersion', 'commandId', 'projectId', 'createdAt', 'deadlineAt', 'policy'] as const;
 const AUTO_APPLY_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'expectedRevision', 'operations']);
 const FREE_FIX_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'expectedRevision', 'recovery']);
+const PAID_RECOVERY_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'expectedRevision', 'blocker']);
 const PROJECT_STATUS_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'detail']);
 const LIST_ROUTES_COMMAND_KEYS = new Set(COMMAND_BASE_KEYS);
 const GET_PROPOSAL_COMMAND_KEYS = new Set([...COMMAND_BASE_KEYS, 'proposalId']);
@@ -180,6 +188,15 @@ const V2_FREE_FIX_APPLIED_RECEIPT_KEYS = new Set([
   'appliedRevision',
   'recovery',
 ]);
+const V2_PAID_RECOVERY_RECORDED_RECEIPT_KEYS = new Set([
+  'schemaVersion',
+  'commandId',
+  'projectId',
+  'expectedRevision',
+  'decidedAt',
+  'status',
+  'proposal',
+]);
 const V2_REJECTION_CODES = new Set([
   'malformed_record',
   'unsupported_version',
@@ -219,6 +236,17 @@ const V2_PROPOSAL_RECORD_KEYS = new Set([
 ]);
 const V2_PROPOSAL_MUTATION_PAYLOAD_KEYS = new Set(['kind', 'operations']);
 const V2_PROPOSAL_PIN_RULE_PAYLOAD_KEYS = new Set(['kind', 'rule']);
+const V2_PROPOSAL_PAID_RECOVERY_PAYLOAD_KEYS = new Set(['kind', 'blocker', 'quote']);
+const V2_PAID_RECOVERY_QUOTE_KEYS = new Set([
+  'quoteId',
+  'projectRevision',
+  'expiresAt',
+  'currency',
+  'lowerMinorUnits',
+  'upperMinorUnits',
+  'itemCount',
+  'includesCascade',
+]);
 const V2_PROPOSAL_RULE_KEYS = new Set(['text', 'predicate']);
 const V2_RULE_PREDICATE_KEYS = new Set(['kind', 'terms']);
 const V2_PROPOSAL_DECISION_KEYS = new Set(['schemaVersion', 'proposalId', 'status', 'decidedAt']);
@@ -600,6 +628,14 @@ const validatesBlockerV2 = (value: unknown): boolean => {
   // earlier root of its current segment. The prepare payload is shape-checked
   // above; only continuity changes are guaranteed to target `where` exactly.
   return true;
+};
+
+/** Strict shared contract for the exact paid blocker a Director may copy from detailed status. */
+export const validatesStudioPaidRecoveryBlockerV2 = (value: unknown): boolean => {
+  if (!validatesBlockerV2(value)) return false;
+  const blocker = snapshotDataRecordV2(value);
+  const remedy = blocker === null ? null : snapshotDataRecordV2(blocker.remedy);
+  return remedy?.kind === 'proposal';
 };
 
 const validatesSummaryV2 = (value: unknown, stage: (typeof STUDIO_PROJECT_STATUS_STAGE_ORDER_V2)[number]): boolean => {
@@ -1381,6 +1417,10 @@ export function parseStudioDirectorPendingRecordV2(input: {
       hasExactKeysV2(value, FREE_FIX_COMMAND_KEYS) &&
       isRevision(value.expectedRevision) &&
       validateStudioDirectorFreeRecoveryV2(value.recovery)) ||
+    (value.policy === 'propose_paid_recovery' &&
+      hasExactKeysV2(value, PAID_RECOVERY_COMMAND_KEYS) &&
+      isRevision(value.expectedRevision) &&
+      validatesStudioPaidRecoveryBlockerV2(value.blocker)) ||
     (value.policy === 'get_project_status' &&
       hasExactKeysV2(value, PROJECT_STATUS_COMMAND_KEYS) &&
       typeof value.detail === 'boolean') ||
@@ -1459,6 +1499,29 @@ export function parseStudioDirectorCommandReceiptV2(input: {
     }
     return invalidSidecarV2();
   }
+  if (value.status === 'recorded') {
+    if (
+      !hasExactKeysV2(value, V2_PAID_RECOVERY_RECORDED_RECEIPT_KEYS) ||
+      !isRevision(value.expectedRevision) ||
+      !isRecord(value.proposal)
+    ) {
+      return invalidSidecarV2();
+    }
+    const parsedProposal = parseStudioProposalRecordV2({
+      projectId: input.projectId,
+      proposalId: input.commandId,
+      value: value.proposal,
+    });
+    if (
+      parsedProposal.status !== 'valid' ||
+      parsedProposal.record.baseRevision !== value.expectedRevision ||
+      parsedProposal.record.payload.kind !== 'paid_recovery' ||
+      Date.parse(value.decidedAt as string) < Date.parse(parsedProposal.record.createdAt)
+    ) {
+      return invalidSidecarV2();
+    }
+    return validSidecarV2(value as StudioDirectorPaidRecoveryRecordedReceiptV2);
+  }
   if (!fitsCommandRecord(value)) return invalidSidecarV2();
   if (value.status === 'applied') {
     if (Object.hasOwn(value, 'recovery')) {
@@ -1519,6 +1582,10 @@ export const isStudioDirectorFreeRecoveryCommandV2 = (
   command: StudioDirectorCommandRecordV2
 ): command is StudioDirectorFreeRecoveryCommandRecordV2 => command.policy === 'apply_free_fix';
 
+export const isStudioDirectorPaidRecoveryCommandV2 = (
+  command: StudioDirectorCommandRecordV2
+): command is StudioDirectorPaidRecoveryCommandRecordV2 => command.policy === 'propose_paid_recovery';
+
 export const isStudioDirectorFreeRecoveryAppliedReceiptV2 = (
   receipt: StudioDirectorCommandReceiptV2
 ): receipt is StudioDirectorFreeRecoveryAppliedReceiptV2 => receipt.status === 'applied' && 'recovery' in receipt;
@@ -1544,11 +1611,18 @@ export const studioDirectorCommandReceiptMatchesRecordV2 = (
     return (
       !isStudioDirectorQueryReceiptV2(receipt) &&
       !isStudioDirectorFreeRecoveryAppliedReceiptV2(receipt) &&
+      receipt.status !== 'recorded' &&
       receipt.expectedRevision === command.expectedRevision
     );
   }
   if (isStudioDirectorFreeRecoveryCommandV2(command)) {
-    if (isStudioDirectorQueryReceiptV2(receipt) || receipt.expectedRevision !== command.expectedRevision) return false;
+    if (
+      isStudioDirectorQueryReceiptV2(receipt) ||
+      receipt.status === 'recorded' ||
+      receipt.expectedRevision !== command.expectedRevision
+    ) {
+      return false;
+    }
     if (receipt.status !== 'applied') return true;
     if (!isStudioDirectorFreeRecoveryAppliedReceiptV2(receipt) || receipt.recovery.op !== command.recovery.op) {
       return false;
@@ -1557,6 +1631,21 @@ export const studioDirectorCommandReceiptMatchesRecordV2 = (
       ? receipt.recovery.op === 'retry_conditioning_frame' &&
           receipt.recovery.dependentShotId === command.recovery.dependentShotId
       : receipt.recovery.op === 'terminalize_refused_job' && receipt.recovery.jobId === command.recovery.jobId;
+  }
+  if (isStudioDirectorPaidRecoveryCommandV2(command)) {
+    if (receipt.status !== 'recorded') {
+      return (
+        !isStudioDirectorQueryReceiptV2(receipt) &&
+        receipt.status !== 'applied' &&
+        receipt.expectedRevision === command.expectedRevision
+      );
+    }
+    return (
+      receipt.expectedRevision === command.expectedRevision &&
+      receipt.proposal.id === command.commandId &&
+      receipt.proposal.payload.kind === 'paid_recovery' &&
+      isDeepStrictEqual(receipt.proposal.payload.blocker, command.blocker)
+    );
   }
   if (!isStudioDirectorQueryReceiptV2(receipt)) return false;
   const query = studioDirectorQueryForCommandV2(command);
@@ -1612,6 +1701,27 @@ const validateProposalPayloadV2 = (value: unknown): boolean => {
       )
     );
   }
+  if (value.kind === 'paid_recovery') {
+    const quote = snapshotDataRecordV2(value.quote);
+    return (
+      hasExactKeysV2(value, V2_PROPOSAL_PAID_RECOVERY_PAYLOAD_KEYS) &&
+      validatesStudioPaidRecoveryBlockerV2(value.blocker) &&
+      quote !== null &&
+      hasExactKeysV2(quote, V2_PAID_RECOVERY_QUOTE_KEYS) &&
+      isSafeStudioDirectorId(quote.quoteId) &&
+      isRevision(quote.projectRevision) &&
+      timestampMs(quote.expiresAt) !== null &&
+      typeof quote.currency === 'string' &&
+      CURRENCY.test(quote.currency) &&
+      isNonnegativeSafeIntegerV2(quote.lowerMinorUnits) &&
+      isNonnegativeSafeIntegerV2(quote.upperMinorUnits) &&
+      quote.lowerMinorUnits <= quote.upperMinorUnits &&
+      isNonnegativeSafeIntegerV2(quote.itemCount) &&
+      quote.itemCount >= 1 &&
+      quote.itemCount <= STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST &&
+      typeof quote.includesCascade === 'boolean'
+    );
+  }
   return (
     value.kind === 'pin_rule' &&
     hasExactKeysV2(value, V2_PROPOSAL_PIN_RULE_PAYLOAD_KEYS) &&
@@ -1621,6 +1731,18 @@ const validateProposalPayloadV2 = (value: unknown): boolean => {
     value.rule.text.trim().length > 0 &&
     value.rule.text.length <= STUDIO_RULE_LIMITS.text &&
     validateRulePredicateV2(value.rule.predicate)
+  );
+};
+
+const paidRecoveryQuoteLifetimeFitsRecordV2 = (payload: unknown, createdAt: unknown): boolean => {
+  if (!isRecord(payload) || payload.kind !== 'paid_recovery' || !isRecord(payload.quote)) return true;
+  const createdAtMs = timestampMs(createdAt);
+  const expiresAtMs = timestampMs(payload.quote.expiresAt);
+  return (
+    createdAtMs !== null &&
+    expiresAtMs !== null &&
+    expiresAtMs > createdAtMs &&
+    expiresAtMs - createdAtMs <= STUDIO_PREPARED_QUOTE_TTL_SECONDS * 1_000
   );
 };
 
@@ -1642,7 +1764,12 @@ export function parseStudioProposalRecordV2(input: {
     value.status !== 'pending' ||
     !isRevision(value.baseRevision) ||
     !validateProposalPayloadV2(value.payload) ||
+    (isRecord(value.payload) &&
+      value.payload.kind === 'paid_recovery' &&
+      isRecord(value.payload.quote) &&
+      value.payload.quote.projectRevision !== value.baseRevision) ||
     timestampMs(value.createdAt) === null ||
+    !paidRecoveryQuoteLifetimeFitsRecordV2(value.payload, value.createdAt) ||
     value.decidedAt !== null ||
     !fitsCommandRecord(value)
   ) {

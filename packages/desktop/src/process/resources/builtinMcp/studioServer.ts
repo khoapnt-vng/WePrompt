@@ -28,6 +28,7 @@ import {
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_REFERENCE_LABEL_LENGTH,
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
+  STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
@@ -42,6 +43,7 @@ import {
   STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
   type StudioDirectorOperationV2,
   type StudioDirectorFreeRecoveryV2,
+  type StudioPaidRecoveryBlockerV2,
   type StudioMutationOperationV2,
   type StudioProjectV2,
   type StudioRouteCatalogV2,
@@ -60,9 +62,11 @@ import {
 import {
   createStudioDirectorCommandWriterV2,
   studioDirectorFreeFixInputFitsDurableRecordV2,
+  studioDirectorPaidRecoveryInputFitsDurableRecordV2,
   studioDirectorToolInputFitsDurableRecordV2,
   type StudioApplyEditsInputV2,
   type StudioApplyFreeFixInputV2,
+  type StudioProposePaidRecoveryInputV2,
   type StudioDirectorCommandWriterDeps,
   type StudioGetCommandStatusInput,
   type StudioGetProposalDirectorInputV2,
@@ -74,6 +78,7 @@ import {
 } from '@process/services/creative-studio/service/briefFile';
 import {
   classifyStudioDirectorOperationV2,
+  validatesStudioPaidRecoveryBlockerV2,
   type StudioDirectorOperationDispositionV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 import {
@@ -634,6 +639,90 @@ export const studioApplyFreeFixInputSchemaV2 = z4
   .object({
     expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
     recovery: studioDirectorFreeRecoverySchemaV2,
+  })
+  .strict();
+
+const studioPaidRecoveryWhereSchemaV2 = z4.discriminatedUnion('kind', [
+  z4.object({ kind: z4.literal('project') }).strict(),
+  z4
+    .object({
+      kind: z4.literal('route'),
+      routeKind: z4.enum(['image', 'video']),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('reference'),
+      referenceId: studioDirectorIdSchemaV2,
+      jobId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('shot'),
+      beatId: studioDirectorIdSchemaV2,
+      shotId: studioDirectorIdSchemaV2,
+      beatPosition: z4.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      shotPosition: z4.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      jobId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  z4.object({ kind: z4.literal('cut') }).strict(),
+]);
+
+const studioPaidRecoveryGenerationChoiceSchemaV2 = z4
+  .object({
+    target: z4.object({ kind: z4.literal('shot'), shotId: studioDirectorIdSchemaV2 }).strict(),
+    purpose: z4.enum(['seed_still', 'board_still', 'video_take']),
+  })
+  .strict();
+
+const studioPaidRecoveryPrepareSchemaV2 = z4.discriminatedUnion('kind', [
+  z4
+    .object({
+      kind: z4.literal('project_references'),
+      referenceIds: uniqueStudioIdsSchema(STUDIO_MAX_PROJECT_REFERENCES).min(1),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('generation'),
+      baseChoices: z4.array(studioPaidRecoveryGenerationChoiceSchemaV2).max(STUDIO_MAX_MUTATION_OPERATIONS),
+      cascadeChoices: z4.array(studioPaidRecoveryGenerationChoiceSchemaV2).max(STUDIO_MAX_MUTATION_OPERATIONS),
+      continuityChange: z4
+        .object({
+          shotId: studioDirectorIdSchemaV2,
+          hardCut: z4.boolean(),
+          requiresSeedGeneration: z4.boolean(),
+        })
+        .strict()
+        .nullable(),
+    })
+    .strict(),
+]);
+
+const studioPaidRecoveryBlockerSchemaV2 = z4
+  .object({
+    cause: z4.enum(STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2),
+    where: studioPaidRecoveryWhereSchemaV2,
+    remedy: z4
+      .object({
+        kind: z4.literal('proposal'),
+        prepare: studioPaidRecoveryPrepareSchemaV2,
+        estimatedMinorUnits: z4.null(),
+        currency: z4.null(),
+      })
+      .strict(),
+  })
+  .strict()
+  .refine(validatesStudioPaidRecoveryBlockerV2, {
+    message: 'Copy one exact proposal blocker from a fresh detailed Studio status read.',
+  });
+
+export const studioProposePaidRecoveryInputSchemaV2 = z4
+  .object({
+    expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    blocker: studioPaidRecoveryBlockerSchemaV2,
   })
   .strict();
 
@@ -1305,6 +1394,22 @@ export function createStudioApplyFreeFixHandlerV2(
   };
 }
 
+export function createStudioProposePaidRecoveryHandlerV2(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: StudioProposePaidRecoveryInputV2) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => {
+    if (!studioDirectorPaidRecoveryInputFitsDurableRecordV2(input)) {
+      return errorResult('Paid-recovery input is invalid or exceeds the durable record size cap.');
+    }
+    return commandToolResult(await writer.proposePaidRecovery(input));
+  };
+}
+
 export function createStudioGetCommandStatusHandlerV2(
   config: StudioServerEnv | null,
   deps: StudioDirectorCommandWriterDeps = {}
@@ -1429,6 +1534,22 @@ export function registerStudioToolsV2(
       )({
         expectedRevision: input.expectedRevision,
         recovery: input.recovery as StudioDirectorFreeRecoveryV2,
+      })
+  );
+  server.registerTool(
+    'studio_propose_paid_recovery',
+    {
+      description:
+        "Prepare and record one priced recovery only after an immediately preceding studio_get_project_status call with detail: true returned the exact proposal remedy. Copy that result's projectRevision and complete blocker verbatim. Preparation is free: it creates no authorization, job, provider request, or spend. The resulting card shows the price, and only the person's explicit Confirm button may spend. Never treat a recorded proposal or a typed chat approval as confirmation.",
+      inputSchema: studioProposePaidRecoveryInputSchemaV2,
+    },
+    async (input) =>
+      createStudioProposePaidRecoveryHandlerV2(
+        config,
+        writerDeps
+      )({
+        expectedRevision: input.expectedRevision,
+        blocker: input.blocker as StudioPaidRecoveryBlockerV2,
       })
   );
   server.registerTool(

@@ -52,11 +52,14 @@ that guards money stays with the human; everything that guards nothing should no
    a quote, authorization, job, generation request, or spend; conditioning recovery can only
    resume work that the owner already authorized. Both were verified free and deterministic
    across every occurrence on 2026-08-26.
-3. **Recovery proposals that carry a prepared quote.** The proposal card pattern exists; extend it so
-   the Director can attach a prepared (free) quote — "Shot 4's seed was refused by the content
-   filter; rejoining costs $1.23 — Confirm / Reject." The owner's Confirm remains the only spend.
-   This composes with the "show the estimate" assignment: same principle, the number arrives before
-   the permission question.
+3. **Implemented and verified 2026-08-29 — recovery proposals carry a prepared quote.** The Director
+   may copy one exact paid blocker from a fresh detailed status read into
+   `studio_propose_paid_recovery`. Main rederives the blocker and quote, persists only the typed
+   blocker and bounded display summary, and keeps the full provider-bound quote in its expiring
+   cache. The renderer's explicit Confirm remains the only spend: generic proposal acceptance and
+   chat “yes” are rejected, while a missing or expired quote refreshes without spending and requires
+   a second click. Confirmation commits the exact authorization with crash-safe proposal
+   attribution before reporting success.
 4. **Proposal dispositions for `edit_project`'s editable settings and `set_reference_prompt`** — the
    two places the Director can diagnose a defect it is forbidden even to propose fixing.
 5. **Teach the rules it broke or missed, in its rules text:** the conditioning budget (item 6), the

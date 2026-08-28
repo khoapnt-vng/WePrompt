@@ -1292,6 +1292,30 @@
         "chatRejected": "Öneri reddedildi.",
         "reviewStale": "Bu inceleme {{baseRevision}} revizyonundan türetildi; proje artık {{currentRevision}} revizyonunda.",
         "noChanges": "Bu öneri anlamsal bir değişiklik yapmıyor.",
+        "paidRecovery": {
+          "heading": "Ücretli kurtarma",
+          "explanation": "Director yeni üretim gerektiren bir kurtarma buldu. Harcamadan önce etkilenen işi ve fiyatı inceleyin.",
+          "blockedBy": "Engelleyen neden",
+          "affectedWork": "Etkilenen iş",
+          "price": "Tahmini maliyet",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "Üretim kapsamı",
+          "generationCount": "{{count}} üretim öğesi",
+          "includesCascade": "bağımlı işi içerir",
+          "expires": "Bu fiyat {{expiresAt}} tarihinde sona erer.",
+          "expired": "Kaydedilen bu fiyatın süresi doldu. Onaylamadan önce yenileyin.",
+          "confirm": "Onayla ve harca",
+          "refresh": "Fiyatı yenile",
+          "refreshed": "Fiyat yenilendi. İnceleyin ve harcamak için yeniden onaylayın.",
+          "cardOnly": "Ücretli kurtarma yalnızca güncel fiyat incelendikten sonra öneri kartından onaylanabilir.",
+          "location": {
+            "project": "Proje",
+            "cut": "Kurgu",
+            "route": "{{route}} rotası",
+            "reference": "Referans · {{reference}}",
+            "shot": "{{beat}} · Çekim {{shot}}"
+          }
+        },
         "subject": {
           "project": "Proje",
           "beat": "Beat",

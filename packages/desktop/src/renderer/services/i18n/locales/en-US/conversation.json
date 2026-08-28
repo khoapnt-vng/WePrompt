@@ -2195,6 +2195,30 @@
         "reject": "Reject proposal",
         "reviewStale": "This review was derived from revision {{baseRevision}}, but the project is now revision {{currentRevision}}.",
         "noChanges": "This proposal makes no semantic change.",
+        "paidRecovery": {
+          "heading": "Paid recovery",
+          "explanation": "The Director found a recovery that needs new generation. Review the exact affected work and price before spending.",
+          "blockedBy": "Blocked by",
+          "affectedWork": "Affected work",
+          "price": "Estimated cost",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "Generation scope",
+          "generationCount": "{{count}} generation items",
+          "includesCascade": "includes dependent work",
+          "expires": "This price expires {{expiresAt}}.",
+          "expired": "This saved price has expired. Refresh it before confirming.",
+          "confirm": "Confirm and spend",
+          "refresh": "Refresh price",
+          "refreshed": "Price refreshed. Review it, then confirm again to spend.",
+          "cardOnly": "Paid recovery can only be confirmed from its proposal card after you review the current price.",
+          "location": {
+            "project": "Project",
+            "cut": "Cut",
+            "route": "{{route}} route",
+            "reference": "Reference · {{reference}}",
+            "shot": "{{beat}} · Shot {{shot}}"
+          }
+        },
         "subject": {
           "project": "Project",
           "beat": "Beat",

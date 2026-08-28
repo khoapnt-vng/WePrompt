@@ -13,6 +13,7 @@ import {
   STUDIO_MUTATION_REASONS_V2,
   STUDIO_VIEWS,
   type StudioMutationBatchResultV2,
+  type StudioPaidRecoveryQuoteSummaryV2,
   type StudioProjectStatusV2,
   type StudioRendererPreparedSubmissionOptionsV2,
   type StudioRendererProjectV2,
@@ -36,6 +37,8 @@ const providerNames = [
   'listProposals',
   'acceptProposal',
   'rejectProposal',
+  'preparePaidRecoveryProposal',
+  'confirmPaidRecoveryProposal',
   'listReferenceRequests',
   'decideReferenceRequest',
   'listReferenceGenerationHandoffs',
@@ -97,6 +100,8 @@ const mocks = vi.hoisted(() => ({
       'listProposals',
       'acceptProposal',
       'rejectProposal',
+      'preparePaidRecoveryProposal',
+      'confirmPaidRecoveryProposal',
       'listReferenceRequests',
       'decideReferenceRequest',
       'listReferenceGenerationHandoffs',
@@ -261,6 +266,16 @@ const generationCapability = {
     },
   ],
 };
+const paidRecoveryQuote: StudioPaidRecoveryQuoteSummaryV2 = {
+  quoteId: 'quote_paid_recovery_1',
+  projectRevision: 7,
+  expiresAt: '2026-08-19T02:08:04.000Z',
+  currency: 'USD',
+  lowerMinorUnits: 125,
+  upperMinorUnits: 925,
+  itemCount: 2,
+  includesCascade: true,
+};
 const preparedSubmission = {
   baseOnly: {
     id: 'quote_1',
@@ -350,6 +365,8 @@ const createService = () =>
     listProposals: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8, proposals: [] })),
     acceptProposal: vi.fn(),
     rejectProposal: vi.fn(),
+    preparePaidRecoveryProposal: vi.fn(async () => paidRecoveryQuote),
+    confirmPaidRecoveryProposal: vi.fn(async () => ({ projectId: 'project_1', projectRevision: 8 })),
     listReferenceRequests: vi.fn(async () => []),
     decideReferenceRequest: vi.fn(),
     listReferenceGenerationHandoffs: vi.fn(async () => []),
@@ -856,6 +873,29 @@ describe('initCreativeStudioBridge', () => {
     ]) {
       expect(serialized).not.toContain(`"${forbiddenKey}"`);
     }
+  });
+
+  it('routes paid recovery preparation and confirmation only through their explicit proposal providers', async () => {
+    initCreativeStudioBridge(dependencies);
+    const prepareInput = { projectId: 'project_1', proposalId: 'proposal_paid_recovery_1' };
+    const confirmInput = {
+      ...prepareInput,
+      quoteId: paidRecoveryQuote.quoteId,
+      expectedRevision: paidRecoveryQuote.projectRevision,
+    };
+
+    await expect(registeredHandler('preparePaidRecoveryProposal')(prepareInput as never)).resolves.toEqual({
+      ok: true,
+      data: paidRecoveryQuote,
+    });
+    await expect(registeredHandler('confirmPaidRecoveryProposal')(confirmInput as never)).resolves.toEqual({
+      ok: true,
+      data: { projectId: 'project_1', projectRevision: 8 },
+    });
+    expect(service.preparePaidRecoveryProposal).toHaveBeenCalledExactlyOnceWith(prepareInput);
+    expect(service.confirmPaidRecoveryProposal).toHaveBeenCalledExactlyOnceWith(confirmInput);
+    expect(service.acceptProposal).not.toHaveBeenCalled();
+    expect(service.confirmSubmission).not.toHaveBeenCalled();
   });
 
   it('routes reference preparation through pricing and current-image selection through the mutation reducer', async () => {

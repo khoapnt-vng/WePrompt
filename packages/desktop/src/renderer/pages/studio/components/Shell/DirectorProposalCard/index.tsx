@@ -11,6 +11,9 @@ import { useTranslation } from 'react-i18next';
 import type {
   StudioFixedShotReasonV2,
   StudioMutationReasonV2,
+  StudioPaidRecoveryQuoteSummaryV2,
+  StudioProjectStatusBlockerCauseV2,
+  StudioProjectStatusWhereV2,
   StudioProposalReviewFieldKeyV2,
   StudioProposalReviewFieldV2,
   StudioProposalReviewGroupV2,
@@ -19,6 +22,7 @@ import type {
   StudioRendererProjectV2,
   StudioRendererProposalV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { formatMinorUnits } from '@/renderer/pages/studio/components/Workspace/spendGate';
 import styles from './DirectorProposalCard.module.css';
 
 export type DirectorProposalCardProps = {
@@ -33,9 +37,95 @@ export type DirectorProposalCardProps = {
   errorMessageKey?: string | null;
   onAccept: (proposalId: string) => Promise<void>;
   onReject: (proposalId: string) => Promise<void>;
+  paidRecoveryQuote?: StudioPaidRecoveryQuoteSummaryV2 | null;
+  paidRecoveryStatusMessageKey?: string | null;
+  onPaidRecoveryAction?: (proposalId: string) => Promise<void>;
   onRequestUpdated?: (proposalId: string, saveWorkspaceDrafts: boolean) => Promise<void>;
   onReviewRuleDrafts?: () => void;
   onEditShotsDirectly?: (beatId: string, shotIds: readonly string[]) => void;
+};
+
+const PAID_RECOVERY_CAUSE_KEYS = {
+  route_inventory_unavailable:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.routeInventoryUnavailable',
+  route_not_selected: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.routeNotSelected',
+  route_setup_required: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.routeSetupRequired',
+  route_unavailable: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.routeUnavailable',
+  route_retired: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.routeRetired',
+  route_incompatible_frame: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.routeIncompatibleFrame',
+  route_first_frame_unsupported:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.routeFirstFrameUnsupported',
+  route_duration_unsupported: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.routeDurationUnsupported',
+  reference_plan_invalid: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.referencePlanInvalid',
+  reference_generation_required:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceGenerationRequired',
+  reference_approval_required:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceApprovalRequired',
+  reference_generation_failed:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceGenerationFailed',
+  reference_binding_unassigned:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceBindingUnassigned',
+  reference_binding_unknown_reference:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceBindingUnknownReference',
+  reference_binding_wrong_kind:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceBindingWrongKind',
+  reference_binding_unapproved_reference:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceBindingUnapprovedReference',
+  reference_binding_missing_asset:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceBindingMissingAsset',
+  reference_binding_capacity_exceeded:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.referenceBindingCapacityExceeded',
+  shooting_script_required: 'conversation.creativeStudio.workspace.gate.errors.pricing.missingShootingScript',
+  seed_selection_required: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.seedSelectionRequired',
+  seed_generation_required: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.seedGenerationRequired',
+  conditioning_frame_required:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.conditioningFrameRequired',
+  extraction_failed: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.extractionFailed',
+  dependency_failed: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.dependencyFailed',
+  generation_invalid_request: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationInvalidRequest',
+  generation_content_rejected:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationContentRejected',
+  generation_auth: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationAuth',
+  generation_quota: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationQuota',
+  generation_rate_limited: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationRateLimited',
+  generation_provider_unavailable:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationProviderUnavailable',
+  generation_timeout: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationTimeout',
+  generation_poll_deadline: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationPollDeadline',
+  generation_no_output: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationNoOutput',
+  generation_variation_grid: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationVariationGrid',
+  generation_submission_unknown:
+    'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationSubmissionUnknown',
+  generation_download_failed: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationDownloadFailed',
+  generation_unsupported: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationUnsupported',
+  generation_unknown: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationUnknown',
+  cut_invalid_media: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.cutInvalidMedia',
+  cut_bed_too_short: 'conversation.creativeStudio.workspace.board.shot.blocker.cause.cutBedTooShort',
+} as const satisfies Record<StudioProjectStatusBlockerCauseV2, string>;
+
+const formatPaidRecoveryLocation = (
+  where: StudioProjectStatusWhereV2,
+  project: StudioRendererProjectV2,
+  t: (key: string, values?: Record<string, unknown>) => string
+): string => {
+  const root = 'conversation.creativeStudio.workspace.proposals.paidRecovery.location';
+  if (where.kind === 'project' || where.kind === 'cut') return t(`${root}.${where.kind}`);
+  if (where.kind === 'route') {
+    return t(`${root}.route`, {
+      route: t(`conversation.creativeStudio.workspace.controls.${where.routeKind}Route`),
+    });
+  }
+  if (where.kind === 'reference') {
+    const reference = Object.hasOwn(project.references, where.referenceId)
+      ? project.references[where.referenceId]
+      : undefined;
+    return t(`${root}.reference`, { reference: reference?.label ?? where.referenceId });
+  }
+  const beat = Object.hasOwn(project.beats, where.beatId) ? project.beats[where.beatId] : undefined;
+  return t(`${root}.shot`, {
+    beat: beat?.title ?? where.beatPosition,
+    shot: where.shotPosition,
+  });
 };
 
 const REFUSAL_REASON_KEYS: Readonly<Record<StudioMutationReasonV2, string>> = {
@@ -186,15 +276,22 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
   errorMessageKey = null,
   onAccept,
   onReject,
+  paidRecoveryQuote = null,
+  paidRecoveryStatusMessageKey = null,
+  onPaidRecoveryAction,
   onRequestUpdated = async () => undefined,
   onReviewRuleDrafts = () => undefined,
   onEditShotsDirectly = () => undefined,
 }) => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const acceptBlockId = React.useId();
   const reviewDetailsId = React.useId();
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   if (proposal.status !== 'pending') return null;
+  const paidRecoveryPayload = proposal.payload.kind === 'paid_recovery' ? proposal.payload : null;
+  const effectivePaidRecoveryQuote = paidRecoveryQuote ?? paidRecoveryPayload?.quote ?? null;
+  const paidRecoveryQuoteExpired =
+    effectivePaidRecoveryQuote !== null && Date.parse(effectivePaidRecoveryQuote.expiresAt) <= Date.now();
   const reviewUnavailable = authorityState !== 'ready';
   const authorityUnavailable = authorityState === 'unavailable' && !authorityVerified;
   const actionsUnavailable = !authorityVerified || authorityState === 'refreshing';
@@ -303,6 +400,61 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
             </ul>
           </div>
         )
+      ) : paidRecoveryPayload !== null && effectivePaidRecoveryQuote !== null ? (
+        <section data-testid='studio-paid-recovery-review'>
+          <h3>{t('conversation.creativeStudio.workspace.proposals.paidRecovery.heading')}</h3>
+          <p>{t('conversation.creativeStudio.workspace.proposals.paidRecovery.explanation')}</p>
+          <dl>
+            <dt>{t('conversation.creativeStudio.workspace.proposals.paidRecovery.blockedBy')}</dt>
+            <dd>{t(PAID_RECOVERY_CAUSE_KEYS[paidRecoveryPayload.blocker.cause])}</dd>
+            <dt>{t('conversation.creativeStudio.workspace.proposals.paidRecovery.affectedWork')}</dt>
+            <dd>
+              <bdi dir='auto'>{formatPaidRecoveryLocation(paidRecoveryPayload.blocker.where, project, t)}</bdi>
+            </dd>
+            <dt>{t('conversation.creativeStudio.workspace.proposals.paidRecovery.price')}</dt>
+            <dd data-paid-recovery-price>
+              <bdi dir='auto'>
+                {effectivePaidRecoveryQuote.lowerMinorUnits === effectivePaidRecoveryQuote.upperMinorUnits
+                  ? formatMinorUnits(
+                      effectivePaidRecoveryQuote.lowerMinorUnits,
+                      effectivePaidRecoveryQuote.currency,
+                      i18n?.resolvedLanguage ?? i18n?.language ?? 'en-US'
+                    )
+                  : t('conversation.creativeStudio.workspace.proposals.paidRecovery.priceRange', {
+                      lower: formatMinorUnits(
+                        effectivePaidRecoveryQuote.lowerMinorUnits,
+                        effectivePaidRecoveryQuote.currency,
+                        i18n?.resolvedLanguage ?? i18n?.language ?? 'en-US'
+                      ),
+                      upper: formatMinorUnits(
+                        effectivePaidRecoveryQuote.upperMinorUnits,
+                        effectivePaidRecoveryQuote.currency,
+                        i18n?.resolvedLanguage ?? i18n?.language ?? 'en-US'
+                      ),
+                    })}
+              </bdi>
+            </dd>
+            <dt>{t('conversation.creativeStudio.workspace.proposals.paidRecovery.generations')}</dt>
+            <dd>
+              {t('conversation.creativeStudio.workspace.proposals.paidRecovery.generationCount', {
+                count: effectivePaidRecoveryQuote.itemCount,
+              })}
+              {effectivePaidRecoveryQuote.includesCascade
+                ? ` · ${t('conversation.creativeStudio.workspace.proposals.paidRecovery.includesCascade')}`
+                : ''}
+            </dd>
+          </dl>
+          <p role={paidRecoveryQuoteExpired ? 'alert' : 'status'}>
+            {paidRecoveryQuoteExpired
+              ? t('conversation.creativeStudio.workspace.proposals.paidRecovery.expired')
+              : t('conversation.creativeStudio.workspace.proposals.paidRecovery.expires', {
+                  expiresAt: new Intl.DateTimeFormat(i18n?.resolvedLanguage ?? i18n?.language ?? 'en-US', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  }).format(new Date(effectivePaidRecoveryQuote.expiresAt)),
+                })}
+          </p>
+        </section>
       ) : proposal.review.groups.length === 0 ? (
         <p>{t('conversation.creativeStudio.workspace.proposals.noChanges')}</p>
       ) : (
@@ -355,15 +507,30 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
         </>
       )}
       <div className={styles.actions}>
-        <Button
-          type={reviewUnavailable ? undefined : 'primary'}
-          aria-describedby={effectiveAcceptBlockedMessageKey === null ? undefined : acceptBlockId}
-          disabled={actionsLocked || effectiveAcceptBlockedMessageKey !== null || reviewUnavailable}
-          loading={pending}
-          onClick={() => void onAccept(proposal.id)}
-        >
-          {t('conversation.creativeStudio.workspace.proposals.accept')}
-        </Button>
+        {paidRecoveryPayload === null ? (
+          <Button
+            type={reviewUnavailable ? undefined : 'primary'}
+            aria-describedby={effectiveAcceptBlockedMessageKey === null ? undefined : acceptBlockId}
+            disabled={actionsLocked || effectiveAcceptBlockedMessageKey !== null || reviewUnavailable}
+            loading={pending}
+            onClick={() => void onAccept(proposal.id)}
+          >
+            {t('conversation.creativeStudio.workspace.proposals.accept')}
+          </Button>
+        ) : (
+          <Button
+            type={reviewUnavailable ? undefined : 'primary'}
+            disabled={actionsLocked || actionsUnavailable || reviewUnavailable || onPaidRecoveryAction === undefined}
+            loading={pending}
+            onClick={() => void onPaidRecoveryAction?.(proposal.id)}
+          >
+            {t(
+              paidRecoveryQuoteExpired
+                ? 'conversation.creativeStudio.workspace.proposals.paidRecovery.refresh'
+                : 'conversation.creativeStudio.workspace.proposals.paidRecovery.confirm'
+            )}
+          </Button>
+        )}
         <Button disabled={actionsLocked || actionsUnavailable} onClick={() => void onReject(proposal.id)}>
           {t('conversation.creativeStudio.workspace.proposals.reject')}
         </Button>
@@ -375,7 +542,7 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
             {t('conversation.creativeStudio.workspace.proposals.refusal.editShotsDirectly')}
           </Button>
         )}
-        {draftBlocker === 'rules' ? (
+        {paidRecoveryPayload !== null ? null : draftBlocker === 'rules' ? (
           <Button disabled={actionsLocked} onClick={onReviewRuleDrafts}>
             {t('conversation.creativeStudio.workspace.proposals.reviewRuleDrafts')}
           </Button>
@@ -399,6 +566,7 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
           {t(effectiveAcceptBlockedMessageKey)}
         </p>
       )}
+      {paidRecoveryStatusMessageKey === null ? null : <p role='status'>{t(paidRecoveryStatusMessageKey)}</p>}
       {errorMessageKey !== null ? <div role='alert'>{t(errorMessageKey)}</div> : null}
     </Card>
   );

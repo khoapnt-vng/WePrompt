@@ -290,6 +290,9 @@ export const studioProposalOperationsV2 = (
     }
     return structuredClone(proposal.payload.operations);
   }
+  if (proposal.payload.kind === 'paid_recovery') {
+    throw new StudioMutationErrorV2('invalid_operation');
+  }
   const ruleId = studioProposalRuleIdV2(proposal.id);
   if (project.rules.some((rule) => rule.id === ruleId)) throw new StudioMutationErrorV2('identity_collision');
   return [
@@ -325,6 +328,7 @@ export const deriveStudioProposalReviewV2 = (
   }
   let operations: StudioMutationOperationV2[] = [];
   try {
+    if (proposal.payload.kind === 'paid_recovery') return { status: 'ready', groups: [] };
     operations = studioProposalOperationsV2(project, proposal);
     const after = applyStudioMutationBatchV2(
       project,

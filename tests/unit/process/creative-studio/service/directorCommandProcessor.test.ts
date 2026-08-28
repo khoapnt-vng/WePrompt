@@ -14,11 +14,13 @@ import {
   STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_COMMAND_SWEEP_INTERVAL_MS,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   type CreateStudioProjectInputV2,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
   type StudioDirectorFreeRecoveryCommandRecordV2,
   type StudioDirectorFreeRecoveryV2,
+  type StudioDirectorPaidRecoveryCommandRecordV2,
   type StudioDirectorQueryCommandRecordV2,
   type StudioProjectV2,
   type StudioProjectStatusV2,
@@ -185,6 +187,70 @@ const makeFreeRecoveryCommandV2 = (
   recovery,
 });
 
+const paidRecoveryBlockerV2 = () => ({
+  cause: 'seed_generation_required' as const,
+  where: {
+    kind: 'shot' as const,
+    beatId: 'beat_1',
+    shotId: 'shot_1',
+    beatPosition: 1,
+    shotPosition: 1,
+    jobId: null,
+  },
+  remedy: {
+    kind: 'proposal' as const,
+    prepare: {
+      kind: 'generation' as const,
+      baseChoices: [{ target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const }],
+      cascadeChoices: [],
+      continuityChange: null,
+    },
+    estimatedMinorUnits: null,
+    currency: null,
+  },
+});
+
+const makePaidRecoveryCommandV2 = (
+  commandId = 'paid_recovery_v2',
+  expectedRevision = 1
+): StudioDirectorPaidRecoveryCommandRecordV2 => ({
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  commandId,
+  projectId: 'project_v2',
+  expectedRevision,
+  createdAt: '2026-08-16T12:00:00.000Z',
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  policy: 'propose_paid_recovery',
+  blocker: paidRecoveryBlockerV2(),
+});
+
+const paidRecoveryProposalV2 = (
+  command: StudioDirectorPaidRecoveryCommandRecordV2,
+  status: StudioProposalV2['status'] = 'pending'
+): StudioProposalV2 => ({
+  schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  id: command.commandId,
+  projectId: command.projectId,
+  status,
+  baseRevision: command.expectedRevision,
+  payload: {
+    kind: 'paid_recovery',
+    blocker: structuredClone(command.blocker),
+    quote: {
+      quoteId: `quote_${command.commandId}`,
+      projectRevision: command.expectedRevision,
+      expiresAt: '2026-08-16T12:05:00.000Z',
+      currency: 'USD',
+      lowerMinorUnits: 3,
+      upperMinorUnits: 3,
+      itemCount: 1,
+      includesCascade: false,
+    },
+  },
+  createdAt: '2026-08-16T12:00:01.000Z',
+  decidedAt: status === 'pending' ? null : '2026-08-16T12:00:02.000Z',
+});
+
 const makeProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
   projectId: 'project_v2',
   projectRevision: 2,
@@ -340,7 +406,7 @@ const makeProjectV2 = (projectId = 'project_v2', revision = 1): StudioProjectV2 
 
 const makeProposalV2 = (id: string, status: StudioProposalV2['status'] = 'pending'): StudioProposalV2 => {
   const pending: StudioProposalRecordV2 = {
-    schemaVersion: 5,
+    schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
     id,
     projectId: 'project_v2',
     status: 'pending',
@@ -368,6 +434,7 @@ type HarnessV2 = {
   serviceListRoutes: ReturnType<typeof vi.fn>;
   serviceRetryConditioningFrame: ReturnType<typeof vi.fn>;
   serviceTerminalizeRefusedJob: ReturnType<typeof vi.fn>;
+  serviceProposePaidRecovery: ReturnType<typeof vi.fn>;
   storeGetProject: ReturnType<typeof vi.fn>;
   storeListProposals: ReturnType<typeof vi.fn>;
   writeReceipt: ReturnType<
@@ -398,6 +465,7 @@ const createHarnessV2 = (
     serviceListRoutes?: (input: { projectId: string }) => Promise<StudioRouteCatalogV2>;
     serviceRetryConditioningFrame?: StudioDirectorCommandProcessorDepsV2['service']['retryConditioningFrame'];
     serviceTerminalizeRefusedJob?: StudioDirectorCommandProcessorDepsV2['service']['terminalizeRefusedJob'];
+    serviceProposePaidRecovery?: StudioDirectorCommandProcessorDepsV2['service']['proposePaidRecovery'];
     proposals?: StudioProposalV2[];
     queryAuthorityActive?: () => boolean;
     beforeReceiptPublish?: () => Promise<void>;
@@ -516,7 +584,16 @@ const createHarnessV2 = (
     }
     return { status: 'supported' as const, project };
   });
-  const storeListProposals = vi.fn(async () => structuredClone(input.proposals ?? []));
+  const proposals = [...(input.proposals ?? [])];
+  const storeListProposals = vi.fn(async () => structuredClone(proposals));
+  const serviceProposePaidRecovery = vi.fn(
+    input.serviceProposePaidRecovery ??
+      (async (command: StudioDirectorPaidRecoveryCommandRecordV2) => {
+        const proposal = paidRecoveryProposalV2(command);
+        proposals.push(proposal);
+        return structuredClone(proposal) as StudioProposalRecordV2;
+      })
+  );
   const notify = vi.fn<(projectId: string) => void>();
   const processor = createStudioDirectorCommandProcessorV2({
     store: { getProjectV2: storeGetProject, listProposalsV2: storeListProposals },
@@ -527,6 +604,7 @@ const createHarnessV2 = (
       listRoutes: serviceListRoutes,
       retryConditioningFrame: serviceRetryConditioningFrame,
       terminalizeRefusedJob: serviceTerminalizeRefusedJob,
+      proposePaidRecovery: serviceProposePaidRecovery,
     },
     tracker,
     queryAuthorityActive: input.queryAuthorityActive,
@@ -555,6 +633,7 @@ const createHarnessV2 = (
     serviceListRoutes,
     serviceRetryConditioningFrame,
     serviceTerminalizeRefusedJob,
+    serviceProposePaidRecovery,
     storeGetProject,
     storeListProposals,
     writeReceipt,
@@ -576,7 +655,11 @@ const createHarnessV2 = (
 };
 
 const addLiveCommandV2 = (harness: HarnessV2, command: StudioDirectorCommandRecordV2): void => {
-  if (command.policy === 'auto_apply' || command.policy === 'apply_free_fix') {
+  if (
+    command.policy === 'auto_apply' ||
+    command.policy === 'apply_free_fix' ||
+    command.policy === 'propose_paid_recovery'
+  ) {
     harness.projects.set(command.projectId, makeProjectV2(command.projectId, command.expectedRevision));
   }
   harness.pendings.set(keyOf(command.projectId, command.commandId), { status: 'valid', record: command });
@@ -974,6 +1057,106 @@ describe('Studio Director schema-2 command processor', () => {
     expect(oversized.storeGetProject).not.toHaveBeenCalled();
     expect(oversized.serviceApply).not.toHaveBeenCalled();
     expect(oversized.notify).not.toHaveBeenCalled();
+  });
+
+  it('records one paid-recovery proposal without applying a mutation, recovery, or project notification', async () => {
+    const harness = createHarnessV2();
+    await harness.processor.start();
+    const command = makePaidRecoveryCommandV2();
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+    expect(receipt).toEqual({
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: new Date(NOW_MS).toISOString(),
+      status: 'recorded',
+      proposal: paidRecoveryProposalV2(command),
+    });
+    expect(harness.serviceProposePaidRecovery).toHaveBeenCalledExactlyOnceWith(command);
+    expect(harness.serviceApply).not.toHaveBeenCalled();
+    expect(harness.serviceRetryConditioningFrame).not.toHaveBeenCalled();
+    expect(harness.serviceTerminalizeRefusedJob).not.toHaveBeenCalled();
+    expect(harness.notify).not.toHaveBeenCalled();
+    expect(harness.finish).toHaveBeenCalledExactlyOnceWith(command.projectId, command.commandId);
+    await harness.processor.stop();
+  });
+
+  it('clamps a recorded paid-recovery receipt clock to its immutable proposal creation time', async () => {
+    const command = makePaidRecoveryCommandV2('paid_recovery_clock_rollback');
+    const harness = createHarnessV2({ nowMs: Date.parse('2026-08-16T12:00:00.500Z') });
+    await harness.processor.start();
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+    expect(receipt).toMatchObject({
+      status: 'recorded',
+      decidedAt: '2026-08-16T12:00:01.000Z',
+      proposal: { createdAt: '2026-08-16T12:00:01.000Z' },
+    });
+    expect(harness.serviceProposePaidRecovery).toHaveBeenCalledOnce();
+    await harness.processor.stop();
+  });
+
+  it('repairs a paid-recovery command from its exact durable proposal without repricing or spending', async () => {
+    const command = makePaidRecoveryCommandV2('paid_recovery_restart');
+    const terminalProposal = paidRecoveryProposalV2(command, 'accepted');
+    const harness = createHarnessV2({ proposals: [terminalProposal] });
+    await harness.processor.start();
+    addLiveCommandV2(harness, command);
+
+    harness.processor.trigger(command.projectId, command.commandId);
+    const receipt = await waitForReceiptV2(harness, command.projectId, command.commandId);
+
+    expect(receipt).toMatchObject({
+      status: 'recorded',
+      proposal: { id: command.commandId, status: 'pending', decidedAt: null },
+    });
+    expect(harness.serviceProposePaidRecovery).not.toHaveBeenCalled();
+    expect(harness.serviceApply).not.toHaveBeenCalled();
+    expect(harness.notify).not.toHaveBeenCalled();
+    await harness.processor.stop();
+  });
+
+  it('fails closed on an occupied paid-recovery proposal identity and on stale proposal creation', async () => {
+    const command = makePaidRecoveryCommandV2('paid_recovery_collision');
+    const collision = { ...paidRecoveryProposalV2(command), baseRevision: command.expectedRevision + 1 };
+    const occupied = createHarnessV2({ proposals: [collision] });
+    await occupied.processor.start();
+    addLiveCommandV2(occupied, command);
+    occupied.processor.trigger(command.projectId, command.commandId);
+
+    await expect(waitForReceiptV2(occupied, command.projectId, command.commandId)).resolves.toMatchObject({
+      status: 'rejected',
+      reasonCode: 'identity_collision',
+    });
+    expect(occupied.serviceProposePaidRecovery).not.toHaveBeenCalled();
+    await occupied.processor.stop();
+
+    const staleCommand = makePaidRecoveryCommandV2('paid_recovery_stale');
+    const stale = createHarnessV2({
+      serviceProposePaidRecovery: async () => {
+        throw new CreativeStudioStoreError('stale_project', 'project advanced');
+      },
+    });
+    await stale.processor.start();
+    addLiveCommandV2(stale, staleCommand);
+    stale.processor.trigger(staleCommand.projectId, staleCommand.commandId);
+
+    await expect(waitForReceiptV2(stale, staleCommand.projectId, staleCommand.commandId)).resolves.toMatchObject({
+      status: 'rejected',
+      observedRevision: staleCommand.expectedRevision,
+      reasonCode: 'stale_revision',
+    });
+    expect(stale.serviceApply).not.toHaveBeenCalled();
+    expect(stale.notify).not.toHaveBeenCalled();
+    await stale.processor.stop();
   });
 
   it.each([

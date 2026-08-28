@@ -24,6 +24,7 @@ import {
   type StudioCommandResult,
   type StudioGenerationBlockV2,
   type StudioGenerationCapabilityItemV2,
+  type StudioPaidRecoveryQuoteSummaryV2,
   type StudioRendererAuthoringOperationV2,
   type StudioRendererExportCatalogV2,
   type StudioRendererJobV2,
@@ -366,6 +367,16 @@ const StudioProjectPage: React.FC<{
   const reviewedActionLocked = reviewedAction !== null;
   const pendingReviewedAction = reviewedAction?.target ?? null;
   const [pendingReferenceId, setPendingReferenceId] = useState<string | null>(null);
+  const [paidRecoveryQuotes, setPaidRecoveryQuotes] = useState<
+    Readonly<Record<string, StudioPaidRecoveryQuoteSummaryV2>>
+  >({});
+  const [paidRecoveryStatusMessageKeys, setPaidRecoveryStatusMessageKeys] = useState<Readonly<Record<string, string>>>(
+    {}
+  );
+  useEffect(() => {
+    setPaidRecoveryQuotes({});
+    setPaidRecoveryStatusMessageKeys({});
+  }, [projectId]);
   const [actionErrorMessageKey, setActionErrorMessageKeyState] = useState<string | null>(null);
   const actionErrorGenerationRef = useRef(0);
   const ruleAdoptionErrorGenerationsRef = useRef(new Map<string, number>());
@@ -3512,7 +3523,8 @@ const StudioProjectPage: React.FC<{
   const proposalDraftBlocker = useCallback((candidate: StudioRendererProposalV2): 'workspace' | 'rules' | null => {
     const current = proposalDraftAuthorityRef.current;
     if (candidate.payload.kind === 'mutation_batch') return current.workspaceDirtyCount > 0 ? 'workspace' : null;
-    return current.activeRuleDirtyCount > 0 ? 'rules' : null;
+    if (candidate.payload.kind === 'pin_rule') return current.activeRuleDirtyCount > 0 ? 'rules' : null;
+    return null;
   }, []);
 
   const proposalAuthorityVerified = useCallback(
@@ -3561,6 +3573,10 @@ const StudioProjectPage: React.FC<{
       draftErrorMode: 'card' | 'chat' = 'card'
     ): Promise<boolean> => {
       if (decision === 'accept') {
+        if (target.payload.kind === 'paid_recovery') {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly');
+          return false;
+        }
         if (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision) {
           setActionErrorMessageKey(
             target.review.status === 'stale'
@@ -3665,7 +3681,11 @@ const StudioProjectPage: React.FC<{
           return;
         }
         const pending = authority.catalog.proposals.filter((candidate) => candidate.status === 'pending');
-        const ready = pending.filter(
+        const eligiblePending =
+          intent.decision === 'accept'
+            ? pending.filter((candidate) => candidate.payload.kind !== 'paid_recovery')
+            : pending;
+        const ready = eligiblePending.filter(
           (candidate) => candidate.review.status === 'ready' && candidate.baseRevision === authority.project.revision
         );
         const target =
@@ -3678,9 +3698,17 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey(
             pending.length === 0
               ? 'conversation.creativeStudio.workspace.proposals.chatNoPending'
-              : pending.some((candidate) => candidate.review.status === 'stale')
-                ? 'conversation.creativeStudio.workspace.proposals.chatStale'
-                : 'conversation.creativeStudio.workspace.proposals.chatUnavailable'
+              : intent.decision === 'accept' &&
+                  pending.some(
+                    (candidate) =>
+                      candidate.payload.kind === 'paid_recovery' &&
+                      candidate.review.status === 'ready' &&
+                      candidate.baseRevision === authority.project.revision
+                  )
+                ? 'conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly'
+                : pending.some((candidate) => candidate.review.status === 'stale')
+                  ? 'conversation.creativeStudio.workspace.proposals.chatStale'
+                  : 'conversation.creativeStudio.workspace.proposals.chatUnavailable'
           );
           return;
         }
@@ -3690,6 +3718,10 @@ const StudioProjectPage: React.FC<{
         }
         if (target === undefined) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        if (intent.decision === 'accept' && target.payload.kind === 'paid_recovery') {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly');
           return;
         }
         if (!retargetReviewedAction(token, { kind: 'proposal', id: target.id })) {
@@ -3819,6 +3851,106 @@ const StudioProjectPage: React.FC<{
       await decideProposalFromCard('reject', proposalId);
     },
     [decideProposalFromCard]
+  );
+
+  const paidRecoveryQuote = useCallback(
+    (candidate: StudioRendererProposalV2): StudioPaidRecoveryQuoteSummaryV2 | null =>
+      candidate.payload.kind === 'paid_recovery' ? (paidRecoveryQuotes[candidate.id] ?? candidate.payload.quote) : null,
+    [paidRecoveryQuotes]
+  );
+
+  const paidRecoveryStatusMessageKey = useCallback(
+    (candidate: StudioRendererProposalV2): string | null => paidRecoveryStatusMessageKeys[candidate.id] ?? null,
+    [paidRecoveryStatusMessageKeys]
+  );
+
+  const actOnPaidRecoveryProposal = useCallback(
+    async (proposalId: string): Promise<void> => {
+      const token = beginReviewedAction({ kind: 'proposal', id: proposalId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      setActionErrorMessageKey(null);
+      try {
+        const authority = await refreshProposalAuthority();
+        if (authority === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+          return;
+        }
+        const target = authority.catalog.proposals.find(
+          (candidate) =>
+            candidate.id === proposalId && candidate.status === 'pending' && candidate.payload.kind === 'paid_recovery'
+        );
+        if (
+          target === undefined ||
+          target.payload.kind !== 'paid_recovery' ||
+          target.review.status !== 'ready' ||
+          target.baseRevision !== authority.project.revision
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        const currentQuote = paidRecoveryQuotes[target.id] ?? target.payload.quote;
+        const refreshQuote = async (): Promise<void> => {
+          const refreshed = await ipcBridge.creativeStudio.preparePaidRecoveryProposal.invoke({
+            projectId: authority.project.id,
+            proposalId: target.id,
+          });
+          if (refreshed.ok === false) {
+            setActionErrorMessageKey(refreshed.error.messageKey);
+            await refreshProposalAuthority();
+            return;
+          }
+          if (refreshed.data.projectRevision !== target.baseRevision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+            await refreshProposalAuthority();
+            return;
+          }
+          setPaidRecoveryQuotes((current) => ({ ...current, [target.id]: refreshed.data }));
+          setPaidRecoveryStatusMessageKeys((current) => ({
+            ...current,
+            [target.id]: 'conversation.creativeStudio.workspace.proposals.paidRecovery.refreshed',
+          }));
+        };
+        if (Date.parse(currentQuote.expiresAt) <= Date.now()) {
+          await refreshQuote();
+          return;
+        }
+        const result = await ipcBridge.creativeStudio.confirmPaidRecoveryProposal.invoke({
+          projectId: authority.project.id,
+          proposalId: target.id,
+          quoteId: currentQuote.quoteId,
+          expectedRevision: target.baseRevision,
+        });
+        if (result.ok === false) {
+          if (result.error.code === 'quote_not_found') {
+            await refreshQuote();
+            return;
+          }
+          setActionErrorMessageKey(result.error.messageKey);
+          await refreshProposalAuthority();
+          return;
+        }
+        setPaidRecoveryQuotes((current) => {
+          const next = { ...current };
+          delete next[target.id];
+          return next;
+        });
+        setPaidRecoveryStatusMessageKeys((current) => {
+          const next = { ...current };
+          delete next[target.id];
+          return next;
+        });
+        await refreshProposalAuthority();
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        await refreshProposalAuthority();
+      } finally {
+        finishReviewedAction(token);
+      }
+    },
+    [beginReviewedAction, finishReviewedAction, paidRecoveryQuotes, refreshProposalAuthority, setActionErrorMessageKey]
   );
 
   const reviewHandoff = useCallback(
@@ -4147,6 +4279,9 @@ const StudioProjectPage: React.FC<{
       referenceErrorMessageKey={cardReferenceErrorMessageKey}
       onAcceptProposal={acceptProposalFromCard}
       onRejectProposal={rejectProposalFromCard}
+      paidRecoveryQuote={paidRecoveryQuote}
+      paidRecoveryStatusMessageKey={paidRecoveryStatusMessageKey}
+      onPaidRecoveryAction={actOnPaidRecoveryProposal}
       onRequestUpdatedProposal={requestUpdatedProposal}
       onReviewRuleDrafts={reviewRuleDrafts}
       onEditProposalShots={openProposalShotEditor}

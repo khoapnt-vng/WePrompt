@@ -28,6 +28,8 @@ export type WriteProposalInputV2 = {
   proposalId?: string;
   /** Test seam for V2 identity and publication races. */
   fs?: RecordIoFileSystem;
+  /** Main-owned clock seam; omitted by the Director-side writer. */
+  now?: () => Date;
   /** Reasserts the exact manifest authority around V2 sidecar publication. */
   authorityFence?: () => Promise<'valid' | 'unsupported_prototype_schema' | 'invalid'>;
   projectAuthority: StudioPendingProjectAuthorityV2;
@@ -35,6 +37,12 @@ export type WriteProposalInputV2 = {
 
 /** Writes one validated schema-2 proposal without mutating project state. */
 export const writeProposalRecordV2 = async (input: WriteProposalInputV2): Promise<StudioProposalRecordV2> => {
+  let createdAt: string;
+  try {
+    createdAt = (input.now?.() ?? new Date()).toISOString();
+  } catch {
+    throw new StudioPendingRecordWriteError('storage', 'Invalid schema-2 proposal');
+  }
   let validated: {
     projectId: string;
     proposalId: string | undefined;
@@ -56,7 +64,7 @@ export const writeProposalRecordV2 = async (input: WriteProposalInputV2): Promis
         status: 'pending',
         baseRevision: input.baseRevision,
         payload: input.payload,
-        createdAt: '1970-01-01T00:00:00.000Z',
+        createdAt,
         decidedAt: null,
       },
     });
@@ -79,7 +87,7 @@ export const writeProposalRecordV2 = async (input: WriteProposalInputV2): Promis
     status: 'pending',
     baseRevision: validated.baseRevision,
     payload: validated.payload,
-    createdAt: new Date().toISOString(),
+    createdAt,
     decidedAt: null,
   };
   const canonical = parseStudioProposalRecordV2({

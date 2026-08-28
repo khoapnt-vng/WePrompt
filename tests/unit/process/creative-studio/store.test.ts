@@ -224,6 +224,33 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
     return { proposal, slot, directories };
   };
 
+  const paidRecoveryPayloadV2 = (
+    project: StudioProjectV2,
+    referenceId = 'reference_paid_recovery'
+  ): StudioProposalRecordV2['payload'] => ({
+    kind: 'paid_recovery',
+    blocker: {
+      cause: 'reference_generation_required',
+      where: { kind: 'reference', referenceId, jobId: null },
+      remedy: {
+        kind: 'proposal',
+        prepare: { kind: 'project_references', referenceIds: [referenceId] },
+        estimatedMinorUnits: null,
+        currency: null,
+      },
+    },
+    quote: {
+      quoteId: 'quote_paid_recovery',
+      projectRevision: project.revision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      currency: 'USD',
+      lowerMinorUnits: 2,
+      upperMinorUnits: 2,
+      itemCount: 1,
+      includesCascade: false,
+    },
+  });
+
   const seedReferenceRequestV2 = async (
     store: CreativeStudioStore,
     project: StudioProjectV2,
@@ -972,6 +999,18 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
     await expect(absent.listProposalsV2('missing_project')).rejects.toMatchObject(notFound);
     await expect(absent.acceptProposalV2('missing_project', 'proposal_1')).rejects.toMatchObject(notFound);
     await expect(absent.rejectProposalV2('missing_project', 'proposal_1')).rejects.toMatchObject(notFound);
+    await expect(
+      absent.confirmPaidRecoveryProposalV2({
+        projectId: 'missing_project',
+        proposalId: 'proposal_1',
+        authorizationId: 'authorization_1',
+        expectedRevision: 1,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => null,
+        assertActive: () => undefined,
+        buildCommit: (project) => ({ project, dispatch: null }),
+      })
+    ).rejects.toMatchObject(notFound);
     await expect(absent.resolveProposalPathsV2('missing_project')).rejects.toMatchObject(notFound);
     await expect(absent.listReferenceRequestsV2('missing_project')).rejects.toMatchObject(notFound);
     await expect(absent.readReferenceGenerationHandoffV2('missing_project', 'handoff_1')).rejects.toMatchObject(
@@ -4061,6 +4100,337 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
     expect(retry.project.undoHistory.filter((entry) => entry.id === proposal.id)).toHaveLength(1);
   });
 
+  it('records a paid recovery without changing project authority and refuses the generic proposal accept path', async () => {
+    const { store } = createStoreV2({
+      createId: () => 'paid_recovery_store_project',
+      now: () => '2026-08-17T12:00:01.000Z',
+    });
+    const project = await store.createProjectV2(inputV2);
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const projectBefore = readFileSync(projectFile);
+    const proposal = await store.recordProposalV2({
+      projectId: project.id,
+      proposalId: 'proposal_paid_recovery',
+      baseRevision: project.revision,
+      payload: paidRecoveryPayloadV2(project),
+    });
+
+    expect(proposal).toMatchObject({
+      id: 'proposal_paid_recovery',
+      status: 'pending',
+      baseRevision: project.revision,
+      payload: { kind: 'paid_recovery' },
+    });
+    await expect(
+      store.recordProposalV2({
+        projectId: project.id,
+        proposalId: proposal.id,
+        baseRevision: project.revision,
+        payload: structuredClone(proposal.payload),
+      })
+    ).resolves.toEqual(proposal);
+    await expect(
+      store.recordProposalV2({
+        projectId: project.id,
+        proposalId: proposal.id,
+        baseRevision: project.revision,
+        payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'Identity collision' }] },
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    await expect(store.acceptProposalV2(project.id, proposal.id)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(store.listProposalsV2(project.id)).resolves.toEqual([proposal]);
+    await expect(store.getProjectV2(project.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { revision: project.revision, spendAuthorizations: [] },
+    });
+  });
+
+  it('rejects every malformed paid-recovery confirmation field before project IO', async () => {
+    const { store } = createStoreV2();
+    const valid = {
+      projectId: 'paid_input_project',
+      proposalId: 'paid_input_proposal',
+      authorizationId: 'paid_input_authorization',
+      expectedRevision: 1,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      revalidate: async () => null,
+      assertActive: () => undefined,
+      buildCommit: (project: StudioProjectV2) => ({ project, dispatch: null }),
+    };
+    const invalidInputs = [
+      null,
+      { ...valid, projectId: '../unsafe' },
+      { ...valid, proposalId: '../unsafe' },
+      { ...valid, authorizationId: '../unsafe' },
+      { ...valid, expectedRevision: 0 },
+      { ...valid, expiresAt: 'not-a-timestamp' },
+      { ...valid, revalidate: null },
+      { ...valid, assertActive: null },
+      { ...valid, buildCommit: null },
+      { ...valid, commitTag: 42 },
+    ];
+
+    await Promise.all(
+      invalidInputs.map((input) =>
+        expect(store.confirmPaidRecoveryProposalV2(input as never)).rejects.toMatchObject({ code: 'invalid_payload' })
+      )
+    );
+  });
+
+  it('fails closed when paid-recovery proposal authority is absent or belongs to another proposal kind', async () => {
+    const missingStore = createStoreV2({
+      createId: () => 'paid_missing_ledger_project',
+      now: () => '2026-08-17T12:00:01.000Z',
+    }).store;
+    const missingProject = await missingStore.createProjectV2(inputV2);
+    const inputFor = (projectId: string, proposalId: string, expectedRevision: number) => ({
+      projectId,
+      proposalId,
+      authorizationId: `authorization_${proposalId}`,
+      expectedRevision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      revalidate: async () => null,
+      assertActive: () => undefined,
+      buildCommit: (project: StudioProjectV2) => ({ project, dispatch: null }),
+    });
+
+    await expect(
+      missingStore.confirmPaidRecoveryProposalV2(
+        inputFor(missingProject.id, 'proposal_missing_ledger', missingProject.revision)
+      )
+    ).rejects.toMatchObject({ code: 'not_found' });
+
+    const mutationStore = createStoreV2({
+      createId: () => 'paid_wrong_kind_project',
+      now: () => '2026-08-17T12:00:01.000Z',
+    }).store;
+    const mutationProject = await mutationStore.createProjectV2(inputV2);
+    const mutationProposal = await mutationStore.recordProposalV2({
+      projectId: mutationProject.id,
+      proposalId: 'proposal_mutation_only',
+      baseRevision: mutationProject.revision,
+      payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'Not a paid recovery' }] },
+    });
+    await expect(
+      mutationStore.confirmPaidRecoveryProposalV2(
+        inputFor(mutationProject.id, 'proposal_missing_identity', mutationProject.revision)
+      )
+    ).rejects.toMatchObject({ code: 'not_found' });
+    await expect(
+      mutationStore.confirmPaidRecoveryProposalV2(
+        inputFor(mutationProject.id, mutationProposal.id, mutationProject.revision)
+      )
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('accepts generation recovery shape but refuses a commit without one exact authorization', async () => {
+    const { store } = createStoreV2({
+      createId: () => 'paid_generation_shape_project',
+      now: () => '2026-08-17T12:00:03.000Z',
+    });
+    const project = await store.createProjectV2(inputV2);
+    const proposal = await store.recordProposalV2({
+      projectId: project.id,
+      proposalId: 'proposal_paid_generation',
+      baseRevision: project.revision,
+      payload: {
+        kind: 'paid_recovery',
+        blocker: {
+          cause: 'seed_generation_required',
+          where: {
+            kind: 'shot',
+            beatId: 'beat_generation',
+            shotId: 'shot_generation',
+            beatPosition: 0,
+            shotPosition: 0,
+            jobId: null,
+          },
+          remedy: {
+            kind: 'proposal',
+            prepare: {
+              kind: 'generation',
+              baseChoices: [{ target: { kind: 'shot', shotId: 'shot_generation' }, purpose: 'seed_still' }],
+              cascadeChoices: [],
+              continuityChange: null,
+            },
+            estimatedMinorUnits: null,
+            currency: null,
+          },
+        },
+        quote: {
+          quoteId: 'quote_paid_generation',
+          projectRevision: project.revision,
+          expiresAt: '2026-08-17T12:05:00.000Z',
+          currency: 'USD',
+          lowerMinorUnits: 2,
+          upperMinorUnits: 2,
+          itemCount: 1,
+          includesCascade: false,
+        },
+      },
+    });
+
+    await expect(
+      store.confirmPaidRecoveryProposalV2({
+        projectId: project.id,
+        proposalId: proposal.id,
+        authorizationId: 'authorization_paid_generation',
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => null,
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({ project: candidate, dispatch: null }),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('rejects paid-recovery attribution that predates its durable proposal', async () => {
+    const { store } = createStoreV2({
+      createId: () => 'paid_attribution_time_project',
+      now: () => '2026-08-17T12:00:03.000Z',
+    });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const referenceId = project.referenceOrder[0]!;
+    const proposal = await store.recordProposalV2({
+      projectId: project.id,
+      proposalId: 'proposal_paid_attribution_time',
+      baseRevision: project.revision,
+      payload: paidRecoveryPayloadV2(project, referenceId),
+    });
+
+    await expect(
+      store.confirmPaidRecoveryProposalV2({
+        projectId: project.id,
+        proposalId: proposal.id,
+        authorizationId: 'authorization_paid_attribution_time',
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => null,
+        assertActive: () => undefined,
+        buildCommit(candidate) {
+          const next = addReferenceAuthorizationV2(candidate, 'paid_attribution_time', referenceId);
+          const authorization = next.spendAuthorizations.at(-1)!;
+          authorization.confirmedAt = '2026-08-17T12:00:02.000Z';
+          next.jobs[`job_paid_attribution_time`]!.createdAt = authorization.confirmedAt;
+          next.jobs[`job_paid_attribution_time`]!.updatedAt = authorization.confirmedAt;
+          next.references[referenceId]!.updatedAt = authorization.confirmedAt;
+          return { project: next, dispatch: null };
+        },
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('attributes explicit paid-recovery confirmation to exactly one authorization and accepts its proposal', async () => {
+    const confirmedAt = '2026-08-17T12:00:03.000Z';
+    const { store } = createStoreV2({
+      createId: () => 'paid_recovery_confirmation_project',
+      now: () => confirmedAt,
+    });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created);
+    const referenceId = project.referenceOrder[0]!;
+    const proposal = await store.recordProposalV2({
+      projectId: project.id,
+      proposalId: 'proposal_paid_confirmation',
+      baseRevision: project.revision,
+      payload: paidRecoveryPayloadV2(project, referenceId),
+    });
+    const assertActive = vi.fn();
+
+    const confirmed = await store.confirmPaidRecoveryProposalV2({
+      projectId: project.id,
+      proposalId: proposal.id,
+      authorizationId: 'authorization_paid_confirmation',
+      expectedRevision: project.revision,
+      expiresAt: '2026-08-17T12:05:00.000Z',
+      revalidate: async () => ({ quoteId: 'quote_paid_recovery' }),
+      assertActive,
+      buildCommit(candidate) {
+        const next = addReferenceAuthorizationV2(candidate, 'paid_confirmation', referenceId);
+        next.spendAuthorizations[0]!.originReferenceHandoffId = null;
+        return { project: next, dispatch: { jobIds: [`job_paid_confirmation`] } };
+      },
+      commitTag: 'paid-recovery/confirm',
+    });
+
+    expect(confirmed.project.revision).toBe(project.revision + 1);
+    expect(confirmed.project.spendAuthorizations).toEqual([
+      expect.objectContaining({ id: 'authorization_paid_confirmation', confirmedAt }),
+    ]);
+    expect(assertActive).toHaveBeenCalledTimes(2);
+    await expect(store.listProposalsV2(project.id)).resolves.toEqual([
+      expect.objectContaining({ id: proposal.id, status: 'accepted', decidedAt: confirmedAt }),
+    ]);
+    expect(readdirSync(path.join(rootDir, project.id, 'proposals', 'commits'))).toEqual([]);
+    expect(readdirSync(path.join(rootDir, project.id, 'proposals', 'slots'))).toEqual([]);
+    await expect(
+      store.confirmPaidRecoveryProposalV2({
+        projectId: project.id,
+        proposalId: proposal.id,
+        authorizationId: 'authorization_paid_confirmation',
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate: async () => null,
+        assertActive: () => undefined,
+        buildCommit: (candidate) => ({ project: candidate, dispatch: null }),
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('rechecks the store queue and rejects a paid reference recovery that intersects an open handoff subset', async () => {
+    const confirmedAt = '2026-08-17T12:00:03.000Z';
+    const { store } = createStoreV2({
+      createId: (() => {
+        const ids = ['paid_overlap_project', 'handoff_overlap'];
+        return () => ids.shift() ?? 'unexpected_identity';
+      })(),
+      now: () => confirmedAt,
+    });
+    const created = await store.createProjectV2(inputV2);
+    const project = await addActiveReferenceShotsV2(store, created, ['shot_overlap_a', 'shot_overlap_b']);
+    const [referenceA, referenceB] = project.referenceOrder;
+    if (referenceA === undefined || referenceB === undefined) throw new Error('expected two references');
+    const handoff = await seedGenerationHandoffV2(store, project, {
+      requestId: 'request_overlap',
+      referenceIds: [referenceA, referenceB],
+    });
+    const proposal = await store.recordProposalV2({
+      projectId: project.id,
+      proposalId: 'proposal_paid_overlap',
+      baseRevision: project.revision,
+      payload: paidRecoveryPayloadV2(project, referenceB),
+    });
+    const projectFile = path.join(rootDir, project.id, 'project.json');
+    const projectBefore = readFileSync(projectFile);
+    const revalidate = vi.fn(async () => ({ quoteId: 'quote_paid_recovery' }));
+    const buildCommit = vi.fn((candidate: StudioProjectV2) => ({ project: candidate, dispatch: null }));
+
+    await expect(
+      store.confirmPaidRecoveryProposalV2({
+        projectId: project.id,
+        proposalId: proposal.id,
+        authorizationId: 'authorization_overlap',
+        expectedRevision: project.revision,
+        expiresAt: '2026-08-17T12:05:00.000Z',
+        revalidate,
+        assertActive: () => undefined,
+        buildCommit,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    expect(handoff.request.referenceIds).toEqual([referenceA, referenceB]);
+    expect(proposal.payload.kind === 'paid_recovery' ? proposal.payload.blocker.remedy.prepare : null).toEqual({
+      kind: 'project_references',
+      referenceIds: [referenceB],
+    });
+    expect(revalidate).not.toHaveBeenCalled();
+    expect(buildCommit).not.toHaveBeenCalled();
+    expect(readFileSync(projectFile)).toEqual(projectBefore);
+    await expect(store.listProposalsV2(project.id)).resolves.toEqual([proposal]);
+  });
+
   it('rejects a current-schema forbidden hard-cut proposal without publishing project or decision bytes', async () => {
     const { store } = createStoreV2({
       createId: () => 'legacy_hard_cut_proposal_project',
@@ -4337,6 +4707,7 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
     const projectBytes = readFileSync(path.join(rootDir, project.id, 'project.json'), 'utf8');
     const attribution: StudioProposalCommitAttributionV2 = {
       schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      kind: 'mutation',
       proposalId: proposal.id,
       projectId: project.id,
       baseRevision: project.revision,
@@ -4345,6 +4716,7 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
       afterProjectSha256: 'b'.repeat(64),
       createdBeatIds: ['forged_beat'],
       createdShotIds: [],
+      authorizationId: null,
       decidedAt: '2026-08-17T12:00:01.000Z',
     };
     writeFileSync(path.join(directories.commits, `${proposal.id}.json`), JSON.stringify(attribution, null, 2));
@@ -4360,6 +4732,23 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
     expect(snapshotTreeV2(rootDir)).toEqual(before);
   });
 
+  it('classifies an immediate-prior schema-5 attribution as unsupported without changing its bytes', async () => {
+    const { store } = createStoreV2({ createId: () => 'schema_5_attribution_project', now: () => timestamp });
+    const project = await store.createProjectV2(inputV2);
+    const seeded = await seedProposalV2(store, project, { proposalId: 'proposal_schema_5_attribution' });
+    const attributionFile = path.join(seeded.directories.commits, `${seeded.proposal.id}.json`);
+    const bytes = JSON.stringify({
+      schemaVersion: 5,
+      proposalId: seeded.proposal.id,
+      projectId: project.id,
+      baseRevision: project.revision,
+    });
+    writeFileSync(attributionFile, bytes);
+
+    await expect(store.getProjectV2(project.id)).rejects.toMatchObject({ code: 'unsupported_prototype_schema' });
+    expect(readFileSync(attributionFile, 'utf8')).toBe(bytes);
+  });
+
   it('fails an exact-before attribution whose decision predates its immutable proposal', async () => {
     const { store } = createStoreV2({ createId: () => 'attribution_clock_v2', now: () => timestamp });
     const project = await store.createProjectV2(inputV2);
@@ -4367,6 +4756,7 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
     const projectBytes = readFileSync(path.join(rootDir, project.id, 'project.json'), 'utf8');
     const attribution: StudioProposalCommitAttributionV2 = {
       schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      kind: 'mutation',
       proposalId: seeded.proposal.id,
       projectId: project.id,
       baseRevision: project.revision,
@@ -4375,6 +4765,7 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
       afterProjectSha256: 'c'.repeat(64),
       createdBeatIds: [],
       createdShotIds: [],
+      authorizationId: null,
       decidedAt: '2026-08-17T11:59:59.000Z',
     };
     const attributionFile = path.join(seeded.directories.commits, `${seeded.proposal.id}.json`);

@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { isDeepStrictEqual } from 'node:util';
+
 import {
   STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS,
   STUDIO_DIRECTOR_COMMAND_MAINTENANCE_INTERVAL_MS,
@@ -16,6 +18,8 @@ import {
   type StudioDirectorAutoApplyCommandRecordV2,
   type StudioDirectorFreeRecoveryCommandRecordV2,
   type StudioDirectorFreeRecoveryV2,
+  type StudioDirectorPaidRecoveryCommandRecordV2,
+  type StudioDirectorPaidRecoveryRecordedReceiptV2,
   type StudioDirectorMutationReceiptV2,
   type StudioDirectorQueryCommandRecordV2,
   type StudioDirectorQueryFailureCodeV2,
@@ -25,6 +29,7 @@ import {
   type StudioDirectorCommandIndeterminateCode,
   type StudioDirectorProposalLookupV2,
   type StudioProposalV2,
+  type StudioProposalRecordV2,
   type StudioJobRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import {
@@ -39,6 +44,7 @@ import type { StudioDirectorCommandMailboxV2 } from './directorCommandMailbox';
 import {
   isStudioDirectorQueryCommandV2,
   isStudioDirectorFreeRecoveryCommandV2,
+  isStudioDirectorPaidRecoveryCommandV2,
   isStudioDirectorQueryReceiptV2,
   parseStudioDirectorCommandReceiptV2,
   snapshotStudioDirectorQueryResultV2,
@@ -65,7 +71,10 @@ export type StudioDirectorCommandProcessorDepsV2 = {
   store: Pick<CreativeStudioStore, 'getProjectV2' | 'listProposalsV2'>;
   mailbox: StudioDirectorCommandMailboxV2;
   service: StudioDirectorCommandServiceV2 &
-    Pick<CreativeStudioServiceV2, 'getProjectStatus' | 'listRoutes' | 'retryConditioningFrame'> & {
+    Pick<
+      CreativeStudioServiceV2,
+      'getProjectStatus' | 'listRoutes' | 'retryConditioningFrame' | 'proposePaidRecovery'
+    > & {
       terminalizeRefusedJob(input: StudioJobRequest, commitTag: string): Promise<unknown>;
     };
   tracker: StudioDirectorCommitTrackerV2;
@@ -79,7 +88,8 @@ export type StudioDirectorCommandProcessorDepsV2 = {
 
 type StudioDirectorWriteCommandRecordV2 =
   | StudioDirectorAutoApplyCommandRecordV2
-  | StudioDirectorFreeRecoveryCommandRecordV2;
+  | StudioDirectorFreeRecoveryCommandRecordV2
+  | StudioDirectorPaidRecoveryCommandRecordV2;
 
 type ExpectedCommitV2 = Readonly<{
   projectId: string;
@@ -248,6 +258,16 @@ export const createStudioDirectorCommandProcessorV2 = (
     preStart.delete(stateKey(projectId, commandId));
   };
 
+  const completePaidRecoveryTerminal = async (
+    projectId: string,
+    commandId: string,
+    receipt: StudioDirectorPaidRecoveryRecordedReceiptV2
+  ): Promise<void> => {
+    await deps.mailbox.writeReceipt(projectId, receipt);
+    await deps.mailbox.finish(projectId, commandId);
+    preStart.delete(stateKey(projectId, commandId));
+  };
+
   const observedRevisionAfter = async (projectId: string, fallback: number | null): Promise<number | null> => {
     try {
       const loaded = await deps.store.getProjectV2(projectId);
@@ -359,6 +379,48 @@ export const createStudioDirectorCommandProcessorV2 = (
       return { status: 'no_longer_pending', proposalId: proposal.id, decision: proposal.status };
     }
     return { status: 'pending', proposal: structuredClone(proposal) };
+  };
+
+  const paidRecoveryProposalForCommand = async (
+    command: StudioDirectorPaidRecoveryCommandRecordV2
+  ): Promise<StudioProposalRecordV2 | null> => {
+    const proposal = (await deps.store.listProposalsV2(command.projectId)).find(
+      (candidate) => candidate.id === command.commandId
+    );
+    if (proposal === undefined) return null;
+    if (
+      proposal.baseRevision !== command.expectedRevision ||
+      proposal.payload.kind !== 'paid_recovery' ||
+      !isDeepStrictEqual(proposal.payload.blocker, command.blocker)
+    ) {
+      throw new CreativeStudioStoreError('invalid_payload', 'Studio paid-recovery proposal identity collision');
+    }
+    return {
+      schemaVersion: proposal.schemaVersion,
+      id: proposal.id,
+      projectId: proposal.projectId,
+      status: 'pending',
+      baseRevision: proposal.baseRevision,
+      payload: structuredClone(proposal.payload),
+      createdAt: proposal.createdAt,
+      decidedAt: null,
+    };
+  };
+
+  const recordedPaidRecovery = (
+    command: StudioDirectorPaidRecoveryCommandRecordV2,
+    proposal: StudioProposalRecordV2
+  ): StudioDirectorPaidRecoveryRecordedReceiptV2 => {
+    const observedAt = decidedAt();
+    return {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: Date.parse(observedAt) >= Date.parse(proposal.createdAt) ? observedAt : proposal.createdAt,
+      status: 'recorded',
+      proposal: structuredClone(proposal),
+    };
   };
 
   const answeredQuery = (
@@ -536,6 +598,78 @@ export const createStudioDirectorCommandProcessorV2 = (
           const reasonCode = queryFailureCode(command, error);
           if (reasonCode !== null) {
             await completeQueryTerminal(projectId, commandId, failedQuery(command, reasonCode));
+          }
+        }
+        return;
+      }
+
+      if (isStudioDirectorPaidRecoveryCommandV2(command)) {
+        let existing: StudioProposalRecordV2 | null;
+        try {
+          existing = await paidRecoveryProposalForCommand(command);
+        } catch (error) {
+          if (isStoreError(error, 'invalid_payload')) {
+            await completeTerminal(
+              projectId,
+              commandId,
+              materialize(rejected(command, null, 'identity_collision')),
+              true
+            );
+          }
+          return;
+        }
+        if (existing !== null) {
+          await completePaidRecoveryTerminal(projectId, commandId, recordedPaidRecovery(command, existing));
+          return;
+        }
+        if (preStart.has(stateKey(projectId, commandId))) {
+          await completeTerminal(
+            projectId,
+            commandId,
+            materialize(expired(command, command.expectedRevision, 'expired_after_restart')),
+            true
+          );
+          return;
+        }
+        if (now() >= Date.parse(command.deadlineAt) - STUDIO_DIRECTOR_COMMAND_ACK_GRACE_MS) {
+          await completeTerminal(
+            projectId,
+            commandId,
+            materialize(expired(command, command.expectedRevision, 'deadline_elapsed')),
+            true
+          );
+          return;
+        }
+        try {
+          const proposal = await deps.service.proposePaidRecovery(command);
+          await completePaidRecoveryTerminal(projectId, commandId, recordedPaidRecovery(command, proposal));
+        } catch (error) {
+          if (isStoreError(error, 'stale_project')) {
+            await completeTerminal(
+              projectId,
+              commandId,
+              materialize(
+                rejected(command, await observedRevisionAfter(projectId, command.expectedRevision), 'stale_revision')
+              ),
+              true
+            );
+          } else if (isStoreError(error, 'not_found')) {
+            await completeTerminal(
+              projectId,
+              commandId,
+              materialize(rejected(command, null, 'project_not_found')),
+              true
+            );
+          } else if (
+            isStoreError(error, 'invalid_payload') ||
+            (error instanceof CreativeStudioServiceError && error.code === 'invalid_route')
+          ) {
+            await completeTerminal(
+              projectId,
+              commandId,
+              materialize(rejected(command, command.expectedRevision, 'dependency_blocked')),
+              true
+            );
           }
         }
         return;

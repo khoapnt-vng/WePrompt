@@ -22,6 +22,7 @@ import {
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
   type StudioDirectorFreeRecoveryCommandRecordV2,
+  type StudioDirectorPaidRecoveryCommandRecordV2,
   type StudioDirectorQueryCommandRecordV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
@@ -41,6 +42,7 @@ import * as directorCommandContracts from '@process/services/creative-studio/ser
 import {
   classifyStudioDirectorOperationV2,
   isStudioDirectorFreeRecoveryCommandV2,
+  isStudioDirectorPaidRecoveryCommandV2,
   isStudioDirectorQueryCommandV2,
   parseStudioDirectorCommandReceiptV2,
   parseStudioDirectorCommandSlotLeaseV2,
@@ -117,6 +119,43 @@ const validFreeRecoveryCommandV2 = (
   deadlineAt: '2026-08-16T12:00:15.000Z',
   policy: 'apply_free_fix',
   recovery: { op: 'retry_conditioning_frame', dependentShotId: 'shot_2' },
+  ...overrides,
+});
+
+const paidRecoveryBlockerV2 = () => ({
+  cause: 'seed_generation_required' as const,
+  where: {
+    kind: 'shot' as const,
+    beatId: 'beat_1',
+    shotId: 'shot_1',
+    beatPosition: 1,
+    shotPosition: 1,
+    jobId: null,
+  },
+  remedy: {
+    kind: 'proposal' as const,
+    prepare: {
+      kind: 'generation' as const,
+      baseChoices: [{ target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const }],
+      cascadeChoices: [],
+      continuityChange: null,
+    },
+    estimatedMinorUnits: null,
+    currency: null,
+  },
+});
+
+const validPaidRecoveryCommandV2 = (
+  overrides: Partial<StudioDirectorPaidRecoveryCommandRecordV2> = {}
+): StudioDirectorPaidRecoveryCommandRecordV2 => ({
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  commandId: 'command_1',
+  projectId: 'project_1',
+  expectedRevision: 4,
+  createdAt: NOW,
+  deadlineAt: '2026-08-16T12:00:15.000Z',
+  policy: 'propose_paid_recovery',
+  blocker: paidRecoveryBlockerV2(),
   ...overrides,
 });
 
@@ -354,7 +393,7 @@ describe('Studio Director V2 command contracts', () => {
     ]) {
       expect(parsePendingV2(validCommandV2({ operations: [operation] })).status).toBe('valid');
     }
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(9);
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(10);
     expect(STUDIO_MAX_MUTATION_OPERATIONS).toBe(32);
   });
 
@@ -368,6 +407,145 @@ describe('Studio Director V2 command contracts', () => {
       expect(parsePendingV2(command)).toEqual({ status: 'valid', record: command });
       expect(isStudioDirectorFreeRecoveryCommandV2(command)).toBe(true);
       expect(isStudioDirectorQueryCommandV2(command)).toBe(false);
+    }
+  });
+
+  it('accepts only an exact status-owned paid recovery and correlates its recorded proposal receipt', () => {
+    const command = validPaidRecoveryCommandV2();
+    const proposal: StudioProposalRecordV2 = {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      id: command.commandId,
+      projectId: command.projectId,
+      status: 'pending',
+      baseRevision: command.expectedRevision,
+      payload: {
+        kind: 'paid_recovery',
+        blocker: command.blocker,
+        quote: {
+          quoteId: 'quote_paid_1',
+          projectRevision: command.expectedRevision,
+          expiresAt: '2026-08-16T12:05:00.000Z',
+          currency: 'USD',
+          lowerMinorUnits: 3,
+          upperMinorUnits: 7,
+          itemCount: 2,
+          includesCascade: true,
+        },
+      },
+      createdAt: NOW,
+      decidedAt: null,
+    };
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: '2026-08-16T12:00:01.000Z',
+      status: 'recorded' as const,
+      proposal,
+    };
+
+    expect(parsePendingV2(command)).toEqual({ status: 'valid', record: command });
+    expect(isStudioDirectorPaidRecoveryCommandV2(command)).toBe(true);
+    expect(isStudioDirectorQueryCommandV2(command)).toBe(false);
+    expect(
+      parseStudioDirectorCommandReceiptV2({
+        projectId: command.projectId,
+        commandId: command.commandId,
+        value: receipt,
+      })
+    ).toEqual({ status: 'valid', record: receipt });
+    expect(studioDirectorCommandReceiptMatchesRecordV2(receipt, command)).toBe(true);
+
+    const rejected = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: '2026-08-16T12:00:01.000Z',
+      status: 'rejected' as const,
+      observedRevision: command.expectedRevision,
+      reasonCode: 'dependency_blocked' as const,
+    };
+    const expired = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: '2026-08-16T12:00:01.000Z',
+      status: 'expired' as const,
+      observedRevision: command.expectedRevision,
+      reasonCode: 'deadline_elapsed' as const,
+    };
+    const applied = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      expectedRevision: command.expectedRevision,
+      decidedAt: '2026-08-16T12:00:01.000Z',
+      status: 'applied' as const,
+      appliedRevision: command.expectedRevision + 1,
+      createdBeatIds: [],
+      createdShotIds: [],
+    };
+    for (const terminal of [rejected, expired]) {
+      expect(
+        parseStudioDirectorCommandReceiptV2({
+          projectId: command.projectId,
+          commandId: command.commandId,
+          value: terminal,
+        })
+      ).toEqual({ status: 'valid', record: terminal });
+      expect(studioDirectorCommandReceiptMatchesRecordV2(terminal, command)).toBe(true);
+    }
+    expect(
+      parseStudioDirectorCommandReceiptV2({
+        projectId: command.projectId,
+        commandId: command.commandId,
+        value: applied,
+      })
+    ).toEqual({ status: 'valid', record: applied });
+    expect(studioDirectorCommandReceiptMatchesRecordV2(applied, command)).toBe(false);
+
+    expect(parsePendingV2({ ...command, blocker: { ...command.blocker, where: { kind: 'project' } } })).toMatchObject({
+      status: 'invalid',
+    });
+    expect(parsePendingV2({ ...command, blocker: { ...command.blocker, extra: true } })).toMatchObject({
+      status: 'invalid',
+    });
+    expect(
+      parseStudioDirectorCommandReceiptV2({
+        projectId: command.projectId,
+        commandId: command.commandId,
+        value: {
+          ...receipt,
+          proposal: { ...proposal, id: 'proposal_other' },
+        },
+      })
+    ).toEqual({ status: 'invalid' });
+    expect(
+      parseStudioDirectorCommandReceiptV2({
+        projectId: command.projectId,
+        commandId: command.commandId,
+        value: { ...receipt, decidedAt: '2026-08-16T11:59:59.999Z' },
+      })
+    ).toEqual({ status: 'invalid' });
+    for (const quote of [
+      { ...proposal.payload.quote, expiresAt: 'not-a-clock' },
+      { ...proposal.payload.quote, expiresAt: '2026-08-16T11:59:59.999Z' },
+      { ...proposal.payload.quote, expiresAt: '2026-08-16T12:05:00.001Z' },
+      { ...proposal.payload.quote, currency: '' },
+      { ...proposal.payload.quote, currency: ' USD ' },
+      { ...proposal.payload.quote, lowerMinorUnits: 8, upperMinorUnits: 7 },
+      { ...proposal.payload.quote, projectRevision: command.expectedRevision + 1 },
+    ]) {
+      expect(
+        parseStudioProposalRecordV2({
+          projectId: command.projectId,
+          proposalId: command.commandId,
+          value: { ...proposal, payload: { ...proposal.payload, quote } },
+        })
+      ).toEqual({ status: 'invalid' });
     }
   });
 
@@ -791,8 +969,8 @@ describe('Studio Director V2 read-query contracts', () => {
     expect(parsePendingV2({ ...routes, detail: false })).toMatchObject({ status: 'invalid' });
     expect(parsePendingV2({ ...proposal, proposalId: '../unsafe' })).toMatchObject({ status: 'invalid' });
     expect(parsePendingV2({ ...proposal, detail: false })).toMatchObject({ status: 'invalid' });
-    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(9);
-    expect(STUDIO_PROPOSAL_SCHEMA_VERSION_V2).toBe(5);
+    expect(STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2).toBe(10);
+    expect(STUDIO_PROPOSAL_SCHEMA_VERSION_V2).toBe(6);
     expect(STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION).toBe(5);
     expect(STUDIO_DIRECTOR_COMMAND_MAX_RECEIPT_BYTES).toBeGreaterThan(256 * 1024);
   });

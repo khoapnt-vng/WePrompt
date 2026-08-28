@@ -43,6 +43,7 @@ import {
   type StudioDismissReferenceGenerationHandoffRequestV2,
   type StudioDismissReferenceGenerationHandoffResultV2,
   type StudioDirectorSessionAuthorityV2,
+  type StudioDirectorPaidRecoveryCommandRecordV2,
   type StudioJobRequest,
   type StudioJobPurpose,
   type StudioJobV2,
@@ -68,6 +69,11 @@ import {
   type StudioProjectV2,
   type StudioPrepareProjectReferencesRequestV2,
   type StudioPrepareSubmissionRequestV2,
+  type StudioPreparePaidRecoveryProposalRequestV2,
+  type StudioConfirmPaidRecoveryProposalRequestV2,
+  type StudioPaidRecoveryBlockerV2,
+  type StudioPaidRecoveryQuoteSummaryV2,
+  type StudioProposalRecordV2,
   type StudioProposalV2,
   type StudioProviderRef,
   type StudioQuotedGeneration,
@@ -303,6 +309,14 @@ export type CreativeStudioServiceV2 = {
     applied: boolean;
   }>;
   rejectProposal(input: { projectId: string; proposalId: string }): Promise<StudioProposalV2>;
+  /** Main-only Director command boundary. Preparation records a proposal but never spends. */
+  proposePaidRecovery(command: StudioDirectorPaidRecoveryCommandRecordV2): Promise<StudioProposalRecordV2>;
+  preparePaidRecoveryProposal(
+    input: StudioPreparePaidRecoveryProposalRequestV2
+  ): Promise<StudioPaidRecoveryQuoteSummaryV2>;
+  confirmPaidRecoveryProposal(
+    input: StudioConfirmPaidRecoveryProposalRequestV2
+  ): Promise<StudioConfirmSubmissionResultV2>;
   listReferenceRequests(input: { projectId: string }): Promise<StudioReferenceRequestV2[]>;
   decideReferenceRequest(input: StudioDecideReferenceRequestInputV2): Promise<StudioReferenceRequestDecisionV2>;
   listReferenceGenerationHandoffs(input: { projectId: string }): Promise<StudioRendererReferenceGenerationHandoffV2[]>;
@@ -1563,6 +1577,19 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   const activeFilmRenders = new Map<string, ActiveFilmRenderV2>();
   const terminalFilmRenders = new Map<string, TerminalFilmRenderV2>();
   const activeClaims = new Set<StudioPreparedSubmissionClaimV2>();
+  type PaidRecoveryQuoteAuthorityV2 = {
+    projectId: string;
+    proposalId: string;
+    expectedRevision: number;
+    blocker: StudioPaidRecoveryBlockerV2;
+    request: StudioPrepareProjectReferencesRequestV2 | StudioPrepareSubmissionRequestV2;
+    summary: StudioPaidRecoveryQuoteSummaryV2;
+    selected: boolean;
+    expiresAt: string;
+  };
+  const paidRecoveryQuoteAuthorities = new Map<string, PaidRecoveryQuoteAuthorityV2>();
+  const activePaidRecoveryConfirmations = new Map<string, string>();
+  const paidRecoveryQuoteKey = (projectId: string, quoteId: string): string => `${projectId}\0${quoteId}`;
   let generationRoutesSnapshot: StudioGenerationRouteCatalog | null = null;
   let generationRoutesFlight: Promise<StudioGenerationRouteCatalog> | null = null;
   let disposed = false;
@@ -2011,6 +2038,208 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     });
     return projectPreparedOptions(project, generation, session.options);
   };
+
+  const deriveFreshProjectStatus = async (projectId: string, detail: boolean): Promise<StudioProjectStatusV2> => {
+    let generation: StudioGenerationRouteCatalog | null = null;
+    try {
+      generation = await refreshGenerationRoutes();
+    } catch (error) {
+      const knownInventoryFailure =
+        (error instanceof CreativeStudioServiceError && error.code === 'provider_error') ||
+        (error instanceof CreativeStudioStoreError && error.code === 'storage_error');
+      if (!knownInventoryFailure) throw error;
+    }
+    const project = await loadSupported(projectId);
+    const routes: StudioProjectStatusRouteCatalogV2 =
+      generation === null
+        ? { status: 'inventory_unavailable', catalogVersion: null }
+        : { status: 'available', catalog: toRouteCatalog(generation, project) };
+    return projectStudioStatusV2(project, routes, { detail });
+  };
+
+  const exactPaidRecoveryBlocker = async (
+    projectId: string,
+    expectedRevision: number,
+    blocker: StudioPaidRecoveryBlockerV2
+  ): Promise<StudioPaidRecoveryBlockerV2> => {
+    const status = await deriveFreshProjectStatus(projectId, true);
+    if (status.projectId !== projectId || status.projectRevision !== expectedRevision) {
+      throw new CreativeStudioStoreError('stale_project', 'Studio paid-recovery status is stale');
+    }
+    const matches = status.stages
+      .flatMap((stage) => stage.blockers)
+      .filter(
+        (candidate): candidate is StudioPaidRecoveryBlockerV2 =>
+          candidate.remedy.kind === 'proposal' && jsonEqual(candidate, blocker)
+      );
+    if (matches.length !== 1) {
+      throw invalid('Studio paid-recovery blocker is no longer offered');
+    }
+    return structuredClone(matches[0]!);
+  };
+
+  const selectedPaidRecoverySummary = (
+    options: StudioRendererPreparedSubmissionOptionsV2
+  ): StudioPaidRecoveryQuoteSummaryV2 => {
+    const selected = options.withCascade ?? options.baseOnly;
+    return {
+      quoteId: selected.id,
+      projectRevision: selected.projectRevision,
+      expiresAt: selected.expiresAt,
+      currency: selected.currency,
+      lowerMinorUnits: selected.lowerMinorUnits,
+      upperMinorUnits: selected.upperMinorUnits,
+      itemCount: selected.baseItems.length + selected.cascadeItems.length,
+      includesCascade: options.withCascade !== null,
+    };
+  };
+
+  const prepareExactPaidRecovery = async (
+    projectId: string,
+    expectedRevision: number,
+    blocker: StudioPaidRecoveryBlockerV2,
+    proposalId: string,
+    verifiedBlocker?: StudioPaidRecoveryBlockerV2
+  ): Promise<StudioPaidRecoveryQuoteSummaryV2> => {
+    const exactBlocker = verifiedBlocker ?? (await exactPaidRecoveryBlocker(projectId, expectedRevision, blocker));
+    if (!jsonEqual(exactBlocker, blocker)) {
+      throw invalid('Studio paid-recovery blocker authority changed');
+    }
+    const project = await loadSupported(projectId);
+    if (project.revision !== expectedRevision) {
+      throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+    }
+    const prepare = exactBlocker.remedy.prepare;
+    const generation = await refreshGenerationRoutes();
+    let graph;
+    if (prepare.kind === 'project_references') {
+      const request: StudioPrepareProjectReferencesRequestV2 = {
+        projectId,
+        expectedRevision,
+        referenceIds: [...prepare.referenceIds],
+      };
+      const entries = await deps.store.listReferenceRequestsV2(projectId);
+      const requestedReferenceIds = new Set(request.referenceIds);
+      const overlappingOpenHandoffs = entries.filter(
+        (entry) =>
+          entry.receipt === null &&
+          entry.decision?.outcome.kind === 'generation_gate' &&
+          entry.request.referenceIds.some((referenceId) => requestedReferenceIds.has(referenceId))
+      );
+      if (overlappingOpenHandoffs.length > 0) {
+        throw invalid('Studio paid recovery overlaps an open reference-generation handoff');
+      }
+      try {
+        preflightStudioProjectReferencePreparationV2({ project, request });
+        graph = deriveStudioProjectReferenceSubmissionQuoteGraphV2({
+          project,
+          request,
+          resolveRoute: compositionRouteLookup(generation, project),
+          originReferenceHandoffId: null,
+        });
+      } catch (error) {
+        return rethrowPricingFailure(error);
+      }
+    } else {
+      const request: StudioPrepareSubmissionRequestV2 = {
+        projectId,
+        expectedRevision,
+        originReferenceHandoffId: null,
+        baseChoices: structuredClone(prepare.baseChoices),
+        cascadeChoices: structuredClone(prepare.cascadeChoices),
+        ...(prepare.continuityChange === null ? {} : { continuityChange: structuredClone(prepare.continuityChange) }),
+      };
+      try {
+        preflightStudioSubmissionPreparationV2({ project, request });
+        graph = deriveStudioSubmissionQuoteGraphV2({
+          project,
+          request,
+          resolveRoute: compositionRouteLookup(generation, project),
+        });
+      } catch (error) {
+        return rethrowPricingFailure(error);
+      }
+    }
+    const options = await prepareQuoteGraph(project, graph, generation);
+    const summary = selectedPaidRecoverySummary(options);
+    const observedAt = readNow().getTime();
+    for (const [key, authority] of paidRecoveryQuoteAuthorities) {
+      if (Date.parse(authority.expiresAt) <= observedAt) paidRecoveryQuoteAuthorities.delete(key);
+    }
+    const register = (quote: StudioRendererPreparedSubmissionOptionsV2['baseOnly'], selected: boolean): void => {
+      paidRecoveryQuoteAuthorities.set(paidRecoveryQuoteKey(projectId, quote.id), {
+        projectId,
+        proposalId,
+        expectedRevision,
+        blocker: structuredClone(blocker),
+        request: structuredClone(graph.request),
+        summary: structuredClone(summary),
+        selected,
+        expiresAt: quote.expiresAt,
+      });
+    };
+    register(options.baseOnly, options.withCascade === null);
+    if (options.withCascade !== null) register(options.withCascade, true);
+    return summary;
+  };
+
+  const currentPaidRecoverySummary = (
+    projectId: string,
+    proposalId: string,
+    expectedRevision: number,
+    blocker: StudioPaidRecoveryBlockerV2
+  ): StudioPaidRecoveryQuoteSummaryV2 | null => {
+    const selected = [...paidRecoveryQuoteAuthorities.entries()].find(
+      ([, authority]) =>
+        authority.projectId === projectId &&
+        authority.proposalId === proposalId &&
+        authority.expectedRevision === expectedRevision &&
+        authority.selected &&
+        jsonEqual(authority.blocker, blocker)
+    );
+    if (selected === undefined) return null;
+    const [key, authority] = selected;
+    if (Date.parse(authority.expiresAt) <= readNow().getTime()) {
+      paidRecoveryQuoteAuthorities.delete(key);
+      return null;
+    }
+    let claim: StudioPreparedSubmissionClaimV2;
+    try {
+      claim = preparedSubmissionCache.claim(projectId, authority.summary.quoteId);
+    } catch (error) {
+      if (error instanceof StudioPreparedSubmissionCacheErrorV2 && error.code === 'quote_in_use') {
+        return structuredClone(authority.summary);
+      }
+      if (error instanceof StudioPreparedSubmissionCacheErrorV2 && error.code === 'quote_not_found') {
+        paidRecoveryQuoteAuthorities.delete(key);
+        return null;
+      }
+      throw error;
+    }
+    try {
+      if (
+        claim.quote.id !== authority.summary.quoteId ||
+        !paidRecoveryRequestMatches(claim.session.request, authority.request, projectId, expectedRevision)
+      ) {
+        throw invalid('Studio paid-recovery quote authority mismatch');
+      }
+      return structuredClone(authority.summary);
+    } finally {
+      preparedSubmissionCache.release(claim);
+    }
+  };
+
+  const paidRecoveryRequestMatches = (
+    request: StudioPrepareProjectReferencesRequestV2 | StudioPrepareSubmissionRequestV2,
+    expectedRequest: StudioPrepareProjectReferencesRequestV2 | StudioPrepareSubmissionRequestV2,
+    projectId: string,
+    expectedRevision: number
+  ): boolean =>
+    request.projectId === projectId &&
+    request.expectedRevision === expectedRevision &&
+    expectedRequest.projectId === projectId &&
+    expectedRequest.expectedRevision === expectedRevision &&
+    jsonEqual(request, expectedRequest);
 
   const exactSelectedBindings = (
     claim: StudioPreparedSubmissionClaimV2
@@ -2536,7 +2765,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       });
   };
 
-  return {
+  const service: CreativeStudioServiceV2 = {
     listProjects: () => deps.store.listProjectsV2(),
 
     async createProject(input): Promise<StudioRendererProjectV2> {
@@ -3277,21 +3506,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       }
       assertSafeId(input.projectId, 'project id');
       const detail = Object.hasOwn(input, 'detail') && input.detail === true;
-      let generation: StudioGenerationRouteCatalog | null = null;
-      try {
-        generation = await refreshGenerationRoutes();
-      } catch (error) {
-        const knownInventoryFailure =
-          (error instanceof CreativeStudioServiceError && error.code === 'provider_error') ||
-          (error instanceof CreativeStudioStoreError && error.code === 'storage_error');
-        if (!knownInventoryFailure) throw error;
-      }
-      const project = await loadSupported(input.projectId);
-      const routes: StudioProjectStatusRouteCatalogV2 =
-        generation === null
-          ? { status: 'inventory_unavailable', catalogVersion: null }
-          : { status: 'available', catalog: toRouteCatalog(generation, project) };
-      return projectStudioStatusV2(project, routes, { detail });
+      return deriveFreshProjectStatus(input.projectId, detail);
     },
 
     async getGenerationCapability(input): Promise<StudioGenerationCapabilityV2> {
@@ -3460,6 +3675,125 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       assertSafeId(input.projectId, 'project id');
       assertSafeId(input.proposalId, 'proposal id');
       return structuredClone(await deps.store.rejectProposalV2(input.projectId, input.proposalId));
+    },
+
+    async proposePaidRecovery(command): Promise<StudioProposalRecordV2> {
+      assertServiceActive();
+      if (
+        !isRecord(command) ||
+        command.policy !== 'propose_paid_recovery' ||
+        !isSafeId(command.commandId) ||
+        !isSafeId(command.projectId)
+      ) {
+        throw invalid('Invalid Studio paid-recovery command');
+      }
+      assertRevision(command.expectedRevision);
+      const existing = (await deps.store.listProposalsV2(command.projectId)).find(
+        (proposal) => proposal.id === command.commandId
+      );
+      if (existing !== undefined) {
+        if (
+          existing.status !== 'pending' ||
+          existing.baseRevision !== command.expectedRevision ||
+          existing.payload.kind !== 'paid_recovery' ||
+          !jsonEqual(existing.payload.blocker, command.blocker)
+        ) {
+          throw invalid('Studio paid-recovery proposal identity collision');
+        }
+        return structuredClone(existing);
+      }
+      const blocker = await exactPaidRecoveryBlocker(command.projectId, command.expectedRevision, command.blocker);
+      const quote = await prepareExactPaidRecovery(
+        command.projectId,
+        command.expectedRevision,
+        blocker,
+        command.commandId
+      );
+      const record = await deps.store.recordProposalV2({
+        projectId: command.projectId,
+        proposalId: command.commandId,
+        baseRevision: command.expectedRevision,
+        payload: { kind: 'paid_recovery', blocker, quote },
+      });
+      if (
+        record.id !== command.commandId ||
+        record.baseRevision !== command.expectedRevision ||
+        record.payload.kind !== 'paid_recovery' ||
+        !jsonEqual(record.payload.blocker, blocker) ||
+        !jsonEqual(record.payload.quote, quote)
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio paid-recovery proposal changed');
+      }
+      return structuredClone(record);
+    },
+
+    async preparePaidRecoveryProposal(input): Promise<StudioPaidRecoveryQuoteSummaryV2> {
+      assertServiceActive();
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'proposalId'])) {
+        throw invalid('Invalid Studio paid-recovery preparation');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.proposalId, 'proposal id');
+      const proposal = (await deps.store.listProposalsV2(input.projectId)).find(
+        (candidate) => candidate.id === input.proposalId
+      );
+      if (proposal === undefined) throw new CreativeStudioStoreError('not_found', 'Studio proposal not found');
+      if (proposal.status !== 'pending' || proposal.payload.kind !== 'paid_recovery') {
+        throw invalid('Studio paid-recovery proposal is no longer pending');
+      }
+      const blocker = await exactPaidRecoveryBlocker(input.projectId, proposal.baseRevision, proposal.payload.blocker);
+      const current = currentPaidRecoverySummary(input.projectId, proposal.id, proposal.baseRevision, blocker);
+      if (current !== null) return current;
+      return prepareExactPaidRecovery(input.projectId, proposal.baseRevision, blocker, proposal.id, blocker);
+    },
+
+    async confirmPaidRecoveryProposal(input): Promise<StudioConfirmSubmissionResultV2> {
+      assertServiceActive();
+      if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'proposalId', 'quoteId', 'expectedRevision'])) {
+        throw invalid('Invalid Studio paid-recovery confirmation');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertSafeId(input.proposalId, 'proposal id');
+      assertSafeId(input.quoteId, 'quote id');
+      assertRevision(input.expectedRevision);
+      const proposal = (await deps.store.listProposalsV2(input.projectId)).find(
+        (candidate) => candidate.id === input.proposalId
+      );
+      if (
+        proposal === undefined ||
+        proposal.status !== 'pending' ||
+        proposal.baseRevision !== input.expectedRevision ||
+        proposal.payload.kind !== 'paid_recovery'
+      ) {
+        throw invalid('Studio paid-recovery proposal is no longer pending');
+      }
+      const key = paidRecoveryQuoteKey(input.projectId, input.quoteId);
+      const authority = paidRecoveryQuoteAuthorities.get(key);
+      if (authority === undefined || Date.parse(authority.expiresAt) <= readNow().getTime()) {
+        paidRecoveryQuoteAuthorities.delete(key);
+        throw new StudioPreparedSubmissionCacheErrorV2('quote_not_found');
+      }
+      if (
+        authority.projectId !== input.projectId ||
+        authority.proposalId !== proposal.id ||
+        authority.expectedRevision !== proposal.baseRevision ||
+        !authority.selected ||
+        !jsonEqual(authority.blocker, proposal.payload.blocker) ||
+        activePaidRecoveryConfirmations.has(key)
+      ) {
+        throw invalid('Studio paid-recovery quote authority mismatch');
+      }
+      await exactPaidRecoveryBlocker(input.projectId, input.expectedRevision, proposal.payload.blocker);
+      activePaidRecoveryConfirmations.set(key, proposal.id);
+      try {
+        return await service.confirmSubmission({
+          projectId: input.projectId,
+          quoteId: input.quoteId,
+          expectedRevision: input.expectedRevision,
+        });
+      } finally {
+        activePaidRecoveryConfirmations.delete(key);
+      }
     },
 
     async listReferenceRequests(input): Promise<StudioReferenceRequestV2[]> {
@@ -3652,6 +3986,24 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       activeClaims.add(claim);
       let durable = false;
       try {
+        const paidRecoveryKey = paidRecoveryQuoteKey(input.projectId, input.quoteId);
+        const paidRecoveryAuthority = paidRecoveryQuoteAuthorities.get(paidRecoveryKey);
+        const activePaidProposalId = activePaidRecoveryConfirmations.get(paidRecoveryKey);
+        if (
+          (paidRecoveryAuthority !== undefined &&
+            (activePaidProposalId !== paidRecoveryAuthority.proposalId ||
+              !paidRecoveryAuthority.selected ||
+              paidRecoveryAuthority.expectedRevision !== input.expectedRevision ||
+              !paidRecoveryRequestMatches(
+                claim.session.request,
+                paidRecoveryAuthority.request,
+                input.projectId,
+                input.expectedRevision
+              ))) ||
+          (paidRecoveryAuthority === undefined && activePaidProposalId !== undefined)
+        ) {
+          throw invalid('Studio paid-recovery quote requires its explicit proposal confirmation');
+        }
         const confirmation: StudioProjectConfirmationInputV2<ConfirmationRevalidation, ConfirmationDispatch> = {
           projectId: input.projectId,
           expectedRevision: input.expectedRevision,
@@ -3724,18 +4076,31 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           commitTag: `confirm_submission:${claim.quote.id}`,
         };
         const committed =
-          claim.quote.originReferenceHandoffId === null
-            ? await deps.store.confirmProjectV2<ConfirmationRevalidation, ConfirmationDispatch>(confirmation)
-            : await deps.store.confirmReferenceGenerationHandoffV2<ConfirmationRevalidation, ConfirmationDispatch>({
+          paidRecoveryAuthority !== undefined && activePaidProposalId === paidRecoveryAuthority.proposalId
+            ? await deps.store.confirmPaidRecoveryProposalV2<ConfirmationRevalidation, ConfirmationDispatch>({
                 ...confirmation,
-                handoffId: claim.quote.originReferenceHandoffId,
-              });
+                proposalId: activePaidProposalId,
+                authorizationId: claim.quote.id,
+              })
+            : claim.quote.originReferenceHandoffId === null
+              ? await deps.store.confirmProjectV2<ConfirmationRevalidation, ConfirmationDispatch>(confirmation)
+              : await deps.store.confirmReferenceGenerationHandoffV2<ConfirmationRevalidation, ConfirmationDispatch>({
+                  ...confirmation,
+                  handoffId: claim.quote.originReferenceHandoffId,
+                });
         durable = true;
         activeClaims.delete(claim);
         try {
           preparedSubmissionCache.consume(claim);
         } catch {
           // A durable claim remains non-replayable even if cache bookkeeping is already inconsistent.
+        }
+        if (paidRecoveryAuthority !== undefined) {
+          for (const [key, authority] of paidRecoveryQuoteAuthorities) {
+            if (authority.projectId === input.projectId && authority.proposalId === paidRecoveryAuthority.proposalId) {
+              paidRecoveryQuoteAuthorities.delete(key);
+            }
+          }
         }
         try {
           deps.onProjectUpdated(committed.project.id);
@@ -4013,7 +4378,10 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       terminalFilmRenders.clear();
       filmExporter.dispose();
       activeClaims.clear();
+      paidRecoveryQuoteAuthorities.clear();
+      activePaidRecoveryConfirmations.clear();
       preparedSubmissionCache.close();
     },
   };
+  return service;
 };

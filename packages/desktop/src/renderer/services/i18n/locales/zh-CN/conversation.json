@@ -1290,6 +1290,30 @@
         "chatRejected": "提案已拒绝。",
         "reviewStale": "此审核基于修订版 {{baseRevision}}，但项目当前为修订版 {{currentRevision}}。",
         "noChanges": "此提案没有语义变更。",
+        "paidRecovery": {
+          "heading": "付费恢复",
+          "explanation": "Director 找到了需要重新生成的恢复方案。花费前请检查具体受影响的工作和价格。",
+          "blockedBy": "阻塞原因",
+          "affectedWork": "受影响的工作",
+          "price": "预计费用",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "生成范围",
+          "generationCount": "{{count}} 个生成项目",
+          "includesCascade": "包含依赖工作",
+          "expires": "此价格将于 {{expiresAt}} 过期。",
+          "expired": "保存的价格已过期。请在确认前刷新。",
+          "confirm": "确认并付费",
+          "refresh": "刷新价格",
+          "refreshed": "价格已刷新。请检查后再次确认以付费。",
+          "cardOnly": "付费恢复只能在检查当前价格后从其提案卡确认。",
+          "location": {
+            "project": "项目",
+            "cut": "剪辑",
+            "route": "{{route}} 路由",
+            "reference": "参考 · {{reference}}",
+            "shot": "{{beat}} · 镜头 {{shot}}"
+          }
+        },
         "subject": {
           "project": "项目",
           "beat": "Beat",

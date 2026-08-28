@@ -107,6 +107,7 @@ import type {
   StudioBindDirectorConversationRequestV2,
   StudioCascadeBarrierActionRequestV2,
   StudioCommandResult,
+  StudioConfirmPaidRecoveryProposalRequestV2,
   StudioConfirmSubmissionRequestV2,
   StudioConfirmSubmissionResultV2,
   StudioCopyExportResultV2,
@@ -134,8 +135,10 @@ import type {
   StudioGenerationCapabilityV2,
   StudioExportArtifactRequestV2,
   StudioListExportsRequestV2,
+  StudioPaidRecoveryQuoteSummaryV2,
   StudioParkBeatRequestV2,
   StudioParkShotRequestV2,
+  StudioPreparePaidRecoveryProposalRequestV2,
   StudioPrepareProjectReferencesRequestV2,
   StudioPrepareSubmissionRequestV2,
   StudioProjectListResultV2,
@@ -1269,6 +1272,14 @@ export const creativeStudio = {
   rejectProposal: bridge.buildProvider<StudioCommandResult<StudioProposalV2>, StudioProposalRequestV2>(
     'creative-studio.reject-proposal'
   ),
+  preparePaidRecoveryProposal: bridge.buildProvider<
+    StudioCommandResult<StudioPaidRecoveryQuoteSummaryV2>,
+    StudioPreparePaidRecoveryProposalRequestV2
+  >('creative-studio.prepare-paid-recovery-proposal'),
+  confirmPaidRecoveryProposal: bridge.buildProvider<
+    StudioCommandResult<StudioConfirmSubmissionResultV2>,
+    StudioConfirmPaidRecoveryProposalRequestV2
+  >('creative-studio.confirm-paid-recovery-proposal'),
   listReferenceRequests: bridge.buildProvider<StudioCommandResult<StudioReferenceRequestV2[]>, StudioProjectRequestV2>(
     'creative-studio.list-reference-requests'
   ),

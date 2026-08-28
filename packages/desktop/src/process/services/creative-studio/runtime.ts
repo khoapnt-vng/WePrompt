@@ -508,6 +508,7 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
       ...directorMutationService,
       getProjectStatus: (input) => coldService.getProjectStatus(input),
       listRoutes: (input) => coldService.listRoutes(input),
+      proposePaidRecovery: (command) => coldService.proposePaidRecovery(command),
       retryConditioningFrame: (input, commitTag) => coldService.retryConditioningFrame(input, commitTag),
       terminalizeRefusedJob: (input, commitTag) => jobManager.terminalizeRefusedJobV2(input, commitTag),
     };

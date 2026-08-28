@@ -1290,6 +1290,30 @@
         "chatRejected": "提案を却下しました。",
         "reviewStale": "このレビューはリビジョン {{baseRevision}} から作成されましたが、現在のプロジェクトは {{currentRevision}} です。",
         "noChanges": "この提案による意味上の変更はありません。",
+        "paidRecovery": {
+          "heading": "有料リカバリー",
+          "explanation": "Director が新しい生成を必要とするリカバリーを見つけました。支払い前に対象と価格を確認してください。",
+          "blockedBy": "停止理由",
+          "affectedWork": "対象作業",
+          "price": "推定費用",
+          "priceRange": "{{lower}}～{{upper}}",
+          "generations": "生成範囲",
+          "generationCount": "生成項目 {{count}} 件",
+          "includesCascade": "依存作業を含む",
+          "expires": "この価格は {{expiresAt}} に期限切れになります。",
+          "expired": "保存された価格は期限切れです。確認前に更新してください。",
+          "confirm": "確認して支払う",
+          "refresh": "価格を更新",
+          "refreshed": "価格を更新しました。確認し、支払うにはもう一度確定してください。",
+          "cardOnly": "有料リカバリーは、現在の価格を確認した後に提案カードからのみ確定できます。",
+          "location": {
+            "project": "プロジェクト",
+            "cut": "カット",
+            "route": "{{route}} ルート",
+            "reference": "リファレンス · {{reference}}",
+            "shot": "{{beat}} · ショット {{shot}}"
+          }
+        },
         "subject": {
           "project": "プロジェクト",
           "beat": "Beat",

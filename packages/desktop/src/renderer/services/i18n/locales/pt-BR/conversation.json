@@ -1296,6 +1296,30 @@
         "chatRejected": "Proposta rejeitada.",
         "reviewStale": "Esta revisão foi derivada da revisão {{baseRevision}}, mas o projeto agora está na revisão {{currentRevision}}.",
         "noChanges": "Esta proposta não faz nenhuma alteração semântica.",
+        "paidRecovery": {
+          "heading": "Recuperação paga",
+          "explanation": "O Director encontrou uma recuperação que exige nova geração. Revise o trabalho afetado e o preço antes de gastar.",
+          "blockedBy": "Bloqueado por",
+          "affectedWork": "Trabalho afetado",
+          "price": "Custo estimado",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "Escopo de geração",
+          "generationCount": "{{count}} itens de geração",
+          "includesCascade": "inclui trabalho dependente",
+          "expires": "Este preço expira em {{expiresAt}}.",
+          "expired": "Este preço salvo expirou. Atualize-o antes de confirmar.",
+          "confirm": "Confirmar e gastar",
+          "refresh": "Atualizar preço",
+          "refreshed": "Preço atualizado. Revise-o e confirme novamente para gastar.",
+          "cardOnly": "A recuperação paga só pode ser confirmada no cartão da proposta após a revisão do preço atual.",
+          "location": {
+            "project": "Projeto",
+            "cut": "Corte",
+            "route": "Rota {{route}}",
+            "reference": "Referência · {{reference}}",
+            "shot": "{{beat}} · Plano {{shot}}"
+          }
+        },
         "subject": {
           "project": "Projeto",
           "beat": "Beat",

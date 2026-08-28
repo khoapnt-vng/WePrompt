@@ -33,6 +33,7 @@ import {
   type StudioProposalCommitAttributionV2,
   type StudioProposalDecisionV2,
   type StudioProposalRecordV2,
+  type StudioRecordProposalInputV2,
   type StudioProposalSlotV2,
   type StudioProposalV2,
   type StudioReferenceGenerationHandoffReceiptV2,
@@ -40,6 +41,7 @@ import {
   type StudioReferenceRequestSlotV2,
   type StudioReferenceRequestV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { StudioProposalWriteError, writeProposalRecordV2 } from '@process/resources/builtinMcp/studioProposalWriter';
 import { toStudioProjectSummaryV2 } from '@/common/types/project/creativeStudioProjectSummary';
 import {
   canonicalizeRecordRoot,
@@ -136,6 +138,7 @@ const FORBIDDEN_CONNECTION_KEY_FRAGMENTS = [
 ] as const;
 const PROPOSAL_COMMIT_ATTRIBUTION_KEYS = new Set([
   'schemaVersion',
+  'kind',
   'proposalId',
   'projectId',
   'baseRevision',
@@ -144,6 +147,7 @@ const PROPOSAL_COMMIT_ATTRIBUTION_KEYS = new Set([
   'afterProjectSha256',
   'createdBeatIds',
   'createdShotIds',
+  'authorizationId',
   'decidedAt',
 ]);
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
@@ -264,6 +268,14 @@ export type StudioReferenceGenerationHandoffConfirmationInputV2<TRevalidation, T
     handoffId: string;
   };
 
+export type StudioPaidRecoveryProposalConfirmationInputV2<TRevalidation, TDispatch> = StudioProjectConfirmationInputV2<
+  TRevalidation,
+  TDispatch
+> & {
+  proposalId: string;
+  authorizationId: string;
+};
+
 export type StudioProjectInventoryV2 = {
   supportedProjectIds: string[];
   unsupportedProjectIds: string[];
@@ -347,6 +359,9 @@ export type CreativeStudioStore = {
   confirmReferenceGenerationHandoffV2<TRevalidation, TDispatch>(
     input: StudioReferenceGenerationHandoffConfirmationInputV2<TRevalidation, TDispatch>
   ): Promise<StudioProjectConfirmationResultV2<TDispatch>>;
+  confirmPaidRecoveryProposalV2<TRevalidation, TDispatch>(
+    input: StudioPaidRecoveryProposalConfirmationInputV2<TRevalidation, TDispatch>
+  ): Promise<StudioProjectConfirmationResultV2<TDispatch>>;
   updateProjectV2(
     projectId: string,
     update: (project: StudioProjectV2) => StudioProjectV2,
@@ -364,6 +379,7 @@ export type CreativeStudioStore = {
   ): Promise<boolean>;
   deleteProjectV2(projectId: string, expectedRevision: number): Promise<boolean>;
   listProposalsV2(projectId: string): Promise<StudioProposalV2[]>;
+  recordProposalV2(input: StudioRecordProposalInputV2): Promise<StudioProposalRecordV2>;
   acceptProposalV2(projectId: string, proposalId: string): Promise<StudioProposalAcceptanceResultV2>;
   rejectProposalV2(projectId: string, proposalId: string): Promise<StudioProposalV2>;
   reapAbandonedProposalsV2(): Promise<void>;
@@ -697,6 +713,7 @@ const validateProposalCommitAttributionV2 = (
   isRecord(value) &&
   hasExactKeys(value, PROPOSAL_COMMIT_ATTRIBUTION_KEYS) &&
   value.schemaVersion === STUDIO_PROPOSAL_SCHEMA_VERSION_V2 &&
+  (value.kind === 'mutation' || value.kind === 'paid_recovery') &&
   value.proposalId === proposalId &&
   value.projectId === projectId &&
   isSafeProposalId(value.proposalId) &&
@@ -709,6 +726,11 @@ const validateProposalCommitAttributionV2 = (
   LOWERCASE_SHA256.test(value.afterProjectSha256) &&
   isUniqueSafeIdArrayV2(value.createdBeatIds, STUDIO_MAX_BEATS) &&
   isUniqueSafeIdArrayV2(value.createdShotIds, STUDIO_MAX_SHOTS_PER_PROJECT) &&
+  (value.kind === 'mutation'
+    ? value.authorizationId === null
+    : isSafeProposalId(value.authorizationId) &&
+      value.createdBeatIds.length === 0 &&
+      value.createdShotIds.length === 0) &&
   isCanonicalIsoTimestamp(value.decidedAt);
 
 const sha256Utf8 = (bytes: string): string => createHash('sha256').update(bytes, 'utf8').digest('hex');
@@ -3711,7 +3733,14 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     | { status: 'valid'; record: StudioProposalCommitAttributionV2 }
     | { status: 'unsupported_prototype_schema' }
     | { status: 'invalid' } => {
-    if (isRecord(value) && value.schemaVersion === 1) return { status: 'unsupported_prototype_schema' };
+    if (
+      isRecord(value) &&
+      Number.isSafeInteger(value.schemaVersion) &&
+      (value.schemaVersion as number) >= 1 &&
+      (value.schemaVersion as number) < STUDIO_PROPOSAL_SCHEMA_VERSION_V2
+    ) {
+      return { status: 'unsupported_prototype_schema' };
+    }
     return validateProposalCommitAttributionV2(projectId, proposalId, value)
       ? { status: 'valid', record: value }
       : { status: 'invalid' };
@@ -5795,7 +5824,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     createdBeatEvidence?: ReadonlySet<string>;
     createdShotEvidence?: ReadonlySet<string>;
   }): { createdBeatIds: string[]; createdShotIds: string[] } => {
-    if (input.proposal.payload.kind === 'pin_rule') return { createdBeatIds: [], createdShotIds: [] };
+    if (input.proposal.payload.kind !== 'mutation_batch') return { createdBeatIds: [], createdShotIds: [] };
     const beats = new Set(input.existingBeatIds ?? []);
     const shots = new Set(input.existingShotIds ?? []);
     const createdBeatIds: string[] = [];
@@ -5829,6 +5858,30 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     project: StudioProjectV2;
     state: 'before' | 'after';
   }): void => {
+    if (input.attribution.kind === 'paid_recovery') {
+      if (
+        input.proposal.payload.kind !== 'paid_recovery' ||
+        input.attribution.authorizationId === null ||
+        input.attribution.createdBeatIds.length !== 0 ||
+        input.attribution.createdShotIds.length !== 0
+      ) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio paid-recovery attribution scope mismatch');
+      }
+      const matching = input.project.spendAuthorizations.filter(
+        (authorization) => authorization.id === input.attribution.authorizationId
+      );
+      if (input.state === 'before') {
+        if (matching.length !== 0) {
+          throw new CreativeStudioStoreError('storage_error', 'Studio paid-recovery authorization predates commit');
+        }
+      } else if (matching.length !== 1 || matching[0]?.confirmedAt !== input.attribution.decidedAt) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio paid-recovery authorization proof mismatch');
+      }
+      return;
+    }
+    if (input.proposal.payload.kind === 'paid_recovery' || input.attribution.authorizationId !== null) {
+      throw new CreativeStudioStoreError('storage_error', 'Studio mutation attribution scope mismatch');
+    }
     let expected: { createdBeatIds: string[]; createdShotIds: string[] };
     if (input.state === 'before') {
       expected = operationCreatedIdentityOrderV2({
@@ -7169,6 +7222,29 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return result;
   };
 
+  const assertNoOpenReferenceHandoffOverlapV2InsideQueue = async (input: {
+    root: string;
+    projectId: string;
+    snapshot: Extract<ProjectFileInspectionV2, { status: 'supported' }>;
+    referenceIds: readonly string[];
+  }): Promise<void> => {
+    if (input.referenceIds.length === 0) return;
+    const requested = new Set(input.referenceIds);
+    const entries = await listReferenceRequestsV2InsideQueue(input);
+    const overlaps = entries.some(
+      (entry) =>
+        entry.decision?.outcome.kind === 'generation_gate' &&
+        entry.receipt === null &&
+        entry.request.referenceIds.some((referenceId) => requested.has(referenceId))
+    );
+    if (overlaps) {
+      throw new CreativeStudioStoreError(
+        'invalid_payload',
+        'Studio paid recovery overlaps an open reference-generation handoff'
+      );
+    }
+  };
+
   const listReferenceRequestsV2ThroughQueue = (projectId: string): Promise<StudioReferenceRequestLedgerEntryV2[]> =>
     enqueue(projectId, async () => {
       const root = await existingCanonicalRootV2();
@@ -7647,6 +7723,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       };
     }
     const slot = assertPendingProposalSlotV2(ledger, input.proposalId);
+    if (proposal.record.payload.kind === 'paid_recovery') {
+      throw new CreativeStudioStoreError(
+        'invalid_payload',
+        'Paid Studio recovery requires the renderer confirmation boundary'
+      );
+    }
     if (input.snapshot.project.revision !== proposal.record.baseRevision) {
       throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
     }
@@ -7685,6 +7767,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     const candidateBytes = serializeProjectV2ForWrite(candidate, 'Schema-2 Studio proposal result');
     const attribution: StudioProposalCommitAttributionV2 = {
       schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      kind: 'mutation',
       proposalId: proposal.record.id,
       projectId: input.projectId,
       baseRevision: proposal.record.baseRevision,
@@ -7693,6 +7776,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       afterProjectSha256: sha256Utf8(candidateBytes),
       createdBeatIds: [...applied.createdBeatIds],
       createdShotIds: [...applied.createdShotIds],
+      authorizationId: null,
       decidedAt,
     };
     if (!validateProposalCommitAttributionV2(input.projectId, proposal.record.id, attribution)) {
@@ -8367,6 +8451,219 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       return result;
     },
 
+    async confirmPaidRecoveryProposalV2<TRevalidation, TDispatch>(
+      input: StudioPaidRecoveryProposalConfirmationInputV2<TRevalidation, TDispatch>
+    ): Promise<StudioProjectConfirmationResultV2<TDispatch>> {
+      if (
+        !isRecord(input) ||
+        !isSafeIdV2(input.projectId) ||
+        !isSafeProposalId(input.proposalId) ||
+        !isSafeProposalId(input.authorizationId) ||
+        !isIntegerInRange(input.expectedRevision, 1, Number.MAX_SAFE_INTEGER) ||
+        !isCanonicalIsoTimestamp(input.expiresAt) ||
+        typeof input.revalidate !== 'function' ||
+        typeof input.assertActive !== 'function' ||
+        typeof input.buildCommit !== 'function' ||
+        (input.commitTag !== undefined && typeof input.commitTag !== 'string')
+      ) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio paid-recovery confirmation input');
+      }
+      const confirmationInput = Object.freeze({
+        projectId: input.projectId,
+        proposalId: input.proposalId,
+        authorizationId: input.authorizationId,
+        expectedRevision: input.expectedRevision,
+        expiresAt: input.expiresAt,
+        revalidate: input.revalidate,
+        assertActive: input.assertActive,
+        buildCommit: input.buildCommit,
+        commitTag: input.commitTag,
+      });
+      let result: StudioProjectConfirmationResultV2<TDispatch>;
+      try {
+        result = await enqueue(confirmationInput.projectId, async () => {
+          const root = await existingCanonicalRootV2();
+          if (root === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+          const inspected = requireSupportedProjectInspectionV2(
+            await inspectProjectWithAttributionFenceV2InsideQueue(root, confirmationInput.projectId)
+          );
+          let ledger = await readCleanProposalLedgerV2InsideQueue({
+            root,
+            projectId: confirmationInput.projectId,
+            snapshot: inspected,
+            createIfWhollyAbsent: false,
+          });
+          if (ledger === null) throw new CreativeStudioStoreError('not_found', 'Studio proposal not found');
+          ledger = await reapProposalLedgerV2InsideQueue({
+            root,
+            projectId: confirmationInput.projectId,
+            snapshot: inspected,
+            ledger,
+          });
+          const proposal = ledger.proposals.get(confirmationInput.proposalId);
+          if (proposal === undefined) throw new CreativeStudioStoreError('not_found', 'Studio proposal not found');
+          if (
+            proposal.record.payload.kind !== 'paid_recovery' ||
+            proposal.record.baseRevision !== confirmationInput.expectedRevision ||
+            ledger.decisions.has(confirmationInput.proposalId)
+          ) {
+            throw new CreativeStudioStoreError('invalid_payload', 'Studio paid-recovery proposal is not pending');
+          }
+          const paidPrepare = proposal.record.payload.blocker.remedy.prepare;
+          const paidReferenceIds = paidPrepare.kind === 'project_references' ? [...paidPrepare.referenceIds] : [];
+          await assertNoOpenReferenceHandoffOverlapV2InsideQueue({
+            root,
+            projectId: confirmationInput.projectId,
+            snapshot: inspected,
+            referenceIds: paidReferenceIds,
+          });
+          const slot = assertPendingProposalSlotV2(ledger, confirmationInput.proposalId);
+          let identifiedAttribution: IdentifiedRecordV2<StudioProposalCommitAttributionV2> | null = null;
+          const committed = await confirmProjectV2InsideQueue(root, inspected, confirmationInput, async (candidate) => {
+            await assertNoOpenReferenceHandoffOverlapV2InsideQueue({
+              root,
+              projectId: confirmationInput.projectId,
+              snapshot: inspected,
+              referenceIds: paidReferenceIds,
+            });
+            const exactAuthorizations = candidate.spendAuthorizations.filter(
+              (authorization) => authorization.id === confirmationInput.authorizationId
+            );
+            if (
+              candidate.spendAuthorizations.length !== inspected.project.spendAuthorizations.length + 1 ||
+              exactAuthorizations.length !== 1 ||
+              inspected.project.spendAuthorizations.some(
+                (authorization) => authorization.id === confirmationInput.authorizationId
+              )
+            ) {
+              throw new CreativeStudioStoreError(
+                'invalid_payload',
+                'Studio paid recovery did not create one exact authorization'
+              );
+            }
+            const candidateBytes = serializeProjectV2ForWrite(
+              candidate as StudioProjectV2,
+              'Schema-2 Studio paid-recovery proposal result'
+            );
+            const authorization = exactAuthorizations[0]!;
+            const attribution: StudioProposalCommitAttributionV2 = {
+              schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+              kind: 'paid_recovery',
+              proposalId: proposal.record.id,
+              projectId: confirmationInput.projectId,
+              baseRevision: proposal.record.baseRevision,
+              appliedRevision: candidate.revision,
+              beforeProjectSha256: sha256Utf8(inspected.bytes),
+              afterProjectSha256: sha256Utf8(candidateBytes),
+              createdBeatIds: [],
+              createdShotIds: [],
+              authorizationId: authorization.id,
+              decidedAt: authorization.confirmedAt,
+            };
+            if (
+              Date.parse(attribution.decidedAt) < Date.parse(proposal.record.createdAt) ||
+              attribution.decidedAt !== candidate.updatedAt ||
+              !validateProposalCommitAttributionV2(
+                confirmationInput.projectId,
+                confirmationInput.proposalId,
+                attribution
+              )
+            ) {
+              throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio paid-recovery attribution');
+            }
+            assertAttributionCreatedIdsV2({
+              attribution,
+              proposal: proposal.record,
+              project: candidate as StudioProjectV2,
+              state: 'after',
+            });
+            if (identifiedAttribution === null) {
+              await assertProposalLedgerEntrySetCurrentV2(ledger);
+              await assertProjectSnapshotCurrentV2({ root, snapshot: inspected });
+              identifiedAttribution = await publishProposalAttributionV2({
+                root,
+                projectId: confirmationInput.projectId,
+                directories: ledger.directories,
+                attribution,
+                authorizeBeforeLink: async (temporary) => {
+                  await assertProjectSnapshotCurrentV2({ root, snapshot: inspected });
+                  await assertProposalLedgerEntrySetCurrentV2(ledger, { attribution: temporary });
+                  await assertProposalDirectoryAuthoritiesV2(ledger.directories);
+                  await Promise.all([
+                    assertIdentifiedRecordCurrentV2({
+                      root,
+                      authority: ledger!.directories.pending,
+                      identified: proposal,
+                    }),
+                    assertIdentifiedRecordCurrentV2({
+                      root,
+                      authority: ledger!.directories.slots,
+                      identified: slot,
+                    }),
+                    assertPathAbsentV2(
+                      path.join(ledger!.directories.decisions.path, `${confirmationInput.proposalId}.json`)
+                    ),
+                  ]);
+                  await assertProjectSnapshotCurrentV2({ root, snapshot: inspected });
+                },
+              });
+            } else {
+              if (!sameJson(identifiedAttribution.record, attribution)) {
+                throw new CreativeStudioStoreError('storage_error', 'Studio paid-recovery attribution changed');
+              }
+            }
+            const exactAttribution = identifiedAttribution;
+            if (exactAttribution === null) {
+              throw new CreativeStudioStoreError('storage_error', 'Studio paid-recovery attribution disappeared');
+            }
+            const attributedLedger: ProposalLedgerV2 = { ...ledger, attributions: [exactAttribution] };
+            await assertProjectSnapshotCurrentV2({ root, snapshot: inspected });
+            await assertProposalLedgerEntrySetCurrentV2(attributedLedger);
+            await assertProposalDirectoryAuthoritiesV2(ledger.directories);
+            await Promise.all([
+              assertIdentifiedRecordCurrentV2({
+                root,
+                authority: ledger.directories.commits,
+                identified: exactAttribution,
+              }),
+              assertIdentifiedRecordCurrentV2({
+                root,
+                authority: ledger.directories.pending,
+                identified: proposal,
+              }),
+              assertIdentifiedRecordCurrentV2({
+                root,
+                authority: ledger.directories.slots,
+                identified: slot,
+              }),
+              assertPathAbsentV2(path.join(ledger.directories.decisions.path, `${confirmationInput.proposalId}.json`)),
+            ]);
+            await assertProjectSnapshotCurrentV2({ root, snapshot: inspected });
+          });
+          if (identifiedAttribution === null) {
+            throw new CreativeStudioStoreError('storage_error', 'Studio paid-recovery attribution was not published');
+          }
+          const postCommit = requireSupportedProjectInspectionV2(
+            await inspectProjectFileV2(root, confirmationInput.projectId)
+          );
+          if (!sameJson(postCommit.project, committed.project)) {
+            throw new CreativeStudioStoreError('storage_error', 'Studio paid-recovery project changed');
+          }
+          await resolveProposalAttributionV2InsideQueue({
+            root,
+            projectId: confirmationInput.projectId,
+            snapshot: postCommit,
+          });
+          return committed;
+        });
+      } catch (error) {
+        await summaryV2Queue.catch((): undefined => undefined);
+        throw error;
+      }
+      await repairSummaryV2AfterCommit();
+      return result;
+    },
+
     async confirmReferenceGenerationHandoffV2<TRevalidation, TDispatch>(
       input: StudioReferenceGenerationHandoffConfirmationInputV2<TRevalidation, TDispatch>
     ): Promise<StudioProjectConfirmationResultV2<TDispatch>> {
@@ -8790,6 +9087,102 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio proposal project identity');
       }
       return listProposalsV2ThroughQueue(projectId);
+    },
+
+    async recordProposalV2(input: StudioRecordProposalInputV2): Promise<StudioProposalRecordV2> {
+      if (
+        !isRecord(input) ||
+        !hasExactKeys(input, new Set(['projectId', 'proposalId', 'baseRevision', 'payload'])) ||
+        !isSafeIdV2(input.projectId) ||
+        !isSafeProposalId(input.proposalId) ||
+        !isIntegerInRange(input.baseRevision, 1, Number.MAX_SAFE_INTEGER) ||
+        !isRecord(input.payload)
+      ) {
+        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio proposal record request');
+      }
+      return enqueue(input.projectId, async () => {
+        const root = await existingCanonicalRootV2();
+        if (root === null) throw new CreativeStudioStoreError('not_found', 'Studio project not found');
+        const snapshot = requireSupportedProjectInspectionV2(
+          await inspectProjectWithAttributionFenceV2InsideQueue(root, input.projectId)
+        );
+        if (snapshot.project.revision !== input.baseRevision) {
+          throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+        }
+        const directories = await resolveProposalDirectoriesV2({
+          root,
+          project: snapshot.directory,
+          createIfWhollyAbsent: true,
+          snapshot,
+        });
+        if (directories === null) {
+          throw new CreativeStudioStoreError('storage_error', 'Studio proposal storage is unavailable');
+        }
+        const currentLedger = await readCleanProposalLedgerV2InsideQueue({
+          root,
+          projectId: input.projectId,
+          snapshot,
+          createIfWhollyAbsent: true,
+        });
+        const existing = currentLedger?.proposals.get(input.proposalId)?.record;
+        if (existing !== undefined) {
+          if (
+            existing.baseRevision !== input.baseRevision ||
+            !sameJson(existing.payload, input.payload) ||
+            existing.status !== 'pending'
+          ) {
+            throw new CreativeStudioStoreError('invalid_payload', 'Studio proposal identity collision');
+          }
+          return structuredClone(existing);
+        }
+        let record: StudioProposalRecordV2;
+        try {
+          record = await writeProposalRecordV2({
+            pendingDir: directories.pending.path,
+            projectId: input.projectId,
+            baseRevision: input.baseRevision,
+            payload: structuredClone(input.payload),
+            proposalId: input.proposalId,
+            fs,
+            now: () => new Date(now()),
+            projectAuthority: {
+              canonicalRoot: snapshot.directory.path,
+              rootIdentity: { dev: snapshot.directory.dev, ino: snapshot.directory.ino },
+            },
+            authorityFence: async () => {
+              try {
+                await Promise.all([
+                  assertProposalDirectoryAuthoritiesV2(directories),
+                  assertProjectSnapshotCurrentV2({ root, snapshot }),
+                ]);
+                return 'valid';
+              } catch {
+                return 'invalid';
+              }
+            },
+          });
+        } catch (error) {
+          if (error instanceof StudioProposalWriteError && error.code === 'capacity') {
+            throw new CreativeStudioStoreError('busy', 'Studio proposal inbox is full');
+          }
+          if (error instanceof StudioProposalWriteError && error.code === 'too_large') {
+            throw new CreativeStudioStoreError('invalid_payload', 'Studio proposal exceeds the size cap');
+          }
+          throw new CreativeStudioStoreError('storage_error', 'Studio proposal could not be recorded');
+        }
+        await assertProjectSnapshotCurrentV2({ root, snapshot });
+        const finalLedger = await readCleanProposalLedgerV2InsideQueue({
+          root,
+          projectId: input.projectId,
+          snapshot,
+          createIfWhollyAbsent: false,
+        });
+        const durable = finalLedger?.proposals.get(input.proposalId)?.record;
+        if (durable === undefined || !sameJson(durable, record)) {
+          throw new CreativeStudioStoreError('storage_error', 'Studio proposal publication changed');
+        }
+        return structuredClone(durable);
+      });
     },
 
     async acceptProposalV2(projectId: string, proposalId: string): Promise<StudioProposalAcceptanceResultV2> {

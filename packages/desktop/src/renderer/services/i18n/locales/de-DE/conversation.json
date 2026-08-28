@@ -1291,6 +1291,30 @@
         "chatRejected": "Vorschlag abgelehnt.",
         "reviewStale": "Diese Prüfung wurde aus Revision {{baseRevision}} abgeleitet; das Projekt hat jetzt Revision {{currentRevision}}.",
         "noChanges": "Dieser Vorschlag enthält keine semantische Änderung.",
+        "paidRecovery": {
+          "heading": "Kostenpflichtige Wiederherstellung",
+          "explanation": "Der Director hat eine Wiederherstellung gefunden, die eine neue Generierung benötigt. Prüfe betroffene Arbeit und Preis vor der Ausgabe.",
+          "blockedBy": "Blockiert durch",
+          "affectedWork": "Betroffene Arbeit",
+          "price": "Geschätzte Kosten",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "Generierungsumfang",
+          "generationCount": "{{count}} Generierungselemente",
+          "includesCascade": "einschließlich abhängiger Arbeit",
+          "expires": "Dieser Preis läuft am {{expiresAt}} ab.",
+          "expired": "Dieser gespeicherte Preis ist abgelaufen. Aktualisiere ihn vor der Bestätigung.",
+          "confirm": "Bestätigen und bezahlen",
+          "refresh": "Preis aktualisieren",
+          "refreshed": "Preis aktualisiert. Prüfe ihn und bestätige dann erneut, um zu bezahlen.",
+          "cardOnly": "Eine kostenpflichtige Wiederherstellung kann erst nach Prüfung des aktuellen Preises auf ihrer Vorschlagskarte bestätigt werden.",
+          "location": {
+            "project": "Projekt",
+            "cut": "Schnitt",
+            "route": "Route {{route}}",
+            "reference": "Referenz · {{reference}}",
+            "shot": "{{beat}} · Shot {{shot}}"
+          }
+        },
         "subject": {
           "project": "Projekt",
           "beat": "Beat",

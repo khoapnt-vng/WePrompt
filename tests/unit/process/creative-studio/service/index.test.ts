@@ -31,6 +31,7 @@ import {
   STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   type CreateStudioProjectInputV2,
   type StudioAssetV2,
+  type StudioDirectorPaidRecoveryCommandRecordV2,
   type StudioExportCatalogV2,
   type StudioGenerationCapabilityItemV2,
   type StudioGenerationRequestPlan,
@@ -38,6 +39,7 @@ import {
   type StudioMutationOperationV2,
   type StudioProjectV2,
   type StudioPrepareGenerationChoiceV2,
+  type StudioPaidRecoveryBlockerV2,
   type StudioProposalRecordV2,
   type StudioProposalV2,
   type StudioReferenceRequestV2,
@@ -108,6 +110,7 @@ import {
   studioApplyFreeFixInputSchemaV2,
   studioGetProjectStatusInputSchemaV2,
   studioGetProposalInputSchemaV2,
+  studioProposePaidRecoveryInputSchemaV2,
   studioProposeStoryboardInputSchemaV2,
   studioRequestReferenceImagesInputSchemaV2,
 } from '@process/resources/builtinMcp/studioServer';
@@ -600,7 +603,33 @@ describe('CreativeStudioServiceV2', () => {
       createdAt: '2026-08-17T00:00:01.000Z',
       decidedAt: null,
     };
-    const listProposalsV2 = vi.fn(async () => [structuredClone(proposal)]);
+    const proposals: StudioProposalV2[] = [proposal];
+    const listProposalsV2 = vi.fn(async () => structuredClone(proposals));
+    const recordProposalV2 = vi.fn<CreativeStudioStore['recordProposalV2']>(async (input) => {
+      const existing = proposals.find((candidate) => candidate.id === input.proposalId);
+      if (existing !== undefined) {
+        if (
+          existing.status !== 'pending' ||
+          existing.baseRevision !== input.baseRevision ||
+          JSON.stringify(existing.payload) !== JSON.stringify(input.payload)
+        ) {
+          throw new CreativeStudioStoreError('invalid_payload', 'proposal identity collision');
+        }
+        return structuredClone(existing) as StudioProposalRecordV2;
+      }
+      const record: StudioProposalRecordV2 = {
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+        id: input.proposalId,
+        projectId: input.projectId,
+        status: 'pending',
+        baseRevision: input.baseRevision,
+        payload: structuredClone(input.payload),
+        createdAt: committedAt,
+        decidedAt: null,
+      };
+      proposals.push(record);
+      return structuredClone(record);
+    });
     const acceptProposalV2 = vi.fn(async () => ({
       proposal: {
         ...structuredClone(proposal),
@@ -719,6 +748,9 @@ describe('CreativeStudioServiceV2', () => {
         return result;
       }
     );
+    const confirmPaidRecoveryProposalV2 = vi.fn<CreativeStudioStore['confirmPaidRecoveryProposalV2']>(async (input) =>
+      confirmProjectV2(input)
+    );
     let connections: import('@/common/types/project/creativeStudioTypes').StudioConnectionBinding[] = [];
     const resolveProposalPathsV2 = vi.fn(async () => ({
       projectDir: `/studio/${current.id}`,
@@ -768,9 +800,11 @@ describe('CreativeStudioServiceV2', () => {
       applyMutationBatchV2,
       updateProjectV2,
       confirmProjectV2,
+      confirmPaidRecoveryProposalV2,
       confirmReferenceGenerationHandoffV2,
       deleteProjectV2,
       listProposalsV2,
+      recordProposalV2,
       acceptProposalV2,
       rejectProposalV2,
       listReferenceRequestsV2,
@@ -1020,6 +1054,7 @@ describe('CreativeStudioServiceV2', () => {
       onProjectUpdated,
       proposal,
       listProposalsV2,
+      recordProposalV2,
       acceptProposalV2,
       rejectProposalV2,
       referenceRequest,
@@ -1028,6 +1063,7 @@ describe('CreativeStudioServiceV2', () => {
       readReferenceGenerationHandoffV2,
       recordReferenceGenerationHandoffReceiptV2,
       confirmReferenceGenerationHandoffV2,
+      confirmPaidRecoveryProposalV2,
       resolveProposalPathsV2,
       resolveReferenceRequestPathsV2,
       getVerifiedProjectDirectoryV2,
@@ -5303,6 +5339,266 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.importBedAudioFromPathV2).not.toHaveBeenCalled();
   });
 
+  it('admits only an exact fresh paid blocker, records a bounded quote, and performs no spend or project write', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const failedJob = makeSchema2Job(project, { id: 'job_paid_recovery', status: 'failed' });
+    project.jobs[failedJob.id] = failedJob;
+    project.shots.clip_1!.jobIds.push(failedJob.id);
+    const harness = makeHarness(project);
+    const status = await harness.service.getProjectStatus({ projectId: project.id, detail: true });
+    const blocker = status.stages
+      .flatMap((stage) => stage.blockers)
+      .find((candidate): candidate is StudioPaidRecoveryBlockerV2 => candidate.remedy.kind === 'proposal');
+    if (blocker === undefined) throw new Error('expected a payable recovery blocker');
+    const command = {
+      schemaVersion: 10,
+      commandId: 'proposal_paid_service',
+      projectId: project.id,
+      expectedRevision: project.revision,
+      createdAt: '2026-08-17T00:00:01.000Z',
+      deadlineAt: '2026-08-17T00:00:15.000Z',
+      policy: 'propose_paid_recovery',
+      blocker: structuredClone(blocker),
+    } satisfies StudioDirectorPaidRecoveryCommandRecordV2;
+    const before = harness.getProject();
+
+    const proposal = await harness.service.proposePaidRecovery(command);
+
+    expect(proposal).toMatchObject({
+      id: command.commandId,
+      projectId: project.id,
+      baseRevision: project.revision,
+      status: 'pending',
+      payload: {
+        kind: 'paid_recovery',
+        blocker,
+        quote: {
+          projectRevision: project.revision,
+          currency: 'USD',
+          itemCount: expect.any(Number),
+        },
+      },
+    });
+    expect(proposal.payload.kind === 'paid_recovery' ? proposal.payload.quote.itemCount : 0).toBeGreaterThan(0);
+    expect(harness.recordProposalV2).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      proposalId: command.commandId,
+      baseRevision: project.revision,
+      payload: proposal.payload,
+    });
+    expect(harness.getProject()).toEqual(before);
+    expect(harness.store.confirmProjectV2).not.toHaveBeenCalled();
+    expect(harness.confirmPaidRecoveryProposalV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.onProjectUpdated).not.toHaveBeenCalled();
+
+    if (proposal.payload.kind !== 'paid_recovery') throw new Error('expected a paid recovery proposal');
+    await expect(
+      harness.service.preparePaidRecoveryProposal({ projectId: project.id, proposalId: proposal.id })
+    ).resolves.toEqual(proposal.payload.quote);
+    await expect(
+      harness.service.preparePaidRecoveryProposal({
+        projectId: project.id,
+        proposalId: proposal.id,
+        unexpected: true,
+      } as never)
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+
+    const routeReadsAfterFirst = harness.providerResolver.listGenerationRoutes.mock.calls.length;
+    await expect(harness.service.proposePaidRecovery(command)).resolves.toEqual(proposal);
+    expect(harness.recordProposalV2).toHaveBeenCalledOnce();
+    expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(routeReadsAfterFirst);
+  });
+
+  it('fails closed before pricing when a paid blocker is stale or no longer matches fresh detailed status', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    project.videoRouteId = videoRoute.choiceId;
+    const failedJob = makeSchema2Job(project, { id: 'job_paid_mismatch', status: 'failed' });
+    project.jobs[failedJob.id] = failedJob;
+    project.shots.clip_1!.jobIds.push(failedJob.id);
+    const harness = makeHarness(project);
+    const status = await harness.service.getProjectStatus({ projectId: project.id, detail: true });
+    const blocker = status.stages
+      .flatMap((stage) => stage.blockers)
+      .find((candidate): candidate is StudioPaidRecoveryBlockerV2 => candidate.remedy.kind === 'proposal');
+    if (blocker === undefined) throw new Error('expected a payable recovery blocker');
+    const command = {
+      schemaVersion: 10,
+      commandId: 'proposal_paid_mismatch',
+      projectId: project.id,
+      expectedRevision: project.revision,
+      createdAt: '2026-08-17T00:00:01.000Z',
+      deadlineAt: '2026-08-17T00:00:15.000Z',
+      policy: 'propose_paid_recovery',
+      blocker: { ...structuredClone(blocker), where: { ...blocker.where, jobId: 'job_not_current' } },
+    } as StudioDirectorPaidRecoveryCommandRecordV2;
+
+    await expect(harness.service.proposePaidRecovery(command)).rejects.toMatchObject({ code: 'invalid_payload' });
+    await expect(
+      harness.service.proposePaidRecovery({
+        ...command,
+        commandId: 'proposal_paid_stale',
+        expectedRevision: project.revision + 1,
+        blocker: structuredClone(blocker),
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    expect(harness.recordProposalV2).not.toHaveBeenCalled();
+    expect(harness.store.confirmProjectV2).not.toHaveBeenCalled();
+    expect(harness.submitShots).not.toHaveBeenCalled();
+    expect(harness.getProject().spendAuthorizations).toEqual(project.spendAuthorizations);
+  });
+
+  it('keeps same-named paid proposals and quote IDs isolated by project after one project confirms', async () => {
+    const renameProject = (source: StudioProjectV2, projectId: string): StudioProjectV2 => {
+      const project = structuredClone(source);
+      project.id = projectId;
+      for (const asset of Object.values(project.assets)) asset.projectId = projectId;
+      for (const job of Object.values(project.jobs)) job.projectId = projectId;
+      for (const authorization of project.spendAuthorizations) authorization.projectId = projectId;
+      return project;
+    };
+    const projectA = renameProject(makeSchema2ServiceProject(), 'project_paid_a');
+    const projectB = renameProject(makeSchema2ServiceProject(), 'project_paid_b');
+    for (const [index, project] of [projectA, projectB].entries()) {
+      project.imageRouteId = imageRoute.choiceId;
+      project.videoRouteId = videoRoute.choiceId;
+      const failed = makeSchema2Job(project, { id: `job_paid_shared_${index}`, status: 'failed' });
+      project.jobs[failed.id] = failed;
+      project.shots.clip_1!.jobIds.push(failed.id);
+    }
+    const projects = new Map([
+      [projectA.id, projectA],
+      [projectB.id, projectB],
+    ]);
+    const proposals = new Map<string, StudioProposalV2[]>();
+    const committedAt = '2026-08-17T00:00:02.000Z';
+    const store = {
+      getProjectV2: vi.fn(async (projectId: string) => {
+        const project = projects.get(projectId);
+        return project === undefined
+          ? { status: 'not_found' as const, projectId }
+          : { status: 'supported' as const, project: structuredClone(project) };
+      }),
+      listProposalsV2: vi.fn(async (projectId: string) => structuredClone(proposals.get(projectId) ?? [])),
+      recordProposalV2: vi.fn<CreativeStudioStore['recordProposalV2']>(async (input) => {
+        const record: StudioProposalRecordV2 = {
+          schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+          id: input.proposalId,
+          projectId: input.projectId,
+          status: 'pending',
+          baseRevision: input.baseRevision,
+          payload: structuredClone(input.payload),
+          createdAt: '2026-08-17T00:00:01.000Z',
+          decidedAt: null,
+        };
+        proposals.set(input.projectId, [...(proposals.get(input.projectId) ?? []), record]);
+        return structuredClone(record);
+      }),
+      listReferenceRequestsV2: vi.fn(async () => []),
+      confirmPaidRecoveryProposalV2: vi.fn<CreativeStudioStore['confirmPaidRecoveryProposalV2']>(async (input) => {
+        const current = projects.get(input.projectId);
+        if (current === undefined || current.revision !== input.expectedRevision) throw new Error('stale fixture');
+        const revalidation = await input.revalidate(structuredClone(current) as never);
+        input.assertActive();
+        const built = input.buildCommit(structuredClone(current), structuredClone(revalidation) as never, committedAt);
+        input.assertActive();
+        const committed = { ...built.project, revision: current.revision + 1, updatedAt: committedAt };
+        projects.set(input.projectId, structuredClone(committed));
+        proposals.set(
+          input.projectId,
+          (proposals.get(input.projectId) ?? []).map((proposal) =>
+            proposal.id === input.proposalId
+              ? { ...proposal, status: 'accepted' as const, decidedAt: committedAt }
+              : proposal
+          )
+        );
+        return { project: structuredClone(committed), dispatch: structuredClone(built.dispatch) };
+      }),
+      updateProjectV2: vi.fn(async (projectId: string, update: (project: StudioProjectV2) => StudioProjectV2) => {
+        const current = projects.get(projectId);
+        if (current === undefined) throw new Error('missing fixture');
+        const updated = update(structuredClone(current));
+        projects.set(projectId, structuredClone(updated));
+        return structuredClone(updated);
+      }),
+    };
+    const base = makeHarness(projectA);
+    let jobOrdinal = 0;
+    let idempotencyOrdinal = 0;
+    let quoteOrdinal = 0;
+    const dispatchAuthorizedJobsV2 = vi.fn(async ({ projectId, jobIds }: { projectId: string; jobIds: string[] }) =>
+      jobIds.map((jobId) => structuredClone(projects.get(projectId)!.jobs[jobId]!))
+    );
+    const service = createCreativeStudioServiceV2({
+      store: store as unknown as CreativeStudioStore,
+      jobManager: {
+        dispatchAuthorizedJobsV2,
+        cancelJobV2: vi.fn(),
+        retryJobV2: vi.fn(),
+        retryDownloadV2: vi.fn(),
+      } as never,
+      providerResolver: base.providerResolver as never,
+      listProviders: base.listProviders,
+      getAdapterRegistry: () => base.adapterRegistry as never,
+      getStudioServerScriptPath: base.getStudioServerScriptPath,
+      ensureDirectorCommandMailbox: base.ensureDirectorCommandMailbox,
+      rateCard: base.loadRateCard,
+      createQuoteId: () => (quoteOrdinal++ % 2 === 0 ? 'quote_shared_paid_base' : 'quote_shared_paid_cascade'),
+      createJobId: () => `job_shared_paid_${++jobOrdinal}`,
+      createIdempotencyKey: () => `key_shared_paid_${++idempotencyOrdinal}`,
+      now: () => new Date(committedAt),
+      onProjectUpdated: vi.fn(),
+    });
+    const blockerFor = async (projectId: string): Promise<StudioPaidRecoveryBlockerV2> => {
+      const status = await service.getProjectStatus({ projectId, detail: true });
+      const blocker = status.stages
+        .flatMap((stage) => stage.blockers)
+        .find((candidate): candidate is StudioPaidRecoveryBlockerV2 => candidate.remedy.kind === 'proposal');
+      if (blocker === undefined) throw new Error('expected paid blocker');
+      return blocker;
+    };
+    const commandFor = async (project: StudioProjectV2): Promise<StudioDirectorPaidRecoveryCommandRecordV2> => ({
+      schemaVersion: 10,
+      commandId: 'proposal_shared_paid',
+      projectId: project.id,
+      expectedRevision: project.revision,
+      createdAt: '2026-08-17T00:00:01.000Z',
+      deadlineAt: '2026-08-17T00:00:15.000Z',
+      policy: 'propose_paid_recovery',
+      blocker: await blockerFor(project.id),
+    });
+
+    const proposalA = await service.proposePaidRecovery(await commandFor(projectA));
+    const proposalB = await service.proposePaidRecovery(await commandFor(projectB));
+    if (proposalA.payload.kind !== 'paid_recovery' || proposalB.payload.kind !== 'paid_recovery') {
+      throw new Error('expected paid proposals');
+    }
+    expect(proposalA.id).toBe(proposalB.id);
+    expect(proposalA.payload.quote.quoteId).toBe(proposalB.payload.quote.quoteId);
+
+    await service.confirmPaidRecoveryProposal({
+      projectId: projectA.id,
+      proposalId: proposalA.id,
+      quoteId: proposalA.payload.quote.quoteId,
+      expectedRevision: projectA.revision,
+    });
+    await expect(
+      service.confirmPaidRecoveryProposal({
+        projectId: projectB.id,
+        proposalId: proposalB.id,
+        quoteId: proposalB.payload.quote.quoteId,
+        expectedRevision: projectB.revision,
+      })
+    ).resolves.toEqual({ projectId: projectB.id, projectRevision: projectB.revision + 1 });
+    expect(store.confirmPaidRecoveryProposalV2).toHaveBeenCalledTimes(2);
+    expect(dispatchAuthorizedJobsV2).toHaveBeenCalledTimes(2);
+    await service.dispose();
+    await base.service.dispose();
+  });
+
   it('reports an empty active Beat as incomplete authored coverage through the Director status read', async () => {
     const project = makeSchema2ServiceProject();
     project.targetDurationSeconds = 12;
@@ -7994,6 +8290,7 @@ describe('Studio MCP schema-2 server', () => {
         'studio_get_project_status',
         'studio_get_proposal',
         'studio_list_routes',
+        'studio_propose_paid_recovery',
         'studio_request_reference_images',
       ]);
       expect(tools.every((tool) => Object.keys(tool.inputSchema).length > 0)).toBe(true);
@@ -8164,6 +8461,64 @@ describe('Studio MCP schema-2 server', () => {
       );
       expect(freeFixTool?.description).toMatch(/creates no quote, authorization, job, generation request, or spend/i);
       expect(freeFixTool?.description).toMatch(/never infer or reuse a stale remedy/i);
+
+      const paidRecoveryTool = tools.find((tool) => tool.name === 'studio_propose_paid_recovery');
+      const paidRecoveryValidator = new AjvJsonSchemaValidator().getValidator(paidRecoveryTool?.inputSchema as never);
+      const exactPaidRecovery = {
+        expectedRevision: 8,
+        blocker: {
+          cause: 'seed_generation_required',
+          where: {
+            kind: 'shot',
+            beatId: 'beat_1',
+            shotId: 'shot_1',
+            beatPosition: 1,
+            shotPosition: 1,
+            jobId: null,
+          },
+          remedy: {
+            kind: 'proposal',
+            prepare: {
+              kind: 'generation',
+              baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+              cascadeChoices: [],
+              continuityChange: null,
+            },
+            estimatedMinorUnits: null,
+            currency: null,
+          },
+        },
+      };
+      expect(paidRecoveryTool?.inputSchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+        required: ['expectedRevision', 'blocker'],
+      });
+      expect(paidRecoveryValidator(exactPaidRecovery)).toMatchObject({ valid: true });
+      expect(studioProposePaidRecoveryInputSchemaV2.safeParse(exactPaidRecovery).success).toBe(true);
+      const crossFieldMismatch = {
+        ...exactPaidRecovery,
+        blocker: { ...exactPaidRecovery.blocker, where: { kind: 'project' } },
+      };
+      // JSON Schema publishes the finite structural union; the shared strict runtime
+      // validator additionally enforces cause/where/remedy correlation.
+      expect(paidRecoveryValidator(crossFieldMismatch)).toMatchObject({ valid: true });
+      expect(studioProposePaidRecoveryInputSchemaV2.safeParse(crossFieldMismatch).success).toBe(false);
+      for (const invalidInput of [
+        {
+          ...exactPaidRecovery,
+          blocker: {
+            ...exactPaidRecovery.blocker,
+            remedy: { ...exactPaidRecovery.blocker.remedy, currency: 'USD' },
+          },
+        },
+        { ...exactPaidRecovery, blocker: { ...exactPaidRecovery.blocker, extra: true } },
+      ]) {
+        expect(paidRecoveryValidator(invalidInput), JSON.stringify(invalidInput)).toMatchObject({ valid: false });
+        expect(studioProposePaidRecoveryInputSchemaV2.safeParse(invalidInput).success).toBe(false);
+      }
+      expect(paidRecoveryTool?.description).toMatch(/creates no authorization, job, provider request, or spend/i);
+      expect(paidRecoveryTool?.description).toMatch(/only the person's explicit Confirm button may spend/i);
 
       const projectStatusTool = tools.find((tool) => tool.name === 'studio_get_project_status');
       const projectStatusValidator = new AjvJsonSchemaValidator().getValidator(projectStatusTool?.inputSchema as never);
@@ -9376,6 +9731,53 @@ describe('Studio MCP schema-2 server', () => {
     }
     await expect(readdir(pendingDir)).resolves.toEqual(beforePending);
     await expect(readdir(slotsDir)).resolves.toEqual(beforeSlots);
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
+  it('validates a paid recovery against the exact timestamp it publishes', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-paid-proposal-v2-'));
+    const pendingDir = path.join(projectDir, 'proposals', 'pending');
+    await createSidecarFamilyV2(projectDir, 'proposals');
+    const projectAuthority = await capturePendingProjectAuthorityV2(projectDir);
+    const now = vi.fn(() => new Date('2026-08-17T12:00:01.000Z'));
+
+    const record = await writeProposalRecordV2({
+      pendingDir,
+      projectId: 'project_v2',
+      proposalId: 'proposal_paid_recovery',
+      baseRevision: 7,
+      payload: {
+        kind: 'paid_recovery',
+        blocker: {
+          cause: 'reference_generation_required',
+          where: { kind: 'reference', referenceId: 'reference_paid_recovery', jobId: null },
+          remedy: {
+            kind: 'proposal',
+            prepare: { kind: 'project_references', referenceIds: ['reference_paid_recovery'] },
+            estimatedMinorUnits: null,
+            currency: null,
+          },
+        },
+        quote: {
+          quoteId: 'quote_paid_recovery',
+          projectRevision: 7,
+          expiresAt: '2026-08-17T12:05:00.000Z',
+          currency: 'USD',
+          lowerMinorUnits: 2,
+          upperMinorUnits: 2,
+          itemCount: 1,
+          includesCascade: false,
+        },
+      },
+      projectAuthority,
+      now,
+    });
+
+    expect(record.createdAt).toBe('2026-08-17T12:00:01.000Z');
+    expect(now).toHaveBeenCalledTimes(1);
+    await expect(readFile(path.join(pendingDir, 'proposal_paid_recovery.json'), 'utf8')).resolves.toContain(
+      '2026-08-17T12:00:01.000Z'
+    );
     await rm(projectDir, { recursive: true, force: true });
   });
 

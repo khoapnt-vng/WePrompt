@@ -982,6 +982,12 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.rejectProposal.provider((input) =>
     runCommand(() => dependencies.getService().rejectProposal(input))
   );
+  ipcBridge.creativeStudio.preparePaidRecoveryProposal.provider((input) =>
+    runCommand(() => dependencies.getService().preparePaidRecoveryProposal(input))
+  );
+  ipcBridge.creativeStudio.confirmPaidRecoveryProposal.provider((input) =>
+    runCommand(() => dependencies.getService().confirmPaidRecoveryProposal(input))
+  );
   ipcBridge.creativeStudio.listReferenceRequests.provider((input) =>
     runCommand(() => dependencies.getService().listReferenceRequests(input))
   );

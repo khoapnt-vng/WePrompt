@@ -187,6 +187,38 @@ const proposal = (
   review,
 });
 
+const paidRecoveryProposal = (expiresAt = '2099-08-24T01:00:00.000Z'): StudioRendererProposalV2 => ({
+  ...proposal({ status: 'ready', groups: [] }),
+  payload: {
+    kind: 'paid_recovery',
+    blocker: {
+      cause: 'generation_timeout',
+      where: { kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', beatPosition: 1, shotPosition: 2, jobId: null },
+      remedy: {
+        kind: 'proposal',
+        prepare: {
+          kind: 'generation',
+          baseChoices: [],
+          cascadeChoices: [],
+          continuityChange: null,
+        },
+        estimatedMinorUnits: null,
+        currency: null,
+      },
+    },
+    quote: {
+      quoteId: 'quote_1',
+      projectRevision: 7,
+      expiresAt,
+      currency: 'USD',
+      lowerMinorUnits: 125,
+      upperMinorUnits: 250,
+      itemCount: 2,
+      includesCascade: true,
+    },
+  },
+});
+
 describe('DirectorProposalCard semantic review', () => {
   const onAccept = vi.fn(async () => undefined);
   const onReject = vi.fn(async () => undefined);
@@ -657,5 +689,47 @@ describe('DirectorProposalCard semantic review', () => {
       expect(onAccept).toHaveBeenCalledWith('proposal_1');
       expect(onReject).toHaveBeenCalledWith('proposal_1');
     });
+  });
+
+  it('shows a bounded paid-recovery review and exposes only its explicit spend action', async () => {
+    const onPaidRecoveryAction = vi.fn(async () => undefined);
+    renderCard(paidRecoveryProposal(), {
+      project: projectWithShot(),
+      onPaidRecoveryAction,
+    });
+    const card = within(screen.getByTestId('studio-proposal-proposal_1'));
+
+    expect(card.getByTestId('studio-paid-recovery-review')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationTimeout'
+    );
+    expect(card.getByTestId('studio-paid-recovery-review')).toHaveTextContent('beat=Arrival,shot=2');
+    expect(
+      card.getByTestId('studio-paid-recovery-review').querySelector('[data-paid-recovery-price] bdi')
+    ).toHaveTextContent('$1.25');
+    expect(card.queryByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })).toBeNull();
+
+    fireEvent.click(
+      card.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.paidRecovery.confirm' })
+    );
+    await waitFor(() => expect(onPaidRecoveryAction).toHaveBeenCalledWith('proposal_1'));
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('requires an expired persisted paid-recovery quote to be refreshed before it can be confirmed', async () => {
+    const onPaidRecoveryAction = vi.fn(async () => undefined);
+    renderCard(paidRecoveryProposal('2020-08-24T01:00:00.000Z'), { onPaidRecoveryAction });
+    const card = within(screen.getByTestId('studio-proposal-proposal_1'));
+
+    expect(card.getByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.proposals.paidRecovery.expired'
+    );
+    expect(
+      card.queryByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.paidRecovery.confirm' })
+    ).toBeNull();
+    fireEvent.click(
+      card.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.paidRecovery.refresh' })
+    );
+    await waitFor(() => expect(onPaidRecoveryAction).toHaveBeenCalledWith('proposal_1'));
+    expect(onAccept).not.toHaveBeenCalled();
   });
 });

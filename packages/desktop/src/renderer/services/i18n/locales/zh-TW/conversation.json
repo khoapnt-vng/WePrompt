@@ -1290,6 +1290,30 @@
         "chatRejected": "提案已拒絕。",
         "reviewStale": "此審核基於修訂版 {{baseRevision}}，但專案目前為修訂版 {{currentRevision}}。",
         "noChanges": "此提案沒有語意變更。",
+        "paidRecovery": {
+          "heading": "付費復原",
+          "explanation": "Director 找到需要重新生成的復原方案。花費前請檢查具體受影響的工作與價格。",
+          "blockedBy": "阻擋原因",
+          "affectedWork": "受影響的工作",
+          "price": "預估費用",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "生成範圍",
+          "generationCount": "{{count}} 個生成項目",
+          "includesCascade": "包含相依工作",
+          "expires": "此價格將於 {{expiresAt}} 到期。",
+          "expired": "儲存的價格已到期。請在確認前重新整理。",
+          "confirm": "確認並付費",
+          "refresh": "重新整理價格",
+          "refreshed": "價格已重新整理。請檢查後再次確認以付費。",
+          "cardOnly": "付費復原只能在檢查目前價格後從其提案卡確認。",
+          "location": {
+            "project": "專案",
+            "cut": "剪輯",
+            "route": "{{route}} 路由",
+            "reference": "參考 · {{reference}}",
+            "shot": "{{beat}} · 鏡頭 {{shot}}"
+          }
+        },
         "subject": {
           "project": "專案",
           "beat": "Beat",

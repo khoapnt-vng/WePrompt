@@ -962,6 +962,16 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.list-proposals': studioV2ProjectRequestSchema,
   'creative-studio.accept-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
   'creative-studio.reject-proposal': z.object({ projectId: safeIdSchema, proposalId: safeIdSchema }).strict(),
+  'creative-studio.prepare-paid-recovery-proposal': z
+    .object({ projectId: safeIdSchema, proposalId: safeIdSchema })
+    .strict(),
+  'creative-studio.confirm-paid-recovery-proposal': z
+    .object({
+      ...studioV2MutationRequestShape,
+      proposalId: safeIdSchema,
+      quoteId: safeIdSchema,
+    })
+    .strict(),
   'creative-studio.list-reference-requests': studioV2ProjectRequestSchema,
   'creative-studio.decide-reference-request': studioV2ReferenceDecisionSchema,
   'creative-studio.list-reference-generation-handoffs': studioV2ProjectRequestSchema,

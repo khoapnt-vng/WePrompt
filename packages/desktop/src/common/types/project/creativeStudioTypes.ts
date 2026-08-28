@@ -169,8 +169,8 @@ export const isValidProviderJobId = (value: string): boolean =>
 
 export const STUDIO_MAX_DIRTY_DRAFTS_REPORTED = 24;
 /** Durable Beat/Shot Director command schema. */
-export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 9 as const;
-export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 5 as const;
+export const STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 = 10 as const;
+export const STUDIO_PROPOSAL_SCHEMA_VERSION_V2 = 6 as const;
 export const STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION = 5 as const;
 export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION = 1 as const;
 /** Sidecar contract version. It intentionally does not follow the project schema version. */
@@ -236,6 +236,13 @@ export type StudioDirectorFreeRecoveryCommandRecordV2 = StudioDirectorCommandRec
   recovery: StudioDirectorFreeRecoveryV2;
 };
 
+/** Free preparation request that records a priced recovery for later human confirmation. */
+export type StudioDirectorPaidRecoveryCommandRecordV2 = StudioDirectorCommandRecordBaseV2 & {
+  policy: 'propose_paid_recovery';
+  expectedRevision: number;
+  blocker: StudioPaidRecoveryBlockerV2;
+};
+
 export type StudioDirectorGetProjectStatusCommandRecordV2 = StudioDirectorCommandRecordBaseV2 & {
   policy: 'get_project_status';
   /** Normalized by the writer so durable identity never depends on omission semantics. */
@@ -260,6 +267,7 @@ export type StudioDirectorQueryCommandRecordV2 =
 export type StudioDirectorCommandRecordV2 =
   | StudioDirectorAutoApplyCommandRecordV2
   | StudioDirectorFreeRecoveryCommandRecordV2
+  | StudioDirectorPaidRecoveryCommandRecordV2
   | StudioDirectorQueryCommandRecordV2;
 
 export type StudioDirectorQueryV2 =
@@ -322,6 +330,17 @@ export type StudioDirectorFreeRecoveryAppliedReceiptV2 = {
   status: 'applied';
   appliedRevision: number;
   recovery: StudioDirectorFreeRecoveryV2;
+};
+
+/** Durable proof that free preparation recorded one immutable proposal and spent nothing. */
+export type StudioDirectorPaidRecoveryRecordedReceiptV2 = {
+  schemaVersion: typeof STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2;
+  commandId: string;
+  projectId: string;
+  expectedRevision: number;
+  decidedAt: string;
+  status: 'recorded';
+  proposal: StudioProposalRecordV2;
 };
 
 export type StudioDirectorRejectedReceiptV2 = {
@@ -413,7 +432,10 @@ export type StudioDirectorMutationReceiptV2 =
   | StudioDirectorExpiredReceiptV2
   | StudioDirectorIndeterminateReceiptV2;
 
-export type StudioDirectorCommandReceiptV2 = StudioDirectorMutationReceiptV2 | StudioDirectorQueryReceiptV2;
+export type StudioDirectorCommandReceiptV2 =
+  | StudioDirectorMutationReceiptV2
+  | StudioDirectorQueryReceiptV2
+  | StudioDirectorPaidRecoveryRecordedReceiptV2;
 
 export type StudioBeat = {
   id: string;
@@ -805,6 +827,7 @@ export type StudioRendererPreparedSubmissionOptionsV2 = {
 
 export type StudioProposalCommitAttributionV2 = {
   schemaVersion: typeof STUDIO_PROPOSAL_SCHEMA_VERSION_V2;
+  kind: 'mutation' | 'paid_recovery';
   proposalId: string;
   projectId: string;
   baseRevision: number;
@@ -813,6 +836,7 @@ export type StudioProposalCommitAttributionV2 = {
   afterProjectSha256: string;
   createdBeatIds: string[];
   createdShotIds: string[];
+  authorizationId: string | null;
   decidedAt: string;
 };
 
@@ -1807,7 +1831,36 @@ export type StudioPinRuleProposalPayloadV2 = {
   };
 };
 
-export type StudioProposalPayloadV2 = StudioMutationBatchProposalPayloadV2 | StudioPinRuleProposalPayloadV2;
+/** Exact status-owned paid remedy copied from a fresh detailed Director status read. */
+export type StudioPaidRecoveryBlockerV2 = {
+  cause: StudioProjectStatusBlockerCauseV2;
+  where: StudioProjectStatusWhereV2;
+  remedy: Extract<StudioProjectStatusRemedyV2, { kind: 'proposal' }>;
+};
+
+/** Bounded display facts; the full provider-bound quote remains only in Main's expiring cache. */
+export type StudioPaidRecoveryQuoteSummaryV2 = {
+  quoteId: string;
+  projectRevision: number;
+  expiresAt: string;
+  currency: string;
+  lowerMinorUnits: number;
+  upperMinorUnits: number;
+  itemCount: number;
+  includesCascade: boolean;
+};
+
+/** One priced recovery whose spend boundary remains an explicit renderer-only Confirm. */
+export type StudioPaidRecoveryProposalPayloadV2 = {
+  kind: 'paid_recovery';
+  blocker: StudioPaidRecoveryBlockerV2;
+  quote: StudioPaidRecoveryQuoteSummaryV2;
+};
+
+export type StudioProposalPayloadV2 =
+  | StudioMutationBatchProposalPayloadV2
+  | StudioPinRuleProposalPayloadV2
+  | StudioPaidRecoveryProposalPayloadV2;
 
 /** Exact immutable record written under proposals/pending. Decisions remain separate append-only records. */
 export type StudioProposalRecordV2 = {
@@ -1942,6 +1995,18 @@ export type StudioRecordProposalInputV2 = {
   proposalId: string;
   baseRevision: number;
   payload: StudioProposalPayloadV2;
+};
+
+export type StudioPreparePaidRecoveryProposalRequestV2 = {
+  projectId: string;
+  proposalId: string;
+};
+
+export type StudioConfirmPaidRecoveryProposalRequestV2 = {
+  projectId: string;
+  proposalId: string;
+  quoteId: string;
+  expectedRevision: number;
 };
 
 /** A durable request for reviewed generation of ordered semantic project references. */

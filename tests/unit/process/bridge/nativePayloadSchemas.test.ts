@@ -241,6 +241,16 @@ const VALID_PAYLOADS = {
   'creative-studio.list-proposals': { projectId: 'project_1' },
   'creative-studio.accept-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
   'creative-studio.reject-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
+  'creative-studio.prepare-paid-recovery-proposal': {
+    projectId: 'project_1',
+    proposalId: 'proposal_paid_recovery_1',
+  },
+  'creative-studio.confirm-paid-recovery-proposal': {
+    projectId: 'project_1',
+    proposalId: 'proposal_paid_recovery_1',
+    quoteId: 'quote_paid_recovery_1',
+    expectedRevision: 1,
+  },
   'creative-studio.list-reference-requests': { projectId: 'project_1' },
   'creative-studio.decide-reference-request': {
     projectId: 'project_1',
@@ -1030,6 +1040,31 @@ const INVALID_PAYLOADS = [
     'creative-studio.bind-director-conversation',
     'legacy Director binding field',
     { projectId: 'project_1', expectedRevision: 1, briefConversationId: 'conversation_1' },
+  ],
+  [
+    'creative-studio.prepare-paid-recovery-proposal',
+    'renderer supplied quote authority during paid recovery preparation',
+    {
+      ...VALID_PAYLOADS['creative-studio.prepare-paid-recovery-proposal'],
+      quoteId: 'quote_paid_recovery_1',
+    },
+  ],
+  [
+    'creative-studio.confirm-paid-recovery-proposal',
+    'renderer supplied authorization authority during paid recovery confirmation',
+    {
+      ...VALID_PAYLOADS['creative-studio.confirm-paid-recovery-proposal'],
+      authorizationId: 'authorization_private',
+    },
+  ],
+  [
+    'creative-studio.confirm-paid-recovery-proposal',
+    'missing paid recovery proposal correlation',
+    {
+      projectId: 'project_1',
+      quoteId: 'quote_paid_recovery_1',
+      expectedRevision: 1,
+    },
   ],
   [
     'creative-studio.prepare-project-references',
@@ -2131,6 +2166,8 @@ describe('native bridge payload schemas', () => {
       'creative-studio.prepare-project-references',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
+      'creative-studio.prepare-paid-recovery-proposal',
+      'creative-studio.confirm-paid-recovery-proposal',
       'creative-studio.cancel-job',
       'creative-studio.retry-job',
       'creative-studio.retry-job-download',
@@ -2171,6 +2208,8 @@ describe('native bridge payload schemas', () => {
       'creative-studio.prepare-project-references',
       'creative-studio.prepare-submission',
       'creative-studio.confirm-submission',
+      'creative-studio.prepare-paid-recovery-proposal',
+      'creative-studio.confirm-paid-recovery-proposal',
       'creative-studio.cancel-job',
       'creative-studio.retry-job',
       'creative-studio.retry-job-download',
@@ -2198,9 +2237,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(54);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(54);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(54);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(56);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(56);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(56);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);

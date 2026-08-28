@@ -25,6 +25,8 @@ import {
   type StudioDirectorCommandSlotV2,
   type StudioDirectorFreeRecoveryV2,
   type StudioDirectorOperationV2,
+  type StudioDirectorPaidRecoveryRecordedReceiptV2,
+  type StudioPaidRecoveryBlockerV2,
   type StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
@@ -36,6 +38,7 @@ import {
   parseStudioDirectorPendingRecordV2,
   studioDirectorCommandReceiptMatchesRecordV2,
   validateStudioDirectorFreeRecoveryV2,
+  validatesStudioPaidRecoveryBlockerV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 import { validateStudioMutationOperationV2 } from '@process/services/creative-studio/service/schema2';
 import {
@@ -66,6 +69,11 @@ export type StudioApplyFreeFixInputV2 = {
   recovery: StudioDirectorFreeRecoveryV2;
 };
 
+export type StudioProposePaidRecoveryInputV2 = {
+  expectedRevision: number;
+  blocker: StudioPaidRecoveryBlockerV2;
+};
+
 export type StudioGetCommandStatusInput = { commandId: string };
 
 export type StudioGetProjectStatusDirectorInputV2 = { detail?: boolean };
@@ -74,6 +82,7 @@ export type StudioGetProposalDirectorInputV2 = { proposalId: string };
 
 export type StudioDirectorToolApplyResultV2 =
   | StudioDirectorMutationReceiptV2
+  | StudioDirectorPaidRecoveryRecordedReceiptV2
   | {
       status: 'busy' | 'unconfirmed' | 'storage_error' | 'unsupported_prototype_schema';
       commandId: string;
@@ -108,6 +117,7 @@ export type StudioDirectorCommandWriterDeps = {
 export type StudioDirectorCommandWriterV2 = {
   apply(input: StudioApplyEditsInputV2): Promise<StudioDirectorToolApplyResultV2>;
   applyFreeFix(input: StudioApplyFreeFixInputV2): Promise<StudioDirectorToolApplyResultV2>;
+  proposePaidRecovery(input: StudioProposePaidRecoveryInputV2): Promise<StudioDirectorToolApplyResultV2>;
   getProjectStatus(input?: StudioGetProjectStatusDirectorInputV2): Promise<StudioDirectorToolQueryResultV2>;
   listRoutes(): Promise<StudioDirectorToolQueryResultV2>;
   getProposal(input: StudioGetProposalDirectorInputV2): Promise<StudioDirectorToolQueryResultV2>;
@@ -234,6 +244,45 @@ export const studioDirectorFreeFixInputFitsDurableRecordV2 = (
   }
 };
 
+export const studioDirectorPaidRecoveryInputFitsDurableRecordV2 = (
+  toolInput: StudioProposePaidRecoveryInputV2,
+  projectId = MAX_SAFE_STUDIO_ID_PREVIEW
+): boolean => {
+  try {
+    const expectedRevision = Object.getOwnPropertyDescriptor(toolInput, 'expectedRevision');
+    const blocker = Object.getOwnPropertyDescriptor(toolInput, 'blocker');
+    if (
+      typeof toolInput !== 'object' ||
+      toolInput === null ||
+      Array.isArray(toolInput) ||
+      Object.getPrototypeOf(toolInput) !== Object.prototype ||
+      Reflect.ownKeys(toolInput).length !== 2 ||
+      expectedRevision === undefined ||
+      blocker === undefined ||
+      !Object.hasOwn(expectedRevision, 'value') ||
+      !Object.hasOwn(blocker, 'value') ||
+      !Number.isSafeInteger(expectedRevision.value) ||
+      Number(expectedRevision.value) < 1 ||
+      !validatesStudioPaidRecoveryBlockerV2(blocker.value)
+    ) {
+      return false;
+    }
+    const preview: StudioDirectorCommandRecordV2 = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: MAX_SAFE_STUDIO_ID_PREVIEW,
+      projectId,
+      expectedRevision: Number(expectedRevision.value),
+      createdAt: '9999-12-31T23:59:59.999Z',
+      deadlineAt: '9999-12-31T23:59:59.999Z',
+      policy: 'propose_paid_recovery',
+      blocker: structuredClone(blocker.value) as StudioPaidRecoveryBlockerV2,
+    };
+    return Buffer.byteLength(JSON.stringify(preview), 'utf8') <= STUDIO_DIRECTOR_COMMAND_MAX_RECORD_BYTES;
+  } catch {
+    return false;
+  }
+};
+
 type CommandDirectories = {
   canonicalRoot: string;
   pending: string;
@@ -258,6 +307,7 @@ type PreparedCommandV2 = {
 type StudioDirectorWriterRequestV2 =
   | { policy: 'auto_apply'; input: StudioApplyEditsInputV2 }
   | { policy: 'apply_free_fix'; input: StudioApplyFreeFixInputV2 }
+  | { policy: 'propose_paid_recovery'; input: StudioProposePaidRecoveryInputV2 }
   | { policy: 'get_project_status'; detail: boolean }
   | { policy: 'list_routes' }
   | { policy: 'get_proposal'; proposalId: string };
@@ -629,7 +679,9 @@ const prepareCommandV2 = (input: {
     (input.request.policy === 'auto_apply' &&
       !studioDirectorToolInputFitsDurableRecordV2(input.request.input, input.config?.projectId)) ||
     (input.request.policy === 'apply_free_fix' &&
-      !studioDirectorFreeFixInputFitsDurableRecordV2(input.request.input, input.config?.projectId))
+      !studioDirectorFreeFixInputFitsDurableRecordV2(input.request.input, input.config?.projectId)) ||
+    (input.request.policy === 'propose_paid_recovery' &&
+      !studioDirectorPaidRecoveryInputFitsDurableRecordV2(input.request.input, input.config?.projectId))
   ) {
     return { commandId: 'unavailable', prepared: null };
   }
@@ -667,11 +719,18 @@ const prepareCommandV2 = (input: {
             expectedRevision: input.request.input.expectedRevision,
             recovery: input.request.input.recovery,
           }
-        : input.request.policy === 'get_project_status'
-          ? { ...base, policy: 'get_project_status', detail: input.request.detail }
-          : input.request.policy === 'list_routes'
-            ? { ...base, policy: 'list_routes' }
-            : { ...base, policy: 'get_proposal', proposalId: input.request.proposalId };
+        : input.request.policy === 'propose_paid_recovery'
+          ? {
+              ...base,
+              policy: 'propose_paid_recovery',
+              expectedRevision: input.request.input.expectedRevision,
+              blocker: input.request.input.blocker,
+            }
+          : input.request.policy === 'get_project_status'
+            ? { ...base, policy: 'get_project_status', detail: input.request.detail }
+            : input.request.policy === 'list_routes'
+              ? { ...base, policy: 'list_routes' }
+              : { ...base, policy: 'get_proposal', proposalId: input.request.proposalId };
   const slot: StudioDirectorCommandSlotV2 = {
     schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
     commandId,
@@ -1915,6 +1974,11 @@ export const createStudioDirectorCommandWriterV2 = (
   const applyFreeFix = async (input: StudioApplyFreeFixInputV2): Promise<StudioDirectorToolApplyResultV2> =>
     (await submit({ policy: 'apply_free_fix', input })) as StudioDirectorToolApplyResultV2;
 
+  const proposePaidRecovery = async (
+    input: StudioProposePaidRecoveryInputV2
+  ): Promise<StudioDirectorToolApplyResultV2> =>
+    (await submit({ policy: 'propose_paid_recovery', input })) as StudioDirectorToolApplyResultV2;
+
   const getProjectStatus = async (
     input: StudioGetProjectStatusDirectorInputV2 = {}
   ): Promise<StudioDirectorToolQueryResultV2> => {
@@ -1934,5 +1998,5 @@ export const createStudioDirectorCommandWriterV2 = (
       : ((await submit({ policy: 'get_proposal', proposalId })) as StudioDirectorToolQueryResultV2);
   };
 
-  return { apply, applyFreeFix, getProjectStatus, listRoutes, getProposal, getStatus };
+  return { apply, applyFreeFix, proposePaidRecovery, getProjectStatus, listRoutes, getProposal, getStatus };
 };

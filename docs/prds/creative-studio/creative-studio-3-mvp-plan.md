@@ -1824,8 +1824,8 @@ build it alongside that assignment, not independently.
 
 ## Assignable follow-on — Director troubleshooting: diagnose freely, repair free things, propose the rest
 
-**Status:** implementation in progress; items 1–2 implemented and verified 2026-08-28, items 3–5
-remain. Full direction and the fourteen-action inventory live in
+**Status:** implementation in progress; items 1–3 implemented and verified, items 4–5 remain. Full
+direction and the fourteen-action inventory live in
 [the Director as first responder](../../design/creative-studio-3-director-troubleshooting.md).
 Charter: **diagnose freely · repair freely when free · propose when it costs · never confirm its
 own spend.**
@@ -1844,9 +1844,14 @@ own spend.**
    it, attributes the resulting commit to a durable receipt, and fails closed if either the remedy
    or commit proof differs. Neither operation creates a quote, authorization, job, generation
    request, or spend; a conditioning repair may only release work the owner already authorized.
-3. **Extend proposals to carry a prepared quote** so recovery that costs money arrives as a card
-   with the number on it; the owner's Confirm stays the only spend. Composes with the
-   "show the estimate" assignment.
+3. **Implemented and verified 2026-08-29 — paid-recovery proposals carry a prepared quote.**
+   `studio_propose_paid_recovery` accepts only an exact blocker from a fresh detailed status read.
+   Main rederives it, prices it for free, persists the typed blocker plus a bounded quote summary,
+   and retains the full provider-bound quote only in its expiring cache. The renderer's explicit
+   Confirm is the sole spend path; generic proposal acceptance and a typed “yes” cannot spend.
+   Missing or expired quote authority refreshes the estimate without confirming, so a second click
+   is required. The crash-safe proposal commit records the exact authorization attribution before
+   publishing the project revision.
 4. **Add proposal dispositions** for `edit_project`'s editable settings and `set_reference_prompt`.
 5. **Regenerate the Director's self-description from the capability table** (BUG-139) and teach the
    conditioning-budget and chain-shape rules in its rules text.
