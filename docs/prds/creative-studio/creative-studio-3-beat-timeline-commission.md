@@ -156,6 +156,60 @@ drawn well**, which is the part we would get wrong on our own:
   the version without.
 - Not the cut editor on the Cut view. That is its own surface.
 
+## Decided after the designer's response, 2026-08-28
+
+The drawing answers every question it was asked and is buildable as drawn. Three things it did not
+cover are decided here rather than sent back, because they turn on how the product already stores
+status rather than on how it should look.
+
+**The gap.** The spec's status note reads _"FAILED is one word from the fixed vocabulary — Rendered,
+Queued, Rendering, Failed — so it holds at 4s width without wrapping."_ That is a four-word
+vocabulary. Ours is six, and it carries two qualifiers on top. Measured from `en-US`:
+
+| Label                   | Chars | Fits ~78px? |
+| ----------------------- | ----- | ----------- |
+| `Queued` / `Failed`     | 6     | yes         |
+| `Rendered`              | 8     | yes         |
+| `Not ready`/`Rendering` | 9     | yes         |
+| `Ready to render`       | 15    | **no**      |
+| `Latest attempt failed` | 21    | **no**      |
+
+At the drawing's own tightest case — six 4s Shots at ~78px each — roughly 13 characters of the
+prototype's 9.5px mono survive. So exactly two strings overflow, and `RENDERED · LATEST ATTEMPT
+FAILED` (30 characters) never had a chance.
+
+**6 — the qualifiers are marks on the block, never appended text.** This is not a model change. The
+vocabulary module already separates them:
+
+```ts
+type WorkspaceShotStatus = { word: WorkspaceShotStatusWord; stale: boolean; latestAttemptFailed: boolean };
+```
+
+`stale` and `latestAttemptFailed` are booleans beside the word, each with its own i18n key. The
+Board's `RENDERED · LATEST ATTEMPT FAILED` is that structure concatenated for a surface with room;
+it is a rendering choice, not the shape of the data. The track renders `word` as text and the two
+booleans as marks, so both views read the same structure and neither invents a state. The full
+sentence belongs in the selected Shot's detail panel — where the action it warns about already lives
+— and in the block's accessible name. This also matches the drawing's own grammar: `ACTUAL ≠ PLAN`
+is already expressed as a dashed line plus prose elsewhere, on the stated principle that it is
+_"worth seeing, not an error"_. A failed retry over good footage is the same kind of fact.
+
+**7 — `Ready to render` becomes `Ready`.** It is the only word that overflows, and the fix is the
+shared label rather than a track-only abbreviation. A compact variant would give the two views
+different words for one state, which the commission explicitly ruled out. `Not ready` / `Ready` is
+also the more natural pair, and the current phrasing is the odd one of the six. This edits an
+existing value in all twelve locales; it adds no key, so the exact-key-set contract test is
+unaffected, but it does need twelve real translations rather than an English string copied across.
+
+**8 — the block omits the word when the Shot is `rendered`.** The drawing already distinguishes
+footage from intent by fill: solid with a thumbnail means it will play, hatched with a dashed edge
+and `PLAN` means it will not yet. For a rendered Shot the word therefore repeats what the fill has
+already said, and it is the overwhelmingly common case — 30 of 36 Shots on the live `Plateau`
+project. Dropping it leaves the usual block carrying id, duration and thumbnail, and reserves text
+for the five states that genuinely need saying, of which `queued` and `rendering` are the ones an
+owner is actually watching for. Absence is safe here only because fill already encodes it; do not
+extend this to any other word.
+
 ## For reference
 
 The owner's words, in full, on seeing the current panel: _"the two band for Shot??? do we really need
