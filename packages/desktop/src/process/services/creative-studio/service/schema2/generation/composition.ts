@@ -272,8 +272,9 @@ export const recomposeStudioGenerationV2 = (
 };
 
 /**
- * Proves both deterministic prompt bytes and the quote/job authority that selected those inputs.
- * Callers still validate the surrounding exact-key envelope before using this predicate.
+ * Proves that a frozen composition still names the quote/job authority that selected its inputs.
+ * Prompt bytes are historical provider evidence: callers validate the surrounding stored copies
+ * for exact equality, but must not reinterpret them with the current composer implementation.
  */
 export const studioGenerationCompositionMatchesAuthorityV2 = (
   composition: StudioGenerationCompositionV2,
@@ -285,7 +286,6 @@ export const studioGenerationCompositionMatchesAuthorityV2 = (
   }
 ): boolean => {
   try {
-    if (!studioGenerationCompositionsEqualV2(composition, recomposeStudioGenerationV2(composition))) return false;
     const inputs = composition.inputs;
     if (
       inputs.projectRevision !== authority.projectRevision ||

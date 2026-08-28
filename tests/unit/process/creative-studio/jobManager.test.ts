@@ -462,6 +462,35 @@ const createV2Harness = async (
 const dispatchV2 = (harness: V2Harness, jobIds = harness.jobs.map((job) => job.id)) =>
   harness.manager.dispatchAuthorizedJobsV2({ projectId: harness.project.id, jobIds });
 
+const persistLegacyCharacterPrompt = async (harness: V2Harness): Promise<string> => {
+  const current = await harness.store.getProjectV2(harness.project.id);
+  if (current.status !== 'supported') throw new Error('legacy prompt fixture project disappeared');
+  const currentJob = current.project.jobs.job_v2_1!;
+  const legacyPrompt = currentJob.composition.prompt.replace(
+    /OUTPUT\n[\s\S]*$/,
+    'OUTPUT\nCreate one clean character reference sheet in a single image with front, three-quarter, side, and back views. Keep identity, age, wardrobe, proportions, and art style consistent. Do not add captions, borders, UI, or multiple alternative identities.'
+  );
+  if (legacyPrompt === currentJob.composition.prompt) throw new Error('legacy prompt fixture did not change');
+
+  await harness.store.updateProjectV2(harness.project.id, (project) => {
+    const authorizationItem = project.spendAuthorizations[0]!.baseItems[0]!;
+    const job = project.jobs.job_v2_1!;
+    if (
+      authorizationItem.requestPlan.kind !== 'resolved' ||
+      job.requestPlan.kind !== 'resolved' ||
+      job.requestSnapshot === null
+    ) {
+      throw new Error('legacy prompt fixture requires resolved request records');
+    }
+    authorizationItem.requestPlan.snapshot.composition.prompt = legacyPrompt;
+    job.requestPlan.snapshot.composition.prompt = legacyPrompt;
+    job.requestSnapshot.composition.prompt = legacyPrompt;
+    job.composition.prompt = legacyPrompt;
+    return project;
+  });
+  return legacyPrompt;
+};
+
 const expectV2Job = async (harness: V2Harness, expected: Partial<StudioJobV2>, jobId = 'job_v2_1'): Promise<void> =>
   waitFor(async () => {
     const loaded = await harness.store.getProjectV2(harness.project.id);
@@ -836,40 +865,6 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       await expect(dispatchV2(harness)).rejects.toMatchObject({ code: 'invalid_request' });
     }
 
-    expect(submit).not.toHaveBeenCalled();
-  });
-
-  it('rejects consistently tampered prompt authority before route, media, adapter, or provider work', async () => {
-    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
-    const adapter = controllableAdapter('weprompt-image-v1', { submit });
-    const listProviders = vi.fn(async () => [provider]);
-    const harness = await createV2Harness(adapter, { listProviders });
-    const corrupted = structuredClone(harness.project);
-    const authorizationItem = corrupted.spendAuthorizations[0]!.baseItems[0]!;
-    const job = corrupted.jobs.job_v2_1!;
-    if (
-      authorizationItem.requestPlan.kind !== 'resolved' ||
-      job.requestPlan.kind !== 'resolved' ||
-      job.requestSnapshot === null
-    ) {
-      throw new Error('tampered authority fixture requires resolved requests');
-    }
-    const tamperedPrompt = `${job.composition.prompt}\nUNAUTHORIZED PROMPT SUFFIX`;
-    authorizationItem.requestPlan.snapshot.composition.prompt = tamperedPrompt;
-    job.requestPlan.snapshot.composition.prompt = tamperedPrompt;
-    job.requestSnapshot.composition.prompt = tamperedPrompt;
-    job.composition.prompt = tamperedPrompt;
-
-    vi.spyOn(harness.store, 'getProjectV2').mockResolvedValue({ status: 'supported', project: corrupted });
-    const listGenerationRoutes = vi.spyOn(harness.providerResolver, 'listGenerationRoutes');
-    const resolveProviderInputV2 = vi.spyOn(harness.mediaStore, 'resolveProviderInputV2');
-    const validateRequest = vi.spyOn(adapter, 'validateRequest');
-
-    await expect(dispatchV2(harness)).rejects.toMatchObject({ code: 'invalid_request' });
-    expect(listGenerationRoutes).not.toHaveBeenCalled();
-    expect(listProviders).not.toHaveBeenCalled();
-    expect(resolveProviderInputV2).not.toHaveBeenCalled();
-    expect(validateRequest).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -1797,18 +1792,19 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
   it('resumes the atomically queued reference retry after a manager reload', async () => {
     let outputPath = '';
     let stopBeforeRetryDispatch: (() => void) | null = null;
+    const submit = vi.fn(async () => ({
+      kind: 'complete' as const,
+      outputs: [
+        {
+          mediaKind: 'image' as const,
+          role: 'primary' as const,
+          source: { kind: 'file' as const, path: outputPath },
+          mimeType: 'image/png' as const,
+        },
+      ],
+    }));
     const adapter = controllableAdapter('weprompt-image-v1', {
-      submit: vi.fn(async () => ({
-        kind: 'complete' as const,
-        outputs: [
-          {
-            mediaKind: 'image' as const,
-            role: 'primary' as const,
-            source: { kind: 'file' as const, path: outputPath },
-            mimeType: 'image/png' as const,
-          },
-        ],
-      })),
+      submit,
     });
     let persistenceAttempt = 0;
     const harness = await createV2Harness(adapter, {
@@ -1832,6 +1828,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     });
     outputPath = path.join(harness.rootDir, 'provider-reference-reload-retry.png');
     await writeFile(outputPath, png);
+    const legacyPrompt = await persistLegacyCharacterPrompt(harness);
     stopBeforeRetryDispatch = () => {
       void harness.manager.dispose();
     };
@@ -1846,6 +1843,9 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
         status: 'queued_local',
         retryOfJobId: 'job_v2_1',
         retryReason: 'variation_grid',
+        composition: { prompt: legacyPrompt },
+        requestPlan: { kind: 'resolved', snapshot: { composition: { prompt: legacyPrompt } } },
+        requestSnapshot: { composition: { prompt: legacyPrompt } },
       });
     });
     await harness.manager.dispose();
@@ -1867,6 +1867,9 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
       expect(loaded.project.jobs[retryJobId]).toMatchObject({ status: 'succeeded', retryReason: 'variation_grid' });
       expect(reference.approvedAssetId).toEqual(expect.any(String));
     });
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(submit.mock.calls.map(([request]) => request.prompt)).toEqual([legacyPrompt, legacyPrompt]);
+    expect(submit.mock.calls.map(([request]) => request.idempotencyKey)).toEqual(['key_v2_1', 'key_v2_2']);
   });
 
   it('refuses adapter normalization that would change the immutable paid request snapshot', async () => {
@@ -2728,6 +2731,37 @@ describe('StudioJobManager V2 durable authorized lifecycle', () => {
     expect(isGenerationRouteAvailable).not.toHaveBeenCalled();
     expect(poll).toHaveBeenCalledWith('remote_1', expect.objectContaining({ id: provider.id }), expect.anything());
     expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('submits exact historical prompt bytes when a queued local job resumes after reload', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const adapter = controllableAdapter('weprompt-image-v1', { submit });
+    const harness = await createV2Harness(adapter, { purpose: 'reference_image' });
+    const legacyPrompt = await persistLegacyCharacterPrompt(harness);
+    await harness.manager.dispose();
+
+    harness.manager = createStudioJobManager({
+      store: harness.store,
+      mediaStore: harness.mediaStore,
+      providerResolver: harness.providerResolver,
+      adapters: new Map([[adapter.id, adapter]]),
+      listProviders: harness.listProviders,
+      jitterMs: (baseMs) => baseMs,
+    });
+    await harness.manager.resumePendingJobsV2([harness.project.id]);
+
+    await expectV2Job(harness, {
+      status: 'failed',
+      error: { code: 'no_output' },
+      spendReceipt: expect.any(Object),
+    });
+    expect(submit).toHaveBeenCalledOnce();
+    expect(submit).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: legacyPrompt, idempotencyKey: 'key_v2_1' }),
+      expect.anything(),
+      expect.anything()
+    );
+    expect(submit.mock.calls[0]![0].prompt).not.toContain('ONE SINGLE clean character reference photograph');
   });
 
   it('recovers or suppresses every durable V2 local, ambiguous, terminal, deadline, and missing-binding state', async () => {

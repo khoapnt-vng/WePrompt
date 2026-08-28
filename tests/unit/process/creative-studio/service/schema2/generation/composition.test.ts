@@ -20,6 +20,7 @@ import {
   composeStudioGenerationV2,
   deriveStudioInstructionProfileV2,
   recomposeStudioGenerationV2,
+  studioGenerationCompositionMatchesAuthorityV2,
   studioGenerationCompositionDigestV2,
   studioGenerationCompositionsEqualV2,
 } from '@/process/services/creative-studio/service/schema2/generation/composition';
@@ -126,6 +127,38 @@ describe('canonical schema-5 generation composition', () => {
     const same = composeBoard();
     expect(studioGenerationCompositionsEqualV2(composition, same)).toBe(true);
     expect(studioGenerationCompositionDigestV2(composition)).toBe(studioGenerationCompositionDigestV2(same));
+  });
+
+  it('matches frozen historical prompt bytes to authority without current-code recomposition', () => {
+    const historical = composeBoard();
+    historical.prompt = historical.prompt.replace(
+      /OUTPUT\n[\s\S]*$/,
+      'OUTPUT\nLegacy provider instruction preserved exactly.'
+    );
+    const authority = {
+      projectRevision: 9,
+      target: { kind: 'shot' as const, shotId: shotSource.shotId },
+      purpose: 'board_still' as const,
+      provider: route,
+    };
+
+    expect(recomposeStudioGenerationV2(historical).prompt).not.toBe(historical.prompt);
+    expect(studioGenerationCompositionMatchesAuthorityV2(historical, authority)).toBe(true);
+    expect(studioGenerationCompositionMatchesAuthorityV2(historical, { ...authority, projectRevision: 10 })).toBe(
+      false
+    );
+    expect(
+      studioGenerationCompositionMatchesAuthorityV2(historical, {
+        ...authority,
+        target: { kind: 'shot', shotId: 'shot_other' },
+      })
+    ).toBe(false);
+    expect(
+      studioGenerationCompositionMatchesAuthorityV2(historical, {
+        ...authority,
+        provider: { ...route, model: 'other-model' },
+      })
+    ).toBe(false);
   });
 
   it('canonicalizes nested source, rule, predicate, and reference key order', () => {
