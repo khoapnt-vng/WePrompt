@@ -3,22 +3,26 @@
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on
 someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallied by hand.
 
-**116 bugs filed · 95 closed · 21 open** — 4 P1, 10 P2, 7 P3.
+**116 bugs filed · 98 closed · 18 open** — 2 P1, 10 P2, 6 P3.
 
 ---
 
-## 1. The four P1s
+## 1. The two P1s
 
-| Bug         | What is broken                                                                      | Note                                                 |
-| ----------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| **BUG-136** | Projects written before a schema change cannot be opened at all                     | Half fixed on `fix/studio-legacy-manifest-traversal` |
-| **BUG-140** | A film that plans no references can never render                                    | Fix exists on `fix/studio-empty-reference-binding`   |
-| **BUG-144** | Film export needs an ffmpeg the product never ships                                 | Needs a bundling decision, not only a fix            |
-| **BUG-165** | Chained generation — the product's central mechanism — succeeds about ⅓ of the time | Root cause only partly proven                        |
+| Bug         | What is broken                                                                            | Note                                      |
+| ----------- | ----------------------------------------------------------------------------------------- | ----------------------------------------- |
+| **BUG-144** | Film export needs an ffmpeg the product never ships                                       | Needs a bundling decision, not only a fix |
+| **BUG-165** | Chained generation — the product's central mechanism — succeeds about a third of the time | Root cause only partly proven             |
 
-**Two of these have fixes nobody is running.** `b5d654c97` and `012caa7e9` sit on the remote,
-unmerged and unreachable from the working branch. That remains the cheapest open win on the board and
-it has not moved all day.
+**BUG-136 and BUG-140 closed 2026-08-28.** Both were already fixed in the working branch and were
+verified live: `Plateau` opens at revision 1218 with 97 stored job compositions written before the
+prompt rewrite, and three films that plan no references have all their Shots bound with two of them
+holding jobs. Neither needed merging.
+
+This entry previously claimed two P1 fixes sat unmerged on the remote. That was wrong, and the
+mistake is worth keeping: it came from `git merge-base --is-ancestor`, which tests whether a branch
+**tip** is an ancestor. Both fixes had landed via different commits, so ancestry reported "not
+merged" while the code carried them. Compare content, not ancestry.
 
 ## 2. The P2s and P3s, grouped by what fixes them
 
@@ -85,7 +89,6 @@ vocabulary, which is twelve locale values and touches the Board as well as the t
 
 ## 4. What is waiting on a person
 
-- **Two P1 fix branches unmerged** — engineering, minutes of work.
 - **Piece 3 needs slicing** — the only planned work that cannot start.
 - **BUG-144 needs a bundling decision** — ship ffmpeg or state the dependency.
 - **9 commits held unpushed** at the owner's instruction: the sound and workspace plan, four rounds of
