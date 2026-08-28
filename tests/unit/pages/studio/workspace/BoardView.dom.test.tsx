@@ -8,7 +8,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import React, { useState } from 'react';
+import React from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -16,10 +16,10 @@ import type {
   StudioProjectStatusShotDetailV2,
   StudioProjectStatusStageV2,
   StudioProjectStatusV2,
-  StudioRendererParkEligibilityV2,
 } from '@/common/types/project/creativeStudioTypes';
 import type {
   WorkspaceBeatProjection,
+  WorkspaceBoardPanelProjection,
   WorkspaceProjection,
   WorkspaceShotProjection,
 } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
@@ -59,6 +59,7 @@ type MockBinProps = {
   onRestoreSuccess: (
     result: { kind: 'beat'; beatId: string } | { kind: 'shot'; beatId: string; shotId: string }
   ) => void;
+  pending: boolean;
 };
 
 vi.mock('@arco-design/web-react', async () => {
@@ -138,18 +139,25 @@ vi.mock('react-i18next', () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       const copy: Record<string, string> = {
         'conversation.creativeStudio.workspace.board.ariaLabel': 'Beat board',
-        'conversation.creativeStudio.workspace.board.actionsLabel': 'Actions for Beat A',
         'conversation.creativeStudio.workspace.board.selectedBeat': 'Selected Beat',
         'conversation.creativeStudio.workspace.board.noCoverage': 'No coverage',
         'conversation.creativeStudio.workspace.board.coverUnavailable': 'Preview unavailable',
-        'conversation.creativeStudio.workspace.board.reorderFailed': 'Beat order was not changed.',
-        'conversation.creativeStudio.workspace.board.liftBeat': 'Lift Beat',
-        'conversation.creativeStudio.workspace.board.liftConfirmContent': 'All authored work is kept in the Bin.',
-        'conversation.creativeStudio.workspace.board.liftUnavailable':
-          'Refresh the current workspace status before lifting this Beat.',
-        'conversation.creativeStudio.workspace.board.liftDirtyDraft': 'Save or reset local edits before lifting.',
-        'conversation.creativeStudio.workspace.board.liftSucceeded': 'Beat moved to the Bin.',
-        'conversation.creativeStudio.workspace.board.liftFailed': 'Beat was not moved to the Bin.',
+        'conversation.creativeStudio.workspace.board.controls.label': 'Director Board controls',
+        'conversation.creativeStudio.workspace.board.controls.progressLabel': 'Board completeness',
+        'conversation.creativeStudio.workspace.board.controls.stop': 'Stop drawing',
+        'conversation.creativeStudio.workspace.board.controls.stopNote':
+          'Completed panels and charges already incurred remain.',
+        'conversation.creativeStudio.workspace.board.panel.redrawBeat': 'Redraw Beat · paid',
+        'conversation.creativeStudio.workspace.board.panel.status.missing': 'Not drawn',
+        'conversation.creativeStudio.workspace.board.panel.status.current': 'Current',
+        'conversation.creativeStudio.workspace.board.panel.status.stale': 'Stale',
+        'conversation.creativeStudio.workspace.board.panel.status.statusPending': 'Status pending',
+        'conversation.creativeStudio.workspace.board.panel.status.queued': 'Queued',
+        'conversation.creativeStudio.workspace.board.panel.status.drawing': 'Drawing',
+        'conversation.creativeStudio.workspace.board.panel.status.needsAttention': 'Needs attention',
+        'conversation.creativeStudio.workspace.board.panel.status.failed': 'Failed',
+        'conversation.creativeStudio.workspace.board.panel.status.cancelled': 'Cancelled',
+        'conversation.creativeStudio.workspace.gate.purpose.board_still': 'Board panel',
         'conversation.creativeStudio.workspace.board.statusUnavailable': 'Board unavailable',
         'conversation.creativeStudio.workspace.board.shot.videoPreview': 'Current Shot video',
         'conversation.creativeStudio.workspace.board.shot.stale': 'Stale',
@@ -173,6 +181,8 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.shotStatus.rendered': 'Rendered',
         'conversation.creativeStudio.workspace.shotStatus.failed': 'Failed',
         'conversation.creativeStudio.workspace.beatPanel.untitledBeat': 'Untitled Beat',
+        'conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked':
+          'Authorized video work has locked this Shot’s first frame.',
         'conversation.creativeStudio.workspace.table.state.durationPending': 'Duration pending',
         'conversation.creativeStudio.workspace.table.state.noCoverage': 'No coverage state',
         'conversation.creativeStudio.workspace.table.state.seedPending': 'First frame pending',
@@ -193,6 +203,12 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.blocker.boundNonterminalRequest': 'Request is still bound',
         'conversation.creativeStudio.workspace.beatPanel.blocker.beatShotCapacityReached': 'Beat Shot limit reached',
         'conversation.creativeStudio.workspace.beatPanel.common.cancel': 'Cancel',
+        'conversation.creativeStudio.jobs.retry': 'Retry',
+        'conversation.creativeStudio.jobs.retryDownload': 'Retry download',
+        'conversation.creativeStudio.jobs.cancel': 'Cancel job',
+        'conversation.creativeStudio.jobs.retryChargeBody': 'The provider may already have accepted this job.',
+        'conversation.creativeStudio.jobs.retryChargeConfirm': 'Retry and accept risk',
+        'conversation.creativeStudio.jobs.retryChargeTitle': 'Possible duplicate charge',
       };
       if (key === 'conversation.creativeStudio.workspace.board.ordinal') {
         return String(values?.index ?? 0).padStart(2, '0');
@@ -232,21 +248,32 @@ vi.mock('react-i18next', () => ({
         return `${String(values?.seconds)}s`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.openBeat') return `Open ${String(values?.title)}`;
-      if (key === 'conversation.creativeStudio.workspace.board.actionsLabel') {
+      if (key === 'conversation.creativeStudio.workspace.board.controls.progress') {
+        return `${String(values?.drawn)} of ${String(values?.total)} panels drawn`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.board.controls.staleCount') {
+        return `${String(values?.count)} stale`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.board.controls.busyCount') {
+        return `${String(values?.count)} in progress`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.board.controls.drawNext') {
+        return `Draw next batch (${String(values?.count)})`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.board.panel.drawMissing') {
+        return `Draw missing (${String(values?.count)})`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.board.panel.beatActions') {
         return `Actions for ${String(values?.title)}`;
       }
-      if (key === 'conversation.creativeStudio.workspace.board.dragHandle') {
-        return `Reorder ${String(values?.title)} at position ${String(values?.position)}`;
+      if (key === 'conversation.creativeStudio.workspace.board.panel.cardLabel') {
+        return `Shot ${String(values?.position)}: ${String(values?.status)}`;
       }
-      if (key === 'conversation.creativeStudio.workspace.board.moveEarlier') {
-        return `Move ${String(values?.title)} earlier`;
+      if (key === 'conversation.creativeStudio.workspace.board.panel.redrawShot') {
+        return `Redraw Shot ${String(values?.position)} · paid`;
       }
-      if (key === 'conversation.creativeStudio.workspace.board.moveLater') return `Move ${String(values?.title)} later`;
-      if (key === 'conversation.creativeStudio.workspace.board.reorderAnnouncement') {
-        return `Moved ${String(values?.title)} from ${String(values?.from)} to ${String(values?.to)} of ${String(values?.total)}.`;
-      }
-      if (key === 'conversation.creativeStudio.workspace.board.liftConfirmTitle') {
-        return `Lift ${String(values?.title)}?`;
+      if (key === 'conversation.creativeStudio.workspace.board.panel.useAsFirstFrame') {
+        return `Use Shot ${String(values?.position)} panel as first frame`;
       }
       return copy[key] ?? key;
     },
@@ -255,7 +282,7 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/renderer/pages/studio/components/Workspace/Views/Board/Bin', async () => {
   const ReactModule = await import('react');
-  const Bin = ({ focusItemKey, onFocusItemSettled, onRestoreSuccess }: MockBinProps) => {
+  const Bin = ({ focusItemKey, onFocusItemSettled, onRestoreSuccess, pending }: MockBinProps) => {
     const focusTarget = ReactModule.useRef<HTMLButtonElement | null>(null);
     ReactModule.useEffect(() => {
       if (focusItemKey === null || focusTarget.current === null) return;
@@ -263,7 +290,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace/Views/Board/Bin', async ()
       onFocusItemSettled();
     }, [focusItemKey, onFocusItemSettled]);
     return (
-      <section aria-label='Bin' data-testid='board-bin'>
+      <section aria-label='Bin' data-pending={pending} data-testid='board-bin'>
         <button
           ref={focusTarget}
           data-bin-focus-key={focusItemKey ?? undefined}
@@ -341,16 +368,18 @@ const makeBeat = (id: string, overrides: Partial<WorkspaceBeatProjection> = {}):
   ...overrides,
 });
 
-const parkRow = (
-  beatId: string,
-  overrides: Partial<StudioRendererParkEligibilityV2> = {}
-): StudioRendererParkEligibilityV2 => ({
-  subject: 'beat',
-  action: 'park',
-  beatId,
-  shotId: null,
-  allowed: true,
-  blockers: [],
+const makeBoardPanel = (
+  shotId: string,
+  overrides: Partial<WorkspaceBoardPanelProjection> = {}
+): WorkspaceBoardPanelProjection => ({
+  shotId,
+  assetId: null,
+  producerJobId: null,
+  latestJobId: null,
+  staleCauses: [],
+  freshness: 'missing',
+  activity: 'idle',
+  recovery: null,
   ...overrides,
 });
 
@@ -381,10 +410,10 @@ const makeProjection = (
   },
   bin: { items: [], beats: [], shots: [] },
   undoTop: null,
-  boardPanels: [],
+  boardPanels: beats.flatMap((beat) => beat.shots.map((shot) => makeBoardPanel(shot.id))),
   dirtyShots: [],
   cascadeProgress: [],
-  parkEligibility: beats.map((beat) => parkRow(beat.id)),
+  parkEligibility: [],
   conditioningFailures: [],
   ...overrides,
 });
@@ -501,8 +530,15 @@ const makeProjectStatus = (
 });
 
 const makeActions = (): BoardActions => ({
-  reorderBeats: vi.fn().mockResolvedValue(true),
-  parkBeat: vi.fn().mockResolvedValue(true),
+  drawNext: vi.fn(),
+  drawBeat: vi.fn(),
+  redrawShot: vi.fn(),
+  redrawBeat: vi.fn(),
+  promotePanel: vi.fn(),
+  stop: vi.fn(),
+  retryJob: vi.fn(),
+  retryDownload: vi.fn(),
+  cancelJob: vi.fn(),
   restoreBeat: vi.fn().mockResolvedValue(true),
   restoreShot: vi.fn().mockResolvedValue(true),
   reorderBin: vi.fn().mockResolvedValue(true),
@@ -522,8 +558,9 @@ const boardProps = (
   projection,
   projectStatus: makeProjectStatus(projection),
   selectedBeatId: null,
-  dirtyBeatIds: [],
   pending: false,
+  gateLocked: false,
+  imageRouteReady: true,
   actions,
   binFocusAnnouncement: '',
   binFocusItemKey: null,
@@ -696,7 +733,7 @@ describe('BoardView', () => {
     expect(list.compareDocumentPosition(bin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('uses a responsive Shot grid, neutral Beat openers, and no paid or recovery controls', () => {
+  it('uses a responsive Shot grid, neutral Beat openers, and Board-owned drawing without structural actions', () => {
     const actions = makeActions();
     const result = render(
       <BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]), actions)} />
@@ -707,15 +744,18 @@ describe('BoardView', () => {
     expect(list).not.toHaveAttribute('data-card-size');
     for (const beatId of ['a', 'b', 'c']) {
       const card = cardFor(result.container, beatId);
-      expect(within(card).getAllByRole('button')).toHaveLength(1);
       expect(within(card).getByRole('button', { name: `Open Beat ${beatId.toUpperCase()}` })).not.toHaveAttribute(
         'aria-current'
       );
       expect(within(card).queryByRole('button', { name: /(?:move|reorder|lift)/i })).toBeNull();
     }
-    expect(screen.queryByRole('group', { name: /Actions for/ })).toBeNull();
-    expect(actions.reorderBeats).not.toHaveBeenCalled();
-    expect(actions.parkBeat).not.toHaveBeenCalled();
+    expect(screen.getByRole('region', { name: 'Director Board controls' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Bin' })).toBeVisible();
+    expect(result.container.querySelector('[data-board-panel-shot-id][role="region"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Draw next batch (3)' })).toBeEnabled();
+    expect(screen.getByRole('progressbar', { name: 'Board completeness' })).toBeVisible();
+    expect(actions).not.toHaveProperty('reorderBeats');
+    expect(actions).not.toHaveProperty('parkBeat');
     expect(actions.reorderBin).not.toHaveBeenCalled();
 
     expect(boardCss).toMatch(/\.beatList\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s);
@@ -734,13 +774,123 @@ describe('BoardView', () => {
     expect(boardCss).toMatch(
       /\.beatTitle:global\(\.arco-btn-text\)[^{]*\{[^}]*border-color:\s*transparent[^}]*background-color:\s*transparent[^}]*box-shadow:\s*none/s
     );
-    expect(boardCss).toMatch(
-      /\.liftBeat[^,{]*\[aria-disabled='true'\][^{]*\{[^}]*color:\s*var\(--text-disabled\)[^}]*cursor:\s*not-allowed/s
-    );
+    expect(boardCss).toMatch(/\.panelCard\s*\{[^}]*grid-template-columns:\s*96px\s+minmax\(0,\s*1fr\)/s);
     expect(result.container.querySelector('[data-composer-status-word="notReady"]')).not.toBeNull();
-    expect(screen.queryByRole('button', { name: /generate|render|retry|cancel|prepare|confirm/i })).toBeNull();
-    expect(screen.queryByRole('progressbar')).toBeNull();
+    expect(screen.queryByRole('button', { name: /render|retry|cancel|prepare|confirm/i })).toBeNull();
     expect(result.container.textContent).not.toMatch(/\$\d|€\d|£\d/);
+  });
+
+  it('qualifies paid Beat actions by film position when authored titles repeat', () => {
+    render(
+      <BoardView
+        {...boardProps(
+          makeProjection([makeBeat('first', { title: 'Same title' }), makeBeat('second', { title: 'Same title' })])
+        )}
+      />
+    );
+
+    expect(screen.getByRole('group', { name: 'Actions for 1. Same title' })).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Actions for 2. Same title' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Draw missing (1) · 1. Same title' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Draw missing (1) · 2. Same title' })).toBeVisible();
+  });
+
+  it('summarizes 30 exact panels and caps the next paid batch at 24 drawable missing Shots', async () => {
+    const user = userEvent.setup();
+    const actions = makeActions();
+    const shots = Array.from({ length: 30 }, (_, index) => makeShot(`shot_${index + 1}`));
+    const panels = shots.map((shot, index) => {
+      if (index < 2) {
+        return makeBoardPanel(shot.id, {
+          assetId: `panel_${index + 1}`,
+          producerJobId: `job_${index + 1}`,
+          latestJobId: `job_${index + 1}`,
+          freshness: 'current',
+        });
+      }
+      if (index === 2) {
+        return makeBoardPanel(shot.id, {
+          assetId: 'panel_stale',
+          producerJobId: 'job_stale',
+          latestJobId: 'job_stale',
+          freshness: 'stale',
+          staleCauses: ['request_out_of_date'],
+        });
+      }
+      if (index === 3) return makeBoardPanel(shot.id, { activity: 'drawing', latestJobId: 'job_drawing' });
+      if (index === 4) return makeBoardPanel(shot.id, { activity: 'queued', latestJobId: 'job_queued' });
+      if (index === 5) return makeBoardPanel(shot.id, { activity: 'failed', latestJobId: 'job_failed' });
+      return makeBoardPanel(shot.id);
+    });
+    const projection = makeProjection([makeBeat('large', { shots })], { boardPanels: panels });
+    const result = render(<BoardView {...boardProps(projection, actions)} />);
+
+    const controls = screen.getByRole('region', { name: 'Director Board controls' });
+    expect(controls).toHaveTextContent('3 of 30 panels drawn');
+    expect(controls).toHaveTextContent('1 stale');
+    expect(controls).toHaveTextContent('2 in progress');
+    expect(within(controls).getByRole('button', { name: 'Stop drawing' })).toBeEnabled();
+
+    const settledPanels = panels.map((panel, index) => {
+      if (index === 3) return makeBoardPanel(panel.shotId, { activity: 'failed', latestJobId: 'job_failed_4' });
+      if (index === 4) return makeBoardPanel(panel.shotId, { activity: 'cancelled', latestJobId: 'job_cancelled_5' });
+      return panel;
+    });
+    result.rerender(
+      <BoardView
+        {...boardProps(makeProjection([makeBeat('large', { shots })], { boardPanels: settledPanels }), actions)}
+      />
+    );
+
+    const settledControls = screen.getByRole('region', { name: 'Director Board controls' });
+    const drawNext = within(settledControls).getByRole('button', { name: 'Draw next batch (24)' });
+    expect(drawNext).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Draw missing (27) · 1. Beat LARGE' })).toBeDisabled();
+    await user.click(drawNext);
+    expect(actions.drawNext).toHaveBeenCalledTimes(1);
+  });
+
+  it('locks paid and Bin controls when route, status, gate, or project authority is not exact', () => {
+    const projection = makeProjection([makeBeat('a')]);
+    const result = render(<BoardView {...boardProps(projection)} imageRouteReady={false} />);
+    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
+
+    const statusPending = {
+      ...projection,
+      boardPanels: [makeBoardPanel('a_shot', { activity: 'status_pending', freshness: 'status_pending' })],
+    };
+    result.rerender(<BoardView {...boardProps(statusPending)} />);
+    expect(screen.getByRole('button', { name: 'Draw next batch (0)' })).toBeDisabled();
+
+    result.rerender(<BoardView {...boardProps(projection)} gateLocked />);
+    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
+    expect(screen.getByTestId('board-bin')).toHaveAttribute('data-pending', 'true');
+
+    result.rerender(<BoardView {...boardProps(projection)} projectId='project_other' />);
+    expect(screen.getByText('Board unavailable')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
+    expect(screen.getByTestId('board-bin')).toHaveAttribute('data-pending', 'true');
+  });
+
+  it('offers whole-Beat redraw only when every exact panel exists', () => {
+    const first = makeShot('first');
+    const second = makeShot('second');
+    const beat = makeBeat('pair', { shots: [first, second] });
+    const current = (shotId: string) =>
+      makeBoardPanel(shotId, {
+        assetId: `panel_${shotId}`,
+        producerJobId: `job_${shotId}`,
+        latestJobId: `job_${shotId}`,
+        freshness: 'current',
+      });
+    const complete = makeProjection([beat], { boardPanels: [current(first.id), current(second.id)] });
+    const result = render(<BoardView {...boardProps(complete)} />);
+    expect(screen.getByRole('button', { name: 'Redraw Beat · paid · 1. Beat PAIR' })).toBeEnabled();
+
+    const partial = makeProjection([beat], { boardPanels: [current(first.id), makeBoardPanel(second.id)] });
+    result.rerender(<BoardView {...boardProps(partial)} />);
+    expect(screen.queryByRole('button', { name: 'Redraw Beat · paid · 1. Beat PAIR' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Draw missing (1) · 1. Beat PAIR' })).toBeEnabled();
   });
 
   it('shows project and route blockers once at Board scope without mislabelling a rendered Shot', () => {
@@ -856,241 +1006,228 @@ describe('BoardView', () => {
     expect(within(tile).queryByRole('button', { name: 'Review references on Table' })).toBeNull();
   });
 
-  it('opens from the neutral Beat target, exposes actions only on the selected Beat, and preserves paid Shots', async () => {
+  it('owns exact Board-panel drawing, redraw, and promotion while leaving structure elsewhere', async () => {
     const user = userEvent.setup();
-    const projection = makeProjection([makeBeat('a'), makeBeat('b')]);
-    const Harness = () => {
-      const [selectedBeatId, setSelectedBeatId] = useState<string | null>('a');
-      const [selectedShotIds] = useState(['a_shot']);
-      return (
-        <>
-          <output data-testid='selection'>{JSON.stringify({ selectedBeatId, selectedShotIds })}</output>
-          <BoardView {...boardProps(projection)} onOpenBeat={setSelectedBeatId} selectedBeatId={selectedBeatId} />
-        </>
-      );
-    };
-    const result = render(<Harness />);
-
-    const firstCard = cardFor(result.container, 'a');
-    const secondCard = cardFor(result.container, 'b');
-    expect(within(firstCard).getByRole('button', { name: 'Open Beat A' })).toHaveAttribute('aria-current', 'true');
-    expect(within(firstCard).getByRole('group', { name: 'Actions for Beat A' })).toBeVisible();
-    expect(within(secondCard).getAllByRole('button')).toHaveLength(1);
-    await user.click(within(secondCard).getByRole('button', { name: 'Open Beat B' }));
-    expect(JSON.parse(screen.getByTestId('selection').textContent ?? '{}')).toEqual({
-      selectedBeatId: 'b',
-      selectedShotIds: ['a_shot'],
-    });
-    expect(within(secondCard).getByRole('button', { name: 'Open Beat B' })).toHaveAttribute('aria-current', 'true');
-    const actionsGroup = within(secondCard).getByRole('group', { name: 'Actions for Beat B' });
-    expect(actionsGroup.compareDocumentPosition(within(secondCard).getByRole('button', { name: 'Open Beat B' }))).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING
-    );
-    act(() => within(actionsGroup).getByRole('button', { name: 'Move Beat B earlier' }).focus());
-    fireEvent.keyDown(actionsGroup, { key: 'Escape' });
-    expect(within(secondCard).getByRole('button', { name: 'Open Beat B' })).toHaveFocus();
-    fireEvent.click(cardFor(result.container, 'a'));
-    expect(JSON.parse(screen.getByTestId('selection').textContent ?? '{}').selectedBeatId).toBe('b');
-    expect(screen.queryByRole('checkbox')).toBeNull();
-  });
-
-  it('sends exact whole-order keyboard payloads, announces global positions, and restores moved identity focus', async () => {
     const actions = makeActions();
-    const projection = makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]);
-    const Harness = () => {
-      const [selectedBeatId, setSelectedBeatId] = useState<string | null>('a');
-      return (
-        <BoardView
-          {...boardProps(projection, actions)}
-          onOpenBeat={setSelectedBeatId}
-          selectedBeatId={selectedBeatId}
-        />
-      );
-    };
-    render(<Harness />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Move Beat A later' }));
-    await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
-    expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus();
-    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent('Moved Beat A from 1 to 2 of 3.');
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open Beat C' }));
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat C at position 3' }), { key: 'Home' });
-    await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['c', 'a', 'b']));
-    expect(screen.getByRole('button', { name: 'Open Beat C' })).toHaveFocus();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open Beat A' }));
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat A at position 1' }), { key: 'End' });
-    await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['b', 'c', 'a']));
-    expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus();
-    expect(actions.parkBeat).not.toHaveBeenCalled();
-    expect(actions.reorderBin).not.toHaveBeenCalled();
-  });
-
-  it('keeps contextual reorder single-flight while the exact native action is pending', async () => {
-    let finish!: (value: boolean) => void;
-    const actions = makeActions();
-    vi.mocked(actions.reorderBeats).mockReturnValueOnce(
-      new Promise<boolean>((resolvePromise) => {
-        finish = resolvePromise;
-      })
-    );
-    render(<BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('b')]), actions)} selectedBeatId='a' />);
-    const moveLater = screen.getByRole('button', { name: 'Move Beat A later' });
-
-    fireEvent.click(moveLater);
-    fireEvent.click(moveLater);
-    expect(actions.reorderBeats).toHaveBeenCalledTimes(1);
-    expect(actions.reorderBeats).toHaveBeenCalledWith(['b', 'a']);
-    const guardedLift = screen.getByRole('button', { name: 'Lift Beat' });
-    expect(guardedLift).toHaveAttribute('aria-disabled', 'true');
-    fireEvent.click(guardedLift);
-    expect(actions.parkBeat).not.toHaveBeenCalled();
-
-    finish(true);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus());
-  });
-
-  it('uses pointer drag and canonical earlier/later semantics unchanged in RTL without optimistic DOM order', async () => {
-    const actions = makeActions();
-    const projection = makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]);
-    const Harness = () => {
-      const [selectedBeatId, setSelectedBeatId] = useState<string | null>('a');
-      return (
-        <BoardView
-          {...boardProps(projection, actions)}
-          onOpenBeat={setSelectedBeatId}
-          selectedBeatId={selectedBeatId}
-        />
-      );
-    };
-    const result = render(
-      <div dir='rtl'>
-        <Harness />
-      </div>
-    );
-    const transferBytes = new Map<string, string>();
-    const dataTransfer = {
-      effectAllowed: 'none',
-      setData: (format: string, value: string) => transferBytes.set(format, value),
-      getData: (format: string) => transferBytes.get(format) ?? '',
-    };
-    fireEvent.dragStart(screen.getByRole('button', { name: 'Reorder Beat A at position 1' }), { dataTransfer });
-    fireEvent.dragOver(cardFor(result.container, 'c'), { dataTransfer });
-    fireEvent.drop(cardFor(result.container, 'c'), { dataTransfer });
-    await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['b', 'c', 'a']));
-    expect(
-      Array.from(screen.getByRole('list', { name: 'Beat board' }).children).map(
-        (item) => (item as HTMLElement).dataset.beatId
-      )
-    ).toEqual(['a', 'b', 'c']);
-    expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Open Beat B' }));
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat B at position 2' }), { key: 'ArrowUp' });
-    await waitFor(() => expect(actions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
-
-    vi.mocked(actions.reorderBeats).mockClear();
-    dataTransfer.setData('text/plain', 'a');
-    fireEvent.dragOver(cardFor(result.container, 'c'), { dataTransfer });
-    fireEvent.drop(cardFor(result.container, 'c'), { dataTransfer });
-    expect(actions.reorderBeats).not.toHaveBeenCalled();
-  });
-
-  it('fails closed for unavailable, duplicate, blocked, and dirty lift facts in deterministic blocker order', () => {
-    const beats = [makeBeat('a'), makeBeat('b'), makeBeat('c'), makeBeat('d')];
-    const projection = makeProjection(beats, {
-      parkEligibility: [
-        parkRow('a'),
-        parkRow('a'),
-        parkRow('b'),
-        parkRow('c', {
-          allowed: false,
-          blockers: [
-            { shotId: 'c_shot', code: 'own_pending_frame' },
-            { shotId: 'c_shot', code: 'downstream_nonterminal_job' },
-          ],
+    const missingBeat = makeBeat('missing');
+    const currentBeat = makeBeat('current');
+    const projection = makeProjection([missingBeat, currentBeat], {
+      boardPanels: [
+        makeBoardPanel('missing_shot'),
+        makeBoardPanel('current_shot', {
+          assetId: 'panel_current',
+          producerJobId: 'panel_job',
+          latestJobId: 'panel_job',
+          freshness: 'current',
         }),
-        parkRow('d'),
       ],
     });
-    const actions = makeActions();
-    const result = render(<BoardView {...boardProps(projection, actions)} dirtyBeatIds={['b']} selectedBeatId='a' />);
+    const result = render(<BoardView {...boardProps(projection, actions)} />);
 
-    const select = (beatId: string, nextProjection = projection, dirtyBeatIds: readonly string[] = ['b']) => {
-      result.rerender(
-        <BoardView {...boardProps(nextProjection, actions)} dirtyBeatIds={dirtyBeatIds} selectedBeatId={beatId} />
-      );
-      const card = cardFor(result.container, beatId);
-      const group = within(card).getByRole('group', { name: `Actions for Beat ${beatId.toUpperCase()}` });
-      expect(screen.getAllByRole('group', { name: /Actions for/ })).toHaveLength(1);
-      return group;
-    };
-
-    let actionRegion = select('a');
-    expect(actionRegion).toHaveTextContent('Refresh the current workspace status');
-    expect(cardFor(result.container, 'b')).not.toHaveTextContent('Refresh the current workspace status');
-    expect(within(actionRegion).getByRole('button', { name: 'Lift Beat' })).toHaveAttribute('aria-disabled', 'true');
-
-    actionRegion = select('b');
-    expect(actionRegion).toHaveTextContent('Save or reset local edits');
-    expect(cardFor(result.container, 'a')).not.toHaveTextContent('Save or reset local edits');
-    expect(within(actionRegion).getByRole('button', { name: 'Lift Beat' })).toHaveAttribute('aria-disabled', 'true');
-
-    actionRegion = select('c');
-    expect(actionRegion).toHaveTextContent('Own frame is pending');
-    expect(actionRegion).toHaveTextContent('Downstream job is still running');
-    expect(cardFor(result.container, 'd')).not.toHaveTextContent('Own frame is pending');
-    const blockerList = within(actionRegion).getByRole('list');
-    expect(blockerList).toHaveAttribute('aria-live', 'polite');
-    expect(within(blockerList).getAllByRole('listitem')).toHaveLength(2);
-    expect(actionRegion.textContent!.indexOf('Own frame is pending')).toBeLessThan(
-      actionRegion.textContent!.indexOf('Downstream job is still running')
+    await user.click(screen.getByRole('button', { name: 'Draw next batch (1)' }));
+    await user.click(
+      within(cardFor(result.container, 'missing')).getByRole('button', {
+        name: 'Draw missing (1) · 1. Beat MISSING',
+      })
     );
-    const blockedLift = within(actionRegion).getByRole('button', { name: 'Lift Beat' });
-    expect(blockedLift).toBeEnabled();
-    expect(blockedLift).toHaveAttribute('aria-disabled', 'true');
-    expect(blockedLift).toHaveAttribute('aria-describedby', blockerList.id);
-    act(() => blockedLift.focus());
-    expect(blockedLift).toHaveFocus();
-    fireEvent.click(blockedLift);
-    fireEvent.keyDown(blockedLift, { key: 'Enter' });
+    const currentCard = cardFor(result.container, 'current');
+    await user.click(within(currentCard).getByRole('button', { name: 'Redraw Beat · paid · 2. Beat CURRENT' }));
+    const currentTile = currentCard.querySelector<HTMLElement>('[data-shot-id="current_shot"]')!;
+    const panelCard = currentTile.querySelector<HTMLElement>('[data-board-panel-shot-id="current_shot"]')!;
+    expect(panelCard).toHaveTextContent('Board panel');
+    expect(panelCard.querySelector('img')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/panel_current');
+    await user.click(within(panelCard).getByRole('button', { name: 'Redraw Shot 2.1 · paid' }));
+    await user.click(within(panelCard).getByRole('button', { name: 'Use Shot 2.1 panel as first frame' }));
 
-    actionRegion = select('d');
-    expect(within(actionRegion).getByRole('button', { name: 'Lift Beat' })).not.toHaveAttribute('aria-disabled');
-    expect(actions.parkBeat).not.toHaveBeenCalled();
-
-    actionRegion = select('d', { ...projection, workspaceStatusReady: false }, []);
-    const unavailableLift = within(actionRegion).getByRole('button', { name: 'Lift Beat' });
-    expect(unavailableLift).toBeEnabled();
-    expect(unavailableLift).toHaveAttribute('aria-disabled', 'true');
-    fireEvent.click(unavailableLift);
-    expect(actions.parkBeat).not.toHaveBeenCalled();
+    expect(actions.drawNext).toHaveBeenCalledTimes(1);
+    expect(actions.drawBeat).toHaveBeenCalledWith('missing');
+    expect(actions.redrawBeat).toHaveBeenCalledWith('current');
+    expect(actions.redrawShot).toHaveBeenCalledWith('current_shot');
+    expect(actions.promotePanel).toHaveBeenCalledWith('current_shot', 'panel_current');
+    expect(screen.queryByRole('button', { name: /(?:move|reorder|lift).*(?:Beat|beat)/ })).toBeNull();
   });
 
-  it('keeps focus and calls nothing on lift cancel, then focuses the matching Bin item on exact success', async () => {
+  it('keeps retry, duplicate-charge acknowledgement, download recovery, and cancellation on exact Shot panels', async () => {
+    const user = userEvent.setup();
     const actions = makeActions();
-    render(<BoardView {...boardProps(makeProjection([makeBeat('a')]), actions)} selectedBeatId='a' />);
-    const actionGroup = within(cardFor(document.body, 'a')).getByRole('group', { name: 'Actions for Beat A' });
-    const lift = within(actionGroup).getByRole('button', { name: 'Lift Beat' });
+    const beat = makeBeat('a', {
+      shots: [makeShot('retry'), makeShot('unknown'), makeShot('download')],
+    });
+    const projection = makeProjection([beat], {
+      boardPanels: [
+        makeBoardPanel('retry', {
+          activity: 'needs_attention',
+          latestJobId: 'job_retry',
+          recovery: {
+            jobId: 'job_retry',
+            canRetry: true,
+            canCancel: false,
+            canRetryDownload: false,
+            submissionUnknown: false,
+          },
+        }),
+        makeBoardPanel('unknown', {
+          activity: 'needs_attention',
+          latestJobId: 'job_unknown',
+          recovery: {
+            jobId: 'job_unknown',
+            canRetry: true,
+            canCancel: true,
+            canRetryDownload: false,
+            submissionUnknown: true,
+          },
+        }),
+        makeBoardPanel('download', {
+          assetId: 'panel_download',
+          activity: 'failed',
+          freshness: 'current',
+          latestJobId: 'job_download',
+          recovery: {
+            jobId: 'job_download',
+            canRetry: false,
+            canCancel: false,
+            canRetryDownload: true,
+            submissionUnknown: false,
+          },
+        }),
+      ],
+    });
+    const result = render(<BoardView {...boardProps(projection, actions)} />);
+    const retryPanel = result.container.querySelector<HTMLElement>('[data-board-panel-shot-id="retry"]')!;
+    const unknownPanel = result.container.querySelector<HTMLElement>('[data-board-panel-shot-id="unknown"]')!;
+    const downloadPanel = result.container.querySelector<HTMLElement>('[data-board-panel-shot-id="download"]')!;
+    expect(within(downloadPanel).getByRole('button', { name: 'Retry download · 1.3' })).toBeVisible();
+    expect(within(downloadPanel).queryByRole('button', { name: /Redraw Shot/ })).toBeNull();
 
-    act(() => lift.focus());
-    fireEvent.click(lift);
-    const firstConfirm = screen.getByRole('group', { name: 'Lift Beat A?' });
-    expect(firstConfirm).toHaveTextContent('All authored work is kept');
-    fireEvent.click(within(firstConfirm).getByRole('button', { name: 'Cancel' }));
-    expect(actions.parkBeat).not.toHaveBeenCalled();
-    expect(lift).toHaveFocus();
+    await user.click(within(retryPanel).getByRole('button', { name: 'Retry · 1.1' }));
+    expect(actions.retryJob).toHaveBeenCalledWith('job_retry', false);
+    expect(retryPanel).toHaveFocus();
 
-    fireEvent.click(lift);
-    const secondConfirm = screen.getByRole('group', { name: 'Lift Beat A?' });
-    fireEvent.click(within(secondConfirm).getByRole('button', { name: 'Lift Beat' }));
-    await waitFor(() => expect(actions.parkBeat).toHaveBeenCalledWith('a'));
-    await waitFor(() => expect(screen.getByTestId('bin-focus-target')).toHaveFocus());
-    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent('Beat moved to the Bin.');
-    const list = screen.getByRole('list', { name: 'Beat board' });
-    const bin = screen.getByTestId('board-bin');
-    expect(list.compareDocumentPosition(bin) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(within(unknownPanel).getByRole('button', { name: 'Retry · 1.2' }));
+    expect(actions.retryJob).not.toHaveBeenCalledWith('job_unknown', true);
+    const confirmation = screen.getByRole('group', { name: 'Possible duplicate charge' });
+    expect(confirmation).toHaveTextContent('provider may already have accepted');
+    await user.click(within(confirmation).getByRole('button', { name: 'Retry and accept risk' }));
+    expect(actions.retryJob).toHaveBeenCalledWith('job_unknown', true);
+
+    await user.click(within(unknownPanel).getByRole('button', { name: 'Cancel job · 1.2' }));
+    await user.click(within(downloadPanel).getByRole('button', { name: 'Retry download · 1.3' }));
+    expect(actions.cancelJob).toHaveBeenCalledWith('job_unknown');
+    expect(actions.retryDownload).toHaveBeenCalledWith('job_download');
+    expect(downloadPanel).toHaveFocus();
+
+    result.rerender(<BoardView {...boardProps(projection, actions)} gateLocked />);
+    expect(within(retryPanel).getByRole('button', { name: 'Retry · 1.1' })).toBeDisabled();
+    expect(within(unknownPanel).getByRole('button', { name: 'Cancel job · 1.2' })).toBeDisabled();
+    expect(within(downloadPanel).getByRole('button', { name: 'Retry download · 1.3' })).toBeDisabled();
+
+    const recoveredProjection = {
+      ...projection,
+      boardPanels: projection.boardPanels.map((panel) => (panel.shotId === 'retry' ? makeBoardPanel('retry') : panel)),
+    };
+    result.rerender(<BoardView {...boardProps(recoveredProjection, actions)} />);
+    await waitFor(() => expect(downloadPanel).toHaveFocus());
+  });
+
+  it('explains and disables Board-panel promotion while authorized work locks the first frame', async () => {
+    const user = userEvent.setup();
+    const actions = makeActions();
+    const lockedShot = makeShot('locked_shot', {
+      seedAuthorizationLock: {
+        compatibleAssetIds: [],
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+    });
+    const lockedDownstream = makeShot('locked_downstream', {
+      segmentHead: false,
+      videoGenerationBlocked: true,
+    });
+    const projection = makeProjection([makeBeat('locked', { shots: [lockedShot, lockedDownstream] })], {
+      boardPanels: [
+        makeBoardPanel('locked_shot', {
+          assetId: 'locked_panel',
+          producerJobId: 'panel_job',
+          latestJobId: 'panel_job',
+          freshness: 'current',
+        }),
+        makeBoardPanel('locked_downstream', {
+          assetId: 'downstream_panel',
+          producerJobId: 'downstream_panel_job',
+          latestJobId: 'downstream_panel_job',
+          freshness: 'current',
+        }),
+      ],
+    });
+    render(<BoardView {...boardProps(projection, actions)} />);
+
+    const promote = screen.getByRole('button', { name: 'Use Shot 1.1 panel as first frame' });
+    expect(promote).toBeDisabled();
+    expect(promote.closest('[data-board-panel-shot-id]')).toHaveTextContent(
+      'Authorized video work has locked this Shot’s first frame.'
+    );
+    await user.click(promote);
+    expect(actions.promotePanel).not.toHaveBeenCalled();
+  });
+
+  it('stops exact busy Board work and locks the control during another confirmation', async () => {
+    const user = userEvent.setup();
+    const actions = makeActions();
+    const projection = makeProjection([makeBeat('a')], {
+      boardPanels: [
+        makeBoardPanel('a_shot', {
+          activity: 'drawing',
+          latestJobId: 'job_drawing',
+        }),
+      ],
+    });
+    const result = render(<BoardView {...boardProps(projection, actions)} />);
+
+    const stop = screen.getByRole('button', { name: 'Stop drawing' });
+    expect(stop).toBeEnabled();
+    expect(screen.getByRole('region', { name: 'Director Board controls' })).toHaveTextContent(
+      'Completed panels and charges already incurred remain.'
+    );
+    await user.click(stop);
+    expect(actions.stop).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('region', { name: 'Director Board controls' })).toHaveFocus();
+
+    result.rerender(<BoardView {...boardProps(projection, actions)} gateLocked />);
+    expect(screen.getByRole('button', { name: 'Stop drawing' })).toBeDisabled();
+    expect(screen.getByTestId('board-bin')).toHaveAttribute('data-pending', 'true');
+
+    result.rerender(<BoardView {...boardProps(makeProjection([makeBeat('a')]), actions)} />);
+    expect(screen.getByRole('region', { name: 'Director Board controls' })).toHaveFocus();
+  });
+
+  it('fails closed when Board panel order cannot be correlated to exact film order', () => {
+    const actions = makeActions();
+    const projection = makeProjection([makeBeat('a', { shots: [makeShot('first'), makeShot('second')] })], {
+      boardPanels: [
+        makeBoardPanel('second', {
+          activity: 'needs_attention',
+          latestJobId: 'job_second',
+          recovery: {
+            jobId: 'job_second',
+            canRetry: true,
+            canCancel: true,
+            canRetryDownload: false,
+            submissionUnknown: false,
+          },
+        }),
+        makeBoardPanel('first', {
+          assetId: 'wrong_panel',
+          freshness: 'current',
+        }),
+      ],
+    });
+    const result = render(<BoardView {...boardProps(projection, actions)} />);
+
+    expect(result.container.querySelectorAll('[data-panel-activity="status_pending"]')).toHaveLength(2);
+    expect(result.container.querySelector('[data-board-recovery-job-id]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Draw next batch (0)' })).toBeDisabled();
+    expect(actions.retryJob).not.toHaveBeenCalled();
+    expect(actions.promotePanel).not.toHaveBeenCalled();
   });
 
   it('hands an external rendered-Shot request to the exact Bin focus model and does nothing without a request', async () => {
@@ -1125,31 +1262,10 @@ describe('BoardView', () => {
     expect(announcement).toHaveTextContent('Shot moved to the Bin.');
   });
 
-  it('leaves order and focus stable on reorder or lift failure and focuses a restored owner Beat after projection refresh', async () => {
+  it('focuses a restored owner Beat after the projection refreshes', async () => {
     const actions = makeActions();
-    vi.mocked(actions.reorderBeats).mockResolvedValue(false);
-    vi.mocked(actions.parkBeat).mockResolvedValue(false);
-    const initial = makeProjection([makeBeat('a'), makeBeat('b')]);
+    const initial = makeProjection([makeBeat('a')]);
     const result = render(<BoardView {...boardProps(initial, actions)} selectedBeatId='a' />);
-
-    fireEvent.click(screen.getByRole('button', { name: 'Move Beat A later' }));
-    await waitFor(() => expect(actions.reorderBeats).toHaveBeenCalledWith(['b', 'a']));
-    expect(screen.getByRole('button', { name: 'Open Beat A' })).toHaveFocus();
-    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent('Beat order was not changed.');
-    expect(
-      Array.from(screen.getByRole('list', { name: 'Beat board' }).children).map(
-        (item) => (item as HTMLElement).dataset.beatId
-      )
-    ).toEqual(['a', 'b']);
-
-    const lift = within(cardFor(result.container, 'a')).getByRole('button', { name: 'Lift Beat' });
-    fireEvent.click(lift);
-    fireEvent.click(
-      within(screen.getByRole('group', { name: 'Lift Beat A?' })).getByRole('button', { name: 'Lift Beat' })
-    );
-    await waitFor(() => expect(actions.parkBeat).toHaveBeenCalledWith('a'));
-    await waitFor(() => expect(lift).toHaveFocus());
-    expect(document.querySelector('[aria-live="polite"]')).toHaveTextContent('Beat was not moved to the Bin.');
 
     fireEvent.click(screen.getByRole('button', { name: 'Report restored Beat' }));
     result.rerender(

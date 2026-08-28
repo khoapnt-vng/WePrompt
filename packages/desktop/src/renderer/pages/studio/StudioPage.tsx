@@ -71,7 +71,6 @@ import {
   type SpendGateDraft,
   type SpendGateBoardPromotion,
   type SpendGateRouteIssue,
-  type TableBoardActions,
   type TableReferenceBindingActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
@@ -2151,19 +2150,8 @@ const StudioProjectPage: React.FC<{
     });
   }, [projection, refetchProjectWorkspace, runWorkspaceExclusive, setActionErrorMessageKey, spendGateLocked]);
 
-  const tableBoardActions = useMemo<TableBoardActions>(
+  const boardProductionActions = useMemo<Omit<BoardActions, 'restoreBeat' | 'restoreShot' | 'reorderBin'>>(
     () => ({
-      setStyle: (style) => {
-        const current = projectRef.current;
-        if (current === null || current.boardStyle === style || workspacePendingRef.current || spendGateLocked) {
-          return;
-        }
-        if (generationDraftsBlockReview) {
-          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
-          return;
-        }
-        void mutations.editProject({ boardStyle: style });
-      },
       drawNext: () =>
         openBoardSpendGate((current, exactProjection) =>
           boardGateDraft({
@@ -2315,7 +2303,6 @@ const StudioProjectPage: React.FC<{
     [
       generationDraftsBlockReview,
       currentGenerationCapability,
-      mutations,
       openBoardSpendGate,
       projection,
       routeCatalog,
@@ -2329,15 +2316,7 @@ const StudioProjectPage: React.FC<{
 
   const boardActions = useMemo<BoardActions>(
     () => ({
-      reorderBeats: async (beatOrder) =>
-        runWorkspaceCommit((current) =>
-          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
-            projectId: current.id,
-            expectedRevision: current.revision,
-            operations: [{ kind: 'reorder_beats', beatOrder: [...beatOrder] }],
-          })
-        ),
-      parkBeat: beatPanelActions.parkBeat,
+      ...boardProductionActions,
       restoreBeat: async (beatId, beforeBeatId) =>
         runWorkspaceCommit((current) =>
           ipcBridge.creativeStudio.restoreBeat.invoke({
@@ -2365,12 +2344,19 @@ const StudioProjectPage: React.FC<{
           })
         ),
     }),
-    [beatPanelActions, runWorkspaceCommit]
+    [boardProductionActions, runWorkspaceCommit]
   );
 
   const cutActions = useMemo<CutActions>(
     () => ({
-      reorderBeats: boardActions.reorderBeats,
+      reorderBeats: async (beatOrder) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'reorder_beats', beatOrder: [...beatOrder] }],
+          })
+        ),
       importBedAudio: async (): Promise<CutImportResult> =>
         (await runWorkspaceExclusive(async () => {
           const current = projectRef.current;
@@ -2422,13 +2408,7 @@ const StudioProjectPage: React.FC<{
           return true;
         })) ?? false,
     }),
-    [
-      boardActions.reorderBeats,
-      refetchProjectWorkspace,
-      runWorkspaceCommit,
-      runWorkspaceExclusive,
-      setActionErrorMessageKey,
-    ]
+    [refetchProjectWorkspace, runWorkspaceCommit, runWorkspaceExclusive, setActionErrorMessageKey]
   );
 
   const createEditorFolder = useCallback(async (): Promise<
@@ -4270,7 +4250,6 @@ const StudioProjectPage: React.FC<{
           <WorkspaceControls
             activeView={activeView}
             boardActions={boardActions}
-            tableBoardActions={tableBoardActions}
             cutActions={cutActions}
             project={project}
             projectStatus={projectStatus}

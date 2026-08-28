@@ -1019,6 +1019,14 @@
         "dismissed": "未花费并已关闭"
       },
       "table": {
+        "reorder": {
+          "label": "重新排序 {{title}} 的操作",
+          "dragHandle": "重新排序位于第 {{position}} 位的 {{title}}",
+          "moveEarlier": "将 {{title}} 前移",
+          "moveLater": "将 {{title}} 后移",
+          "announcement": "已将 {{title}} 从第 {{from}} 位移至第 {{to}} 位（共 {{total}} 位）。",
+          "failed": "Beat 顺序未更改。"
+        },
         "authoring": {
           "label": "故事编写与恢复",
           "coverageGap": "{{total}} 个 Beat 中有 {{count}} 个没有 Shot",
@@ -1039,34 +1047,12 @@
           "story": "故事"
         },
         "plannedPending": "暂无计划总时长",
-        "board": {
-          "label": "导演分镜控制",
-          "progress": "已绘制 {{drawn}} / {{total}} 个分镜",
-          "progressLabel": "分镜板完成度",
-          "staleCount": "{{count}} 个已过期",
-          "busyCount": "{{count}} 个进行中",
-          "style": {
-            "label": "分镜板风格",
-            "greyTone": "灰度",
-            "lineArt": "线稿",
-            "colourKey": "色彩稿"
-          },
-          "stop": "停止绘制",
-          "stopNote": "停止操作会在可能的情况下请求取消。已完成的分镜和已经产生的费用会保留。",
-          "drawNext": "绘制下一批（{{count}}）",
-          "styleRequired": "请先选择分镜板风格再绘制。"
-        },
         "panel": {
           "openDetails": "打开 {{title}} 的分镜",
           "closeDetails": "关闭 {{title}} 的分镜",
-          "detailLabel": "{{title}} 的分镜",
-          "drawMissing": "绘制缺失项（{{count}}）",
-          "redrawBeat": "重新绘制 Beat · 付费",
           "cardLabel": "Shot {{position}}：{{status}}",
           "shotDetails": "镜头 {{position}} 详情",
           "head": "链首",
-          "redrawShot": "重新绘制 Shot {{position}} · 付费",
-          "useAsFirstFrame": "将 Shot {{position}} 分镜用作首帧",
           "status": {
             "missing": "未绘制",
             "current": "当前",
@@ -1091,6 +1077,35 @@
         }
       },
       "board": {
+        "controls": {
+          "label": "导演分镜控制",
+          "progress": "已绘制 {{drawn}} / {{total}} 个分镜",
+          "progressLabel": "分镜板完成度",
+          "staleCount": "{{count}} 个已过期",
+          "busyCount": "{{count}} 个进行中",
+          "stop": "停止绘制",
+          "stopNote": "停止操作会在可能的情况下请求取消。已完成的分镜和已经产生的费用会保留。",
+          "drawNext": "绘制下一批（{{count}}）"
+        },
+        "panel": {
+          "beatActions": "导演分镜控制 · {{title}}",
+          "drawMissing": "绘制缺失项（{{count}}）",
+          "redrawBeat": "重新绘制 Beat · 付费",
+          "cardLabel": "Shot {{position}}：{{status}}",
+          "redrawShot": "重新绘制 Shot {{position}} · 付费",
+          "useAsFirstFrame": "将 Shot {{position}} 分镜用作首帧",
+          "status": {
+            "missing": "未绘制",
+            "current": "当前",
+            "stale": "已过期",
+            "statusPending": "状态待定",
+            "queued": "已排队",
+            "drawing": "绘制中",
+            "needsAttention": "需要处理",
+            "failed": "失败",
+            "cancelled": "已取消"
+          }
+        },
         "statusUnavailable": "当前 Board 顺序不完整或不明确。请刷新项目后再检查 Shot 卡片。",
         "renderedCount": "{{total}} 个中已渲染 {{count}} 个",
         "staleCount": "{{count}} 个已过时的 Shot",
@@ -1156,10 +1171,7 @@
               "cutBedTooShort": "音频底轨比 Cut 短。"
             }
           }
-        },
-        "liftBeat": "移到废纸篓",
-        "liftConfirmTitle": "将“{{title}}”移到废纸篓？",
-        "liftConfirmContent": "此节拍将从影片中移除。所有已创作内容和付费生成的素材都会保留在废纸篓中。"
+        }
       },
       "cut": {
         "preview": {

@@ -4,16 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Popconfirm, Select } from '@arco-design/web-react';
+import { ArrowDown, ArrowUp, Drag } from '@icon-park/react';
+import { Alert, Button, Select } from '@arco-design/web-react';
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import {
-  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
-  STUDIO_MAX_SHOT_SECONDS,
-  STUDIO_MIN_SHOT_SECONDS,
-  type StudioBoardStyleV2,
-} from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MAX_SHOT_SECONDS, STUDIO_MIN_SHOT_SECONDS } from '@/common/types/project/creativeStudioTypes';
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
@@ -63,21 +59,6 @@ const PANEL_STATUS_KEYS = {
   failed: 'conversation.creativeStudio.workspace.table.panel.status.failed',
   cancelled: 'conversation.creativeStudio.workspace.table.panel.status.cancelled',
 } as const;
-
-const DRAWABLE_BOARD_ACTIVITIES = new Set<WorkspaceBoardPanelProjection['activity']>(['idle', 'failed', 'cancelled']);
-const BUSY_BOARD_ACTIVITIES = new Set<WorkspaceBoardPanelProjection['activity']>(['queued', 'drawing']);
-
-const isDrawableBoardPanel = (panel: WorkspaceBoardPanelProjection): boolean =>
-  DRAWABLE_BOARD_ACTIVITIES.has(panel.activity) &&
-  panel.freshness !== 'status_pending' &&
-  panel.activity !== 'status_pending' &&
-  panel.recovery?.canRetryDownload !== true;
-
-const isPromotableBoardPanel = (
-  panel: WorkspaceBoardPanelProjection
-): panel is WorkspaceBoardPanelProjection & {
-  assetId: string;
-} => panel.assetId !== null && panel.freshness === 'current' && isDrawableBoardPanel(panel);
 
 const panelStatusKey = (panel: WorkspaceBoardPanelProjection): string =>
   panel.activity === 'idle' ? PANEL_STATUS_KEYS[panel.freshness] : PANEL_STATUS_KEYS[panel.activity];
@@ -133,6 +114,15 @@ const plannedSecondsForBeat = (beat: WorkspaceBeatProjection): number | null => 
   return cursor;
 };
 
+const moveOrder = (order: readonly string[], from: number, to: number): string[] | null => {
+  if (from < 0 || from >= order.length || to < 0 || to >= order.length || from === to) return null;
+  const next = [...order];
+  const [moved] = next.splice(from, 1);
+  if (moved === undefined) return null;
+  next.splice(to, 0, moved);
+  return next;
+};
+
 type BoardPanelArtworkProps = {
   panel: WorkspaceBoardPanelProjection;
   projectId: string;
@@ -159,93 +149,6 @@ const BoardPanelArtwork: React.FC<BoardPanelArtworkProps> = ({ panel, projectId 
   );
 };
 
-type BoardPanelRecoveryControlsProps = {
-  actions: TableBoardActions;
-  describedBy: string;
-  disabled: boolean;
-  panel: WorkspaceBoardPanelProjection;
-};
-
-const BoardPanelRecoveryControls: React.FC<BoardPanelRecoveryControlsProps> = ({
-  actions,
-  describedBy,
-  disabled,
-  panel,
-}) => {
-  const { t } = useTranslation();
-  const recovery = panel.recovery;
-  if (recovery === null) return null;
-  return (
-    <div className={styles.panelRecovery} data-board-recovery-job-id={recovery.jobId}>
-      {recovery.canRetryDownload ? (
-        <Button
-          aria-describedby={describedBy}
-          disabled={disabled}
-          onClick={() => {
-            if (!disabled) actions.retryDownload(recovery.jobId);
-          }}
-          size='mini'
-        >
-          {t('conversation.creativeStudio.jobs.retryDownload')}
-        </Button>
-      ) : null}
-      {recovery.canRetry && recovery.submissionUnknown ? (
-        <Popconfirm
-          cancelText={t('conversation.creativeStudio.workspace.beatPanel.common.cancel')}
-          content={t('conversation.creativeStudio.jobs.retryChargeBody')}
-          disabled={disabled}
-          okText={t('conversation.creativeStudio.jobs.retryChargeConfirm')}
-          onOk={() => {
-            if (!disabled) actions.retryJob(recovery.jobId, true);
-          }}
-          title={t('conversation.creativeStudio.jobs.retryChargeTitle')}
-        >
-          <Button aria-describedby={describedBy} disabled={disabled} size='mini'>
-            {t('conversation.creativeStudio.jobs.retry')}
-          </Button>
-        </Popconfirm>
-      ) : recovery.canRetry ? (
-        <Button
-          aria-describedby={describedBy}
-          disabled={disabled}
-          onClick={() => {
-            if (!disabled) actions.retryJob(recovery.jobId, false);
-          }}
-          size='mini'
-        >
-          {t('conversation.creativeStudio.jobs.retry')}
-        </Button>
-      ) : null}
-      {recovery.canCancel ? (
-        <Button
-          aria-describedby={describedBy}
-          disabled={disabled}
-          onClick={() => {
-            if (!disabled) actions.cancelJob(recovery.jobId);
-          }}
-          size='mini'
-        >
-          {t('conversation.creativeStudio.jobs.cancel')}
-        </Button>
-      ) : null}
-    </div>
-  );
-};
-
-/** Action-owner contract for Table controls; spend and persistence policy remain upstream. */
-export type TableBoardActions = {
-  setStyle: (style: StudioBoardStyleV2) => void;
-  drawNext: () => void;
-  drawBeat: (beatId: string) => void;
-  redrawShot: (shotId: string) => void;
-  redrawBeat: (beatId: string) => void;
-  promotePanel: (shotId: string, boardAssetId: string) => void;
-  stop: () => void;
-  retryJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => void;
-  retryDownload: (jobId: string) => void;
-  cancelJob: (jobId: string) => void;
-};
-
 export type ReferenceBindingWorkspaceItem = {
   shotId: string;
   status: 'unassigned' | 'ready' | 'invalid';
@@ -266,6 +169,7 @@ export type TableAuthoringActions = {
   addBeat: () => Promise<boolean>;
   addShot: (beatId: string) => Promise<boolean>;
   askDirector: (beatId: string) => void;
+  reorderBeats: (beatOrder: readonly string[]) => Promise<boolean>;
 };
 
 type ShotReferenceBindingEditorProps = {
@@ -376,13 +280,11 @@ const ShotReferenceBindingEditor: React.FC<ShotReferenceBindingEditorProps> = ({
 };
 
 export type TableViewProps = {
-  actions: TableBoardActions;
   authoringActions: TableAuthoringActions;
   projectId: string;
   beats: readonly WorkspaceBeatProjection[];
   coverageGapBeatIds: readonly string[];
   unscriptedShotIds: readonly string[];
-  boardStyle: StudioBoardStyleV2 | null;
   boardPanels: readonly WorkspaceBoardPanelProjection[];
   references: readonly ReferenceWorkspaceItem[];
   referenceBindings: readonly ReferenceBindingWorkspaceItem[];
@@ -391,7 +293,6 @@ export type TableViewProps = {
   bindingActions: TableReferenceBindingActions;
   referenceFocusIntent?: StudioReferenceFocusIntent | null;
   onReferenceFocusIntentConsumed?: (intentId: string) => void;
-  imageRouteReady: boolean;
   pending: boolean;
   gateLocked: boolean;
   selectedBeatId: string | null;
@@ -401,13 +302,11 @@ export type TableViewProps = {
 
 /** Beat-level workspace presentation. Selection is supplied by the shared draft owner. */
 export const TableView: React.FC<TableViewProps> = ({
-  actions,
   authoringActions,
   projectId,
   beats,
   coverageGapBeatIds,
   unscriptedShotIds,
-  boardStyle,
   boardPanels,
   references,
   referenceBindings,
@@ -416,7 +315,6 @@ export const TableView: React.FC<TableViewProps> = ({
   bindingActions,
   referenceFocusIntent = null,
   onReferenceFocusIntentConsumed,
-  imageRouteReady,
   pending,
   gateLocked,
   selectedBeatId,
@@ -431,6 +329,9 @@ export const TableView: React.FC<TableViewProps> = ({
   });
   const cellRefs = useRef<Array<Partial<Record<TableColumnId, HTMLTableCellElement | null>>>>([]);
   const panelButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const reorderButtonRefs = useRef(new Map<string, HTMLButtonElement>());
+  const reorderPendingRef = useRef(false);
+  const draggedBeatIdRef = useRef<string | null>(null);
   const bindingCardRefs = useRef(new Map<string, HTMLElement>());
   const bindingHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consumedReferenceFocusIntentRef = useRef<{ projectId: string; intentId: string } | null>(null);
@@ -439,6 +340,8 @@ export const TableView: React.FC<TableViewProps> = ({
   const [openBoardBeatId, setOpenBoardBeatId] = useState<string | null>(null);
   const [openShotDetailId, setOpenShotDetailId] = useState<string | null>(null);
   const [highlightedBindingShotId, setHighlightedBindingShotId] = useState<string | null>(null);
+  const [reorderingBeatId, setReorderingBeatId] = useState<string | null>(null);
+  const [reorderAnnouncement, setReorderAnnouncement] = useState({ message: '', sequence: 0 });
   const detailIdBase = useId();
   const safeDetailIdBase = `studio-table-${detailIdBase.replace(/[^A-Za-z0-9_-]/g, '') || 'details'}`;
   const exactBoardPanels = useMemo(() => exactFilmOrderBoardPanels(beats, boardPanels), [beats, boardPanels]);
@@ -450,8 +353,6 @@ export const TableView: React.FC<TableViewProps> = ({
     () => new Map(referenceBindings.map((binding) => [binding.shotId, binding] as const)),
     [referenceBindings]
   );
-  const characters = useMemo(() => references.filter((item) => item.kind === 'character'), [references]);
-  const backgrounds = useMemo(() => references.filter((item) => item.kind === 'background'), [references]);
   const bindingSummary = useMemo(
     () => ({
       ready: referenceBindings.filter((binding) => binding.status === 'ready').length,
@@ -459,32 +360,11 @@ export const TableView: React.FC<TableViewProps> = ({
     }),
     [beats, referenceBindings]
   );
-  const boardSummary = useMemo(() => {
-    const drawn = exactBoardPanels.filter((panel) => panel.assetId !== null).length;
-    const stale = exactBoardPanels.filter((panel) => panel.freshness === 'stale').length;
-    const busy = exactBoardPanels.filter((panel) => BUSY_BOARD_ACTIVITIES.has(panel.activity)).length;
-    const needsAttention = exactBoardPanels.some((panel) => panel.activity === 'needs_attention');
-    const statusPending = exactBoardPanels.some(
-      (panel) => panel.freshness === 'status_pending' || panel.activity === 'status_pending'
-    );
-    const drawableMissing = exactBoardPanels.filter(
-      (panel) => panel.freshness === 'missing' && isDrawableBoardPanel(panel)
-    ).length;
-    return {
-      drawn,
-      stale,
-      busy,
-      needsAttention,
-      statusPending,
-      drawableMissing,
-      nextBatch: Math.min(STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST, drawableMissing),
-      total: exactBoardPanels.length,
-    };
-  }, [exactBoardPanels]);
+  const characters = useMemo(() => references.filter((item) => item.kind === 'character'), [references]);
+  const backgrounds = useMemo(() => references.filter((item) => item.kind === 'background'), [references]);
   const interactionLocked = pending || gateLocked;
-  const generationLocked = interactionLocked || boardStyle === null || boardSummary.statusPending || !imageRouteReady;
-  const canDrawNext = !generationLocked && boardSummary.nextBatch > 0;
-  const canStop = !interactionLocked && boardSummary.busy > 0;
+  const beatOrder = beats.map((beat) => beat.id);
+  const canonicalOrderReady = new Set(beatOrder).size === beatOrder.length;
   const askDirectorBeatId =
     coverageGapBeatIds.find((beatId) => beats.some((beat) => beat.id === beatId && beat.shots.length === 0)) ??
     beats.find((beat) => beat.shots.some((shot) => shot.id === unscriptedShotIds[0]))?.id ??
@@ -617,6 +497,23 @@ export const TableView: React.FC<TableViewProps> = ({
     column: number,
     beat: WorkspaceBeatProjection
   ): void => {
+    if (
+      columns[column]?.id === 'position' &&
+      (event.key === 'F2' ||
+        event.key === 'Enter' ||
+        event.key === ' ' ||
+        event.key === 'Space' ||
+        event.key === 'Spacebar')
+    ) {
+      event.preventDefault();
+      reorderButtonRefs.current.get(beat.id)?.focus({ preventScroll: true });
+      return;
+    }
+    if (columns[column]?.id === 'position' && event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+      event.preventDefault();
+      void reorderBeat(beat.id, row + (event.key === 'ArrowUp' ? -1 : 1));
+      return;
+    }
     if (event.key === 'Escape' && columns[column]?.id === 'panel') {
       event.preventDefault();
       closeBoardDetails(beat.id);
@@ -647,6 +544,46 @@ export const TableView: React.FC<TableViewProps> = ({
     focusCell(nextRow, nextColumn);
   };
 
+  const reorderBeat = async (beatId: string, destination: number): Promise<void> => {
+    if (interactionLocked || reorderPendingRef.current || !canonicalOrderReady) return;
+    const source = beatOrder.indexOf(beatId);
+    const nextOrder = moveOrder(beatOrder, source, destination);
+    if (nextOrder === null) return;
+    reorderPendingRef.current = true;
+    setReorderingBeatId(beatId);
+    let reordered = false;
+    try {
+      reordered = await authoringActions.reorderBeats(nextOrder);
+      const sourceBeat = beats[source];
+      const sourceTitle =
+        sourceBeat === undefined
+          ? beatId
+          : sourceBeat.title.trim() === ''
+            ? t('conversation.creativeStudio.workspace.beatPanel.untitledBeat', {
+                index: source + 1,
+              })
+            : sourceBeat.title;
+      const message = reordered
+        ? t('conversation.creativeStudio.workspace.table.reorder.announcement', {
+            title: sourceTitle,
+            from: source + 1,
+            to: destination + 1,
+            total: beatOrder.length,
+          })
+        : t('conversation.creativeStudio.workspace.table.reorder.failed');
+      setReorderAnnouncement((current) => ({ message, sequence: current.sequence + 1 }));
+    } catch {
+      setReorderAnnouncement((current) => ({
+        message: t('conversation.creativeStudio.workspace.table.reorder.failed'),
+        sequence: current.sequence + 1,
+      }));
+    } finally {
+      reorderPendingRef.current = false;
+      setReorderingBeatId(null);
+      reorderButtonRefs.current.get(beatId)?.focus({ preventScroll: true });
+    }
+  };
+
   return (
     <section className={styles.root}>
       <section
@@ -672,6 +609,12 @@ export const TableView: React.FC<TableViewProps> = ({
               })}
             </span>
           ) : null}
+          <span data-reference-binding-progress>
+            {t(`${REFERENCE_ROOT}.bindings.progress`, {
+              ready: bindingSummary.ready,
+              total: bindingSummary.total,
+            })}
+          </span>
           <span className={styles.authoringNote}>
             {t('conversation.creativeStudio.workspace.table.authoring.unassignedReferenceNote')}
           </span>
@@ -694,68 +637,6 @@ export const TableView: React.FC<TableViewProps> = ({
           >
             {t('conversation.creativeStudio.workspace.table.authoring.addBeat')}
           </Button>
-        </div>
-      </section>
-      <section
-        aria-label={t('conversation.creativeStudio.workspace.table.board.label')}
-        className={styles.boardStrip}
-        role='region'
-      >
-        <div className={styles.boardProgressBlock}>
-          <strong className={styles.boardProgressText}>
-            {t('conversation.creativeStudio.workspace.table.board.progress', {
-              drawn: boardSummary.drawn,
-              total: boardSummary.total,
-            })}
-          </strong>
-          <progress
-            aria-label={t('conversation.creativeStudio.workspace.table.board.progressLabel')}
-            className={styles.boardProgress}
-            max={Math.max(1, boardSummary.total)}
-            value={boardSummary.drawn}
-          />
-          <span className={styles.boardProgressFacts}>
-            <span>
-              {t(`${REFERENCE_ROOT}.bindings.progress`, {
-                ready: bindingSummary.ready,
-                total: bindingSummary.total,
-              })}
-            </span>
-            <span>
-              {t('conversation.creativeStudio.workspace.table.board.staleCount', { count: boardSummary.stale })}
-            </span>
-            <span>
-              {t('conversation.creativeStudio.workspace.table.board.busyCount', { count: boardSummary.busy })}
-            </span>
-          </span>
-        </div>
-        <div className={styles.boardPrimaryAction}>
-          {boardSummary.busy > 0 ? (
-            <>
-              <Button
-                disabled={!canStop}
-                onClick={() => {
-                  if (canStop) actions.stop();
-                }}
-                status='danger'
-              >
-                {t('conversation.creativeStudio.workspace.table.board.stop')}
-              </Button>
-              <p>{t('conversation.creativeStudio.workspace.table.board.stopNote')}</p>
-            </>
-          ) : (
-            <Button
-              disabled={!canDrawNext}
-              onClick={() => {
-                if (canDrawNext) actions.drawNext();
-              }}
-              type='primary'
-            >
-              {t('conversation.creativeStudio.workspace.table.board.drawNext', {
-                count: boardSummary.nextBatch,
-              })}
-            </Button>
-          )}
         </div>
       </section>
       <div ref={scrollRef} className={styles.scroll} data-studio-table-scroll>
@@ -802,24 +683,15 @@ export const TableView: React.FC<TableViewProps> = ({
                 beat.title.trim() === ''
                   ? t('conversation.creativeStudio.workspace.beatPanel.untitledBeat', { index: row + 1 })
                   : beat.title;
+              const reorderAccessibleTitle = `${row + 1}. ${beatDisplayTitle}`;
               const selected = beat.id === selectedBeatId;
               const hasCoverage = beat.shots.length > 0;
               const boardDetailsOpen = openBoardBeatIndex === row && hasCoverage;
               const boardPanelsForBeat = beat.shots.map(
                 (shot) => panelByShotId.get(shot.id) ?? statusPendingPanel(shot.id)
               );
-              const drawableMissingCount = boardPanelsForBeat.filter(
-                (panel) => panel.freshness === 'missing' && isDrawableBoardPanel(panel)
-              ).length;
-              const canDrawMissing =
-                !generationLocked &&
-                drawableMissingCount > 0 &&
-                drawableMissingCount <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST;
-              const canOfferRedrawBeat =
-                boardPanelsForBeat.length > 0 &&
-                boardPanelsForBeat.length <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST &&
-                boardPanelsForBeat.every((panel) => panel.assetId !== null && isDrawableBoardPanel(panel));
               const leadPanel = boardPanelsForBeat[0] ?? null;
+              const reorderLocked = interactionLocked || reorderingBeatId !== null || !canonicalOrderReady;
               const beatAriaRowIndex =
                 row + 2 + (openBoardBeatIndex >= 0 && row > openBoardBeatIndex ? openShotCount : 0);
               const durationKind = hasCoverage ? 'planned' : 'target';
@@ -841,9 +713,79 @@ export const TableView: React.FC<TableViewProps> = ({
                 {
                   column: 'position',
                   content: (
-                    <span className={styles.position}>
-                      <bdi>{String(row + 1).padStart(2, '0')}</bdi>
-                    </span>
+                    <div className={styles.positionActions}>
+                      <span className={styles.position}>
+                        <bdi>{String(row + 1).padStart(2, '0')}</bdi>
+                      </span>
+                      <div
+                        aria-label={t('conversation.creativeStudio.workspace.table.reorder.label', {
+                          title: reorderAccessibleTitle,
+                        })}
+                        className={styles.reorderActions}
+                        onClick={(event) => event.stopPropagation()}
+                        onKeyDown={(event) => event.stopPropagation()}
+                        role='group'
+                      >
+                        <Button
+                          ref={(node) => {
+                            if (node === null) reorderButtonRefs.current.delete(beat.id);
+                            else if (node instanceof HTMLButtonElement) reorderButtonRefs.current.set(beat.id, node);
+                          }}
+                          aria-label={t('conversation.creativeStudio.workspace.table.reorder.dragHandle', {
+                            title: beatDisplayTitle,
+                            position: row + 1,
+                          })}
+                          disabled={reorderLocked}
+                          draggable={!reorderLocked}
+                          icon={<Drag />}
+                          onDragEnd={() => {
+                            draggedBeatIdRef.current = null;
+                          }}
+                          onDragStart={(event) => {
+                            draggedBeatIdRef.current = beat.id;
+                            event.dataTransfer.effectAllowed = 'move';
+                            event.dataTransfer.setData('text/plain', beat.id);
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Escape') {
+                              event.preventDefault();
+                              cellRefs.current[row]?.position?.focus({ preventScroll: true });
+                              return;
+                            }
+                            let destination: number | null = null;
+                            if (event.key === 'ArrowUp') destination = row - 1;
+                            else if (event.key === 'ArrowDown') destination = row + 1;
+                            else if (event.key === 'Home') destination = 0;
+                            else if (event.key === 'End') destination = beatOrder.length - 1;
+                            if (destination === null) return;
+                            event.preventDefault();
+                            void reorderBeat(beat.id, destination);
+                          }}
+                          size='mini'
+                          tabIndex={-1}
+                        />
+                        <Button
+                          aria-label={t('conversation.creativeStudio.workspace.table.reorder.moveEarlier', {
+                            title: reorderAccessibleTitle,
+                          })}
+                          disabled={reorderLocked || row === 0}
+                          icon={<ArrowUp />}
+                          onClick={() => void reorderBeat(beat.id, row - 1)}
+                          size='mini'
+                          tabIndex={-1}
+                        />
+                        <Button
+                          aria-label={t('conversation.creativeStudio.workspace.table.reorder.moveLater', {
+                            title: reorderAccessibleTitle,
+                          })}
+                          disabled={reorderLocked || row === beatOrder.length - 1}
+                          icon={<ArrowDown />}
+                          onClick={() => void reorderBeat(beat.id, row + 1)}
+                          size='mini'
+                          tabIndex={-1}
+                        />
+                      </div>
+                    </div>
                   ),
                 },
                 {
@@ -976,6 +918,17 @@ export const TableView: React.FC<TableViewProps> = ({
                     data-beat-id={beat.id}
                     data-board-details-open={boardDetailsOpen}
                     onClick={() => onOpenBeat(beat.id)}
+                    onDragOver={(event) => {
+                      if (draggedBeatIdRef.current !== null && draggedBeatIdRef.current !== beat.id) {
+                        event.preventDefault();
+                      }
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const draggedBeatId = draggedBeatIdRef.current;
+                      draggedBeatIdRef.current = null;
+                      if (draggedBeatId !== null) void reorderBeat(draggedBeatId, row);
+                    }}
                     role='row'
                   >
                     {cells.map(({ column: columnId, content }, column) => (
@@ -1070,48 +1023,6 @@ export const TableView: React.FC<TableViewProps> = ({
                                 <span className={styles.shotScript} dir='auto'>
                                   {shot.shootingScript}
                                 </span>
-                                {shotIndex === 0 && (drawableMissingCount > 0 || canOfferRedrawBeat) ? (
-                                  <div
-                                    aria-label={t('conversation.creativeStudio.workspace.table.panel.detailLabel', {
-                                      title: beatDisplayTitle,
-                                    })}
-                                    className={styles.beatBoardActions}
-                                    onClick={(event) => event.stopPropagation()}
-                                    onKeyDown={(event) => {
-                                      event.stopPropagation();
-                                      if (event.key !== 'Escape') return;
-                                      event.preventDefault();
-                                      closeBoardDetails(beat.id);
-                                    }}
-                                    role='toolbar'
-                                  >
-                                    {drawableMissingCount > 0 ? (
-                                      <Button
-                                        disabled={!canDrawMissing}
-                                        onClick={() => {
-                                          if (canDrawMissing) actions.drawBeat(beat.id);
-                                        }}
-                                        size='small'
-                                        type='primary'
-                                      >
-                                        {t('conversation.creativeStudio.workspace.table.panel.drawMissing', {
-                                          count: drawableMissingCount,
-                                        })}
-                                      </Button>
-                                    ) : null}
-                                    {canOfferRedrawBeat ? (
-                                      <Button
-                                        disabled={generationLocked}
-                                        onClick={() => {
-                                          if (!generationLocked) actions.redrawBeat(beat.id);
-                                        }}
-                                        size='small'
-                                      >
-                                        {t('conversation.creativeStudio.workspace.table.panel.redrawBeat')}
-                                      </Button>
-                                    ) : null}
-                                  </div>
-                                ) : null}
                                 {detailsOpen ? (
                                   <section
                                     ref={(node) => {
@@ -1133,47 +1044,6 @@ export const TableView: React.FC<TableViewProps> = ({
                                       pending={referencePendingId === shot.id}
                                       save={bindingActions.saveBinding}
                                     />
-                                    <BoardPanelRecoveryControls
-                                      actions={actions}
-                                      describedBy={panelStatusId}
-                                      disabled={interactionLocked}
-                                      panel={panel}
-                                    />
-                                    <div className={styles.panelActions}>
-                                      {shot.segmentHead &&
-                                      shot.explicitSeedAssetId !== panel.assetId &&
-                                      isPromotableBoardPanel(panel) ? (
-                                        <Button
-                                          aria-describedby={panelStatusId}
-                                          className={styles.panelPromote}
-                                          disabled={interactionLocked}
-                                          onClick={() => {
-                                            if (!interactionLocked) actions.promotePanel(shot.id, panel.assetId);
-                                          }}
-                                          size='mini'
-                                        >
-                                          {t('conversation.creativeStudio.workspace.table.panel.useAsFirstFrame', {
-                                            position: shotIndex + 1,
-                                          })}
-                                        </Button>
-                                      ) : null}
-                                      {panel.assetId !== null && panel.recovery?.canRetryDownload !== true ? (
-                                        <Button
-                                          className={styles.panelRedraw}
-                                          disabled={generationLocked || !isDrawableBoardPanel(panel)}
-                                          onClick={() => {
-                                            if (!generationLocked && isDrawableBoardPanel(panel)) {
-                                              actions.redrawShot(shot.id);
-                                            }
-                                          }}
-                                          size='mini'
-                                        >
-                                          {t('conversation.creativeStudio.workspace.table.panel.redrawShot', {
-                                            position: shotIndex + 1,
-                                          })}
-                                        </Button>
-                                      ) : null}
-                                    </div>
                                   </section>
                                 ) : null}
                               </>
@@ -1274,6 +1144,9 @@ export const TableView: React.FC<TableViewProps> = ({
           {t('conversation.creativeStudio.workspace.table.empty')}
         </p>
       ) : null}
+      <span aria-live='polite' className={styles.srOnly}>
+        <span key={reorderAnnouncement.sequence}>{reorderAnnouncement.message}</span>
+      </span>
     </section>
   );
 };

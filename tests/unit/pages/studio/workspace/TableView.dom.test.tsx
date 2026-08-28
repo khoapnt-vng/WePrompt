@@ -38,6 +38,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.columns.shots': 'Shots',
         'conversation.creativeStudio.workspace.table.columns.length': 'Sum',
         'conversation.creativeStudio.workspace.table.columns.state': 'State',
+        'conversation.creativeStudio.workspace.table.reorder.failed': 'Beat order was not changed.',
         'conversation.creativeStudio.workspace.table.targetPending': 'No target',
         'conversation.creativeStudio.workspace.table.plannedPending': 'No planned sum',
         'conversation.creativeStudio.workspace.table.empty': 'No beats yet',
@@ -53,7 +54,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.state.draft': 'Draft',
         'conversation.creativeStudio.workspace.table.panel.openDetails': `Open Board panels for ${String(values?.title)}`,
         'conversation.creativeStudio.workspace.table.panel.closeDetails': `Close Board panels for ${String(values?.title)}`,
-        'conversation.creativeStudio.workspace.table.panel.detailLabel': `Board panels for ${String(values?.title)}`,
         'conversation.creativeStudio.workspace.table.panel.shotDetails': `Shot ${String(values?.position)} details`,
         'conversation.creativeStudio.workspace.table.panel.head': 'Chain head',
         'conversation.creativeStudio.workspace.table.panel.status.missing': 'Not drawn',
@@ -65,17 +65,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.panel.status.needsAttention': 'Needs attention',
         'conversation.creativeStudio.workspace.table.panel.status.failed': 'Failed',
         'conversation.creativeStudio.workspace.table.panel.status.cancelled': 'Cancelled',
-        'conversation.creativeStudio.workspace.table.board.label': 'Director Board controls',
-        'conversation.creativeStudio.workspace.table.board.progressLabel': 'Board completeness',
-        'conversation.creativeStudio.workspace.table.board.style.label': 'Board style',
-        'conversation.creativeStudio.workspace.table.board.style.greyTone': 'Grey tone',
-        'conversation.creativeStudio.workspace.table.board.style.lineArt': 'Line art',
-        'conversation.creativeStudio.workspace.table.board.style.colourKey': 'Colour key',
-        'conversation.creativeStudio.workspace.table.board.drawNext': `Draw next batch (${String(values?.count)})`,
-        'conversation.creativeStudio.workspace.table.board.stop': 'Stop drawing',
-        'conversation.creativeStudio.workspace.table.board.stopNote':
-          'Stop requests cancellation where possible. Completed panels and charges already incurred remain.',
-        'conversation.creativeStudio.workspace.table.board.styleRequired': 'Choose a Board style before drawing.',
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.characters': 'Characters',
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.background': 'Background',
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.shot': `Shot ${String(values?.position)}`,
@@ -85,15 +74,6 @@ vi.mock('react-i18next', () => ({
           'Choose the exact references for this Shot.',
         'conversation.creativeStudio.workspace.referenceWorkflow.bindings.invalid':
           'This Shot binding is no longer valid. Review and save it again.',
-        'conversation.creativeStudio.workspace.table.panel.redrawBeat': 'Redraw Beat · paid',
-        'conversation.creativeStudio.jobs.retry': 'Retry generation',
-        'conversation.creativeStudio.jobs.retryDownload': 'Retry download',
-        'conversation.creativeStudio.jobs.cancel': 'Cancel job',
-        'conversation.creativeStudio.jobs.retryChargeTitle': 'Retry with possible duplicate charge?',
-        'conversation.creativeStudio.jobs.retryChargeBody':
-          'The previous submission outcome is unknown. A replacement may create another provider charge.',
-        'conversation.creativeStudio.jobs.retryChargeConfirm': 'Acknowledge and review estimate',
-        'conversation.creativeStudio.workspace.beatPanel.common.cancel': 'Cancel',
       };
       if (key === 'conversation.creativeStudio.workspace.table.panel.cardLabel') {
         return `Shot ${String(values?.position)}: ${String(values?.status)}`;
@@ -108,8 +88,20 @@ vi.mock('react-i18next', () => ({
       if (key === 'conversation.creativeStudio.workspace.table.authoring.addShotForBeat') {
         return `Add Shot to ${String(values?.title)}`;
       }
-      if (key === 'conversation.creativeStudio.workspace.table.board.progress') {
-        return `${String(values?.drawn)} of ${String(values?.total)} panels drawn`;
+      if (key === 'conversation.creativeStudio.workspace.table.reorder.label') {
+        return `Reorder ${String(values?.title)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.table.reorder.dragHandle') {
+        return `Reorder ${String(values?.title)} at position ${String(values?.position)}`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.table.reorder.moveEarlier') {
+        return `Move ${String(values?.title)} earlier`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.table.reorder.moveLater') {
+        return `Move ${String(values?.title)} later`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.table.reorder.announcement') {
+        return `Moved ${String(values?.title)} from ${String(values?.from)} to ${String(values?.to)} of ${String(values?.total)}.`;
       }
       if (key === 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.progress') {
         return `${String(values?.ready)} of ${String(values?.total)} Shots bound`;
@@ -119,21 +111,6 @@ vi.mock('react-i18next', () => ({
       }
       if (key === 'conversation.creativeStudio.workspace.referenceWorkflow.bindings.capacityUsage') {
         return `${String(values?.count)} / ${String(values?.limit)} shared image-reference slots used (characters + background)`;
-      }
-      if (key === 'conversation.creativeStudio.workspace.table.board.staleCount') {
-        return `${String(values?.count)} stale`;
-      }
-      if (key === 'conversation.creativeStudio.workspace.table.board.busyCount') {
-        return `${String(values?.count)} in progress`;
-      }
-      if (key === 'conversation.creativeStudio.workspace.table.panel.drawMissing') {
-        return `Draw missing (${String(values?.count)})`;
-      }
-      if (key === 'conversation.creativeStudio.workspace.table.panel.redrawShot') {
-        return `Redraw Shot ${String(values?.position)} · paid`;
-      }
-      if (key === 'conversation.creativeStudio.workspace.table.panel.useAsFirstFrame') {
-        return `Use Shot ${String(values?.position)} panel as first frame`;
       }
       if (key === 'conversation.creativeStudio.workspace.table.shotCount') {
         const count = Number(values?.count ?? 0);
@@ -156,7 +133,6 @@ import {
   TableView,
   type ReferenceBindingWorkspaceItem,
   type TableAuthoringActions,
-  type TableBoardActions,
   type TableReferenceBindingActions,
 } from '@/renderer/pages/studio/components/Workspace/Views/Table';
 
@@ -216,27 +192,6 @@ const makeBoardPanel = (
   ...overrides,
 });
 
-const makeBoardDownloadRecovery = (jobId: string): NonNullable<WorkspaceBoardPanelProjection['recovery']> => ({
-  jobId,
-  canRetry: false,
-  canCancel: false,
-  canRetryDownload: true,
-  submissionUnknown: false,
-});
-
-const makeTableBoardActions = (): TableBoardActions => ({
-  setStyle: vi.fn(),
-  drawNext: vi.fn(),
-  drawBeat: vi.fn(),
-  redrawShot: vi.fn(),
-  redrawBeat: vi.fn(),
-  promotePanel: vi.fn(),
-  stop: vi.fn(),
-  retryJob: vi.fn(),
-  retryDownload: vi.fn(),
-  cancelJob: vi.fn(),
-});
-
 const makeBindingActions = (): TableReferenceBindingActions => ({
   saveBinding: vi.fn(async () => true),
 });
@@ -245,6 +200,7 @@ const makeAuthoringActions = (): TableAuthoringActions => ({
   addBeat: vi.fn(async () => true),
   addShot: vi.fn(async () => true),
   askDirector: vi.fn(),
+  reorderBeats: vi.fn(async () => true),
 });
 
 const makeReference = (overrides: Partial<ReferenceWorkspaceItem> = {}): ReferenceWorkspaceItem => ({
@@ -272,21 +228,18 @@ const makeBinding = (overrides: Partial<ReferenceBindingWorkspaceItem> = {}): Re
 });
 
 const tableBoardProps = (beats: readonly WorkspaceBeatProjection[], onOpenBeat = vi.fn()) => ({
-  actions: makeTableBoardActions(),
   authoringActions: makeAuthoringActions(),
   projectId: 'project_1',
   coverageGapBeatIds: beats.filter((beat) => beat.shots.length === 0).map((beat) => beat.id),
   unscriptedShotIds: beats.flatMap((beat) =>
     beat.shots.filter((shot) => shot.shootingScript.trim() === '').map((shot) => shot.id)
   ),
-  boardStyle: 'grey_tone' as const,
   boardPanels: beats.flatMap((beat) => beat.shots.map((shot) => makeBoardPanel(shot.id))),
   references: [] as readonly ReferenceWorkspaceItem[],
   referenceBindings: beats.flatMap((beat) => beat.shots.map((shot) => makeBinding({ shotId: shot.id }))),
   referenceMaxConditioningImages: 3,
   referencePendingId: null,
   bindingActions: makeBindingActions(),
-  imageRouteReady: true,
   pending: false,
   gateLocked: false,
   onOpenBeat,
@@ -781,8 +734,7 @@ describe('TableView', () => {
     expect(rowForBeat('opening')).toHaveAttribute('aria-rowindex', '2');
     expect(cellAt(rowForBeat('opening'), 3).innerHTML).toBe(openingStoryBeforeExpansion);
     expect(within(rowForBeat('opening')).queryByRole('toolbar')).toBeNull();
-    expect(within(openingRows[0]!).getByRole('toolbar', { name: 'Board panels for Opening' })).toBeInTheDocument();
-    expect(openingRows.slice(1).every((shot) => within(shot).queryByRole('toolbar') === null)).toBe(true);
+    expect(openingRows.every((shot) => within(shot).queryByRole('toolbar') === null)).toBe(true);
     expect(openingRows.map((shot) => shot.getAttribute('aria-rowindex'))).toEqual(['3', '4', '5', '6', '7', '8']);
     expect(openingRows.every((shot) => within(shot).getAllByRole('gridcell').length === 7)).toBe(true);
     expect(rowForBeat('close')).toHaveAttribute('aria-rowindex', '9');
@@ -837,11 +789,9 @@ describe('TableView', () => {
     const beats = [makeBeat('opening', { title: 'Opening' }), makeBeat('close', { title: 'Close' })];
     const onOpenBeat = vi.fn();
     const onSelectBeat = vi.fn();
-    const actions = makeTableBoardActions();
     render(
       <TableView
         {...tableBoardProps(beats, onOpenBeat)}
-        actions={actions}
         beats={beats}
         selectedBeatId={null}
         onSelectBeat={onSelectBeat}
@@ -855,9 +805,6 @@ describe('TableView', () => {
     expect(onOpenBeat).not.toHaveBeenCalled();
     expect(rowForShot('opening_shot')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Draw missing (1)' }));
-    expect(actions.drawBeat).toHaveBeenCalledExactlyOnceWith('opening');
-    expect(onOpenBeat).not.toHaveBeenCalled();
     await user.click(screen.getByRole('button', { name: 'Expand: Shot 1 details' }));
     expect(onOpenBeat).not.toHaveBeenCalled();
     act(() => disclosure.focus());
@@ -946,221 +893,66 @@ describe('TableView', () => {
     ).toBeNull();
   });
 
-  it('offers first-frame promotion only for a stable current Board panel on an actual segment head', async () => {
+  it('keeps exact Board-panel monitoring but exposes no Board spend or recovery controls', async () => {
     const user = userEvent.setup();
-    const actions = makeTableBoardActions();
-    const beats = [
-      makeBeat('opening', {
-        title: 'Opening',
-        shots: [
-          makeShot('shot_head', { segmentHead: true }),
-          makeShot('shot_continuous', { segmentHead: false }),
-          makeShot('shot_already_pinned', { segmentHead: true, explicitSeedAssetId: 'board_pinned' }),
-          makeShot('shot_stale_head', { segmentHead: true }),
-          makeShot('shot_busy_head', { segmentHead: true }),
-          makeShot('shot_attention_head', { segmentHead: true }),
-        ],
-      }),
-    ];
-    const boardPanels = [
-      makeBoardPanel('shot_head', { assetId: 'board_head', producerJobId: 'job_head', freshness: 'current' }),
-      makeBoardPanel('shot_continuous', {
-        assetId: 'board_continuous',
-        producerJobId: 'job_continuous',
-        freshness: 'current',
-      }),
-      makeBoardPanel('shot_already_pinned', {
-        assetId: 'board_pinned',
-        producerJobId: 'job_pinned',
-        freshness: 'current',
-      }),
-      makeBoardPanel('shot_stale_head', {
-        assetId: 'board_stale',
-        producerJobId: 'job_stale',
-        freshness: 'stale',
-        staleCauses: ['request_out_of_date'],
-      }),
-      makeBoardPanel('shot_busy_head', {
-        assetId: 'board_busy',
-        producerJobId: 'job_busy',
-        latestJobId: 'job_redraw',
-        freshness: 'current',
-        activity: 'drawing',
-      }),
-      makeBoardPanel('shot_attention_head', {
-        assetId: 'board_attention',
-        producerJobId: 'job_attention_producer',
-        latestJobId: 'job_attention',
-        freshness: 'current',
-        activity: 'needs_attention',
-      }),
-    ];
-    const { rerender } = render(
+    const beat = makeBeat('opening', { title: 'Opening' });
+    const panel = makeBoardPanel('opening_shot', {
+      activity: 'needs_attention',
+      latestJobId: 'job_attention',
+      recovery: {
+        jobId: 'job_attention',
+        canRetry: true,
+        canCancel: true,
+        canRetryDownload: false,
+        submissionUnknown: false,
+      },
+    });
+    const result = render(
       <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardPanels={boardPanels}
+        {...tableBoardProps([beat])}
+        beats={[beat]}
+        boardPanels={[panel]}
         selectedBeatId={null}
         onSelectBeat={vi.fn()}
       />
     );
+
     await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    const shotRow = rowForShot('opening_shot');
+    expect(shotRow).toHaveTextContent('Needs attention');
+    expect(result.container.querySelector('[data-reference-binding-progress]')).toHaveTextContent('0 of 1 Shots bound');
+    expect(result.container.querySelector('[data-board-recovery-job-id]')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Director Board controls' })).toBeNull();
+    expect(screen.queryByRole('progressbar', { name: 'Board completeness' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /draw|redraw|retry|cancel job|stop drawing|first frame/i })).toBeNull();
 
-    await user.click(within(rowForShot('shot_head')).getByRole('button', { name: 'Expand: Shot 1 details' }));
-    const promote = screen.getByRole('button', { name: 'Use Shot 1 panel as first frame' });
-    await user.click(promote);
-    expect(actions.promotePanel).toHaveBeenCalledExactlyOnceWith('shot_head', 'board_head');
-    for (const [shotId, position] of [
-      ['shot_continuous', 2],
-      ['shot_already_pinned', 3],
-      ['shot_stale_head', 4],
-      ['shot_busy_head', 5],
-      ['shot_attention_head', 6],
-    ] as const) {
-      // eslint-disable-next-line no-await-in-loop -- each disclosure replaces the prior Shot detail
-      await user.click(
-        within(rowForShot(shotId)).getByRole('button', { name: `Expand: Shot ${String(position)} details` })
-      );
-      expect(screen.queryByRole('button', { name: /Use Shot \d+ panel as first frame/ })).toBeNull();
-    }
-
-    rerender(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardPanels={boardPanels}
-        gateLocked
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
-    );
-    await user.click(within(rowForShot('shot_head')).getByRole('button', { name: 'Expand: Shot 1 details' }));
-    expect(screen.getByRole('button', { name: 'Use Shot 1 panel as first frame' })).toBeDisabled();
+    await user.click(within(shotRow).getByRole('button', { name: /Expand/ }));
+    expect(within(shotRow).getByRole('button', { name: 'Save references' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /draw|redraw|retry|cancel job|stop drawing|first frame/i })).toBeNull();
   });
 
   it('fails closed instead of cross-associating reordered Board panel status', async () => {
     const user = userEvent.setup();
-    const beats = [makeBeat('opening', { title: 'Opening', shots: [makeShot('shot_1'), makeShot('shot_2')] })];
-    const reordered = [
-      makeBoardPanel('shot_2', { assetId: 'board_2', freshness: 'current' }),
-      makeBoardPanel('shot_1', { assetId: 'board_1', freshness: 'current' }),
-    ];
-    render(
+    const beat = makeBeat('opening', {
+      title: 'Opening',
+      shots: [makeShot('shot_1'), makeShot('shot_2')],
+    });
+    const result = render(
       <TableView
-        {...tableBoardProps(beats)}
-        beats={beats}
-        boardPanels={reordered}
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
-    );
-
-    const disclosure = screen.getByRole('button', { name: 'Open Board panels for Opening' });
-    expect(disclosure.querySelector('[data-asset-id]')).toBeNull();
-    expect(disclosure.querySelector('[data-freshness="status_pending"]')).not.toBeNull();
-    await user.click(disclosure);
-    expect(screen.getAllByText('Status pending')).toHaveLength(2);
-  });
-
-  it('names exact Board completeness separately from the capped next paid batch without exposing Board style', async () => {
-    const user = userEvent.setup();
-    const actions = makeTableBoardActions();
-    const shots = Array.from({ length: 30 }, (_, index) => makeShot(`shot_${String(index + 1)}`));
-    const beats = [makeBeat('opening', { title: 'Opening', shots })];
-    const boardPanels = shots.map((shot, index) =>
-      makeBoardPanel(
-        shot.id,
-        index === 0
-          ? { assetId: 'board_1', producerJobId: 'job_1', freshness: 'current' }
-          : index === 1
-            ? {
-                assetId: 'board_2',
-                producerJobId: 'job_2',
-                freshness: 'stale',
-                staleCauses: ['request_out_of_date'],
-              }
-            : {}
-      )
-    );
-    render(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardPanels={boardPanels}
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
-    );
-
-    const controls = screen.getByRole('region', { name: 'Director Board controls' });
-    expect(within(controls).getByText('2 of 30 panels drawn')).toBeInTheDocument();
-    expect(within(controls).getByText('1 stale')).toBeInTheDocument();
-    expect(within(controls).getByText('0 in progress')).toBeInTheDocument();
-    expect(within(controls).getByRole('progressbar', { name: 'Board completeness' })).toHaveAttribute('max', '30');
-    expect(within(controls).getByRole('progressbar', { name: 'Board completeness' })).toHaveAttribute('value', '2');
-
-    const drawNext = within(controls).getByRole('button', { name: 'Draw next batch (24)' });
-    expect(drawNext).toBeEnabled();
-    act(() => drawNext.focus());
-    await user.keyboard('{Enter}');
-    expect(actions.drawNext).toHaveBeenCalledTimes(1);
-
-    expect(within(controls).queryByRole('radio')).toBeNull();
-    expect(within(controls).queryByText('Board style')).toBeNull();
-    expect(actions.setStyle).not.toHaveBeenCalled();
-  });
-
-  it('fails Board generation controls closed when the route or exact panel status is unavailable', () => {
-    const beats = [makeBeat('opening', { title: 'Opening' })];
-    const actions = makeTableBoardActions();
-    const { rerender } = render(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        imageRouteReady={false}
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
-    );
-
-    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
-    expect(screen.queryByRole('radio')).toBeNull();
-
-    rerender(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardPanels={[makeBoardPanel('opening_shot', { freshness: 'status_pending', activity: 'status_pending' })]}
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
-    );
-    expect(screen.getByRole('button', { name: 'Draw next batch (0)' })).toBeDisabled();
-    expect(screen.queryByRole('radio')).toBeNull();
-    expect(actions.drawNext).not.toHaveBeenCalled();
-  });
-
-  it('offers Stop only for active Board work and preserves the completed/charged warning', async () => {
-    const user = userEvent.setup();
-    const beats = [makeBeat('opening', { title: 'Opening' })];
-    const actions = makeTableBoardActions();
-    render(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
+        {...tableBoardProps([beat])}
+        beats={[beat]}
         boardPanels={[
-          makeBoardPanel('opening_shot', {
-            assetId: 'retained_board',
-            producerJobId: 'job_done',
-            latestJobId: 'job_redraw',
-            freshness: 'current',
-            activity: 'drawing',
+          makeBoardPanel('shot_2', { assetId: 'panel_2', freshness: 'current' }),
+          makeBoardPanel('shot_1', {
+            activity: 'needs_attention',
+            latestJobId: 'job_wrong',
+            recovery: {
+              jobId: 'job_wrong',
+              canRetry: true,
+              canCancel: true,
+              canRetryDownload: false,
+              submissionUnknown: false,
+            },
           }),
         ]}
         selectedBeatId={null}
@@ -1168,273 +960,151 @@ describe('TableView', () => {
       />
     );
 
-    expect(screen.getByText('1 of 1 panels drawn')).toBeInTheDocument();
-    expect(screen.getByText('1 in progress')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /Draw next batch/ })).toBeNull();
-    expect(
-      screen.getByText(
-        'Stop requests cancellation where possible. Completed panels and charges already incurred remain.'
-      )
-    ).toBeInTheDocument();
-    expect(screen.queryByRole('radio')).toBeNull();
-    const stop = screen.getByRole('button', { name: 'Stop drawing' });
-    act(() => stop.focus());
-    await user.keyboard('{Enter}');
-    expect(actions.stop).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    expect(result.container.querySelectorAll('[data-panel-activity="status_pending"]')).toHaveLength(2);
+    expect(result.container.querySelector('[data-asset-id]')).toBeNull();
+    expect(result.container.querySelector('[data-board-recovery-job-id]')).toBeNull();
   });
 
-  it('separates Board attention from active progress and exposes only sanitized retry/cancel authority', async () => {
-    const user = userEvent.setup();
-    const actions = makeTableBoardActions();
-    const beats = [
-      makeBeat('opening', {
-        title: 'Opening',
-        shots: [makeShot('shot_unknown'), makeShot('shot_retryable')],
-      }),
-    ];
-    const boardPanels = [
-      makeBoardPanel('shot_unknown', {
-        activity: 'needs_attention',
-        latestJobId: 'job_unknown',
-        recovery: {
-          jobId: 'job_unknown',
-          canRetry: true,
-          canCancel: false,
-          canRetryDownload: false,
-          submissionUnknown: true,
-        },
-      }),
-      makeBoardPanel('shot_retryable', {
-        activity: 'needs_attention',
-        latestJobId: 'job_retryable',
-        recovery: {
-          jobId: 'job_retryable',
-          canRetry: true,
-          canCancel: true,
-          canRetryDownload: false,
-          submissionUnknown: false,
-        },
-      }),
-    ];
-    const { rerender } = render(
+  it('owns exact whole-order Beat reordering with keyboard, buttons, drag, focus, and announcements', async () => {
+    const authoringActions = makeAuthoringActions();
+    const beats = [makeBeat('a'), makeBeat('b'), makeBeat('c')];
+    const result = render(
       <TableView
         {...tableBoardProps(beats)}
-        actions={actions}
+        authoringActions={authoringActions}
         beats={beats}
-        boardPanels={boardPanels}
         selectedBeatId={null}
         onSelectBeat={vi.fn()}
       />
     );
 
-    expect(screen.getByText('0 in progress')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Stop drawing' })).toBeNull();
-    expect(screen.queryByRole('radio')).toBeNull();
-    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
-    await user.click(within(rowForShot('shot_unknown')).getByRole('button', { name: 'Expand: Shot 1 details' }));
+    const reorderButtons = screen.getAllByRole('button', { name: /(?:move|reorder) Beat/i });
+    expect(reorderButtons.every((button) => button.tabIndex === -1)).toBe(true);
+    const firstPositionCell = cellAt(rowForBeat('a'), 0);
+    act(() => firstPositionCell.focus());
+    fireEvent.keyDown(firstPositionCell, { key: 'Enter' });
+    expect(screen.getByRole('button', { name: 'Reorder Beat a at position 1' })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat a at position 1' }), { key: 'Escape' });
+    expect(firstPositionCell).toHaveFocus();
 
-    const unknown = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_unknown"]');
-    if (unknown === null) throw new Error('Missing unknown-outcome Board recovery controls');
-    expect(within(unknown).queryByRole('button', { name: 'Cancel job' })).toBeNull();
-    await user.click(within(unknown).getByRole('button', { name: 'Retry generation' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge and review estimate' }));
-    expect(actions.retryJob).toHaveBeenCalledWith('job_unknown', true);
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1. Beat a later' }));
+    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reorder Beat a at position 1' })).toHaveFocus());
+    expect(result.container.querySelector('[aria-live="polite"]')).toHaveTextContent('Moved Beat a from 1 to 2 of 3.');
 
-    await user.click(within(rowForShot('shot_retryable')).getByRole('button', { name: 'Expand: Shot 2 details' }));
-    const retryable = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_retryable"]');
-    if (retryable === null) throw new Error('Missing retryable Board recovery controls');
-    await user.click(within(retryable).getByRole('button', { name: 'Retry generation' }));
-    expect(actions.retryJob).toHaveBeenCalledWith('job_retryable', false);
-    await user.click(within(retryable).getByRole('button', { name: 'Cancel job' }));
-    expect(actions.cancelJob).toHaveBeenCalledWith('job_retryable');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat c at position 3' }), { key: 'Home' });
+    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['c', 'a', 'b']));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reorder Beat c at position 3' })).toHaveFocus());
 
-    rerender(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardPanels={boardPanels}
-        gateLocked
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
-    );
+    const transfer = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: 'none',
+      setData: (format: string, value: string) => transfer.set(format, value),
+      getData: (format: string) => transfer.get(format) ?? '',
+    };
+    fireEvent.dragStart(screen.getByRole('button', { name: 'Reorder Beat a at position 1' }), { dataTransfer });
+    fireEvent.dragOver(rowForBeat('c'), { dataTransfer });
+    fireEvent.drop(rowForBeat('c'), { dataTransfer });
+    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['b', 'c', 'a']));
     expect(
-      Array.from(document.querySelectorAll<HTMLElement>('[data-board-recovery-job-id] button')).every((button) =>
-        button.hasAttribute('disabled')
+      Array.from(screen.getByRole('grid').querySelectorAll('[data-beat-id]')).map((row) =>
+        row.getAttribute('data-beat-id')
       )
+    ).toEqual(['a', 'b', 'c']);
+  });
+
+  it('qualifies reorder controls by film position when Beat titles repeat', () => {
+    const beats = [makeBeat('first', { title: 'Repeat' }), makeBeat('second', { title: 'Repeat' })];
+    render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
+
+    expect(screen.getByRole('group', { name: 'Reorder 1. Repeat' })).toBeVisible();
+    expect(screen.getByRole('group', { name: 'Reorder 2. Repeat' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Move 1. Repeat later' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Move 2. Repeat earlier' })).toBeVisible();
+  });
+
+  it('announces the localized untitled Beat fallback after a reorder', async () => {
+    const authoringActions = makeAuthoringActions();
+    const beats = [makeBeat('blank', { title: '   ' }), makeBeat('named')];
+    const result = render(
+      <TableView
+        {...tableBoardProps(beats)}
+        authoringActions={authoringActions}
+        beats={beats}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1. Untitled Beat 1 later' }));
+    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenCalledWith(['named', 'blank']));
+    expect(result.container.querySelector('[aria-live="polite"]')).toHaveTextContent(
+      'Moved Untitled Beat 1 from 1 to 2 of 2.'
+    );
+  });
+
+  it('keeps Table reordering single-flight, fails closed, and locks with workspace authority', async () => {
+    let finish!: (value: boolean) => void;
+    const authoringActions = makeAuthoringActions();
+    vi.mocked(authoringActions.reorderBeats).mockReturnValueOnce(
+      new Promise<boolean>((resolvePromise) => {
+        finish = resolvePromise;
+      })
+    );
+    const beats = [makeBeat('a'), makeBeat('b')];
+    const result = render(
+      <TableView
+        {...tableBoardProps(beats)}
+        authoringActions={authoringActions}
+        beats={beats}
+        selectedBeatId={null}
+        onSelectBeat={vi.fn()}
+      />
+    );
+
+    const moveLater = screen.getByRole('button', { name: 'Move 1. Beat a later' });
+    fireEvent.click(moveLater);
+    fireEvent.click(moveLater);
+    expect(authoringActions.reorderBeats).toHaveBeenCalledTimes(1);
+    expect(
+      screen
+        .getAllByRole('button', { name: /(?:move|reorder) Beat/i })
+        .every((button) => button.hasAttribute('disabled'))
     ).toBe(true);
-  });
 
-  it('offers no-charge download recovery without offering a fresh paid Draw or Redraw', async () => {
-    const user = userEvent.setup();
-    const actions = makeTableBoardActions();
-    const beats = [
-      makeBeat('opening', {
-        title: 'Opening',
-        shots: [makeShot('shot_missing'), makeShot('shot_retained')],
-      }),
-    ];
-    const boardPanels = [
-      makeBoardPanel('shot_missing', {
-        activity: 'failed',
-        latestJobId: 'job_missing_download',
-        recovery: makeBoardDownloadRecovery('job_missing_download'),
-      }),
-      makeBoardPanel('shot_retained', {
-        assetId: 'board_retained',
-        producerJobId: 'job_retained_producer',
-        latestJobId: 'job_retained_download',
-        freshness: 'current',
-        activity: 'failed',
-        recovery: makeBoardDownloadRecovery('job_retained_download'),
-      }),
-    ];
-    render(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardPanels={boardPanels}
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
+    finish(false);
+    await waitFor(() =>
+      expect(result.container.querySelector('[aria-live="polite"]')).toHaveTextContent('Beat order was not changed.')
     );
+    expect(screen.getByRole('button', { name: 'Reorder Beat a at position 1' })).toHaveFocus();
+    const firstFailureAnnouncement = result.container.querySelector('[aria-live="polite"]')?.firstElementChild;
 
-    expect(screen.getByRole('button', { name: 'Draw next batch (0)' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
-    expect(screen.queryByRole('button', { name: /Draw missing/ })).toBeNull();
-    expect(screen.queryByRole('button', { name: 'Redraw Beat · paid' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Redraw Shot/ })).toBeNull();
-
-    await user.click(within(rowForShot('shot_missing')).getByRole('button', { name: 'Expand: Shot 1 details' }));
-    const missing = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_missing_download"]');
-    if (missing === null) throw new Error('Missing Board download recovery controls for missing panel');
-    await user.click(within(missing).getByRole('button', { name: 'Retry download' }));
-    await user.click(within(rowForShot('shot_retained')).getByRole('button', { name: 'Expand: Shot 2 details' }));
-    const retained = document.querySelector<HTMLElement>('[data-board-recovery-job-id="job_retained_download"]');
-    if (retained === null) throw new Error('Missing Board download recovery controls for retained panel');
-    await user.click(within(retained).getByRole('button', { name: 'Retry download' }));
-    expect(actions.retryDownload).toHaveBeenNthCalledWith(1, 'job_missing_download');
-    expect(actions.retryDownload).toHaveBeenNthCalledWith(2, 'job_retained_download');
-    expect(actions.drawNext).not.toHaveBeenCalled();
-    expect(actions.drawBeat).not.toHaveBeenCalled();
-    expect(actions.redrawShot).not.toHaveBeenCalled();
-    expect(actions.redrawBeat).not.toHaveBeenCalled();
-  });
-
-  it('draws only exact drawable missing panels in one Beat and offers paid redraw only for existing panels', async () => {
-    const user = userEvent.setup();
-    const actions = makeTableBoardActions();
-    const beats = [
-      makeBeat('opening', {
-        title: 'Opening',
-        shots: [makeShot('shot_1'), makeShot('shot_2'), makeShot('shot_3'), makeShot('shot_4')],
-      }),
-    ];
-    const boardPanels = [
-      makeBoardPanel('shot_1', { assetId: 'board_1', producerJobId: 'job_1', freshness: 'current' }),
-      makeBoardPanel('shot_2'),
-      makeBoardPanel('shot_3', { activity: 'failed', latestJobId: 'job_3' }),
-      makeBoardPanel('shot_4', { activity: 'queued', latestJobId: 'job_4' }),
-    ];
-    render(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardPanels={boardPanels}
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
+    vi.mocked(authoringActions.reorderBeats).mockResolvedValueOnce(false);
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1. Beat a later' }));
+    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(result.container.querySelector('[aria-live="polite"]')?.firstElementChild).not.toBe(
+        firstFailureAnnouncement
+      )
     );
-    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+    expect(result.container.querySelector('[aria-live="polite"]')).toHaveTextContent('Beat order was not changed.');
 
-    expect(screen.queryByRole('button', { name: 'Redraw Beat · paid' })).toBeNull();
-    const drawMissing = screen.getByRole('button', { name: 'Draw missing (2)' });
-    act(() => drawMissing.focus());
-    await user.keyboard('{Enter}');
-    expect(actions.drawBeat).toHaveBeenCalledWith('opening');
-    await user.click(within(rowForShot('shot_1')).getByRole('button', { name: 'Expand: Shot 1 details' }));
-    const redrawShots = screen.getAllByRole('button', { name: /Redraw Shot/ });
-    expect(redrawShots).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: 'Redraw Shot 1 · paid' }));
-    expect(actions.redrawShot).toHaveBeenCalledWith('shot_1');
-  });
-
-  it('offers paid Beat and per-panel redraw only when every panel exists and is exactly drawable', async () => {
-    const user = userEvent.setup();
-    const actions = makeTableBoardActions();
-    const beats = [
-      makeBeat('opening', {
-        title: 'Opening',
-        shots: [makeShot('shot_1'), makeShot('shot_2'), makeShot('shot_3')],
-      }),
-    ];
-    const boardPanels = [
-      makeBoardPanel('shot_1', { assetId: 'board_1', producerJobId: 'job_1', freshness: 'current' }),
-      makeBoardPanel('shot_2', {
-        assetId: 'board_2',
-        producerJobId: 'job_2',
-        freshness: 'stale',
-        activity: 'failed',
-        staleCauses: ['route_out_of_date'],
-      }),
-      makeBoardPanel('shot_3', {
-        assetId: 'board_3',
-        producerJobId: 'job_3',
-        freshness: 'current',
-        activity: 'cancelled',
-      }),
-    ];
-    const { rerender } = render(
+    result.rerender(
       <TableView
         {...tableBoardProps(beats)}
-        actions={actions}
+        authoringActions={authoringActions}
         beats={beats}
-        boardPanels={boardPanels}
-        selectedBeatId={null}
-        onSelectBeat={vi.fn()}
-      />
-    );
-    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
-
-    expect(screen.queryByRole('button', { name: /Draw missing/ })).toBeNull();
-    const redrawBeat = screen.getByRole('button', { name: 'Redraw Beat · paid' });
-    expect(redrawBeat).toBeEnabled();
-    await user.click(redrawBeat);
-    expect(actions.redrawBeat).toHaveBeenCalledWith('opening');
-    for (const [shotId, position] of [
-      ['shot_1', 1],
-      ['shot_2', 2],
-      ['shot_3', 3],
-    ] as const) {
-      // eslint-disable-next-line no-await-in-loop -- one Shot detail is intentionally open at a time
-      await user.click(
-        within(rowForShot(shotId)).getByRole('button', { name: `Expand: Shot ${String(position)} details` })
-      );
-      const redrawShot = screen.getByRole('button', { name: `Redraw Shot ${String(position)} · paid` });
-      expect(redrawShot).toBeEnabled();
-      // eslint-disable-next-line no-await-in-loop -- each paid action predicate is exercised independently
-      await user.click(redrawShot);
-    }
-    expect(actions.redrawShot).toHaveBeenNthCalledWith(1, 'shot_1');
-    expect(actions.redrawShot).toHaveBeenNthCalledWith(2, 'shot_2');
-    expect(actions.redrawShot).toHaveBeenNthCalledWith(3, 'shot_3');
-
-    rerender(
-      <TableView
-        {...tableBoardProps(beats)}
-        actions={actions}
-        beats={beats}
-        boardPanels={boardPanels}
         gateLocked
         selectedBeatId={null}
         onSelectBeat={vi.fn()}
       />
     );
-    expect(screen.getByRole('button', { name: 'Redraw Beat · paid' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'Redraw Shot 3 · paid' })).toBeDisabled();
+    expect(
+      screen
+        .getAllByRole('button', { name: /(?:move|reorder) Beat/i })
+        .every((button) => button.hasAttribute('disabled'))
+    ).toBe(true);
   });
 
   it('keeps roving ArrowDown navigation on Beat cells while an inline detail row is open', async () => {
@@ -1513,10 +1183,13 @@ describe('TableView', () => {
     );
     const multi = rowForBeat('multi');
     const empty = rowForBeat('empty');
-    fireEvent.click(multi);
+    fireEvent.click(within(multi).getByText('01'));
     expect(onOpenBeat).toHaveBeenLastCalledWith('multi');
+    fireEvent.click(screen.getByRole('button', { name: 'Move 1. Beat multi later' }));
+    expect(onOpenBeat).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Reorder Beat multi at position 1' })).toHaveFocus());
 
-    act(() => cellAt(multi, 0).focus());
+    act(() => cellAt(multi, 3).focus());
     await user.keyboard('{ArrowDown}{Enter}');
     expect(onOpenBeat).toHaveBeenLastCalledWith('empty');
     await user.keyboard('{Space}');

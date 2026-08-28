@@ -545,7 +545,6 @@ const exactBoardGateProjection = (input: {
   projection: WorkspaceProjection;
 }): { orderedShotIds: string[]; boardPanels: WorkspaceProjection['boardPanels'] } | null => {
   if (
-    input.project.boardStyle === null ||
     input.projection.projectId !== input.project.id ||
     input.projection.projectRevision !== input.project.revision ||
     input.projection.activeBeatIds.length !== input.project.beatOrder.length ||
@@ -678,6 +677,7 @@ export const boardPromotionGatePlan = (input: {
     !projectedShot.segmentHead ||
     projectedShot.chainBreak !== shot.chainBreak ||
     projectedShot.seedGenerationBlocked ||
+    projectedShot.seedAuthorizationLock !== null ||
     panel?.shotId !== shot.id ||
     panel.assetId !== input.boardAssetId ||
     shot.boardAssetId !== input.boardAssetId ||
@@ -720,6 +720,7 @@ export const boardPromotionGatePlan = (input: {
       projected.chainBreak !== segmentShot.chainBreak ||
       projected.segmentState.kind === 'status_pending' ||
       projected.videoGenerationBlocked ||
+      projected.seedAuthorizationLock !== null ||
       (segmentShot.videoAssetId === null) !== (projected.currentPicture === null) ||
       (segmentShot.videoAssetId !== null && projected.currentPicture?.assetId !== segmentShot.videoAssetId)
     ) {

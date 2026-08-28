@@ -127,6 +127,7 @@ import {
   selectionGateDraft,
   spendGateReducer,
   spendGateRouteIssue,
+  tableBeatReorderOperation,
   useWorkspaceDrafts,
   useSpendGate,
   type BeatPanelActions,
@@ -136,7 +137,6 @@ import {
   type SpendGateDraft,
   type SpendGateGenerationDisclosure,
   type StudioShotEditFocusIntent,
-  type TableBoardActions,
   type WorkspaceDraftValue,
   type WorkspaceMutationCallbacks,
 } from '@/renderer/pages/studio/components/Workspace';
@@ -675,8 +675,7 @@ const beatPanelActions = (): BeatPanelActions => ({
   requestResplit: vi.fn(),
 });
 
-const tableBoardActions = (): TableBoardActions => ({
-  setStyle: vi.fn(),
+const boardActions = (): BoardActions => ({
   drawNext: vi.fn(),
   drawBeat: vi.fn(),
   redrawShot: vi.fn(),
@@ -686,11 +685,6 @@ const tableBoardActions = (): TableBoardActions => ({
   retryJob: vi.fn(),
   retryDownload: vi.fn(),
   cancelJob: vi.fn(),
-});
-
-const boardActions = (): BoardActions => ({
-  reorderBeats: vi.fn(async () => true),
-  parkBeat: vi.fn(async () => true),
   restoreBeat: vi.fn(async () => true),
   restoreShot: vi.fn(async () => true),
   reorderBin: vi.fn(async () => true),
@@ -1009,7 +1003,6 @@ const ControlsHarness: React.FC<{
         errorMessageKey={null}
         exportErrorMessageKey={null}
         mutations={mutations}
-        tableBoardActions={tableBoardActions()}
         boardActions={boardActions()}
         cutActions={cutActions()}
         beatPanelActions={beatActions}
@@ -1542,13 +1535,13 @@ describe('Board spend gate draft', () => {
     ).not.toBeNull();
   });
 
-  it('fails closed without a style or an exact project, revision, active order, and Board status', () => {
+  it('leaves Board-style validation to Main and fails closed on renderer authority mismatches', () => {
     const project = makeBoardProject(3);
     const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
     expect(boardGateDraft({ project, projection })).not.toBeNull();
 
     project.boardStyle = null;
-    expect(boardGateDraft({ project, projection })).toBeNull();
+    expect(boardGateDraft({ project, projection })).not.toBeNull();
     project.boardStyle = 'grey_tone';
 
     expect(boardGateDraft({ project, projection: { ...projection, projectId: 'project_other' } })).toBeNull();
@@ -1661,6 +1654,63 @@ describe('Board spend gate draft', () => {
 
 describe('WorkspaceControls', () => {
   beforeEach(() => window.sessionStorage.clear());
+
+  it('builds only an exact unlocked Table Beat reorder operation', () => {
+    const exact = {
+      activeBeatIds: ['beat_1', 'beat_2'],
+      activeView: 'table' as const,
+      beatOrder: ['beat_2', 'beat_1'],
+      gateLocked: false,
+      pending: false,
+    };
+
+    expect(tableBeatReorderOperation(exact)).toEqual({
+      kind: 'reorder_beats',
+      beatOrder: ['beat_2', 'beat_1'],
+    });
+    expect(tableBeatReorderOperation({ ...exact, pending: true })).toBeNull();
+    expect(tableBeatReorderOperation({ ...exact, gateLocked: true })).toBeNull();
+    expect(tableBeatReorderOperation({ ...exact, activeView: 'board' })).toBeNull();
+    expect(tableBeatReorderOperation({ ...exact, beatOrder: ['beat_1'] })).toBeNull();
+    expect(tableBeatReorderOperation({ ...exact, beatOrder: ['beat_1', 'beat_1'] })).toBeNull();
+    expect(tableBeatReorderOperation({ ...exact, beatOrder: ['beat_1', 'foreign'] })).toBeNull();
+  });
+
+  it('commits a Table-owned whole-order Beat reorder and reflects the refreshed authoritative order', async () => {
+    const initial = makeProject();
+    const mutations = workspaceCallbacks();
+    const result = render(
+      <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={initial} mutations={mutations} />
+    );
+
+    fireEvent.click(
+      screen.getAllByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.table\.reorder\.moveLater/,
+      })[0]!
+    );
+    await waitFor(() =>
+      expect(mutations.applyAuthoring).toHaveBeenCalledExactlyOnceWith([
+        { kind: 'reorder_beats', beatOrder: ['beat_2', 'beat_1'] },
+      ])
+    );
+
+    const refreshed = structuredClone(initial);
+    refreshed.revision += 1;
+    refreshed.beatOrder = ['beat_2', 'beat_1'];
+    result.rerender(
+      <ControlsHarness
+        routes={routeCatalog('ready', 'ready')}
+        open={vi.fn()}
+        project={refreshed}
+        mutations={mutations}
+      />
+    );
+    expect(
+      Array.from(result.container.querySelectorAll('[role="row"][data-beat-id]')).map((row) =>
+        row.getAttribute('data-beat-id')
+      )
+    ).toEqual(['beat_2', 'beat_1']);
+  });
 
   it('forwards an exact Board reference-binding review without preparing or confirming spend', async () => {
     const authority = makeProject();
@@ -2435,6 +2485,30 @@ describe('Board first-frame promotion gate plan', () => {
     const blocked = structuredClone(projection);
     blocked.activeBeats[0]!.shots[1]!.videoGenerationBlocked = true;
     expect(build(blocked)).toBeNull();
+  });
+
+  it('rejects promotion while the selected head or any downstream Shot has waiting authorization', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
+    const projection = promotionProjection(project, assetId, jobId);
+    const authorizationLock = {
+      compatibleAssetIds: [] as string[],
+      canCancelWaiting: true,
+      waitingReason: 'choose_seed' as const,
+    };
+
+    const lockedHead = structuredClone(projection);
+    lockedHead.activeBeats[0]!.shots[0]!.seedAuthorizationLock = authorizationLock;
+    expect(
+      boardPromotionGatePlan({ project, projection: lockedHead, shotId: 'shot_1', boardAssetId: assetId })
+    ).toBeNull();
+
+    const lockedDownstream = structuredClone(projection);
+    lockedDownstream.activeBeats[0]!.shots[1]!.seedAuthorizationLock = authorizationLock;
+    expect(
+      boardPromotionGatePlan({ project, projection: lockedDownstream, shotId: 'shot_1', boardAssetId: assetId })
+    ).toBeNull();
   });
 
   it.each(['idle', 'failed', 'cancelled'] as const)(

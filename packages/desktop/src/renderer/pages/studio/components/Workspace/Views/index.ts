@@ -17,10 +17,9 @@ export { TableView } from './Table';
 export type {
   ReferenceBindingWorkspaceItem,
   TableAuthoringActions,
-  TableBoardActions,
   TableReferenceBindingActions,
   TableViewProps,
 } from './Table';
-export { WorkspaceControls } from './WorkspaceControls';
+export { WorkspaceControls, tableBeatReorderOperation } from './WorkspaceControls';
 export { WorkspaceProjectMenu, countStoredStudioRuleDrafts } from './WorkspaceProjectMenu';
 export type { WorkspaceControlsProps, WorkspaceMutationCallbacks, WorkspaceProjectMenuProps } from './viewTypes';

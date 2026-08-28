@@ -1020,6 +1020,14 @@
         "dismissed": "Ohne Ausgaben verworfen"
       },
       "table": {
+        "reorder": {
+          "label": "Aktionen zum Neuordnen von {{title}}",
+          "dragHandle": "{{title}} an Position {{position}} neu anordnen",
+          "moveEarlier": "{{title}} nach vorn verschieben",
+          "moveLater": "{{title}} nach hinten verschieben",
+          "announcement": "{{title}} wurde von Position {{from}} auf {{to}} von {{total}} verschoben.",
+          "failed": "Die Beat-Reihenfolge wurde nicht geändert."
+        },
         "authoring": {
           "label": "Story-Autorenschaft und Wiederherstellung",
           "coverageGap": "{{count}} von {{total}} Beats haben keine Shots",
@@ -1040,34 +1048,12 @@
           "story": "Story"
         },
         "plannedPending": "Keine geplante Summe",
-        "board": {
-          "label": "Director-Board-Steuerung",
-          "progress": "{{drawn}} von {{total}} Panels gezeichnet",
-          "progressLabel": "Board-Fortschritt",
-          "staleCount": "{{count}} veraltet",
-          "busyCount": "{{count}} in Arbeit",
-          "style": {
-            "label": "Board-Stil",
-            "greyTone": "Graustufen",
-            "lineArt": "Linienzeichnung",
-            "colourKey": "Farbskizze"
-          },
-          "stop": "Zeichnen stoppen",
-          "stopNote": "Stopp fordert, soweit möglich, den Abbruch an. Fertige Panels und bereits angefallene Kosten bleiben bestehen.",
-          "drawNext": "Nächsten Stapel zeichnen ({{count}})",
-          "styleRequired": "Wähle vor dem Zeichnen einen Board-Stil."
-        },
         "panel": {
           "openDetails": "Board-Panels für {{title}} öffnen",
           "closeDetails": "Board-Panels für {{title}} schließen",
-          "detailLabel": "Board-Panels für {{title}}",
-          "drawMissing": "Fehlende zeichnen ({{count}})",
-          "redrawBeat": "Beat neu zeichnen · kostenpflichtig",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Details zu Shot {{position}}",
           "head": "Kettenanfang",
-          "redrawShot": "Shot {{position}} neu zeichnen · kostenpflichtig",
-          "useAsFirstFrame": "Panel von Shot {{position}} als erstes Bild verwenden",
           "status": {
             "missing": "Nicht gezeichnet",
             "current": "Aktuell",
@@ -1092,6 +1078,35 @@
         }
       },
       "board": {
+        "controls": {
+          "label": "Director-Board-Steuerung",
+          "progress": "{{drawn}} von {{total}} Panels gezeichnet",
+          "progressLabel": "Board-Fortschritt",
+          "staleCount": "{{count}} veraltet",
+          "busyCount": "{{count}} in Arbeit",
+          "stop": "Zeichnen stoppen",
+          "stopNote": "Stopp fordert, soweit möglich, den Abbruch an. Fertige Panels und bereits angefallene Kosten bleiben bestehen.",
+          "drawNext": "Nächsten Stapel zeichnen ({{count}})"
+        },
+        "panel": {
+          "beatActions": "Director-Board-Steuerung · {{title}}",
+          "drawMissing": "Fehlende zeichnen ({{count}})",
+          "redrawBeat": "Beat neu zeichnen · kostenpflichtig",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "redrawShot": "Shot {{position}} neu zeichnen · kostenpflichtig",
+          "useAsFirstFrame": "Panel von Shot {{position}} als erstes Bild verwenden",
+          "status": {
+            "missing": "Nicht gezeichnet",
+            "current": "Aktuell",
+            "stale": "Veraltet",
+            "statusPending": "Status ausstehend",
+            "queued": "In Warteschlange",
+            "drawing": "Wird gezeichnet",
+            "needsAttention": "Eingriff erforderlich",
+            "failed": "Fehlgeschlagen",
+            "cancelled": "Abgebrochen"
+          }
+        },
         "statusUnavailable": "Die aktuelle Reihenfolge im Board ist unvollständig oder nicht eindeutig. Aktualisiere das Projekt, bevor du die Shot-Kacheln prüfst.",
         "renderedCount": "{{count}} von {{total}} gerendert",
         "staleCount": "{{count}} veraltete Shots",
@@ -1157,10 +1172,7 @@
               "cutBedTooShort": "Das Audiobett ist kürzer als der Cut."
             }
           }
-        },
-        "liftBeat": "In den Papierkorb verschieben",
-        "liftConfirmTitle": "{{title}} in den Papierkorb verschieben?",
-        "liftConfirmContent": "Dieser Beat wird aus dem Film entfernt. Alle erstellten und bezahlten Inhalte bleiben im Papierkorb erhalten."
+        }
       },
       "cut": {
         "preview": {

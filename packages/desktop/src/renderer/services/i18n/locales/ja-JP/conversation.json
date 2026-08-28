@@ -1019,6 +1019,14 @@
         "dismissed": "費用を使わず破棄"
       },
       "table": {
+        "reorder": {
+          "label": "{{title}}の並べ替え操作",
+          "dragHandle": "{{title}}（位置{{position}}）を並べ替え",
+          "moveEarlier": "{{title}}を前へ移動",
+          "moveLater": "{{title}}を後ろへ移動",
+          "announcement": "{{title}}を位置{{from}}から{{to}}（全{{total}}件）へ移動しました。",
+          "failed": "Beatの順序は変更されませんでした。"
+        },
         "authoring": {
           "label": "ストーリーの作成と復旧",
           "coverageGap": "{{total}} 個の Beat のうち {{count}} 個に Shot がありません",
@@ -1039,34 +1047,12 @@
           "story": "ストーリー"
         },
         "plannedPending": "計画合計なし",
-        "board": {
-          "label": "ディレクター・ボードの操作",
-          "progress": "{{total}}枚中{{drawn}}枚を作成済み",
-          "progressLabel": "ボードの完成度",
-          "staleCount": "古いパネル {{count}}件",
-          "busyCount": "進行中 {{count}}件",
-          "style": {
-            "label": "ボードのスタイル",
-            "greyTone": "グレートーン",
-            "lineArt": "線画",
-            "colourKey": "カラーキー"
-          },
-          "stop": "描画を停止",
-          "stopNote": "可能な場合は停止時にキャンセルを要求します。完成済みのパネルと発生済みの料金はそのまま残ります。",
-          "drawNext": "次のバッチを描画 ({{count}})",
-          "styleRequired": "描画する前にボードのスタイルを選択してください。"
-        },
         "panel": {
           "openDetails": "{{title}}のボードパネルを開く",
           "closeDetails": "{{title}}のボードパネルを閉じる",
-          "detailLabel": "{{title}}のボードパネル",
-          "drawMissing": "未作成を描画 ({{count}})",
-          "redrawBeat": "Beatを再描画 · 有料",
           "cardLabel": "Shot {{position}}：{{status}}",
           "shotDetails": "ショット{{position}}の詳細",
           "head": "チェーン先頭",
-          "redrawShot": "Shot {{position}}を再描画 · 有料",
-          "useAsFirstFrame": "Shot {{position}}のパネルを最初のフレームに使用",
           "status": {
             "missing": "未作成",
             "current": "最新",
@@ -1091,6 +1077,35 @@
         }
       },
       "board": {
+        "controls": {
+          "label": "ディレクター・ボードの操作",
+          "progress": "{{total}}枚中{{drawn}}枚を作成済み",
+          "progressLabel": "ボードの完成度",
+          "staleCount": "古いパネル {{count}}件",
+          "busyCount": "進行中 {{count}}件",
+          "stop": "描画を停止",
+          "stopNote": "可能な場合は停止時にキャンセルを要求します。完成済みのパネルと発生済みの料金はそのまま残ります。",
+          "drawNext": "次のバッチを描画 ({{count}})"
+        },
+        "panel": {
+          "beatActions": "ディレクター・ボードの操作 · {{title}}",
+          "drawMissing": "未作成を描画 ({{count}})",
+          "redrawBeat": "Beatを再描画 · 有料",
+          "cardLabel": "Shot {{position}}：{{status}}",
+          "redrawShot": "Shot {{position}}を再描画 · 有料",
+          "useAsFirstFrame": "Shot {{position}}のパネルを最初のフレームに使用",
+          "status": {
+            "missing": "未作成",
+            "current": "最新",
+            "stale": "古い",
+            "statusPending": "ステータス待ち",
+            "queued": "待機中",
+            "drawing": "描画中",
+            "needsAttention": "要確認",
+            "failed": "失敗",
+            "cancelled": "キャンセル済み"
+          }
+        },
         "statusUnavailable": "現在のBoardの順序は不完全か不明確です。Shotタイルを確認する前にプロジェクトを更新してください。",
         "renderedCount": "{{total}}個中{{count}}個をレンダリング済み",
         "staleCount": "古くなったShot {{count}}個",
@@ -1156,10 +1171,7 @@
               "cutBedTooShort": "オーディオベッドがCutより短くなっています。"
             }
           }
-        },
-        "liftBeat": "ゴミ箱に移動",
-        "liftConfirmTitle": "「{{title}}」をゴミ箱に移動しますか？",
-        "liftConfirmContent": "このビートはフィルムから外れます。作成済みの内容と有料生成した素材はすべてゴミ箱に保持されます。"
+        }
       },
       "cut": {
         "preview": {

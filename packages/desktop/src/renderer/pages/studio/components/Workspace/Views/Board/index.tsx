@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ArrowDown, ArrowUp, Drag } from '@icon-park/react';
 import { Button, Popconfirm } from '@arco-design/web-react';
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,12 +12,11 @@ import type {
   StudioBinItem,
   StudioProjectStatusBlockerCauseV2,
   StudioProjectStatusV2,
-  StudioRendererParkBlockerCodeV2,
-  StudioRendererParkEligibilityV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST } from '@/common/types/project/creativeStudioTypes';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
-import type { WorkspaceProjection } from '../../workspaceProjection';
+import type { WorkspaceBoardPanelProjection, WorkspaceProjection } from '../../workspaceProjection';
 import { Bin, binItemFocusKey } from './Bin';
 import { deriveBoardShotTiles, type BoardShotTile, type BoardShotTileMedia } from './boardShotTiles';
 import styles from './Board.module.css';
@@ -26,16 +24,6 @@ import styles from './Board.module.css';
 const KEY_ROOT = 'conversation.creativeStudio.workspace.board';
 const BEAT_PANEL_ROOT = 'conversation.creativeStudio.workspace.beatPanel';
 const WORKSPACE_CONTROLS_ROOT = 'conversation.creativeStudio.workspace.controls';
-
-const BLOCKER_KEYS = {
-  own_nonterminal_job: `${BEAT_PANEL_ROOT}.blocker.ownNonterminalJob`,
-  own_pending_frame: `${BEAT_PANEL_ROOT}.blocker.ownPendingFrame`,
-  downstream_nonterminal_job: `${BEAT_PANEL_ROOT}.blocker.downstreamNonterminalJob`,
-  downstream_pending_frame: `${BEAT_PANEL_ROOT}.blocker.downstreamPendingFrame`,
-  waiting_authorization_dependency: `${BEAT_PANEL_ROOT}.blocker.waitingAuthorizationDependency`,
-  bound_nonterminal_request: `${BEAT_PANEL_ROOT}.blocker.boundNonterminalRequest`,
-  beat_shot_capacity_reached: `${BEAT_PANEL_ROOT}.blocker.beatShotCapacityReached`,
-} as const satisfies Record<StudioRendererParkBlockerCodeV2, string>;
 
 const SHOT_BLOCKER_CAUSE_KEYS = {
   route_inventory_unavailable: `${KEY_ROOT}.shot.blocker.cause.routeInventoryUnavailable`,
@@ -84,9 +72,67 @@ const ROUTE_KIND_KEYS = {
   video: `${WORKSPACE_CONTROLS_ROOT}.videoRoute`,
 } as const;
 
+const PANEL_STATUS_KEYS = {
+  missing: `${KEY_ROOT}.panel.status.missing`,
+  current: `${KEY_ROOT}.panel.status.current`,
+  stale: `${KEY_ROOT}.panel.status.stale`,
+  status_pending: `${KEY_ROOT}.panel.status.statusPending`,
+  queued: `${KEY_ROOT}.panel.status.queued`,
+  drawing: `${KEY_ROOT}.panel.status.drawing`,
+  needs_attention: `${KEY_ROOT}.panel.status.needsAttention`,
+  failed: `${KEY_ROOT}.panel.status.failed`,
+  cancelled: `${KEY_ROOT}.panel.status.cancelled`,
+} as const;
+
+const DRAWABLE_BOARD_ACTIVITIES = new Set<WorkspaceBoardPanelProjection['activity']>(['idle', 'failed', 'cancelled']);
+const BUSY_BOARD_ACTIVITIES = new Set<WorkspaceBoardPanelProjection['activity']>(['queued', 'drawing']);
+
+const isDrawableBoardPanel = (panel: WorkspaceBoardPanelProjection): boolean =>
+  DRAWABLE_BOARD_ACTIVITIES.has(panel.activity) &&
+  panel.freshness !== 'status_pending' &&
+  panel.activity !== 'status_pending' &&
+  panel.recovery?.canRetryDownload !== true;
+
+const isPromotableBoardPanel = (
+  panel: WorkspaceBoardPanelProjection
+): panel is WorkspaceBoardPanelProjection & { assetId: string } =>
+  panel.assetId !== null && panel.freshness === 'current' && isDrawableBoardPanel(panel);
+
+const panelStatusKey = (panel: WorkspaceBoardPanelProjection): string =>
+  panel.activity === 'idle' ? PANEL_STATUS_KEYS[panel.freshness] : PANEL_STATUS_KEYS[panel.activity];
+
+const statusPendingPanel = (shotId: string): WorkspaceBoardPanelProjection => ({
+  shotId,
+  assetId: null,
+  producerJobId: null,
+  latestJobId: null,
+  staleCauses: [],
+  freshness: 'status_pending',
+  activity: 'status_pending',
+  recovery: null,
+});
+
+const exactFilmOrderBoardPanels = (projection: WorkspaceProjection): WorkspaceBoardPanelProjection[] => {
+  if (
+    projection.boardPanels.length !== projection.activeShotIds.length ||
+    projection.boardPanels.some((panel, index) => panel?.shotId !== projection.activeShotIds[index]) ||
+    new Set(projection.activeShotIds).size !== projection.activeShotIds.length
+  ) {
+    return projection.activeShotIds.map(statusPendingPanel);
+  }
+  return projection.boardPanels.map((panel) => ({ ...panel, staleCauses: [...panel.staleCauses] }));
+};
+
 export type BoardActions = {
-  reorderBeats: (beatOrder: readonly string[]) => Promise<boolean>;
-  parkBeat: (beatId: string) => Promise<boolean>;
+  drawNext: () => void;
+  drawBeat: (beatId: string) => void;
+  redrawShot: (shotId: string) => void;
+  redrawBeat: (beatId: string) => void;
+  promotePanel: (shotId: string, boardAssetId: string) => void;
+  stop: () => void;
+  retryJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => void;
+  retryDownload: (jobId: string) => void;
+  cancelJob: (jobId: string) => void;
   restoreBeat: (beatId: string, beforeBeatId: string | null) => Promise<boolean>;
   restoreShot: (shotId: string, beforeShotId: string | null) => Promise<boolean>;
   reorderBin: (bin: readonly StudioBinItem[]) => Promise<boolean>;
@@ -97,8 +143,9 @@ export type BoardViewProps = {
   projection: WorkspaceProjection;
   projectStatus: StudioProjectStatusV2 | null;
   selectedBeatId: string | null;
-  dirtyBeatIds: readonly string[];
   pending: boolean;
+  gateLocked: boolean;
+  imageRouteReady: boolean;
   actions: BoardActions;
   binFocusAnnouncement: string;
   binFocusItemKey: string | null;
@@ -110,18 +157,6 @@ export type BoardViewProps = {
 type ShotMediaProps = {
   media: BoardShotTileMedia;
   projectId: string;
-};
-
-const exactBeatParkEligibility = (
-  projection: WorkspaceProjection,
-  projectId: string,
-  beatId: string
-): StudioRendererParkEligibilityV2 | null => {
-  if (projection.projectId !== projectId || !projection.workspaceStatusReady) return null;
-  const matches = projection.parkEligibility.filter(
-    (row) => row.subject === 'beat' && row.action === 'park' && row.beatId === beatId && row.shotId === null
-  );
-  return matches.length === 1 ? matches[0]! : null;
 };
 
 const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId }) => {
@@ -159,15 +194,154 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId }) => {
   );
 };
 
+type BoardPanelArtworkProps = {
+  panel: WorkspaceBoardPanelProjection;
+  projectId: string;
+};
+
+const BoardPanelArtwork: React.FC<BoardPanelArtworkProps> = ({ panel, projectId }) => {
+  const assetUrl = panel.assetId === null ? null : createManagedStudioAssetUrl(projectId, panel.assetId);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showImage = assetUrl !== null && failedUrl !== assetUrl;
+
+  useEffect(() => setFailedUrl(null), [assetUrl]);
+
+  return (
+    <span
+      aria-hidden='true'
+      className={styles.panelArtwork}
+      data-activity={panel.activity}
+      data-asset-id={panel.assetId ?? undefined}
+      data-freshness={panel.freshness}
+    >
+      {showImage ? <img alt='' loading='lazy' onError={() => setFailedUrl(assetUrl)} src={assetUrl} /> : null}
+      <span className={styles.panelActivityMark} />
+    </span>
+  );
+};
+
+type BoardPanelRecoveryControlsProps = {
+  actions: BoardActions;
+  describedBy: string;
+  disabled: boolean;
+  onAction: () => void;
+  panel: WorkspaceBoardPanelProjection;
+  shotLabel: string;
+};
+
+const BoardPanelRecoveryControls: React.FC<BoardPanelRecoveryControlsProps> = ({
+  actions,
+  describedBy,
+  disabled,
+  onAction,
+  panel,
+  shotLabel,
+}) => {
+  const { t } = useTranslation();
+  const recovery = panel.recovery;
+  if (recovery === null) return null;
+  const retryLabel = `${t('conversation.creativeStudio.jobs.retry')} · ${shotLabel}`;
+  const retryDownloadLabel = `${t('conversation.creativeStudio.jobs.retryDownload')} · ${shotLabel}`;
+  const cancelLabel = `${t('conversation.creativeStudio.jobs.cancel')} · ${shotLabel}`;
+  return (
+    <div className={styles.panelRecovery} data-board-recovery-job-id={recovery.jobId}>
+      {recovery.canRetryDownload ? (
+        <Button
+          aria-describedby={describedBy}
+          aria-label={retryDownloadLabel}
+          disabled={disabled}
+          onClick={() => {
+            if (!disabled) {
+              onAction();
+              actions.retryDownload(recovery.jobId);
+            }
+          }}
+          size='mini'
+        >
+          {t('conversation.creativeStudio.jobs.retryDownload')}
+        </Button>
+      ) : null}
+      {recovery.canRetry && recovery.submissionUnknown ? (
+        <Popconfirm
+          cancelText={t(`${BEAT_PANEL_ROOT}.common.cancel`)}
+          content={t('conversation.creativeStudio.jobs.retryChargeBody')}
+          disabled={disabled}
+          okText={t('conversation.creativeStudio.jobs.retryChargeConfirm')}
+          onOk={() => {
+            if (!disabled) {
+              onAction();
+              actions.retryJob(recovery.jobId, true);
+            }
+          }}
+          title={t('conversation.creativeStudio.jobs.retryChargeTitle')}
+        >
+          <Button aria-describedby={describedBy} aria-label={retryLabel} disabled={disabled} size='mini'>
+            {t('conversation.creativeStudio.jobs.retry')}
+          </Button>
+        </Popconfirm>
+      ) : recovery.canRetry ? (
+        <Button
+          aria-describedby={describedBy}
+          aria-label={retryLabel}
+          disabled={disabled}
+          onClick={() => {
+            if (!disabled) {
+              onAction();
+              actions.retryJob(recovery.jobId, false);
+            }
+          }}
+          size='mini'
+        >
+          {t('conversation.creativeStudio.jobs.retry')}
+        </Button>
+      ) : null}
+      {recovery.canCancel ? (
+        <Button
+          aria-describedby={describedBy}
+          aria-label={cancelLabel}
+          disabled={disabled}
+          onClick={() => {
+            if (!disabled) {
+              onAction();
+              actions.cancelJob(recovery.jobId);
+            }
+          }}
+          size='mini'
+        >
+          {t('conversation.creativeStudio.jobs.cancel')}
+        </Button>
+      ) : null}
+    </div>
+  );
+};
+
 type ShotTileProps = {
+  actions: BoardActions;
+  generationLocked: boolean;
+  interactionLocked: boolean;
+  panel: WorkspaceBoardPanelProjection;
   projectId: string;
   shot: BoardShotTile;
   onReviewReferenceBinding: (shotId: string) => void;
 };
 
-const ShotTile: React.FC<ShotTileProps> = ({ projectId, shot, onReviewReferenceBinding }) => {
+const ShotTile: React.FC<ShotTileProps> = ({
+  actions,
+  generationLocked,
+  interactionLocked,
+  panel,
+  projectId,
+  shot,
+  onReviewReferenceBinding,
+}) => {
   const { t } = useTranslation();
   const canReviewReferenceBinding = shot.blockers.some((blocker) => blocker.reviewReferenceBinding);
+  const panelStatusId = useId();
+  const panelCardRef = useRef<HTMLDivElement | null>(null);
+  const shotLabel = t(`${KEY_ROOT}.shot.position`, {
+    beat: shot.beatPosition,
+    shot: shot.shotPosition,
+  });
   return (
     <li
       aria-label={t(`${KEY_ROOT}.shot.ariaLabel`, {
@@ -179,6 +353,72 @@ const ShotTile: React.FC<ShotTileProps> = ({ projectId, shot, onReviewReferenceB
       data-shot-tile
     >
       <ShotMedia media={shot.media} projectId={projectId} />
+      <div
+        ref={panelCardRef}
+        aria-label={t(`${KEY_ROOT}.panel.cardLabel`, { position: shotLabel, status: t(panelStatusKey(panel)) })}
+        className={styles.panelCard}
+        data-board-panel-shot-id={shot.shotId}
+        role='group'
+        tabIndex={-1}
+      >
+        <BoardPanelArtwork panel={panel} projectId={projectId} />
+        <div className={styles.panelBody}>
+          <span className={styles.panelLabel}>
+            {t('conversation.creativeStudio.workspace.gate.purpose.board_still')}
+          </span>
+          <span
+            className={styles.panelStatus}
+            data-panel-activity={panel.activity}
+            data-panel-freshness={panel.freshness}
+            id={panelStatusId}
+          >
+            {t(panelStatusKey(panel))}
+          </span>
+          <BoardPanelRecoveryControls
+            actions={actions}
+            describedBy={panelStatusId}
+            disabled={interactionLocked}
+            onAction={() => {
+              panelCardRef.current?.focus({ preventScroll: true });
+            }}
+            panel={panel}
+            shotLabel={shotLabel}
+          />
+          <div className={styles.panelActions}>
+            {shot.chain.kind === 'head' &&
+            shot.explicitSeedAssetId !== panel.assetId &&
+            isPromotableBoardPanel(panel) ? (
+              <Button
+                aria-describedby={panelStatusId}
+                disabled={interactionLocked || shot.promotionBlocked}
+                onClick={() => {
+                  if (!interactionLocked && !shot.promotionBlocked) actions.promotePanel(shot.shotId, panel.assetId);
+                }}
+                size='mini'
+              >
+                {t(`${KEY_ROOT}.panel.useAsFirstFrame`, { position: shotLabel })}
+              </Button>
+            ) : null}
+            {panel.assetId !== null && panel.recovery?.canRetryDownload !== true ? (
+              <Button
+                aria-describedby={panelStatusId}
+                disabled={generationLocked || !isDrawableBoardPanel(panel)}
+                onClick={() => {
+                  if (!generationLocked && isDrawableBoardPanel(panel)) actions.redrawShot(shot.shotId);
+                }}
+                size='mini'
+              >
+                {t(`${KEY_ROOT}.panel.redrawShot`, { position: shotLabel })}
+              </Button>
+            ) : null}
+          </div>
+          {shot.seedAuthorizationLocked && isPromotableBoardPanel(panel) ? (
+            <p className={styles.panelLockCopy}>
+              {t('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked')}
+            </p>
+          ) : null}
+        </div>
+      </div>
       <div className={styles.shotBody}>
         <div className={styles.shotHeading}>
           <span className={styles.shotPosition}>
@@ -252,23 +492,15 @@ const ShotTile: React.FC<ShotTileProps> = ({ projectId, shot, onReviewReferenceB
   );
 };
 
-const moveOrder = (order: readonly string[], from: number, to: number): string[] | null => {
-  if (from < 0 || from >= order.length || to < 0 || to >= order.length || from === to) return null;
-  const next = [...order];
-  const [moved] = next.splice(from, 1);
-  if (moved === undefined) return null;
-  next.splice(to, 0, moved);
-  return next;
-};
-
 /** Film-order Board backed only by sanitized workspace projection facts and exact native actions. */
 export const BoardView: React.FC<BoardViewProps> = ({
   projectId,
   projection,
   projectStatus,
   selectedBeatId,
-  dirtyBeatIds,
   pending,
+  gateLocked,
+  imageRouteReady,
   actions,
   binFocusAnnouncement,
   binFocusItemKey,
@@ -277,25 +509,44 @@ export const BoardView: React.FC<BoardViewProps> = ({
   onReviewReferenceBinding,
 }) => {
   const { t } = useTranslation();
-  const [announcement, setAnnouncement] = useState('');
-  const [busyBeatId, setBusyBeatId] = useState<string | null>(null);
   const [localFocusItemKey, setLocalFocusItemKey] = useState<string | null>(null);
   const [restoreFocusIntent, setRestoreFocusIntent] = useState<{ projectId: string; beatId: string } | null>(null);
-  const [failedLiftFocusId, setFailedLiftFocusId] = useState<string | null>(null);
   const titleRefs = useRef(new Map<string, HTMLButtonElement>());
-  const liftRefs = useRef(new Map<string, HTMLButtonElement>());
-  const liftBlockerDescriptionId = useId();
-  const mutationPendingRef = useRef(false);
-  const draggedBeatIdRef = useRef<string | null>(null);
-  const dirtyBeatIdSet = useMemo(() => new Set(dirtyBeatIds), [dirtyBeatIds]);
   const tileBoard = useMemo(
     () => (projectId === projection.projectId ? deriveBoardShotTiles(projection, projectStatus) : null),
     [projectId, projectStatus, projection]
   );
-  const beatOrder = projection.activeBeats.map((beat) => beat.id);
-  const canonicalOrderReady =
-    tileBoard !== null && projectId === projection.projectId && new Set(beatOrder).size === beatOrder.length;
+  const exactBoardPanels = useMemo(() => exactFilmOrderBoardPanels(projection), [projection]);
+  const panelByShotId = useMemo(
+    () => new Map(exactBoardPanels.map((panel) => [panel.shotId, panel] as const)),
+    [exactBoardPanels]
+  );
+  const boardSummary = useMemo(() => {
+    const drawn = exactBoardPanels.filter((panel) => panel.assetId !== null).length;
+    const stale = exactBoardPanels.filter((panel) => panel.freshness === 'stale').length;
+    const busy = exactBoardPanels.filter((panel) => BUSY_BOARD_ACTIVITIES.has(panel.activity)).length;
+    const statusPending = exactBoardPanels.some(
+      (panel) => panel.freshness === 'status_pending' || panel.activity === 'status_pending'
+    );
+    const drawableMissing = exactBoardPanels.filter(
+      (panel) => panel.freshness === 'missing' && isDrawableBoardPanel(panel)
+    ).length;
+    return {
+      drawn,
+      stale,
+      busy,
+      statusPending,
+      nextBatch: Math.min(STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST, drawableMissing),
+      total: exactBoardPanels.length,
+    };
+  }, [exactBoardPanels]);
+  const boardControlsRef = useRef<HTMLElement | null>(null);
+  const interactionLocked = pending || gateLocked || tileBoard === null;
+  const generationLocked = interactionLocked || boardSummary.statusPending || !imageRouteReady;
+  const canDrawNext = !generationLocked && boardSummary.nextBatch > 0;
+  const canStop = !interactionLocked && boardSummary.busy > 0;
   const managedProjectId = projectId === projection.projectId ? projectId : '';
+  const requestedBinFocusItemKey = binFocusItemKey ?? localFocusItemKey;
 
   useEffect(() => {
     if (restoreFocusIntent === null) return;
@@ -319,76 +570,67 @@ export const BoardView: React.FC<BoardViewProps> = ({
     }
   }, [projectId, projection.activeBeatIds, projection.bin.items, projection.projectId, restoreFocusIntent]);
 
-  useEffect(() => {
-    if (failedLiftFocusId === null || busyBeatId !== null) return;
-    if (!projection.activeBeatIds.includes(failedLiftFocusId)) {
-      setFailedLiftFocusId(null);
-      return;
-    }
-    const control = liftRefs.current.get(failedLiftFocusId);
-    (control ?? titleRefs.current.get(failedLiftFocusId))?.focus();
-    setFailedLiftFocusId(null);
-  }, [busyBeatId, failedLiftFocusId, projection.activeBeatIds]);
-
-  const focusBeatTitle = (beatId: string): void => {
-    titleRefs.current.get(beatId)?.focus();
-  };
-
-  const reorderBeat = async (beatId: string, destination: number): Promise<void> => {
-    if (pending || mutationPendingRef.current || !canonicalOrderReady) return;
-    const source = beatOrder.indexOf(beatId);
-    const nextOrder = moveOrder(beatOrder, source, destination);
-    if (nextOrder === null) return;
-
-    mutationPendingRef.current = true;
-    setBusyBeatId(beatId);
-    let reordered = false;
-    try {
-      reordered = await actions.reorderBeats(nextOrder);
-      setAnnouncement(
-        reordered
-          ? t(`${KEY_ROOT}.reorderAnnouncement`, {
-              title: projection.activeBeats[source]?.title || beatId,
-              from: source + 1,
-              to: destination + 1,
-              total: beatOrder.length,
-            })
-          : t(`${KEY_ROOT}.reorderFailed`)
-      );
-    } catch {
-      setAnnouncement(t(`${KEY_ROOT}.reorderFailed`));
-    } finally {
-      mutationPendingRef.current = false;
-      setBusyBeatId(null);
-      focusBeatTitle(beatId);
-    }
-  };
-
-  const liftBeat = async (beatId: string, liftAllowed: boolean): Promise<void> => {
-    if (!liftAllowed || pending || mutationPendingRef.current) return;
-    mutationPendingRef.current = true;
-    setBusyBeatId(beatId);
-    let lifted = false;
-    try {
-      lifted = await actions.parkBeat(beatId);
-      setAnnouncement(t(lifted ? `${KEY_ROOT}.liftSucceeded` : `${KEY_ROOT}.liftFailed`));
-      if (lifted) setLocalFocusItemKey(binItemFocusKey({ kind: 'beat', beatId, reason: 'lifted' }));
-    } catch {
-      setAnnouncement(t(`${KEY_ROOT}.liftFailed`));
-    } finally {
-      mutationPendingRef.current = false;
-      setBusyBeatId(null);
-      if (!lifted) setFailedLiftFocusId(beatId);
-    }
-  };
-
-  const requestedBinFocusItemKey = binFocusItemKey ?? localFocusItemKey;
-
   return (
     <section className={styles.root}>
       <header className={styles.header}>
         <h2 className={styles.heading}>{t(`${KEY_ROOT}.ariaLabel`)}</h2>
       </header>
+
+      <section
+        ref={boardControlsRef}
+        aria-label={t(`${KEY_ROOT}.controls.label`)}
+        className={styles.boardControls}
+        role='region'
+        tabIndex={-1}
+      >
+        <div className={styles.boardProgressBlock}>
+          <strong className={styles.boardProgressText}>
+            {t(`${KEY_ROOT}.controls.progress`, {
+              drawn: boardSummary.drawn,
+              total: boardSummary.total,
+            })}
+          </strong>
+          <progress
+            aria-label={t(`${KEY_ROOT}.controls.progressLabel`)}
+            className={styles.boardProgress}
+            max={Math.max(1, boardSummary.total)}
+            value={boardSummary.drawn}
+          />
+          <span className={styles.boardProgressFacts}>
+            <span>{t(`${KEY_ROOT}.controls.staleCount`, { count: boardSummary.stale })}</span>
+            <span>{t(`${KEY_ROOT}.controls.busyCount`, { count: boardSummary.busy })}</span>
+          </span>
+        </div>
+        <div className={styles.boardPrimaryAction}>
+          {boardSummary.busy > 0 ? (
+            <>
+              <Button
+                disabled={!canStop}
+                onClick={() => {
+                  if (canStop) {
+                    boardControlsRef.current?.focus({ preventScroll: true });
+                    actions.stop();
+                  }
+                }}
+                status='danger'
+              >
+                {t(`${KEY_ROOT}.controls.stop`)}
+              </Button>
+              <p>{t(`${KEY_ROOT}.controls.stopNote`)}</p>
+            </>
+          ) : (
+            <Button
+              disabled={!canDrawNext}
+              onClick={() => {
+                if (canDrawNext) actions.drawNext();
+              }}
+              type='primary'
+            >
+              {t(`${KEY_ROOT}.controls.drawNext`, { count: boardSummary.nextBatch })}
+            </Button>
+          )}
+        </div>
+      </section>
 
       {tileBoard !== null && tileBoard.globalBlockers.length > 0 ? (
         <section
@@ -417,45 +659,31 @@ export const BoardView: React.FC<BoardViewProps> = ({
           {tileBoard.beats.map((beatTiles, index) => {
             const { beat } = beatTiles;
             const selected = beat.id === selectedBeatId;
-            const eligibility = exactBeatParkEligibility(projection, projectId, beat.id);
-            const dirty = dirtyBeatIdSet.has(beat.id);
-            const liftAllowed =
-              canonicalOrderReady && eligibility?.allowed === true && eligibility.blockers.length === 0 && !dirty;
-            const blockerKeys = dirty
-              ? [`${KEY_ROOT}.liftDirtyDraft`]
-              : !canonicalOrderReady || eligibility === null
-                ? [`${KEY_ROOT}.liftUnavailable`]
-                : eligibility.blockers.length > 0
-                  ? eligibility.blockers.map((blocker) => BLOCKER_KEYS[blocker.code])
-                  : eligibility.allowed
-                    ? []
-                    : [`${KEY_ROOT}.liftUnavailable`];
-            const mutationLocked = pending || busyBeatId !== null || !canonicalOrderReady;
-            const liftGuarded = mutationLocked || !liftAllowed;
+            const boardPanelsForBeat = beatTiles.shots.map(
+              (shot) => panelByShotId.get(shot.shotId) ?? statusPendingPanel(shot.shotId)
+            );
+            const drawableMissingCount = boardPanelsForBeat.filter(
+              (panel) => panel.freshness === 'missing' && isDrawableBoardPanel(panel)
+            ).length;
+            const canDrawMissing =
+              !generationLocked &&
+              drawableMissingCount > 0 &&
+              drawableMissingCount <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST;
+            const canOfferRedrawBeat =
+              boardPanelsForBeat.length > 0 &&
+              boardPanelsForBeat.length <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST &&
+              boardPanelsForBeat.every((panel) => panel.assetId !== null && isDrawableBoardPanel(panel));
             const title =
               beat.title.trim() ||
               t('conversation.creativeStudio.workspace.beatPanel.untitledBeat', { index: beatTiles.beatPosition });
+            const accessibleBeatTitle = `${beatTiles.beatPosition}. ${title}`;
             const actualDuration =
               beat.actualSeconds === null ? null : t(`${KEY_ROOT}.actualDuration`, { seconds: beat.actualSeconds });
             const targetDuration =
               beat.targetSeconds === null ? null : t(`${KEY_ROOT}.targetDuration`, { seconds: beat.targetSeconds });
 
             return (
-              <li
-                key={beat.id}
-                className={styles.beatCard}
-                data-beat-id={beat.id}
-                data-selected={selected}
-                onDragOver={(event) => {
-                  if (draggedBeatIdRef.current !== null && draggedBeatIdRef.current !== beat.id) event.preventDefault();
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const draggedBeatId = draggedBeatIdRef.current;
-                  draggedBeatIdRef.current = null;
-                  if (draggedBeatId !== null) void reorderBeat(draggedBeatId, index);
-                }}
-              >
+              <li key={beat.id} className={styles.beatCard} data-beat-id={beat.id} data-selected={selected}>
                 <header className={styles.beatHeader}>
                   <span className={styles.ordinal}>
                     <bdi>{t(`${KEY_ROOT}.ordinal`, { index: String(index + 1).padStart(2, '0') })}</bdi>
@@ -512,106 +740,37 @@ export const BoardView: React.FC<BoardViewProps> = ({
                       )}
                     </div>
                   </div>
-                  {selected ? (
+                  {drawableMissingCount > 0 || canOfferRedrawBeat ? (
                     <div
-                      aria-label={t(`${KEY_ROOT}.actionsLabel`, { title })}
-                      className={styles.selectionActions}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Escape') return;
-                        event.preventDefault();
-                        event.stopPropagation();
-                        focusBeatTitle(beat.id);
-                      }}
+                      aria-label={t(`${KEY_ROOT}.panel.beatActions`, { title: accessibleBeatTitle })}
+                      className={styles.beatPanelActions}
                       role='group'
                     >
-                      <div className={styles.cardActions}>
+                      {drawableMissingCount > 0 ? (
                         <Button
-                          aria-label={t(`${KEY_ROOT}.dragHandle`, { title, position: index + 1 })}
-                          className={styles.dragHandle}
-                          disabled={mutationLocked}
-                          draggable={!mutationLocked}
-                          icon={<Drag />}
-                          onDragEnd={() => {
-                            draggedBeatIdRef.current = null;
-                          }}
-                          onDragStart={(event) => {
-                            draggedBeatIdRef.current = beat.id;
-                            event.dataTransfer.effectAllowed = 'move';
-                            event.dataTransfer.setData('text/plain', beat.id);
-                          }}
-                          onKeyDown={(event) => {
-                            let destination: number | null = null;
-                            if (event.key === 'ArrowUp') destination = index - 1;
-                            else if (event.key === 'ArrowDown') destination = index + 1;
-                            else if (event.key === 'Home') destination = 0;
-                            else if (event.key === 'End') destination = beatOrder.length - 1;
-                            if (destination === null) return;
-                            event.preventDefault();
-                            void reorderBeat(beat.id, destination);
+                          aria-label={`${t(`${KEY_ROOT}.panel.drawMissing`, { count: drawableMissingCount })} · ${accessibleBeatTitle}`}
+                          disabled={!canDrawMissing}
+                          onClick={() => {
+                            if (canDrawMissing) actions.drawBeat(beat.id);
                           }}
                           size='small'
-                        />
-                        <Button
-                          aria-label={t(`${KEY_ROOT}.moveEarlier`, { title })}
-                          disabled={mutationLocked || index === 0}
-                          icon={<ArrowUp />}
-                          onClick={() => void reorderBeat(beat.id, index - 1)}
-                          size='small'
-                        />
-                        <Button
-                          aria-label={t(`${KEY_ROOT}.moveLater`, { title })}
-                          disabled={mutationLocked || index === beatOrder.length - 1}
-                          icon={<ArrowDown />}
-                          onClick={() => void reorderBeat(beat.id, index + 1)}
-                          size='small'
-                        />
-                        <Popconfirm
-                          cancelText={t(`${BEAT_PANEL_ROOT}.common.cancel`)}
-                          content={t(`${KEY_ROOT}.liftConfirmContent`)}
-                          disabled={liftGuarded}
-                          okText={t(`${KEY_ROOT}.liftBeat`)}
-                          onCancel={() => liftRefs.current.get(beat.id)?.focus()}
-                          onOk={() => liftBeat(beat.id, liftAllowed)}
-                          title={t(`${KEY_ROOT}.liftConfirmTitle`, { title })}
+                          type='primary'
                         >
-                          <Button
-                            ref={(node) => {
-                              if (node === null) liftRefs.current.delete(beat.id);
-                              else if (node instanceof HTMLButtonElement) liftRefs.current.set(beat.id, node);
-                            }}
-                            aria-describedby={blockerKeys.length === 0 ? undefined : liftBlockerDescriptionId}
-                            aria-disabled={liftGuarded || undefined}
-                            className={styles.liftBeat}
-                            onClick={(event) => {
-                              if (!liftGuarded) return;
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }}
-                            onKeyDown={(event) => {
-                              if (!liftGuarded || (event.key !== 'Enter' && event.key !== ' ')) return;
-                              event.preventDefault();
-                              event.stopPropagation();
-                            }}
-                            size='small'
-                            status='danger'
-                            type='secondary'
-                          >
-                            {t(`${KEY_ROOT}.liftBeat`)}
-                          </Button>
-                        </Popconfirm>
-                      </div>
-                      {blockerKeys.length === 0 ? null : (
-                        <ul
-                          id={liftBlockerDescriptionId}
-                          aria-atomic='true'
-                          aria-live='polite'
-                          className={styles.blocker}
+                          {t(`${KEY_ROOT}.panel.drawMissing`, { count: drawableMissingCount })}
+                        </Button>
+                      ) : null}
+                      {canOfferRedrawBeat ? (
+                        <Button
+                          aria-label={`${t(`${KEY_ROOT}.panel.redrawBeat`)} · ${accessibleBeatTitle}`}
+                          disabled={generationLocked}
+                          onClick={() => {
+                            if (!generationLocked) actions.redrawBeat(beat.id);
+                          }}
+                          size='small'
                         >
-                          {blockerKeys.map((blockerKey, blockerIndex) => (
-                            <li key={`${blockerKey}:${blockerIndex}`}>{t(blockerKey)}</li>
-                          ))}
-                        </ul>
-                      )}
+                          {t(`${KEY_ROOT}.panel.redrawBeat`)}
+                        </Button>
+                      ) : null}
                     </div>
                   ) : null}
                 </header>
@@ -623,7 +782,11 @@ export const BoardView: React.FC<BoardViewProps> = ({
                     {beatTiles.shots.map((shot) => (
                       <ShotTile
                         key={shot.shotId}
+                        actions={actions}
+                        generationLocked={generationLocked}
+                        interactionLocked={interactionLocked}
                         onReviewReferenceBinding={onReviewReferenceBinding}
+                        panel={panelByShotId.get(shot.shotId) ?? statusPendingPanel(shot.shotId)}
                         projectId={managedProjectId}
                         shot={shot}
                       />
@@ -646,14 +809,11 @@ export const BoardView: React.FC<BoardViewProps> = ({
         onRestoreSuccess={(result) => {
           setRestoreFocusIntent({ projectId, beatId: result.beatId });
         }}
-        pending={pending}
+        pending={interactionLocked}
         projectId={projectId}
         projection={projection}
       />
 
-      <span aria-atomic='true' aria-live='polite' className={styles.srOnly}>
-        {announcement}
-      </span>
       <span aria-atomic='true' aria-live='polite' className={styles.srOnly} data-studio-shot-lift-announcement>
         {binFocusAnnouncement}
       </span>

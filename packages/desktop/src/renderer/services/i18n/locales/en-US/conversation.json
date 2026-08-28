@@ -1428,6 +1428,14 @@
         }
       },
       "table": {
+        "reorder": {
+          "label": "Actions for {{title}}",
+          "dragHandle": "Reorder {{title}} at position {{position}}",
+          "moveEarlier": "Move {{title}} earlier",
+          "moveLater": "Move {{title}} later",
+          "announcement": "Moved {{title}} from position {{from}} to {{to}} of {{total}}.",
+          "failed": "Beat order was not changed."
+        },
         "label": "Beat table",
         "authoring": {
           "label": "Story authoring and recovery",
@@ -1452,34 +1460,12 @@
           "state": "State",
           "story": "Story"
         },
-        "board": {
-          "label": "Director Board controls",
-          "progress": "{{drawn}} of {{total}} panels drawn",
-          "progressLabel": "Board completeness",
-          "staleCount": "{{count}} stale",
-          "busyCount": "{{count}} in progress",
-          "style": {
-            "label": "Board style",
-            "greyTone": "Grey tone",
-            "lineArt": "Line art",
-            "colourKey": "Colour key"
-          },
-          "stop": "Stop drawing",
-          "stopNote": "Stop requests cancellation where possible. Completed panels and charges already incurred remain.",
-          "drawNext": "Draw next batch ({{count}})",
-          "styleRequired": "Choose a Board style before drawing."
-        },
         "panel": {
           "openDetails": "Open Board panels for {{title}}",
           "closeDetails": "Close Board panels for {{title}}",
-          "detailLabel": "Board panels for {{title}}",
-          "drawMissing": "Draw missing ({{count}})",
-          "redrawBeat": "Redraw Beat · paid",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Shot {{position}} details",
           "head": "Chain head",
-          "redrawShot": "Redraw Shot {{position}} · paid",
-          "useAsFirstFrame": "Use Shot {{position}} panel as first frame",
           "status": {
             "missing": "Not drawn",
             "current": "Current",
@@ -1514,6 +1500,35 @@
         }
       },
       "board": {
+        "controls": {
+          "label": "Director Board controls",
+          "progress": "{{drawn}} of {{total}} panels drawn",
+          "progressLabel": "Board completeness",
+          "staleCount": "{{count}} stale",
+          "busyCount": "{{count}} in progress",
+          "stop": "Stop drawing",
+          "stopNote": "Stop requests cancellation where possible. Completed panels and charges already incurred remain.",
+          "drawNext": "Draw next batch ({{count}})"
+        },
+        "panel": {
+          "beatActions": "Actions for {{title}}",
+          "drawMissing": "Draw missing ({{count}})",
+          "redrawBeat": "Redraw Beat · paid",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "redrawShot": "Redraw Shot {{position}} · paid",
+          "useAsFirstFrame": "Use Shot {{position}} panel as first frame",
+          "status": {
+            "missing": "Not drawn",
+            "current": "Current",
+            "stale": "Stale",
+            "statusPending": "Status pending",
+            "queued": "Queued",
+            "drawing": "Drawing",
+            "needsAttention": "Needs attention",
+            "failed": "Failed",
+            "cancelled": "Cancelled"
+          }
+        },
         "statusUnavailable": "The current Board order is incomplete or ambiguous. Refresh the project before reviewing Shot tiles.",
         "renderedCount": "{{count}} of {{total}} rendered",
         "staleCount": "{{count}} stale Shots",
@@ -1581,7 +1596,6 @@
           }
         },
         "ariaLabel": "Beat board",
-        "actionsLabel": "Actions for {{title}}",
         "openBeat": "Open {{title}}",
         "selectedBeat": "Selected Beat",
         "ordinal": "{{index}}",
@@ -1591,19 +1605,7 @@
         "targetDuration": "~{{seconds}}s target",
         "actualDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s actual",
         "noCoverage": "No coverage",
-        "coverUnavailable": "Preview unavailable",
-        "dragHandle": "Reorder {{title}} at position {{position}}",
-        "moveEarlier": "Move {{title}} earlier",
-        "moveLater": "Move {{title}} later",
-        "reorderAnnouncement": "Moved {{title}} from position {{from}} to {{to}} of {{total}}.",
-        "reorderFailed": "Beat order was not changed.",
-        "liftBeat": "Move to Bin",
-        "liftConfirmTitle": "Move {{title}} to the Bin?",
-        "liftConfirmContent": "This Beat leaves the film. All authored and paid work is kept in the Bin.",
-        "liftUnavailable": "Refresh the current workspace status before lifting this Beat.",
-        "liftDirtyDraft": "Save or reset local edits before lifting this Beat.",
-        "liftSucceeded": "Beat moved to the Bin.",
-        "liftFailed": "Beat was not moved to the Bin."
+        "coverUnavailable": "Preview unavailable"
       },
       "cut": {
         "ariaLabel": "Film Cut",

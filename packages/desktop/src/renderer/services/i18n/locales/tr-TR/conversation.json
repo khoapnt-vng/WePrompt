@@ -1021,6 +1021,14 @@
         "dismissed": "Harcama yapmadan kapatıldı"
       },
       "table": {
+        "reorder": {
+          "label": "{{title}} için yeniden sıralama eylemleri",
+          "dragHandle": "{{position}}. konumdaki {{title}} öğesini yeniden sırala",
+          "moveEarlier": "{{title}} öğesini öne taşı",
+          "moveLater": "{{title}} öğesini arkaya taşı",
+          "announcement": "{{title}}, {{from}}. konumdan {{total}} içinde {{to}}. konuma taşındı.",
+          "failed": "Beat sırası değiştirilmedi."
+        },
         "authoring": {
           "label": "Hikâye yazımı ve kurtarma",
           "coverageGap": "{{total}} Beat'in {{count}} tanesinde Shot yok",
@@ -1041,34 +1049,12 @@
           "story": "Hikâye"
         },
         "plannedPending": "Planlanan toplam yok",
-        "board": {
-          "label": "Yönetmen panosu denetimleri",
-          "progress": "{{total}} panelden {{drawn}} tanesi çizildi",
-          "progressLabel": "Pano tamamlanma durumu",
-          "staleCount": "{{count}} eski",
-          "busyCount": "{{count}} işlemde",
-          "style": {
-            "label": "Pano stili",
-            "greyTone": "Gri ton",
-            "lineArt": "Çizgi sanatı",
-            "colourKey": "Renk anahtarı"
-          },
-          "stop": "Çizimi durdur",
-          "stopNote": "Durdurma, mümkün olduğunda iptal talebinde bulunur. Tamamlanan paneller ve oluşmuş ücretler korunur.",
-          "drawNext": "Sonraki grubu çiz ({{count}})",
-          "styleRequired": "Çizmeden önce bir pano stili seçin."
-        },
         "panel": {
           "openDetails": "{{title}} için pano panellerini aç",
           "closeDetails": "{{title}} için pano panellerini kapat",
-          "detailLabel": "{{title}} için pano panelleri",
-          "drawMissing": "Eksikleri çiz ({{count}})",
-          "redrawBeat": "Beat'i yeniden çiz · ücretli",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Shot {{position}} ayrıntıları",
           "head": "Zincir başlangıcı",
-          "redrawShot": "Shot {{position}} öğesini yeniden çiz · ücretli",
-          "useAsFirstFrame": "Shot {{position}} panelini ilk kare olarak kullan",
           "status": {
             "missing": "Çizilmedi",
             "current": "Güncel",
@@ -1093,6 +1079,35 @@
         }
       },
       "board": {
+        "controls": {
+          "label": "Yönetmen panosu denetimleri",
+          "progress": "{{total}} panelden {{drawn}} tanesi çizildi",
+          "progressLabel": "Pano tamamlanma durumu",
+          "staleCount": "{{count}} eski",
+          "busyCount": "{{count}} işlemde",
+          "stop": "Çizimi durdur",
+          "stopNote": "Durdurma, mümkün olduğunda iptal talebinde bulunur. Tamamlanan paneller ve oluşmuş ücretler korunur.",
+          "drawNext": "Sonraki grubu çiz ({{count}})"
+        },
+        "panel": {
+          "beatActions": "Yönetmen panosu denetimleri · {{title}}",
+          "drawMissing": "Eksikleri çiz ({{count}})",
+          "redrawBeat": "Beat'i yeniden çiz · ücretli",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "redrawShot": "Shot {{position}} öğesini yeniden çiz · ücretli",
+          "useAsFirstFrame": "Shot {{position}} panelini ilk kare olarak kullan",
+          "status": {
+            "missing": "Çizilmedi",
+            "current": "Güncel",
+            "stale": "Eski",
+            "statusPending": "Durum bekleniyor",
+            "queued": "Kuyrukta",
+            "drawing": "Çiziliyor",
+            "needsAttention": "İlgilenilmesi gerekiyor",
+            "failed": "Başarısız",
+            "cancelled": "İptal edildi"
+          }
+        },
         "statusUnavailable": "Geçerli Board sırası eksik veya belirsiz. Shot kartlarını incelemeden önce projeyi yenileyin.",
         "renderedCount": "{{total}} öğenin {{count}} tanesi render edildi",
         "staleCount": "{{count}} eski Shot",
@@ -1158,10 +1173,7 @@
               "cutBedTooShort": "Ses yatağı Cut’tan daha kısa."
             }
           }
-        },
-        "liftBeat": "Çöp Kutusu'na taşı",
-        "liftConfirmTitle": "\"{{title}}\" Çöp Kutusu'na taşınsın mı?",
-        "liftConfirmContent": "Bu Beat filmden çıkarılır. Oluşturulan ve ücreti ödenmiş tüm içerik Çöp Kutusu'nda korunur."
+        }
       },
       "cut": {
         "preview": {

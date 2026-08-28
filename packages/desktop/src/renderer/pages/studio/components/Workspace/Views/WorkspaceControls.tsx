@@ -17,8 +17,36 @@ import { CutView } from './Cut';
 import { ReferencesView, type ReferenceWorkspaceItem } from './References';
 import { deriveReferenceRemovalBlockers } from './References/referenceRemovalBlockers';
 import { TableView, type ReferenceBindingWorkspaceItem } from './Table';
-import type { WorkspaceControlsProps } from './viewTypes';
+import type { WorkspaceAuthoringOperationV2, WorkspaceControlsProps } from './viewTypes';
 import styles from './WorkspaceControls.module.css';
+
+type TableBeatReorderOperation = Extract<WorkspaceAuthoringOperationV2, { kind: 'reorder_beats' }>;
+
+export const tableBeatReorderOperation = ({
+  activeBeatIds,
+  activeView,
+  beatOrder,
+  gateLocked,
+  pending,
+}: {
+  activeBeatIds: readonly string[];
+  activeView: WorkspaceControlsProps['activeView'];
+  beatOrder: readonly string[];
+  gateLocked: boolean;
+  pending: boolean;
+}): TableBeatReorderOperation | null => {
+  if (
+    pending ||
+    gateLocked ||
+    activeView !== 'table' ||
+    beatOrder.length !== activeBeatIds.length ||
+    new Set(beatOrder).size !== beatOrder.length ||
+    beatOrder.some((beatId) => !activeBeatIds.includes(beatId))
+  ) {
+    return null;
+  }
+  return { kind: 'reorder_beats', beatOrder: [...beatOrder] };
+};
 
 export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   activeView,
@@ -31,7 +59,6 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   imageRouteReady,
   errorMessageKey,
   mutations,
-  tableBoardActions,
   boardActions,
   cutActions,
   beatPanelActions,
@@ -80,17 +107,6 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
     shotEditFocusIntent.shotIds.every((shotId) => openBeat.shots.some((shot) => shot.id === shotId))
       ? shotEditFocusIntent
       : null;
-  const dirtyBeatIds = useMemo(() => {
-    const dirtyKeys = new Set(drafts.dirtyKeys);
-    return projection.activeBeats.flatMap((beat) => {
-      const beatKeys = [
-        `beat.${beat.id}.story`,
-        `beat.${beat.id}.targetSeconds`,
-        ...beat.shots.flatMap((shot) => [`shot.${shot.id}.shootingScript`, `shot.${shot.id}.durationSeconds`]),
-      ];
-      return beatKeys.some((key) => dirtyKeys.has(key)) ? [beat.id] : [];
-    });
-  }, [drafts.dirtyKeys, projection.activeBeats]);
   const projectReferences = useMemo<ReferenceWorkspaceItem[]>(
     () =>
       project.referenceOrder.flatMap((referenceId) => {
@@ -421,6 +437,22 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
     beatPanelActions.requestResplit(beatId);
   };
 
+  const reorderBeats = async (beatOrder: readonly string[]): Promise<boolean> => {
+    const operation = tableBeatReorderOperation({
+      activeBeatIds: projection.activeBeatIds,
+      activeView,
+      beatOrder,
+      gateLocked,
+      pending,
+    });
+    if (operation === null) return false;
+    try {
+      return await mutations.applyAuthoring([operation]);
+    } catch {
+      return false;
+    }
+  };
+
   const selectAndOpenBeat = (beatId: string): void => {
     drafts.selectBeat(beatId);
     setShotLiftAnnouncement('');
@@ -502,15 +534,12 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       ) : null}
       {activeView === 'table' ? (
         <TableView
-          actions={tableBoardActions}
-          authoringActions={{ addBeat, addShot, askDirector }}
+          authoringActions={{ addBeat, addShot, askDirector, reorderBeats }}
           beats={projection.activeBeats}
           coverageGapBeatIds={projection.coverageGapBeatIds}
           bindingActions={referenceActions ?? { saveBinding: async () => false }}
-          boardStyle={project.boardStyle}
           boardPanels={projection.boardPanels}
           gateLocked={gateLocked}
-          imageRouteReady={imageRouteReady}
           onOpenBeat={selectAndOpenBeat}
           onSelectBeat={drafts.selectBeat}
           pending={pending}
@@ -530,7 +559,8 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           actions={boardActions}
           binFocusAnnouncement={shotLiftAnnouncement}
           binFocusItemKey={binFocusIntent?.projectId === project.id ? binFocusIntent.itemKey : null}
-          dirtyBeatIds={dirtyBeatIds}
+          gateLocked={gateLocked}
+          imageRouteReady={imageRouteReady}
           onBinFocusItemSettled={() => setBinFocusIntent(null)}
           onOpenBeat={selectAndOpenBeat}
           onReviewReferenceBinding={onReviewShotReferenceBinding}

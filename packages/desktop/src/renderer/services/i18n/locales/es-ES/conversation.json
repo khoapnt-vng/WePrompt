@@ -1020,6 +1020,14 @@
         "dismissed": "Descartado sin gastar"
       },
       "table": {
+        "reorder": {
+          "label": "Acciones para reordenar {{title}}",
+          "dragHandle": "Reordenar {{title}} en la posición {{position}}",
+          "moveEarlier": "Mover {{title}} antes",
+          "moveLater": "Mover {{title}} después",
+          "announcement": "Se movió {{title}} de la posición {{from}} a la {{to}} de {{total}}.",
+          "failed": "No se cambió el orden de los Beats."
+        },
         "authoring": {
           "label": "Autoría y recuperación de la historia",
           "coverageGap": "{{count}} de {{total}} Beats no tienen Shots",
@@ -1040,34 +1048,12 @@
           "story": "Historia"
         },
         "plannedPending": "Sin suma planificada",
-        "board": {
-          "label": "Controles del Board del Director",
-          "progress": "{{drawn}} de {{total}} paneles dibujados",
-          "progressLabel": "Progreso del Board",
-          "staleCount": "{{count}} obsoletos",
-          "busyCount": "{{count}} en curso",
-          "style": {
-            "label": "Estilo del Board",
-            "greyTone": "Tonos grises",
-            "lineArt": "Dibujo lineal",
-            "colourKey": "Clave de color"
-          },
-          "stop": "Detener el dibujo",
-          "stopNote": "Detener solicita la cancelación cuando es posible. Los paneles completados y los cargos ya incurridos se conservan.",
-          "drawNext": "Dibujar siguiente lote ({{count}})",
-          "styleRequired": "Elige un estilo del Board antes de dibujar."
-        },
         "panel": {
           "openDetails": "Abrir paneles del Board de {{title}}",
           "closeDetails": "Cerrar paneles del Board de {{title}}",
-          "detailLabel": "Paneles del Board de {{title}}",
-          "drawMissing": "Dibujar faltantes ({{count}})",
-          "redrawBeat": "Redibujar Beat · de pago",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Detalles del Shot {{position}}",
           "head": "Inicio de cadena",
-          "redrawShot": "Redibujar Shot {{position}} · de pago",
-          "useAsFirstFrame": "Usar el panel de Shot {{position}} como primer fotograma",
           "status": {
             "missing": "Sin dibujar",
             "current": "Actual",
@@ -1092,6 +1078,35 @@
         }
       },
       "board": {
+        "controls": {
+          "label": "Controles del Board del Director",
+          "progress": "{{drawn}} de {{total}} paneles dibujados",
+          "progressLabel": "Progreso del Board",
+          "staleCount": "{{count}} obsoletos",
+          "busyCount": "{{count}} en curso",
+          "stop": "Detener el dibujo",
+          "stopNote": "Detener solicita la cancelación cuando es posible. Los paneles completados y los cargos ya incurridos se conservan.",
+          "drawNext": "Dibujar siguiente lote ({{count}})"
+        },
+        "panel": {
+          "beatActions": "Controles del Board del Director · {{title}}",
+          "drawMissing": "Dibujar faltantes ({{count}})",
+          "redrawBeat": "Redibujar Beat · de pago",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "redrawShot": "Redibujar Shot {{position}} · de pago",
+          "useAsFirstFrame": "Usar el panel de Shot {{position}} como primer fotograma",
+          "status": {
+            "missing": "Sin dibujar",
+            "current": "Actual",
+            "stale": "Obsoleto",
+            "statusPending": "Estado pendiente",
+            "queued": "En cola",
+            "drawing": "Dibujando",
+            "needsAttention": "Requiere atención",
+            "failed": "Fallido",
+            "cancelled": "Cancelado"
+          }
+        },
         "statusUnavailable": "El orden actual del Board está incompleto o es ambiguo. Actualiza el proyecto antes de revisar las tarjetas de Shot.",
         "renderedCount": "{{count}} de {{total}} renderizados",
         "staleCount": "{{count}} Shots desactualizados",
@@ -1157,10 +1172,7 @@
               "cutBedTooShort": "La pista de audio es más corta que el Cut."
             }
           }
-        },
-        "liftBeat": "Mover a la papelera",
-        "liftConfirmTitle": "¿Mover «{{title}}» a la papelera?",
-        "liftConfirmContent": "Este Beat sale de la película. Todo el contenido creado y de pago se conserva en la papelera."
+        }
       },
       "cut": {
         "preview": {

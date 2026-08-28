@@ -29,7 +29,6 @@ import type {
   CutActions,
   ReferenceRetainedShotReviewClaim,
   ReferencesViewActions,
-  TableBoardActions,
   WorkspaceMutationCallbacks,
   WorkspaceProjectMenuProps,
 } from '@/renderer/pages/studio/components/Workspace';
@@ -60,7 +59,6 @@ const mocks = vi.hoisted(() => {
     closeHandlers,
     beatPanelActions: null as BeatPanelActions | null,
     boardActions: null as BoardActions | null,
-    tableBoardActions: null as TableBoardActions | null,
     cutActions: null as CutActions | null,
     referenceActions: null as ReferencesViewActions | null,
     workspaceMutations: null as WorkspaceMutationCallbacks | null,
@@ -149,7 +147,6 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
     WorkspaceControls: (props: React.ComponentProps<typeof actual.WorkspaceControls>) => {
       mocks.beatPanelActions = props.beatPanelActions;
       mocks.boardActions = props.boardActions;
-      mocks.tableBoardActions = props.tableBoardActions;
       mocks.cutActions = props.cutActions;
       mocks.referenceActions = props.referenceActions ?? null;
       mocks.workspaceMutations = props.mutations;
@@ -1696,11 +1693,6 @@ const capturedBoardActions = (): BoardActions => {
   return mocks.boardActions!;
 };
 
-const capturedTableBoardActions = (): TableBoardActions => {
-  expect(mocks.tableBoardActions).not.toBeNull();
-  return mocks.tableBoardActions!;
-};
-
 const capturedCutActions = (): CutActions => {
   expect(mocks.cutActions).not.toBeNull();
   return mocks.cutActions!;
@@ -1784,7 +1776,6 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.closeHandlers.hasUnsavedWork = null;
     mocks.closeHandlers.flushUnsavedWork = null;
     mocks.boardActions = null;
-    mocks.tableBoardActions = null;
     mocks.cutActions = null;
     mocks.referenceActions = null;
     mocks.workspaceMutations = null;
@@ -3634,9 +3625,9 @@ describe('StudioPage schema-5 cutover', () => {
     mockSupportedProject(authority);
     mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().drawNext());
+    act(() => capturedBoardActions().drawNext());
     await screen.findByTestId('studio-spend-gate');
 
     await waitFor(() =>
@@ -3677,9 +3668,9 @@ describe('StudioPage schema-5 cutover', () => {
     mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
     renderStudio();
     await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalled());
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().drawNext());
+    act(() => capturedBoardActions().drawNext());
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="reference_binding"]')).toBeVisible();
 
@@ -3697,24 +3688,6 @@ describe('StudioPage schema-5 cutover', () => {
     );
   });
 
-  it('routes a Board style choice through the revisioned project-settings owner', async () => {
-    const authority = projectWithBoardJobs(2, false);
-    mockSupportedProject(authority);
-    mocks.bridge.editProject.invoke.mockResolvedValue(commit(authority.revision));
-    renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
-
-    act(() => capturedTableBoardActions().setStyle('line_art'));
-
-    await waitFor(() =>
-      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
-        projectId: authority.id,
-        expectedRevision: authority.revision,
-        changes: { boardStyle: 'line_art' },
-      })
-    );
-  });
-
   it('promotes one exact current Board panel for $0 without preparing or confirming provider work', async () => {
     const initial = withCurrentVideoTakes(withCurrentBoardPanels(projectWithBoardJobs(3, false), [1]), [1, 2, 3]);
     initial.videoRouteId = 'route_video';
@@ -3727,9 +3700,9 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValue(projectWorkspaceLoad(promoted));
     mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(promoted.revision));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal).toHaveAttribute('data-gate-kind', 'board_promotion');
     expect(
@@ -3780,9 +3753,9 @@ describe('StudioPage schema-5 cutover', () => {
       ok({ projectId: authority.id, projectRevision: authority.revision + 1 })
     );
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
@@ -3878,9 +3851,9 @@ describe('StudioPage schema-5 cutover', () => {
     }>();
     mocks.bridge.confirmSubmission.invoke.mockReturnValue(confirmation.promise);
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().drawNext());
+    act(() => capturedBoardActions().drawNext());
     const modal = await screen.findByTestId('studio-spend-gate');
     const confirm = await within(modal).findByRole('button', {
       name: /conversation\.creativeStudio\.workspace\.gate\.confirm/,
@@ -3889,12 +3862,11 @@ describe('StudioPage schema-5 cutover', () => {
     await waitFor(() => expect(mocks.bridge.confirmSubmission.invoke).toHaveBeenCalledTimes(1));
 
     act(() => {
-      capturedTableBoardActions().setStyle('line_art');
-      capturedTableBoardActions().drawNext();
-      capturedTableBoardActions().retryJob('board_job_01', false);
-      capturedTableBoardActions().retryDownload('board_job_01');
-      capturedTableBoardActions().cancelJob('board_job_01');
-      capturedTableBoardActions().stop();
+      capturedBoardActions().drawNext();
+      capturedBoardActions().retryJob('board_job_01', false);
+      capturedBoardActions().retryDownload('board_job_01');
+      capturedBoardActions().cancelJob('board_job_01');
+      capturedBoardActions().stop();
     });
     expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.cancelJob.invoke).not.toHaveBeenCalled();
@@ -3913,9 +3885,9 @@ describe('StudioPage schema-5 cutover', () => {
     mockSupportedProject(authority);
     mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().drawBeat('board_beat_2'));
+    act(() => capturedBoardActions().drawBeat('board_beat_2'));
     await screen.findByTestId('studio-spend-gate');
 
     await waitFor(() =>
@@ -3942,9 +3914,9 @@ describe('StudioPage schema-5 cutover', () => {
       { code: 'first_frame', role: 'video' }
     );
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="first_frame"]')).toBeVisible();
     expect(
@@ -3965,8 +3937,8 @@ describe('StudioPage schema-5 cutover', () => {
     mockSupportedProject(authority);
     renderStudio('/studio/project_1/table');
     await screen.findByRole('heading', { name: 'Launch film' });
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
-    const board = capturedTableBoardActions();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+    const board = capturedBoardActions();
 
     act(() => board.stop());
     act(() => board.drawBeat('missing_beat'));
@@ -3985,9 +3957,9 @@ describe('StudioPage schema-5 cutover', () => {
     mockSupportedProject(authority);
     mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().redrawShot('board_shot_02'));
+    act(() => capturedBoardActions().redrawShot('board_shot_02'));
     await screen.findByTestId('studio-spend-gate');
 
     await waitFor(() =>
@@ -4005,13 +3977,13 @@ describe('StudioPage schema-5 cutover', () => {
     const authority = withCurrentBoardPanels(projectWithBoardJobs(2, false), [1]);
     mockSupportedProject(authority);
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().redrawShot('board_shot_02'));
+    act(() => capturedBoardActions().redrawShot('board_shot_02'));
     expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
     expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
 
-    act(() => capturedTableBoardActions().redrawBeat('board_beat_1'));
+    act(() => capturedBoardActions().redrawBeat('board_beat_1'));
     expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
@@ -4023,11 +3995,10 @@ describe('StudioPage schema-5 cutover', () => {
       'brief.text': { baseValue: authority.brief, value: 'Unsaved replacement brief' },
     });
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().setStyle('line_art'));
-    act(() => capturedTableBoardActions().drawNext());
-    act(() => capturedTableBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    act(() => capturedBoardActions().drawNext());
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
     expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
@@ -4042,9 +4013,9 @@ describe('StudioPage schema-5 cutover', () => {
     pendingStatus.boardPanels[0]!.latestJobId = 'forged_job';
     mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(pendingStatus));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().drawNext());
+    act(() => capturedBoardActions().drawNext());
 
     expect(await screen.findByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
     expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
@@ -4060,9 +4031,9 @@ describe('StudioPage schema-5 cutover', () => {
       { code: 'no_engine', role: 'image' }
     );
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().drawNext());
+    act(() => capturedBoardActions().drawNext());
 
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
@@ -4072,18 +4043,31 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('blocks Board spend review until the project has a Board style', async () => {
+  it('removes the dead Board-style editor lock while Main remains quote authority', async () => {
     const authority = projectWithBoardJobs(2, false);
     authority.boardStyle = null;
     mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('Main rejects the malformed style'));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().drawNext());
+    expect(capturedBoardActions()).not.toHaveProperty('setStyle');
+    act(() => capturedBoardActions().drawNext());
 
-    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
-    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
-    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    await screen.findByTestId('studio-spend-gate');
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [1, 2].map((index) => ({
+          target: { kind: 'shot', shotId: `board_shot_0${index}` },
+          purpose: 'board_still',
+        })),
+        cascadeChoices: [],
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
   it('stops all 30 exact cancellable Board jobs against sequentially refreshed revisions', async () => {
@@ -4102,9 +4086,9 @@ describe('StudioPage schema-5 cutover', () => {
       return ok(authorities[shotNumber]!.jobs[jobId]!);
     });
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().stop());
+    act(() => capturedBoardActions().stop());
 
     await waitFor(() => expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledTimes(30), { timeout: 15_000 });
     expect(mocks.bridge.cancelJob.invoke.mock.calls.map(([request]) => request)).toEqual(
@@ -4132,9 +4116,9 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValue(projectWorkspaceLoad(afterBusyCancellation));
     mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(afterBusyCancellation.jobs.board_job_01));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().stop());
+    act(() => capturedBoardActions().stop());
 
     await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
     expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledExactlyOnceWith({
@@ -4167,13 +4151,13 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValue(ok(chainStatus(retried)));
     mocks.bridge.retryJob.invoke.mockResolvedValue(ok(retried.jobs.board_job_01));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
     await expect(capturedBeatPanelActions().retryGenerationJob('board_job_01', true)).resolves.toBe(false);
-    act(() => capturedTableBoardActions().retryJob('board_job_01', false));
+    act(() => capturedBoardActions().retryJob('board_job_01', false));
     expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
 
-    act(() => capturedTableBoardActions().retryJob('board_job_01', true));
+    act(() => capturedBoardActions().retryJob('board_job_01', true));
     await waitFor(() =>
       expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledExactlyOnceWith({
         projectId: current.id,
@@ -4209,13 +4193,13 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValue(ok(chainStatus(retried)));
     mocks.bridge.retryDownload.invoke.mockResolvedValue(ok(retried.jobs.board_job_01));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    act(() => capturedTableBoardActions().drawNext());
+    act(() => capturedBoardActions().drawNext());
     expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
 
-    act(() => capturedTableBoardActions().retryDownload('board_job_01'));
+    act(() => capturedBoardActions().retryDownload('board_job_01'));
     await waitFor(() =>
       expect(mocks.bridge.retryDownload.invoke).toHaveBeenCalledExactlyOnceWith({
         projectId: current.id,
@@ -4248,10 +4232,10 @@ describe('StudioPage schema-5 cutover', () => {
       .mockResolvedValue(ok(chainStatus(cancelled)));
     mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(cancelled.jobs.board_job_01));
     renderStudio();
-    await waitFor(() => expect(mocks.tableBoardActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
     await expect(capturedBeatPanelActions().cancelGenerationJob('board_job_01')).resolves.toBe(false);
-    act(() => capturedTableBoardActions().cancelJob('board_job_01'));
+    act(() => capturedBoardActions().cancelJob('board_job_01'));
 
     await waitFor(() =>
       expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledExactlyOnceWith({
@@ -7238,7 +7222,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(actions).not.toHaveProperty('restoreTake');
     await expectSuccessfulBeatPanelAction(() => actions.parkShot('shot_0'));
     await expectSuccessfulBeatPanelAction(() => actions.parkBeat('beat_0'));
-    await expectSuccessfulBeatPanelAction(() => board.reorderBeats(['beat_1', 'beat_0']));
+    expect(board).not.toHaveProperty('reorderBeats');
     await expectSuccessfulBeatPanelAction(() => board.restoreBeat('beat_2', 'beat_1'));
     await expectSuccessfulBeatPanelAction(() => board.restoreShot('shot_2', 'shot_1'));
     expect(board).not.toHaveProperty('restoreTake');
@@ -7292,11 +7276,6 @@ describe('StudioPage schema-5 cutover', () => {
         expectedRevision: 8,
         operations: [{ kind: 'reorder_shots', beatId: 'beat_0', shotOrder: ['shot_1', 'shot_0'] }],
       },
-      {
-        projectId: 'project_1',
-        expectedRevision: 11,
-        operations: [{ kind: 'reorder_beats', beatOrder: ['beat_1', 'beat_0'] }],
-      },
     ]);
     expect(mocks.bridge.parkShot.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
@@ -7310,25 +7289,25 @@ describe('StudioPage schema-5 cutover', () => {
     });
     expect(mocks.bridge.restoreBeat.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 12,
+      expectedRevision: 11,
       beatId: 'beat_2',
       beforeBeatId: 'beat_1',
     });
     expect(mocks.bridge.restoreShot.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 13,
+      expectedRevision: 12,
       shotId: 'shot_2',
       beforeShotId: 'shot_1',
     });
     expect(mocks.bridge.reorderBin.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
-      expectedRevision: 14,
+      expectedRevision: 13,
       bin: [
         { kind: 'beat', beatId: 'beat_2', reason: 'lifted' },
         { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
       ],
     });
-    expect(revision).toBe(15);
+    expect(revision).toBe(14);
   });
 
   it('projects malformed topology defensively through both render and close-save traversal', async () => {

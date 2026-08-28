@@ -1019,6 +1019,14 @@
         "dismissed": "بدون هزینه بسته شد"
       },
       "table": {
+        "reorder": {
+          "label": "کنش‌های مرتب‌سازی {{title}}",
+          "dragHandle": "مرتب‌سازی مجدد {{title}} در جایگاه {{position}}",
+          "moveEarlier": "انتقال {{title}} به قبل",
+          "moveLater": "انتقال {{title}} به بعد",
+          "announcement": "{{title}} از جایگاه {{from}} به {{to}} از {{total}} منتقل شد.",
+          "failed": "ترتیب Beatها تغییر نکرد."
+        },
         "authoring": {
           "label": "نگارش و بازیابی داستان",
           "coverageGap": "{{count}} از {{total}} Beat هیچ Shoti ندارند",
@@ -1039,34 +1047,12 @@
           "story": "داستان"
         },
         "plannedPending": "جمع برنامه‌ریزی‌شده موجود نیست",
-        "board": {
-          "label": "کنترل‌های بورد کارگردان",
-          "progress": "{{drawn}} از {{total}} پنل طراحی شده",
-          "progressLabel": "میزان تکمیل بورد",
-          "staleCount": "{{count}} مورد قدیمی",
-          "busyCount": "{{count}} مورد در حال انجام",
-          "style": {
-            "label": "سبک بورد",
-            "greyTone": "طیف خاکستری",
-            "lineArt": "طراحی خطی",
-            "colourKey": "کلید رنگ"
-          },
-          "stop": "توقف طراحی",
-          "stopNote": "توقف، در صورت امکان درخواست لغو می‌کند. پنل‌های تکمیل‌شده و هزینه‌های ایجادشده باقی می‌مانند.",
-          "drawNext": "طراحی دستهٔ بعدی ({{count}})",
-          "styleRequired": "پیش از طراحی، یک سبک بورد انتخاب کنید."
-        },
         "panel": {
           "openDetails": "باز کردن پنل‌های بورد برای {{title}}",
           "closeDetails": "بستن پنل‌های بورد برای {{title}}",
-          "detailLabel": "پنل‌های بورد برای {{title}}",
-          "drawMissing": "طراحی موارد باقی‌مانده ({{count}})",
-          "redrawBeat": "طراحی دوبارهٔ بیت · پولی",
           "cardLabel": "شات {{position}}: {{status}}",
           "shotDetails": "جزئیات شات {{position}}",
           "head": "آغاز زنجیره",
-          "redrawShot": "طراحی دوبارهٔ شات {{position}} · پولی",
-          "useAsFirstFrame": "استفاده از پنل شات {{position}} به‌عنوان فریم اول",
           "status": {
             "missing": "طراحی نشده",
             "current": "فعلی",
@@ -1091,6 +1077,35 @@
         }
       },
       "board": {
+        "controls": {
+          "label": "کنترل‌های بورد کارگردان",
+          "progress": "{{drawn}} از {{total}} پنل طراحی شده",
+          "progressLabel": "میزان تکمیل بورد",
+          "staleCount": "{{count}} مورد قدیمی",
+          "busyCount": "{{count}} مورد در حال انجام",
+          "stop": "توقف طراحی",
+          "stopNote": "توقف، در صورت امکان درخواست لغو می‌کند. پنل‌های تکمیل‌شده و هزینه‌های ایجادشده باقی می‌مانند.",
+          "drawNext": "طراحی دستهٔ بعدی ({{count}})"
+        },
+        "panel": {
+          "beatActions": "کنترل‌های بورد کارگردان · {{title}}",
+          "drawMissing": "طراحی موارد باقی‌مانده ({{count}})",
+          "redrawBeat": "طراحی دوبارهٔ بیت · پولی",
+          "cardLabel": "شات {{position}}: {{status}}",
+          "redrawShot": "طراحی دوبارهٔ شات {{position}} · پولی",
+          "useAsFirstFrame": "استفاده از پنل شات {{position}} به‌عنوان فریم اول",
+          "status": {
+            "missing": "طراحی نشده",
+            "current": "فعلی",
+            "stale": "قدیمی",
+            "statusPending": "وضعیت در انتظار",
+            "queued": "در صف",
+            "drawing": "در حال طراحی",
+            "needsAttention": "نیازمند توجه",
+            "failed": "ناموفق",
+            "cancelled": "لغوشده"
+          }
+        },
         "statusUnavailable": "ترتیب فعلی Board ناقص یا مبهم است. پیش از بررسی کاشی‌های Shot، پروژه را تازه‌سازی کنید.",
         "renderedCount": "{{count}} از {{total}} رندر شده",
         "staleCount": "{{count}} Shot قدیمی",
@@ -1156,10 +1171,7 @@
               "cutBedTooShort": "بستر صوتی از Cut کوتاه‌تر است."
             }
           }
-        },
-        "liftBeat": "انتقال به سطل زباله",
-        "liftConfirmTitle": "«{{title}}» به سطل زباله منتقل شود؟",
-        "liftConfirmContent": "این ضرب‌آهنگ از فیلم خارج می‌شود. همهٔ محتوای ساخته‌شده و پولی در سطل زباله حفظ می‌شود."
+        }
       },
       "cut": {
         "preview": {

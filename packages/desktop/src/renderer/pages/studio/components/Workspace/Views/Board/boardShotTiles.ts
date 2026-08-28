@@ -35,6 +35,9 @@ export type BoardShotTile = {
   shotPosition: number;
   shootingScript: string;
   durationSeconds: number;
+  explicitSeedAssetId: string | null;
+  promotionBlocked: boolean;
+  seedAuthorizationLocked: boolean;
   status: WorkspaceShotStatus;
   chain: BoardShotTileChain;
   media: BoardShotTileMedia;
@@ -224,10 +227,29 @@ export const deriveBoardShotTiles = (
       if (statusWord.stale) staleCount += 1;
       if (shot.videoGenerationInFlight || shot.seedGenerationInFlight) inFlightCount += 1;
       if (!shot.segmentHead && shotIndex === 0) return null;
+      const segmentShots: WorkspaceShotProjection[] = [];
+      if (shot.segmentHead) {
+        for (let segmentIndex = shotIndex; segmentIndex < beat.shots.length; segmentIndex += 1) {
+          const segmentShot = beat.shots[segmentIndex]!;
+          if (segmentIndex > shotIndex && segmentShot.segmentHead) break;
+          segmentShots.push(segmentShot);
+        }
+      }
+      const seedAuthorizationLocked = segmentShots.some((segmentShot) => segmentShot.seedAuthorizationLock !== null);
       shots.push({
         ...position,
         shootingScript: shot.shootingScript,
         durationSeconds: shot.durationSeconds,
+        explicitSeedAssetId: shot.explicitSeedAssetId,
+        promotionBlocked:
+          !projection.workspaceStatusReady ||
+          !projection.chainStatusReady ||
+          shot.seedGenerationBlocked ||
+          seedAuthorizationLocked ||
+          segmentShots.some(
+            (segmentShot) => segmentShot.segmentState.kind === 'status_pending' || segmentShot.videoGenerationBlocked
+          ),
+        seedAuthorizationLocked,
         status: statusWord,
         chain: shot.segmentHead
           ? { kind: 'head' }

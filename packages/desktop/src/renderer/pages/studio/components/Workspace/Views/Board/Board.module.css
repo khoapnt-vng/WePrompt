@@ -26,7 +26,6 @@
   overflow-wrap: anywhere;
 }
 
-.cardActions,
 .binActions {
   display: flex;
   min-inline-size: 0;
@@ -247,35 +246,13 @@
   text-transform: uppercase;
 }
 
-.cardActions {
-  justify-content: flex-end;
-}
-
-.selectionActions {
-  display: grid;
-  min-inline-size: 0;
-  gap: 8px;
-  max-inline-size: 420px;
-}
-
-.dragHandle,
 .binDragHandle {
   cursor: grab;
   touch-action: none;
 }
 
-.dragHandle:active,
 .binDragHandle:active {
   cursor: grabbing;
-}
-
-.liftBeat:global(.arco-btn-secondary.arco-btn-status-danger)[aria-disabled='true'],
-.liftBeat:global(.arco-btn-secondary.arco-btn-status-danger)[aria-disabled='true']:hover,
-.liftBeat:global(.arco-btn-secondary.arco-btn-status-danger)[aria-disabled='true']:active {
-  border-color: var(--color-border-2);
-  color: var(--text-disabled);
-  background-color: var(--color-fill-2);
-  cursor: not-allowed;
 }
 
 .blocker,
@@ -310,6 +287,212 @@
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--color-fill-2);
+}
+
+.boardControls {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) minmax(160px, auto);
+  align-items: center;
+  gap: 14px;
+  min-inline-size: 0;
+  padding-block: 10px;
+  padding-inline: 12px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 12px;
+  background: var(--color-bg-2);
+}
+
+.boardProgressBlock {
+  display: grid;
+  min-inline-size: 0;
+  gap: 5px;
+}
+
+.boardProgressText {
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.boardProgress {
+  overflow: hidden;
+  inline-size: 100%;
+  block-size: 5px;
+  border: 0;
+  border-radius: 999px;
+  accent-color: var(--color-primary-6);
+  background: var(--color-fill-2);
+}
+
+.boardProgress::-webkit-progress-bar {
+  border-radius: inherit;
+  background: var(--color-fill-2);
+}
+
+.boardProgress::-webkit-progress-value {
+  border-radius: inherit;
+  background: var(--color-primary-6);
+}
+
+.boardProgressFacts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+
+.boardPrimaryAction {
+  display: grid;
+  justify-items: stretch;
+  gap: 4px;
+  min-inline-size: 160px;
+}
+
+.boardPrimaryAction p {
+  margin: 0;
+  color: var(--color-text-3);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.beatPanelActions {
+  display: flex;
+  min-inline-size: 0;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.panelCard {
+  display: grid;
+  min-inline-size: 0;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border-block-end: 1px solid var(--color-border-1);
+  background: var(--color-fill-1);
+}
+
+.panelArtwork {
+  position: relative;
+  display: block;
+  overflow: hidden;
+  min-inline-size: 0;
+  aspect-ratio: 16 / 9;
+  border: 1px dashed var(--color-border-3);
+  border-radius: 7px;
+  background: var(--color-fill-2);
+}
+
+.panelArtwork[data-freshness='current'],
+.panelArtwork[data-freshness='stale'] {
+  border-style: solid;
+}
+
+.panelArtwork[data-freshness='stale'] {
+  border-color: var(--color-warning-6);
+}
+
+.panelArtwork[data-activity='queued'],
+.panelArtwork[data-activity='drawing'] {
+  border-color: var(--color-primary-6);
+  background: var(--color-primary-light-1);
+}
+
+.panelArtwork[data-activity='needs_attention'],
+.panelArtwork[data-activity='failed'] {
+  border-color: var(--color-danger-6);
+}
+
+.panelArtwork > img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.panelActivityMark {
+  position: absolute;
+  inset-block-start: 4px;
+  inset-inline-end: 4px;
+  display: none;
+  inline-size: 6px;
+  block-size: 6px;
+  border-radius: 50%;
+  background: var(--color-primary-6);
+  box-shadow: 0 0 0 2px var(--color-bg-2);
+}
+
+.panelArtwork[data-activity='queued'] .panelActivityMark,
+.panelArtwork[data-activity='drawing'] .panelActivityMark {
+  display: block;
+}
+
+.panelBody {
+  display: grid;
+  min-inline-size: 0;
+  align-content: start;
+  gap: 5px;
+}
+
+.panelLabel {
+  color: var(--color-text-3);
+  font-size: 11px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.panelStatus {
+  overflow: hidden;
+  color: var(--color-text-2);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.panelRecovery {
+  display: grid;
+  gap: 4px;
+}
+
+.panelRecovery > button,
+.panelRecovery > span,
+.panelRecovery > span > button {
+  inline-size: 100%;
+}
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.panelActions > button {
+  min-block-size: 26px;
+  padding-inline: 5px;
+  font-size: 9px;
+  line-height: 1.2;
+  white-space: normal;
+}
+
+.panelLockCopy {
+  margin: 0;
+  color: var(--color-warning-7);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .shotBody {
@@ -525,9 +708,18 @@
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .selectionActions {
+  .beatPanelActions {
     grid-column: 1 / -1;
-    max-inline-size: none;
+    justify-content: flex-start;
+  }
+
+  .boardControls {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+
+  .boardPrimaryAction {
+    min-inline-size: 0;
   }
 
   .header,
@@ -536,7 +728,6 @@
     flex-direction: column;
   }
 
-  .cardActions,
   .binActions {
     inline-size: 100%;
   }

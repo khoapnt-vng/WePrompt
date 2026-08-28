@@ -2199,6 +2199,8 @@ test.describe('Creative Studio workspace', () => {
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table', {
       timeout: studioFakeMediaTimeoutMs,
     });
+    await page.locator(viewNavigationSelector).getByRole('link', { name: 'Board', exact: true }).click();
+    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
     const drawNextBoardBatch = page.getByRole('button', { name: 'Draw next batch (2)', exact: true });
     await expect(drawNextBoardBatch).toBeEnabled({ timeout: studioFakeMediaTimeoutMs });
     await drawNextBoardBatch.click();
@@ -2566,7 +2568,16 @@ test.describe('Creative Studio workspace', () => {
     await expect(lastCell).toBeFocused();
     await page.keyboard.press('ArrowDown');
     await expect(lastCell).toBeFocused();
-    await page.keyboard.press('Enter');
+    await lastCell.press('Enter');
+    const lastReorderHandle = rows.nth(24).getByRole('button', {
+      name: 'Reorder Table beat 24 at position 24',
+    });
+    await expect(lastReorderHandle).toBeFocused();
+    await lastReorderHandle.press('Escape');
+    await expect(lastCell).toBeFocused();
+    const lastBeatCell = rows.nth(24).locator('[data-grid-column-name="beat"]');
+    await lastBeatCell.focus();
+    await lastBeatCell.press('Enter');
     await expect(rows.nth(24)).toHaveAttribute('aria-selected', 'true');
     const beatPanel = page.getByRole('dialog', { name: 'Beat panel — Table beat 24' });
     await expect(beatPanel).toBeVisible();
@@ -2593,16 +2604,16 @@ test.describe('Creative Studio workspace', () => {
     const selectedBoardCard = boardCards.nth(23);
     const firstBoardOpener = firstBoardCard.getByRole('button', { name: 'Open Table beat 01' });
     const selectedBoardOpener = selectedBoardCard.getByRole('button', { name: 'Open Table beat 24' });
-    const selectedBoardActions = selectedBoardCard.getByRole('group', { name: 'Actions for Table beat 24' });
+    const firstBoardActions = firstBoardCard.getByRole('group', { name: 'Actions for 1. Table beat 01' });
 
     await expect(directorToggle).toHaveAttribute('aria-expanded', 'false');
     await expect(boardCards).toHaveCount(24);
     await expect(page.getByRole('group', { name: 'Board card size' })).toHaveCount(0);
     await expect(board).not.toHaveAttribute('data-card-size');
-    await expect(firstBoardCard.getByRole('button')).toHaveCount(1);
-    await expect(firstBoardCard.getByRole('group', { name: /Actions for/ })).toHaveCount(0);
+    await expect(firstBoardCard.getByRole('button')).toHaveCount(2);
+    await expect(firstBoardActions).toBeVisible();
+    await expect(selectedBoardCard.getByRole('group', { name: /Actions for/ })).toHaveCount(0);
     await expect(selectedBoardOpener).toHaveAttribute('aria-current', 'true');
-    await expect(selectedBoardActions).toBeVisible();
     await expect(board.getByRole('group', { name: /Actions for/ })).toHaveCount(1);
 
     const expectBoardGeometry = async (direction: 'ltr' | 'rtl'): Promise<void> => {
@@ -2611,7 +2622,8 @@ test.describe('Creative Studio workspace', () => {
       const geometry = await board.evaluate((element) => {
         const cards = Array.from(element.querySelectorAll<HTMLElement>(':scope > [data-beat-id]')).slice(0, 4);
         const cardRects = cards.map((card) => card.getBoundingClientRect());
-        const cover = cards[0]?.querySelector<HTMLElement>('[data-cover-kind]')?.getBoundingClientRect() ?? null;
+        const media =
+          cards[0]?.querySelector<HTMLElement>('[data-shot-tile] [data-media-kind]')?.getBoundingClientRect() ?? null;
         const bounds = element.getBoundingClientRect();
         const workScroll = element.closest<HTMLElement>('[data-studio-work-scroll]');
         const workScrollBounds = workScroll?.getBoundingClientRect() ?? null;
@@ -2626,7 +2638,7 @@ test.describe('Creative Studio workspace', () => {
           })),
           clientWidth: element.clientWidth,
           columnCount: getComputedStyle(element).gridTemplateColumns.split(' ').filter(Boolean).length,
-          cover: cover === null ? null : { height: cover.height, width: cover.width },
+          media: media === null ? null : { height: media.height, width: media.width },
           left: bounds.left,
           right: bounds.right,
           scrollWidth: element.scrollWidth,
@@ -2641,7 +2653,7 @@ test.describe('Creative Studio workspace', () => {
                 },
         };
       });
-      expect(geometry.columnCount).toBe(3);
+      expect(geometry.columnCount).toBe(1);
       expect(geometry.cardRects).toHaveLength(4);
       expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
       expect(geometry.workScroll).not.toBeNull();
@@ -2652,13 +2664,12 @@ test.describe('Creative Studio workspace', () => {
         expect(card.left).toBeGreaterThanOrEqual(geometry.left - 1);
         expect(card.right).toBeLessThanOrEqual(geometry.right + 1);
       }
-      expect(Math.abs(geometry.cardRects[0]!.top - geometry.cardRects[1]!.top)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry.cardRects[0]!.top - geometry.cardRects[2]!.top)).toBeLessThanOrEqual(1);
-      expect(geometry.cardRects[3]!.top).toBeGreaterThan(geometry.cardRects[0]!.bottom);
-      expect(Math.abs(geometry.cardRects[0]!.width - geometry.cardRects[1]!.width)).toBeLessThanOrEqual(1);
-      expect(Math.abs(geometry.cardRects[0]!.width - geometry.cardRects[2]!.width)).toBeLessThanOrEqual(1);
-      expect(geometry.cover).not.toBeNull();
-      expect(geometry.cover!.width / geometry.cover!.height).toBeCloseTo(16 / 9, 1);
+      for (let index = 1; index < geometry.cardRects.length; index += 1) {
+        expect(geometry.cardRects[index]!.top).toBeGreaterThan(geometry.cardRects[index - 1]!.bottom);
+        expect(Math.abs(geometry.cardRects[0]!.width - geometry.cardRects[index]!.width)).toBeLessThanOrEqual(1);
+      }
+      expect(geometry.media).not.toBeNull();
+      expect(geometry.media!.width / geometry.media!.height).toBeCloseTo(16 / 9, 1);
     };
 
     await expectBoardGeometry('ltr');
@@ -2693,23 +2704,15 @@ test.describe('Creative Studio workspace', () => {
     expect(titleStyleBeforeHover.fontFamily).toContain('Manrope');
     await firstBoardCard.scrollIntoViewIfNeeded();
     await expect(firstBoardCard).toBeVisible();
-    const firstCoverBox = await firstBoardCard.locator('[data-cover-kind]').boundingBox();
-    if (firstCoverBox === null) throw new Error('The first Board cover geometry was unavailable');
-    await page.mouse.move(firstCoverBox.x + firstCoverBox.width / 2, firstCoverBox.y + firstCoverBox.height / 2);
+    const firstMediaBox = await firstBoardCard.locator('[data-shot-tile] [data-media-kind]').first().boundingBox();
+    if (firstMediaBox === null) throw new Error('The first Board Shot media geometry was unavailable');
+    await page.mouse.move(firstMediaBox.x + firstMediaBox.width / 2, firstMediaBox.y + firstMediaBox.height / 2);
     expect(await titleStyle()).toEqual(titleStyleBeforeHover);
     await firstBoardOpener.focus();
     await page.keyboard.press('Tab');
-    await expect(boardCards.nth(1).getByRole('button', { name: 'Open Table beat 02' })).toBeFocused();
+    await expect(firstBoardActions.getByRole('button', { name: 'Draw missing (8) · 1. Table beat 01' })).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await expect(firstBoardOpener).toBeFocused();
-
-    await selectedBoardOpener.focus();
-    await page.keyboard.press('Tab');
-    await expect(
-      selectedBoardActions.getByRole('button', { name: 'Reorder Table beat 24 at position 24' })
-    ).toBeFocused();
-    await page.keyboard.press('Escape');
-    await expect(selectedBoardOpener).toBeFocused();
     await expectBoardGeometry('rtl');
     await root.evaluate((element) => element.setAttribute('dir', 'ltr'));
     await expect(root).toHaveAttribute('dir', 'ltr');
@@ -3050,20 +3053,7 @@ test.describe('Creative Studio workspace', () => {
       const seededNavigation = page.locator(viewNavigationSelector);
       await seededNavigation.getByRole('link', { name: 'Board' }).click();
       const seededBeatCard = page.locator(`[data-beat-id="${beatId}"]`);
-      const seededBoardLift = seededBeatCard.getByRole('button', { name: 'Move to Bin' });
-      await expect(seededBoardLift).toBeDisabled();
-      await expect(seededBeatCard.getByText('This item has generation work in progress.', { exact: true })).toHaveCount(
-        2
-      );
-      await expect(
-        seededBeatCard.getByText('Downstream generation is still using this item.', { exact: true })
-      ).toHaveCount(1);
-      await expect(
-        seededBeatCard.getByText('An authorized waiting item still depends on this item.', { exact: true })
-      ).toHaveCount(1);
-      const seededBeatSnapshot = await captureStudioNoMutationSnapshot(page, userDataDirectory, projectId);
-      await seededBoardLift.evaluate((button: HTMLButtonElement) => button.click());
-      await expectStudioNoMutation(page, userDataDirectory, projectId, seededBeatSnapshot);
+      await expect(seededBeatCard.getByRole('button', { name: 'Move to Bin' })).toHaveCount(0);
       await expect(page.locator('[data-studio-bin]')).toContainText('The Bin is empty.');
       await takeScreenshot(page, 'creative-studio/gate-3/refusal-beat-inflight-blockers.png');
       await seededNavigation.getByRole('link', { name: 'Table' }).click();

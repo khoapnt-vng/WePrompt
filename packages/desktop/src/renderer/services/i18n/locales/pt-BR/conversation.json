@@ -1025,6 +1025,14 @@
         "dismissed": "Descartado sem gastar"
       },
       "table": {
+        "reorder": {
+          "label": "Ações para reordenar {{title}}",
+          "dragHandle": "Reordenar {{title}} na posição {{position}}",
+          "moveEarlier": "Mover {{title}} para antes",
+          "moveLater": "Mover {{title}} para depois",
+          "announcement": "{{title}} foi movido da posição {{from}} para {{to}} de {{total}}.",
+          "failed": "A ordem dos Beats não foi alterada."
+        },
         "authoring": {
           "label": "Autoria e recuperação da história",
           "coverageGap": "{{count}} de {{total}} Beats não têm Shots",
@@ -1045,34 +1053,12 @@
           "story": "História"
         },
         "plannedPending": "Sem soma planejada",
-        "board": {
-          "label": "Controles do Board do Diretor",
-          "progress": "{{drawn}} de {{total}} painéis desenhados",
-          "progressLabel": "Conclusão do Board",
-          "staleCount": "{{count}} desatualizados",
-          "busyCount": "{{count}} em andamento",
-          "style": {
-            "label": "Estilo do Board",
-            "greyTone": "Tons de cinza",
-            "lineArt": "Arte linear",
-            "colourKey": "Chave de cor"
-          },
-          "stop": "Parar desenho",
-          "stopNote": "Parar solicita o cancelamento quando possível. Os painéis concluídos e as cobranças já incorridas permanecem.",
-          "drawNext": "Desenhar próximo lote ({{count}})",
-          "styleRequired": "Escolha um estilo de Board antes de desenhar."
-        },
         "panel": {
           "openDetails": "Abrir painéis do Board de {{title}}",
           "closeDetails": "Fechar painéis do Board de {{title}}",
-          "detailLabel": "Painéis do Board de {{title}}",
-          "drawMissing": "Desenhar ausentes ({{count}})",
-          "redrawBeat": "Redesenhar Beat · pago",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Detalhes do Shot {{position}}",
           "head": "Início da cadeia",
-          "redrawShot": "Redesenhar Shot {{position}} · pago",
-          "useAsFirstFrame": "Usar o painel do Shot {{position}} como primeiro quadro",
           "status": {
             "missing": "Não desenhado",
             "current": "Atual",
@@ -1097,6 +1083,35 @@
         }
       },
       "board": {
+        "controls": {
+          "label": "Controles do Board do Diretor",
+          "progress": "{{drawn}} de {{total}} painéis desenhados",
+          "progressLabel": "Conclusão do Board",
+          "staleCount": "{{count}} desatualizados",
+          "busyCount": "{{count}} em andamento",
+          "stop": "Parar desenho",
+          "stopNote": "Parar solicita o cancelamento quando possível. Os painéis concluídos e as cobranças já incorridas permanecem.",
+          "drawNext": "Desenhar próximo lote ({{count}})"
+        },
+        "panel": {
+          "beatActions": "Controles do Board do Diretor · {{title}}",
+          "drawMissing": "Desenhar ausentes ({{count}})",
+          "redrawBeat": "Redesenhar Beat · pago",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "redrawShot": "Redesenhar Shot {{position}} · pago",
+          "useAsFirstFrame": "Usar o painel do Shot {{position}} como primeiro quadro",
+          "status": {
+            "missing": "Não desenhado",
+            "current": "Atual",
+            "stale": "Desatualizado",
+            "statusPending": "Status pendente",
+            "queued": "Na fila",
+            "drawing": "Desenhando",
+            "needsAttention": "Requer atenção",
+            "failed": "Falhou",
+            "cancelled": "Cancelado"
+          }
+        },
         "statusUnavailable": "A ordem atual do Board está incompleta ou ambígua. Atualize o projeto antes de revisar os cartões de Shot.",
         "renderedCount": "{{count}} de {{total}} renderizados",
         "staleCount": "{{count}} Shots desatualizados",
@@ -1162,10 +1177,7 @@
               "cutBedTooShort": "A faixa de áudio é mais curta que o Cut."
             }
           }
-        },
-        "liftBeat": "Mover para a Lixeira",
-        "liftConfirmTitle": "Mover \"{{title}}\" para a Lixeira?",
-        "liftConfirmContent": "Este Beat sai do filme. Todo o conteúdo criado e pago permanece na Lixeira."
+        }
       },
       "cut": {
         "preview": {

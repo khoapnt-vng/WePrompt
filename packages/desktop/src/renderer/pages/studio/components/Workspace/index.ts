@@ -97,6 +97,7 @@ export {
   WorkspaceControls,
   WorkspaceProjectMenu,
   countStoredStudioRuleDrafts,
+  tableBeatReorderOperation,
 } from './Views';
 export type {
   BoardActions,
@@ -114,7 +115,6 @@ export type {
   StudioReferenceFocusIntent,
   ReferenceBindingWorkspaceItem,
   TableAuthoringActions,
-  TableBoardActions,
   TableReferenceBindingActions,
   TableViewProps,
   WorkspaceControlsProps,
