@@ -212,7 +212,7 @@ vi.mock('react-i18next', () => ({
         'common.collapse': 'Collapse',
         'common.expand': 'Expand',
         'common.more': 'More actions',
-        'conversation.creativeStudio.workspace.beatPanel.beatFieldsLabel': 'Beat fields',
+        'conversation.creativeStudio.workspace.beatPanel.beatFieldsLabel': 'Beat story',
         'conversation.creativeStudio.workspace.beatPanel.blocker.statusUnavailable': 'Status unavailable',
         'conversation.creativeStudio.workspace.beatPanel.blocker.unsavedDrafts': 'Save or reset local edits first',
         'conversation.creativeStudio.workspace.beatPanel.chain.authorHardCut': 'Author hard cut',
@@ -238,7 +238,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.fields.duration': 'Duration',
         'conversation.creativeStudio.workspace.beatPanel.fields.shootingScript': 'Shooting script',
         'conversation.creativeStudio.workspace.beatPanel.fields.story': 'Story',
-        'conversation.creativeStudio.workspace.beatPanel.fields.targetSeconds': 'Beat target',
         'conversation.creativeStudio.workspace.beatPanel.generation.gateLocked': 'A confirmation is open',
         'conversation.creativeStudio.workspace.beatPanel.generation.generateSeed': 'Review first-frame generation',
         'conversation.creativeStudio.workspace.beatPanel.generation.noReference': 'No Brief reference',
@@ -2217,11 +2216,11 @@ describe('BeatPanel', () => {
     return menu;
   };
 
-  it('collapses Story and the Beat target behind header controls, leaving no editor by default', () => {
+  it('keeps Story behind its header control and exposes no Beat target authoring', () => {
     const { container } = render(<BeatPanel {...panelProps(makeBeat(), makeDrafts(), makeActions())} />);
 
     // Nothing is authored on screen until asked for: no fields region, no inline action row.
-    expect(screen.queryByRole('region', { name: 'Beat fields' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Beat story' })).toBeNull();
     expect(container.querySelector('[data-beat-editor-actions]')).toBeNull();
     expect(container.querySelector('[data-beat-field="story"]')).toBeNull();
     expect(container.querySelector('[data-beat-field="target"]')).toBeNull();
@@ -2231,18 +2230,16 @@ describe('BeatPanel', () => {
     if (storyToggle === null) throw new Error('Missing Story toggle');
     expect(storyToggle).toHaveAttribute('title', 'Open the film');
     fireEvent.click(storyToggle);
-    const fields = screen.getByRole('region', { name: 'Beat fields' });
+    const fields = screen.getByRole('region', { name: 'Beat story' });
     const storyField = fields.querySelector<HTMLElement>('[data-beat-field="story"]');
     if (storyField === null) throw new Error('Story was not revealed');
     expect(storyField.tagName).toBe('LABEL');
     expect(within(storyField).getByRole('textbox', { name: 'Story' })).toBeVisible();
     expect(within(storyField).getByText('Story · What happens in this Beat', { exact: true })).toBeVisible();
 
-    // The target is revealed from the overflow menu, not from the layout.
-    fireEvent.click(within(openBeatMenu(document.body)).getByRole('menuitem', { name: 'Beat target' }));
-    const revealed = container.querySelector<HTMLElement>('[data-beat-field="target"]');
-    if (revealed === null) throw new Error('Beat target was not revealed from the menu');
-    expect(within(revealed).getByRole('spinbutton', { name: 'Beat target' })).toBeVisible();
+    expect(within(openBeatMenu(document.body)).queryByRole('menuitem', { name: /target/i })).toBeNull();
+    expect(container.querySelector('[data-beat-field="target"]')).toBeNull();
+    expect(container.querySelector('[data-beat-target-reveal]')).toBeNull();
     expect(fields.querySelectorAll('textarea')).toHaveLength(1);
   });
 
@@ -2258,7 +2255,7 @@ describe('BeatPanel', () => {
     fireEvent.click(save);
     await waitFor(() => expect(actions.saveBeat).toHaveBeenCalledWith('beat_1', { story }));
     expect(drafts.resetIfValue).toHaveBeenCalledWith('beat.beat_1.story', story);
-    expect(drafts.resetIfValue).toHaveBeenCalledWith('beat.beat_1.targetSeconds', 8);
+    expect(drafts.resetIfValue).toHaveBeenCalledTimes(1);
   });
 
   it('resets only the local Shot draft keys and invokes no semantic mutation', () => {

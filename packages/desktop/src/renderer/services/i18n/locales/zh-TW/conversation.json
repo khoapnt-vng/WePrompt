@@ -1423,12 +1423,11 @@
           "beatBodyStale": "此節拍中的所有鏡頭、已創作內容和付費產生素材都會保留。移到垃圾桶後，以下內容會變成過時狀態：{{shots}}。",
           "confirmBeat": "移到垃圾桶"
         },
-        "beatFieldsLabel": "Beat 故事與目標",
+        "beatFieldsLabel": "Beat 故事",
         "fieldGuidance": {
           "story": "故事 · 此 Beat 的敘事目的與推進"
         },
         "fields": {
-          "targetSeconds": "目標秒數",
           "story": "故事",
           "shootingScript": "拍攝腳本",
           "shootingScriptFor": "Shot {{index}} 的拍攝腳本"

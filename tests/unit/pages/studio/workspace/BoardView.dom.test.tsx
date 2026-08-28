@@ -218,9 +218,6 @@ vi.mock('react-i18next', () => ({
         const count = Number(values?.count ?? 0);
         return `${count} ${count === 1 ? 'shot' : 'shots'}`;
       }
-      if (key === 'conversation.creativeStudio.workspace.board.targetDuration') {
-        return `~${String(values?.seconds)}s target`;
-      }
       if (key === 'conversation.creativeStudio.workspace.board.actualDuration') {
         return `${String(values?.seconds)}s actual`;
       }
@@ -722,7 +719,7 @@ describe('BoardView', () => {
     expect(coveredCard).not.toHaveTextContent('job_hidden');
     expect(coveredCard).toHaveTextContent('6 shots');
     expect(coveredCard).toHaveTextContent('8s actual');
-    expect(coveredCard).toHaveTextContent('~8s target');
+    expect(coveredCard.querySelector('[data-duration-kind="target"]')).toBeNull();
 
     expect(cardFor(result.container, 'empty')).toHaveTextContent('No coverage');
     expect(cardFor(result.container, 'empty').querySelectorAll('[data-shot-tile]')).toHaveLength(0);

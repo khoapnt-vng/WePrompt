@@ -217,7 +217,7 @@ const hasAdoptedRuleDrafts = (project: StudioRendererProjectV2, drafts: readonly
     );
   });
 
-const beatDraftKey = (beatId: string, field: 'story' | 'targetSeconds'): string => `beat.${beatId}.${field}`;
+const beatDraftKey = (beatId: string): string => `beat.${beatId}.story`;
 
 const shotDraftKey = (shotId: string, field: 'shootingScript' | 'durationSeconds'): string => `shot.${shotId}.${field}`;
 
@@ -292,8 +292,7 @@ const projectDraftValues = (project: StudioRendererProjectV2): Record<string, Wo
   for (const beatId of project.beatOrder) {
     const beat = Object.hasOwn(project.beats, beatId) ? project.beats[beatId] : undefined;
     if (beat?.id !== beatId) continue;
-    values[beatDraftKey(beatId, 'story')] = beat.story;
-    values[beatDraftKey(beatId, 'targetSeconds')] = beat.targetSeconds;
+    values[beatDraftKey(beatId)] = beat.story;
     for (const shotId of beat.shotOrder) {
       const shot = Object.hasOwn(project.shots, shotId) ? project.shots[shotId] : undefined;
       if (shot?.id !== shotId) continue;
@@ -3426,21 +3425,13 @@ const StudioProjectPage: React.FC<{
       const beat = Object.hasOwn(current.beats, beatId) ? current.beats[beatId] : undefined;
       if (beat?.id !== beatId) continue;
       const values: SubmittedOperation['values'] = [];
-      const changes: Partial<Pick<typeof beat, 'story' | 'targetSeconds'>> = {};
-      for (const field of ['story', 'targetSeconds'] as const) {
-        const key = beatDraftKey(beatId, field);
-        if (!dirty.has(key)) continue;
+      const changes: Partial<Pick<typeof beat, 'story'>> = {};
+      const key = beatDraftKey(beatId);
+      if (dirty.has(key)) {
         const value = drafts.value(key);
-        if (
-          (field === 'targetSeconds' && value !== null && !Number.isSafeInteger(value)) ||
-          (field !== 'targetSeconds' && typeof value !== 'string')
-        ) {
-          return false;
-        }
-        values.push([key, value as WorkspaceDraftValue]);
-        if (value !== beat[field]) {
-          Object.assign(changes, { [field]: value });
-        }
+        if (typeof value !== 'string') return false;
+        values.push([key, value]);
+        if (value !== beat.story) changes.story = value;
       }
       if (values.length > 0) {
         if (Object.keys(changes).length === 0) {

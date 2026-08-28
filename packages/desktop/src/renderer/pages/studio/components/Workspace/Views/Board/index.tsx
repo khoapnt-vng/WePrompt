@@ -685,8 +685,6 @@ export const BoardView: React.FC<BoardViewProps> = ({
             const accessibleBeatTitle = `${beatTiles.beatPosition}. ${title}`;
             const actualDuration =
               beat.actualSeconds === null ? null : t(`${KEY_ROOT}.actualDuration`, { seconds: beat.actualSeconds });
-            const targetDuration =
-              beat.targetSeconds === null ? null : t(`${KEY_ROOT}.targetDuration`, { seconds: beat.targetSeconds });
 
             return (
               <li key={beat.id} className={styles.beatCard} data-beat-id={beat.id} data-selected={selected}>
@@ -737,11 +735,6 @@ export const BoardView: React.FC<BoardViewProps> = ({
                       {actualDuration === null ? null : (
                         <span data-duration-kind='actual'>
                           <bdi>{actualDuration}</bdi>
-                        </span>
-                      )}
-                      {targetDuration === null ? null : (
-                        <span data-duration-kind='target'>
-                          <bdi>{targetDuration}</bdi>
                         </span>
                       )}
                     </div>

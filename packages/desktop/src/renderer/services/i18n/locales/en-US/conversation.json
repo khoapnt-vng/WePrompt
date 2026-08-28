@@ -1481,8 +1481,6 @@
         "shotCount": "{{count}} shots",
         "shotCount_one": "{{count}} shot",
         "shotCount_other": "{{count}} shots",
-        "targetDuration": "~{{seconds}}s target",
-        "targetPending": "No target",
         "actualDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s",
         "plannedPending": "No planned sum",
         "empty": "No active beats yet.",
@@ -1601,7 +1599,6 @@
         "shotCount": "{{count}} shots",
         "shotCount_one": "{{count}} shot",
         "shotCount_other": "{{count}} shots",
-        "targetDuration": "~{{seconds}}s target",
         "actualDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}}s actual",
         "noCoverage": "No coverage",
         "coverUnavailable": "Preview unavailable"
@@ -1788,7 +1785,7 @@
         "previousBeatShort": "Previous",
         "nextBeat": "Next Beat",
         "nextBeatShort": "Next",
-        "beatFieldsLabel": "Beat story and target",
+        "beatFieldsLabel": "Beat story",
         "fieldGuidance": {
           "story": "Story · The narrative purpose and progression for this Beat"
         },
@@ -1802,7 +1799,6 @@
           "resetShot": "Reset Shot"
         },
         "fields": {
-          "targetSeconds": "Beat target (seconds)",
           "duration": "Planned duration (seconds)",
           "durationFor": "Planned duration for Shot {{index}}",
           "story": "Story",

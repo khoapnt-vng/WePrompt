@@ -668,21 +668,11 @@ export const TableView: React.FC<TableViewProps> = ({
               const reorderLocked = interactionLocked || reorderingBeatId !== null || !canonicalOrderReady;
               const beatAriaRowIndex =
                 row + 2 + (openBoardBeatIndex >= 0 && row > openBoardBeatIndex ? openShotCount : 0);
-              const durationKind = hasCoverage ? 'planned' : 'target';
-              const durationSeconds = hasCoverage ? beat.sumSeconds : beat.targetSeconds;
+              const durationSeconds = hasCoverage ? beat.sumSeconds : null;
               const duration =
                 durationSeconds === null
-                  ? t(
-                      hasCoverage
-                        ? 'conversation.creativeStudio.workspace.table.plannedPending'
-                        : 'conversation.creativeStudio.workspace.table.targetPending'
-                    )
-                  : t(
-                      hasCoverage
-                        ? 'conversation.creativeStudio.workspace.table.actualDuration'
-                        : 'conversation.creativeStudio.workspace.table.targetDuration',
-                      { seconds: durationSeconds }
-                    );
+                  ? t('conversation.creativeStudio.workspace.table.plannedPending')
+                  : t('conversation.creativeStudio.workspace.table.actualDuration', { seconds: durationSeconds });
               const cells: Array<{ column: TableColumnId; content: React.ReactNode }> = [
                 {
                   column: 'position',
@@ -864,8 +854,8 @@ export const TableView: React.FC<TableViewProps> = ({
                   content: (
                     <span className={styles.durationFact}>
                       <span
-                        className={`${durationKind === 'planned' ? styles.plannedDuration : styles.targetDuration} ${durationSeconds === null ? styles.pendingDuration : ''}`}
-                        data-duration-kind={durationKind}
+                        className={`${styles.plannedDuration} ${durationSeconds === null ? styles.pendingDuration : ''}`}
+                        data-duration-kind='planned'
                       >
                         <bdi>{duration}</bdi>
                       </span>

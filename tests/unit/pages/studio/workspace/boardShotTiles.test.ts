@@ -422,6 +422,8 @@ describe('Board Shot tile projection', () => {
     const result = deriveBoardShotTiles(projection, makeStatus(projection));
     expect(result).not.toBeNull();
     const beat = result!.beats[0]!;
+    expect(beat.beat).not.toHaveProperty('targetSeconds');
+    expect(projection.activeBeats[0]!.targetSeconds).toBe(8);
     expect(beat.shots.map((shot) => shot.shotId)).toEqual(['shot_1', 'shot_2', 'shot_3', 'shot_4', 'shot_5', 'shot_6']);
     expect(beat.shots.map((shot) => shot.status)).toEqual([
       { word: 'rendered', stale: true },

@@ -152,13 +152,12 @@
 .beatEditor {
   display: grid;
   min-inline-size: 0;
-  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 13px;
   padding: 16px;
 }
 
 .beatField,
-.beatTargetField,
 .editorGrid > label {
   display: grid;
   min-inline-size: 0;
@@ -195,21 +194,6 @@
 .fieldGuidance {
   font-variant-numeric: tabular-nums;
   text-transform: uppercase;
-}
-
-.beatMetaRow {
-  display: grid;
-  min-inline-size: 0;
-  grid-column: 1 / -1;
-  grid-template-columns: minmax(132px, 180px) minmax(0, 1fr);
-  align-items: end;
-  gap: 10px 13px;
-  padding-block-start: 12px;
-  border-block-start: 1px solid var(--color-border-1);
-}
-
-.beatMetaRow .editorActions {
-  justify-content: flex-end;
 }
 
 .editorGrid {
@@ -1490,16 +1474,6 @@ textarea.shotPromptInput {
   .beatEditor {
     grid-template-columns: minmax(0, 1fr);
     gap: 12px;
-  }
-
-  .beatMetaRow {
-    grid-column: 1;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-  }
-
-  .beatMetaRow .editorActions {
-    justify-content: flex-start;
   }
 
   .editorGrid {

@@ -1423,12 +1423,11 @@
           "beatBodyStale": "همهٔ نماها و همهٔ محتوای ساخته‌شده و پولی همراه این ضرب‌آهنگ می‌مانند. انتقال آن به سطل زباله، {{shots}} را قدیمی می‌کند.",
           "confirmBeat": "انتقال به سطل زباله"
         },
-        "beatFieldsLabel": "داستان و هدف Beat",
+        "beatFieldsLabel": "داستان Beat",
         "fieldGuidance": {
           "story": "داستان · هدف روایی و پیشروی این Beat"
         },
         "fields": {
-          "targetSeconds": "زمان هدف به ثانیه",
           "story": "داستان",
           "shootingScript": "فیلمنامهٔ فیلم‌برداری",
           "shootingScriptFor": "فیلمنامهٔ فیلم‌برداری Shot {{index}}"

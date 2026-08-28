@@ -951,7 +951,6 @@ const ControlsHarness: React.FC<{
     const beat = project.beats[beatId];
     if (beat === undefined) continue;
     canonicalValues[`beat.${beatId}.story`] = beat.story;
-    canonicalValues[`beat.${beatId}.targetSeconds`] = beat.targetSeconds;
     for (const shotId of beat.shotOrder) {
       const shot = project.shots[shotId];
       if (shot === undefined) continue;

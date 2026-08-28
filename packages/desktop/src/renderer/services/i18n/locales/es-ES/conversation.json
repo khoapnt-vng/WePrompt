@@ -1424,12 +1424,11 @@
           "beatBodyStale": "Todos los planos y todo el contenido creado y de pago permanecen con este Beat. Al moverlo a la papelera, queda contenido desactualizado en {{shots}}.",
           "confirmBeat": "Mover a la papelera"
         },
-        "beatFieldsLabel": "Historia y objetivo del Beat",
+        "beatFieldsLabel": "Historia del Beat",
         "fieldGuidance": {
           "story": "Historia · Propósito narrativo y progresión de este Beat"
         },
         "fields": {
-          "targetSeconds": "Duración objetivo en segundos",
           "story": "Historia",
           "shootingScript": "Guion de rodaje",
           "shootingScriptFor": "Guion de rodaje del Shot {{index}}"

@@ -39,7 +39,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.columns.length': 'Sum',
         'conversation.creativeStudio.workspace.table.columns.state': 'State',
         'conversation.creativeStudio.workspace.table.reorder.failed': 'Beat order was not changed.',
-        'conversation.creativeStudio.workspace.table.targetPending': 'No target',
         'conversation.creativeStudio.workspace.table.plannedPending': 'No planned sum',
         'conversation.creativeStudio.workspace.table.empty': 'No beats yet',
         'conversation.creativeStudio.workspace.table.state.durationPending': 'Duration pending',
@@ -115,9 +114,6 @@ vi.mock('react-i18next', () => ({
       if (key === 'conversation.creativeStudio.workspace.table.shotCount') {
         const count = Number(values?.count ?? 0);
         return `${count} ${count === 1 ? 'shot' : 'shots'}`;
-      }
-      if (key === 'conversation.creativeStudio.workspace.table.targetDuration') {
-        return `~${String(values?.seconds)}s target`;
       }
       if (key === 'conversation.creativeStudio.workspace.table.actualDuration') {
         return `${String(Math.round(Number(values?.seconds)))}s`;
@@ -1393,6 +1389,7 @@ describe('TableView', () => {
       }),
       makeBeat('no_coverage', {
         targetSeconds: 7,
+        sumSeconds: 99,
         actualSeconds: null,
         displayState: 'no_coverage',
         shots: [],
@@ -1418,12 +1415,13 @@ describe('TableView', () => {
     const covered = cellAt(rowForBeat('covered'), 5);
     const maxTarget = cellAt(rowForBeat('max_target'), 5);
 
-    expect(pending).toHaveTextContent('No target');
+    expect(pending).toHaveTextContent('No planned sum');
     expect(pending.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
-    expect(pending.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'target');
-    expect(uncovered).toHaveTextContent('~7s target');
+    expect(pending.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'planned');
+    expect(uncovered).toHaveTextContent('No planned sum');
+    expect(uncovered).not.toHaveTextContent('99s');
     expect(uncovered.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
-    expect(uncovered.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'target');
+    expect(uncovered.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'planned');
     expect(coveredPending).toHaveTextContent('No planned sum');
     expect(coveredPending).not.toHaveTextContent('23s');
     expect(coveredPending).not.toHaveTextContent('0s');
@@ -1434,9 +1432,9 @@ describe('TableView', () => {
     expect(covered).not.toHaveTextContent('~7s target');
     expect(covered.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
     expect(covered.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'planned');
-    expect(maxTarget).toHaveTextContent('~1440s target');
+    expect(maxTarget).toHaveTextContent('No planned sum');
     expect(maxTarget.querySelectorAll('[data-duration-kind]')).toHaveLength(1);
-    expect(maxTarget.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'target');
+    expect(maxTarget.querySelector('[data-duration-kind]')).toHaveAttribute('data-duration-kind', 'planned');
     for (const length of [pending, uncovered, coveredPending, covered, maxTarget]) {
       expect(length.textContent).not.toMatch(/^~?0s(?:\s|$)/);
     }

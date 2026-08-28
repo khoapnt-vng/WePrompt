@@ -1425,12 +1425,11 @@
           "beatBodyStale": "Tüm çekimler ile oluşturulan ve ücreti ödenmiş tüm içerik bu Beat ile kalır. Çöp Kutusu'na taşındığında şu içerik güncelliğini yitirir: {{shots}}.",
           "confirmBeat": "Çöp Kutusu'na taşı"
         },
-        "beatFieldsLabel": "Beat hikâyesi ve hedefi",
+        "beatFieldsLabel": "Beat hikâyesi",
         "fieldGuidance": {
           "story": "Hikâye · Bu Beat’in anlatı amacı ve ilerleyişi"
         },
         "fields": {
-          "targetSeconds": "Saniye cinsinden hedef süre",
           "story": "Hikâye",
           "shootingScript": "Çekim senaryosu",
           "shootingScriptFor": "Shot {{index}} için çekim senaryosu"

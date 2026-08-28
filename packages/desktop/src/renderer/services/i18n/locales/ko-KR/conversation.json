@@ -1423,12 +1423,11 @@
           "beatBodyStale": "모든 숏과 작성한 내용 및 유료 생성 결과물은 이 비트에 그대로 남습니다. 휴지통으로 이동하면 다음 항목이 최신 상태가 아니게 됩니다: {{shots}}.",
           "confirmBeat": "휴지통으로 이동"
         },
-        "beatFieldsLabel": "Beat 스토리와 목표",
+        "beatFieldsLabel": "Beat 스토리",
         "fieldGuidance": {
           "story": "스토리 · 이 Beat의 서사 목적과 진행"
         },
         "fields": {
-          "targetSeconds": "목표 시간(초)",
           "story": "스토리",
           "shootingScript": "촬영 대본",
           "shootingScriptFor": "Shot {{index}} 촬영 대본"

@@ -7196,9 +7196,7 @@ describe('StudioPage schema-5 cutover', () => {
     expect(await actions.saveShot(oversizedUpdates)).toBe(false);
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
 
-    await expectSuccessfulBeatPanelAction(() =>
-      actions.saveBeat('beat_0', { story: 'Revised moonlit story', targetSeconds: 8 })
-    );
+    await expectSuccessfulBeatPanelAction(() => actions.saveBeat('beat_0', { story: 'Revised moonlit story' }));
     await expectSuccessfulBeatPanelAction(() =>
       actions.saveShot([
         {
@@ -7241,7 +7239,7 @@ describe('StudioPage schema-5 cutover', () => {
           {
             kind: 'edit_beat',
             beatId: 'beat_0',
-            changes: { story: 'Revised moonlit story', targetSeconds: 8 },
+            changes: { story: 'Revised moonlit story' },
           },
         ],
       },
@@ -8629,8 +8627,32 @@ describe('StudioPage schema-5 cutover', () => {
     expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 });
   });
 
+  it('retires active and inactive Beat target drafts without blocking close-save', async () => {
+    seedWorkspaceDrafts({
+      'beat.beat_0.targetSeconds': { baseValue: 4, value: 8 },
+    });
+    seedWorkspaceDrafts(
+      {
+        'beat.beat_9.targetSeconds': { baseValue: 12, value: 16 },
+      },
+      'project_2',
+      4
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: true });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 });
+  });
+
   it.each([
-    ['beat.beat_0.targetSeconds', 4, 1.5, 1, false],
     ['beat.beat_0.story', 'Story 1', 42, 0, true],
     ['shot.shot_0.durationSeconds', 4, 1.5, 1, false],
     ['shot.shot_0.shootingScript', 'Shot 1', 42, 0, true],

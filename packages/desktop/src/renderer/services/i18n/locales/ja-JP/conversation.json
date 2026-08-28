@@ -1423,12 +1423,11 @@
           "beatBodyStale": "すべてのショットと、作成済みの内容および有料生成した素材はこのビートに残ります。ゴミ箱に移動すると、{{shots}}が古い状態になります。",
           "confirmBeat": "ゴミ箱に移動"
         },
-        "beatFieldsLabel": "Beat のストーリーと目標",
+        "beatFieldsLabel": "Beat のストーリー",
         "fieldGuidance": {
           "story": "ストーリー · この Beat の物語上の目的と展開"
         },
         "fields": {
-          "targetSeconds": "目標時間（秒）",
           "story": "ストーリー",
           "shootingScript": "撮影台本",
           "shootingScriptFor": "Shot {{index}} の撮影台本"

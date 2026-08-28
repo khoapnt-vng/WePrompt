@@ -1424,12 +1424,11 @@
           "beatBodyStale": "Alle Shots sowie alle erstellten und bezahlten Inhalte bleiben bei diesem Beat. Wenn er in den Papierkorb verschoben wird, werden {{shots}} als veraltet markiert.",
           "confirmBeat": "In den Papierkorb verschieben"
         },
-        "beatFieldsLabel": "Beat-Story und Ziel",
+        "beatFieldsLabel": "Beat-Story",
         "fieldGuidance": {
           "story": "Story · Erzählerischer Zweck und Verlauf dieses Beats"
         },
         "fields": {
-          "targetSeconds": "Zieldauer in Sekunden",
           "story": "Story",
           "shootingScript": "Drehbuch",
           "shootingScriptFor": "Drehbuch für Shot {{index}}"

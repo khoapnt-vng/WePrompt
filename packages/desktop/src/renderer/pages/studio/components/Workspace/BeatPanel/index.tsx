@@ -12,7 +12,6 @@ import { useTranslation } from 'react-i18next';
 import {
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
-  type StudioEditableBeatChanges,
   type StudioEditableShotChanges,
   type StudioGenerationBlockV2,
   type StudioRendererParkBlockerCodeV2,
@@ -63,6 +62,8 @@ export type BeatPanelShotSave = {
   changes: StudioEditableShotChanges;
 };
 
+export type BeatPanelBeatSaveChanges = { story: string };
+
 export type StudioShotEditFocusIntent = {
   id: string;
   projectId: string;
@@ -72,7 +73,7 @@ export type StudioShotEditFocusIntent = {
 };
 
 export type BeatPanelActions = {
-  saveBeat: (beatId: string, changes: StudioEditableBeatChanges) => Promise<boolean>;
+  saveBeat: (beatId: string, changes: BeatPanelBeatSaveChanges) => Promise<boolean>;
   saveShot: (updates: readonly [BeatPanelShotSave, ...BeatPanelShotSave[]]) => Promise<boolean>;
   setSeedStill: (shotId: string, assetId: string | null) => Promise<boolean>;
   dismissSeedStill: (shotId: string, assetId: string) => Promise<boolean>;
@@ -128,19 +129,13 @@ export type BeatPanelProps = {
   actions: BeatPanelActions;
 };
 
-const beatDraftKey = (beatId: string, field: 'story' | 'targetSeconds'): string => `beat.${beatId}.${field}`;
+const beatDraftKey = (beatId: string): string => `beat.${beatId}.story`;
 
 const shotDraftKey = (shotId: string, field: 'shootingScript' | 'durationSeconds'): string => `shot.${shotId}.${field}`;
 
 const draftString = (drafts: UseWorkspaceDraftsResult, key: string, fallback: string): string => {
   const value = drafts.value(key);
   return typeof value === 'string' ? value : fallback;
-};
-
-const draftNullableNumber = (drafts: UseWorkspaceDraftsResult, key: string, fallback: number | null): number | null => {
-  const value = drafts.value(key);
-  if (value === null) return null;
-  return typeof value === 'number' && Number.isSafeInteger(value) ? value : fallback;
 };
 
 const draftNumber = (drafts: UseWorkspaceDraftsResult, key: string, fallback: number): number => {
@@ -1152,10 +1147,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   const [reorderAnnouncement, setReorderAnnouncement] = useState('');
   const [shotLiftAnnouncement, setShotLiftAnnouncement] = useState('');
   const beatMenuTriggerRef = useRef<HTMLButtonElement | null>(null);
-  // The target leaves the layout but stays reachable: the overflow menu reveals it on demand rather
-  // than a nested Modal, which this panel — itself a Modal — would have to trap focus inside.
-  const [targetOpen, setTargetOpen] = useState(false);
-  const targetFieldRef = useRef<HTMLLabelElement | null>(null);
   // Story is context for this screen rather than its work: it reads on hover and opens to edit.
   const [storyOpen, setStoryOpen] = useState(false);
   const storyFieldRef = useRef<HTMLLabelElement | null>(null);
@@ -1177,11 +1168,9 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
     shotId: string | null;
   }>(() => ({ beatId: beat.id, shotId: beat.shots[0]?.id ?? null }));
   const consumedShotEditFocusIntentRef = useRef<{ projectId: string; intentId: string } | null>(null);
-  const storyKey = beatDraftKey(beat.id, 'story');
-  const targetKey = beatDraftKey(beat.id, 'targetSeconds');
+  const storyKey = beatDraftKey(beat.id);
   const story = draftString(drafts, storyKey, beat.story);
-  const targetSeconds = draftNullableNumber(drafts, targetKey, beat.targetSeconds);
-  const beatDraftKeys = [storyKey, targetKey] as const;
+  const beatDraftKeys = [storyKey] as const;
   const beatDirty = beatDraftKeys.some((key) => hasDraft(drafts, key));
   const mutationLocked = pending || gateLocked;
   const coverageDraftDirty =
@@ -1327,20 +1316,14 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
 
   const saveBeat = async (): Promise<void> => {
     if (!beatDirty || savingBeat || mutationLocked || drafts.staleRevision) return;
-    const submitted = [
-      [storyKey, story],
-      [targetKey, targetSeconds],
-    ] as const;
-    const changes: Partial<{ story: string; targetSeconds: number | null }> = {};
-    if (story !== beat.story) changes.story = story;
-    if (targetSeconds !== beat.targetSeconds) changes.targetSeconds = targetSeconds;
-    if (Object.keys(changes).length === 0) {
+    const submitted = [[storyKey, story]] as const;
+    if (story === beat.story) {
       submitted.forEach(([key, value]) => draftsRef.current.resetIfValue(key, value));
       return;
     }
     setSavingBeat(true);
     try {
-      const saved = await actions.saveBeat(beat.id, changes as StudioEditableBeatChanges);
+      const saved = await actions.saveBeat(beat.id, { story });
       if (saved) submitted.forEach(([key, value]) => draftsRef.current.resetIfValue(key, value));
     } finally {
       setSavingBeat(false);
@@ -1444,14 +1427,6 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
         {t(`${KEY_ROOT}.common.resetBeat`)}
       </Menu.Item>
       <Menu.Item
-        key='beat-target'
-        data-beat-target-reveal
-        disabled={mutationLocked}
-        onClick={() => setTargetOpen(true)}
-      >
-        {t(`${KEY_ROOT}.fields.targetSeconds`)}
-      </Menu.Item>
-      <Menu.Item
         key='resplit'
         data-beat-resplit
         disabled={mutationLocked}
@@ -1481,17 +1456,11 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   }, [beatLiftAllowed, mutationLocked]);
 
   useEffect(() => {
-    if (!targetOpen) return;
-    targetFieldRef.current?.querySelector('input')?.focus();
-  }, [targetOpen]);
-
-  useEffect(() => {
     if (!storyOpen) return;
     storyFieldRef.current?.querySelector('textarea')?.focus();
   }, [storyOpen]);
 
   useEffect(() => {
-    setTargetOpen(false);
     setStoryOpen(false);
     setDurationRevealShotId(null);
     setMenuOpen(false);
@@ -1598,37 +1567,20 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
 
         {errorMessageKey === null ? null : <Alert content={t(errorMessageKey)} type='error' />}
 
-        {!storyOpen && !targetOpen ? null : (
+        {!storyOpen ? null : (
           <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
-            {storyOpen ? (
-              <label className={styles.beatField} data-beat-field='story' ref={storyFieldRef}>
-                <span className={styles.beatFieldHeading}>
-                  <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
-                </span>
-                <Input.TextArea
-                  aria-label={t(`${KEY_ROOT}.fields.story`)}
-                  autoSize={{ minRows: 3, maxRows: 8 }}
-                  disabled={mutationLocked}
-                  onChange={(value) => drafts.setValue(storyKey, value)}
-                  value={story}
-                />
-              </label>
-            ) : null}
-            <div className={styles.beatMetaRow} data-beat-meta-row>
-              {targetOpen ? (
-                <label className={styles.beatTargetField} data-beat-field='target' ref={targetFieldRef}>
-                  <span>{t(`${KEY_ROOT}.fields.targetSeconds`)}</span>
-                  <InputNumber
-                    aria-label={t(`${KEY_ROOT}.fields.targetSeconds`)}
-                    disabled={mutationLocked}
-                    min={1}
-                    onChange={(value) => drafts.setValue(targetKey, typeof value === 'number' ? value : null)}
-                    precision={0}
-                    value={targetSeconds ?? undefined}
-                  />
-                </label>
-              ) : null}
-            </div>
+            <label className={styles.beatField} data-beat-field='story' ref={storyFieldRef}>
+              <span className={styles.beatFieldHeading}>
+                <span className={styles.fieldGuidance}>{t(`${KEY_ROOT}.fieldGuidance.story`)}</span>
+              </span>
+              <Input.TextArea
+                aria-label={t(`${KEY_ROOT}.fields.story`)}
+                autoSize={{ minRows: 3, maxRows: 8 }}
+                disabled={mutationLocked}
+                onChange={(value) => drafts.setValue(storyKey, value)}
+                value={story}
+              />
+            </label>
           </section>
         )}
 

@@ -1586,8 +1586,8 @@ describe('useWorkspaceDrafts', () => {
     window.localStorage.clear();
   });
 
-  it('preserves intentional null values and a true null base through conflict detection', async () => {
-    let canonical = {
+  it('rejects retired Beat target draft keys regardless of their former nullable-number shape', () => {
+    const canonical = {
       'beat.beat_1.targetSeconds': 4 as number | null,
       'beat.beat_2.targetSeconds': null as number | null,
     };
@@ -1604,11 +1604,10 @@ describe('useWorkspaceDrafts', () => {
       view.result.current.setValue('beat.beat_1.targetSeconds', null);
       view.result.current.setValue('beat.beat_2.targetSeconds', 6);
     });
-    expect(view.result.current.value('beat.beat_1.targetSeconds')).toBeNull();
-    canonical = { 'beat.beat_1.targetSeconds': 4, 'beat.beat_2.targetSeconds': 8 };
-    view.rerender();
-    await waitFor(() => expect(view.result.current.conflictKeys).toEqual(['beat.beat_2.targetSeconds']));
-    expect(view.result.current.entries['beat.beat_2.targetSeconds']).toEqual({ baseValue: null, value: 6 });
+    expect(view.result.current.value('beat.beat_1.targetSeconds')).toBeUndefined();
+    expect(view.result.current.value('beat.beat_2.targetSeconds')).toBeUndefined();
+    expect(view.result.current.entries).toEqual({});
+    expect(view.result.current.dirtyCount).toBe(0);
   });
 
   it('uses session storage across remount and keeps gate preferences out of close dirty count', async () => {
@@ -1985,6 +1984,7 @@ describe('useWorkspaceDrafts', () => {
             },
             'settings.name': { baseValue: 'Launch film', value: 'Renamed film' },
             'settings.targetDurationSeconds': { baseValue: 30, value: 45 },
+            'beat.beat_1.targetSeconds': { baseValue: 8, value: 12 },
             'brief.text': { baseValue: 'Launch film', value: 'A tighter launch film' },
           },
           selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
@@ -1999,6 +1999,7 @@ describe('useWorkspaceDrafts', () => {
             'brief.rules': '[]',
             'settings.name': 'Launch film',
             'settings.targetDurationSeconds': 30,
+            'beat.beat_1.targetSeconds': 8,
             'brief.text': 'Launch film',
           },
           activeBeatIds: [],

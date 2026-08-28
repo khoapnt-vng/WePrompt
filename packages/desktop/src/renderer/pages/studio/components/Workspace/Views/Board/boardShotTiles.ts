@@ -46,7 +46,7 @@ export type BoardShotTile = {
 };
 
 export type BoardShotTileBeat = {
-  beat: Pick<WorkspaceBeatProjection, 'id' | 'title' | 'story' | 'targetSeconds' | 'actualSeconds'>;
+  beat: Pick<WorkspaceBeatProjection, 'id' | 'title' | 'story' | 'actualSeconds'>;
   beatPosition: number;
   shotCount: number;
   renderedCount: number;
@@ -264,7 +264,6 @@ export const deriveBoardShotTiles = (
         id: beat.id,
         title: beat.title,
         story: beat.story,
-        targetSeconds: beat.targetSeconds,
         actualSeconds: beat.actualSeconds,
       },
       beatPosition: beatIndex + 1,

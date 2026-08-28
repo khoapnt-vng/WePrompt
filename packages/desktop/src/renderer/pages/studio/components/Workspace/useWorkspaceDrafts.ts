@@ -94,7 +94,11 @@ type VolatileWorkspaceDrafts = {
 const volatileWorkspaceDrafts = new Map<string, VolatileWorkspaceDrafts>();
 
 const validKey = (key: string): boolean =>
-  key.length > 0 && key.length <= MAX_FIELD_KEY_LENGTH && !FORBIDDEN_KEYS.has(key) && !RETIRED_DRAFT_KEYS.has(key);
+  key.length > 0 &&
+  key.length <= MAX_FIELD_KEY_LENGTH &&
+  !FORBIDDEN_KEYS.has(key) &&
+  !RETIRED_DRAFT_KEYS.has(key) &&
+  !(key.startsWith('beat.') && key.endsWith('.targetSeconds'));
 
 const emptyEntries = (): Record<string, WorkspaceDraftEntry> =>
   Object.create(null) as Record<string, WorkspaceDraftEntry>;
@@ -127,16 +131,8 @@ const validValue = (key: string, value: unknown): value is WorkspaceDraftValue =
     !Object.is(value, -0)) ||
   (typeof value === 'string' && value.length <= maxStringValueLength(key));
 
-const matchesCanonicalValueKind = (
-  key: string,
-  value: WorkspaceDraftValue,
-  canonical: WorkspaceDraftValue
-): boolean => {
-  if (key.startsWith('beat.') && key.endsWith('.targetSeconds')) {
-    return value === null || typeof value === 'number';
-  }
-  return canonical === null ? value === null : typeof value === typeof canonical;
-};
+const matchesCanonicalValueKind = (_key: string, value: WorkspaceDraftValue, canonical: WorkspaceDraftValue): boolean =>
+  canonical === null ? value === null : typeof value === typeof canonical;
 
 const fitsPersistedDraftBound = (drafts: PersistedWorkspaceDrafts): boolean => {
   try {

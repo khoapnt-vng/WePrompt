@@ -1429,12 +1429,11 @@
           "beatBodyStale": "Todos os planos e todo o conteúdo criado e pago permanecem com este Beat. Ao movê-lo para a Lixeira, o seguinte conteúdo fica desatualizado: {{shots}}.",
           "confirmBeat": "Mover para a Lixeira"
         },
-        "beatFieldsLabel": "História e meta do Beat",
+        "beatFieldsLabel": "História do Beat",
         "fieldGuidance": {
           "story": "História · Propósito narrativo e progressão deste Beat"
         },
         "fields": {
-          "targetSeconds": "Duração-alvo em segundos",
           "story": "História",
           "shootingScript": "Roteiro de filmagem",
           "shootingScriptFor": "Roteiro de filmagem do Shot {{index}}"
