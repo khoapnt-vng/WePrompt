@@ -3,7 +3,7 @@
 **For:** the designer of the Beat and Shot prototype
 **From:** engineering, 2026-08-28
 **About:** the Beat panel's Shot bands — [BUG-171](./creative-studio-3-bug-list.md) and the owner's review of 2026-08-28
-**Needs:** a drawing, and answers to the five questions in _What we are asking_
+**Needs:** a drawing. Two of the five questions are already settled by the owner; three remain
 
 ## The short version
 
@@ -63,24 +63,28 @@ mid-gesture. What remains is a track that **shows** structure and time, and **se
 duration or structure happens through an explicit, named action — the Director, or a control that
 says what it will do and what it costs — rather than by dragging.
 
-## What we are asking
+## Settled by the owner, 2026-08-28 — not open for redesign
 
-1. **One track or two?** Our position is one clip track under one ruler, with each Shot a block whose
-   **width is its duration**. Do you agree, or does the chain model justify keeping a structural row
-   separate from a temporal one? If one track: what happens to the `×` boundary control — does it live
-   at the block seam, and what does it look like when the join is chained versus a hard cut?
+These two were the structural questions, and the owner answered them directly. They are given here as
+constraints, not as options.
 
-2. **What is the track's full interactive vocabulary, now that trimming is out?** Our reading is that
-   it reduces to two things: **seek**, and **select a Shot**. If that is right, say so — a track that
-   only reads and seeks can be drawn much more plainly than one built for direct manipulation, and we
-   would rather have the plain version. If you think one editing gesture genuinely belongs here even
-   under the simplification, name it and say why it earns its place. Bear in mind the product rule:
-   **the cut has no undo, ever**, so any gesture that mutates has no way back.
+1. **One track.** One clip track under one ruler. Each Shot is a block whose **width is its duration**.
+   The chip row and the plan strip go away; their content is carried by the block and the ruler.
 
-3. **Where does a paid action live, if not on the track?** Breaking or moving a join re-renders the
-   next Shot and costs money. With dragging gone, that becomes an explicit control. Should it sit on
-   the selected Shot, at the seam between blocks, or outside the track entirely? It needs to state
-   its consequence before it is taken, not after.
+2. **Seek and select, nothing else.** That is the track's entire interactive vocabulary. No trimming,
+   no dragging of any kind, no reordering by hand. A block can be selected and the playhead can be
+   moved. Everything that changes the film happens elsewhere, through a named action.
+
+Please draw the plainest thing that satisfies those two. The track is a **reading instrument**, and
+its job is to let someone see the shape of a 30-second Beat at a glance and move around inside it.
+
+## What we are still asking
+
+3. **Where does a paid action live, now that it is off the track?** Breaking or moving a join re-renders the
+   next Shot and costs money. With dragging gone it must become an explicit, labelled control. Should
+   it sit on the selected Shot, at the seam between blocks, or outside the track entirely? It needs to
+   state its consequence before it is taken, not after — and since selection is now one of only two
+   gestures, the selected block is the obvious host unless you see better.
 
 4. **How should `plan` and `source` read without trim handles?** In an NLE these are one clip and its
    trimmed extent, expressed at the handles — but we no longer have handles. Are two numbers still
