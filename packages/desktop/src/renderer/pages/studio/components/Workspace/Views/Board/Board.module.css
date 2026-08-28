@@ -530,7 +530,7 @@
 }
 
 .shotStatus[data-composer-status-word='ready'],
-.shotStatus[data-composer-status-word='rendered'][data-stale='false'] {
+.shotStatus[data-composer-status-word='rendered'][data-stale='false'][data-latest-attempt-failed='false'] {
   color: var(--color-success-6);
 }
 
@@ -540,7 +540,8 @@
 }
 
 .shotStatus[data-composer-status-word='failed'],
-.shotStatus[data-stale='true'] {
+.shotStatus[data-stale='true'],
+.shotStatus[data-latest-attempt-failed='true'] {
   color: var(--color-danger-6);
 }
 

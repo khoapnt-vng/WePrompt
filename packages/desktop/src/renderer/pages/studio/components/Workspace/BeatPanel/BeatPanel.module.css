@@ -1182,11 +1182,12 @@ div.previewMedia {
   color: var(--color-link-6);
 }
 
-.shotStatus[data-composer-status-word='rendered'] {
+.shotStatus[data-composer-status-word='rendered'][data-latest-attempt-failed='false'] {
   color: var(--color-success-6);
 }
 
-.shotStatus[data-composer-status-word='failed'] {
+.shotStatus[data-composer-status-word='failed'],
+.shotStatus[data-latest-attempt-failed='true'] {
   color: var(--color-danger-6);
 }
 

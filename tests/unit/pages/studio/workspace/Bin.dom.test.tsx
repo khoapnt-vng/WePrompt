@@ -164,6 +164,7 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
   videoGenerationBlocked: false,
   seedGenerationBlocked: false,
   attentionJobs: [],
+  latestVideoAttemptFailed: false,
   hasEffectiveSeed: false,
   ...overrides,
 });

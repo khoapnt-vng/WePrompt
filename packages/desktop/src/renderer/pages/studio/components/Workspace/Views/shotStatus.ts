@@ -13,6 +13,7 @@ export type WorkspaceShotStatusWord = (typeof WORKSPACE_SHOT_STATUS_WORDS)[numbe
 export type WorkspaceShotStatus = {
   word: WorkspaceShotStatusWord;
   stale: boolean;
+  latestAttemptFailed: boolean;
 };
 
 export type WorkspaceShotStatusInput = Pick<
@@ -22,24 +23,33 @@ export type WorkspaceShotStatusInput = Pick<
   | 'videoGenerationInFlight'
   | 'seedGenerationInFlight'
   | 'currentPicture'
+  | 'dirtyCauses'
+  | 'latestVideoAttemptFailed'
   | 'hasEffectiveSeed'
 >;
 
-const current = (word: WorkspaceShotStatusWord): WorkspaceShotStatus => ({ word, stale: false });
+const current = (word: WorkspaceShotStatusWord): WorkspaceShotStatus => ({
+  word,
+  stale: false,
+  latestAttemptFailed: false,
+});
 
 /** One shared six-word Shot status with staleness carried only as a qualifier. */
 export const deriveWorkspaceShotStatus = (
   shot: WorkspaceShotStatusInput,
   conditioningFailed: boolean
 ): WorkspaceShotStatus => {
-  if (conditioningFailed || shot.segmentState.kind === 'never_dispatched') return current('failed');
-  if (
-    shot.segmentState.kind === 'failed_unbilled' ||
-    shot.segmentState.kind === 'needs_attention' ||
-    shot.attentionJobs.length > 0
-  ) {
-    return current('failed');
-  }
+  const stale =
+    shot.segmentState.kind === 'stale' ||
+    shot.segmentState.kind === 'needs_rerender' ||
+    shot.dirtyCauses.includes('continuity_stale') ||
+    shot.dirtyCauses.includes('generation_out_of_date');
+  const rendered = (): WorkspaceShotStatus => ({
+    word: 'rendered',
+    stale,
+    latestAttemptFailed: shot.latestVideoAttemptFailed,
+  });
+  if (conditioningFailed) return shot.currentPicture === null ? current('failed') : rendered();
   if (shot.segmentState.kind === 'rendering') return current('rendering');
   if (
     shot.segmentState.kind === 'queued' ||
@@ -48,10 +58,18 @@ export const deriveWorkspaceShotStatus = (
   ) {
     return current('queued');
   }
-  if (shot.videoGenerationInFlight || shot.seedGenerationInFlight) return current('rendering');
-  if (shot.segmentState.kind === 'stale' || shot.segmentState.kind === 'needs_rerender') {
-    return { word: 'rendered', stale: true };
+  if (
+    shot.segmentState.kind === 'never_dispatched' ||
+    shot.segmentState.kind === 'failed_unbilled' ||
+    shot.segmentState.kind === 'needs_attention' ||
+    shot.attentionJobs.length > 0
+  ) {
+    return shot.currentPicture === null ? current('failed') : rendered();
   }
-  if (shot.currentPicture !== null) return current('rendered');
+  if (shot.videoGenerationInFlight || shot.seedGenerationInFlight) return current('rendering');
+  if (shot.currentPicture !== null) return rendered();
+  if (stale) {
+    return { word: 'rendered', stale: true, latestAttemptFailed: false };
+  }
   return current(shot.hasEffectiveSeed ? 'ready' : 'notReady');
 };

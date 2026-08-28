@@ -373,6 +373,7 @@ const playbackShot = (
     videoGenerationBlocked: false,
     seedGenerationBlocked: false,
     attentionJobs: [],
+    latestVideoAttemptFailed: false,
     hasEffectiveSeed: false,
     ...overrides,
   };

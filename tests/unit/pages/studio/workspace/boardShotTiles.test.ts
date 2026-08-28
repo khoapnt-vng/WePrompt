@@ -67,6 +67,7 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
   videoGenerationBlocked: false,
   seedGenerationBlocked: false,
   attentionJobs: [],
+  latestVideoAttemptFailed: false,
   hasEffectiveSeed: false,
   ...overrides,
 });
@@ -385,7 +386,9 @@ describe('Board Shot tile projection', () => {
       makeBeat('beat_1', [
         makeShot('shot_1', {
           currentPicture: stalePicture,
-          segmentState: { kind: 'stale' },
+          segmentState: { kind: 'failed_unbilled' },
+          dirtyCauses: ['continuity_stale'],
+          latestVideoAttemptFailed: true,
           generationProgressPercent: 23,
           activeGenerationJob: { id: 'job_hidden', purpose: 'video_take', canCancel: true },
         }),
@@ -394,6 +397,7 @@ describe('Board Shot tile projection', () => {
           currentPicture: { ...stalePicture, assetId: 'video_2', posterAssetId: null },
           videoGenerationInFlight: true,
           seedGenerationInFlight: true,
+          latestVideoAttemptFailed: true,
           generationProgressPercent: null,
           activeGenerationJob: null,
         }),
@@ -426,12 +430,12 @@ describe('Board Shot tile projection', () => {
     expect(projection.activeBeats[0]!.targetSeconds).toBe(8);
     expect(beat.shots.map((shot) => shot.shotId)).toEqual(['shot_1', 'shot_2', 'shot_3', 'shot_4', 'shot_5', 'shot_6']);
     expect(beat.shots.map((shot) => shot.status)).toEqual([
-      { word: 'rendered', stale: true },
-      { word: 'rendering', stale: false },
-      { word: 'ready', stale: false },
-      { word: 'notReady', stale: false },
-      { word: 'queued', stale: false },
-      { word: 'failed', stale: false },
+      { word: 'rendered', stale: true, latestAttemptFailed: true },
+      { word: 'rendering', stale: false, latestAttemptFailed: false },
+      { word: 'ready', stale: false, latestAttemptFailed: false },
+      { word: 'notReady', stale: false, latestAttemptFailed: false },
+      { word: 'queued', stale: false, latestAttemptFailed: false },
+      { word: 'failed', stale: false, latestAttemptFailed: false },
     ]);
     expect(beat.shots.map((shot) => shot.media)).toEqual([
       { kind: 'poster', assetId: 'poster_stale' },

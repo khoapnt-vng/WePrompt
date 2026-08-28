@@ -814,6 +814,7 @@ describe('projectWorkspace', () => {
       seedGenerationInFlight: false,
       seedGenerationBlocked: false,
       attentionJobs: [],
+      latestVideoAttemptFailed: false,
       hasEffectiveSeed: false,
     });
   });
@@ -1492,11 +1493,17 @@ describe('projectWorkspace', () => {
     expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
       kind: 'failed_unbilled',
     });
+    expect(
+      projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.latestVideoAttemptFailed
+    ).toBe(true);
 
     failed.status = 'needs_attention';
     expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
       kind: 'needs_attention',
     });
+    expect(
+      projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.latestVideoAttemptFailed
+    ).toBe(true);
 
     failed.status = 'succeeded';
     failed.error = null;
@@ -1519,6 +1526,9 @@ describe('projectWorkspace', () => {
     expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
       kind: 'rendered',
     });
+    expect(
+      projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.latestVideoAttemptFailed
+    ).toBe(false);
 
     status.currentVideoJobs.find((row) => row.shotId === 'shot_1')!.jobIds = [failed.id];
     expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
@@ -1533,6 +1543,48 @@ describe('projectWorkspace', () => {
     expect(projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!.segmentState).toEqual({
       kind: 'stale',
     });
+  });
+
+  it('retains a canonical current take while projecting an exact later video-wave failure', () => {
+    const project = makeProject();
+    project.beatOrder = ['beat_1'];
+    addCurrentVideo(project, 'shot_1', 'video_retained', 6);
+    const producer = makeJob('job_video_producer', 'shot_1', {
+      status: 'succeeded',
+      outputAssetIds: ['video_retained'],
+      outputAssetIdsByRole: { primary: 'video_retained', poster: null },
+    });
+    const failedReplacement = makeJob('job_video_replacement_failed', 'shot_1', {
+      status: 'failed',
+      error: { code: 'provider_error', messageKey: 'provider_error' },
+    });
+    project.jobs[producer.id] = producer;
+    project.jobs[failedReplacement.id] = failedReplacement;
+    project.shots.shot_1!.jobIds.push(producer.id, failedReplacement.id);
+    const status = cleanWorkspaceStatus();
+    status.currentVideoJobs.find((row) => row.shotId === 'shot_1')!.jobIds = [failedReplacement.id];
+
+    let shot = projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.currentPicture).toMatchObject({ assetId: 'video_retained' });
+    expect(shot.segmentState).toEqual({ kind: 'failed_unbilled' });
+    expect(shot.latestVideoAttemptFailed).toBe(true);
+
+    failedReplacement.status = 'needs_attention';
+    shot = projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.segmentState).toEqual({ kind: 'needs_attention' });
+    expect(shot.latestVideoAttemptFailed).toBe(true);
+
+    failedReplacement.status = 'failed';
+    failedReplacement.error = { code: 'dependency_failed', messageKey: 'dependency_failed' };
+    shot = projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.currentPicture).toMatchObject({ assetId: 'video_retained' });
+    expect(shot.latestVideoAttemptFailed).toBe(false);
+
+    failedReplacement.status = 'running';
+    failedReplacement.error = null;
+    shot = projectWorkspace(project, status, cleanChainStatus()).activeBeats[0]!.shots[0]!;
+    expect(shot.segmentState).toMatchObject({ kind: 'rendering' });
+    expect(shot.latestVideoAttemptFailed).toBe(false);
   });
 
   it('fails a missing or duplicate current-wave row to status pending instead of trusting historical jobs', () => {

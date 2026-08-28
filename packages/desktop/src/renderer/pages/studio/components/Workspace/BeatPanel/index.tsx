@@ -597,10 +597,11 @@ const ShotCard: React.FC<ShotCardProps> = ({
     </Menu>
   );
   const conditioningFailure = projection.conditioningFailures.find((failure) => failure.dependentShotId === shot.id);
-  const { word: composerStatus, stale: composerStatusStale } = deriveWorkspaceShotStatus(
-    shot,
-    conditioningFailure !== undefined
-  );
+  const {
+    word: composerStatus,
+    stale: composerStatusStale,
+    latestAttemptFailed: composerLatestAttemptFailed,
+  } = deriveWorkspaceShotStatus(shot, conditioningFailure !== undefined);
   const effectiveFrame = shot.firstFrames.find((frame) => frame.effectiveSeed) ?? null;
   const effectiveFrameUrl =
     effectiveFrame === null ? null : createManagedStudioAssetUrl(projectId, effectiveFrame.assetId);
@@ -644,7 +645,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
       await cancelComposerRun();
       return;
     }
-    if (composerStatus === 'failed' && conditioningFailure !== undefined) {
+    if (conditioningFailure !== undefined) {
       await actions.retryConditioning(shot.id);
       return;
     }
@@ -652,7 +653,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
   };
   const composerActionDisabled =
     composerStatus === 'notReady' ||
-    (composerStatus === 'failed' && conditioningFailure !== undefined
+    (conditioningFailure !== undefined
       ? disabled || !conditioningFailure.canRetry
       : composerStatus === 'rendering' || composerStatus === 'queued'
         ? disabled || (shot.activeGenerationJob?.canCancel !== true && cascadeRow?.canCancelWaiting !== true)
@@ -662,13 +663,13 @@ const ShotCard: React.FC<ShotCardProps> = ({
       ? 'cancelRun'
       : composerStatus === 'queued'
         ? 'removeFromChain'
-        : composerStatus === 'failed'
-          ? conditioningFailure === undefined
+        : conditioningFailure !== undefined
+          ? 'fixStartFrame'
+          : composerStatus === 'failed'
             ? 'tryAgain'
-            : 'fixStartFrame'
-          : composerStatus === 'rendered'
-            ? 'regenerate'
-            : 'generate';
+            : composerStatus === 'rendered'
+              ? 'regenerate'
+              : 'generate';
   const composerFootnoteKey =
     composerStatus === 'notReady'
       ? 'startRequired'
@@ -676,18 +677,19 @@ const ShotCard: React.FC<ShotCardProps> = ({
         ? 'startArrives'
         : composerStatus === 'rendering'
           ? 'promptAsFired'
-          : composerStatus === 'rendered' && index < beat.shots.length - 1
-            ? 'lastFrameStartsNext'
-            : composerStatus === 'failed'
-              ? conditioningFailure === undefined
+          : conditioningFailure !== undefined
+            ? 'startFrameFailed'
+            : composerStatus === 'rendered' && index < beat.shots.length - 1
+              ? 'lastFrameStartsNext'
+              : composerStatus === 'failed'
                 ? 'engineFailed'
-                : 'startFrameFailed'
-              : null;
+                : null;
   return (
     <article
       ref={shotCardRef}
       className={styles.shotCard}
       data-composer-status={composerStatus}
+      data-composer-status-latest-attempt-failed={composerLatestAttemptFailed}
       data-composer-status-stale={composerStatusStale}
       data-shot-card
       data-shot-id={shot.id}
@@ -705,10 +707,18 @@ const ShotCard: React.FC<ShotCardProps> = ({
                 : t(`${KEY_ROOT}.chain.continuous`, { position: String(index).padStart(2, '0') })}
           </bdi>
         </p>
-        <span className={styles.shotStatus} data-composer-status-word={composerStatus} data-stale={composerStatusStale}>
+        <span
+          className={styles.shotStatus}
+          data-composer-status-word={composerStatus}
+          data-latest-attempt-failed={composerLatestAttemptFailed}
+          data-stale={composerStatusStale}
+        >
           {t(`conversation.creativeStudio.workspace.shotStatus.${composerStatus}`)}
           {composerStatus === 'rendering' && shot.generationProgressPercent !== null
             ? ` · ${Math.round(shot.generationProgressPercent)}%`
+            : ''}
+          {composerLatestAttemptFailed
+            ? ` · ${t('conversation.creativeStudio.workspace.shotStatus.latestAttemptFailed')}`
             : ''}
         </span>
         <div className={styles.actions}>
@@ -846,16 +856,17 @@ const ShotCard: React.FC<ShotCardProps> = ({
       />
 
       <div className={styles.composerActionRow} data-composer-row='action'>
-        <span className={styles.composerAttentionTag} data-visible={promptChanged || composerStatus === 'failed'}>
-          {composerStatus === 'failed'
-            ? t(
-                conditioningFailure === undefined
-                  ? `${KEY_ROOT}.composer.tag.notCharged`
-                  : `${KEY_ROOT}.composer.tag.startFrameFailed`
-              )
-            : promptChanged
-              ? t(`${KEY_ROOT}.firstFrames.promptChanged`)
-              : ''}
+        <span
+          className={styles.composerAttentionTag}
+          data-visible={promptChanged || composerStatus === 'failed' || conditioningFailure !== undefined}
+        >
+          {conditioningFailure !== undefined
+            ? t(`${KEY_ROOT}.composer.tag.startFrameFailed`)
+            : composerStatus === 'failed'
+              ? t(`${KEY_ROOT}.composer.tag.notCharged`)
+              : promptChanged
+                ? t(`${KEY_ROOT}.firstFrames.promptChanged`)
+                : ''}
         </span>
         <Button
           aria-describedby={reviewBlockCopy === null ? undefined : generationBlockDescriptionId}
@@ -863,7 +874,11 @@ const ShotCard: React.FC<ShotCardProps> = ({
           data-action-kind={composerActionKey}
           disabled={composerActionDisabled}
           onClick={() => void composerAction()}
-          type={composerStatus === 'rendered' && !promptChanged ? 'secondary' : 'primary'}
+          type={
+            composerStatus === 'rendered' && !promptChanged && conditioningFailure === undefined
+              ? 'secondary'
+              : 'primary'
+          }
         >
           {t(`${KEY_ROOT}.composer.action.${composerActionKey}`, { shot: index + 1 })}
         </Button>

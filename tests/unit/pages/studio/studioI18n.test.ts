@@ -118,6 +118,7 @@ const localizedShotStatusKeys = [
   'shotStatus.rendering',
   'shotStatus.rendered',
   'shotStatus.failed',
+  'shotStatus.latestAttemptFailed',
 ] as const;
 
 const localizedShotComposerKeys = [
@@ -1642,7 +1643,7 @@ describe('Creative Studio workspace translations', () => {
     }
   });
 
-  it('keeps the six shared Shot status values byte-identical in their neutral namespace', () => {
+  it('keeps the shared Shot status words and qualifier byte-identical in their neutral namespace', () => {
     const expected = {
       'shotStatus.notReady': 'Not ready',
       'shotStatus.ready': 'Ready to render',
@@ -1650,6 +1651,7 @@ describe('Creative Studio workspace translations', () => {
       'shotStatus.rendering': 'Rendering',
       'shotStatus.rendered': 'Rendered',
       'shotStatus.failed': 'Failed',
+      'shotStatus.latestAttemptFailed': 'Latest attempt failed',
     } as const;
 
     for (const locale of i18nConfig.supportedLanguages) {

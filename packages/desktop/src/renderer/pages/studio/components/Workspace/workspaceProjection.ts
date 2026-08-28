@@ -135,6 +135,8 @@ export type WorkspaceShotProjection = {
   videoGenerationBlocked: boolean;
   seedGenerationBlocked: boolean;
   attentionJobs: WorkspaceAttentionJobProjection[];
+  /** Exact current video wave ended after a real provider attempt failed or needs attention. */
+  latestVideoAttemptFailed: boolean;
   hasEffectiveSeed: boolean;
 };
 
@@ -646,6 +648,26 @@ const projectShot = (
       : effectiveSeedAssetId !== null
         ? 'seed_ready'
         : 'draft';
+  const segmentState = deriveWorkspaceShotSegmentState({
+    statusReady: context.segmentStatusReady,
+    cascade: context.cascade,
+    upstreamShotNumber: context.upstreamShotNumber,
+    conditioningFailed: context.conditioningFailed,
+    expectsFrameBoundary: !context.segmentHead,
+    frameBoundary: context.frameBoundary,
+    currentVideoJobs: context.currentVideoJobs,
+    dirtyCauses: context.dirtyCauses,
+    hasCurrentPicture: currentPicture !== null,
+  });
+  const latestVideoAttemptFailed =
+    (segmentState.kind === 'failed_unbilled' || segmentState.kind === 'needs_attention') &&
+    context.currentVideoJobs?.some(
+      (job) =>
+        (job.status === 'failed' || job.status === 'needs_attention') &&
+        job.error !== null &&
+        job.error !== undefined &&
+        job.error.code !== 'dependency_failed'
+    ) === true;
   return {
     id: shot.id,
     shootingScript: shot.shootingScript,
@@ -662,17 +684,7 @@ const projectShot = (
     segmentHead: context.segmentHead,
     planningBoundary: context.planningBoundary === null ? null : { ...context.planningBoundary },
     frameBoundary: context.frameBoundary === null ? null : { ...context.frameBoundary },
-    segmentState: deriveWorkspaceShotSegmentState({
-      statusReady: context.segmentStatusReady,
-      cascade: context.cascade,
-      upstreamShotNumber: context.upstreamShotNumber,
-      conditioningFailed: context.conditioningFailed,
-      expectsFrameBoundary: !context.segmentHead,
-      frameBoundary: context.frameBoundary,
-      currentVideoJobs: context.currentVideoJobs,
-      dirtyCauses: context.dirtyCauses,
-      hasCurrentPicture: currentPicture !== null,
-    }),
+    segmentState,
     dirtyCauses: [...context.dirtyCauses],
     downstreamShotIds: [...context.downstreamShotIds],
     seedStills,
@@ -691,6 +703,7 @@ const projectShot = (
     videoGenerationBlocked: hasOwnedGenerationWithStatus(project, shot, 'video_take', GENERATION_BLOCKING_STATUSES),
     seedGenerationBlocked: hasOwnedGenerationWithStatus(project, shot, 'seed_still', GENERATION_BLOCKING_STATUSES),
     attentionJobs: ownedAttentionJobs(project, shot),
+    latestVideoAttemptFailed,
     hasEffectiveSeed: effectiveSeedAssetId !== null,
   };
 };

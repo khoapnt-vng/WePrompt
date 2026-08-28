@@ -181,6 +181,7 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.shotStatus.rendering': 'Rendering',
         'conversation.creativeStudio.workspace.shotStatus.rendered': 'Rendered',
         'conversation.creativeStudio.workspace.shotStatus.failed': 'Failed',
+        'conversation.creativeStudio.workspace.shotStatus.latestAttemptFailed': 'Latest attempt failed',
         'conversation.creativeStudio.workspace.beatPanel.untitledBeat': 'Untitled Beat',
         'conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked':
           'Authorized video work has locked this Shot’s first frame.',
@@ -349,6 +350,7 @@ const makeShot = (id: string, overrides: Partial<WorkspaceShotProjection> = {}):
   videoGenerationBlocked: false,
   seedGenerationBlocked: false,
   attentionJobs: [],
+  latestVideoAttemptFailed: false,
   hasEffectiveSeed: false,
   ...overrides,
 });
@@ -588,6 +590,7 @@ describe('BoardView', () => {
         'generationProgressPercent',
         'hasEffectiveSeed',
         'id',
+        'latestVideoAttemptFailed',
         'planningBoundary',
         'playedDurationSeconds',
         'retainedWork',
@@ -642,7 +645,12 @@ describe('BoardView', () => {
     const covered = makeBeat('covered', {
       title: 'Covered',
       shots: [
-        makeShot('shot_1', { currentPicture: picture, segmentState: { kind: 'stale' } }),
+        makeShot('shot_1', {
+          currentPicture: picture,
+          segmentState: { kind: 'failed_unbilled' },
+          dirtyCauses: ['continuity_stale'],
+          latestVideoAttemptFailed: true,
+        }),
         makeShot('shot_2', {
           currentPicture: { ...picture, assetId: 'video_second', posterAssetId: null },
           segmentHead: false,
@@ -703,7 +711,11 @@ describe('BoardView', () => {
       'data-composer-status-word',
       'rendered'
     );
-    expect(firstTile).toHaveTextContent('Rendered · Stale');
+    expect(firstTile.querySelector('[data-composer-status-word]')).toHaveAttribute(
+      'data-latest-attempt-failed',
+      'true'
+    );
+    expect(firstTile).toHaveTextContent('Rendered · Stale · Latest attempt failed');
     expect(secondTile).toHaveTextContent('After 1.1');
     expect(thirdTile).toHaveTextContent('Chain head');
     expect(
@@ -714,6 +726,9 @@ describe('BoardView', () => {
     expect(coveredCard).toHaveTextContent('2 of 6 rendered');
     expect(coveredCard).toHaveTextContent('1 stale Shot');
     expect(coveredCard).toHaveTextContent('1 queued or rendering Shot');
+    expect(
+      result.container.querySelector('[data-shot-id="shot_6"] [data-composer-status-word="failed"]')
+    ).not.toBeNull();
     expect(coveredCard.textContent).not.toMatch(/\b(?:1st|2nd|3rd|\d+th)\s+(?:in line|in queue|queued)\b/i);
     expect(coveredCard).not.toHaveTextContent('23%');
     expect(coveredCard).not.toHaveTextContent('job_hidden');
@@ -774,6 +789,7 @@ describe('BoardView', () => {
       /\.beatTitle:global\(\.arco-btn-text\)[^{]*\{[^}]*border-color:\s*transparent[^}]*background-color:\s*transparent[^}]*box-shadow:\s*none/s
     );
     expect(boardCss).toMatch(/\.panelCard\s*\{[^}]*grid-template-columns:\s*96px\s+minmax\(0,\s*1fr\)/s);
+    expect(boardCss).toMatch(/\.shotStatus\[data-latest-attempt-failed='true'\]/);
     expect(result.container.querySelector('[data-composer-status-word="notReady"]')).not.toBeNull();
     expect(screen.queryByRole('button', { name: /render|retry|cancel|prepare|confirm/i })).toBeNull();
     expect(result.container.textContent).not.toMatch(/\$\d|€\d|£\d/);

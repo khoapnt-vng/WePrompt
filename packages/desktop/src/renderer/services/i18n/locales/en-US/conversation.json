@@ -1777,7 +1777,8 @@
         "queued": "Queued",
         "rendering": "Rendering",
         "rendered": "Rendered",
-        "failed": "Failed"
+        "failed": "Failed",
+        "latestAttemptFailed": "Latest attempt failed"
       },
       "beatPanel": {
         "title": "Beat panel — {{title}}",

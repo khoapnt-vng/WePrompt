@@ -425,6 +425,7 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.shotStatus.rendering')) return 'Rendering';
       if (key.endsWith('.shotStatus.rendered')) return 'Rendered';
       if (key.endsWith('.shotStatus.failed')) return 'Failed';
+      if (key.endsWith('.shotStatus.latestAttemptFailed')) return 'Latest attempt failed';
       if (key.endsWith('.composer.chain.generate')) return `Generate all ${String(values?.count)} · chained`;
       if (key.endsWith('.composer.chain.stop')) return 'Stop the chain';
       if (key.endsWith('.composer.referencesBudget')) {
@@ -572,6 +573,7 @@ const makeShot = (
     seedAuthorityStatusReady: true,
     seedAuthorizationLock: null,
     attentionJobs: [],
+    latestVideoAttemptFailed: false,
     hasEffectiveSeed: seedStills.some((frame) => frame.effectiveSeed),
     ...overrides,
   };
@@ -1980,6 +1982,73 @@ describe('BeatPanel', () => {
 
     expect(card).toHaveAttribute('data-composer-status', 'failed');
     fireEvent.click(within(card).getByRole('button', { name: 'Fix start frame — free' }));
+    await waitFor(() => expect(actions.retryConditioning).toHaveBeenCalledWith(shot.id));
+  });
+
+  it('keeps a retained take RENDERED when the exact later attempt fails', () => {
+    const shot = makeShot('shot_1', 0, {
+      currentPicture: {
+        ...makeCurrentPicture('video_retained'),
+        prompt: 'Canonical shooting script 1',
+      },
+      segmentState: { kind: 'needs_attention' },
+      latestVideoAttemptFailed: true,
+      videoGenerationBlocked: true,
+      attentionJobs: [
+        {
+          id: 'job_latest_failed',
+          purpose: 'video_take',
+          error: {
+            code: 'provider_unavailable',
+            messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+          },
+          canCancel: false,
+          canRetry: true,
+        },
+      ],
+    });
+    const beat = makeBeat('beat_1', [shot]);
+    const { container } = render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]))} />
+    );
+    const card = shotCard(container, shot.id);
+
+    expect(card).toHaveAttribute('data-composer-status', 'rendered');
+    expect(card).toHaveAttribute('data-composer-status-latest-attempt-failed', 'true');
+    expect(card.querySelector('[data-composer-status-word]')).toHaveTextContent('Rendered · Latest attempt failed');
+    expect(container.querySelector(`button[aria-pressed][data-shot-id="${shot.id}"] small`)).toHaveTextContent(
+      'Rendered'
+    );
+    expect(within(card).getByRole('button', { name: 'Generate again' })).toHaveAttribute(
+      'data-button-type',
+      'secondary'
+    );
+    expect(card.querySelector('[data-job-id="job_latest_failed"]')).toBeVisible();
+  });
+
+  it('keeps free conditioning recovery reachable when retained footage remains RENDERED', async () => {
+    const shot = makeShot('shot_2', 1, {
+      currentPicture: {
+        ...makeCurrentPicture('video_retained'),
+        prompt: 'Canonical shooting script 2',
+      },
+      segmentHead: false,
+      segmentState: { kind: 'never_dispatched' },
+    });
+    const beat = makeBeat('beat_1', [makeShot('shot_1', 0), shot]);
+    const actions = makeActions();
+    const projection = makeProjection([beat], {
+      conditioningFailures: [{ dependentShotId: shot.id, reason: 'conditioning_failed', canRetry: true }],
+    });
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions, projection)} />);
+    inspectShot(container, shot.id);
+    const card = shotCard(container, shot.id);
+
+    expect(card).toHaveAttribute('data-composer-status', 'rendered');
+    expect(card).toHaveAttribute('data-composer-status-latest-attempt-failed', 'false');
+    const recovery = within(card).getByRole('button', { name: 'Fix start frame — free' });
+    expect(recovery).toHaveAttribute('data-button-type', 'primary');
+    fireEvent.click(recovery);
     await waitFor(() => expect(actions.retryConditioning).toHaveBeenCalledWith(shot.id));
   });
 

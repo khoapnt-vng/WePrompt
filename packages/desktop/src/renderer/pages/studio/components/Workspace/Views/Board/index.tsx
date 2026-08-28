@@ -437,10 +437,14 @@ const ShotTile: React.FC<ShotTileProps> = ({
           <span
             className={styles.shotStatus}
             data-composer-status-word={shot.status.word}
+            data-latest-attempt-failed={shot.status.latestAttemptFailed}
             data-stale={shot.status.stale}
           >
             {t(`conversation.creativeStudio.workspace.shotStatus.${shot.status.word}`)}
             {shot.status.stale ? ` · ${t(`${KEY_ROOT}.shot.stale`)}` : ''}
+            {shot.status.latestAttemptFailed
+              ? ` · ${t('conversation.creativeStudio.workspace.shotStatus.latestAttemptFailed')}`
+              : ''}
           </span>
         </div>
         <div className={styles.shotFacts}>
