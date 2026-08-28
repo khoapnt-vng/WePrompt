@@ -1066,14 +1066,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "状态不可用",
+        "blockers": "{{count}} 个阻塞项",
+        "blockers_one": "{{count}} 个阻塞项",
+        "blockers_other": "{{count}} 个阻塞项"
+      },
       "library": {
         "subtitle": "以节拍和镜头规划故事，然后检查每个镜头的当前画面。",
         "pictureCount": "{{count}} 个画面已就绪",
         "pictureCount_one": "{{count}} 个画面已就绪",
         "pictureCount_other": "{{count}} 个画面已就绪",
-        "status": {
-          "complete": "所有镜头都有当前画面",
-          "partial": "部分镜头有当前画面"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "项目状态不可用",
+          "stage": {
+            "brief": "创作简报",
+            "engines": "引擎",
+            "references": "参考图",
+            "storyboard": "故事板",
+            "bindings": "绑定",
+            "production": "制作",
+            "cut": "剪辑"
+          },
+          "progress": {
+            "ready": "已就绪",
+            "needsWork": "需要处理",
+            "references": "已批准 {{current}} / {{total}} 个参考图",
+            "shots": "{{current}} / {{total}} 个 Shot"
+          }
         }
       },
       "board": {

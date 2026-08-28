@@ -1610,6 +1610,8 @@ export type StudioProjectLoadResultV2 =
 
 export type StudioProjectListResultV2 = {
   projects: StudioProjectSummaryV2[];
+  /** Ephemeral revision authority for correlating separately derived project status reads. */
+  projectRevisions: { projectId: string; revision: number }[];
   unsupportedProjectIds: string[];
   quarantinedProjectIds: string[];
 };

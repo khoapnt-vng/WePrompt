@@ -4192,7 +4192,7 @@ const StudioProjectPage: React.FC<{
         onDirectorDraftRequestConsumed={consumeDirectorDraftRequest}
         proposalInbox={proposalInbox}
         activeView={activeView}
-        stats={projection === null ? undefined : buildStudioBarStats(projection)}
+        stats={projection === null ? undefined : buildStudioBarStats(projection, projectStatus)}
         renderAction={
           <Button type='primary' disabled={workspacePending || spendGateLocked} onClick={renderFilm}>
             {t('conversation.creativeStudio.workspace.controls.renderFilm')}

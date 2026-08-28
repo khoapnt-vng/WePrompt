@@ -1068,14 +1068,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "Durum kullanılamıyor",
+        "blockers": "{{count}} engel",
+        "blockers_one": "{{count}} engel",
+        "blockers_other": "{{count}} engel"
+      },
       "library": {
         "subtitle": "Hikâyeleri Beat ve çekimler olarak planlayın, ardından her çekimin geçerli görüntüsünü inceleyin.",
         "pictureCount": "{{count}} görüntü hazır",
         "pictureCount_one": "{{count}} görüntü hazır",
         "pictureCount_other": "{{count}} görüntü hazır",
-        "status": {
-          "complete": "Tüm çekimlerin geçerli bir görüntüsü var",
-          "partial": "Bazı çekimlerin geçerli bir görüntüsü var"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Proje durumu kullanılamıyor",
+          "stage": {
+            "brief": "Brief",
+            "engines": "Motorlar",
+            "references": "Referanslar",
+            "storyboard": "Storyboard",
+            "bindings": "Bağlamalar",
+            "production": "Prodüksiyon",
+            "cut": "Kurgu"
+          },
+          "progress": {
+            "ready": "Hazır",
+            "needsWork": "Çalışma gerekiyor",
+            "references": "{{current}} / {{total}} referans onaylandı",
+            "shots": "{{current}} / {{total}} çekim"
+          }
         }
       },
       "board": {

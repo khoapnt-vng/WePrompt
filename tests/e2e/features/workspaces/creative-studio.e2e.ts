@@ -14,6 +14,7 @@ import type {
   StudioDirectorOperationV2,
   StudioProjectLoadResultV2,
   StudioProjectListResultV2,
+  StudioProjectStatusV2,
   StudioProjectV2,
   StudioRendererPreparedSubmissionOptionsV2,
   StudioRendererProjectCommitResultV2,
@@ -419,6 +420,7 @@ type StudioBridgeMethod =
   | 'edit-project'
   | 'get-brief-session-server'
   | 'get-project'
+  | 'get-project-status'
   | 'list-exports'
   | 'list-projects'
   | 'list-reference-generation-handoffs'
@@ -1722,7 +1724,15 @@ test.describe('Creative Studio workspace', () => {
     await workspace.getByRole('button', { name: 'Create project' }).click();
 
     await expect(page).toHaveURL(/#\/studio\/[^/]+$/);
+    const projectId = projectIdFromStudioUrl(page);
     await expect(page.locator(projectHeaderSelector).getByRole('heading', { level: 1 })).toHaveText(projectBrief);
+    const initialProjectStatus = await invokeStudioBridge<StudioProjectStatusV2>(page, 'get-project-status', {
+      projectId,
+    });
+    const initialBlockerCopy = `${initialProjectStatus.blockerCount} blocker${
+      initialProjectStatus.blockerCount === 1 ? '' : 's'
+    }`;
+    await expect(page.locator('[data-studio-bar-blockers]')).toHaveText(initialBlockerCopy);
 
     const navigation = page.locator(viewNavigationSelector);
     await expect(navigation.getByRole('link', { name: 'Table' })).toHaveAttribute('aria-current', 'page');
@@ -1816,7 +1826,16 @@ test.describe('Creative Studio workspace', () => {
     await closeStudioProjectDialog(briefDialog);
 
     await navigateTo(page, ROUTES.studio);
-    await expect(page.getByRole('button', { name: renamedProject, exact: true })).toBeVisible();
+    const libraryProjectButton = page.getByRole('button', { name: renamedProject, exact: true });
+    await expect(libraryProjectButton).toBeVisible();
+    const libraryCard = libraryProjectButton.locator('xpath=ancestor::*[contains(@class, "arco-card")][1]');
+    const currentProjectStatus = await invokeStudioBridge<StudioProjectStatusV2>(page, 'get-project-status', {
+      projectId,
+    });
+    const currentBlockerCopy = `${currentProjectStatus.blockerCount} blocker${
+      currentProjectStatus.blockerCount === 1 ? '' : 's'
+    }`;
+    await expect(libraryCard.locator('[data-status]')).toContainText(currentBlockerCopy);
 
     // Merely loading, navigating, and restoring drafts cannot open or cross the paid boundary.
     await expect(page.locator('[data-testid="studio-spend-gate"]')).toHaveCount(0);

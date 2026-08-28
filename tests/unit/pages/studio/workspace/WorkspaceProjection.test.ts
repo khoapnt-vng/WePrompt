@@ -268,7 +268,14 @@ describe('buildStudioBarStats', () => {
       cut: { filmDurationSeconds: 178, targetDurationSeconds: 180 },
     } as never);
 
-    expect(stats).toEqual({ beatCount: 4, shotCount: 6, readyCount: 2, filmSeconds: 178, targetSeconds: 180 });
+    expect(stats).toEqual({
+      beatCount: 4,
+      shotCount: 6,
+      readyCount: 2,
+      blockerCount: null,
+      filmSeconds: 178,
+      targetSeconds: 180,
+    });
   });
 
   it('counts only Beats that are ready, not those merely part done or rendering', () => {

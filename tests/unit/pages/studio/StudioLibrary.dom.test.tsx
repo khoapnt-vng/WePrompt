@@ -1,21 +1,26 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
+  type StudioProjectStatusStageIdV2,
+  type StudioProjectStatusStageV2,
+  type StudioProjectStatusV2,
   type StudioProjectSummaryV2,
   type StudioRendererProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
 
 const mocks = vi.hoisted(() => ({
+  projectUpdatedListener: null as null | ((payload: { projectId: string }) => void),
   bridge: {
     listProjects: { invoke: vi.fn() },
     createProject: { invoke: vi.fn() },
     getProject: { invoke: vi.fn() },
     deleteProject: { invoke: vi.fn() },
-    projectUpdated: { on: vi.fn(() => vi.fn()) },
+    getProjectStatus: { invoke: vi.fn() },
+    projectUpdated: { on: vi.fn() },
   },
 }));
 
@@ -32,6 +37,14 @@ import { StudioLibrary } from '@/renderer/pages/studio/components/Library/Studio
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
 const ok = <T,>(data: T) => ({ ok: true as const, data });
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
 
 const summary = (overrides: Partial<StudioProjectSummaryV2> = {}): StudioProjectSummaryV2 => ({
   id: 'project_1',
@@ -75,6 +88,101 @@ const project = (): StudioRendererProjectV2 => ({
   updatedAt: '2026-01-01T00:00:00.000Z',
 });
 
+const projectStatus = (
+  overrides: Partial<StudioProjectStatusV2> & { projectId?: string; projectRevision?: number } = {}
+): StudioProjectStatusV2 => {
+  const productionBlocker = {
+    cause: 'generation_timeout' as const,
+    where: {
+      kind: 'shot' as const,
+      beatId: 'beat_1',
+      shotId: 'shot_4',
+      beatPosition: 2,
+      shotPosition: 4,
+      jobId: 'job_4',
+    },
+    remedy: { kind: 'owner_only' as const, reason: 'review_job_recovery' as const },
+  };
+  const stages: StudioProjectStatusStageV2[] = [
+    { id: 'brief', state: 'complete', summary: { stage: 'brief', hasBrief: true }, blockers: [] },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state: 'complete',
+      summary: { stage: 'references', plannedCount: 2, approvedCount: 2 },
+      blockers: [],
+    },
+    {
+      id: 'storyboard',
+      state: 'complete',
+      summary: {
+        stage: 'storyboard',
+        beatCount: 2,
+        shotCount: 5,
+        authoredShotCount: 5,
+        plannedSeconds: 18,
+        targetSeconds: 18,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state: 'complete',
+      summary: { stage: 'bindings', readyShotCount: 5, shotCount: 5, maxConditioningImages: 3 },
+      blockers: [],
+    },
+    {
+      id: 'production',
+      state: 'blocked',
+      summary: { stage: 'production', currentTakeCount: 3, shotCount: 5, activeJobCount: 0 },
+      blockers: [productionBlocker],
+    },
+    {
+      id: 'cut',
+      state: 'not_started',
+      summary: {
+        stage: 'cut',
+        currentTakeCount: 3,
+        shotCount: 5,
+        durationSeconds: null,
+        targetSeconds: 18,
+        structurallyPlayable: false,
+      },
+      blockers: [],
+    },
+  ];
+  return {
+    projectId: 'project_1',
+    projectRevision: 7,
+    catalogVersion: 'catalog_1',
+    stages,
+    blockerCount: 1,
+    advisories: [],
+    boards: { currentPictureCount: 0, shotCount: 5 },
+    detail: null,
+    ...overrides,
+  };
+};
+
+const projectStatusAtStage = (stageId: StudioProjectStatusStageIdV2): StudioProjectStatusV2 => {
+  const status = projectStatus();
+  const position = status.stages.findIndex((stage) => stage.id === stageId);
+  status.stages = status.stages.map(
+    (stage, index): StudioProjectStatusStageV2 => ({
+      ...stage,
+      state: index < position ? 'complete' : index === position ? 'in_progress' : 'not_started',
+      blockers: [],
+    })
+  );
+  status.blockerCount = 0;
+  return status;
+};
+
 const LocationProbe = () => {
   const location = useLocation();
   return <output data-testid='location'>{location.pathname}</output>;
@@ -102,8 +210,23 @@ describe('StudioLibrary current-schema projects', () => {
     vi.clearAllMocks();
     window.sessionStorage.clear();
     mocks.bridge.listProjects.invoke.mockResolvedValue(
-      ok({ projects: [summary()], unsupportedProjectIds: [], quarantinedProjectIds: [] })
+      ok({
+        projects: [summary()],
+        projectRevisions: [{ projectId: 'project_1', revision: 7 }],
+        unsupportedProjectIds: [],
+        quarantinedProjectIds: [],
+      })
     );
+    mocks.bridge.getProjectStatus.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectStatus({ projectId }))
+    );
+    mocks.projectUpdatedListener = null;
+    mocks.bridge.projectUpdated.on.mockImplementation((listener) => {
+      mocks.projectUpdatedListener = listener;
+      return vi.fn(() => {
+        if (mocks.projectUpdatedListener === listener) mocks.projectUpdatedListener = null;
+      });
+    });
     mocks.bridge.createProject.invoke.mockResolvedValue(ok(project()));
     mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
     mocks.bridge.deleteProject.invoke.mockResolvedValue(ok(true));
@@ -125,7 +248,12 @@ describe('StudioLibrary current-schema projects', () => {
 
   it('surfaces unsupported and quarantined project identities instead of hiding them', async () => {
     mocks.bridge.listProjects.invoke.mockResolvedValue(
-      ok({ projects: [], unsupportedProjectIds: ['legacy_1'], quarantinedProjectIds: ['broken_1'] })
+      ok({
+        projects: [],
+        projectRevisions: [],
+        unsupportedProjectIds: ['legacy_1'],
+        quarantinedProjectIds: ['broken_1'],
+      })
     );
 
     renderLibrary();
@@ -197,7 +325,7 @@ describe('StudioLibrary current-schema projects', () => {
     first.unmount();
 
     mocks.bridge.listProjects.invoke.mockResolvedValue(
-      ok({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })
+      ok({ projects: [], projectRevisions: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })
     );
     mocks.bridge.createProject.invoke.mockRejectedValue(new Error('offline'));
     renderLibrary();
@@ -291,6 +419,7 @@ describe('StudioLibrary current-schema projects', () => {
             poster: { beatId: 'beat_1', shotId: 'shot_1', assetId: 'asset_1', beatPosition: 1, shotPosition: 2 },
           }),
         ],
+        projectRevisions: [{ projectId: 'project_1', revision: 7 }],
         unsupportedProjectIds: [],
         quarantinedProjectIds: [],
       })
@@ -304,26 +433,130 @@ describe('StudioLibrary current-schema projects', () => {
     expect(screen.getByText('conversation.creativeStudio.workspace.library.noPoster')).toBeVisible();
   });
 
-  it('distinguishes complete and untouched projects and defers an unremembered first entry', async () => {
+  it('uses Main project status instead of inferring card state from picture counts', async () => {
     mocks.bridge.listProjects.invoke.mockResolvedValue(
       ok({
-        projects: [
-          summary({ id: 'project_complete', name: 'Complete film', shotCount: 2, pictureCount: 2 }),
-          summary({ id: 'project_spine', name: 'Spine only', pictureCount: 0 }),
-        ],
+        projects: [summary({ id: 'project_complete', name: 'Complete film', shotCount: 5, pictureCount: 5 })],
+        projectRevisions: [{ projectId: 'project_complete', revision: 7 }],
         unsupportedProjectIds: [],
         quarantinedProjectIds: [],
       })
     );
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(
+      ok(projectStatus({ projectId: 'project_complete', projectRevision: 7 }))
+    );
     renderLibrary();
 
-    const complete = await screen.findByText('conversation.creativeStudio.workspace.library.status.complete');
-    const spine = screen.getByText('conversation.creativeStudio.workspace.library.status.spineOnly');
-    expect(complete.closest('[data-status]')).toHaveAttribute('data-status', 'complete');
-    expect(spine.closest('[data-status]')).toHaveAttribute('data-status', 'spine');
+    const statusLine = await screen.findByText(
+      /conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/
+    );
+    expect(statusLine.closest('[data-status]')).toHaveAttribute('data-status', 'blocked');
+    expect(statusLine).toHaveTextContent('conversation.creativeStudio.workspace.project.blockers');
 
     fireEvent.click(screen.getByRole('button', { name: 'Complete film' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_complete'));
     expect(screen.getByTestId('location')).not.toHaveTextContent('/studio/project_complete/table');
+  });
+
+  it.each([
+    ['brief', 'progress.needsWork'],
+    ['engines', 'progress.needsWork'],
+    ['references', 'progress.references'],
+    ['storyboard', 'progress.shots'],
+    ['bindings', 'progress.shots'],
+    ['cut', 'progress.shots'],
+  ] as const)('renders Main-owned %s progress without a renderer heuristic', async (stageId, progressKey) => {
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatusAtStage(stageId)));
+
+    renderLibrary();
+
+    const statusLine = await screen.findByText(
+      /conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/
+    );
+    expect(statusLine).toHaveTextContent(
+      `conversation.creativeStudio.workspace.library.projectStatus.stage.${stageId}`
+    );
+    expect(statusLine).toHaveTextContent(`conversation.creativeStudio.workspace.library.projectStatus.${progressKey}`);
+    expect(statusLine.closest('[data-status]')).toHaveAttribute('data-status', 'in_progress');
+  });
+
+  it('fails closed when a card status does not match the listed project revision', async () => {
+    mocks.bridge.listProjects.invoke.mockResolvedValue(
+      ok({
+        projects: [summary({ shotCount: 5, pictureCount: 5 })],
+        projectRevisions: [{ projectId: 'project_1', revision: 8 }],
+        unsupportedProjectIds: [],
+        quarantinedProjectIds: [],
+      })
+    );
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus({ projectRevision: 7 })));
+
+    renderLibrary();
+
+    const unavailable = await screen.findByText(
+      'conversation.creativeStudio.workspace.library.projectStatus.unavailable'
+    );
+    expect(unavailable.closest('[data-status]')).toHaveAttribute('data-status', 'unavailable');
+    expect(screen.queryByText(/workspace\.library\.status\.(complete|partial|spineOnly)/)).toBeNull();
+  });
+
+  it('refreshes live provider-backed status on focus without requiring a project mutation', async () => {
+    const recovered = projectStatus();
+    recovered.stages = recovered.stages.map((stage) =>
+      stage.id === 'production' || stage.id === 'cut'
+        ? ({ ...stage, state: 'complete', blockers: [] } as StudioProjectStatusStageV2)
+        : stage
+    );
+    recovered.blockerCount = 0;
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValueOnce(ok(projectStatus())).mockResolvedValue(ok(recovered));
+
+    renderLibrary();
+
+    const initial = await screen.findByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/);
+    expect(initial.closest('[data-status]')).toHaveAttribute('data-status', 'blocked');
+    act(() => window.dispatchEvent(new Event('focus')));
+
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      const refreshed = screen.getByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/);
+      expect(refreshed.closest('[data-status]')).toHaveAttribute('data-status', 'complete');
+      expect(refreshed).toHaveTextContent('conversation.creativeStudio.workspace.library.projectStatus.stage.cut');
+    });
+    expect(mocks.projectUpdatedListener).not.toBeNull();
+  });
+
+  it('coalesces project update bursts into one trailing status refresh', async () => {
+    const firstList = deferred<{
+      ok: true;
+      data: {
+        projects: StudioProjectSummaryV2[];
+        projectRevisions: { projectId: string; revision: number }[];
+        unsupportedProjectIds: string[];
+        quarantinedProjectIds: string[];
+      };
+    }>();
+    const listing = ok({
+      projects: [summary()],
+      projectRevisions: [{ projectId: 'project_1', revision: 7 }],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    mocks.bridge.listProjects.invoke.mockReturnValueOnce(firstList.promise).mockResolvedValue(listing);
+
+    renderLibrary();
+    await waitFor(() => expect(mocks.bridge.listProjects.invoke).toHaveBeenCalledTimes(1));
+    act(() => {
+      mocks.projectUpdatedListener?.({ projectId: 'project_1' });
+      mocks.projectUpdatedListener?.({ projectId: 'project_1' });
+    });
+    expect(mocks.bridge.listProjects.invoke).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      firstList.resolve(listing);
+      await firstList.promise;
+    });
+    await waitFor(() => expect(mocks.bridge.listProjects.invoke).toHaveBeenCalledTimes(2));
+    await screen.findByText(/conversation\.creativeStudio\.workspace\.library\.projectStatus\.summary/);
+    expect(mocks.bridge.listProjects.invoke).toHaveBeenCalledTimes(2);
   });
 });

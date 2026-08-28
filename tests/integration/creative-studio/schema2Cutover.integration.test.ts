@@ -552,6 +552,7 @@ describe('Creative Studio schema-2 storage cutover', () => {
     });
     await expect(store.listProjectsV2()).resolves.toEqual({
       projects: [],
+      projectRevisions: [],
       unsupportedProjectIds: [V1_PROJECT_ID],
       quarantinedProjectIds: [],
     });
@@ -593,6 +594,7 @@ describe('Creative Studio schema-2 storage cutover', () => {
       });
       await expect(store.listProjectsV2()).resolves.toEqual({
         projects: [],
+        projectRevisions: [],
         unsupportedProjectIds: [projectId],
         quarantinedProjectIds: [],
       });

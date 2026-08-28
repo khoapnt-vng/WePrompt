@@ -1066,14 +1066,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "Статус недоступний",
+        "blockers": "{{count}} блокувальних проблем",
+        "blockers_one": "{{count}} блокувальна проблема",
+        "blockers_other": "{{count}} блокувальних проблем"
+      },
       "library": {
         "subtitle": "Плануйте історії в бітах і шотах, а потім перевіряйте поточне зображення кожного шота.",
         "pictureCount": "{{count}} зображень готово",
         "pictureCount_one": "{{count}} зображення готове",
         "pictureCount_other": "{{count}} зображень готово",
-        "status": {
-          "complete": "Усі шоти мають поточне зображення",
-          "partial": "Деякі шоти мають поточне зображення"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Статус проєкту недоступний",
+          "stage": {
+            "brief": "Бриф",
+            "engines": "Рушії",
+            "references": "Референси",
+            "storyboard": "Розкадрування",
+            "bindings": "Прив’язки",
+            "production": "Виробництво",
+            "cut": "Монтаж"
+          },
+          "progress": {
+            "ready": "Готово",
+            "needsWork": "Потрібне доопрацювання",
+            "references": "Схвалено референсів: {{current}} з {{total}}",
+            "shots": "{{current}} з {{total}} шотів"
+          }
         }
       },
       "board": {

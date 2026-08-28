@@ -944,6 +944,7 @@ describe('schema-2 creative studio project store', () => {
     });
     await expect(absent.listProjectsV2()).resolves.toEqual({
       projects: [],
+      projectRevisions: [],
       unsupportedProjectIds: [],
       quarantinedProjectIds: [],
     });
@@ -1008,6 +1009,7 @@ describe('schema-2 creative studio project store', () => {
     });
     await expect(store.listProjectsV2()).resolves.toEqual({
       projects: [],
+      projectRevisions: [],
       unsupportedProjectIds: [projectId],
       quarantinedProjectIds: [],
     });
@@ -1485,6 +1487,7 @@ describe('schema-2 creative studio project store', () => {
     await expect(restarted.getProjectV2(projectId)).resolves.toEqual({ status: 'supported', project: winner });
     await expect(restarted.listProjectsV2()).resolves.toEqual({
       projects: [summary],
+      projectRevisions: [{ projectId, revision: winner.revision }],
       unsupportedProjectIds: [],
       quarantinedProjectIds: [],
     });
@@ -1641,6 +1644,7 @@ describe('schema-2 creative studio project store', () => {
     });
     await expect(store.listProjectsV2()).resolves.toEqual({
       projects: [],
+      projectRevisions: [],
       unsupportedProjectIds: [],
       quarantinedProjectIds: [],
     });
@@ -2306,6 +2310,7 @@ describe('schema-2 creative studio project store', () => {
     await expect(restarted.getProjectV2(project.id)).resolves.toEqual({ status: 'supported', project });
     await expect(restarted.listProjectsV2()).resolves.toEqual({
       projects: [expect.objectContaining({ id: project.id, beatCount: 0, shotCount: 0 })],
+      projectRevisions: [{ projectId: project.id, revision: project.revision }],
       unsupportedProjectIds: [],
       quarantinedProjectIds: [],
     });
@@ -2364,6 +2369,7 @@ describe('schema-2 creative studio project store', () => {
 
     await expect(store.listProjectsV2()).resolves.toEqual({
       projects: [expectedSummary],
+      projectRevisions: [{ projectId: project.id, revision: project.revision }],
       unsupportedProjectIds: [prototype.id],
       quarantinedProjectIds: [malformedId],
     });
@@ -2403,6 +2409,7 @@ describe('schema-2 creative studio project store', () => {
 
     await expect(store.listProjectsV2()).resolves.toEqual({
       projects: [summary],
+      projectRevisions: [{ projectId: project.id, revision: project.revision }],
       unsupportedProjectIds: [prototype.id],
       quarantinedProjectIds: [],
     });

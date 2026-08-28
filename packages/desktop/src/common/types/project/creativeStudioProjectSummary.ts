@@ -7,15 +7,71 @@
 import { z } from 'zod';
 
 import { isCanonicalStudioGeneratedTakeV2 } from './creativeStudioCanonicalTake';
-import { STUDIO_MAX_SHOT_SECONDS, STUDIO_MIN_SHOT_SECONDS } from './creativeStudioTypes';
+import {
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
+  STUDIO_PROJECT_STATUS_STAGE_ORDER_V2,
+} from './creativeStudioTypes';
 import type {
   StudioAssetV2,
   StudioBeat,
   StudioShot,
   StudioProjectSummaryV2,
+  StudioProjectStatusV2,
   StudioProjectV2,
   StudioPlanningShotBoundaryV2,
 } from './creativeStudioTypes';
+
+const projectStatusStageStatesV2 = new Set(['not_started', 'in_progress', 'complete', 'blocked']);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isNonnegativeSafeInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+
+/** Accepts Main's read model only when its identity, stage order, shape, and aggregates are self-consistent. */
+export const exactStudioProjectStatusV2 = (
+  status: unknown,
+  projectId: string,
+  projectRevision: number
+): StudioProjectStatusV2 | null => {
+  if (
+    !isRecord(status) ||
+    status.projectId !== projectId ||
+    status.projectRevision !== projectRevision ||
+    !isNonnegativeSafeInteger(status.blockerCount) ||
+    (status.catalogVersion !== null && typeof status.catalogVersion !== 'string') ||
+    !Array.isArray(status.stages) ||
+    status.stages.length !== STUDIO_PROJECT_STATUS_STAGE_ORDER_V2.length ||
+    !Array.isArray(status.advisories) ||
+    !isRecord(status.boards) ||
+    !isNonnegativeSafeInteger(status.boards.currentPictureCount) ||
+    !isNonnegativeSafeInteger(status.boards.shotCount) ||
+    (status.detail !== null &&
+      (!isRecord(status.detail) || !Array.isArray(status.detail.shots) || !Array.isArray(status.detail.references)))
+  ) {
+    return null;
+  }
+
+  let blockerCount = 0;
+  for (const [index, stage] of status.stages.entries()) {
+    const expectedStage = STUDIO_PROJECT_STATUS_STAGE_ORDER_V2[index];
+    if (
+      !isRecord(stage) ||
+      stage.id !== expectedStage ||
+      typeof stage.state !== 'string' ||
+      !projectStatusStageStatesV2.has(stage.state) ||
+      !isRecord(stage.summary) ||
+      stage.summary.stage !== expectedStage ||
+      !Array.isArray(stage.blockers)
+    ) {
+      return null;
+    }
+    blockerCount += stage.blockers.length;
+  }
+  return blockerCount === status.blockerCount ? (status as StudioProjectStatusV2) : null;
+};
 
 const safeStudioIdSchema = z
   .string()

@@ -464,6 +464,15 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
               {t('conversation.creativeStudio.workspace.project.ready', { count: stats.readyCount })}
             </bdi>
           )}
+          {stats === undefined ? null : stats.blockerCount === null ? (
+            <bdi dir='auto' data-status='unavailable' data-studio-bar-blockers>
+              {t('conversation.creativeStudio.workspace.project.statusUnavailable')}
+            </bdi>
+          ) : (
+            <bdi dir='auto' data-status={stats.blockerCount === 0 ? 'clear' : 'blocked'} data-studio-bar-blockers>
+              {t('conversation.creativeStudio.workspace.project.blockers', { count: stats.blockerCount })}
+            </bdi>
+          )}
         </span>
         <span className={styles.barSpacer} />
         <nav

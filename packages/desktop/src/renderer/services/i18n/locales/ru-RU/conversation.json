@@ -1066,14 +1066,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "Статус недоступен",
+        "blockers": "{{count}} блокирующих проблем",
+        "blockers_one": "{{count}} блокирующая проблема",
+        "blockers_other": "{{count}} блокирующих проблем"
+      },
       "library": {
         "subtitle": "Планируйте истории в битах и шотах, а затем проверяйте текущее изображение каждого шота.",
         "pictureCount": "{{count}} изображений готово",
         "pictureCount_one": "{{count}} изображение готово",
         "pictureCount_other": "{{count}} изображений готово",
-        "status": {
-          "complete": "У всех шотов есть текущее изображение",
-          "partial": "У некоторых шотов есть текущее изображение"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Статус проекта недоступен",
+          "stage": {
+            "brief": "Бриф",
+            "engines": "Движки",
+            "references": "Референсы",
+            "storyboard": "Раскадровка",
+            "bindings": "Привязки",
+            "production": "Производство",
+            "cut": "Монтаж"
+          },
+          "progress": {
+            "ready": "Готово",
+            "needsWork": "Требуется работа",
+            "references": "Одобрено референсов: {{current}} из {{total}}",
+            "shots": "{{current}} из {{total}} шотов"
+          }
         }
       },
       "board": {

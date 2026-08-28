@@ -1066,14 +1066,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "상태를 불러올 수 없음",
+        "blockers": "차단 요소 {{count}}개",
+        "blockers_one": "차단 요소 {{count}}개",
+        "blockers_other": "차단 요소 {{count}}개"
+      },
       "library": {
         "subtitle": "비트와 샷으로 이야기를 계획한 다음 각 샷의 현재 사진을 검토하세요.",
         "pictureCount": "사진 {{count}}개 준비됨",
         "pictureCount_one": "사진 {{count}}개 준비됨",
         "pictureCount_other": "사진 {{count}}개 준비됨",
-        "status": {
-          "complete": "모든 샷에 현재 사진이 있습니다",
-          "partial": "일부 샷에 현재 사진이 있습니다"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "프로젝트 상태를 불러올 수 없음",
+          "stage": {
+            "brief": "브리프",
+            "engines": "엔진",
+            "references": "레퍼런스",
+            "storyboard": "스토리보드",
+            "bindings": "바인딩",
+            "production": "프로덕션",
+            "cut": "컷"
+          },
+          "progress": {
+            "ready": "준비됨",
+            "needsWork": "작업 필요",
+            "references": "승인된 레퍼런스 {{current}} / {{total}}",
+            "shots": "Shot {{current}} / {{total}}"
+          }
         }
       },
       "board": {

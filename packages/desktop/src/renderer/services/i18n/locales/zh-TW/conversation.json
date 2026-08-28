@@ -1066,14 +1066,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "狀態無法使用",
+        "blockers": "{{count}} 個阻塞項",
+        "blockers_one": "{{count}} 個阻塞項",
+        "blockers_other": "{{count}} 個阻塞項"
+      },
       "library": {
         "subtitle": "以節拍和鏡頭規劃故事，然後檢視每個鏡頭的目前畫面。",
         "pictureCount": "{{count}} 個畫面已就緒",
         "pictureCount_one": "{{count}} 個畫面已就緒",
         "pictureCount_other": "{{count}} 個畫面已就緒",
-        "status": {
-          "complete": "所有鏡頭都有目前畫面",
-          "partial": "部分鏡頭有目前畫面"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "專案狀態無法使用",
+          "stage": {
+            "brief": "創作簡報",
+            "engines": "引擎",
+            "references": "參考圖",
+            "storyboard": "分鏡腳本",
+            "bindings": "綁定",
+            "production": "製作",
+            "cut": "剪輯"
+          },
+          "progress": {
+            "ready": "已就緒",
+            "needsWork": "需要處理",
+            "references": "已核准 {{current}} / {{total}} 個參考圖",
+            "shots": "{{current}} / {{total}} 個 Shot"
+          }
         }
       },
       "board": {

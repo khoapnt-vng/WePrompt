@@ -1067,14 +1067,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "Status nicht verfügbar",
+        "blockers": "{{count}} Blocker",
+        "blockers_one": "{{count}} Blocker",
+        "blockers_other": "{{count}} Blocker"
+      },
       "library": {
         "subtitle": "Plane Geschichten als Beats und Shots und prüfe dann das aktuelle Bild jedes Shots.",
         "pictureCount": "{{count}} Bilder bereit",
         "pictureCount_one": "{{count}} Bild bereit",
         "pictureCount_other": "{{count}} Bilder bereit",
-        "status": {
-          "complete": "Alle Shots haben ein aktuelles Bild",
-          "partial": "Einige Shots haben ein aktuelles Bild"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Projektstatus nicht verfügbar",
+          "stage": {
+            "brief": "Briefing",
+            "engines": "Engines",
+            "references": "Referenzen",
+            "storyboard": "Storyboard",
+            "bindings": "Zuordnungen",
+            "production": "Produktion",
+            "cut": "Schnitt"
+          },
+          "progress": {
+            "ready": "Bereit",
+            "needsWork": "Bearbeitung erforderlich",
+            "references": "{{current}} von {{total}} Referenzen genehmigt",
+            "shots": "{{current}} von {{total}} Shots"
+          }
         }
       },
       "board": {

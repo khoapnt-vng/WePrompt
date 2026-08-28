@@ -423,6 +423,10 @@ const expectedLeaves = [
   'project.structure',
   'project.against',
   'project.ready',
+  'project.statusUnavailable',
+  'project.blockers',
+  'project.blockers_one',
+  'project.blockers_other',
   'project.unsupportedPrototype',
   'views.title',
   'views.references',
@@ -881,9 +885,19 @@ const expectedLeaves = [
   'library.pictureCount_one',
   'library.pictureCount_other',
   'library.updated',
-  'library.status.complete',
-  'library.status.partial',
-  'library.status.spineOnly',
+  'library.projectStatus.summary',
+  'library.projectStatus.unavailable',
+  'library.projectStatus.stage.brief',
+  'library.projectStatus.stage.engines',
+  'library.projectStatus.stage.references',
+  'library.projectStatus.stage.storyboard',
+  'library.projectStatus.stage.bindings',
+  'library.projectStatus.stage.production',
+  'library.projectStatus.stage.cut',
+  'library.projectStatus.progress.ready',
+  'library.projectStatus.progress.needsWork',
+  'library.projectStatus.progress.references',
+  'library.projectStatus.progress.shots',
   'library.composer.label',
   'library.composer.placeholder',
   'library.composer.aspectRatioLabel',
@@ -1333,11 +1347,26 @@ const localizedBoardPromotionKeys = [
   'gate.promotion.close',
 ] as const;
 
-const localizedOnePicturePresentationKeys = [
-  'library.subtitle',
-  'library.status.complete',
-  'library.status.partial',
-  'cut.exports.editorFolderDescription',
+const localizedOnePicturePresentationKeys = ['library.subtitle', 'cut.exports.editorFolderDescription'] as const;
+
+const localizedProjectStatusKeys = [
+  'project.statusUnavailable',
+  'project.blockers',
+  'project.blockers_one',
+  'project.blockers_other',
+  'library.projectStatus.summary',
+  'library.projectStatus.unavailable',
+  'library.projectStatus.stage.brief',
+  'library.projectStatus.stage.engines',
+  'library.projectStatus.stage.references',
+  'library.projectStatus.stage.storyboard',
+  'library.projectStatus.stage.bindings',
+  'library.projectStatus.stage.production',
+  'library.projectStatus.stage.cut',
+  'library.projectStatus.progress.ready',
+  'library.projectStatus.progress.needsWork',
+  'library.projectStatus.progress.references',
+  'library.projectStatus.progress.shots',
 ] as const;
 
 const localizedWorkspaceKeys = [
@@ -1511,6 +1540,7 @@ const localizedWorkspaceKeys = [
   'library.pictureCount_one',
   'library.pictureCount_other',
   ...localizedOnePicturePresentationKeys,
+  ...localizedProjectStatusKeys,
   ...localizedCutPreviewKeys,
   ...localizedCutCompositionKeys,
   ...localizedBeatPlaybackKeys,
@@ -1942,8 +1972,6 @@ describe('Creative Studio workspace translations', () => {
 
     expect(leaves).toMatchObject({
       'library.subtitle': 'Plan stories as Beats and Shots, then review every current picture.',
-      'library.status.complete': 'All Shots have current pictures',
-      'library.status.partial': 'Some Shots have current pictures',
       'cut.exports.editorFolderDescription':
         'Current Shot pictures, target slates, timeline data and the optional bed in film order.',
     });
@@ -1956,7 +1984,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(25);
+    expect(pluralBases).toHaveLength(26);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));
@@ -2181,6 +2209,7 @@ describe('Creative Studio workspace translations', () => {
         'library.pictureCount_one',
         'library.pictureCount_other',
         ...localizedOnePicturePresentationKeys,
+        ...localizedProjectStatusKeys,
         ...localizedMoveToBinKeys,
         ...localizedBoardKeys,
         ...localizedBoardPromotionKeys,

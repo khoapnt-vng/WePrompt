@@ -1066,14 +1066,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "وضعیت در دسترس نیست",
+        "blockers": "{{count}} مانع",
+        "blockers_one": "{{count}} مانع",
+        "blockers_other": "{{count}} مانع"
+      },
       "library": {
         "subtitle": "داستان‌ها را در قالب ضرب‌آهنگ و شات برنامه‌ریزی کنید، سپس تصویر فعلی هر شات را بازبینی کنید.",
         "pictureCount": "{{count}} تصویر آماده",
         "pictureCount_one": "{{count}} تصویر آماده",
         "pictureCount_other": "{{count}} تصویر آماده",
-        "status": {
-          "complete": "همهٔ شات‌ها تصویر فعلی دارند",
-          "partial": "برخی شات‌ها تصویر فعلی دارند"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "وضعیت پروژه در دسترس نیست",
+          "stage": {
+            "brief": "شرح پروژه",
+            "engines": "موتورها",
+            "references": "مرجع‌ها",
+            "storyboard": "استوری‌بورد",
+            "bindings": "پیوندها",
+            "production": "تولید",
+            "cut": "تدوین"
+          },
+          "progress": {
+            "ready": "آماده",
+            "needsWork": "نیازمند کار",
+            "references": "{{current}} از {{total}} مرجع تأییدشده",
+            "shots": "{{current}} از {{total}} شات"
+          }
         }
       },
       "board": {

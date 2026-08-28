@@ -8,6 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  exactStudioProjectStatusV2,
   studioPlanningShotBoundariesV2,
   studioProjectSummaryV2Schema,
   studioShotPlayedDurationV2,
@@ -20,11 +21,113 @@ import {
   type StudioBeat,
   type StudioJobV2,
   type StudioProjectV2,
+  type StudioProjectStatusStageV2,
+  type StudioProjectStatusV2,
   type StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
 import { composeStudioGenerationV2 } from '@/process/services/creative-studio/service/schema2/generation';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
+
+const coherentProjectStatus = (): StudioProjectStatusV2 => {
+  const stages: StudioProjectStatusStageV2[] = [
+    { id: 'brief', state: 'complete', summary: { stage: 'brief', hasBrief: true }, blockers: [] },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state: 'complete',
+      summary: { stage: 'references', plannedCount: 0, approvedCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'storyboard',
+      state: 'complete',
+      summary: {
+        stage: 'storyboard',
+        beatCount: 1,
+        shotCount: 1,
+        authoredShotCount: 1,
+        plannedSeconds: 4,
+        targetSeconds: 4,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state: 'complete',
+      summary: { stage: 'bindings', readyShotCount: 1, shotCount: 1, maxConditioningImages: 3 },
+      blockers: [],
+    },
+    {
+      id: 'production',
+      state: 'complete',
+      summary: { stage: 'production', currentTakeCount: 1, shotCount: 1, activeJobCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'cut',
+      state: 'complete',
+      summary: {
+        stage: 'cut',
+        currentTakeCount: 1,
+        shotCount: 1,
+        durationSeconds: 4,
+        targetSeconds: 4,
+        structurallyPlayable: true,
+      },
+      blockers: [],
+    },
+  ];
+  return {
+    projectId: 'project_1',
+    projectRevision: 7,
+    catalogVersion: 'catalog_1',
+    blockerCount: 0,
+    stages,
+    advisories: [],
+    boards: { currentPictureCount: 1, shotCount: 1 },
+    detail: null,
+  };
+};
+
+describe('exactStudioProjectStatusV2', () => {
+  it('accepts only the exact project revision with canonical stage and blocker aggregates', () => {
+    const status = coherentProjectStatus();
+    expect(exactStudioProjectStatusV2(status, 'project_1', 7)).toBe(status);
+    expect(exactStudioProjectStatusV2(status, 'project_1', 8)).toBeNull();
+    expect(exactStudioProjectStatusV2({ ...status, blockerCount: 1 }, 'project_1', 7)).toBeNull();
+    expect(exactStudioProjectStatusV2({ ...status, stages: status.stages.toReversed() }, 'project_1', 7)).toBeNull();
+  });
+
+  it('fails closed instead of throwing for malformed stage authority', () => {
+    const status = coherentProjectStatus();
+    expect(exactStudioProjectStatusV2({ ...status, stages: undefined }, 'project_1', 7)).toBeNull();
+    expect(exactStudioProjectStatusV2({ ...status, stages: {} }, 'project_1', 7)).toBeNull();
+    expect(
+      exactStudioProjectStatusV2(
+        { ...status, stages: status.stages.map((stage) => ({ ...stage, blockers: undefined })) },
+        'project_1',
+        7
+      )
+    ).toBeNull();
+  });
+
+  it('rejects non-canonical stage states and mismatched summary discriminators', () => {
+    const status = coherentProjectStatus();
+    const invalidState = structuredClone(status) as unknown as { stages: { state: string }[] };
+    invalidState.stages[0]!.state = 'ready';
+    expect(exactStudioProjectStatusV2(invalidState, 'project_1', 7)).toBeNull();
+
+    const mismatchedSummary = structuredClone(status) as unknown as { stages: { summary: { stage: string } }[] };
+    mismatchedSummary.stages[0]!.summary.stage = 'engines';
+    expect(exactStudioProjectStatusV2(mismatchedSummary, 'project_1', 7)).toBeNull();
+  });
+});
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,

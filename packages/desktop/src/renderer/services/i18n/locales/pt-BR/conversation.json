@@ -1072,14 +1072,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "Status indisponível",
+        "blockers": "{{count}} bloqueios",
+        "blockers_one": "{{count}} bloqueio",
+        "blockers_other": "{{count}} bloqueios"
+      },
       "library": {
         "subtitle": "Planeje histórias como Beats e planos e depois revise a imagem atual de cada plano.",
         "pictureCount": "{{count}} imagens prontas",
         "pictureCount_one": "{{count}} imagem pronta",
         "pictureCount_other": "{{count}} imagens prontas",
-        "status": {
-          "complete": "Todos os planos têm uma imagem atual",
-          "partial": "Alguns planos têm uma imagem atual"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Status do projeto indisponível",
+          "stage": {
+            "brief": "Briefing",
+            "engines": "Engines",
+            "references": "Referências",
+            "storyboard": "Storyboard",
+            "bindings": "Vínculos",
+            "production": "Produção",
+            "cut": "Edição"
+          },
+          "progress": {
+            "ready": "Pronto",
+            "needsWork": "Precisa de ajustes",
+            "references": "{{current}} de {{total}} referências aprovadas",
+            "shots": "{{current}} de {{total}} planos"
+          }
         }
       },
       "board": {

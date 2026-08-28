@@ -10,6 +10,7 @@ import type {
   StudioBeat,
   StudioBinItem,
   StudioPlanningShotBoundaryV2,
+  StudioProjectStatusV2,
   StudioRendererBoardPanelStatusV2,
   StudioRendererChainBoundaryV2,
   StudioRendererChainConditioningFailureV2,
@@ -25,6 +26,7 @@ import type {
 import { STUDIO_BED_FADE_OUT_SECONDS } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
+  exactStudioProjectStatusV2,
   studioPlanningShotBoundariesV2,
   studioShotPlayedDurationV2,
 } from '@/common/types/project/creativeStudioProjectSummary';
@@ -1693,6 +1695,8 @@ export type StudioBarStats = {
   shotCount: number;
   /** Beats that are actually ready, not merely present. */
   readyCount: number;
+  /** Main-owned blocker count for this exact project revision, or null while authority is unavailable. */
+  blockerCount: number | null;
   filmSeconds: number | null;
   targetSeconds: number | null;
 };
@@ -1703,17 +1707,22 @@ export type StudioBarStats = {
  * carried through as null rather than defaulted to zero — a film that has not been measured must not
  * read as a film of no length.
  */
-export const buildStudioBarStats = (projection: WorkspaceProjection): StudioBarStats => {
+export const buildStudioBarStats = (
+  projection: WorkspaceProjection,
+  projectStatus: StudioProjectStatusV2 | null = null
+): StudioBarStats => {
   let shotCount = 0;
   let readyCount = 0;
   for (const beat of projection.activeBeats) {
     shotCount += beat.shots.length;
     if (beat.displayState === 'ready') readyCount += 1;
   }
+  const exactStatus = exactStudioProjectStatusV2(projectStatus, projection.projectId, projection.projectRevision);
   return {
     beatCount: projection.activeBeats.length,
     shotCount,
     readyCount,
+    blockerCount: exactStatus?.blockerCount ?? null,
     filmSeconds: projection.cut.filmDurationSeconds,
     targetSeconds: projection.cut.targetDurationSeconds,
   };

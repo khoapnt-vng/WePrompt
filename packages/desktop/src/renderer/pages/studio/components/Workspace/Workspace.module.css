@@ -236,6 +236,22 @@
   white-space: nowrap;
 }
 
+.statStrip [data-status='blocked'] {
+  color: var(--color-danger-6);
+}
+
+.statStrip [data-status='unavailable'] {
+  color: var(--color-warning-6);
+}
+
+/* Status refreshes fail closed while Main catches up to a new project revision. Keep that temporary
+   copy change inside a stable slot so it cannot move the editable project title during a save. */
+.statStrip [data-studio-bar-blockers] {
+  inline-size: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Absorbs the slack so identity stays at the start and the controls stay at the end. */
 .barSpacer {
   flex: 1 1 auto;

@@ -9,9 +9,11 @@ import { ipcBridge } from '@/common';
 import type {
   CreateStudioProjectInputV2,
   StudioProjectListResultV2,
+  StudioProjectStatusV2,
   StudioProjectSummaryV2,
   StudioRendererProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
+import { exactStudioProjectStatusV2 } from '@/common/types/project/creativeStudioProjectSummary';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
@@ -23,10 +25,17 @@ import { Composer } from './Composer';
 import { ProjectCard } from './ProjectCard';
 import styles from './StudioLibrary.module.css';
 
+type LibraryRefreshFlight = {
+  promise: Promise<void>;
+  trailing: { promise: Promise<void>; resolve: () => void } | null;
+};
+
 export const StudioLibrary: React.FC = () => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const [projects, setProjects] = useState<StudioProjectSummaryV2[]>([]);
+  const [projectRevisions, setProjectRevisions] = useState<Record<string, number>>({});
+  const [projectStatuses, setProjectStatuses] = useState<Record<string, StudioProjectStatusV2 | null>>({});
   const [unsupportedProjectIds, setUnsupportedProjectIds] = useState<string[]>([]);
   const [quarantinedProjectIds, setQuarantinedProjectIds] = useState<string[]>([]);
   const [projectsLoading, setProjectsLoading] = useState(true);
@@ -38,12 +47,15 @@ export const StudioLibrary: React.FC = () => {
   const [deletePreparing, setDeletePreparing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const listRequestRef = useRef(0);
+  const refreshFlightRef = useRef<LibraryRefreshFlight | null>(null);
   const deletePreparationRef = useRef(0);
   const mutationBusy = creating || deletePreparing || deleting;
 
-  const refreshProjects = useCallback(async (): Promise<void> => {
+  const performRefreshProjects = useCallback(async (): Promise<void> => {
     const request = ++listRequestRef.current;
     setProjectsLoading(true);
+    setProjectRevisions({});
+    setProjectStatuses({});
     try {
       const result = await ipcBridge.creativeStudio.listProjects.invoke();
       if (listRequestRef.current !== request) return;
@@ -52,10 +64,47 @@ export const StudioLibrary: React.FC = () => {
         return;
       }
       const listing = result.data as StudioProjectListResultV2;
+      const revisionByProjectId = new Map<string, number>();
+      const invalidRevisionIds = new Set<string>();
+      for (const entry of listing.projectRevisions) {
+        if (
+          invalidRevisionIds.has(entry.projectId) ||
+          revisionByProjectId.has(entry.projectId) ||
+          !Number.isSafeInteger(entry.revision) ||
+          entry.revision < 0
+        ) {
+          revisionByProjectId.delete(entry.projectId);
+          invalidRevisionIds.add(entry.projectId);
+          continue;
+        }
+        revisionByProjectId.set(entry.projectId, entry.revision);
+      }
       setProjects(listing.projects);
+      setProjectRevisions(Object.fromEntries(revisionByProjectId));
       setUnsupportedProjectIds(listing.unsupportedProjectIds);
       setQuarantinedProjectIds(listing.quarantinedProjectIds);
       setListErrorMessageKey(null);
+      const statusEntries = await Promise.all(
+        listing.projects.map(async (project): Promise<readonly [string, StudioProjectStatusV2 | null]> => {
+          const projectRevision = revisionByProjectId.get(project.id);
+          if (projectRevision === undefined) return [project.id, null] as const;
+          try {
+            const statusResult = await ipcBridge.creativeStudio.getProjectStatus.invoke({ projectId: project.id });
+            if (statusResult.ok === false || statusResult.data.detail !== null) {
+              return [project.id, null] as const;
+            }
+            const exactStatus = exactStudioProjectStatusV2(statusResult.data, project.id, projectRevision);
+            return [
+              project.id,
+              exactStatus === null ? null : (structuredClone(exactStatus) as StudioProjectStatusV2),
+            ] as const;
+          } catch {
+            return [project.id, null] as const;
+          }
+        })
+      );
+      if (listRequestRef.current !== request) return;
+      setProjectStatuses(Object.fromEntries(statusEntries));
     } catch {
       if (listRequestRef.current === request) {
         setListErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
@@ -65,14 +114,54 @@ export const StudioLibrary: React.FC = () => {
     }
   }, []);
 
+  const refreshProjects = useCallback((): Promise<void> => {
+    const start = (): Promise<void> => {
+      const flight: LibraryRefreshFlight = {
+        promise: performRefreshProjects(),
+        trailing: null,
+      };
+      refreshFlightRef.current = flight;
+      const settle = (): void => {
+        if (refreshFlightRef.current !== flight) return;
+        const trailing = flight.trailing;
+        refreshFlightRef.current = null;
+        if (trailing !== null) void start().then(trailing.resolve, trailing.resolve);
+      };
+      void flight.promise.then(settle, settle);
+      return flight.promise;
+    };
+
+    const active = refreshFlightRef.current;
+    if (active === null) return start();
+    if (active.trailing === null) {
+      let resolve!: () => void;
+      const promise = new Promise<void>((done) => {
+        resolve = done;
+      });
+      active.trailing = { promise, resolve };
+    }
+    return active.trailing.promise;
+  }, [performRefreshProjects]);
+
   useEffect(() => {
     const unsubscribe = ipcBridge.creativeStudio.projectUpdated.on(() => {
       void refreshProjects();
     });
+    // Provider inventory is live Main-owned authority and can change without mutating a project.
+    // Re-read it when the owner returns to the Library; the refresh flight bounds focus/update bursts
+    // to one active read and one trailing read.
+    const refreshOnFocus = (): void => {
+      void refreshProjects();
+    };
+    window.addEventListener('focus', refreshOnFocus);
     void refreshProjects();
     return () => {
       listRequestRef.current += 1;
       deletePreparationRef.current += 1;
+      const active = refreshFlightRef.current;
+      refreshFlightRef.current = null;
+      active?.trailing?.resolve();
+      window.removeEventListener('focus', refreshOnFocus);
       unsubscribe();
     };
   }, [refreshProjects]);
@@ -204,6 +293,8 @@ export const StudioLibrary: React.FC = () => {
                   <ProjectCard
                     key={candidate.id}
                     project={candidate}
+                    projectRevision={projectRevisions[candidate.id] ?? null}
+                    projectStatus={projectStatuses[candidate.id] ?? null}
                     locale={i18n.resolvedLanguage ?? i18n.language}
                     disabled={mutationBusy || deleteCandidate !== null}
                     onOpen={() => navigate(studioEntryPath(candidate.id))}

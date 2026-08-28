@@ -753,7 +753,12 @@ describe('CreativeStudioServiceV2', () => {
       }
     );
     const store = {
-      listProjectsV2: vi.fn(async () => ({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })),
+      listProjectsV2: vi.fn(async () => ({
+        projects: [],
+        projectRevisions: [],
+        unsupportedProjectIds: [],
+        quarantinedProjectIds: [],
+      })),
       createProjectV2: vi.fn(async () => structuredClone(current)),
       getProjectV2: vi.fn(async () => ({ status: 'supported' as const, project: structuredClone(current) })),
       applyMutationBatchV2,
@@ -4895,6 +4900,22 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.cancelJobV2).not.toHaveBeenCalled();
     expect(harness.retryJobV2).not.toHaveBeenCalled();
     expect(harness.retryDownloadV2).not.toHaveBeenCalled();
+  });
+
+  it('preserves the ephemeral project revision catalog across the service boundary', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const listing = {
+      projects: [],
+      projectRevisions: [{ projectId: project.id, revision: project.revision }],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    };
+    harness.store.listProjectsV2.mockResolvedValueOnce(listing);
+
+    await expect(harness.service.listProjects()).resolves.toEqual(listing);
+    expect(harness.store.listProjectsV2).toHaveBeenCalledOnce();
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
   });
 
   it('decodes a bounded PNG before forwarding a captured poster to V2 media storage', async () => {

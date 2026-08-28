@@ -1066,14 +1066,35 @@
           }
         }
       },
+      "project": {
+        "statusUnavailable": "状況を取得できません",
+        "blockers": "ブロッカー {{count}} 件",
+        "blockers_one": "ブロッカー {{count}} 件",
+        "blockers_other": "ブロッカー {{count}} 件"
+      },
       "library": {
         "subtitle": "ビートとショットで物語を組み立て、各ショットの現在の画像を確認します。",
         "pictureCount": "準備完了の画像 {{count}} 件",
         "pictureCount_one": "準備完了の画像 {{count}} 件",
         "pictureCount_other": "準備完了の画像 {{count}} 件",
-        "status": {
-          "complete": "すべてのショットに現在の画像があります",
-          "partial": "一部のショットに現在の画像があります"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "プロジェクト状況を取得できません",
+          "stage": {
+            "brief": "ブリーフ",
+            "engines": "エンジン",
+            "references": "参照画像",
+            "storyboard": "ストーリーボード",
+            "bindings": "割り当て",
+            "production": "制作",
+            "cut": "編集"
+          },
+          "progress": {
+            "ready": "準備完了",
+            "needsWork": "作業が必要",
+            "references": "承認済み参照画像 {{current}} / {{total}}",
+            "shots": "ショット {{current}} / {{total}}"
+          }
         }
       },
       "board": {

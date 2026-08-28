@@ -405,6 +405,7 @@ export type CreativeStudioStoreDeps = {
 
 type ProjectListingSweepV2 = {
   supportedProjectIds: string[];
+  projectRevisions: { projectId: string; revision: number }[];
   summaries: StudioProjectSummaryV2[];
   unsupportedProjectIds: string[];
   quarantinedProjectIds: string[];
@@ -7907,6 +7908,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       .filter((entry) => entry.isDirectory() && isSafeIdV2(entry.name))
       .toSorted((left, right) => left.name.localeCompare(right.name));
     const supportedProjectIds: string[] = [];
+    const projectRevisions: { projectId: string; revision: number }[] = [];
     const summaries: StudioProjectSummaryV2[] = [];
     const unsupportedProjectIds: string[] = [];
     const quarantinedProjectIds: string[] = [];
@@ -7924,6 +7926,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       }
       if (inspected.status === 'supported') {
         supportedProjectIds.push(inspected.project.id);
+        projectRevisions.push({ projectId: inspected.project.id, revision: inspected.project.revision });
         summaries.push(toStudioProjectSummaryV2(inspected.project));
       } else if (inspected.status === 'unsupported_prototype_schema') unsupportedProjectIds.push(projectId);
       else if (inspected.status === 'malformed_v2') {
@@ -7931,11 +7934,12 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         safeLogError(`[CreativeStudio] Quarantined corrupt schema-2 project manifest: ${projectId}`, inspected.error);
       }
     }
-    return { supportedProjectIds, summaries, unsupportedProjectIds, quarantinedProjectIds };
+    return { supportedProjectIds, projectRevisions, summaries, unsupportedProjectIds, quarantinedProjectIds };
   };
 
   const toProjectListResultV2 = (sweep: ProjectListingSweepV2): StudioProjectListResultV2 => ({
     projects: sweep.summaries.toSorted(compareSummariesV2),
+    projectRevisions: sweep.projectRevisions.toSorted((left, right) => left.projectId.localeCompare(right.projectId)),
     unsupportedProjectIds: [...sweep.unsupportedProjectIds].toSorted((left, right) => left.localeCompare(right)),
     quarantinedProjectIds: [...sweep.quarantinedProjectIds].toSorted((left, right) => left.localeCompare(right)),
   });
@@ -7943,7 +7947,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   const repairSummaryIndexV2 = (): Promise<StudioProjectListResultV2> => {
     const rebuild = async (): Promise<StudioProjectListResultV2> => {
       const root = await existingCanonicalRootV2();
-      if (root === null) return { projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] };
+      if (root === null)
+        return { projects: [], projectRevisions: [], unsupportedProjectIds: [], quarantinedProjectIds: [] };
       const indexFile = await summariesFileV2(root);
       const sweep = await scanProjectsV2(root);
       const result = toProjectListResultV2(sweep);
@@ -7958,6 +7963,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       }
       const ownsIndex = indexExists || sweep.supportedProjectIds.length > 0 || sweep.quarantinedProjectIds.length > 0;
       if (ownsIndex) {
+        // Revisions correlate live read models only. Keep them out of the independently versioned summary sidecar.
         const next = { schemaVersion: 2, projects: result.projects };
         if (!sameJson(existing, next)) await writeJsonAtomic(root, indexFile, next);
       }

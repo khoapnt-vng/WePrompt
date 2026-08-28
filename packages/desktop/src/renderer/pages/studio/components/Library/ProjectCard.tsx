@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { StudioProjectSummaryV2 } from '@/common/types/project/creativeStudioTypes';
+import type {
+  StudioProjectStatusStageIdV2,
+  StudioProjectStatusStageStateV2,
+  StudioProjectStatusV2,
+  StudioProjectSummaryV2,
+} from '@/common/types/project/creativeStudioTypes';
+import { exactStudioProjectStatusV2 } from '@/common/types/project/creativeStudioProjectSummary';
 import { Button, Card, Tag } from '@arco-design/web-react';
 import { Delete } from '@icon-park/react';
 import React, { useState } from 'react';
@@ -42,25 +48,77 @@ export const formatStudioRelativeTime = (timestamp: string, locale: string, now 
 
 export type ProjectCardProps = {
   project: StudioProjectSummaryV2;
+  projectRevision: number | null;
+  projectStatus: StudioProjectStatusV2 | null;
   locale: string;
   disabled: boolean;
   onOpen: () => void;
   onDelete: () => void;
 };
 
-export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disabled, onOpen, onDelete }) => {
+const STATUS_STAGE_KEYS = {
+  brief: 'conversation.creativeStudio.workspace.library.projectStatus.stage.brief',
+  engines: 'conversation.creativeStudio.workspace.library.projectStatus.stage.engines',
+  references: 'conversation.creativeStudio.workspace.library.projectStatus.stage.references',
+  storyboard: 'conversation.creativeStudio.workspace.library.projectStatus.stage.storyboard',
+  bindings: 'conversation.creativeStudio.workspace.library.projectStatus.stage.bindings',
+  production: 'conversation.creativeStudio.workspace.library.projectStatus.stage.production',
+  cut: 'conversation.creativeStudio.workspace.library.projectStatus.stage.cut',
+} as const satisfies Record<StudioProjectStatusStageIdV2, string>;
+
+const STATUS_DOT_CLASSES = {
+  not_started: 'bg-fill-4',
+  in_progress: 'bg-warning-6',
+  complete: 'bg-success-6',
+  blocked: 'bg-danger-6',
+} as const satisfies Record<StudioProjectStatusStageStateV2, string>;
+
+export const ProjectCard: React.FC<ProjectCardProps> = ({
+  project,
+  projectRevision,
+  projectStatus,
+  locale,
+  disabled,
+  onOpen,
+  onDelete,
+}) => {
   const { t } = useTranslation();
   const posterSource = project.poster ? createManagedStudioAssetUrl(project.id, project.poster.assetId) : null;
   const [failedPosterSource, setFailedPosterSource] = useState<string | null>(null);
   const showPlaceholder = posterSource === null || failedPosterSource === posterSource;
-  const complete = project.shotCount > 0 && project.pictureCount >= project.shotCount;
-  const partial = !complete && project.pictureCount > 0;
-  const statusKey = complete
-    ? 'conversation.creativeStudio.workspace.library.status.complete'
-    : partial
-      ? 'conversation.creativeStudio.workspace.library.status.partial'
-      : 'conversation.creativeStudio.workspace.library.status.spineOnly';
-  const statusClass = complete ? 'bg-success-6' : partial ? 'bg-warning-6' : 'bg-fill-4';
+  const status =
+    projectRevision === null ? null : exactStudioProjectStatusV2(projectStatus, project.id, projectRevision);
+  const currentStage = status?.stages.find((stage) => stage.state !== 'complete') ?? status?.stages.at(-1) ?? null;
+  const statusProgress = (() => {
+    if (currentStage === null) return null;
+    switch (currentStage.id) {
+      case 'brief':
+      case 'engines':
+        // The first non-complete stage cannot be ready; an all-complete project resolves to Cut.
+        return t('conversation.creativeStudio.workspace.library.projectStatus.progress.needsWork');
+      case 'references':
+        return t('conversation.creativeStudio.workspace.library.projectStatus.progress.references', {
+          current: currentStage.summary.approvedCount,
+          total: currentStage.summary.plannedCount,
+        });
+      case 'storyboard':
+        return t('conversation.creativeStudio.workspace.library.projectStatus.progress.shots', {
+          current: currentStage.summary.authoredShotCount,
+          total: currentStage.summary.shotCount,
+        });
+      case 'bindings':
+        return t('conversation.creativeStudio.workspace.library.projectStatus.progress.shots', {
+          current: currentStage.summary.readyShotCount,
+          total: currentStage.summary.shotCount,
+        });
+      case 'production':
+      case 'cut':
+        return t('conversation.creativeStudio.workspace.library.projectStatus.progress.shots', {
+          current: currentStage.summary.currentTakeCount,
+          total: currentStage.summary.shotCount,
+        });
+    }
+  })();
 
   return (
     <Card
@@ -104,9 +162,22 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({ project, locale, disab
           onClick={onDelete}
         />
       </div>
-      <p data-status={complete ? 'complete' : partial ? 'partial' : 'spine'} className={styles.statusLine}>
-        <span aria-hidden='true' className={`h-7px w-7px flex-none rounded-full ${statusClass}`} />
-        {t(statusKey)}
+      <p data-status={currentStage?.state ?? 'unavailable'} className={styles.statusLine}>
+        <span
+          aria-hidden='true'
+          className={`h-7px w-7px flex-none rounded-full ${
+            currentStage === null ? 'bg-fill-4' : STATUS_DOT_CLASSES[currentStage.state]
+          }`}
+        />
+        {currentStage === null || statusProgress === null || status === null
+          ? t('conversation.creativeStudio.workspace.library.projectStatus.unavailable')
+          : t('conversation.creativeStudio.workspace.library.projectStatus.summary', {
+              stage: t(STATUS_STAGE_KEYS[currentStage.id]),
+              progress: statusProgress,
+              blockers: t('conversation.creativeStudio.workspace.project.blockers', {
+                count: status.blockerCount,
+              }),
+            })}
       </p>
       <p className={styles.projectMeta}>
         <span>{t('conversation.creativeStudio.workspace.library.beatCount', { count: project.beatCount })}</span>

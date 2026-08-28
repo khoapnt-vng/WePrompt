@@ -1297,7 +1297,11 @@
         "structure": "{{beats}} beats · {{shots}} shots",
         "unsupportedPrototype": "This project uses the retired scene format and cannot be opened in this workspace.",
         "against": "{{film}} of {{target}} target",
-        "ready": "{{count}} ready"
+        "ready": "{{count}} ready",
+        "statusUnavailable": "Status unavailable",
+        "blockers": "{{count}} blockers",
+        "blockers_one": "{{count}} blocker",
+        "blockers_other": "{{count}} blockers"
       },
       "views": {
         "title": "Workspace views",
@@ -2094,10 +2098,24 @@
         "shotCount_one": "{{count}} shot",
         "shotCount_other": "{{count}} shots",
         "updated": "Updated {{relative}}",
-        "status": {
-          "complete": "All Shots have current pictures",
-          "partial": "Some Shots have current pictures",
-          "spineOnly": "Story spine"
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Project status unavailable",
+          "stage": {
+            "brief": "Brief",
+            "engines": "Engines",
+            "references": "References",
+            "storyboard": "Storyboard",
+            "bindings": "Bindings",
+            "production": "Production",
+            "cut": "Cut"
+          },
+          "progress": {
+            "ready": "Ready",
+            "needsWork": "Needs work",
+            "references": "{{current}} of {{total}} references approved",
+            "shots": "{{current}} of {{total}} shots"
+          }
         },
         "composer": {
           "label": "What do you want to make?",

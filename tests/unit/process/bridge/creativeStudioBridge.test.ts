@@ -320,7 +320,12 @@ const preparedSubmission = {
 
 const createService = () =>
   ({
-    listProjects: vi.fn(async () => ({ projects: [], unsupportedProjectIds: [], quarantinedProjectIds: [] })),
+    listProjects: vi.fn(async () => ({
+      projects: [],
+      projectRevisions: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    })),
     createProject: vi.fn(async () => rendererProject),
     getProject: vi.fn(async () => ({ status: 'supported' as const, project: rendererProject })),
     getBriefSessionServer: vi.fn(async () => ({
@@ -747,6 +752,20 @@ describe('initCreativeStudioBridge', () => {
     });
     expect(service.getProjectStatus).toHaveBeenCalledExactlyOnceWith(input);
     expect(service.applyMutations).not.toHaveBeenCalled();
+  });
+
+  it('forwards the ephemeral project revision catalog through the library query', async () => {
+    const listing = {
+      projects: [],
+      projectRevisions: [{ projectId: 'project_1', revision: 8 }],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    };
+    vi.mocked(service.listProjects).mockResolvedValueOnce(listing);
+    initCreativeStudioBridge(dependencies);
+
+    await expect(registeredHandler('listProjects')()).resolves.toEqual({ ok: true, data: listing });
+    expect(service.listProjects).toHaveBeenCalledOnce();
   });
 
   it('maps project-status service failures through the stable command envelope', async () => {

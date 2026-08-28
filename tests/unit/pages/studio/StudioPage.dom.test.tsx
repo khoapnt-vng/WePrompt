@@ -2146,6 +2146,33 @@ describe('StudioPage schema-5 cutover', () => {
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' })).toBeVisible();
   });
 
+  it('shows Main-owned blockers in the app bar only after exact status authority installs', async () => {
+    renderStudio();
+
+    const blockers = await waitFor(() => {
+      const candidate = document.querySelector<HTMLElement>('[data-studio-bar-blockers]');
+      expect(candidate).toHaveAttribute('data-status', 'clear');
+      return candidate!;
+    });
+    expect(blockers).toHaveTextContent('conversation.creativeStudio.workspace.project.blockers:{"count":0}');
+    expect(document.querySelector('[data-studio-bar-ready]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.project.ready'
+    );
+  });
+
+  it('fails the app-bar status closed when Main returns an internally inconsistent aggregate', async () => {
+    const malformed = { ...projectStatus(project()), blockerCount: 1 };
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(malformed));
+
+    renderStudio();
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalled());
+
+    const blockers = document.querySelector<HTMLElement>('[data-studio-bar-blockers]');
+    expect(blockers).toHaveAttribute('data-status', 'unavailable');
+    expect(blockers).toHaveTextContent('conversation.creativeStudio.workspace.project.statusUnavailable');
+    expect(blockers).not.toHaveTextContent('conversation.creativeStudio.workspace.project.blockers');
+  });
+
   it('opens first-time Director-defined reference work before the Table', async () => {
     mockSupportedProject(projectWithReferenceHandoff());
 
