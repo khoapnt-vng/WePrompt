@@ -79,6 +79,7 @@ export type WorkspaceControlsProps = {
   activeView: StudioView;
   project: StudioRendererProjectV2;
   projectStatus: StudioProjectStatusV2 | null;
+  projectStatusPending: boolean;
   projection: WorkspaceProjection;
   drafts: UseWorkspaceDraftsResult;
   pending: boolean;

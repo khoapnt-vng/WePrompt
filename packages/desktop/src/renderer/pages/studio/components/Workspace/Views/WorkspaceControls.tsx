@@ -52,6 +52,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   activeView,
   project,
   projectStatus,
+  projectStatusPending,
   projection,
   drafts,
   pending,
@@ -567,6 +568,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           pending={pending}
           projectId={project.id}
           projectStatus={projectStatus}
+          projectStatusPending={projectStatusPending}
           projection={projection}
           selectedBeatId={drafts.selection.selectedBeatId}
         />

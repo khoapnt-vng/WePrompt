@@ -66,6 +66,7 @@ const mocks = vi.hoisted(() => {
     workspaceControlsProps: null as null | {
       onReviewShotReferenceBinding: (shotId: string) => void;
       projectStatus: StudioProjectStatusV2 | null;
+      projectStatusPending: boolean;
     },
     directorProposalIntent: null as null | ((intent: DirectorProposalChatIntent) => Promise<void>),
     directorDraftRequest: null as null | { requestId: number; projectId: string; prompt: string },
@@ -153,6 +154,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
       mocks.workspaceControlsProps = {
         onReviewShotReferenceBinding: props.onReviewShotReferenceBinding,
         projectStatus: props.projectStatus,
+        projectStatusPending: props.projectStatusPending,
       };
       return React.createElement(actual.WorkspaceControls, props);
     },
@@ -5728,6 +5730,32 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(latestHookResult?.routeErrorMessageKey).toBe('conversation.creativeStudio.workspace.errors.storage');
   });
 
+  it('keeps project status pending while the initial route inventory delays its first status read', async () => {
+    const delayedRoutes = deferred<ReturnType<typeof ok>>();
+    mocks.bridge.listRoutes.invoke.mockReturnValueOnce(delayedRoutes.promise);
+
+    render(<HookProbe projectId='project_1' />);
+
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe('project_1'));
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(true);
+    expect(mocks.bridge.getProjectStatus.invoke).not.toHaveBeenCalled();
+
+    await act(async () => {
+      delayedRoutes.resolve(
+        ok({
+          image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          catalogVersion: 'catalog_1',
+        })
+      );
+      await delayedRoutes.promise;
+    });
+
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(3));
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+  });
+
   it('loads detailed project status and refreshes it only after the exact project revision installs', async () => {
     const initial = project();
     const revised = { ...project(), revision: 4, name: 'Revision four' };
@@ -5741,6 +5769,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
 
     render(<HookProbe projectId={initial.id} />);
     await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(initial.revision));
+    expect(latestHookResult?.projectStatusPending).toBe(false);
     expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledExactlyOnceWith({
       projectId: initial.id,
       detail: true,
@@ -5749,6 +5778,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     act(() => mocks.listeners.projectUpdated?.({ projectId: initial.id }));
     await waitFor(() => expect(latestHookResult?.project?.revision).toBe(revised.revision));
     await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(revised.revision));
+    expect(latestHookResult?.projectStatusPending).toBe(false);
     expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(2);
     expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenLastCalledWith({ projectId: initial.id, detail: true });
 
@@ -5789,15 +5819,17 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(refreshed?.revision).toBe(authority.revision);
     await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledOnce());
     expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(true);
 
     await act(async () => {
       delayedStatus.resolve(ok(projectStatus(authority)));
       await delayedStatus.promise;
     });
     await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+    expect(latestHookResult?.projectStatusPending).toBe(false);
   });
 
-  it('marks same-revision status unavailable while an explicit route refresh is still resolving it', async () => {
+  it('marks same-revision status pending while an explicit route refresh is still resolving it', async () => {
     const authority = project();
     const delayedStatus = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
     render(<HookProbe projectId={authority.id} />);
@@ -5811,12 +5843,14 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     });
     await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledOnce());
     expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(true);
 
     await act(async () => {
       delayedStatus.resolve(ok(projectStatus(authority)));
       expect(await refreshPromise).toBe(true);
     });
     expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision);
+    expect(latestHookResult?.projectStatusPending).toBe(false);
   });
 
   it('fails route and status snapshots closed without a false storage error when inventory versions move', async () => {
@@ -5841,6 +5875,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     });
 
     expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(false);
     expect(latestHookResult?.routeCatalog).toBeNull();
     expect(latestHookResult?.generationCapability).toBeNull();
     expect(latestHookResult?.routeErrorMessageKey).toBeNull();
@@ -5860,6 +5895,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     const view = render(<HookProbe projectId={projectA.id} />);
     await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
     expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(true);
     view.rerender(<HookProbe projectId={projectB.id} />);
     await waitFor(() => expect(latestHookResult?.projectStatus?.projectId).toBe(projectB.id));
 
@@ -5870,6 +5906,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(latestHookResult?.project?.id).toBe(projectB.id);
     expect(latestHookResult?.projectStatus?.projectId).toBe(projectB.id);
     expect(latestHookResult?.projectStatus?.projectRevision).toBe(projectB.revision);
+    expect(latestHookResult?.projectStatusPending).toBe(false);
   });
 
   it('keeps the latest same-binding status request when an older response arrives last', async () => {
@@ -5903,6 +5940,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
 
     expect(refreshed).toBe(true);
     expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(false);
     expect(latestHookResult?.project?.id).toBe('project_1');
     expect(latestHookResult?.loadState).toBe('supported');
     expect(latestHookResult?.errorMessageKey).toBeNull();

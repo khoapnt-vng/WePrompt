@@ -321,6 +321,7 @@ const StudioProjectPage: React.FC<{
     workspaceStatus,
     chainStatus,
     projectStatus,
+    projectStatusPending,
     routeCatalog,
     generationCapability,
     filmExportCapability,
@@ -4244,6 +4245,7 @@ const StudioProjectPage: React.FC<{
             cutActions={cutActions}
             project={project}
             projectStatus={projectStatus}
+            projectStatusPending={projectStatusPending}
             projection={projection}
             drafts={drafts}
             pending={workspacePending}

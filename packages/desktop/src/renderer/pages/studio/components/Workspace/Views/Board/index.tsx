@@ -143,6 +143,7 @@ export type BoardViewProps = {
   projectId: string;
   projection: WorkspaceProjection;
   projectStatus: StudioProjectStatusV2 | null;
+  projectStatusPending: boolean;
   selectedBeatId: string | null;
   pending: boolean;
   gateLocked: boolean;
@@ -323,6 +324,7 @@ type ShotTileProps = {
   panel: WorkspaceBoardPanelProjection;
   projectId: string;
   shot: BoardShotTile;
+  statusPending: boolean;
   onReviewReferenceBinding: (shotId: string) => void;
 };
 
@@ -333,6 +335,7 @@ const ShotTile: React.FC<ShotTileProps> = ({
   panel,
   projectId,
   shot,
+  statusPending,
   onReviewReferenceBinding,
 }) => {
   const { t } = useTranslation();
@@ -466,7 +469,7 @@ const ShotTile: React.FC<ShotTileProps> = ({
           {shot.shootingScript.trim() ||
             t('conversation.creativeStudio.workspace.gate.errors.pricing.missingShootingScript')}
         </p>
-        {!shot.blockersAvailable ? (
+        {!shot.blockersAvailable && statusPending ? null : !shot.blockersAvailable ? (
           <p className={styles.shotStatusUnavailable} data-blocker-status='unavailable'>
             {t(`${KEY_ROOT}.shot.statusUnavailable`)}
           </p>
@@ -507,6 +510,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
   projectId,
   projection,
   projectStatus,
+  projectStatusPending,
   selectedBeatId,
   pending,
   gateLocked,
@@ -526,6 +530,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
     () => (projectId === projection.projectId ? deriveBoardShotTiles(projection, projectStatus) : null),
     [projectId, projectStatus, projection]
   );
+  const blockerStatusPending = projectStatus === null && projectStatusPending;
   const exactBoardPanels = useMemo(() => exactFilmOrderBoardPanels(projection), [projection]);
   const panelByShotId = useMemo(
     () => new Map(exactBoardPanels.map((panel) => [panel.shotId, panel] as const)),
@@ -792,6 +797,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
                         panel={panelByShotId.get(shot.shotId) ?? statusPendingPanel(shot.shotId)}
                         projectId={managedProjectId}
                         shot={shot}
+                        statusPending={blockerStatusPending}
                       />
                     ))}
                   </ol>

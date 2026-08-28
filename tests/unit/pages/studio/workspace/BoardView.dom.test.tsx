@@ -558,6 +558,7 @@ const boardProps = (
   projectId: projection.projectId,
   projection,
   projectStatus: makeProjectStatus(projection),
+  projectStatusPending: false,
   selectedBeatId: null,
   pending: false,
   gateLocked: false,
@@ -1044,6 +1045,20 @@ describe('BoardView', () => {
     expect(blankTile.querySelector('[data-blocker-status="available"]')).toBeNull();
     expect(blankTile).not.toHaveTextContent('Blocked by');
     expect(authoredTile).not.toHaveTextContent(copy);
+  });
+
+  it('keeps blocker authority quiet while project status is still loading', () => {
+    const projection = makeProjection([makeBeat('a'), makeBeat('b')]);
+    const result = render(<BoardView {...boardProps(projection)} projectStatus={null} projectStatusPending />);
+
+    expect(result.container.querySelectorAll('[data-composer-status-word]')).toHaveLength(2);
+    expect(result.container.querySelector('[data-blocker-status="unavailable"]')).toBeNull();
+    expect(result.container).not.toHaveTextContent('Blocker details unavailable');
+    expect(result.container.querySelector('[data-blocker-status="available"]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review references on Table' })).toBeNull();
+
+    result.rerender(<BoardView {...boardProps(projection)} projectStatus={null} projectStatusPending={false} />);
+    expect(result.container.querySelectorAll('[data-blocker-status="unavailable"]')).toHaveLength(2);
   });
 
   it('withholds actionable blocker copy for stale or malformed status while keeping live Shot status', () => {

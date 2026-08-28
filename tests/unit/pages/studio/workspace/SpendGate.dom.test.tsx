@@ -994,6 +994,7 @@ const ControlsHarness: React.FC<{
         project={project}
         projection={projection}
         projectStatus={statusAuthority}
+        projectStatusPending={false}
         exportCatalog={null}
         drafts={drafts}
         pending={pending}

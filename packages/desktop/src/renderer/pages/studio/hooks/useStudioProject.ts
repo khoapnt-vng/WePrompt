@@ -41,6 +41,7 @@ export type UseStudioProjectResult = {
   workspaceStatus: StudioRendererWorkspaceStatusV2 | null;
   chainStatus: StudioRendererChainStatusV2 | null;
   projectStatus: StudioProjectStatusV2 | null;
+  projectStatusPending: boolean;
   routeCatalog: StudioRouteCatalogV2 | null;
   generationCapability: StudioGenerationCapabilityV2 | null;
   filmExportCapability: StudioFilmExportCapabilityV2 | null;
@@ -293,6 +294,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
   });
   const { project, workspaceStatus, chainStatus } = projectWorkspace;
   const [projectStatus, setProjectStatus] = useState<StudioProjectStatusV2 | null>(null);
+  const [projectStatusPending, setProjectStatusPending] = useState(projectId !== undefined);
   const [proposals, setProposals] = useState<StudioRendererProposalV2[]>([]);
   const [proposalCatalog, setProposalCatalog] = useState<StudioRendererProposalCatalogV2 | null>(null);
   const [proposalRefreshing, setProposalRefreshing] = useState(false);
@@ -378,6 +380,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
         projectStatusRequestRef.current += 1;
         projectStatusRef.current = null;
         setProjectStatus(null);
+        setProjectStatusPending(true);
         setLoadState('loading');
       }
       setErrorMessageKey(null);
@@ -434,6 +437,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           projectStatusRequestRef.current += 1;
           projectStatusRef.current = null;
           setProjectStatus(null);
+          setProjectStatusPending(false);
           routeRequestRef.current += 1;
           capabilityRequestRef.current += 1;
           exportRequestRef.current += 1;
@@ -462,6 +466,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           projectStatusRequestRef.current += 1;
           projectStatusRef.current = null;
           setProjectStatus(null);
+          setProjectStatusPending(false);
           routeRequestRef.current += 1;
           capabilityRequestRef.current += 1;
           exportRequestRef.current += 1;
@@ -498,6 +503,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           projectStatusRequestRef.current += 1;
           projectStatusRef.current = null;
           setProjectStatus(null);
+          setProjectStatusPending(true);
         }
         setProjectWorkspace(loaded.snapshot);
         setLoadState('supported');
@@ -571,6 +577,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       const request = ++projectStatusRequestRef.current;
       projectStatusRef.current = null;
       setProjectStatus(null);
+      setProjectStatusPending(true);
       try {
         const result = await ipcBridge.creativeStudio.getProjectStatus.invoke({
           projectId: requestedProjectId,
@@ -594,6 +601,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
         ) {
           projectStatusRef.current = null;
           setProjectStatus(null);
+          setProjectStatusPending(false);
           return null;
         }
         if (result.data.catalogVersion !== currentCatalogVersion) {
@@ -604,11 +612,13 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           setGenerationCapability(null);
           projectStatusRef.current = null;
           setProjectStatus(null);
+          setProjectStatusPending(false);
           return null;
         }
         const installed = structuredClone(result.data) as StudioProjectStatusV2;
         projectStatusRef.current = installed;
         setProjectStatus(installed);
+        setProjectStatusPending(false);
         return installed;
       } catch {
         if (
@@ -618,6 +628,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
         ) {
           projectStatusRef.current = null;
           setProjectStatus(null);
+          setProjectStatusPending(false);
         }
         return null;
       }
@@ -896,6 +907,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       projectStatusRequestRef.current += 1;
       projectStatusRef.current = null;
       setProjectStatus(null);
+      setProjectStatusPending(true);
       try {
         const result = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: requestedProjectId });
         if (
@@ -1114,6 +1126,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
       setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
       projectStatusRef.current = null;
       setProjectStatus(null);
+      setProjectStatusPending(false);
       setProposals([]);
       setProposalCatalog(null);
       setProposalRefreshing(false);
@@ -1146,6 +1159,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     setProjectWorkspace({ project: null, workspaceStatus: null, chainStatus: null });
     projectStatusRef.current = null;
     setProjectStatus(null);
+    setProjectStatusPending(true);
     routeCatalogRef.current = null;
     setRouteCatalog(null);
     setGenerationCapability(null);
@@ -1301,6 +1315,7 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
     workspaceStatus,
     chainStatus,
     projectStatus,
+    projectStatusPending,
     routeCatalog,
     generationCapability,
     filmExportCapability,
