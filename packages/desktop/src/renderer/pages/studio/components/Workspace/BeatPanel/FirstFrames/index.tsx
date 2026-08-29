@@ -456,6 +456,10 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
       <Modal
         className={styles.viewerModal}
         footer={null}
+        // The Beat panel is itself a Modal, so a translucent mask here stacks a second scrim and
+        // leaves the panel half-lit, half-legible and wholly inert behind the viewer (BUG-177).
+        // An opaque mask covers it completely, so exactly one scrim reads.
+        maskStyle={{ background: 'var(--color-bg-1)', opacity: 1 }}
         onCancel={() => setViewer(null)}
         title={null}
         unmountOnExit

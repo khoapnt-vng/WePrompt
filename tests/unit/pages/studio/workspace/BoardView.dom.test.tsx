@@ -783,7 +783,7 @@ describe('BoardView', () => {
     expect(boardCss).not.toMatch(/nth-child/);
     expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*color:\s*var\(--text-primary\)/s);
     expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-family:\s*var\(--font-display\)/s);
-    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-size:\s*13px/s);
+    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-size:\s*15px/s);
     expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-weight:\s*var\(--fw-semibold\)/s);
     expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*composes:\s*inkTextAction/s);
     expect(boardCss).toMatch(

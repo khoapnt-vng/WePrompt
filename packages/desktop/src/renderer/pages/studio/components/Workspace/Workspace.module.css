@@ -176,6 +176,23 @@
   margin-block-start: 0;
 }
 
+/*
+ * The view's name is stated twice already — by the view chips and the app bar — so a third,
+ * larger copy at the top of the work area is chrome that outranks the content beneath it
+ * (BUG-171, BUG-175). It stays in the DOM as the region's accessible name.
+ */
+.viewHeading {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .projectAlert {
   border: 1px solid var(--color-danger-light-3);
   border-radius: 8px;

@@ -7,10 +7,6 @@
   inline-size: min(100%, 1000px);
   min-inline-size: 0;
   margin-inline: auto;
-  border: 1px solid var(--color-border-2);
-  border-radius: 14px;
-  background: var(--color-bg-2);
-  box-shadow: var(--shadow-card);
 }
 
 .root[data-aspect-ratio='16:9'] {
