@@ -60,6 +60,14 @@ describe('studio view chrome', () => {
     expect(firstFrames).toMatch(/maskStyle=\{\{ background: 'var\(--color-bg-1\)', opacity: 1 \}\}/);
   });
 
+  it('keeps the frame counter clear of the close button Arco puts in the same corner', () => {
+    // Found live: "1 of 1" ran to x1242 while the close icon began at x1230, so the counter's
+    // last character was painted over. Arco positions the close button absolutely, which no
+    // amount of flex layout inside the topline can account for.
+    const css = read('components/Workspace/BeatPanel/FirstFrames/FirstFrames.module.css');
+    expect(css).toMatch(/\.viewerTopline\s*\{[^}]*padding-inline-end:\s*24px/s);
+  });
+
   it('makes the whole Beat card the target while keeping one keyboard-reachable control', () => {
     const board = read('components/Workspace/Views/Board/Board.module.css');
     // A 712x19 strip was the Board's primary navigation, far under the 24px target-size floor.
