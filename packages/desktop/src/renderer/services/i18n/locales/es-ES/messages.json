@@ -145,9 +145,9 @@
     },
     "close": {
       "completed": {
-        "v1": "Listo, todo ha salido según lo previsto. Dime qué te gustaría hacer a continuación.",
-        "v2": "Esto ya está terminado y funcionando. Dime por dónde quieres seguir a partir de aquí.",
-        "v3": "Hecho: todo ha encajado. Estoy listo para lo siguiente cuando tú lo estés."
+        "v1": "Se ejecutaron todos los pasos y ninguno falló. Dime qué quieres hacer a continuación.",
+        "v2": "Cada paso terminó sin errores. Dime hacia dónde quieres ir desde aquí.",
+        "v3": "Listo: no hubo ningún problema por el camino. Estoy preparado para lo siguiente cuando quieras."
       },
       "recovered": {
         "v1": "Hecho: un paso necesitó un segundo intento, pero ya está todo resuelto.",

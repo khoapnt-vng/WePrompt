@@ -145,9 +145,9 @@
     },
     "close": {
       "completed": {
-        "v1": "Tudo pronto — deu tudo certo, como planejado. Me diga o que você gostaria de fazer agora.",
-        "v2": "Isso já está concluído e funcionando. Me diga por onde você quer seguir a partir daqui.",
-        "v3": "Pronto — tudo se encaixou. Estou à disposição para o próximo passo quando você quiser."
+        "v1": "Todas as etapas foram executadas e nenhuma falhou. Diga o que você quer fazer em seguida.",
+        "v2": "Cada etapa terminou sem erros. Me diga para onde você quer ir a partir daqui.",
+        "v3": "Pronto — nada deu problema no caminho. Estou à disposição para o próximo passo."
       },
       "recovered": {
         "v1": "Pronto — uma etapa precisou de uma segunda tentativa, mas agora está tudo certo.",

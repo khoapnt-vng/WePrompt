@@ -145,9 +145,9 @@
     },
     "close": {
       "completed": {
-        "v1": "Alles erledigt – alles ist wie geplant durchgelaufen. Sagen Sie mir einfach, was als Nächstes kommen soll.",
-        "v2": "Das ist fertig und funktioniert. Sagen Sie mir gern, wie es von hier aus weitergehen soll.",
-        "v3": "Fertig – alles ist zusammengekommen. Ich bin bereit für den nächsten Schritt, sobald Sie es sind."
+        "v1": "Alle Schritte wurden ausgeführt, keiner ist fehlgeschlagen. Sag mir, was du als Nächstes möchtest.",
+        "v2": "Jeder Schritt wurde ohne Fehler abgeschlossen. Sag mir, wohin es von hier aus gehen soll.",
+        "v3": "Fertig – unterwegs gab es keine Probleme. Ich bin bereit für das Nächste, wann immer du willst."
       },
       "recovered": {
         "v1": "Fertig – ein Schritt brauchte einen zweiten Anlauf, aber jetzt passt alles.",
