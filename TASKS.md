@@ -11,6 +11,34 @@
 > - Every active epic records its current boundary and next admission gate. Do not infer whole-sprint progress from raw checkbox count: epics and bugs differ materially in size.
 > - Update this file after every accepted merge, blocker decision, scope change, and code-freeze checkpoint. Preserve evidence links and move completed items to **Done** instead of deleting them.
 
+## Gate health — changed 2026-08-30
+
+**The pre-push gate was failing on contention rather than on defects, and it was measured.** Five
+filesystem-heavy tests failed gate runs as 10s timeouts while passing in isolation —
+`presentationRunJournal` four times, `PresentationSourceGrantStore` three, plus
+`projectKnowledgeService`, `releasePackagingConfig` and `officeCliRunner`. Each failure cost a full
+re-run, which dwarfed the gate's own six minutes.
+
+None of the five asserts any timing of its own, so they did **not** get the isolation treatment
+beside them in `vitest.config.ts`: that exists for tests asserting wall-clock thresholds, where
+contention corrupts the measurement. These only needed headroom, so they sit in a new `io-heavy`
+project — still fully parallel, 60s ceiling. Serialising them would have added their whole cost to
+the critical path for nothing. `directorCommandLifecycle` is the opposite case and got the opposite
+treatment: its own `waitForCondition` budgets 5s internally, so no harness timeout can reach it, and
+it joins the three siblings already isolated.
+
+**The gate also no longer runs tests for documentation-only pushes.** `scripts/select-push-tests.js`
+picks between the reviewed Creative Studio coverage gate and nothing at all. Only two legs, because
+a three-leg draft that skipped instrumentation whenever no coverage-enforced file changed was
+unsound — deleting a test, or editing a helper a Studio file imports, moves a manifest file's
+coverage without touching any manifest file. `releasePackagingConfig.test.ts` guards that invariant
+and caught it; it now pins the selector to exactly one test command and the skip rule to exactly
+`.md`, both mutation-checked.
+
+**Measured on a quiet machine:** 401s with a flake before; 342s, 324s and 319s green after; 321s for
+the suite without coverage, so instrumentation is ~25% and the rest is simply running 10,666 tests.
+A documentation-only push now runs no tests at all.
+
 ## Carryover after Sprint 2 code freeze
 
 - [ ] **[BUG-042][P2][Test infrastructure] 25 updater tests fail under `CI=true` because production deliberately disables updates in CI** — found 2026-08-10 by the first CI run in this repo's history; **root cause established by controlled experiment the same day**
