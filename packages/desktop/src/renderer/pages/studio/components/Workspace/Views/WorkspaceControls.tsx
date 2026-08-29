@@ -529,6 +529,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
                 }
           }
           errorMessageKey={referenceErrorMessageKey}
+          onRefreshRoutes={() => void mutations.refreshRoutes()}
           focusIntent={referenceFocusIntent}
           gateLocked={gateLocked || pending || referenceActions === undefined}
           pendingReferenceId={referencePendingId}
@@ -599,6 +600,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           beatIndex={openBeatIndex}
           drafts={drafts}
           errorMessageKey={errorMessageKey}
+          onRefreshRoutes={() => void mutations.refreshRoutes()}
           gateLocked={gateLocked}
           onClose={() => setOpenPanel(null)}
           onParkShotSuccess={(shotId) => {

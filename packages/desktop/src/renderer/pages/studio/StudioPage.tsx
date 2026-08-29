@@ -98,6 +98,10 @@ import {
   type StudioView,
 } from './studioPhaseRoute';
 import styles from './StudioPage.module.css';
+import {
+  STUDIO_ROUTE_CATALOG_BLOCKER_KEY,
+  StudioBlockerRemedy,
+} from '@/renderer/pages/studio/components/StudioBlockerAlert';
 
 type StudioReferenceDecisionIntent = { kind: 'rejected' } | { kind: 'generation_gate' };
 
@@ -757,6 +761,18 @@ const StudioProjectPage: React.FC<{
     spendGate.open,
     spendGateLocked,
   ]);
+  /*
+   * BUG-183. `routeCatalogRequired` is the generic "this project has no usable generation route"
+   * line, raised from eight call sites. When the catalogue is null because the fetch itself failed,
+   * `loadRoutes` has already captured the exact reason in `routeErrorMessageKey` — but that sits
+   * last in the precedence chain, so the vague sentence hides the precise one and the person is
+   * told to refresh the very thing that just failed to load. Prefer the specific reason whenever
+   * the generic one is all we would otherwise have shown.
+   */
+  const blockingMessageKey =
+    actionErrorMessageKey === STUDIO_ROUTE_CATALOG_BLOCKER_KEY && routeErrorMessageKey !== null
+      ? routeErrorMessageKey
+      : (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey);
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
   const beatPanelReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
@@ -764,7 +780,13 @@ const StudioProjectPage: React.FC<{
       ? 'conversation.creativeStudio.workspace.controls.statusRequired'
       : routeCatalog === null
         ? 'conversation.creativeStudio.workspace.controls.routeCatalogRequired'
-        : null;
+        : // BUG-183: the handoff derivation below already separates "no catalogue at all" from
+          // "a catalogue that holds no usable image route", and the two need different sentences —
+          // refreshing fixes the first and can never fix the second. This one stopped at the
+          // generic line, so a Beat panel blocked by an unusable route told the person to refresh.
+          currentGenerationCapability === null && routeCatalog.image.status !== 'ready'
+          ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+          : null;
   const handoffReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
     : statusBlocksReview
@@ -4376,7 +4398,7 @@ const StudioProjectPage: React.FC<{
               detachBedAudio={cutActions.detachBedAudio}
               drafts={drafts}
               pending={workspacePending}
-              errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
+              errorMessageKey={blockingMessageKey}
               mutations={mutations}
               briefDialogRequest={briefDialogRequest}
               briefRouteFocusRole={briefRouteFocusRole}
@@ -4389,7 +4411,16 @@ const StudioProjectPage: React.FC<{
           activeView === 'references' ||
           (actionErrorMessageKey === null && workspaceErrorMessageKey === null && routeErrorMessageKey === null)
             ? undefined
-            : t(actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey!)
+            : // The shell owns the role='alert' wrapper, so the remedy travels beside the text
+              // rather than inside a second Alert (BUG-183).
+              [
+                t(blockingMessageKey!),
+                <StudioBlockerRemedy
+                  key='remedy'
+                  messageKey={blockingMessageKey}
+                  onRefreshRoutes={() => void refetchRoutes()}
+                />,
+              ]
         }
         reviewedOutputs={reviewedDirectorOutputs}
       >
@@ -4409,7 +4440,7 @@ const StudioProjectPage: React.FC<{
               currentGenerationCapability !== null ||
               (project.imageRouteId !== null && routeCatalog?.image.status === 'ready')
             }
-            errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
+            errorMessageKey={blockingMessageKey}
             mutations={mutations}
             beatPanelActions={beatPanelActions}
             beatPanelReviewGraphs={beatPanelReviewGraphs}
@@ -4419,11 +4450,7 @@ const StudioProjectPage: React.FC<{
               routeCatalog?.image.selectedRoute?.constraints.maxConditioningImages ?? null
             }
             referencePendingId={pendingReferenceId}
-            referenceErrorMessageKey={
-              activeView === 'references'
-                ? (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey)
-                : null
-            }
+            referenceErrorMessageKey={activeView === 'references' ? blockingMessageKey : null}
             referenceFocusIntent={referenceFocusIntent}
             onReferenceFocusIntentConsumed={consumeReferenceFocusIntent}
             shotEditFocusIntent={shotEditFocusIntent}

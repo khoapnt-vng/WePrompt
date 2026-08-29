@@ -3212,8 +3212,14 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
       },
     },
     {
-      label: 'an unavailable route catalog',
-      messageKey: 'conversation.creativeStudio.workspace.controls.routeCatalogRequired',
+      /*
+       * BUG-183. This row used to assert the generic `routeCatalogRequired` line — "no generation
+       * model is ready … choose Refresh routes" — while the fixture makes the fetch fail with an
+       * exact reason. It codified the defect: the precise message was captured and then hidden
+       * behind the vague one, telling the person to refresh the very thing that just failed.
+       */
+      label: 'a route catalog whose fetch failed, named by its own reason',
+      messageKey: 'native.routesFailed',
       configure: (_authority: StudioRendererProjectV2) => {
         mocks.bridge.listRoutes.invoke.mockResolvedValue({
           ok: false,

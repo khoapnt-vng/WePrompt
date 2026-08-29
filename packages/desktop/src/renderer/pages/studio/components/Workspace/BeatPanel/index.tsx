@@ -31,6 +31,7 @@ import { BeatPlayer } from './BeatPlayer';
 import { CoverageBar } from './CoverageBar';
 import type { CoveragePlanningPairChange } from './coverageGeometry';
 import { FirstFrames } from './FirstFrames';
+import { StudioBlockerAlert } from '@/renderer/pages/studio/components/StudioBlockerAlert';
 
 const KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel';
 const JOB_KEY_ROOT = 'conversation.creativeStudio.jobs';
@@ -114,6 +115,7 @@ export type BeatPanelProps = {
   drafts: UseWorkspaceDraftsResult;
   reviewGraphs: readonly BeatPanelReviewGraph[];
   errorMessageKey: string | null;
+  onRefreshRoutes?: () => void;
   pending: boolean;
   gateLocked: boolean;
   reviewBlockedMessageKey: string | null;
@@ -1147,6 +1149,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
   drafts,
   reviewGraphs,
   errorMessageKey,
+  onRefreshRoutes,
   pending,
   gateLocked,
   reviewBlockedMessageKey,
@@ -1588,7 +1591,7 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
           </p>
         ) : null}
 
-        {errorMessageKey === null ? null : <Alert content={t(errorMessageKey)} type='error' />}
+        <StudioBlockerAlert messageKey={errorMessageKey} onRefreshRoutes={onRefreshRoutes} />
 
         {!storyOpen ? null : (
           <section aria-label={t(`${KEY_ROOT}.beatFieldsLabel`)} className={styles.beatEditor}>
