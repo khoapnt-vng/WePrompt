@@ -2161,7 +2161,9 @@ const StudioProjectPage: React.FC<{
     });
   }, [projection, refetchProjectWorkspace, runWorkspaceExclusive, setActionErrorMessageKey, spendGateLocked]);
 
-  const boardProductionActions = useMemo<Omit<BoardActions, 'restoreBeat' | 'restoreShot' | 'reorderBin'>>(
+  const boardProductionActions = useMemo<
+    Omit<BoardActions, 'restoreBeat' | 'restoreShot' | 'reorderBin' | 'persistCapturedPoster'>
+  >(
     () => ({
       drawNext: () =>
         openBoardSpendGate((current, exactProjection) =>
@@ -2354,8 +2356,9 @@ const StudioProjectPage: React.FC<{
             bin: bin.map(cloneBinItem),
           })
         ),
+      persistCapturedPoster: beatPanelActions.persistCapturedPoster,
     }),
-    [boardProductionActions, runWorkspaceCommit]
+    [beatPanelActions.persistCapturedPoster, boardProductionActions, runWorkspaceCommit]
   );
 
   const cutActions = useMemo<CutActions>(

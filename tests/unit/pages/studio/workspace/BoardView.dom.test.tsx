@@ -543,7 +543,19 @@ const makeActions = (): BoardActions => ({
   restoreBeat: vi.fn().mockResolvedValue(true),
   restoreShot: vi.fn().mockResolvedValue(true),
   reorderBin: vi.fn().mockResolvedValue(true),
+  persistCapturedPoster: vi.fn().mockResolvedValue(true),
 });
+
+const stubCanvasCapture = (): (() => void) => {
+  const originalContext = HTMLCanvasElement.prototype.getContext;
+  const originalDataUrl = HTMLCanvasElement.prototype.toDataURL;
+  HTMLCanvasElement.prototype.getContext = (() => ({ drawImage: () => undefined })) as never;
+  HTMLCanvasElement.prototype.toDataURL = (() => 'data:image/png;base64,AAAA') as never;
+  return () => {
+    HTMLCanvasElement.prototype.getContext = originalContext;
+    HTMLCanvasElement.prototype.toDataURL = originalDataUrl;
+  };
+};
 
 const cardFor = (container: HTMLElement, beatId: string): HTMLElement => {
   const card = container.querySelector<HTMLElement>(`[data-beat-id="${beatId}"]`);
@@ -1364,5 +1376,52 @@ describe('BoardView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Report restored binned-owner Shot' }));
     await waitFor(() => expect(screen.getByTestId('bin-focus-target')).toHaveFocus());
+  });
+  it('captures a poster the first time the Board decodes a Shot video, and only once', async () => {
+    // BUG-166: a Shot only gained a poster when someone opened its Beat panel, so the Board — the
+    // one surface that shows every Shot at once — had none to show for any Shot nobody had opened.
+    const restoreCanvas = stubCanvasCapture();
+    try {
+      const actions = makeActions();
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [
+            makeShot('shot_1', {
+              currentPicture: {
+                assetId: 'video_first',
+                posterAssetId: null,
+                sourceDurationSeconds: 4,
+                createdAt: '2026-08-28T00:00:00.000Z',
+                prompt: 'First Shot',
+                promptChanged: false,
+                firstFrameChanged: false,
+              },
+            }),
+          ],
+        }),
+      ]);
+      render(<BoardView {...boardProps(projection)} actions={actions} />);
+
+      const video = screen.getByLabelText('Current Shot video') as HTMLVideoElement;
+      Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(video, 'videoHeight', { configurable: true, value: 1080 });
+
+      fireEvent.loadedData(video);
+      await waitFor(() =>
+        expect(actions.persistCapturedPoster).toHaveBeenCalledWith({
+          shotId: 'shot_1',
+          videoAssetId: 'video_first',
+          dataUrl: 'data:image/png;base64,AAAA',
+          width: 1920,
+          height: 1080,
+        })
+      );
+
+      // A tile can fire loadedData repeatedly; the capture must not be paid for twice.
+      fireEvent.loadedData(video);
+      await waitFor(() => expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1));
+    } finally {
+      restoreCanvas();
+    }
   });
 });
