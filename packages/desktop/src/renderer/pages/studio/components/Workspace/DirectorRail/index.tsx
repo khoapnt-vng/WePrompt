@@ -644,7 +644,18 @@ const refreshDirectorPresetRules = (conversation: DirectorConversation): Promise
   if (proof === undefined) {
     proof = (async (): Promise<boolean> => {
       try {
-        const updated = await ipcBridge.conversation.update.invoke({
+        /*
+         * Deliberately ignore the resolved value (BUG-163). This provider is typed
+         * `Promise<boolean>`, but `httpRequest` returns `undefined` for any success without a JSON
+         * content-type and `json.data` when the body is wrapped, so a PATCH that genuinely
+         * persisted need never resolve to `true`. Gating on that value marked the conversation
+         * permanently interrupted after a successful write — which is what BUG-168 measured, 654
+         * PATCH responses against a rail still rendering the interrupted notice.
+         *
+         * Failure is signalled by a throw (`BackendHttpError`), which the catch below handles, and
+         * persistence is proved by the readback that follows rather than by the write's echo.
+         */
+        await ipcBridge.conversation.update.invoke({
           id: conversation.id,
           merge_extra: true,
           updates: {
@@ -654,7 +665,6 @@ const refreshDirectorPresetRules = (conversation: DirectorConversation): Promise
             } as TChatConversation['extra'],
           },
         });
-        if (updated !== true) return false;
       } catch {
         return false;
       }

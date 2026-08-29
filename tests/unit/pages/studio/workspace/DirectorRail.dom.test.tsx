@@ -698,12 +698,43 @@ describe('DirectorRail', () => {
     expect(harness.getConversation).not.toHaveBeenCalled();
   });
 
+  it('repairs rules when the write succeeds without echoing true, which is what a 204 does', async () => {
+    /*
+     * BUG-163. `conversation.update` is typed Promise<boolean>, but httpRequest returns `undefined`
+     * for any success without a JSON content-type and `json.data` when the body is wrapped, so a
+     * PATCH that genuinely persisted need never resolve to `true`. Gating the repair on that echo
+     * left the conversation permanently interrupted after a successful write — BUG-168 measured
+     * 654 successful PATCH responses against a rail still rendering the interrupted notice.
+     * Persistence is proved by the readback, not by the write's return value.
+     */
+    const createdWithoutProfile = exactConversation('conversation_director', {
+      studio_director_rules_profile: undefined,
+    });
+    harness.create.mockResolvedValueOnce(createdWithoutProfile);
+    harness.update.mockResolvedValueOnce(undefined as unknown as boolean);
+    harness.getConversation.mockResolvedValueOnce(exactConversation('conversation_director'));
+
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      createdWithoutProfile.id
+    );
+    // The readback is what proves it, so it must actually run.
+    expect(harness.getConversation).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText('Director setup was interrupted before the conversation could be attached to this project.')
+    ).toBeNull();
+  });
+
   it('retries one failed fresh-create rules repair without creating another conversation', async () => {
     const createdWithoutProfile = exactConversation('conversation_director', {
       studio_director_rules_profile: undefined,
     });
     harness.create.mockResolvedValueOnce(createdWithoutProfile);
-    harness.update.mockResolvedValueOnce(false);
+    // A rules write fails by throwing (BackendHttpError); a resolved value never means failure,
+    // because httpRequest returns undefined for any success without a JSON body (BUG-163).
+    harness.update.mockRejectedValueOnce(new Error('PATCH /api/conversations/conversation_director → 500'));
     harness.getConversation.mockResolvedValueOnce(exactConversation('conversation_director'));
 
     render(<DirectorRail project={project()} />);
@@ -1365,7 +1396,7 @@ describe('DirectorRail', () => {
     });
     const refreshed = exactConversation('conversation_director', { session_mode: 'plan' });
     harness.conversations = [conversation];
-    harness.update.mockResolvedValueOnce(false);
+    harness.update.mockRejectedValueOnce(new Error('PATCH /api/conversations/conversation_director → 500'));
     harness.getConversation.mockResolvedValueOnce(refreshed);
 
     render(<DirectorRail project={project({ briefConversationId: conversation.id })} />);
