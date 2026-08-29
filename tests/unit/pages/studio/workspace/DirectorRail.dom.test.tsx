@@ -698,7 +698,7 @@ describe('DirectorRail', () => {
     expect(harness.getConversation).not.toHaveBeenCalled();
   });
 
-  it('repairs rules when the write succeeds without echoing true, which is what a 204 does', async () => {
+  it('repairs rules when the write succeeds without echoing true, which is what an empty body does', async () => {
     /*
      * BUG-163. `conversation.update` is typed Promise<boolean>, but httpRequest returns `undefined`
      * for any success without a JSON content-type and `json.data` when the body is wrapped, so a
@@ -721,6 +721,35 @@ describe('DirectorRail', () => {
       createdWithoutProfile.id
     );
     // The readback is what proves it, so it must actually run.
+    expect(harness.getConversation).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByText('Director setup was interrupted before the conversation could be attached to this project.')
+    ).toBeNull();
+  });
+
+  it('repairs rules when the write echoes the conversation, which is what this backend does', async () => {
+    /*
+     * Measured against the running app 2026-08-29, not inferred: a value-preserving PATCH to
+     * `/api/conversations/:id` returns **200 with a JSON body**, and `conversation.update` resolves
+     * the **full conversation record**. So the shape the sibling test drives — `undefined` from an
+     * empty body — is a shape this backend never produces, and the shape it does produce was
+     * untested. Both are `!== true`, which is the whole point: the provider is typed
+     * `Promise<boolean>` and cannot be trusted to return one, so no repair may be gated on it.
+     */
+    const createdWithoutProfile = exactConversation('conversation_director', {
+      studio_director_rules_profile: undefined,
+    });
+    const echoed = exactConversation('conversation_director');
+    harness.create.mockResolvedValueOnce(createdWithoutProfile);
+    harness.update.mockResolvedValueOnce(echoed as unknown as boolean);
+    harness.getConversation.mockResolvedValueOnce(echoed);
+
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('textbox', { name: 'Director composer' })).toHaveAttribute(
+      'data-conversation-id',
+      createdWithoutProfile.id
+    );
     expect(harness.getConversation).toHaveBeenCalledTimes(1);
     expect(
       screen.queryByText('Director setup was interrupted before the conversation could be attached to this project.')
