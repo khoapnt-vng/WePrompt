@@ -1683,11 +1683,11 @@ describe('WorkspaceControls', () => {
       <ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={initial} mutations={mutations} />
     );
 
-    fireEvent.click(
-      screen.getAllByRole('button', {
-        name: /conversation\.creativeStudio\.workspace\.table\.reorder\.moveLater/,
-      })[0]!
-    );
+    const firstPositionCell = result.container.querySelector<HTMLElement>(
+      '[role="row"][data-beat-id="beat_1"] [data-grid-column="0"]'
+    )!;
+    act(() => firstPositionCell.focus());
+    fireEvent.keyDown(firstPositionCell, { key: 'ArrowDown', altKey: true });
     await waitFor(() =>
       expect(mutations.applyAuthoring).toHaveBeenCalledExactlyOnceWith([
         { kind: 'reorder_beats', beatOrder: ['beat_2', 'beat_1'] },

@@ -365,14 +365,7 @@ const localizedBoardPanelKeys = [
   'board.panel.status.cancelled',
 ] as const;
 
-const localizedTableReorderKeys = [
-  'table.reorder.label',
-  'table.reorder.dragHandle',
-  'table.reorder.moveEarlier',
-  'table.reorder.moveLater',
-  'table.reorder.announcement',
-  'table.reorder.failed',
-] as const;
+const localizedTableReorderKeys = ['table.reorder.announcement', 'table.reorder.failed'] as const;
 
 const localizedPaidRecoveryKeys = [
   'proposals.paidRecovery.heading',
@@ -544,6 +537,7 @@ const expectedLeaves = [
   'table.shotCount_other',
   'table.actualDuration',
   'table.plannedPending',
+  'table.shotPosition',
   'table.empty',
   'table.state.durationPending',
   'table.state.noCoverage',
@@ -1588,6 +1582,7 @@ const localizedWorkspaceKeys = [
   'table.columns.length',
   'table.columns.story',
   'table.plannedPending',
+  'table.shotPosition',
   'controls.briefAndRulesTitle',
   'controls.undoLabel.set_reference_plan',
   'controls.undoLabel.amend_reference_plan',
@@ -1767,10 +1762,6 @@ describe('Creative Studio workspace translations', () => {
       'table.authoring.addShotForBeat': 'Add Shot to {{title}}',
       'table.authoring.unassignedReferenceNote':
         'A hand-authored Shot starts with references unassigned and requires review before paid generation.',
-      'table.reorder.label': 'Actions for {{title}}',
-      'table.reorder.dragHandle': 'Reorder {{title}} at position {{position}}',
-      'table.reorder.moveEarlier': 'Move {{title}} earlier',
-      'table.reorder.moveLater': 'Move {{title}} later',
       'table.reorder.announcement': 'Moved {{title}} from position {{from}} to {{to}} of {{total}}.',
       'table.reorder.failed': 'Beat order was not changed.',
       'table.columns.panel': 'Panel',

@@ -1022,10 +1022,6 @@
       },
       "table": {
         "reorder": {
-          "label": "{{title}} için yeniden sıralama eylemleri",
-          "dragHandle": "{{position}}. konumdaki {{title}} öğesini yeniden sırala",
-          "moveEarlier": "{{title}} öğesini öne taşı",
-          "moveLater": "{{title}} öğesini arkaya taşı",
           "announcement": "{{title}}, {{from}}. konumdan {{total}} içinde {{to}}. konuma taşındı.",
           "failed": "Beat sırası değiştirilmedi."
         },
@@ -1066,7 +1062,8 @@
             "failed": "Başarısız",
             "cancelled": "İptal edildi"
           }
-        }
+        },
+        "shotPosition": "{{beat}}.{{shot}}"
       },
       "project": {
         "statusUnavailable": "Durum kullanılamıyor",

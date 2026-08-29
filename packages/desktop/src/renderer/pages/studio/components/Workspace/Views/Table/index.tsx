@@ -301,9 +301,7 @@ export const TableView: React.FC<TableViewProps> = ({
   });
   const cellRefs = useRef<Array<Partial<Record<TableColumnId, HTMLTableCellElement | null>>>>([]);
   const panelButtonRefs = useRef(new Map<string, HTMLButtonElement>());
-  const reorderButtonRefs = useRef(new Map<string, HTMLButtonElement>());
   const reorderPendingRef = useRef(false);
-  const draggedBeatIdRef = useRef<string | null>(null);
   const bindingCardRefs = useRef(new Map<string, HTMLElement>());
   const bindingHighlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const consumedReferenceFocusIntentRef = useRef<{ projectId: string; intentId: string } | null>(null);
@@ -469,22 +467,17 @@ export const TableView: React.FC<TableViewProps> = ({
     column: number,
     beat: WorkspaceBeatProjection
   ): void => {
-    if (
-      columns[column]?.id === 'position' &&
-      (event.key === 'F2' ||
-        event.key === 'Enter' ||
-        event.key === ' ' ||
-        event.key === 'Space' ||
-        event.key === 'Spacebar')
-    ) {
-      event.preventDefault();
-      reorderButtonRefs.current.get(beat.id)?.focus({ preventScroll: true });
-      return;
-    }
-    if (columns[column]?.id === 'position' && event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
-      event.preventDefault();
-      void reorderBeat(beat.id, row + (event.key === 'ArrowUp' ? -1 : 1));
-      return;
+    if (columns[column]?.id === 'position' && event.altKey) {
+      let destination: number | null = null;
+      if (event.key === 'ArrowUp') destination = row - 1;
+      else if (event.key === 'ArrowDown') destination = row + 1;
+      else if (event.key === 'Home') destination = 0;
+      else if (event.key === 'End') destination = beatOrder.length - 1;
+      if (destination !== null) {
+        event.preventDefault();
+        void reorderBeat(beat.id, destination);
+        return;
+      }
     }
     if (event.key === 'Escape' && columns[column]?.id === 'panel') {
       event.preventDefault();
@@ -552,7 +545,7 @@ export const TableView: React.FC<TableViewProps> = ({
     } finally {
       reorderPendingRef.current = false;
       setReorderingBeatId(null);
-      reorderButtonRefs.current.get(beatId)?.focus({ preventScroll: true });
+      cellRefs.current[destination]?.position?.focus({ preventScroll: true });
     }
   };
 
@@ -655,7 +648,6 @@ export const TableView: React.FC<TableViewProps> = ({
                 beat.title.trim() === ''
                   ? t('conversation.creativeStudio.workspace.beatPanel.untitledBeat', { index: row + 1 })
                   : beat.title;
-              const reorderAccessibleTitle = `${row + 1}. ${beatDisplayTitle}`;
               const selected = beat.id === selectedBeatId;
               const hasCoverage = beat.shots.length > 0;
               const boardDetailsOpen = openBoardBeatIndex === row && hasCoverage;
@@ -663,7 +655,6 @@ export const TableView: React.FC<TableViewProps> = ({
                 (shot) => panelByShotId.get(shot.id) ?? statusPendingPanel(shot.id)
               );
               const leadPanel = boardPanelsForBeat[0] ?? null;
-              const reorderLocked = interactionLocked || reorderingBeatId !== null || !canonicalOrderReady;
               const beatAriaRowIndex =
                 row + 2 + (openBoardBeatIndex >= 0 && row > openBoardBeatIndex ? openShotCount : 0);
               const durationSeconds = hasCoverage ? beat.sumSeconds : null;
@@ -679,74 +670,6 @@ export const TableView: React.FC<TableViewProps> = ({
                       <span className={styles.position}>
                         <bdi>{String(row + 1).padStart(2, '0')}</bdi>
                       </span>
-                      <div
-                        aria-label={t('conversation.creativeStudio.workspace.table.reorder.label', {
-                          title: reorderAccessibleTitle,
-                        })}
-                        className={styles.reorderActions}
-                        onClick={(event) => event.stopPropagation()}
-                        onKeyDown={(event) => event.stopPropagation()}
-                        role='group'
-                      >
-                        <Button
-                          ref={(node) => {
-                            if (node === null) reorderButtonRefs.current.delete(beat.id);
-                            else if (node instanceof HTMLButtonElement) reorderButtonRefs.current.set(beat.id, node);
-                          }}
-                          aria-label={t('conversation.creativeStudio.workspace.table.reorder.dragHandle', {
-                            title: beatDisplayTitle,
-                            position: row + 1,
-                          })}
-                          disabled={reorderLocked}
-                          draggable={!reorderLocked}
-                          icon={<Drag />}
-                          onDragEnd={() => {
-                            draggedBeatIdRef.current = null;
-                          }}
-                          onDragStart={(event) => {
-                            draggedBeatIdRef.current = beat.id;
-                            event.dataTransfer.effectAllowed = 'move';
-                            event.dataTransfer.setData('text/plain', beat.id);
-                          }}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Escape') {
-                              event.preventDefault();
-                              cellRefs.current[row]?.position?.focus({ preventScroll: true });
-                              return;
-                            }
-                            let destination: number | null = null;
-                            if (event.key === 'ArrowUp') destination = row - 1;
-                            else if (event.key === 'ArrowDown') destination = row + 1;
-                            else if (event.key === 'Home') destination = 0;
-                            else if (event.key === 'End') destination = beatOrder.length - 1;
-                            if (destination === null) return;
-                            event.preventDefault();
-                            void reorderBeat(beat.id, destination);
-                          }}
-                          size='mini'
-                          tabIndex={-1}
-                        />
-                        <Button
-                          aria-label={t('conversation.creativeStudio.workspace.table.reorder.moveEarlier', {
-                            title: reorderAccessibleTitle,
-                          })}
-                          disabled={reorderLocked || row === 0}
-                          icon={<ArrowUp />}
-                          onClick={() => void reorderBeat(beat.id, row - 1)}
-                          size='mini'
-                          tabIndex={-1}
-                        />
-                        <Button
-                          aria-label={t('conversation.creativeStudio.workspace.table.reorder.moveLater', {
-                            title: reorderAccessibleTitle,
-                          })}
-                          disabled={reorderLocked || row === beatOrder.length - 1}
-                          icon={<ArrowDown />}
-                          onClick={() => void reorderBeat(beat.id, row + 1)}
-                          size='mini'
-                          tabIndex={-1}
-                        />
-                      </div>
                     </div>
                   ),
                 },
@@ -871,17 +794,6 @@ export const TableView: React.FC<TableViewProps> = ({
                     data-beat-id={beat.id}
                     data-board-details-open={boardDetailsOpen}
                     onClick={() => onOpenBeat(beat.id)}
-                    onDragOver={(event) => {
-                      if (draggedBeatIdRef.current !== null && draggedBeatIdRef.current !== beat.id) {
-                        event.preventDefault();
-                      }
-                    }}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const draggedBeatId = draggedBeatIdRef.current;
-                      draggedBeatIdRef.current = null;
-                      if (draggedBeatId !== null) void reorderBeat(draggedBeatId, row);
-                    }}
                     role='row'
                   >
                     {cells.map(({ column: columnId, content }, column) => (
@@ -926,7 +838,12 @@ export const TableView: React.FC<TableViewProps> = ({
                             column: 'position',
                             content: (
                               <span className={styles.shotPosition} data-shot-position={shotIndex + 1}>
-                                <bdi>{String(shotIndex + 1).padStart(2, '0')}</bdi>
+                                <bdi>
+                                  {t('conversation.creativeStudio.workspace.table.shotPosition', {
+                                    beat: row + 1,
+                                    shot: shotIndex + 1,
+                                  })}
+                                </bdi>
                               </span>
                             ),
                           },

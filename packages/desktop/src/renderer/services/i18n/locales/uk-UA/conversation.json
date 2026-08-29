@@ -1020,10 +1020,6 @@
       },
       "table": {
         "reorder": {
-          "label": "Дії для зміни порядку {{title}}",
-          "dragHandle": "Змінити порядок {{title}} на позиції {{position}}",
-          "moveEarlier": "Перемістити {{title}} раніше",
-          "moveLater": "Перемістити {{title}} пізніше",
           "announcement": "{{title}} переміщено з позиції {{from}} на {{to}} із {{total}}.",
           "failed": "Порядок бітів не змінено."
         },
@@ -1064,7 +1060,8 @@
             "failed": "Помилка",
             "cancelled": "Скасовано"
           }
-        }
+        },
+        "shotPosition": "{{beat}}.{{shot}}"
       },
       "project": {
         "statusUnavailable": "Статус недоступний",

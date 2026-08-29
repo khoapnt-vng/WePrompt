@@ -326,6 +326,10 @@
   background: var(--color-fill-1);
 }
 
+.shotRow .shotCell[data-grid-column='0'] {
+  padding-inline-start: 32px;
+}
+
 .shotRow:hover .shotCell,
 .shotRow[data-shot-detail-open='true'] .shotCell {
   background: var(--color-fill-2);
