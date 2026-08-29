@@ -645,21 +645,41 @@ describe('release packaging configuration', () => {
   it('blocks local pushes and sprint3 pull requests on reviewed Creative Studio coverage', () => {
     const justfile = readProjectFile('justfile');
     const workflow = readProjectFile('.github/workflows/sprint3-pr-gate.yml');
+    const selector = readProjectFile('scripts/select-push-tests.js');
     const pushDependencies = justfile.match(/^push \*ARGS: (.+)$/m)?.[1].split(/\s+/) ?? [];
 
+    /*
+     * The local push reaches the coverage gate through a selector that skips tests for
+     * documentation-only pushes, rather than depending on the recipe directly. What must stay true
+     * is that any change able to move coverage still runs the reviewed script — so the selector is
+     * held to having exactly one test command, and to deciding on documentation alone.
+     *
+     * An earlier draft of that selector also had a no-coverage middle leg for changes that touched
+     * no coverage-enforced file. That was unsound: deleting a test, or editing a helper a Studio
+     * file imports, moves a manifest file's coverage without touching any manifest file. This
+     * assertion is what caught it.
+     */
     expect({
-      localPushUsesCoverageGate: pushDependencies.includes('test-coverage-creative-studio'),
+      localPushReachesTestSelector: pushDependencies.includes('test-for-push'),
       localPushStillRunsRedundantSuite: pushDependencies.includes('test'),
-      localGateRunsReviewedScript:
-        /^test-coverage-creative-studio:\s*\n\s+bun run test:coverage:creative-studio$/m.test(justfile),
+      localGateRunsReviewedScript: /^test-for-push:\s*\n\s+node scripts\/select-push-tests\.js$/m.test(justfile),
+      selectorOnlyEverRunsTheReviewedScript:
+        [...selector.matchAll(/bun[^\n]*run['"\s,]+([\w:-]+)/g)].map((match) => match[1]).join() ===
+        'test:coverage:creative-studio',
+      // Pinned exactly, not merely "mentions .md": widening this predicate to any source
+      // extension would let a real change push with no tests at all, and a looser assertion did
+      // not notice when that mutation was tried.
+      selectorSkipsOnlyMarkdown: /const isDocumentation = \(file\) => file\.endsWith\('\.md'\);/.test(selector),
       pullRequestGateRunsReviewedScript: workflow.includes('if bun run test:coverage:creative-studio 2>&1'),
       quarantineCanHideCoverageFailure: !workflow.includes(
         '! grep -Eq \'Coverage for .* does not meet .*threshold\' "$clean"'
       ),
     }).toEqual({
-      localPushUsesCoverageGate: true,
+      localPushReachesTestSelector: true,
       localPushStillRunsRedundantSuite: false,
       localGateRunsReviewedScript: true,
+      selectorOnlyEverRunsTheReviewedScript: true,
+      selectorSkipsOnlyMarkdown: true,
       pullRequestGateRunsReviewedScript: true,
       quarantineCanHideCoverageFailure: false,
     });
