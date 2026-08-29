@@ -1864,9 +1864,16 @@ not — while a typed "yes" in chat still spends nothing.
 
 ## Assignable follow-on — Project status
 
-**Status:** owner-directed 2026-08-27. Full design in
-[Project status](../../design/creative-studio-3-project-status.md). Companion to the Director
-troubleshooting assignment above — build them together; the status tool is that charter's item 1.
+**Status: implemented and verified 2026-08-29.** Full design in
+[Project status](../../design/creative-studio-3-project-status.md). All four items are in the tree:
+the pure rollup is `service/schema2/projectStatus.ts`; it is served over IPC as `getProjectStatus`
+(`ipcBridge.ts:1334`) and exposed to the Director as `studio_get_project_status`; and item 3's
+re-pointing is done on both surfaces — the app bar renders `stats.blockerCount`
+(`WorkspaceShell.tsx:467-473`) and the library card renders the seven-stage summary
+(`ProjectCard.tsx:52-66`). Item 4's invariants are covered by 34 tests in
+`projectStatus.test.ts`, including dependency-failure precedence over queueing (`:20`, `:21`),
+boards advisory (`:540`), bounded codes with fail-closed topology handling (`:30`), and
+_"is deterministic and pure for a rich project projection"_ (`:34`).
 
 1. **`projectStudioStatusV2(project, routeCatalog)`** — pure, main-side, derived on read, never
    persisted. Stages `brief · engines · references · storyboard · bindings · production · cut`,
@@ -1886,9 +1893,25 @@ the design doc, the status output names the true cause and the correct remedy la
 
 ## Assignable follow-on — regroup the project menu by consequence
 
-**Status:** owner-directed 2026-08-27. **Blocked on Codex's film-export work landing** — this edits
-`WorkspaceProjectMenu.tsx`, the same file the export feature lives in (`7a3ed801e`). Start only once
-export is merged.
+**Status: implemented and verified 2026-08-29.** The blocker lifted — `7a3ed801e` is an ancestor of
+HEAD — and all six required behaviours are already in the tree. Verified item by item rather than
+assumed, because this file's status lines have proven stale elsewhere:
+
+1. **Project settings dialog retired.** The menu (`WorkspaceProjectMenu.tsx:1475-1516`) carries only
+   Film setup, audio imports, editor-folder export and film export. No settings item exists.
+2. **Inline rename.** `WorkspaceProjectTitle` (`WorkspaceShell.tsx:50`) with the
+   `phase.shared.renameProject` affordance, covered by `WorkspaceProjectTitle.dom.test.tsx`.
+3. **Target duration lives in the Cut** — `Cut/index.tsx:81` and `:103` hold the draft and the
+   canonical value beside the readout it drives.
+4. **Aspect ratio and resolution sit beside engine selection** inside the dialog
+   (`WorkspaceProjectMenu.tsx:1867-1893`), **and the guard survived the move**: both are
+   `disabled={pending || projection.requestShapeLocked}`.
+5. **The dialog is named `Film setup`** — `controls.briefAndRulesTitle` resolves to exactly that.
+6. **Rules stayed**, with organisation rules still separate and read-only (`:1939`).
+
+The acceptance list passes: `WorkspaceProjectMenu.dom.test.tsx` asserts _"one consequence-grouped
+Film setup action"_ (`:424`) and _"excludes name and target"_ (`:880`), and takes `requestShapeLocked`
+as a fixture parameter (`:222`). 208 tests across the menu, title and Cut suites run green.
 
 ### Problem
 
