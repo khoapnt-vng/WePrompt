@@ -122,6 +122,28 @@ type StudioReviewedActionLatch = {
   target: StudioReviewedActionTarget | null;
 };
 
+/**
+ * Which blocker the person should actually read.
+ *
+ * BUG-183. `routeCatalogRequired` is the generic "this project has no usable generation route"
+ * line, raised from eight call sites. When the catalogue is null because the fetch itself failed,
+ * `loadRoutes` has already captured the exact reason in `routeErrorMessageKey` — but that sat last
+ * in the precedence chain, so the vague sentence hid the precise one and the person was told to
+ * refresh the very thing that had just failed to load. Prefer the specific reason whenever the
+ * generic one is all we would otherwise have shown.
+ *
+ * Exported because it is pure and worth covering exhaustively: four render sites read it, and a
+ * wrong precedence here is invisible until someone hits a blocker in the running app.
+ */
+export const resolveStudioBlockingMessageKey = (
+  actionErrorMessageKey: string | null,
+  workspaceErrorMessageKey: string | null,
+  routeErrorMessageKey: string | null
+): string | null =>
+  actionErrorMessageKey === STUDIO_ROUTE_CATALOG_BLOCKER_KEY && routeErrorMessageKey !== null
+    ? routeErrorMessageKey
+    : (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey);
+
 const shotCapabilityItemsForDraft = (draft: SpendGateDraft): StudioGenerationCapabilityItemV2[] =>
   'baseChoices' in draft
     ? [...draft.baseChoices, ...draft.cascadeChoices].flatMap((choice) =>
@@ -761,18 +783,11 @@ const StudioProjectPage: React.FC<{
     spendGate.open,
     spendGateLocked,
   ]);
-  /*
-   * BUG-183. `routeCatalogRequired` is the generic "this project has no usable generation route"
-   * line, raised from eight call sites. When the catalogue is null because the fetch itself failed,
-   * `loadRoutes` has already captured the exact reason in `routeErrorMessageKey` — but that sits
-   * last in the precedence chain, so the vague sentence hides the precise one and the person is
-   * told to refresh the very thing that just failed to load. Prefer the specific reason whenever
-   * the generic one is all we would otherwise have shown.
-   */
-  const blockingMessageKey =
-    actionErrorMessageKey === STUDIO_ROUTE_CATALOG_BLOCKER_KEY && routeErrorMessageKey !== null
-      ? routeErrorMessageKey
-      : (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey);
+  const blockingMessageKey = resolveStudioBlockingMessageKey(
+    actionErrorMessageKey,
+    workspaceErrorMessageKey,
+    routeErrorMessageKey
+  );
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
   const beatPanelReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'

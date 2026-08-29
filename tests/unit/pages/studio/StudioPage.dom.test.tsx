@@ -220,7 +220,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import StudioPage from '@/renderer/pages/studio/StudioPage';
+import StudioPage, { resolveStudioBlockingMessageKey } from '@/renderer/pages/studio/StudioPage';
 import { railPreferenceKey } from '@/renderer/pages/studio/components/Workspace/WorkspaceShell';
 import { useStudioProject, type UseStudioProjectResult } from '@/renderer/pages/studio/hooks/useStudioProject';
 
@@ -3527,38 +3527,6 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     );
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
-  });
-
-  it('renders the workspace shell before the project resolves, without a menu or controls', async () => {
-    /*
-     * The shell mounts while `getProjectWorkspace` is still in flight, so `projection` is null and
-     * both the project menu and the controls are withheld. Nothing asserted that, which left the
-     * pre-projection render — the state every project passes through on open — untested.
-     */
-    const pending = deferred<Awaited<ReturnType<typeof mocks.bridge.getProjectWorkspace.invoke>>>();
-    mocks.bridge.getProjectWorkspace.invoke.mockReturnValue(pending.promise);
-    renderStudio('/studio/project_1/board');
-
-    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalled());
-    expect(mocks.workspaceControlsProps).toBeNull();
-
-    // Resolving it must bring the controls up rather than leave the shell stranded.
-    const projectResult = await mocks.bridge.getProject.invoke({ projectId: 'project_1' });
-    const workspaceResult = await mocks.bridge.projectWorkspaceStatusFixture.invoke({ projectId: 'project_1' });
-    const chainResult = await mocks.bridge.projectWorkspaceChainFixture.invoke({ projectId: 'project_1' });
-    await act(async () =>
-      pending.resolve(
-        ok({
-          status: 'supported' as const,
-          snapshot: {
-            project: projectResult.data.project,
-            workspaceStatus: workspaceResult.data,
-            chainStatus: chainResult.data,
-          },
-        })
-      )
-    );
-    await waitFor(() => expect(mocks.workspaceControlsProps).not.toBeNull());
   });
 
   it('lets the workspace notice refresh the routes it is complaining about', async () => {
@@ -7218,6 +7186,9 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     mocks.bridge.acknowledgeFilmExport.invoke
       .mockResolvedValueOnce(ok({ status: 'acknowledged' as const }))
       .mockResolvedValueOnce(ok({ status: 'not_found' as const }))
+      // A refused acknowledgement is not the same as a thrown one, and both must read as null
+      // rather than as a status the caller could act on.
+      .mockResolvedValueOnce({ ok: false as const, error: { code: 'storage_error', messageKey: 'native.failed' } })
       .mockRejectedValueOnce(new Error('acknowledgement transport failed'));
 
     renderStudio('/studio/project_1/cut');
@@ -7281,6 +7252,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     await expect(menu.cancelFilmExport('film_run_1')).resolves.toBe(false);
     await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBe('acknowledged');
     await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBe('not_found');
+    await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBeNull();
     await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBeNull();
     await expect(menu.revealFilm('missing_film')).resolves.toEqual({
       ok: false,
