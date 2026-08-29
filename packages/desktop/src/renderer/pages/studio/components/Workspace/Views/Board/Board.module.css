@@ -70,12 +70,11 @@
 .binCover {
   position: relative;
   min-inline-size: 0;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--studio-frame-aspect-ratio);
   overflow: hidden;
   background: var(--color-fill-2);
 }
 
-.shotMedia,
 .shotMediaAsset,
 .binCoverImage,
 .coverPlaceholder,
@@ -83,11 +82,13 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
+  min-inline-size: 0;
+  min-block-size: 0;
 }
 
 .shotMediaAsset,
 .binCoverImage {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .beatHeader {
@@ -283,8 +284,12 @@
 }
 
 .shotMedia {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  place-items: stretch;
+  inline-size: 100%;
   min-inline-size: 0;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--studio-frame-aspect-ratio);
   overflow: hidden;
   background: var(--color-fill-2);
 }
@@ -385,7 +390,7 @@
   display: block;
   overflow: hidden;
   min-inline-size: 0;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--studio-frame-aspect-ratio);
   border: 1px dashed var(--color-border-3);
   border-radius: 7px;
   background: var(--color-fill-2);
@@ -415,7 +420,7 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .panelActivityMark {

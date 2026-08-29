@@ -341,9 +341,9 @@
 .mediaPreview {
   display: block;
   inline-size: 100%;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--studio-frame-aspect-ratio);
   border-radius: 7px;
-  object-fit: cover;
+  object-fit: contain;
   background: var(--color-fill-2);
 }
 
@@ -530,7 +530,7 @@
   position: relative;
   display: grid;
   min-inline-size: 0;
-  aspect-ratio: 16 / 9;
+  aspect-ratio: var(--studio-frame-aspect-ratio);
   place-items: stretch;
   overflow: hidden;
   border: 1px solid var(--color-border-2);
@@ -804,11 +804,12 @@ div.previewMedia {
   inset-block-start: 50%;
   inset-inline: 0;
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   box-sizing: border-box;
   inline-size: 24px;
   block-size: 34px;
   margin-inline: auto;
-  place-items: center;
+  place-items: stretch;
   border: 2px solid var(--color-border-3);
   border-radius: 7px;
   background: var(--color-bg-1);
@@ -1227,9 +1228,10 @@ div.previewMedia {
 .frameSlot {
   position: relative;
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   min-inline-size: 0;
   block-size: 66px;
-  place-items: center;
+  place-items: stretch;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--color-border-2);
@@ -1257,10 +1259,13 @@ div.previewMedia {
 .frameSlot img {
   inline-size: 100%;
   block-size: 100%;
-  object-fit: cover;
+  min-inline-size: 0;
+  min-block-size: 0;
+  object-fit: contain;
 }
 
 .emptySlotCopy {
+  place-self: center;
   font-family: var(--font-mono);
   font-size: 7.5px;
   white-space: nowrap;

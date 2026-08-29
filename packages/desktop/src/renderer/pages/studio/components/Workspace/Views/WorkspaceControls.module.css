@@ -1,3 +1,32 @@
+/*
+ * The project's ratio, published once for every view below. Custom properties inherit through
+ * CSS-module scoping, so Board, Table, Cut, BeatPanel and References all read this rather than
+ * hardcoding 16 / 9 — which is only one of five supported ratios (BUG-138).
+ */
+.root {
+  --studio-frame-aspect-ratio: 16 / 9;
+}
+
+.root[data-aspect-ratio='16:9'] {
+  --studio-frame-aspect-ratio: 16 / 9;
+}
+
+.root[data-aspect-ratio='9:16'] {
+  --studio-frame-aspect-ratio: 9 / 16;
+}
+
+.root[data-aspect-ratio='1:1'] {
+  --studio-frame-aspect-ratio: 1 / 1;
+}
+
+.root[data-aspect-ratio='4:3'] {
+  --studio-frame-aspect-ratio: 4 / 3;
+}
+
+.root[data-aspect-ratio='3:4'] {
+  --studio-frame-aspect-ratio: 3 / 4;
+}
+
 .root {
   display: grid;
   gap: 16px;
