@@ -192,15 +192,31 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPoste
    * decodes a tile's video leaves an image behind, so later visits paint from a still rather than
    * from dozens of concurrent video elements.
    */
-  const capturePoster = async (video: HTMLVideoElement): Promise<void> => {
-    if (media === null || media.kind !== 'video') return;
+  const capturePoster = async (video: HTMLVideoElement): Promise<boolean> => {
+    if (media === null || media.kind !== 'video') return true;
     const captureKey = `${projectId}:${shotId}:${media.assetId}`;
-    if (capturedRef.current.has(captureKey)) return;
+    if (capturedRef.current.has(captureKey)) return true;
     const captured = captureStudioVideoPoster(video);
-    if (captured === null) return;
+    if (captured === null) return false;
     capturedRef.current.add(captureKey);
     const persisted = await onPosterCaptured({ shotId, videoAssetId: media.assetId, ...captured });
     if (!persisted) capturedRef.current.delete(captureKey);
+    return true;
+  };
+
+  /*
+   * `loadeddata` promises data for the current position, not that a frame has been composited, and
+   * a tile's video is never played. Drawing at that moment returns a blank frame, which the capture
+   * now refuses. `requestVideoFrameCallback` fires only once a frame has actually been presented,
+   * which is the earliest a poster can carry a picture, so retry there.
+   */
+  const scheduleCapture = (video: HTMLVideoElement): void => {
+    void capturePoster(video).then((settled) => {
+      if (settled) return;
+      video.requestVideoFrameCallback?.(() => {
+        if (video.isConnected) void capturePoster(video);
+      });
+    });
   };
 
   return (
@@ -211,7 +227,7 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPoste
           className={styles.shotMediaAsset}
           muted
           onError={() => setFailedUrl(assetUrl)}
-          onLoadedData={(event) => void capturePoster(event.currentTarget)}
+          onLoadedData={(event) => scheduleCapture(event.currentTarget)}
           playsInline
           preload='metadata'
           src={assetUrl}

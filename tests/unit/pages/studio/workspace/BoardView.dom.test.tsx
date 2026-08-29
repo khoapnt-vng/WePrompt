@@ -546,10 +546,24 @@ const makeActions = (): BoardActions => ({
   persistCapturedPoster: vi.fn().mockResolvedValue(true),
 });
 
-const stubCanvasCapture = (): (() => void) => {
+/**
+ * jsdom has no canvas, so the draw has to be stubbed — but a stub that always hands back the same
+ * data URL cannot tell a real frame from a blank one, which is exactly how the Board shipped a
+ * capture that persisted 28 byte-identical all-black posters with this test green. The stub now
+ * returns pixels, so `carriesPicture` runs for real and `blank` reproduces the defect.
+ */
+const stubCanvasCapture = (options: { blank?: boolean } = {}): (() => void) => {
   const originalContext = HTMLCanvasElement.prototype.getContext;
   const originalDataUrl = HTMLCanvasElement.prototype.toDataURL;
-  HTMLCanvasElement.prototype.getContext = (() => ({ drawImage: () => undefined })) as never;
+  const pixel = (index: number): number => (options.blank === true ? 0 : index % 251);
+  HTMLCanvasElement.prototype.getContext = (() => ({
+    drawImage: () => undefined,
+    // Sized for the sampler, not for the frame: allocating a real 1920x1080 buffer per capture
+    // costs 8MB and buys nothing, since `carriesPicture` reads the buffer's own length.
+    getImageData: () => ({
+      data: Uint8ClampedArray.from({ length: 4_096 * 4 }, (_value, index) => pixel(index)),
+    }),
+  })) as never;
   HTMLCanvasElement.prototype.toDataURL = (() => 'data:image/png;base64,AAAA') as never;
   return () => {
     HTMLCanvasElement.prototype.getContext = originalContext;
@@ -1420,6 +1434,71 @@ describe('BoardView', () => {
       // A tile can fire loadedData repeatedly; the capture must not be paid for twice.
       fireEvent.loadedData(video);
       await waitFor(() => expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1));
+    } finally {
+      restoreCanvas();
+    }
+  });
+
+  it('never persists a blank frame, and retries once one has actually been presented', async () => {
+    /*
+     * The first fix for BUG-166 drew on `loadeddata`, which promises data for the current position
+     * and nothing about compositing. A Board tile's video is never played, so the draw came back
+     * flat black — and because a poster permanently replaces the video on the tile, every one of
+     * those Shots was pinned to a black rectangle. Measured on `Plateau`: 28 of 30 captures were
+     * the same byte-identical all-black PNG, with the wiring test above green throughout.
+     */
+    const restoreCanvas = stubCanvasCapture({ blank: true });
+    const presented: (() => void)[] = [];
+    try {
+      const actions = makeActions();
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [
+            makeShot('shot_1', {
+              currentPicture: {
+                assetId: 'video_first',
+                posterAssetId: null,
+                sourceDurationSeconds: 4,
+                createdAt: '2026-08-28T00:00:00.000Z',
+                prompt: 'First Shot',
+                promptChanged: false,
+                firstFrameChanged: false,
+              },
+            }),
+          ],
+        }),
+      ]);
+      render(<BoardView {...boardProps(projection)} actions={actions} />);
+
+      const video = screen.getByLabelText('Current Shot video') as HTMLVideoElement;
+      Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(video, 'videoHeight', { configurable: true, value: 1080 });
+      Object.defineProperty(video, 'requestVideoFrameCallback', {
+        configurable: true,
+        value: (callback: () => void) => presented.push(callback),
+      });
+
+      fireEvent.loadedData(video);
+      await waitFor(() => expect(presented).toHaveLength(1));
+      expect(actions.persistCapturedPoster).not.toHaveBeenCalled();
+
+      // The frame arrives; the same tile now captures a real picture without a reload.
+      restoreCanvas();
+      const restoreDrawn = stubCanvasCapture();
+      try {
+        presented[0]!();
+        await waitFor(() =>
+          expect(actions.persistCapturedPoster).toHaveBeenCalledWith({
+            shotId: 'shot_1',
+            videoAssetId: 'video_first',
+            dataUrl: 'data:image/png;base64,AAAA',
+            width: 1920,
+            height: 1080,
+          })
+        );
+      } finally {
+        restoreDrawn();
+      }
     } finally {
       restoreCanvas();
     }

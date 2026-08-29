@@ -2454,9 +2454,14 @@ describe('BeatPanel', () => {
 
   it('captures and persists one poster when the current video becomes readable', async () => {
     const drawImage = vi.fn();
+    // The capture reads the canvas back and refuses a frame that is one flat colour, so a stub
+    // that only records `drawImage` would look exactly like the blank draw it must reject.
+    const getImageData = vi.fn(() => ({
+      data: Uint8ClampedArray.from({ length: 4_096 * 4 }, (_value, index) => index % 251),
+    }));
     const getContext = vi
       .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+      .mockReturnValue({ drawImage, getImageData } as unknown as CanvasRenderingContext2D);
     const toDataUrl = vi
       .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
       .mockReturnValue('data:image/png;base64,cG9zdGVy');
