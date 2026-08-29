@@ -65,6 +65,7 @@ import {
   type StudioMutationApplyResultV2,
 } from './service/schema2';
 import { studioProposalOperationsV2 } from './service/schema2/mutations/proposalReview';
+import { authoredProjectDigest } from './service/schema2/authoredDigest';
 import {
   createStudioProjectManifestV2,
   decodeStudioProjectManifestV2,
@@ -705,13 +706,23 @@ const hasExactKeys = (value: Record<string, unknown>, keys: ReadonlySet<string>)
 const isUniqueSafeIdArrayV2 = (value: unknown, maximum: number): value is string[] =>
   Array.isArray(value) && value.length <= maximum && value.every(isSafeIdV2) && new Set(value).size === value.length;
 
+const PROPOSAL_COMMIT_ATTRIBUTION_KEYS_WITH_APPLIED_OVER = new Set([
+  ...PROPOSAL_COMMIT_ATTRIBUTION_KEYS,
+  'appliedOverRevision',
+]);
+
+/** The revision an attribution was applied over; its own base when it carries nothing else. */
+const appliedOverRevisionV2 = (value: Record<string, unknown>): number =>
+  typeof value.appliedOverRevision === 'number' ? value.appliedOverRevision : (value.baseRevision as number);
+
 const validateProposalCommitAttributionV2 = (
   projectId: string,
   proposalId: string,
   value: unknown
 ): value is StudioProposalCommitAttributionV2 =>
   isRecord(value) &&
-  hasExactKeys(value, PROPOSAL_COMMIT_ATTRIBUTION_KEYS) &&
+  (hasExactKeys(value, PROPOSAL_COMMIT_ATTRIBUTION_KEYS) ||
+    hasExactKeys(value, PROPOSAL_COMMIT_ATTRIBUTION_KEYS_WITH_APPLIED_OVER)) &&
   value.schemaVersion === STUDIO_PROPOSAL_SCHEMA_VERSION_V2 &&
   (value.kind === 'mutation' || value.kind === 'paid_recovery') &&
   value.proposalId === proposalId &&
@@ -719,7 +730,11 @@ const validateProposalCommitAttributionV2 = (
   isSafeProposalId(value.proposalId) &&
   isSafeIdV2(value.projectId) &&
   isIntegerInRange(value.baseRevision, 1, Number.MAX_SAFE_INTEGER - 1) &&
-  value.appliedRevision === value.baseRevision + 1 &&
+  // The applied revision always follows whatever was applied over — the proposal's own base when
+  // the two coincide, and the live head when the batch was accepted over later machine work.
+  isIntegerInRange(appliedOverRevisionV2(value), 1, Number.MAX_SAFE_INTEGER - 1) &&
+  value.appliedRevision === appliedOverRevisionV2(value) + 1 &&
+  appliedOverRevisionV2(value) >= (value.baseRevision as number) &&
   typeof value.beforeProjectSha256 === 'string' &&
   LOWERCASE_SHA256.test(value.beforeProjectSha256) &&
   typeof value.afterProjectSha256 === 'string' &&
@@ -6133,7 +6148,8 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
 
     const projectDigest = sha256Utf8(input.snapshot.bytes);
     const isExactBefore =
-      input.snapshot.project.revision === attribution.baseRevision && projectDigest === attribution.beforeProjectSha256;
+      input.snapshot.project.revision === appliedOverRevisionV2(attribution) &&
+      projectDigest === attribution.beforeProjectSha256;
     const isExactAfter =
       input.snapshot.project.revision === attribution.appliedRevision &&
       projectDigest === attribution.afterProjectSha256;
@@ -7729,8 +7745,21 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
         'Paid Studio recovery requires the renderer confirmation boundary'
       );
     }
-    if (input.snapshot.project.revision !== proposal.record.baseRevision) {
-      throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+    /*
+     * BUG-028. The old fence was exact revision equality, but `jobs` and `assets` live in this same
+     * document and every write bumps the revision, so a generation ticking over killed a reviewed,
+     * paid draft permanently. Ask the question the fence means instead: has anything a person
+     * authored moved since the proposal was recorded?
+     *
+     * A record written before `authoredDigest` existed cannot answer that, so it keeps the old
+     * behaviour rather than being accepted on trust.
+     */
+    const appliedOverRevision = input.snapshot.project.revision;
+    if (appliedOverRevision !== proposal.record.baseRevision) {
+      const recordedDigest = proposal.record.authoredDigest;
+      if (recordedDigest === undefined || recordedDigest !== authoredProjectDigest(input.snapshot.project)) {
+        throw new CreativeStudioStoreError('stale_project', 'Studio project has changed');
+      }
     }
     const decidedAt = now();
     if (!isCanonicalIsoTimestamp(decidedAt)) {
@@ -7750,7 +7779,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       {
         schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: input.projectId,
-        expectedRevision: proposal.record.baseRevision,
+        expectedRevision: appliedOverRevision,
         operations,
       },
       { mutationId: proposal.record.id, capturedAt: proposal.record.createdAt }
@@ -7758,7 +7787,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     const candidate: StudioProjectV2 = {
       ...applied.project,
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
-      revision: proposal.record.baseRevision + 1,
+      revision: appliedOverRevision + 1,
       updatedAt: decidedAt,
     };
     if (!validateStudioProjectV2(candidate)) {
@@ -7771,6 +7800,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       proposalId: proposal.record.id,
       projectId: input.projectId,
       baseRevision: proposal.record.baseRevision,
+      ...(appliedOverRevision === proposal.record.baseRevision ? {} : { appliedOverRevision }),
       appliedRevision: candidate.revision,
       beforeProjectSha256: sha256Utf8(input.snapshot.bytes),
       afterProjectSha256: sha256Utf8(candidateBytes),
@@ -9141,6 +9171,9 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
             pendingDir: directories.pending.path,
             projectId: input.projectId,
             baseRevision: input.baseRevision,
+            // BUG-028: what the accept actually needs to know later — whether anything a person
+            // authored moved, not whether the revision did.
+            authoredDigest: authoredProjectDigest(snapshot.project),
             payload: structuredClone(input.payload),
             proposalId: input.proposalId,
             fs,

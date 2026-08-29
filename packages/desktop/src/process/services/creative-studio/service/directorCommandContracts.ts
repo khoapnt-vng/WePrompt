@@ -234,6 +234,13 @@ const V2_PROPOSAL_RECORD_KEYS = new Set([
   'createdAt',
   'decidedAt',
 ]);
+/**
+ * BUG-028's `authoredDigest` is optional, so a record is valid with or without it. Widening to two
+ * exact sets keeps the check exact — a record carrying some *other* extra key is still rejected.
+ */
+const V2_PROPOSAL_RECORD_KEYS_WITH_DIGEST = new Set([...V2_PROPOSAL_RECORD_KEYS, 'authoredDigest']);
+const V2_LOWERCASE_SHA256 = /^[0-9a-f]{64}$/u;
+
 const V2_PROPOSAL_MUTATION_PAYLOAD_KEYS = new Set(['kind', 'operations']);
 const V2_PROPOSAL_PIN_RULE_PAYLOAD_KEYS = new Set(['kind', 'rule']);
 const V2_PROPOSAL_PAID_RECOVERY_PAYLOAD_KEYS = new Set(['kind', 'blocker', 'quote']);
@@ -1756,7 +1763,9 @@ export function parseStudioProposalRecordV2(input: {
   const value = schema === 'v2' ? snapshotDataRecordV2(input.value) : null;
   if (
     value === null ||
-    !hasExactKeysV2(value, V2_PROPOSAL_RECORD_KEYS) ||
+    (!hasExactKeysV2(value, V2_PROPOSAL_RECORD_KEYS) && !hasExactKeysV2(value, V2_PROPOSAL_RECORD_KEYS_WITH_DIGEST)) ||
+    (Object.hasOwn(value, 'authoredDigest') &&
+      (typeof value.authoredDigest !== 'string' || !V2_LOWERCASE_SHA256.test(value.authoredDigest))) ||
     value.id !== input.proposalId ||
     value.projectId !== input.projectId ||
     !isSafeStudioDirectorId(value.id) ||

@@ -81,6 +81,7 @@ import {
   validatesStudioPaidRecoveryBlockerV2,
   type StudioDirectorOperationDispositionV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
+import { authoredProjectDigest } from '@process/services/creative-studio/service/schema2/authoredDigest';
 import {
   type RecordIoFileSystem,
   readBoundedRegularFileWithIdentity,
@@ -1202,6 +1203,9 @@ export function createProposeStoryboardHandlerV2(
         pendingDir: config.pendingDir,
         projectId: config.projectId,
         baseRevision: base_revision,
+        // BUG-028: recorded so the accept can ask whether anything AUTHORED moved, rather than
+        // whether the revision moved — which it does on every job poll.
+        authoredDigest: authoredProjectDigest(project),
         payload: { kind: 'mutation_batch', operations },
         fs: config.fs,
         authorityFence: () => projectSnapshotStatusV2(config, snapshot),
@@ -1255,6 +1259,9 @@ export function createProposeBriefRuleHandlerV2(
         pendingDir: config.pendingDir,
         projectId: config.projectId,
         baseRevision: base_revision,
+        // BUG-028: recorded so the accept can ask whether anything AUTHORED moved, rather than
+        // whether the revision moved — which it does on every job poll.
+        authoredDigest: authoredProjectDigest(project),
         payload: {
           kind: 'pin_rule',
           rule: { text: trimmed, predicate: terms.length === 0 ? null : { kind: 'forbidden_terms', terms } },

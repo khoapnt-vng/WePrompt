@@ -3634,7 +3634,7 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly');
           return false;
         }
-        if (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision) {
+        if (target.review.status !== 'ready') {
           setActionErrorMessageKey(
             target.review.status === 'stale'
               ? 'conversation.creativeStudio.workspace.proposals.chatStale'
@@ -3742,9 +3742,7 @@ const StudioProjectPage: React.FC<{
           intent.decision === 'accept'
             ? pending.filter((candidate) => candidate.payload.kind !== 'paid_recovery')
             : pending;
-        const ready = eligiblePending.filter(
-          (candidate) => candidate.review.status === 'ready' && candidate.baseRevision === authority.project.revision
-        );
+        const ready = eligiblePending.filter((candidate) => candidate.review.status === 'ready');
         const target =
           intent.proposalId === null
             ? ready.length === 1
@@ -3757,10 +3755,7 @@ const StudioProjectPage: React.FC<{
               ? 'conversation.creativeStudio.workspace.proposals.chatNoPending'
               : intent.decision === 'accept' &&
                   pending.some(
-                    (candidate) =>
-                      candidate.payload.kind === 'paid_recovery' &&
-                      candidate.review.status === 'ready' &&
-                      candidate.baseRevision === authority.project.revision
+                    (candidate) => candidate.payload.kind === 'paid_recovery' && candidate.review.status === 'ready'
                   )
                 ? 'conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly'
                 : pending.some((candidate) => candidate.review.status === 'stale')
@@ -3785,10 +3780,7 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
           return;
         }
-        if (
-          intent.decision === 'accept' &&
-          (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision)
-        ) {
+        if (intent.decision === 'accept' && target.review.status !== 'ready') {
           setActionErrorMessageKey(
             target.review.status === 'stale'
               ? 'conversation.creativeStudio.workspace.proposals.chatStale'
@@ -3939,12 +3931,7 @@ const StudioProjectPage: React.FC<{
           (candidate) =>
             candidate.id === proposalId && candidate.status === 'pending' && candidate.payload.kind === 'paid_recovery'
         );
-        if (
-          target === undefined ||
-          target.payload.kind !== 'paid_recovery' ||
-          target.review.status !== 'ready' ||
-          target.baseRevision !== authority.project.revision
-        ) {
+        if (target === undefined || target.payload.kind !== 'paid_recovery' || target.review.status !== 'ready') {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
           return;
         }

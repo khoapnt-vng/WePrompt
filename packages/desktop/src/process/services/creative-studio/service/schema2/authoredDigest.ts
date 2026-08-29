@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { createHash } from 'node:crypto';
+
 import type {
   StudioBeat,
   StudioProjectReferenceV2,
@@ -173,3 +175,15 @@ export const authoredProjectDigestInput = (value: StudioProjectV2): Record<strin
     references: byKey(value.references as unknown as Record<string, unknown>, authoredReference as never),
   };
 };
+
+/**
+ * A stable hash of everything a person authored, and nothing a machine maintains.
+ *
+ * `JSON.stringify` is deterministic here because `authoredProjectDigestInput` emits its record keys
+ * in a fixed order and sorts the Beat, Shot and reference maps — no authoring action controls the
+ * order keys happen to be written in, so the digest must not depend on it.
+ */
+export const authoredProjectDigest = (value: StudioProjectV2): string =>
+  createHash('sha256')
+    .update(JSON.stringify(authoredProjectDigestInput(value)), 'utf8')
+    .digest('hex');

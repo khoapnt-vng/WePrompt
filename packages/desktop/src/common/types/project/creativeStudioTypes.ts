@@ -831,6 +831,17 @@ export type StudioProposalCommitAttributionV2 = {
   proposalId: string;
   projectId: string;
   baseRevision: number;
+  /**
+   * The revision the batch was actually applied over, when that is not the proposal's own
+   * `baseRevision` (BUG-028).
+   *
+   * `baseRevision` cannot carry this: crash recovery separately requires it to equal the proposal
+   * record's `baseRevision` as its authority check, while it *also* uses it to recognise the
+   * un-applied project on disk. Those two uses pull apart the moment a proposal is accepted over a
+   * later revision, so the second one moves here. Absent means the two coincide, which is every
+   * attribution written before this existed.
+   */
+  appliedOverRevision?: number;
   appliedRevision: number;
   beforeProjectSha256: string;
   afterProjectSha256: string;
@@ -1869,6 +1880,15 @@ export type StudioProposalRecordV2 = {
   projectId: string;
   status: 'pending';
   baseRevision: number;
+  /**
+   * Hash of everything a person had authored when the proposal was recorded (BUG-028).
+   *
+   * Optional so records written before it exists stay readable and keep the old exact-revision
+   * fence; a record that carries one may be accepted over a later revision, provided nothing
+   * authored moved. `jobs` and `assets` live in the same document and bump the revision on every
+   * poll, which is what made a reviewed, paid draft die the moment a generation ticked over.
+   */
+  authoredDigest?: string;
   payload: StudioProposalPayloadV2;
   createdAt: string;
   decidedAt: null;
