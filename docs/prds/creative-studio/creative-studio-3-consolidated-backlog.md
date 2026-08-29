@@ -3,7 +3,9 @@
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on
 someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallied by hand.
 
-**120 bugs filed · 105 closed · 15 open** — 2 P1, 8 P2, 5 P3.
+**120 bugs filed · 112 closed · 8 open** — 2 P1, 4 P2, 2 P3.
+
+_Closed 2026-08-29 after live verification in the running app: BUG-138, 171, 173, 174, 175, 176 and 178. Of the eight still open, **five carry a landed fix that could not be witnessed** — four of those five need a working Director, which never attaches in this profile — and only three need engineering: BUG-144 (owner-deferred distribution decision), BUG-165 (one Director-adjacent cause plus a pricing call) and BUG-180 (no repair route for a project bricked mid-publication)._
 
 _Added 2026-08-29 from live verification: **BUG-179** (P1, one unreadable project degraded the whole runtime — **fixed and verified live**, and it also fixed film export by consequence) and **BUG-180** (P2, a crash mid-publication leaves a project permanently unopenable with no in-app recovery)._
 
