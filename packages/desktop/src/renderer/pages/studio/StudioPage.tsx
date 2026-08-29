@@ -4408,8 +4408,7 @@ const StudioProjectPage: React.FC<{
           )
         }
         notice={
-          activeView === 'references' ||
-          (actionErrorMessageKey === null && workspaceErrorMessageKey === null && routeErrorMessageKey === null)
+          activeView === 'references' || blockingMessageKey === null
             ? undefined
             : // The shell owns the role='alert' wrapper, so the remedy travels beside the text
               // rather than inside a second Alert (BUG-183).

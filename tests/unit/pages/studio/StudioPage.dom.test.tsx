@@ -3529,6 +3529,61 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
+  it('renders the workspace shell before the project resolves, without a menu or controls', async () => {
+    /*
+     * The shell mounts while `getProjectWorkspace` is still in flight, so `projection` is null and
+     * both the project menu and the controls are withheld. Nothing asserted that, which left the
+     * pre-projection render — the state every project passes through on open — untested.
+     */
+    const pending = deferred<Awaited<ReturnType<typeof mocks.bridge.getProjectWorkspace.invoke>>>();
+    mocks.bridge.getProjectWorkspace.invoke.mockReturnValue(pending.promise);
+    renderStudio('/studio/project_1/board');
+
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalled());
+    expect(mocks.workspaceControlsProps).toBeNull();
+
+    // Resolving it must bring the controls up rather than leave the shell stranded.
+    const projectResult = await mocks.bridge.getProject.invoke({ projectId: 'project_1' });
+    const workspaceResult = await mocks.bridge.projectWorkspaceStatusFixture.invoke({ projectId: 'project_1' });
+    const chainResult = await mocks.bridge.projectWorkspaceChainFixture.invoke({ projectId: 'project_1' });
+    await act(async () =>
+      pending.resolve(
+        ok({
+          status: 'supported' as const,
+          snapshot: {
+            project: projectResult.data.project,
+            workspaceStatus: workspaceResult.data,
+            chainStatus: chainResult.data,
+          },
+        })
+      )
+    );
+    await waitFor(() => expect(mocks.workspaceControlsProps).not.toBeNull());
+  });
+
+  it('lets the workspace notice refresh the routes it is complaining about', async () => {
+    /*
+     * BUG-183. The blocker named "Refresh routes" while that control sat unmentioned in the More
+     * menu. The remedy now travels with the message, and the shell owns its own role='alert'
+     * wrapper, so it takes the bare button rather than a second nested Alert.
+     */
+    // The provisioning pass only runs for an attached project whose catalogue holds no options,
+    // which is exactly the state the blocker describes.
+    mocks.bridge.listConnectionCandidates.invoke.mockRejectedValue(new Error('provisioning unavailable'));
+    mockSupportedProject(attachedProject());
+    renderStudio('/studio/project_1/board');
+
+    const notice = await screen.findByRole('alert');
+    expect(notice).toHaveTextContent('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+
+    const before = mocks.bridge.listRoutes.invoke.mock.calls.length;
+    fireEvent.click(
+      within(notice).getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.refreshRoutes' })
+    );
+
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke.mock.calls.length).toBeGreaterThan(before));
+  });
+
   it('refuses Board reference focus for retained or unknown Shot identities without navigation or spend', async () => {
     const authority = projectWithRetainedReferenceDownloadBlocker('shot');
     mockSupportedProject(authority);
