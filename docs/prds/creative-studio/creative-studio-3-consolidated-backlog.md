@@ -3,7 +3,9 @@
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on
 someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallied by hand.
 
-**116 bugs filed · 98 closed · 18 open** — 2 P1, 10 P2, 6 P3.
+**118 bugs filed · 99 closed · 19 open** — 2 P1, 11 P2, 6 P3.
+
+_Count note 2026-08-29: the previous line read 116 filed · 98 closed. Counting `- [ ]`/`- [x]` **[BUG-nnn]** headers in `creative-studio-3-bug-list.md` returns 118 unique ids with no duplicates, so the filed and closed figures were two low; the open figure of 18 was correct. BUG-138 was reopened on 2026-08-29, taking open to 19._
 
 ---
 
@@ -34,11 +36,19 @@ merged" while the code carried them. Compare content, not ancestry.
 
 Filing them individually was right; fixing them individually would not be. Five clusters:
 
-**Images are cropped wherever they matter** — **BUG-172** (P2), **BUG-178** (P2).
-Three instances of one pattern: a fixed `block-size` plus `object-fit: cover` plus `overflow: hidden`.
+**Images are cropped wherever they matter** — **BUG-138** (P2, _reopened 2026-08-29_), **BUG-172** (P2), **BUG-178** (P2).
+One pattern in two shapes: a fixed `block-size`, or a hardcoded `aspect-ratio`, each combined with
+`object-fit: cover` (or an unconstrained image) plus `overflow: hidden`. Ten instances, not three.
 The canonical reference image loses 67% of itself; the take strip is 54×38; the Shot's `Start` tile is
-74px. Every one of those surfaces exists so the owner can judge an image. One shared image frame with
-`aspect-ratio: 16/9` fixes all three; three local patches would not stop the fourth.
+74px. Every one of those surfaces exists so the owner can judge an image. One shared image frame fixes all of them; local patches would not stop the next one.
+**Corrected 2026-08-29: the frame must not be `aspect-ratio: 16/9`.** `StudioAspectRatio` is
+`'16:9' | '9:16' | '1:1' | '4:3' | '3:4'`, so a hardcoded landscape frame would newly break every
+portrait and square project — which is precisely the defect BUG-138 was filed for. The frame takes its
+ratio from the project, as BUG-138 already ruled and as References already implements.
+**BUG-138 was reopened** on the same sweep: its fix was scoped to References, while seven hardcoded
+`16 / 9` boxes remain in `StudioLibrary`, `BeatPanel` (×2), `Board` (×3) and `Cut` — five of them
+cropping with `object-fit: cover`, two letterboxing with `contain`. That makes this cluster the
+largest open one, and the count of instances ten rather than three.
 
 **Loading states that assert unavailability** — **BUG-167** (P3, _fix landed_).
 Distinct from a genuine unavailable state and repeatedly mistaken for one. Note this cluster is also
