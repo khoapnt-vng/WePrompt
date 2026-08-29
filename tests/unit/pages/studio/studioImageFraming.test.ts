@@ -76,6 +76,42 @@ describe('studio image framing', () => {
     expect(offenders).toEqual([]);
   });
 
+  it('never lets a ratio variable collapse a box when it cannot be resolved', () => {
+    /*
+     * The variable is published on WorkspaceControls, but an Arco Modal with no getPopupContainer
+     * portals its subtree to document.body. React keeps the component tree; CSS custom properties
+     * inherit through the DOM, which the portal escapes. `aspect-ratio` is not inherited and its
+     * initial value is `auto`, so an unresolvable var() silently un-shapes the box rather than
+     * failing loudly. That regressed the Beat preview. A fallback makes the worst case a
+     * wrong-but-shaped box instead of a collapsed one.
+     */
+    const offenders: string[] = [];
+    for (const { path, css } of stylesheets()) {
+      for (const [, value] of css.matchAll(/aspect-ratio:\s*(var\([^;]*\));/g)) {
+        if (!/,\s*\d+\s*\/\s*\d+\s*\)$/.test(value.trim())) offenders.push(`${path}: aspect-ratio: ${value.trim()}`);
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('publishes the ratio again on every surface that portals out of the workspace tree', () => {
+    // The Beat panel is the one such surface today; it must declare what it consumes.
+    const panel = stylesheets().find((s) => s.path.endsWith('BeatPanel/BeatPanel.module.css'));
+    expect(panel, 'BeatPanel.module.css not found').toBeDefined();
+    expect(panel!.css).toMatch(/aspect-ratio:\s*var\(--studio-frame-aspect-ratio/);
+    for (const ratio of ['16:9', '9:16', '1:1', '4:3', '3:4']) {
+      const [w, h] = ratio.split(':');
+      expect(panel!.css, `BeatPanel must declare ${ratio}`).toMatch(
+        new RegExp(
+          `\\.root\\[data-aspect-ratio='${ratio}'\\]\\s*\\{[^}]*--studio-frame-aspect-ratio:\\s*${w} / ${h}`,
+          's'
+        )
+      );
+    }
+    const markup = readFileSync(resolve(STUDIO_ROOT, 'components/Workspace/BeatPanel/index.tsx'), 'utf8');
+    expect(markup).toMatch(/data-aspect-ratio=\{aspectRatio\}/);
+  });
+
   it('gives every clipped grid box a definite row, so object-fit is not inert', () => {
     const offenders: string[] = [];
     for (const { path, css } of stylesheets()) {

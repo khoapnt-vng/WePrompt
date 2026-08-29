@@ -25,6 +25,7 @@ import type { UseWorkspaceDraftsResult } from '../useWorkspaceDrafts';
 import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../workspaceProjection';
 import { generationBlockAction, generationBlockMessage } from '../Gate/generationBlockers';
 import { deriveWorkspaceShotStatus } from '../Views/shotStatus';
+import type { StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
 import styles from './BeatPanel.module.css';
 import { BeatPlayer } from './BeatPlayer';
 import { CoverageBar } from './CoverageBar';
@@ -104,6 +105,8 @@ export type BeatPanelActions = {
 
 export type BeatPanelProps = {
   projectId: string;
+  /** Republished on this panel's root: the Modal portals out of the workspace's DOM subtree. */
+  aspectRatio: StudioAspectRatio;
   beat: WorkspaceBeatProjection;
   beatIds: readonly string[];
   beatIndex: number;
@@ -1136,6 +1139,7 @@ const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection,
 /** Human Beat/Shot authoring and recovery surface. Native authority stays in semantic parent callbacks. */
 export const BeatPanel: React.FC<BeatPanelProps> = ({
   projectId,
+  aspectRatio,
   beat,
   beatIds,
   beatIndex,
@@ -1509,7 +1513,11 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
       unmountOnExit={false}
       visible
     >
-      <section aria-label={t(`${KEY_ROOT}.label`, { title: beatTitle })} className={styles.root}>
+      <section
+        aria-label={t(`${KEY_ROOT}.label`, { title: beatTitle })}
+        className={styles.root}
+        data-aspect-ratio={aspectRatio}
+      >
         <header className={styles.panelHeader} data-panel-header>
           <div>
             <p className={styles.eyebrow}>

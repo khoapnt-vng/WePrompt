@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ArrowDown, ArrowUp, Drag } from '@icon-park/react';
 import { Alert, Button, Select } from '@arco-design/web-react';
 import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -31,7 +30,7 @@ const COLUMNS = [
   {
     id: 'position',
     labelKey: 'conversation.creativeStudio.workspace.table.columns.position',
-    fixedInlineSize: 46,
+    fixedInlineSize: 78,
   },
   { id: 'panel', labelKey: 'conversation.creativeStudio.workspace.table.columns.panel', fixedInlineSize: 176 },
   { id: 'beat', labelKey: 'conversation.creativeStudio.workspace.table.columns.beat', fixedInlineSize: 100 },
@@ -311,6 +310,7 @@ export const TableView: React.FC<TableViewProps> = ({
   const [openShotDetailId, setOpenShotDetailId] = useState<string | null>(null);
   const [highlightedBindingShotId, setHighlightedBindingShotId] = useState<string | null>(null);
   const [reorderingBeatId, setReorderingBeatId] = useState<string | null>(null);
+  const pendingFocusBeatIdRef = useRef<string | null>(null);
   const [reorderAnnouncement, setReorderAnnouncement] = useState({ message: '', sequence: 0 });
   const detailIdBase = useId();
   const safeDetailIdBase = `studio-table-${detailIdBase.replace(/[^A-Za-z0-9_-]/g, '') || 'details'}`;
@@ -545,9 +545,23 @@ export const TableView: React.FC<TableViewProps> = ({
     } finally {
       reorderPendingRef.current = false;
       setReorderingBeatId(null);
-      cellRefs.current[destination]?.position?.focus({ preventScroll: true });
+      pendingFocusBeatIdRef.current = beatId;
     }
   };
+
+  useEffect(() => {
+    const beatId = pendingFocusBeatIdRef.current;
+    if (beatId === null) return;
+    const row = beatOrder.indexOf(beatId);
+    if (row < 0) {
+      pendingFocusBeatIdRef.current = null;
+      return;
+    }
+    const cell = cellRefs.current[row]?.position;
+    if (cell === undefined || cell === null) return;
+    pendingFocusBeatIdRef.current = null;
+    cell.focus({ preventScroll: true });
+  }, [beatOrder]);
 
   return (
     <section className={styles.root}>
@@ -790,8 +804,10 @@ export const TableView: React.FC<TableViewProps> = ({
                   <tr
                     aria-rowindex={beatAriaRowIndex}
                     aria-selected={selected}
+                    aria-busy={reorderingBeatId === beat.id}
                     className={styles.row}
                     data-beat-id={beat.id}
+                    data-reordering={reorderingBeatId === beat.id ? 'true' : undefined}
                     data-board-details-open={boardDetailsOpen}
                     onClick={() => onOpenBeat(beat.id)}
                     role='row'

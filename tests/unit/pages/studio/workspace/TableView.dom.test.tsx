@@ -1000,8 +1000,9 @@ describe('TableView', () => {
     fireEvent.keyDown(firstPositionCell, { key: 'ArrowDown', altKey: true });
     await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
     expect(result.container.querySelector('[aria-live="polite"]')).toHaveTextContent('Moved Beat a from 1 to 2 of 3.');
-    // Focus follows the Beat to where it landed, so a second move continues from there.
-    await waitFor(() => expect(cellAt(rowForBeat('b'), 0)).toHaveFocus());
+
+    // Focus must NOT jump to the destination index while the old order is still rendered.
+    expect(cellAt(rowForBeat('b'), 0)).not.toHaveFocus();
 
     const lastPositionCell = cellAt(rowForBeat('c'), 0);
     act(() => lastPositionCell.focus());
@@ -1033,6 +1034,28 @@ describe('TableView', () => {
     expect(screen.getByText('1.2')).toBeVisible();
 
     expect(tableCss).toMatch(/\.shotRow \.shotCell\[data-grid-column='0'\]\s*\{[^}]*padding-inline-start:\s*32px/s);
+  });
+
+  it('moves focus with the Beat once the new order arrives, not to the destination index', async () => {
+    /*
+     * The owner applies the whole order, so the rendered order changes on a later render. Focusing
+     * cellRefs[destination] inside the reorder's `finally` ran before that flush and landed on
+     * whichever Beat still occupied the row, then travelled with it to the wrong place.
+     */
+    const authoringActions = makeAuthoringActions();
+    const beats = [makeBeat('a'), makeBeat('b'), makeBeat('c')];
+    const props = { authoringActions, selectedBeatId: null, onSelectBeat: vi.fn() };
+    const result = render(<TableView {...tableBoardProps(beats)} {...props} beats={beats} />);
+
+    const cell = cellAt(rowForBeat('a'), 0);
+    act(() => cell.focus());
+    fireEvent.keyDown(cell, { key: 'ArrowDown', altKey: true });
+    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
+    expect(cellAt(rowForBeat('b'), 0)).not.toHaveFocus();
+
+    const reordered = [beats[1]!, beats[0]!, beats[2]!];
+    result.rerender(<TableView {...tableBoardProps(reordered)} {...props} beats={reordered} />);
+    await waitFor(() => expect(cellAt(rowForBeat('a'), 0)).toHaveFocus());
   });
 
   it('carries no per-row move controls, so the position column is the position', () => {

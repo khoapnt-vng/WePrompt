@@ -71,7 +71,7 @@
 .binCover {
   position: relative;
   min-inline-size: 0;
-  aspect-ratio: var(--studio-frame-aspect-ratio);
+  aspect-ratio: var(--studio-frame-aspect-ratio, 16 / 9);
   overflow: hidden;
   background: var(--color-fill-2);
 }
@@ -309,7 +309,7 @@
   place-items: stretch;
   inline-size: 100%;
   min-inline-size: 0;
-  aspect-ratio: var(--studio-frame-aspect-ratio);
+  aspect-ratio: var(--studio-frame-aspect-ratio, 16 / 9);
   overflow: hidden;
   background: var(--color-fill-2);
 }
@@ -410,7 +410,7 @@
   display: block;
   overflow: hidden;
   min-inline-size: 0;
-  aspect-ratio: var(--studio-frame-aspect-ratio);
+  aspect-ratio: var(--studio-frame-aspect-ratio, 16 / 9);
   border: 1px dashed var(--color-border-3);
   border-radius: 7px;
   background: var(--color-fill-2);

@@ -418,6 +418,7 @@ const StudioProjectPage: React.FC<{
   const referencesAutoOpenedRef = useRef<string | null>(null);
   const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
   const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
+  const posterCaptureInFlightRef = useRef(new Set<string>());
   const workspacePendingRef = useRef(false);
   const projectRef = useRef<StudioRendererProjectV2 | null>(project);
   projectRef.current = project;
@@ -1812,35 +1813,51 @@ const StudioProjectPage: React.FC<{
         }
       },
       persistCapturedPoster: async (input) => {
-        const current = projectRef.current;
-        const currentProjection = projectionRef.current;
-        if (
-          current === null ||
-          currentProjection === null ||
-          current.id !== currentProjection.projectId ||
-          current.revision !== currentProjection.projectRevision
-        ) {
-          return false;
-        }
-        const matches = currentProjection.activeBeats.flatMap((beat) =>
-          beat.shots.filter(
-            (shot) =>
-              shot.id === input.shotId &&
-              shot.currentPicture?.assetId === input.videoAssetId &&
-              shot.currentPicture.posterAssetId === null
-          )
-        );
-        if (matches.length !== 1) return false;
+        /*
+         * Single-flight per Shot and video asset. The Board and the Beat panel both capture, and
+         * both gate on `posterAssetId === null` read from the renderer projection — so opening a
+         * Shot while the Board is still capturing produced two writes for one poster. The write
+         * carries no expectedRevision, so the loser is not rejected; its asset is simply referenced
+         * by nothing, and no surface can show it or remove it.
+         */
+        const captureKey = `${input.shotId}:${input.videoAssetId}`;
+        if (posterCaptureInFlightRef.current.has(captureKey)) return false;
+        posterCaptureInFlightRef.current.add(captureKey);
         try {
-          const result = await ipcBridge.creativeStudio.persistCapturedPoster.invoke({
-            projectId: current.id,
-            ...input,
-          });
-          if (result.ok === false) return false;
-          const refreshed = await refetchProjectWorkspace();
-          return refreshed?.id === current.id && refreshed.revision >= current.revision;
-        } catch {
-          return false;
+          return await (async () => {
+            const current = projectRef.current;
+            const currentProjection = projectionRef.current;
+            if (
+              current === null ||
+              currentProjection === null ||
+              current.id !== currentProjection.projectId ||
+              current.revision !== currentProjection.projectRevision
+            ) {
+              return false;
+            }
+            const matches = currentProjection.activeBeats.flatMap((beat) =>
+              beat.shots.filter(
+                (shot) =>
+                  shot.id === input.shotId &&
+                  shot.currentPicture?.assetId === input.videoAssetId &&
+                  shot.currentPicture.posterAssetId === null
+              )
+            );
+            if (matches.length !== 1) return false;
+            try {
+              const result = await ipcBridge.creativeStudio.persistCapturedPoster.invoke({
+                projectId: current.id,
+                ...input,
+              });
+              if (result.ok === false) return false;
+              const refreshed = await refetchProjectWorkspace();
+              return refreshed?.id === current.id && refreshed.revision >= current.revision;
+            } catch {
+              return false;
+            }
+          })();
+        } finally {
+          posterCaptureInFlightRef.current.delete(captureKey);
         }
       },
       parkShot: async (shotId, onCommitted) =>

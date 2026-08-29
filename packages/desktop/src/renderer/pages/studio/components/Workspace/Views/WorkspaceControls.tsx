@@ -593,6 +593,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       {openBeat === null ? null : (
         <BeatPanel
           actions={panelActions}
+          aspectRatio={project.aspectRatio}
           beat={openBeat}
           beatIds={projection.activeBeatIds}
           beatIndex={openBeatIndex}
