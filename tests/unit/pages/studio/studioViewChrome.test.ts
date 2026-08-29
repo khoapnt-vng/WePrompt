@@ -68,7 +68,10 @@ describe('studio view chrome', () => {
     // The overlay must resolve against the card, not the button.
     expect(board).toMatch(/\.beatTitle:global\(\.arco-btn-text\)\s*\{[^}]*position:\s*static/s);
     // Interior controls stay reachable above it.
-    expect(board).toMatch(/\.beatPanelActions,\s*\n\.shotGrid,[^{]*\{[^}]*z-index:\s*1/s);
+    // Lift the tiles, not the grid: lifting the container blankets the card's empty space and
+    // leaves the overlay reachable only in the header strip (found by probing the running app).
+    expect(board).toMatch(/\.beatPanelActions,\s*\n\.shotTile\s*\{[^}]*z-index:\s*1/s);
+    expect(board).not.toMatch(/\.shotGrid,\s*\n?[^{]*\{[^}]*z-index:\s*1/s);
 
     // It must remain a real <button>: attaching onClick to the container would lose the keyboard.
     const markup = read('components/Workspace/Views/Board/index.tsx');

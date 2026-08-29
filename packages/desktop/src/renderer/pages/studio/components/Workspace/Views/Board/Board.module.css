@@ -189,10 +189,11 @@
   inset: 0;
 }
 
-/* Interior controls keep their own targets above the card-filling overlay. */
+/* Interior controls keep their own targets above the card-filling overlay. Lift the tiles, not
+   their container: lifting .shotGrid blanketed the card's empty space and left the overlay
+   reachable only in the header strip. */
 .beatPanelActions,
-.shotGrid,
-.noCoverage {
+.shotTile {
   position: relative;
   z-index: 1;
 }
