@@ -3,7 +3,9 @@
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on
 someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallied by hand.
 
-**118 bugs filed · 104 closed · 14 open** — 2 P1, 7 P2, 5 P3.
+**120 bugs filed · 105 closed · 15 open** — 2 P1, 8 P2, 5 P3.
+
+_Added 2026-08-29 from live verification: **BUG-179** (P1, one unreadable project degraded the whole runtime — **fixed and verified live**, and it also fixed film export by consequence) and **BUG-180** (P2, a crash mid-publication leaves a project permanently unopenable with no in-app recovery)._
 
 _Status 2026-08-29: **12 of the 14 open entries carry a landed fix awaiting live verification**, recorded as `Fix landed … not yet verified live` rather than closed, because jsdom does not compute layout and this file's own standard is that a commit message describing the right fix is not evidence. Only two entries have unfinished work, and neither is engineering that can proceed today: **BUG-144** is the owner-deferred distribution decision, and **BUG-165** needs a prompt-authoring change that overlaps the in-flight Director work plus a pricing call on retry cost._
 
