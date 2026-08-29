@@ -87,6 +87,31 @@ describe('studio view chrome', () => {
     expect(markup).toMatch(/onClick=\{\(\) => onOpenBeat\(beat\.id\)\}/);
   });
 
+  it('tells the person what is missing and where the control is, not just a verb', () => {
+    /*
+     * BUG-183. The owner hit "Refresh routes for the current project settings before reviewing a
+     * cost." while making reference images, and said "no idea about the error message". Three
+     * things were wrong at once: it named a control without saying it lives in the More menu, it
+     * described reviewing a cost when this one key is raised from eight call sites covering quite
+     * different actions, and it never said what a route is or why one was missing.
+     */
+    const copy = JSON.parse(
+      readFileSync(
+        resolve(process.cwd(), 'packages/desktop/src/renderer/services/i18n/locales/en-US/conversation.json'),
+        'utf8'
+      )
+    ) as { creativeStudio: { workspace: { controls: Record<string, string> } } };
+    const message = copy.creativeStudio.workspace.controls.routeCatalogRequired;
+
+    // What is wrong, in the person's terms rather than the catalogue's.
+    expect(message).toMatch(/no generation model is ready/i);
+    // Where the control is, not merely its name.
+    expect(message).toMatch(/More/);
+    expect(message).toMatch(/Refresh routes/);
+    // The claim that was false for seven of the eight call sites.
+    expect(message).not.toMatch(/reviewing a cost/i);
+  });
+
   it('ranks a Beat name above the chrome that names the screen it is on', () => {
     const board = read('components/Workspace/Views/Board/Board.module.css');
     const beatName = fontSize(board, '\\.beatTitle');

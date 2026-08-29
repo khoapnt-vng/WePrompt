@@ -10805,6 +10805,69 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
+  it('refuses a proposal that would create a Shot as a hard cut, and says what to draft instead', async () => {
+    /*
+     * BUG-182, found live. A Shot that does not exist yet can never be created as a hard cut:
+     * `apply_coverage`'s reducer fails the whole batch when it must create one, and `add_shot` mints
+     * `none`. But `hard_cut` is a legal value, so the shape validator accepts it and the Director
+     * drafted a three-Beat film whose end card was a hard cut — correct filmmaking, and refused
+     * whole with a message naming neither the Shot nor the field. The owner redrafted, got an
+     * equivalent proposal with the same hard cut, and was left with two proposals they could not
+     * accept and no way to learn why.
+     */
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-hard-cut-'));
+    const pendingDir = path.join(projectDir, 'proposals', 'pending');
+    const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
+    await createSidecarFamilyV2(projectDir, 'proposals');
+    await createSidecarFamilyV2(projectDir, 'reference-requests');
+    const project = makeSchema2ServiceProject();
+    await writeStudioProjectFilesV2(projectDir, project);
+    const config = { projectId: project.id, projectDir, pendingDir, referencePendingDir };
+    const before = await readdir(pendingDir);
+
+    const endCardBatch = (chainBreak: 'none' | 'hard_cut') =>
+      [
+        {
+          kind: 'add_beat',
+          beatId: 'invitation',
+          beat: { title: 'The Next Story', story: 'Land the film.', targetSeconds: 6 },
+          beforeBeatId: null,
+        },
+        {
+          kind: 'apply_coverage',
+          beatId: 'invitation',
+          shots: [
+            { shotId: 'invitation-endcard', shootingScript: 'The end card resolves.', durationSeconds: 6, chainBreak },
+          ],
+          fixedShots: [],
+        },
+      ] as StudioMutationOperationV2[];
+
+    const refused = await createProposeStoryboardHandlerV2(config)({
+      base_revision: project.revision,
+      operations: endCardBatch('hard_cut'),
+    });
+
+    expect(refused.isError).toBe(true);
+    // The Director can only act on an answer that names the Shot and the way out.
+    expect(refused.content[0].text).toContain('invitation-endcard');
+    expect(refused.content[0].text).toContain('invitation');
+    expect(refused.content[0].text).toMatch(/chainBreak "none"/);
+    expect(refused.content[0].text).toMatch(/Beat panel/i);
+    // Nothing may be written: a refused draft that still lands is the loop this replaces.
+    await expect(readdir(pendingDir)).resolves.toEqual(before);
+
+    // The control: the identical batch is recorded once the end card stops asking for a hard cut.
+    const accepted = await createProposeStoryboardHandlerV2(config)({
+      base_revision: project.revision,
+      operations: endCardBatch('none'),
+    });
+    expect(accepted.isError).toBeUndefined();
+    expect(accepted.content[0].text).toMatch(/recorded for user review/i);
+
+    await rm(projectDir, { recursive: true, force: true });
+  });
+
   it('covers V2 proposal, rule, reference, and unavailable handler outcomes without spending', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-handler-outcomes-'));
     const pendingDir = path.join(projectDir, 'proposals', 'pending');

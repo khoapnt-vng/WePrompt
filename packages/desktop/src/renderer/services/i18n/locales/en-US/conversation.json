@@ -2298,7 +2298,7 @@
         "reviewRender": "Review generation cost",
         "saveBeforeReview": "Save or reset generation-affecting film setup or rule changes before reviewing a cost.",
         "statusRequired": "Refresh the revision-matched workspace and chain status before reviewing a cost.",
-        "routeCatalogRequired": "Refresh routes for the current project settings before reviewing a cost.",
+        "routeCatalogRequired": "No generation model is ready for this project's current settings. Open More (\u22ee) in the project header and choose Refresh routes.",
         "selectionNotPayable": "This exact selection cannot form a bounded generation graph. Keep the uncovered alternative or change the selection.",
         "imageRouteBlocked": "Choose a ready image route before reviewing first-frame generation. Video-only work remains available.",
         "videoRouteBlocked": "Choose a ready video route before reviewing video generation. First-frame-only work remains available.",
