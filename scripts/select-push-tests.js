@@ -29,28 +29,10 @@ const { execFileSync } = require('node:child_process');
 const { readFileSync } = require('node:fs');
 const { resolve } = require('node:path');
 
-const COVERAGE_CONFIG = 'vitest.creative-studio-coverage.config.ts';
-
 /** Documentation carries no behaviour, and no test in this repo reads any of it. */
 const isDocumentation = (file) => file.endsWith('.md');
 
 const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
-
-const coverageManifest = () => {
-  const source = readFileSync(resolve(process.cwd(), COVERAGE_CONFIG), 'utf8');
-  const start = source.indexOf('creativeStudioRuntimeManifest = [');
-  if (start < 0) throw new Error(`No manifest array in ${COVERAGE_CONFIG}`);
-  // The array closes `] as const;`, not `];` — matching the wrong terminator swept in the coverage
-  // reporter strings below it and inflated the manifest by five phantom entries.
-  const end = source.indexOf('\n]', start);
-  if (end < 0) throw new Error(`Unterminated manifest array in ${COVERAGE_CONFIG}`);
-  const entries = [...source.slice(start, end).matchAll(/'([^']+)'/g)].map((match) => match[1]);
-  const stray = entries.filter((entry) => !entry.startsWith('packages/'));
-  if (stray.length > 0) throw new Error(`Manifest parse captured non-paths: ${stray.join(', ')}`);
-  // A manifest that suddenly parses as tiny would quietly stop selecting the coverage leg.
-  if (entries.length < 50) throw new Error(`Manifest parsed as only ${entries.length} entries`);
-  return new Set(entries);
-};
 
 const changedFiles = () => {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
@@ -65,23 +47,17 @@ const select = () => {
   try {
     files = changedFiles();
   } catch (error) {
-    return { leg: 'coverage', why: `cannot tell what is being pushed (${error.message}); running everything` };
+    return { leg: 'coverage', why: `cannot tell what is being pushed (${error.message}); running the gate` };
   }
   if (files.length === 0) return { leg: 'none', why: 'nothing to push' };
 
-  const manifest = coverageManifest();
-  const enforced = files.filter((file) => manifest.has(file));
-  if (enforced.length > 0) {
-    const shown = enforced.slice(0, 3).join(', ');
-    return {
-      leg: 'coverage',
-      why: `${enforced.length} coverage-enforced file(s) changed (${shown}${enforced.length > 3 ? ', …' : ''})`,
-    };
-  }
-
   const behaviour = files.filter((file) => !isDocumentation(file));
   if (behaviour.length > 0) {
-    return { leg: 'full', why: `${behaviour.length} non-documentation file(s) changed, none coverage-enforced` };
+    const shown = behaviour.slice(0, 3).join(', ');
+    return {
+      leg: 'coverage',
+      why: `${behaviour.length} non-documentation file(s) changed (${shown}${behaviour.length > 3 ? ', …' : ''})`,
+    };
   }
   return { leg: 'none', why: `${files.length} file(s) changed, all documentation` };
 };
@@ -90,12 +66,16 @@ let selection;
 try {
   selection = select();
 } catch (error) {
-  selection = { leg: 'coverage', why: `selection failed (${error.message}); running everything` };
+  selection = { leg: 'coverage', why: `selection failed (${error.message}); running the gate` };
 }
 
+/**
+ * Exactly one test command, on purpose. A second entry here would be a way to push Studio code
+ * having run something weaker than the reviewed gate, so `releasePackagingConfig.test.ts` asserts
+ * this map names `test:coverage:creative-studio` and nothing else.
+ */
 const COMMANDS = {
   coverage: ['bun', ['run', 'test:coverage:creative-studio']],
-  full: ['bun', ['run', 'test']],
   none: null,
 };
 
