@@ -3,7 +3,9 @@
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on
 someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallied by hand.
 
-**118 bugs filed · 99 closed · 19 open** — 2 P1, 11 P2, 6 P3.
+**118 bugs filed · 104 closed · 14 open** — 2 P1, 6 P2, 6 P3.
+
+_Status 2026-08-29: **12 of the 14 open entries carry a landed fix awaiting live verification**, recorded as `Fix landed … not yet verified live` rather than closed, because jsdom does not compute layout and this file's own standard is that a commit message describing the right fix is not evidence. Only two entries have unfinished work, and neither is engineering that can proceed today: **BUG-144** is the owner-deferred distribution decision, and **BUG-165** needs a prompt-authoring change that overlaps the in-flight Director work plus a pricing call on retry cost._
 
 _Count note 2026-08-29: the previous line read 116 filed · 98 closed. Counting `- [ ]`/`- [x]` **[BUG-nnn]** headers in `creative-studio-3-bug-list.md` returns 118 unique ids with no duplicates, so the filed and closed figures were two low; the open figure of 18 was correct. BUG-138 was reopened on 2026-08-29, taking open to 19._
 
@@ -45,7 +47,7 @@ The canonical reference image loses 67% of itself; the take strip is 54×38; the
 `'16:9' | '9:16' | '1:1' | '4:3' | '3:4'`, so a hardcoded landscape frame would newly break every
 portrait and square project — which is precisely the defect BUG-138 was filed for. The frame takes its
 ratio from the project, as BUG-138 already ruled and as References already implements.
-**BUG-138 was reopened** on the same sweep: its fix was scoped to References, while seven hardcoded
+**BUG-138 was reopened and fixed** on the same sweep: its fix was scoped to References, while seven hardcoded
 `16 / 9` boxes remain in `StudioLibrary`, `BeatPanel` (×2), `Board` (×3) and `Cut` — five of them
 cropping with `object-fit: cover`, two letterboxing with `contain`. That makes this cluster the
 largest open one, and the count of instances ten rather than three.
