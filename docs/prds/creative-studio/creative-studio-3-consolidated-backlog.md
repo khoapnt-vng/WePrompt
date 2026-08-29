@@ -3,7 +3,9 @@
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on
 someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallied by hand.
 
-**120 bugs filed · 112 closed · 8 open** — 2 P1, 4 P2, 2 P3.
+**120 bugs filed · 114 closed · 6 open** — 2 P1, 2 P2, 2 P3.
+
+_Closed 2026-08-29: **BUG-172** on live evidence from `Plateau` itself, and **BUG-180** on the owner's scope ruling that every Studio project is throwaway test data and migration is not done during development. The containment half of BUG-180 is filed and fixed as **BUG-179** and is unaffected by that ruling: one unopenable project must not degrade the runtime for every other project._
 
 _Closed 2026-08-29 after live verification in the running app: BUG-138, 171, 173, 174, 175, 176 and 178. Of the eight still open, **five carry a landed fix that could not be witnessed** — four of those five need a working Director, which never attaches in this profile — and only three need engineering: BUG-144 (owner-deferred distribution decision), BUG-165 (one Director-adjacent cause plus a pricing call) and BUG-180 (no repair route for a project bricked mid-publication)._
 
