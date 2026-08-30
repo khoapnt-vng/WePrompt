@@ -122,3 +122,19 @@ describe('workspace view switch treatment', () => {
     expect(chipGround).not.toBe(barGround);
   });
 });
+
+describe('workspace view surface', () => {
+  it('lets the surface take its content height instead of being squeezed to the window', () => {
+    /*
+     * .viewSurface is a flex item of .workScroll, a bounded scrolling column. Left shrinkable it
+     * was compressed to the viewport while its content was not -- the bordered card measured 779px
+     * around 1649px of content -- and because the surface keeps overflow: visible, the rows simply
+     * painted straight through the bottom border. The fix is to stop it shrinking, not to clip it:
+     * .workScroll already scrolls, and a second scroller here would nest two.
+     */
+    const surface = block(css(), '.viewSurface');
+    expect(surface).toContain('flex: 0 0 auto');
+    expect(surface).toContain('min-block-size: 220px');
+    expect(surface).not.toContain('overflow');
+  });
+});

@@ -1277,7 +1277,20 @@ const createStudioDirectorCommandMailboxInternal = (
         cursor,
         limit,
         directory: 'pending',
-        tolerateProjectErrors: false,
+        /*
+         * Skip a project whose ledger cannot be read, as the two sibling sweeps already do
+         * (listPendingPage and pruneReceiptsPage both pass true). This snapshot is the Director
+         * processor's pre-start sweep and start() runs it before its own try block, so throwing
+         * here rejected activation and activate()'s catch degraded the whole runtime graph — one
+         * unreadable project took Creative Studio down for every project in the profile.
+         *
+         * The trade is deliberate rather than free. A skipped project's pending commands are
+         * absent from the pre-start set, so a command written before a restart can be treated as
+         * new rather than expired if that project becomes readable again inside this process.
+         * That needs a live deadline and a matching revision to matter, and it costs one project
+         * its ordering; throwing costs every project the entire runtime.
+         */
+        tolerateProjectErrors: true,
         createIfWhollyAbsent: true,
       });
     },

@@ -175,7 +175,12 @@
   background: var(--color-bg-2);
 }
 
+/* The card takes its content's height and .workScroll scrolls the whole card. Left shrinkable it is
+   compressed to the window -- min-block-size overrides the automatic minimum size that would
+   otherwise have prevented that -- while overflow: visible paints the content past its own border,
+   so the frame ended 870px short of what it was drawn around. */
 .viewSurface {
+  flex: 0 0 auto;
   min-block-size: 220px;
   border: 1px solid var(--color-border-2);
   border-radius: 12px;

@@ -57,6 +57,21 @@
   color: var(--color-text-3);
 }
 
+/*
+ * Arco positions the Modal's close button absolutely in the top-right corner, over whatever the
+ * content puts there (.arco-modal-close-icon: right 20px, top 18px, 12px icon). The topline's
+ * right-hand slot is the frame counter, and .viewerModal zeroes the modal content's padding while
+ * .viewer supplies 20px, so the counter's right edge lands exactly on the icon. Reserve the corner
+ * rather than move the counter, so it keeps its place opposite the label.
+ *
+ * Logical, not physical: fa-IR is one of the twelve locales and Arco flips the icon under RTL
+ * (.arco-modal-rtl .arco-modal-close-icon { right: initial; left: 20px }), so padding-right would
+ * reserve the wrong corner in Persian.
+ */
+.viewerTopline {
+  padding-inline-end: 24px;
+}
+
 .shotChip,
 .currentBadge {
   padding: 2px 6px;

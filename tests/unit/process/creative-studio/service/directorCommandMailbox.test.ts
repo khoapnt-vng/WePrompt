@@ -305,6 +305,38 @@ describe('Studio Director schema-2 command mailbox', () => {
     });
   });
 
+  it('skips a project whose pending ledger cannot be read rather than failing the sweep for every project', async () => {
+    /*
+     * The blast radius is the point. snapshotPendingPage is the Director processor's pre-start
+     * sweep, and start() runs it outside its own try block, so a rejection here reached activate()
+     * and degraded the whole runtime graph -- one unreadable project stopped Creative Studio for
+     * every project in the profile. Asserting only that the call resolves would not catch a
+     * regression that skipped everything.
+     */
+    const healthyStore = createCreativeStudioStore({
+      rootDir,
+      now: () => NOW,
+      createId: () => 'project_v2_healthy',
+    });
+    const healthyId = (await healthyStore.createProjectV2(makeInputV2('Healthy schema-2'))).id;
+    await mailbox.ensure(healthyId);
+    await nodeFs.writeFile(
+      path.join(commandDirectories(rootDir, healthyId).pending, 'command_visible.json'),
+      JSON.stringify(makeCommandV2(healthyId, 'command_visible'))
+    );
+
+    // Make the first project's pending ledger unreadable, exactly as corrupt storage would.
+    await mailbox.ensure(projectId);
+    const brokenPending = commandDirectories(rootDir, projectId).pending;
+    await nodeFs.rm(brokenPending, { recursive: true, force: true });
+    await nodeFs.writeFile(brokenPending, 'not a directory', 'utf8');
+
+    const page = await mailbox.snapshotPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
+
+    expect(page.items).toContainEqual({ projectId: healthyId, commandId: 'command_visible' });
+    expect(page.items.every((item) => item.projectId !== projectId)).toBe(true);
+  });
+
   it('rejects malformed identities, traversal bounds, cursors, and maintenance timestamps', async () => {
     const invalidPayload = { code: 'invalid_payload' };
     await expect(mailbox.ensure('../project')).rejects.toMatchObject(invalidPayload);
