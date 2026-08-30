@@ -1,7 +1,15 @@
 # Creative Studio 4 — the canvas
 
-**Date:** 2026-08-30 · **Status:** draft for owner review · **Supersedes:** the four-view workspace IA
-**Grounded in:** a twelve-agent survey of the product at `b1a0fb627`, each area independently checked
+**Date:** 2026-08-30 · **Revision 2** · **Status:** contract amendment, for owner review
+**Supersedes:** the four-view workspace IA · **Amends:** revision 1 (`f541b4647`) after review
+**Grounded in:** two agent surveys of the product, each area independently checked
+
+> **Revision 2 exists because revision 1 was not implementation-ready.** A review found ten blocking
+> gaps. All ten were verified against the code and all ten were correct. The three that mattered
+> most: readiness was film-only and could never describe a standalone photo; pending paid work had no
+> durable owner in the design; and the words `Artifact` and `Composition` were already taken by
+> shipped concepts. Revision 1's claim that "provenance remains unchanged" was true only as an
+> invariant, not as a set of contracts.
 
 ---
 
@@ -63,102 +71,300 @@ not done.
 
 ---
 
-## The model
+## Pilot 1
 
-Three concepts. Only the first is new.
+Deliberately narrow, and it sets the scope of everything below.
 
-### Artifact
+> From an empty project with **zero Beats and zero Shots**: create or import **one standalone photo**;
+> review and confirm any cost; observe progress or failure; receive a named piece; rename it; reload
+> it with stable identity and exact provenance; export it.
 
-A named, finished thing: a picture, a clip, a sound, a document. It has a `#` handle, a kind, the
-bytes, and — recorded but not necessarily shown — what produced it, what conditioned it, and what it
-cost.
+No video, no film, no sound. **This removes ffmpeg from the critical path entirely** — a photo needs
+no probe, no decode and no encoder — so the largest blocker is deferred rather than solved early. If
+video enters Pilot 1 that reverses immediately, and the editor-folder export does **not** rescue it: a
+take discarded during ingestion was never persisted, so there is nothing for a folder export to copy.
+Revision 1 claimed otherwise and was wrong.
 
-**Artifacts do not require a film.** This is the one real addition to the store. Today `Shot` is the
-only owner of generated media and every asset hangs off one. CS4 makes an artifact ownable by the
-project directly, with Shot membership becoming one optional relationship among several.
-
-### Capability
-
-Something that makes artifacts: an image route, a video route, a bed import, an export. A capability
-declares its inputs, its outputs, and what it records. It is invoked by the Director or by the
-person, and its output lands on the canvas as a block.
-
-**A capability produces "a named artifact of some kind", never "a picture or a clip".** This costs
-nothing today and is the difference between parking voice and blocking it.
-
-### Composition
-
-An ordered arrangement of artifacts that makes a larger work. A film is a composition. So is a
-character sheet, or a set of environment plates. Beats and Shots become the structure _of the film
-composition_, not the structure of the app.
+The surface is an **automatically laid-out, keyboard-accessible board** — not an infinite spatial
+canvas. Freeform positioning, film, video and sound all follow.
 
 ---
 
-## What is kept
+## The vocabulary
 
-The survey's most useful finding is how much of CS4 already exists.
+Revision 1 introduced `Artifact` and `Composition`. Both are already taken, and so is `Block`.
 
-**The store keeps its provenance, unchanged.** Schema 2 already records, durably and per job: a
-frozen `StudioGenerationCompositionV2` carrying brief, rules, story, shooting script and the exact
-reference assets with sha256; `requestSnapshot.conditioningInput` naming the seed still or
-predecessor frame; asset-side `producerJobId`, `compositionDigest` and
-`generationReferenceAssetIds`; `spendReceipt` for cost; `supersededVideoAssetIds` for supersession;
-`chainBreak` and derived chain state. **None of this is displayed by the canvas while everything is
-current, and none of it stops being recorded.** That is the whole of the A-surface decision.
+| Word          | Occurrences today               | Existing meaning                                                                                           |
+| ------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `Artifact`    | 811, across 5 live meanings     | Studio export payload, Office document subsystem, aioncore conversation card, presentation-template scrape |
+| `Composition` | `StudioGenerationCompositionV2` | **Frozen generation-request provenance**                                                                   |
+| `Block`       | 11 `Studio*Block*` types        | **Blocker** — a reason something cannot proceed                                                            |
 
-**Project status drives the canvas.** `projectStudioStatusV2` is a pure, main-side derivation
-returning seven stages — `brief · engines · references · storyboard · bindings · production · cut` —
-each `not_started | in_progress | complete | blocked`, with blockers carrying `{cause, where,
-remedy}` and remedies already typed as free-fix versus paid. Which blocks exist, which are ready, and
-what a person can do about a stuck one are all _renderings of this_. The canvas must not invent a
-parallel readiness model.
+Qualifying them does not survive grep or review. The amendment therefore uses three new words, each
+with zero existing occurrences anywhere in the tree:
 
-**The frame around the canvas survives.** `WorkspaceShell` already draws the app bar, the resizable
-Director rail and the work panel; the four views are its `children` — a single insertion point. The
-canvas replaces the contents of one `<main>`.
+- **Piece** (`StudioPieceV2`) — the first-class thing a capability produces. What a person names.
+- **Assembly** (`StudioAssemblyV2`) — an ordered arrangement of Pieces that makes a larger work.
+  **Does not exist until phase 6.** Pilot 1 needs no Assembly.
+- **Job** — unchanged. See below.
 
-**The spend contract survives.** Two gates only — money beyond the envelope, and irreversible change.
-Everything else is shown, not asked.
+### `StudioGenerationCompositionV2` is retained, untouched, and is not the Assembly
 
----
+It is **frozen generation-request provenance**: the brief, rules, story, shooting script and exact
+reference assets with sha256 that a generation was conditioned on. It has nothing to do with the CS4
+ordered-arrangement concept beyond an unfortunate shared English word.
 
-## What changes
-
-**The four views stop existing as destinations.** `STUDIO_VIEWS` is a cross-process constant: the
-main process builds its unsaved-work close-preflight regex from it, and a URL segment main does not
-match closes the window with no prompt and loses drafts. Removing views is therefore a two-process
-change that must land atomically with the route pattern, not a renderer edit.
-
-**The proposal gets one home.** Today the same `DirectorProposalCard` renders in two places at once —
-the work panel inbox and the Director rail. On a canvas of finished work, a pending proposal is by
-definition the one thing that is _not_ finished. It gets a single, distinct home.
-
-**Blocks are named, and Shots have no name today.** A Shot carries `shootingScript` and a position,
-and nothing else. If blocks carry `#` handles, the spec must say where a handle comes from: derived
-from position, taken from the first words of the script, or authored. **Decision: handles are
-authored, defaulting to a derived slug.** A person can rename a block; that is what makes it
-referable in conversation.
+**It must not be renamed, redesigned, or deleted as part of CS4.** Its schema version stays at 1, and
+`validation.ts` requires exact equality on every persisted job at load — a mismatch **quarantines the
+project**. This paragraph exists because revision 1's careless reuse of the word put it one confident
+refactor away from data loss.
 
 ---
 
-## Multi-modal scope
+## Pending work: no new record, one new owner
 
-| Mode      | Today                                                 | CS4                                                                                                                       |
-| --------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| **Photo** | Four adapters, four job purposes, full provenance     | Re-presentation. A photo becomes standalone rather than Shot-owned.                                                       |
-| **Video** | Wired, with a derived continuity chain                | Re-presentation, plus the ffmpeg dependency below.                                                                        |
-| **Sound** | One imported WAV bed, mixed into export at fixed gain | Re-presentation of the bed. **No generation exists** — no TTS, no music, no SFX route.                                    |
-| **Voice** | Nothing                                               | **Parked.** Out of scope. The capability interface must not assume visual output, so it slots in later without a rewrite. |
+The review asked for a durable `CapabilityRun`. Grounding the code says the record already exists and
+the requirement is already met.
 
-"Multi-modal studio" is therefore two-thirds repositioning and one-third new capability. The spec
-does not pretend four equal modes exist.
+`StudioJobV2` is persisted inside the project document. It is minted **inside the confirm CAS commit,
+atomically with the spend authorization**, so paid work has a durable owner before dispatch. Dispatch
+itself is best-effort and swallows errors, leaving the job in `queued_local` for crash recovery. The
+finished asset is created **only** inside a single CAS commit that simultaneously validates the bytes,
+registers the asset, appends it to its owner and flips the job to `succeeded` — the one place
+`succeeded` is ever assigned. `spendReceipt` is written exactly once, at provider success; money is
+not modelled as a status.
+
+**So the amendment adds no new record.** It adds a third owner kind.
+
+### Correcting revision 1 and the review
+
+The nine durable job statuses are `waiting_for_conditioning`, `queued_local`, `submitting`,
+`queued_remote`, `running`, `needs_attention`, `succeeded`, `failed`, `cancelled`.
+
+`awaiting_spend`, `partially_failed` and `dismissed` are **not job states**. They belong to
+`StudioRendererReferenceGenerationHandoffV2`, a derived, non-persisted aggregate over a _set_ of jobs.
+Revision 1 and the commission both described them as job states. For Pilot 1 — one photo, one job —
+`partially_failed` has no meaning at the run level at all.
+
+Adding a status or a field to the job record is a **persisted-schema change**: `validateJob` requires
+an exact key set of 24 required and exactly two optional keys. And every new state needs an explicit
+arm in `resumePendingJobsV2`, which is the whole of crash recovery and skips anything it does not
+recognise.
+
+### The real barrier to a standalone photo
+
+Not the job model. A shot-less job is already legal: `activeOwnerForJobV2`'s reference branch never
+consults Beats or Shots, so a `reference_image` job in a project with zero of both passes every
+structural check today.
+
+The barriers are two, and both are typed:
+
+1. **The asset validator, which is stricter than the job model.** A shot-less image **must** carry a
+   `projectReferenceId`; a shot-less non-image, non-bed-audio asset is **rejected outright**; and
+   ownership is an exclusive XOR between shot and reference.
+2. **Reference is a typed film-craft slot, not a container.** `StudioReferenceKindV2` is
+   `'character' | 'background'` — there is no generic kind — and a biconditional binds
+   `purpose === 'reference_image'` to `target.kind === 'reference'` in three separate validators plus
+   the confirm builder, which throws `'Invalid Studio project-reference job ownership'`.
+
+A person's named standalone photo cannot honestly occupy a character look-sheet. **The amendment adds
+a third owner kind — the Piece — as a first-class map beside `beats`, `shots` and `references`**, with
+an id, a label, an ordered `jobIds` array, `assetIds`, and a current-asset pointer with a superseded
+list. That same id serves the new arm of `StudioGenerationTargetV2` and the new asset-ownership
+pointer.
+
+---
+
+## Which contracts version, and which do not
+
+Revision 1 said provenance is unchanged. That is true as an **invariant** — exact prompts, hashes,
+resolved inputs, routes, receipts and producer linkage are all preserved — and false as a statement
+about **contracts**, several of which must change to admit a shot-less owner.
+
+**These move:**
+
+| Contract                               | Change | Why                                                |
+| -------------------------------------- | ------ | -------------------------------------------------- |
+| `STUDIO_MUTATION_BATCH_SCHEMA_VERSION` | 5 → 6  | New standalone create / rename / delete operations |
+| `STUDIO_EXPORT_SCHEMA_VERSION_V2`      | 2 → 3  | Export of a shot-less item                         |
+
+**These explicitly stay:**
+
+`STUDIO_PROJECT_SCHEMA_VERSION` stays at **5**, following the decode-time defaulting precedent
+already used for the brief sidecar. `STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION` stays at **1** —
+exact equality is required at load and a mismatch quarantines the project.
+`STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2` (10), `STUDIO_PROPOSAL_SCHEMA_VERSION_V2` (6),
+`STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION` (5) and `STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION` (1) are
+all untouched.
+
+> **"schema2" is a subsystem name, not a version.** Revision 1 wrote "Schema 2 already records…" and
+> was wrong: the persisted project schema is **5**.
+
+---
+
+## The three projections
+
+Revision 1 claimed the canvas could be driven entirely by `projectStudioStatusV2`. **That was the
+single load-bearing claim of the cheap estimate, and it is false.** Its seven stages — `brief ·
+engines · references · storyboard · bindings · production · cut` — are film-only. A standalone photo
+can never complete them, so a canvas driven by that projection would report a one-photo project as
+permanently incomplete.
+
+Three Main-owned projections replace it:
+
+1. **Canvas inventory** — what Pieces exist, their labels, current asset, and whether each is current
+   or superseded. Independent of any film.
+2. **Capability activity** — what is in flight, what needs attention, what failed, and what it will
+   cost or has cost. Derived over Jobs.
+3. **Film composition status** — `projectStudioStatusV2`, unchanged, scoped to projects that have a
+   film. Not consulted when no Assembly exists.
+
+The existing typed blockers — `{cause, where, remedy}` with remedies already classed free / proposal /
+paid — are reused by the first two rather than reinvented.
+
+---
+
+## Authority and spend
+
+| Actor                | May                                                            |
+| -------------------- | -------------------------------------------------------------- |
+| **Director**         | Draft, name, and select inputs                                 |
+| **Main**             | Resolve ids, hashes, eligibility, routes, quotes and revisions |
+| **Human (renderer)** | Confirm spend, approval, and irreversible change               |
+
+Confirmation **rederives and rejects stale state**. Mutable `#` handles are **never** resolved at
+dispatch time — a handle is a label for people, and an immutable id is what a contract carries. That
+separation is the whole reason a renameable handle is safe.
+
+### The budget readout is not derivable, and is omitted from the first tranche
+
+Revision 1 recommended a currency envelope drawn down by summing receipts. That is wrong: summing
+receipts gives **recorded spend**, not remaining budget. Authorized-but-not-yet-billed commitments are
+not represented anywhere, and `maxPerBatchMinorUnits` is a per-batch ceiling, not a total envelope.
+
+**For Pilot 1: either omit the corner readout, or show "Recorded spend" by currency and label it that
+way.** This also keeps decision D3 (2026-08-12, no credit ledger) intact.
+
+---
+
+## The first-run journey
+
+Revision 1 diagnosed "do I wait for the Director, or click something?" and then said only that either
+party may invoke a capability — which reproduces the same ambiguity on a blank canvas.
+
+**Pilot 1 answers it explicitly.** An empty canvas offers exactly two named actions, both the
+person's: **create a photo** (describe it) and **import a photo**. The Director does not act first and
+does not act alone. It may draft and name and propose inputs; the person confirms spend. There is no
+state in which a person is waiting for a Director that is waiting for them.
+
+---
+
+## Migration, and what "no migration" does not license
+
+**No migration.** All existing projects are test data. CS4 uses a **clean new project schema**;
+protocol and sidecar versions stay independent. Anyone holding work in a CS3 project loses it — an
+accepted cost.
+
+**But deleting quarantine is not licensed by it.** There is no migration code in the studio subsystem
+at all — a grep for `migrat` returns zero hits. What exists is two separable things:
+
+- **Legacy-schema detection** — deletable under this ruling.
+- **Corruption machinery** — files get corrupted regardless of migration, and this is **retained**:
+  `scanProjectsV2`'s classify-and-continue, bounded validation and traversal caps, transactional
+  crash-safe writes with startup replay, and per-project isolation.
+
+Per-project isolation is not theoretical: **BUG-179** was a P1 fixed on 2026-08-30 where exactly this
+failed — one unreadable project degraded the entire runtime graph because a sweep passed
+`tolerateProjectErrors: false`. The containment pattern must survive the new schema.
+
+Two consequences the current guards force, both to be resolved in phase 1: a project lacking a brief
+sidecar is quarantined today, so a standalone-photo project must still have a brief; and a quarantined
+project can currently be **neither opened nor deleted**, which is a dead end that must not survive
+into the pilot.
+
+---
+
+## The work, in six phases
+
+Revision 1's task zero bundled contract design, fixtures, two major refactors, compatibility deletion
+and test retirement — and left the composition concept owned by nobody. Replaced by an ordered
+sequence, with parallelism starting only after the contract is frozen.
+
+1. **Owner decisions and versioned contracts.** The four decisions below; the Piece owner kind; the
+   two versions that move; the quarantine seam. Not split.
+2. **Runtime fixtures plus behaviour-neutral extraction.** Fixtures captured from a running backend,
+   never hand-built from types. The `store.ts` (9,684 lines) and `StudioPage.tsx` (4,507 lines) carve
+   happens here, and must be provably behaviour-neutral — kept separate from phase 1 so the phase
+   that must be trustworthy carries no refactor risk.
+3. **Hidden Piece and Job storage, and the Main projections.** No UI.
+4. **Standalone-photo fake-adapter E2E.** The Pilot 1 journey, end to end, against a fake generation
+   adapter. This is the acceptance gate for the contract.
+5. **Canvas UI and Director integration.**
+6. **Assembly, film composition, and later modalities.** Video, sound, ffmpeg bundling.
+
+Two lanes may run in parallel **from phase 3**, split on the seam frozen in phase 1: one behind it
+(storage, projections, capabilities, spend), one in front (canvas, Director presentation). Not before.
+
+---
+
+## Completion gates
+
+Every phase. Run from the worktree root, in order:
+
+1. `bun run i18n:types` — regenerates the untracked `i18n-keys.d.ts`
+2. `bunx tsc --noEmit`
+3. `bun run lint -- --quiet` — errors only; ~1,300 pre-existing warnings are not failures
+4. `bun run format` — **oxfmt, never prettier**
+5. `node scripts/check-i18n.js`
+6. Focused tests for the changed area
+7. **Coverage manifest updated** — every new or changed runtime file appended to
+   `creativeStudioRuntimeManifest` in `vitest.creative-studio-coverage.config.ts` (116 paths today,
+   per-file 80% lines and branches). It is unguarded, so this is a named task, not a checklist
+   afterthought.
+8. **Twelve locales, in the same change** — `studioI18n.test.ts` asserts exact key sets in both
+   directions for `en-US` and each of the eleven others. i18n cannot be batched at the end without
+   designing in a red window.
+9. **Accessibility** — extend `StudioAccessibleCopy.dom.test.tsx` with role and label assertions for
+   every new surface. There is no other a11y infrastructure.
+10. `just push` — the full gate: lint-strict → fmt-check → typecheck → i18n-check → the reviewed
+    coverage suite
+11. **Source audit** — read the diff for anything the gate cannot see
+12. **Fake-adapter E2E** for the Pilot 1 journey
+
+> **"Wire-fixture replay" as the review worded it does not exist yet.** There is no response
+> record/replay anywhere in this repository. Phase 2 must build the capture, or the item must be
+> honestly restated as a Pilot 1 photo-lifecycle integration test against a fake adapter. It cannot be
+> listed as though the capability were already there.
+
+> If any phase changes a gate leg, `releasePackagingConfig.test.ts` must change with it — it pins the
+> push recipe's shape deliberately.
+
+---
+
+## The backlog is triaged, and the triage is the contract
+
+Revision 1 said "the nine open CS3 bug entries stay with the other agent". That was wrong twice: the
+backlog has **30** open entries, not nine — nine was one agent's remaining subset from a verification
+pass — and no such handoff was ever agreed.
+
+Replaced by a committed triage in the bug list. Every open entry now carries a disposition, a
+rationale, a destination phase where applicable, and a claimant. **4 fix-before-CS4 · 25 absorb · 1
+superseded-by-cutover · 0 defer.** Nothing was closed by it.
+
+An adversarial pass overturned **eleven** of thirty, nearly all from _superseded_ to _absorb_. The
+decisive example is BUG-182: the cutover deletes the **fix**, not the defect, because `carriesPicture`
+and its only regression test both live inside `FirstFrames/`. Closing it at cutover would tick the
+entry at the exact moment the product regresses.
+
+**This is blocking.** Parallel implementation does not start until it is committed, because otherwise
+the other agent keeps fixing UI the cutover deletes.
 
 ---
 
 ## Decisions the owner must make
 
-These four collide with existing rulings or have no implementation. They are listed rather than
-silently resolved.
+Two remain open (1 and 3). Two were resolved by Pilot 1 and are kept here with their reasoning,
+because each was re-scoped rather than answered on its own terms.
 
 ### 1. The credit counter reverses D3
 
@@ -170,10 +376,15 @@ There is also no data source. No balance, wallet, or spent-to-date value exists 
 store, main, or the renderer — only `StudioSpendPolicy.maxPerBatchMinorUnits`, a per-batch ceiling
 with no drawdown, and per-job `spendReceipt` rows.
 
-**Options:** (a) a currency budget envelope, drawn down by summing receipts — compatible with D3 and
-derivable from what exists; (b) adopt credits as a real product unit, reversing D3; (c) no corner
-readout.
-**Recommendation: (a).** It gives the reference's calm without reopening a ruling.
+**Revision 1 recommended a currency envelope drawn down by summing receipts. That is not derivable.**
+Summing receipts gives _recorded spend_, not remaining budget: authorized-but-unbilled commitments are
+represented nowhere, and `maxPerBatchMinorUnits` is a per-batch ceiling, not a total envelope.
+
+**Options:** (a) omit the readout from the first tranche; (b) show **"Recorded spend"** by currency,
+labelled as exactly that; (c) build a real drawn-down ledger, which is a product decision, not a
+readout; (d) adopt credits, reversing D3.
+**Recommendation: (a) or (b).** Both keep D3 intact. Anything that reads as a _balance_ is
+(c) wearing a disguise.
 
 ### 2. ffmpeg gates four capabilities, not one
 
@@ -191,11 +402,14 @@ BUG-144 describes film export. The survey found the dependency is far wider:
   installed.
 
 The resolver is already bundle-ready and the electron-builder hook exists. **This is a packaging
-decision — pin, download and sign LGPL binaries — not a mechanism to build.** Until it is made, the
-canvas rule "blocks hold finished work" is false on any machine without Homebrew ffmpeg.
+decision — pin, download and sign LGPL binaries — not a mechanism to build.**
 
-**The editor-folder export is the fallback deliverable**: it copies each take plus a slate PNG,
-`script.md` and `timeline.json`, without stitching, and needs no encoder.
+**Pilot 1 defers this entirely.** A standalone photo needs no probe, decode or encoder, so the
+decision is owed at **phase 6**, not now. It becomes blocking the moment video enters scope.
+
+**Revision 1 called the editor-folder export the fallback deliverable. It is not**, for the case that
+matters: a take discarded during ingestion was never persisted, so a folder export has nothing to
+copy. It rescues only takes that survived probing.
 
 ### 3. The canvas replaces work that shipped today
 
@@ -203,67 +417,12 @@ Progressive workspace readiness landed on 2026-08-30 as the answer to the same f
 complaint, and the four-view order is an owner-approved product amendment from 2026-08-24. CS4
 supersedes both. This should be an explicit decision, not a silent overwrite.
 
-### 4. What a pilot user must be able to finish
+### 4. What a pilot user must be able to finish — **decided**
 
-Undecided, and it sets the scope of everything above. A finished film requires resolving (2). One
-photo requires almost nothing beyond the canvas itself.
-
----
-
-## Migration
-
-**None.** All existing projects are test data. CS4 refuses anything that is not current-schema; there
-are no versioned reads, no dual-write, and no compatibility shims. Anyone holding work in a CS3
-project loses it at the switch — an accepted cost, recorded here so it is not rediscovered later.
-
-This licenses the deletion of the schema-1 detection, quarantine and legacy-reporting machinery in
-`store.ts` (~149 references), which is where three of this month's defects lived.
-
----
-
-## The work, in two lanes
-
-Two agents work this in parallel. A file-based split does not work in this codebase: one ordinary
-feature commit recently touched 21 files spanning the tool schema, IPC, the service, shared types,
-twelve locale bundles and the renderer. **Features here are vertical, so any lane drawn through the
-stack cuts every feature in half.**
-
-The split is therefore on a **seam**, and the seam is written first.
-
-### Task zero — one agent, not split
-
-1. **Freeze the artifact and capability contract.** The types, the IPC shape, and what a capability
-   must record when it produces something.
-2. **Capture fixtures from a running backend.** Not hand-written from the type definitions. An epic
-   in this repo passed 8,200 green tests having never once worked, because every fixture was built
-   from types and schemas rather than from the wire. This is the difference between two lanes that
-   integrate on day one and two lanes that integrate on the last day.
-3. **Carve the two giants along the seam CS4 needs anyway.** `store.ts` is 9,684 lines and
-   `StudioPage.tsx` is 4,507; every substantive task routes through one or both, so two agents would
-   collide constantly. Split store into artifacts / capabilities / proposals / spend behind the
-   existing API, and StudioPage into per-block components. **As the seam work, not as a separate
-   refactor.**
-4. **Delete the back-compat surface** the no-migration decision just made dead.
-5. **Retire the CS2 prose-pinned docs.** `documentation.test.ts` asserts exact sentences from seven
-   CS2 design documents, which is why editing a planning doc can turn the suite red. CS2 is closed.
-
-### Then two lanes
-
-**Lane A — behind the seam.** Capabilities, generation, provenance, spend, standalone artifacts in
-the store, project status as the canvas's readiness source.
-
-**Lane B — in front of the seam.** The canvas, blocks, block handles, the Director's presentation
-model, the single proposal home, the app-bar readout.
-
-Both work against the frozen contract and the wire-derived fixtures.
-
-### The rule that keeps them apart
-
-Claim the entry, not the file. One line in the work item naming who took it and when. Three files
-remain genuine merge hazards regardless of lane: `openingTurn.ts` (rule edits invalidate every
-conversation's preset profile), `creativeStudioTypes.ts`, and the twelve locale bundles (a contract
-test requires every referenced key in all twelve, so two agents adding keys conflict twelve times at
-once).
+Pilot 1, above: one standalone photo, created or imported, cost confirmed, progress observed, named,
+renamed, reloaded with stable identity and exact provenance, exported. Recorded here because it is
+what re-scoped decisions 1 and 2, and because it is the reason the remaining decisions are owed later
+rather than now.
 
 ---
 
@@ -276,9 +435,11 @@ once).
   buttons — with a test asserting every name exists in the shipped locale bundle. **A canvas rewrite
   invalidates that map and will fail that test.** That is the test working as designed: update the
   map in the same change.
-- **In-flight work is not finished work.** Statuses `awaiting_spend`, `running`, `partially_failed`
-  and `failed` are real and common. A canvas whose stated rule is "blocks hold finished work" must
-  say where they appear.
+- **In-flight work is not finished work**, and its states are not where revision 1 said. The nine
+  durable job statuses are `waiting_for_conditioning`, `queued_local`, `submitting`, `queued_remote`,
+  `running`, `needs_attention`, `succeeded`, `failed`, `cancelled`. `awaiting_spend`,
+  `partially_failed` and `dismissed` belong to a derived aggregate over a _set_ of jobs, not to a job.
+  A canvas whose rule is "blocks hold finished work" must still say where in-flight work appears.
 - **`toRendererJob` strips `requestSnapshot`.** Main records per-clip conditioning durably, but the
   renderer never receives it. Disclosure later is not free: it needs an IPC change.
 - **Two sessionStorage draft stores** hold real unsaved user work, keyed by a field vocabulary tied
@@ -290,5 +451,8 @@ once).
 
 ## Out of scope
 
-Voice generation. `strictNullChecks`. Any change to the ~98.6% upstream surface. Migration of
-existing projects. The nine open CS3 bug entries, which stay with the other agent.
+Voice generation. Sound and video generation, and the Assembly concept — all phase 6.
+`strictNullChecks`. Any change to the ~98.6% upstream surface. Migration of existing projects.
+
+**Not the CS3 backlog.** Every open entry is triaged in the bug list against this programme, with a
+disposition, a rationale, a destination phase and a claimant. Four of them block the CS4 base.
