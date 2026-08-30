@@ -989,11 +989,14 @@ invoke any of this, and nothing is exported. Those are phases 3–5.
 
 ## Open questions this plan does not settle
 
-Three came from the designer and all concern films, so none blocks phase 1:
+The designer's three are **settled** (owner, 2026-08-30) and recorded in the design: canvas order is
+fixed by the dependency with no hand-reordering; no second proposal while one is pending; and
+`#final_video` auto-recuts, with the Director saying so.
 
-1. Whether canvas order is fixed by dependency or reorderable by hand.
-2. Whether a second proposal can exist while one is pending. Drawn as: no — the Director waits.
-3. Whether `#final_video` auto-recuts when a clip is re-made.
+One of those matters to this phase. **Fixed order means no persisted layout state, which is why
+`STUDIO_PROJECT_SCHEMA_VERSION` can stay at 5.** Had reordering been allowed, Task 2's decode-time
+defaulting would instead have been a schema bump — and a bump makes every existing record fail an
+exact-equality check and quarantine the project.
 
 One came from reconciling the wireframe with the store, and it is owed before phase 5:
 

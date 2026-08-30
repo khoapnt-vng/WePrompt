@@ -422,15 +422,29 @@ buildable. The `NEEDS BUDGET` block is unaffected — it compares one batch agai
 ceiling, which is exactly what the store already supports, and it is the only place the product asks
 about money.
 
-### Three questions the designer left open — none block Pilot 1
+### Three questions the designer left open — all settled
 
-1. Whether canvas order is fixed by dependency or reorderable by hand.
-2. Whether a second proposal can exist while one is pending. _Drawn as: no — the Director waits._
-3. Whether `#final_video` auto-recuts when a clip is re-made, given re-cutting is free and reversible
-   and the spend ruling says do not ask.
+Settled by the owner, 2026-08-30.
 
-All three concern films. **Pilot 1 is one photograph**, so none of them gate the start of work; they
-are owed by phase 6. The drawn default for (2) is the safer one and should stand unless overturned.
+**1. Canvas order is fixed by the dependency. No hand-reordering.** _"Keep it simple for now."_
+
+This preserves the wireframe's own premise — `column flow · order is meaning`, and scanning down is
+reading the production — and it buys something concrete: **no persisted layout state, so no project
+schema change.** Hand-reordering would have needed stored block positions, which is the only thing in
+CS4 that would have forced schema 5 → 6. Everything else is held at 5 by decode-time defaulting.
+
+**2. No second proposal while one is pending. The Director waits.** Confirms the drawn default.
+
+Also the safer answer against a defect the product already has: **BUG-160** and **BUG-181** describe a
+pending proposal dying the moment any generation bumps the revision. Two pending proposals would mean
+two chances to be invalidated, including by each other.
+
+**3. `#final_video` auto-recuts when a clip is re-made.** _"Recut is ok."_
+
+Which is what the spend ruling already implies — re-cutting is free and reversible, and _a product
+that asks permission to do something free and reversible is not careful, it is tiring_. Note the
+ruling's other half still applies: **inform, don't gate**. So the recut happens without asking, and
+the Director says that it happened. Silent is not the same as unasked.
 
 ---
 
