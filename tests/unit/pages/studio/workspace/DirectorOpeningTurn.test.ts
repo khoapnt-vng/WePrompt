@@ -176,6 +176,16 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_project_status or studio_list_routes again/i);
   });
 
+  it('requires the exact persisted predecessor frame before revising an existing chained Shot', () => {
+    expect(DIRECTOR_PRESET_RULES).toContain('studio_get_conditioning_frame');
+    expect(DIRECTOR_PRESET_RULES).toMatch(/revising an existing chained Shot.*studio_get_conditioning_frame/is);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/describe what.*frame already shows, then move/is);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never.*substitute a poster or\s+seed still/is);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/claim a visual diagnosis when the exact conditioning frame is unavailable/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/active\s+model cannot inspect the attached image/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/state that limitation and do not submit a frame-aware revision/i);
+  });
+
   it('describes every governed operation from the exact shared disposition policy', () => {
     for (const [operation, disposition] of Object.entries(STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2)) {
       const heading =

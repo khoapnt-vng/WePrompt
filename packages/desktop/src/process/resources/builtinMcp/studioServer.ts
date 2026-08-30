@@ -8,6 +8,7 @@
 // read a bounded script view and write durable approval-queue records. It never
 // writes project.json; the main-process store remains the sole project writer.
 
+import { createHash } from 'node:crypto';
 import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -26,6 +27,7 @@ import {
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_MUTATION_OPERATIONS,
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_IMAGE_ASSET_BYTES_V2,
   STUDIO_MAX_REFERENCE_LABEL_LENGTH,
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2,
@@ -83,12 +85,15 @@ import {
 } from '@process/services/creative-studio/service/directorCommandContracts';
 import {
   type RecordIoFileSystem,
+  readBoundedRegularBinaryFileWithIdentity,
   readBoundedRegularFileWithIdentity,
+  resolveSafeRecordDirectory,
 } from '@process/services/creative-studio/service/recordIo';
 import {
   deriveStudioFixedShotReasonsV2,
   STUDIO_FIXED_SHOT_REASON_ORDER_V2,
 } from '@process/services/creative-studio/service/schema2/fixedShots';
+import { createStudioFrameExtractionId } from '@process/services/creative-studio/service/schema2/generation/frameExtraction';
 
 export type StudioServerEnv = {
   projectId: string;
@@ -101,7 +106,7 @@ export type StudioServerEnv = {
 };
 
 export type StudioToolResult = {
-  content: Array<{ type: 'text'; text: string }>;
+  content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>;
   isError?: boolean;
 };
 
@@ -117,6 +122,30 @@ export type ProposeStoryboardInputV2 = {
 };
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+const STUDIO_DIRECTOR_CONDITIONING_FRAME_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const conditioningFrameMatchesMimeTypeV2 = (bytes: Uint8Array, mimeType: string): boolean => {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (mimeType === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'));
+  if (mimeType === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  return (
+    mimeType === 'image/webp' &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  );
+};
+type StudioDirectoryIdentityV2 = { dev: number; ino: number };
+const captureStudioDirectoryIdentityV2 = async (
+  fs: RecordIoFileSystem,
+  directory: string
+): Promise<StudioDirectoryIdentityV2 | null> => {
+  const stats = await fs.lstat(directory);
+  if (!stats.isDirectory() || stats.isSymbolicLink() || (await fs.realpath(directory)) !== directory) return null;
+  return { dev: stats.dev, ino: stats.ino };
+};
+const studioDirectoryIdentitiesEqualV2 = (
+  left: StudioDirectoryIdentityV2 | null,
+  right: StudioDirectoryIdentityV2 | null
+): boolean => left !== null && right !== null && left.dev === right.dev && left.ino === right.ino;
 const NONTERMINAL_REFERENCE_JOB_STATUSES: ReadonlySet<StudioProjectV2['jobs'][string]['status']> = new Set([
   'waiting_for_conditioning',
   'queued_local',
@@ -732,6 +761,8 @@ export const studioGetProjectStatusInputSchemaV2 = z4.object({ detail: z4.boolea
 
 export const studioGetProposalInputSchemaV2 = z4.object({ proposalId: studioDirectorIdSchemaV2 }).strict();
 
+export const studioGetConditioningFrameInputSchemaV2 = z4.object({ shotId: studioDirectorIdSchemaV2 }).strict();
+
 export const studioProposeStoryboardInputSchemaV2 = z4
   .object({
     base_revision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
@@ -1132,6 +1163,166 @@ export function createReadStoryboardHandlerV2(
   };
 }
 
+type StudioConditioningFrameUnavailableReasonV2 =
+  | 'not_chained'
+  | 'predecessor_take_missing'
+  | 'extraction_missing'
+  | 'extraction_pending'
+  | 'extraction_failed';
+
+const conditioningFrameUnavailableResultV2 = (
+  projectRevision: number,
+  shotId: string,
+  reason: StudioConditioningFrameUnavailableReasonV2,
+  detail: Record<string, unknown> = {}
+): StudioToolResult => ({
+  content: [
+    {
+      type: 'text',
+      text: JSON.stringify({ status: 'unavailable', projectRevision, shotId, reason, ...detail }, null, 2),
+    },
+  ],
+});
+
+/**
+ * Gives the Director sight of one exact inherited frame without granting asset or path selection.
+ * The dependent Shot is the only caller input; the app derives every media authority from the
+ * current validated project and reasserts that authority after reading the immutable frame.
+ */
+export function createStudioGetConditioningFrameHandlerV2(
+  config: StudioServerEnv | null
+): (input: { shotId: string }) => Promise<StudioToolResult> {
+  return async ({ shotId }) => {
+    if (!config) return errorResult('Creative Studio project is unavailable.');
+    try {
+      const snapshot = await readProjectSnapshotV2(config);
+      const project = snapshot.project;
+      let beatId: string | null = null;
+      let shotIndex = -1;
+      for (const activeBeatId of project.beatOrder) {
+        const candidateIndex = project.beats[activeBeatId]!.shotOrder.indexOf(shotId);
+        if (candidateIndex === -1) continue;
+        beatId = activeBeatId;
+        shotIndex = candidateIndex;
+        break;
+      }
+      if (beatId === null || shotIndex < 0) {
+        return errorResult(JSON.stringify({ status: 'invalid_request', reason: 'inactive_shot', shotId }, null, 2));
+      }
+
+      const shot = project.shots[shotId]!;
+      if (shotIndex === 0 || shot.chainBreak === 'hard_cut') {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'not_chained');
+      }
+      const predecessorShotId = project.beats[beatId]!.shotOrder[shotIndex - 1]!;
+      const predecessor = project.shots[predecessorShotId]!;
+      const takeAssetId = predecessor.videoAssetId;
+      const take = takeAssetId === null ? undefined : project.assets[takeAssetId];
+      if (takeAssetId === null || take?.mediaKind !== 'video' || take.durationSeconds === undefined) {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'predecessor_take_missing', {
+          predecessorShotId,
+        });
+      }
+
+      const endpointSeconds = take.durationSeconds - (predecessor.trimOutSeconds ?? 0);
+      const extractionId = createStudioFrameExtractionId({
+        shotId: predecessorShotId,
+        videoAssetId: takeAssetId,
+        endpointSeconds,
+      });
+      const authority = { predecessorShotId, takeAssetId, extractionId, endpointSeconds };
+      const extraction = project.frameExtractions[extractionId];
+      if (extraction === undefined) {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'extraction_missing', authority);
+      }
+      if (extraction.status === 'pending' || extraction.status === 'extracting') {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'extraction_pending', authority);
+      }
+      if (extraction.status === 'failed') {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'extraction_failed', {
+          ...authority,
+          errorCode: extraction.errorCode,
+        });
+      }
+
+      const frameAssetId = extraction.frameAssetId;
+      const frameAsset = frameAssetId === null ? undefined : project.assets[frameAssetId];
+      if (
+        frameAssetId === null ||
+        frameAsset === undefined ||
+        frameAsset.shotId !== predecessorShotId ||
+        frameAsset.mediaKind !== 'image' ||
+        frameAsset.managedAsset.collection !== 'conditioningFrames' ||
+        !STUDIO_DIRECTOR_CONDITIONING_FRAME_MIME_TYPES.has(frameAsset.mimeType) ||
+        frameAsset.byteSize <= 0 ||
+        frameAsset.byteSize > STUDIO_MAX_IMAGE_ASSET_BYTES_V2
+      ) {
+        return errorResult('Creative Studio conditioning frame is unavailable.');
+      }
+
+      const recordFs = config.fs ?? nodeFs;
+      const framesDirectory = await resolveSafeRecordDirectory({
+        fs: recordFs,
+        canonicalRoot: snapshot.canonicalRoot,
+        parent: snapshot.canonicalRoot,
+        name: 'conditioningFrames',
+        createIfMissing: false,
+      });
+      if (framesDirectory === null) return errorResult('Creative Studio conditioning frame is unavailable.');
+      const framesDirectoryIdentity = await captureStudioDirectoryIdentityV2(recordFs, framesDirectory);
+      if (framesDirectoryIdentity === null) {
+        return errorResult('Creative Studio conditioning frame is unavailable.');
+      }
+      const frameRecord = await readBoundedRegularBinaryFileWithIdentity({
+        fs: recordFs,
+        canonicalRoot: snapshot.canonicalRoot,
+        file: path.join(framesDirectory, frameAsset.managedAsset.fileName),
+        maxBytes: frameAsset.byteSize,
+      });
+      if (
+        frameRecord === null ||
+        frameRecord.bytes.byteLength !== frameAsset.byteSize ||
+        createHash('sha256').update(frameRecord.bytes).digest('hex') !== frameAsset.sha256 ||
+        !conditioningFrameMatchesMimeTypeV2(frameRecord.bytes, frameAsset.mimeType)
+      ) {
+        return errorResult('Creative Studio conditioning frame is unavailable.');
+      }
+      if (
+        !studioDirectoryIdentitiesEqualV2(
+          framesDirectoryIdentity,
+          await captureStudioDirectoryIdentityV2(recordFs, framesDirectory)
+        )
+      ) {
+        return errorResult('Creative Studio conditioning frame is unavailable.');
+      }
+      await reassertProjectSnapshotV2(config, snapshot);
+
+      const metadata = {
+        status: 'ready',
+        projectRevision: project.revision,
+        shotId,
+        predecessorShotId,
+        takeAssetId,
+        extractionId,
+        frameAssetId,
+        endpointSeconds,
+        mimeType: frameAsset.mimeType,
+        byteSize: frameAsset.byteSize,
+        sha256: frameAsset.sha256,
+        requiresVisualInput: true,
+      };
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(metadata, null, 2) },
+          { type: 'image', data: Buffer.from(frameRecord.bytes).toString('base64'), mimeType: frameAsset.mimeType },
+        ],
+      };
+    } catch {
+      return errorResult('Creative Studio conditioning frame is unavailable.');
+    }
+  };
+}
+
 export function createListRoutesHandler(
   config: StudioServerEnv | null,
   deps: StudioDirectorCommandWriterDeps = {}
@@ -1466,6 +1657,15 @@ export function registerStudioToolsV2(
       inputSchema: z.object({}).strict(),
     },
     createReadStoryboardHandlerV2(config)
+  );
+  server.registerTool(
+    'studio_get_conditioning_frame',
+    {
+      description:
+        'Read the exact current predecessor frame inherited by one active chained Shot. Use it before revising that Shot after a generation failure: the Shooting script must begin from what the attached frame already shows, then move. The app derives the predecessor, selected take, trim-aware endpoint, extraction and asset; never supply or infer a path or asset id. Visual input is required: if the active Director model cannot inspect the attached MCP image, state that limitation and do not infer or submit a frame-aware revision. This is read-only and never writes, generates, quotes, authorizes, or spends.',
+      inputSchema: studioGetConditioningFrameInputSchemaV2,
+    },
+    createStudioGetConditioningFrameHandlerV2(config)
   );
   server.registerTool(
     'studio_request_reference_images',

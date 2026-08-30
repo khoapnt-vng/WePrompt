@@ -6,6 +6,7 @@
  * @vitest-environment node
  */
 
+import { createHash } from 'node:crypto';
 import { promises as nodeFs } from 'node:fs';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -98,6 +99,7 @@ import {
   createListRoutesHandler,
   createStudioApplyEditsHandlerV2,
   createStudioApplyFreeFixHandlerV2,
+  createStudioGetConditioningFrameHandlerV2,
   createStudioGetProposalHandlerV2,
   createStudioGetProjectStatusHandlerV2,
   createProposeBriefRuleHandlerV2,
@@ -8059,6 +8061,113 @@ const addGeneratedVideosForMcpV2 = (project: StudioProjectV2, count: number): vo
   project.updatedAt = '2026-08-17T00:00:59.000Z';
 };
 
+const MCP_CONDITIONING_FRAME_BYTES_V2 = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64'
+);
+
+type McpConditioningFrameFixtureV2 = {
+  project: StudioProjectV2;
+  dependentShotId: 'clip_2';
+  predecessorShotId: 'clip_1';
+  takeAssetId: string | null;
+  extractionId: string | null;
+  frameAssetId: string | null;
+  endpointSeconds: number | null;
+  frameBytes: Buffer | null;
+};
+
+const makeMcpConditioningFrameFixtureV2 = (
+  options: {
+    takeCount?: 0 | 1 | 2;
+    chainBreak?: 'none' | 'hard_cut';
+    extraction?: 'missing' | 'pending' | 'extracting' | 'failed' | 'ready';
+    extractionTake?: 'current' | 'old';
+    frameBytes?: Buffer;
+    frameSha256?: string;
+  } = {}
+): McpConditioningFrameFixtureV2 => {
+  const project = makeSchema2ServiceProject();
+  project.beats.section_1!.shotOrder = ['clip_1', 'clip_2'];
+  project.beats.section_2!.shotOrder = [];
+  project.shots.clip_2!.chainBreak = options.chainBreak ?? 'none';
+  const takeCount = options.takeCount ?? 1;
+  if (takeCount > 0) addGeneratedVideosForMcpV2(project, takeCount);
+  const predecessor = project.shots.clip_1!;
+  predecessor.trimOutSeconds = takeCount === 0 ? null : 1.5;
+  const currentTakeAssetId = predecessor.videoAssetId;
+  const extractionTakeAssetId = options.extractionTake === 'old' && takeCount === 2 ? 'take_01' : currentTakeAssetId;
+  const take = extractionTakeAssetId === null ? undefined : project.assets[extractionTakeAssetId];
+  const endpointSeconds =
+    take?.durationSeconds === undefined ? null : take.durationSeconds - (predecessor.trimOutSeconds ?? 0);
+  const extractionId =
+    endpointSeconds === null || extractionTakeAssetId === null
+      ? null
+      : createStudioFrameExtractionId({
+          shotId: predecessor.id,
+          videoAssetId: extractionTakeAssetId,
+          endpointSeconds,
+        });
+  const extractionStatus = options.extraction ?? 'ready';
+  let frameAssetId: string | null = null;
+  let frameBytes: Buffer | null = null;
+  if (extractionId !== null && extractionStatus !== 'missing') {
+    if (extractionStatus === 'ready') {
+      frameAssetId = `frame_${extractionTakeAssetId}`;
+      frameBytes = options.frameBytes ?? MCP_CONDITIONING_FRAME_BYTES_V2;
+      const frame: StudioAssetV2 = {
+        id: frameAssetId,
+        projectId: project.id,
+        shotId: predecessor.id,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'conditioningFrames', fileName: `${frameAssetId}.png` },
+        byteSize: frameBytes.byteLength,
+        sha256: options.frameSha256 ?? createHash('sha256').update(frameBytes).digest('hex'),
+        createdAt: '2026-08-17T00:00:50.000Z',
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
+      };
+      project.assets[frame.id] = frame;
+      predecessor.assetIds.push(frame.id);
+    }
+    project.frameExtractions[extractionId] = {
+      id: extractionId,
+      shotId: predecessor.id,
+      videoAssetId: extractionTakeAssetId!,
+      endpointSeconds: endpointSeconds!,
+      frameAssetId,
+      status: extractionStatus,
+      errorCode: extractionStatus === 'failed' ? 'decode_failed' : null,
+      attemptCount: extractionStatus === 'pending' ? 0 : 1,
+    };
+  }
+  if (!validateStudioProjectV2(project)) throw new Error('Invalid conditioning-frame MCP fixture');
+  return {
+    project,
+    dependentShotId: 'clip_2',
+    predecessorShotId: 'clip_1',
+    takeAssetId: currentTakeAssetId,
+    extractionId,
+    frameAssetId,
+    endpointSeconds,
+    frameBytes,
+  };
+};
+
+const writeMcpConditioningFrameFixtureV2 = async (
+  projectDir: string,
+  fixture: McpConditioningFrameFixtureV2,
+  diskFrameBytes: Buffer | null = fixture.frameBytes
+): Promise<void> => {
+  await writeStudioProjectFilesV2(projectDir, fixture.project);
+  if (fixture.frameAssetId === null || diskFrameBytes === null) return;
+  await mkdir(path.join(projectDir, 'conditioningFrames'));
+  await writeFile(path.join(projectDir, 'conditioningFrames', `${fixture.frameAssetId}.png`), diskFrameBytes);
+};
+
 describe('Studio MCP schema-2 server', () => {
   it('parses explicit and defaulted sidecar paths without coupling route-catalog state to project schema', () => {
     const required = {
@@ -8114,6 +8223,237 @@ describe('Studio MCP schema-2 server', () => {
     expect(JSON.parse(statusUnavailable.content[0]!.text)).toMatchObject({ status: 'storage_error' });
     const proposalUnavailable = await createStudioGetProposalHandlerV2(null)({ proposalId: 'proposal_exact' });
     expect(JSON.parse(proposalUnavailable.content[0]!.text)).toMatchObject({ status: 'storage_error' });
+  });
+
+  it('returns the exact current trim-aware predecessor frame as MCP image content without mutating project authority', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-conditioning-frame-'));
+    const fixture = makeMcpConditioningFrameFixtureV2();
+    await writeMcpConditioningFrameFixtureV2(projectDir, fixture);
+    const manifestPath = path.join(projectDir, 'project.json');
+    const beforeManifest = await readFile(manifestPath);
+    const beforeBrief = await readFile(path.join(projectDir, 'brief.md'));
+    const beforeSpend = structuredClone(fixture.project.spendAuthorizations);
+
+    try {
+      const result = await createStudioGetConditioningFrameHandlerV2({
+        projectId: fixture.project.id,
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      })({ shotId: fixture.dependentShotId });
+      const metadata = JSON.parse(result.content[0]!.type === 'text' ? result.content[0].text : '') as Record<
+        string,
+        unknown
+      >;
+      const image = result.content[1] as { type: 'image'; data: string; mimeType: string } | undefined;
+      const frameAsset = fixture.project.assets[fixture.frameAssetId!]!;
+
+      expect(result.isError).toBeUndefined();
+      expect(metadata).toEqual({
+        status: 'ready',
+        projectRevision: fixture.project.revision,
+        shotId: fixture.dependentShotId,
+        predecessorShotId: fixture.predecessorShotId,
+        takeAssetId: fixture.takeAssetId,
+        extractionId: fixture.extractionId,
+        frameAssetId: fixture.frameAssetId,
+        endpointSeconds: fixture.endpointSeconds,
+        mimeType: frameAsset.mimeType,
+        byteSize: frameAsset.byteSize,
+        sha256: frameAsset.sha256,
+        requiresVisualInput: true,
+      });
+      expect(image).toEqual({
+        type: 'image',
+        data: fixture.frameBytes!.toString('base64'),
+        mimeType: 'image/png',
+      });
+      const protocol = await createStudioMcpProtocolHarnessV2({
+        projectId: fixture.project.id,
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      });
+      try {
+        await expect(
+          protocol.client.callTool({
+            name: 'studio_get_conditioning_frame',
+            arguments: { shotId: fixture.dependentShotId },
+          })
+        ).resolves.toMatchObject({
+          content: [
+            { type: 'text' },
+            { type: 'image', data: fixture.frameBytes!.toString('base64'), mimeType: 'image/png' },
+          ],
+        });
+      } finally {
+        await protocol.close();
+      }
+      await expect(readFile(manifestPath)).resolves.toEqual(beforeManifest);
+      await expect(readFile(path.join(projectDir, 'brief.md'))).resolves.toEqual(beforeBrief);
+      expect(fixture.project.spendAuthorizations).toEqual(beforeSpend);
+      await expect(readdir(projectDir)).resolves.toEqual(['brief.md', 'conditioningFrames', 'project.json']);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not return a stale extraction from a superseded predecessor take', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-stale-conditioning-frame-'));
+    const fixture = makeMcpConditioningFrameFixtureV2({ takeCount: 2, extractionTake: 'old' });
+    await writeMcpConditioningFrameFixtureV2(projectDir, fixture);
+
+    try {
+      const result = await createStudioGetConditioningFrameHandlerV2({
+        projectId: fixture.project.id,
+        projectDir,
+        pendingDir: '',
+        referencePendingDir: '',
+      })({ shotId: fixture.dependentShotId });
+      const metadata = JSON.parse(result.content[0]!.type === 'text' ? result.content[0].text : '');
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content).toHaveLength(1);
+      expect(metadata).toMatchObject({
+        status: 'unavailable',
+        projectRevision: fixture.project.revision,
+        shotId: fixture.dependentShotId,
+        reason: 'extraction_missing',
+        predecessorShotId: fixture.predecessorShotId,
+        takeAssetId: fixture.takeAssetId,
+        extractionId: createStudioFrameExtractionId({
+          shotId: fixture.predecessorShotId,
+          videoAssetId: fixture.takeAssetId!,
+          endpointSeconds: fixture.endpointSeconds!,
+        }),
+        endpointSeconds: fixture.endpointSeconds,
+      });
+      expect(JSON.stringify(result)).not.toContain(fixture.frameAssetId);
+      expect(JSON.stringify(result)).not.toContain(fixture.frameBytes!.toString('base64'));
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['chain head', { takeCount: 0, extraction: 'missing' }, 'clip_1', 'not_chained'],
+    ['hard cut', { chainBreak: 'hard_cut' }, 'clip_2', 'not_chained'],
+    ['missing predecessor take', { takeCount: 0, extraction: 'missing' }, 'clip_2', 'predecessor_take_missing'],
+    ['missing extraction', { extraction: 'missing' }, 'clip_2', 'extraction_missing'],
+    ['pending extraction', { extraction: 'pending' }, 'clip_2', 'extraction_pending'],
+    ['extracting frame', { extraction: 'extracting' }, 'clip_2', 'extraction_pending'],
+    ['failed extraction', { extraction: 'failed' }, 'clip_2', 'extraction_failed'],
+  ] as const)('reports %s as an explicit text-only unavailable state', async (_label, options, shotId, reason) => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-unavailable-conditioning-frame-'));
+    const fixture = makeMcpConditioningFrameFixtureV2(options);
+    await writeMcpConditioningFrameFixtureV2(projectDir, fixture);
+
+    try {
+      const result = await createStudioGetConditioningFrameHandlerV2({
+        projectId: fixture.project.id,
+        projectDir,
+        pendingDir: '',
+        referencePendingDir: '',
+      })({ shotId });
+
+      expect(result.isError).toBeUndefined();
+      expect(result.content).toHaveLength(1);
+      expect(JSON.parse(result.content[0]!.type === 'text' ? result.content[0].text : '')).toMatchObject({
+        status: 'unavailable',
+        projectRevision: fixture.project.revision,
+        shotId,
+        reason,
+      });
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['hash mismatch', MCP_CONDITIONING_FRAME_BYTES_V2, 'f'.repeat(64)],
+    ['truncated file', MCP_CONDITIONING_FRAME_BYTES_V2.subarray(0, -1), null],
+  ] as const)('fails closed when conditioning-frame storage has a %s', async (_label, diskBytes, frameSha256) => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-corrupt-conditioning-frame-'));
+    const fixture = makeMcpConditioningFrameFixtureV2(frameSha256 === null ? {} : { frameSha256 });
+    await writeMcpConditioningFrameFixtureV2(projectDir, fixture, Buffer.from(diskBytes));
+
+    try {
+      const result = await createStudioGetConditioningFrameHandlerV2({
+        projectId: fixture.project.id,
+        projectDir,
+        pendingDir: '',
+        referencePendingDir: '',
+      })({ shotId: fixture.dependentShotId });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(JSON.stringify(result)).not.toContain(diskBytes.toString('base64'));
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when verified bytes do not match the declared image MIME type', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-conditioning-mime-'));
+    const fixture = makeMcpConditioningFrameFixtureV2();
+    fixture.project.assets[fixture.frameAssetId!]!.mimeType = 'image/jpeg';
+    await writeMcpConditioningFrameFixtureV2(projectDir, fixture);
+
+    try {
+      const result = await createStudioGetConditioningFrameHandlerV2({
+        projectId: fixture.project.id,
+        projectDir,
+        pendingDir: '',
+        referencePendingDir: '',
+      })({ shotId: fixture.dependentShotId });
+
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(JSON.stringify(result)).not.toContain(fixture.frameBytes!.toString('base64'));
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails closed when the conditioning-frame directory identity changes during the read', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-conditioning-directory-race-'));
+    const fixture = makeMcpConditioningFrameFixtureV2();
+    await writeMcpConditioningFrameFixtureV2(projectDir, fixture);
+    const framesDirectory = path.join(await nodeFs.realpath(projectDir), 'conditioningFrames');
+    let directoryReads = 0;
+    const racingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'lstat') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.lstat>) => {
+          const stats = await nodeFs.lstat(...args);
+          if (String(args[0]) !== framesDirectory || ++directoryReads !== 3) return stats;
+          return new Proxy(stats, {
+            get(target, statsProperty, statsReceiver) {
+              if (statsProperty === 'ino') return target.ino + 1;
+              const value = Reflect.get(target, statsProperty, statsReceiver) as unknown;
+              return typeof value === 'function' ? value.bind(target) : value;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+
+    try {
+      const result = await createStudioGetConditioningFrameHandlerV2({
+        projectId: fixture.project.id,
+        projectDir,
+        pendingDir: '',
+        referencePendingDir: '',
+        fs: racingFs,
+      })({ shotId: fixture.dependentShotId });
+
+      expect(directoryReads).toBe(3);
+      expect(result.isError).toBe(true);
+      expect(result.content).toHaveLength(1);
+      expect(JSON.stringify(result)).not.toContain(fixture.frameBytes!.toString('base64'));
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
   });
 
   it.each(['ordinary file', 'symbolic link'] as const)(
@@ -8279,6 +8619,10 @@ describe('Studio MCP schema-2 server', () => {
         proposalOperationItems?.items?.oneOf) as typeof operationVariants;
       const applyValidator = new AjvJsonSchemaValidator().getValidator(applySchema as never);
       const proposalValidator = new AjvJsonSchemaValidator().getValidator(proposalSchema as never);
+      const conditioningFrameTool = tools.find((tool) => tool.name === 'studio_get_conditioning_frame');
+      const conditioningFrameValidator = new AjvJsonSchemaValidator().getValidator(
+        conditioningFrameTool?.inputSchema as never
+      );
 
       expect(tools.map(({ name }) => name).toSorted()).toEqual([
         'propose_brief_rule',
@@ -8287,6 +8631,7 @@ describe('Studio MCP schema-2 server', () => {
         'studio_apply_edits',
         'studio_apply_free_fix',
         'studio_get_command_status',
+        'studio_get_conditioning_frame',
         'studio_get_project_status',
         'studio_get_proposal',
         'studio_list_routes',
@@ -8294,6 +8639,20 @@ describe('Studio MCP schema-2 server', () => {
         'studio_request_reference_images',
       ]);
       expect(tools.every((tool) => Object.keys(tool.inputSchema).length > 0)).toBe(true);
+      expect(conditioningFrameTool?.inputSchema).toMatchObject({
+        type: 'object',
+        additionalProperties: false,
+        required: ['shotId'],
+      });
+      expect(conditioningFrameValidator({ shotId: 'clip_2' })).toMatchObject({ valid: true });
+      expect(conditioningFrameValidator({ shotId: '../clip_2' })).toMatchObject({ valid: false });
+      expect(conditioningFrameValidator({ shotId: 'clip_2', path: '/tmp/frame.png' })).toMatchObject({ valid: false });
+      await expect(
+        harness.client.callTool({
+          name: 'studio_get_conditioning_frame',
+          arguments: { shotId: 'clip_2', path: '/tmp/frame.png' },
+        })
+      ).resolves.toMatchObject({ isError: true });
       expect(applySchema).toMatchObject({
         type: 'object',
         additionalProperties: false,

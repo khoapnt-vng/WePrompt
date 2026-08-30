@@ -458,13 +458,18 @@ export type BoundedRegularFileRead = {
   identity: { dev: number; ino: number };
 };
 
-/** Reads a named immutable record and returns the verified named inode identity. */
-export async function readBoundedRegularFileWithIdentity(input: {
+export type BoundedRegularBinaryFileRead = {
+  bytes: Uint8Array;
+  identity: { dev: number; ino: number };
+};
+
+/** Reads a named immutable binary file and returns the verified named inode identity. */
+export async function readBoundedRegularBinaryFileWithIdentity(input: {
   fs: RecordIoFileSystem;
   canonicalRoot: string;
   file: string;
   maxBytes: number;
-}): Promise<BoundedRegularFileRead | null> {
+}): Promise<BoundedRegularBinaryFileRead | null> {
   const file = resolveConfinedRecordPath(input.canonicalRoot, path.dirname(input.file), path.basename(input.file));
   let handle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
   try {
@@ -520,13 +525,32 @@ export async function readBoundedRegularFileWithIdentity(input: {
     }
     await assertNoUnconfirmedPublication(input.fs, file);
     return {
-      bytes: new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, offset)),
+      bytes: bytes.subarray(0, offset),
       identity: { dev: stats.dev, ino: stats.ino },
     };
   } catch (error) {
     throw preserveOrNeutralize(error);
   } finally {
     await handle?.close().catch((): undefined => undefined);
+  }
+}
+
+/** Reads a named immutable UTF-8 record and returns the verified named inode identity. */
+export async function readBoundedRegularFileWithIdentity(input: {
+  fs: RecordIoFileSystem;
+  canonicalRoot: string;
+  file: string;
+  maxBytes: number;
+}): Promise<BoundedRegularFileRead | null> {
+  try {
+    const record = await readBoundedRegularBinaryFileWithIdentity(input);
+    if (record === null) return null;
+    return {
+      bytes: new TextDecoder('utf-8', { fatal: true }).decode(record.bytes),
+      identity: record.identity,
+    };
+  } catch (error) {
+    throw preserveOrNeutralize(error);
   }
 }
 
