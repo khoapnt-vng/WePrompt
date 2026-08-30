@@ -690,6 +690,16 @@ describe('release packaging configuration', () => {
       localPushReachesTestSelector: pushDependencies.includes('test-for-push'),
       localPushStillRunsRedundantSuite: pushDependencies.includes('test'),
       localGateRunsReviewedScript: /^test-for-push:\s*\n\s+node scripts\/select-push-tests\.js$/m.test(justfile),
+      /*
+       * Two gates on one machine inflate test durations by one to two orders of magnitude and
+       * manufacture timeouts that pass in isolation seconds later, so the coverage leg is taken
+       * under a machine-wide lock. Structural on purpose, unlike the decisions below: what must
+       * not be lost here is the wiring. That the lock queues rather than fails, and recovers from
+       * a gate killed mid-run, is proven behaviourally in tests/unit/build-scripts/pushGateLock.test.ts.
+       * The documentation leg returns above this line and takes no lock, because it runs no tests
+       * and so contends for nothing.
+       */
+      localGateSerialisesTheCoverageRun: /withPushGateLock\(\{\}, \(\) => execFileSync\(command\[0\]/.test(selector),
       selectorOnlyEverRunsTheReviewedScript:
         [...selector.matchAll(/bun[^\n]*run['"\s,]+([\w:-]+)/g)].map((match) => match[1]).join() ===
         'test:coverage:creative-studio',
@@ -706,6 +716,7 @@ describe('release packaging configuration', () => {
       localPushReachesTestSelector: true,
       localPushStillRunsRedundantSuite: false,
       localGateRunsReviewedScript: true,
+      localGateSerialisesTheCoverageRun: true,
       selectorOnlyEverRunsTheReviewedScript: true,
       selectorDecisions: {
         inertProse: 'none',

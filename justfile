@@ -343,6 +343,10 @@ push *ARGS: lint-strict fmt-check typecheck i18n-check test-for-push
     git push {{ ARGS }}
 
 # Run the narrowest test leg that still proves what is being pushed. See the script for the rules.
+#
+# When that leg is the coverage gate, the script takes a machine-wide lock first: two gates at once
+# saturate the cores and manufacture timeouts in tests that pass alone. A second push waits for the
+# first and then runs -- it is never refused, and a gate killed mid-run does not wedge the next one.
 test-for-push:
     node scripts/select-push-tests.js
 

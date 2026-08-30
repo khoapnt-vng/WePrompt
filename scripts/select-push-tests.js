@@ -41,9 +41,15 @@
  *
  * Fails safe: anything unexpected — no upstream, a git error — selects the coverage leg, which is
  * exactly the behaviour this replaces.
+ *
+ * The coverage leg is also serialised machine-wide, because two of them at once saturate the cores
+ * and turn healthy tests into timeouts that pass in isolation seconds later. A second push queues
+ * behind the first rather than overlapping it; see the lock module for how it recovers from a gate
+ * that was killed. The documentation leg takes nothing, since it contends for nothing.
  */
 
 const { execFileSync } = require('node:child_process');
+const { withPushGateLock } = require('../packages/shared-scripts/src/push-gate-lock.js');
 
 /**
  * Markdown that something reads. Skipping tests for these would push a change the suite would
@@ -131,7 +137,7 @@ const main = () => {
 
   const command = COMMANDS[selection.leg];
   if (command === null) return;
-  execFileSync(command[0], command[1], { stdio: 'inherit' });
+  withPushGateLock({}, () => execFileSync(command[0], command[1], { stdio: 'inherit' }));
 };
 
 if (require.main === module) main();

@@ -46,6 +46,7 @@ export default defineConfig({
           exclude: [
             'tests/unit/**/*.dom.test.ts',
             'tests/unit/**/*.dom.test.tsx',
+            'tests/unit/build-scripts/pushGateLock.test.ts',
             'tests/integration/creative-studio/directorCommandLatency.integration.test.ts',
             'tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts',
             'tests/integration/creative-studio/generationLifecycle.integration.test.ts',
@@ -113,6 +114,9 @@ export default defineConfig({
           name: 'io-heavy',
           environment: 'node',
           include: [
+            // Spawns competing gate processes and waits on a real lock file, with no wall-clock
+            // assertion of its own -- it polls for conditions, so load slows it instead of failing it.
+            'tests/unit/build-scripts/pushGateLock.test.ts',
             'tests/unit/knowledge/projectKnowledgeService.test.ts',
             'tests/unit/process/services/officeArtifact/officeCliRunner.test.ts',
             'tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts',
