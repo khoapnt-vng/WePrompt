@@ -7,6 +7,19 @@
 
 This governs Piece 1 (production recovery) and every later autonomy piece.
 
+## 2026-08-30 clarification for Creative Studio 4
+
+The owner confirmed that the current `maxPerBatchMinorUnits` policy is a **per-batch ceiling**, not a
+declining total-production envelope. This clarification supersedes this document's later phrases
+“what remains in the envelope”, “budget statement”, and “report as it goes” wherever they imply a
+wallet, credit balance, or drawdown.
+
+The underlying ruling remains: show the exact reviewed cost before dispatch, proceed without another
+click when reversible work is within an active matching-currency ceiling, and require explicit human
+action when no policy exists, the currency differs, the exact cost exceeds the ceiling, or the action
+is irreversible. Receipts are immutable recorded spend. They do not reduce the ceiling, and the UI
+must not relabel `ceiling - receipts` as money remaining.
+
 ## The rule
 
 > Creative Studio acts without asking when the action is **reversible** and **within the authorized

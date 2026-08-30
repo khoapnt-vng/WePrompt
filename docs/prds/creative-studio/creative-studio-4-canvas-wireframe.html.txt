@@ -1,3 +1,11 @@
+<!--
+  REVISION 3 APPROVAL NOTE (2026-08-30)
+  This bundled Revision 2 wireframe is visual evidence, not the Pilot 1 specification. Pilot 1 has
+  exactly Create photo and Import photo; no reference-conditioned generation, proposal cards,
+  script/sound offers, second composer, credit/balance readout, forced-LTR handle, or natural-language
+  spend approval. A provisional quote block is not a durable Piece. See the approved Revision 3
+  design and commission.
+-->
 <!DOCTYPE html>
 <html>
 <head>
@@ -316,6 +324,11 @@ document.addEventListener('DOMContentLoaded', async function() {
     // createElement so they execute, awaiting onload for src scripts to
     // preserve ordering (React before ReactDOM before Babel before text/babel).
     const doc = new DOMParser().parseFromString(template, 'text/html');
+    const revisionNotice = doc.createElement('div');
+    revisionNotice.setAttribute('role', 'note');
+    revisionNotice.style.cssText = 'position:sticky;top:0;z-index:99999;padding:10px 16px;background:#fff7e8;border-bottom:1px solid #ffb65d;color:#4e5969;font:600 13px/1.5 system-ui,sans-serif;text-align:center';
+    revisionNotice.textContent = 'Revision 2 visual evidence only — excluded from the approved Pilot 1: reference-conditioned generation, proposal cards, script/sound offers, second composer, balances, forced-LTR handles, and natural-language spend approval. See the Revision 3 design and commission.';
+    doc.body.prepend(revisionNotice);
     document.documentElement.replaceWith(doc.documentElement);
 
     // Resolve page-frame markers: mint this document's own blob for each

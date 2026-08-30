@@ -1,1007 +1,817 @@
-# CS4 Phase 1 — Contracts for a standalone Piece
+# Creative Studio 4 — Revision 3 implementation plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
-> (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use
-> checkbox (`- [ ]`) syntax for tracking.
+**Date:** 2026-08-30
 
-**Goal:** Make a standalone photograph representable, persistable and generatable in the Creative
-Studio store — with no UI, no canvas and no Director changes.
+**Status:** owner-approved, binding; implementation started on `codex/creative-studio-4-pilot`
 
-**Architecture:** Add a third owner kind, `StudioPieceV2`, beside `beats`/`shots`/`references` on the
-project. It mirrors `StudioProjectReferenceV2` exactly (id, current asset, superseded list, ordered
-`jobIds`, timestamps) plus a handle. A third arm on `StudioGenerationTargetV2` lets a job target it,
-and the asset validator is widened to admit a piece-owned image. The persisted project schema stays
-at **5** via decode-time defaulting; two independent contracts version.
+**Planning baseline:** `f3f9f764b`
 
-**Tech Stack:** TypeScript (strict off — `strictNullChecks` is disabled), Vitest 4, Bun, oxfmt,
-oxlint. Main-process only. No renderer, no locale keys, no Arco.
+**Pilot:** one standalone photograph
 
----
+**Supersedes:** the Phase 1 plan introduced at `00967fcaf`
 
-## Read first
+`f3f9f764b` is a checkpoint for the design discussion, not evidence that any CS4 runtime contract is
+complete. This document replaces the earlier schema-5/defaulting plan. It is the dependency-ordered
+plan for Phases 0–6; it deliberately contains no speculative TypeScript literals or hand-built job
+fixtures.
 
-- [The CS4 design, revision 2](./creative-studio-4-canvas-design.md) — especially _Pending work: no
-  new record, one new owner_, and _Which contracts version, and which do not_.
-- [The wireframe](./creative-studio-4-canvas-wireframe.html.txt) — for what this is eventually for.
-  Nothing in it is built here.
-- `AGENTS.md` — process boundaries, commit format, and **never add AI signatures**.
-
-**Two facts that will otherwise cost you an hour.**
-
-1. `validateJob` requires an **exact key set**: 24 required keys, exactly two optional
-   (`remoteStartedAt`, `progress`). `validateProject` likewise. Adding a field without updating the
-   key set fails validation with no useful message.
-2. `STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION` requires **exact equality at load**, and a mismatch
-   **quarantines the project**. Do not touch it. It stays at 1.
+No push is authorized by this plan. A phase may be committed locally only after its own exit gate is
+green. Pushing or merging still requires separate owner authorization.
 
 ---
 
-## File structure
+## 1. Pilot 1 outcome
 
-| File                                                               | Responsibility             | Change                                                                                                 |
-| ------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `packages/desktop/src/common/types/project/creativeStudioTypes.ts` | The shared contract        | Add `StudioPieceV2`, the `pieces`/`pieceOrder` project fields, the third target arm; bump two versions |
-| `.../creative-studio/service/schema2/validation.ts`                | Persisted-shape validation | Validate pieces; widen asset ownership; extend the target biconditional                                |
-| `.../creative-studio/service/schema2/factories.ts`                 | New-project construction   | Seed `pieces: {}` and `pieceOrder: []`                                                                 |
-| `.../creative-studio/store.ts`                                     | Load/decode                | Decode-time defaulting so schema stays 5                                                               |
-| `.../creative-studio/jobManager.ts`                                | Job ownership              | Third branch in `activeOwnerForJobV2`                                                                  |
-| `tests/unit/process/creative-studio/service/pieces.test.ts`        | New                        | The whole contract, tested                                                                             |
+From a newly created project that requires no Beat, Shot, Reference, film duration, Board style, or
+project-wide render dimensions, a person can:
 
----
+1. choose **Create photo** or **Import photo**;
+2. for generation, enter words and invocation-scoped aspect ratio and resolution;
+3. see the exact quote in currency before any provider attempt;
+4. proceed automatically only under the confirmed spend rule, or explicitly confirm when required;
+5. see one Piece appear with queued, running, failed, needs-attention, or current state;
+6. receive one verified image as that Piece's current asset without losing prior attempts;
+7. rename its `#handle` and undo the rename;
+8. reload with the same Piece, Job, asset, authorization, hashes, receipt, and provenance;
+9. export the exact current image plus a deterministic provenance sidecar; and
+10. delete an unsupported or quarantined project from the library without opening it.
 
-## Task 0: The shared test harness
-
-Every later task uses these. Written once, here, because repeating them per task would drift.
-
-**Files:**
-
-- Create: `tests/unit/process/creative-studio/service/pieces.test.ts`
-
-- [ ] **Step 1: Write the harness**
-
-These are the repository's real APIs — `createEmptyStudioProjectV2(input, id, timestamp)` from
-`schema2/factories`, and `applyStudioMutationBatchV2(project, batch, context)` from
-`schema2/mutations`. There is no `createEmptyStudioProjectV2` and no `applyMutations`.
-
-```ts
-/**
- * @license
- * Copyright 2025 AionUi (aionui.com)
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import { describe, expect, it } from 'vitest';
-
-import type {
-  CreateStudioProjectInputV2,
-  StudioJobV2,
-  StudioMutationOperationV2,
-  StudioProjectV2,
-} from '@/common/types/project/creativeStudioTypes';
-import {
-  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
-  STUDIO_PIECE_KINDS,
-  derivedPieceHandle,
-} from '@/common/types/project/creativeStudioTypes';
-import { createEmptyStudioProjectV2 } from '@process/services/creative-studio/service/schema2/factories';
-import { applyStudioMutationBatchV2 } from '@process/services/creative-studio/service/schema2/mutations';
-const NOW = '2026-08-30T12:00:00.000Z';
-
-const makeInputV2 = (name: string): CreateStudioProjectInputV2 => ({
-  name,
-  brief: 'A bounded schema-2 project',
-  aspectRatio: '16:9',
-  targetDurationSeconds: 12,
-  resolution: '1080p',
-});
-
-/** A fresh, valid project. `createEmptyStudioProjectV2` takes the id and timestamp explicitly. */
-const emptyProject = (): StudioProjectV2 => createEmptyStudioProjectV2(makeInputV2('Pilot'), 'project_v2', NOW);
-
-/** Apply operations and return the next project, throwing on refusal. */
-const applyOps = (project: StudioProjectV2, operations: StudioMutationOperationV2[]): StudioProjectV2 => {
-  const result = applyStudioMutationBatchV2(
-    project,
-    {
-      schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
-      projectId: project.id,
-      expectedRevision: project.revision,
-      operations,
-    },
-    { mutationId: 'mutation_1', capturedAt: NOW }
-  );
-  return result.project;
-};
-
-/** A project holding exactly one photograph Piece, `piece_a`, handle `salt_flat`. */
-const projectWithOnePiece = (): StudioProjectV2 =>
-  applyOps(emptyProject(), [
-    { kind: 'create_piece', pieceId: 'piece_a', kindOfPiece: 'photograph', fromWords: 'salt flat' },
-  ]);
-
-/**
- * A job targeting a Piece. The 24 required keys are spelled out because `validateJob` enforces an
- * exact key set — omitting one fails validation with no useful message.
- */
-const pieceJob = (
-  project: StudioProjectV2,
-  overrides: { purpose?: StudioJobV2['purpose']; pieceId?: string; status?: StudioJobV2['status'] } = {}
-): StudioJobV2 => ({
-  id: 'job_1',
-  target: { kind: 'piece', pieceId: overrides.pieceId ?? 'piece_a' },
-  purpose: overrides.purpose ?? 'seed_still',
-  status: overrides.status ?? 'queued_local',
-  providerId: 'weprompt-image-v1',
-  adapterId: 'weprompt-image-v1',
-  model: 'test-model',
-  requestSnapshot: null,
-  composition: null,
-  compositionDigest: null,
-  providerJobId: null,
-  remoteStartedAt: undefined,
-  progress: undefined,
-  spendReceipt: null,
-  authorizationId: null,
-  authorizationItemId: null,
-  outputAssetIdsByRole: { primary: null, poster: null },
-  error: null,
-  attempt: 1,
-  createdAt: NOW,
-  updatedAt: NOW,
-  projectRevision: project.revision,
-  conditioningInput: null,
-  cancellationPolicy: 'cancellable',
-  idempotencyKey: 'idem_1',
-});
-
-/** An image asset owned by a Piece. */
-const pieceAsset = (project: StudioProjectV2, options: { collection: 'assets' | 'imports'; pieceId?: string }) => ({
-  id: 'asset_1',
-  shotId: null,
-  projectReferenceId: null,
-  pieceId: options.pieceId ?? 'piece_a',
-  mediaKind: 'image' as const,
-  mimeType: 'image/png',
-  managedAsset: { collection: options.collection, fileName: 'asset_1.png' },
-  sha256: 'a'.repeat(64),
-  byteLength: 1024,
-  producerJobId: options.collection === 'assets' ? 'job_1' : null,
-  compositionDigest: options.collection === 'assets' ? 'b'.repeat(64) : null,
-  generationReferenceAssetIds: [],
-  createdAt: NOW,
-});
-
-/** A project whose Piece has a job still in flight, for the delete guard. */
-const projectWithRunningPieceJob = (): StudioProjectV2 => {
-  const project = projectWithOnePiece();
-  const job = pieceJob(project, { status: 'running' });
-  return {
-    ...project,
-    jobs: { [job.id]: job },
-    pieces: { ...project.pieces, piece_a: { ...project.pieces.piece_a!, jobIds: [job.id] } },
-  };
-};
-```
-
-> **Before writing a line of this, open one existing test and copy its job and asset literals** —
-> `tests/unit/process/creative-studio/service/directorCommandSpendFence.test.ts` is a good one. The
-> field lists above are correct at the time of writing, but the exact key set is enforced and it moves.
-> If `validateStudioProjectV2` returns false and you cannot see why, a missing or extra key is the
-> first thing to check.
-
-- [ ] **Step 2: Confirm the harness compiles against an unchanged repo**
-
-Run: `bunx tsc --noEmit`
-Expected: errors only for `create_piece`, `pieceId` and `STUDIO_PIECE_KINDS`, which Tasks 1–6 add.
-Any _other_ error means a field above has drifted — fix the harness, not the type.
-
-- [ ] **Step 3: Commit the harness**
-
-```bash
-git add tests/unit/process/creative-studio/service/pieces.test.ts
-git commit -m "test(studio): add the Piece contract test harness"
-```
+Pilot 1 contains no Assembly, film, video, generated sound, audio-bed workflow, freeform spatial
+layout, reference-conditioning workflow, Beat, Shot, or ffmpeg dependency. The word “composition”
+in Pilot 1 refers only to the existing frozen generation-request provenance contract. It does not
+introduce an ordered-work concept.
 
 ---
 
-## Task 1: The `StudioPieceV2` type
+## 2. Binding decisions
 
-**Files:**
+### 2.1 Clean project cutover
 
-- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts` (after
-  `StudioProjectReferenceV2`, which ends at line 488)
-- Test: `tests/unit/process/creative-studio/service/pieces.test.ts` (create)
+- The persisted project schema moves from **5 to 6**.
+- A schema-5 project is never decoded as schema 6, never defaulted with Piece fields, and never
+  rewritten. It is listed as unsupported cutover data and remains deletable.
+- A malformed schema-6 project remains corruption: isolate it, quarantine it, continue loading other
+  projects, and keep deletion available.
+- There is no migration function, compatibility field, “missing means empty” rule, or prompt rewrite.
+- Crash-safe replacement, bounded traversal, startup replay, manifest/brief correlation, and
+  per-project failure isolation remain mandatory.
 
-- [ ] **Step 1: Write the failing test**
+The schema-6 project root contains only Pilot-relevant project identity and Director binding,
+`revision`, `authoringRevision`, name, brief/rules, Piece order and Piece map, assets, Jobs, spend
+policy and authorizations, undo history, and timestamps. Optional integrations use explicit `null`
+rather than legacy missing-key semantics. Film-only root settings and collections do not appear in
+schema 6. Phase 6 must make a new explicit schema decision before adding Assembly or film state.
 
-```ts
-/**
- * @license
- * Copyright 2025 AionUi (aionui.com)
- * SPDX-License-Identifier: Apache-2.0
- */
+### 2.2 Piece lifecycle
 
-import { describe, expect, it } from 'vitest';
+A Piece is the durable owner of one standalone photograph. Pilot 1 supports exactly one Piece kind:
+`photograph`.
 
-import { STUDIO_PIECE_KINDS, derivedPieceHandle } from '@/common/types/project/creativeStudioTypes';
+- **Prepare new generation:** Main allocates and caches a `create` reservation containing the new
+  Piece id, Job id, authorization/item identity, proposed handle and order slot, exact request intent,
+  provider binding, cancellation policy, quote, and expiry. Project storage and sidecars are not
+  written.
+- **Prepare retry:** only a persisted retryable failed/cancelled/needs-attention generated Piece may
+  create a `retry` reservation. It targets the existing Piece and source Job, copies the source's
+  authored words and request-scoped settings without an edit surface, and allocates only fresh quote,
+  authorization/item, and Job identities. It reserves no Piece id, handle, or order slot.
+- **Retry reason:** schema 6 uses the exact enum
+  `provider_failure | submission_unknown | variation_grid | cancelled`. Main derives it from the
+  predecessor condition: ordinary terminal provider failure → `provider_failure`, unknown submit
+  outcome → `submission_unknown`, detected variation grid → `variation_grid`, and cancelled
+  predecessor → `cancelled`. The schema-5 production reader keeps its former enum until the Phase 5
+  cutover.
+- **Confirm new generation:** under the project queue, Main claims the `create` reservation,
+  re-derives the request and quote, checks authoring and spend authority, and atomically writes the
+  Piece, authorization, and queued Job. Dispatch begins only after that commit succeeds.
+- **Confirm retry:** under the same queue and service, Main revalidates the exact Piece, source Job,
+  lineage, retryable state, copied words/settings, authoring fingerprint, route/rate, and spend rule,
+  then atomically appends only the new authorization and queued Job to that Piece. It cannot change
+  the Piece's id, handle, order, or current asset and cannot create another Piece.
+- **Expired, rejected, stale, lost-on-restart, or failed confirmation:** `create` leaves no Piece,
+  Job, authorization, asset, or sidecar record. `retry` leaves the existing Piece and lineage
+  unchanged and adds no authorization or Job. The person prepares again.
+- **Import:** Main validates and stages the selected image, allocates every id, and atomically commits
+  one Piece plus one imported asset. On failure, staging is cleaned or recovered by the existing
+  transaction machinery; no ownerless asset or empty Piece remains.
+- **Provider success:** one commit registers the verified asset, sets the previously empty Piece
+  current-asset pointer, and marks the Job succeeded. Provider bytes can never become current before
+  that commit. A duplicate or late output cannot replace those bytes.
+- **Provider failure or cancellation:** the Piece and Job remain truthful. No unquoted asset is
+  substituted, and completed assets are never removed.
 
-describe('StudioPieceV2', () => {
-  it('admits exactly the kinds Pilot 1 supports', () => {
-    // Photograph only. Video, sound and assemblies arrive in phase 6; adding them here would let a
-    // job target a kind nothing downstream can produce.
-    expect([...STUDIO_PIECE_KINDS]).toEqual(['photograph']);
-  });
+Pilot 1 exposes retry only for an incomplete generated Piece. It does not expose variation,
+replacement, edited retry wording/settings, regeneration of a completed Piece, or generation over an
+imported Piece; those need a later reviewed product contract. A person who wants different wording
+uses Create photo and receives a sibling Piece.
 
-  it('derives a handle that is never blank, lowercase, and underscore-separated', () => {
-    expect(derivedPieceHandle('A salt flat at dawn, one figure walking away')).toBe('a_salt_flat_at_dawn');
-    expect(derivedPieceHandle('   ')).toBe('untitled');
-    expect(derivedPieceHandle('Ана идёт')).toBe('untitled');
-  });
+Renderer and Director preparation call the same typed Main service. Main exposes admitted sessions
+through an ephemeral renderer-safe `preparedPhotoQuotes` activity projection keyed by
+`reservationId`; each row contains `mode: create | retry`, the Main-issued quote identity/revision,
+target Piece id, proposed handle only for `create`, normalized words, request-scoped settings, exact
+price/currency, spend-policy classification, expiry, whether explicit human action is required, and
+`duplicateChargeAcknowledgementRequired`. It exposes no provider secret, internal path,
+authorization identity, idempotency key, or authoritative fingerprint.
 
-  it('bounds a derived handle so a long sentence cannot become a long identifier', () => {
-    const handle = derivedPieceHandle('a'.repeat(400));
-    expect(handle.length).toBeLessThanOrEqual(48);
-  });
-});
-```
+Admission, release, consume, and expiry emit the normal Studio activity notification. A renderer
+reload in the same Main process re-queries and restores the quote block; a Main-process restart
+truthfully loses the non-durable reservation. A lost `create` reservation leaves no new Piece; a
+lost `retry` reservation leaves the existing Piece and lineage unchanged. For a within-cap quote,
+the renderer first commits the quote block, waits for the next browser paint opportunity, and only
+then calls the ordinary typed confirmation service. Main never auto-dispatches merely because a
+session was admitted. The actual renderer E2E holds the fake adapter at dispatch and proves the
+quote is visible before releasing it; a jsdom state assertion alone is not sufficient evidence.
 
-- [ ] **Step 2: Run it and watch it fail**
+There is no public `create_piece` or `delete_piece` mutation in Pilot 1. Creation exists only in the
+two atomic service paths above. Piece removal is omitted until product defines presentation removal,
+provenance retention, and physical-byte deletion separately.
 
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts`
-Expected: FAIL — `STUDIO_PIECE_KINDS` is not exported.
+`rename_piece` is the one new public authoring mutation. It is free, reversible, validated by Main,
+and represented by a real undo patch. It changes no immutable id and no frozen historical
+composition.
 
-- [ ] **Step 3: Add the type and the handle derivation**
+### 2.3 Identity and handles
 
-In `creativeStudioTypes.ts`, immediately after `StudioProjectReferenceV2` (line 488):
+Main mints project, Piece, asset, Job, quote, authorization, item, mutation, and export identities.
+Renderer and Director inputs may echo a Main-issued id to target an existing record, but never mint,
+reserve, replace, or choose a new durable identity.
 
-```ts
-/** Pilot 1 makes photographs only. Phase 6 adds video, sound and assemblies. */
-export const STUDIO_PIECE_KINDS = ['photograph'] as const;
-export type StudioPieceKindV2 = (typeof STUDIO_PIECE_KINDS)[number];
+The stored handle excludes the visual `#`. Handle derivation and rename validation share one helper
+with explicit `derive` and `rename` modes. Their common pipeline:
 
-/**
- * A first-class thing a capability produced, owned by the project rather than by a Shot.
- *
- * Mirrors `StudioProjectReferenceV2` deliberately: same current-asset pointer, same superseded list,
- * same ordered `jobIds`. The difference is that a Reference is a typed film-craft slot — character or
- * background — and a Piece is whatever a person asked for. That is why a standalone photograph could
- * not simply reuse a Reference.
- */
-export type StudioPieceV2 = {
-  id: string;
-  /** Never blank. Derived at birth; `handleIsDerived` says whether a person has adopted it. */
-  handle: string;
-  handleIsDerived: boolean;
-  /** Kept so a renamed handle stays a valid reference in conversation. */
-  priorHandles: string[];
-  kind: StudioPieceKindV2;
-  currentAssetId: string | null;
-  supersededAssetIds: string[];
-  jobIds: string[];
-  createdAt: string;
-  updatedAt: string;
-};
+1. normalize with Unicode NFKC;
+2. apply locale-independent Unicode lowercase;
+3. retain Unicode letters, combining marks, and decimal numbers from every script;
+4. replace runs of whitespace or ordinary punctuation with one underscore and trim edge underscores;
+   and
+5. measure both Unicode scalar count and UTF-8 byte count without cutting a scalar or combining
+   sequence.
 
-const PIECE_HANDLE_MAX = 48;
+`derive` discards unsafe controls, bidi/invisible spoofing characters, and `/` or `\` path
+separators; safely truncates to the documented bounds; uses locale-independent `piece` when nothing
+remains; and resolves collisions with a bounded numeric suffix after truncating the base. `rename`
+rejects those unsafe characters/separators, an empty normalized result, either exceeded bound, or a
+namespace collision; it never silently deletes, truncates, falls back, or suffixes explicit text.
 
-/**
- * A handle from the words that caused the Piece. ASCII-only on purpose: a handle is typed back at the
- * Director in chat and appears in `#handle` form, so it must survive a keyboard that does not have
- * the author's script. A name that derives to nothing becomes `untitled`, never blank.
- */
-export const derivedPieceHandle = (source: string): string => {
-  const slug = source
-    .normalize('NFKD')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/gu, '_')
-    .replace(/^_+|_+$/gu, '');
-  if (slug === '') return 'untitled';
-  const words = slug.split('_').filter(Boolean);
-  let handle = '';
-  for (const word of words) {
-    const next = handle === '' ? word : `${handle}_${word}`;
-    if (next.length > PIECE_HANDLE_MAX) break;
-    handle = next;
-  }
-  return handle === '' ? words[0]!.slice(0, PIECE_HANDLE_MAX) : handle;
-};
-```
+Current handles and retained aliases share one project-wide namespace. Matching uses the normalized
+stored form. `priorHandles` is dense, unique, and bounded. No alias is silently retired: once the
+documented limit is reached, another rename is refused unless it returns to an existing alias.
+Immutable Piece ids, not aliases, remain the permanent provenance reference. Tests must cover
+Vietnamese, Persian, Cyrillic, Japanese, Korean, Traditional Chinese, composed/decomposed accents,
+RTL text, emoji-only derived fallback, derived boundary truncation, explicit over-bound refusal,
+unsafe-character/path refusal, collisions against both a current handle and an alias, rename-back,
+and refusal at the alias cap.
 
-- [ ] **Step 4: Run the test again**
+Rename-back swaps the selected prior handle with the current handle, preserving a dense alias array
+without increasing its count; it remains legal at the cap. The prepared-session cache reserves each
+proposed normalized handle against current handles, aliases, and other active reservations. A
+concurrent collision receives the deterministic suffix. Expiry/refusal releases that reservation,
+and confirmation recomputes the namespace under the project queue rather than silently choosing a
+different handle from the one reviewed.
 
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts`
-Expected: PASS, 3 tests.
+Generated-photo preparation derives from the Director suggestion or normalized prompt. Import
+derives from the selected file's Unicode basename without its final extension while Main holds the
+project queue; no raw path crosses into renderer state or persisted provenance. Empty/unsafe
+basenames use `piece`. Concurrent same-name imports receive deterministic suffixes, and explicit
+rename remains available afterward.
 
-- [ ] **Step 5: Typecheck and commit**
+### 2.4 Two revision authorities
 
-```bash
-bunx tsc --noEmit
-bun run format
-git add packages/desktop/src/common/types/project/creativeStudioTypes.ts tests/unit/process/creative-studio/service/pieces.test.ts
-git commit -m "feat(studio): add the StudioPieceV2 contract and handle derivation"
-```
+Schema 6 separates storage concurrency from authored meaning:
 
----
+- `revision` increments for every durable project commit and remains the store's internal CAS
+  authority.
+- `authoringRevision` increments only when project meaning changes: name, brief/rules, Director
+  binding, spend policy, Piece creation/import, or Piece rename. Job progress, retry bookkeeping,
+  cancellation, receipts, generated outputs, and current-asset publication increment `revision` but
+  not `authoringRevision`.
 
-## Task 2: `pieces` on the project, with the schema staying at 5
+Renderer mutations, Director authoring commands, and prepared generation intents bind to
+`authoringRevision`. Main still commits against the current internal `revision` while holding the
+project queue. Confirmation also compares an exact Main-derived authoring fingerprint for the fields
+the request consumed. Runtime activity therefore cannot stale a direct action or quote, while an
+actual prompt, settings, policy, or handle change does.
 
-**Files:**
+The wire and persisted fields are exact:
 
-- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts:1629-1635` (the owner maps)
-- Modify: `.../creative-studio/service/schema2/factories.ts`
-- Modify: `.../creative-studio/service/schema2/validation.ts:114` (`PROJECT_REQUIRED_KEYS`)
-- Test: `tests/unit/process/creative-studio/service/pieces.test.ts`
+| Contract                       | Authoring authority                                                               | Storage/audit authority                                                                                                |
+| ------------------------------ | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Schema-6 root                  | `authoringRevision`                                                               | `revision`                                                                                                             |
+| Mutation batch 6               | request `expectedAuthoringRevision`; result `authoringRevision`                   | Main captures current `revision` under the queue and returns committed `revision`; renderer never supplies storage CAS |
+| Main-only prepared reservation | `authoringRevision`, `authoringFingerprintVersion: 1`, and `authoringFingerprint` | `projectRevisionAtPreparation` is audit-only                                                                           |
+| Renderer-safe quote projection | None accepted from renderer; display-only session/quote facts                     | No storage CAS or authoritative fingerprint/revision is exposed                                                        |
+| Composition 2                  | the same authoring fields copied from the prepared request                        | `projectRevisionAtPreparation` is frozen history                                                                       |
+| Authorization and Job          | the same prepared authoring fields after revalidation                             | `projectRevisionAtPreparation` plus `projectRevisionAtAuthorization` from the atomic commit                            |
 
-- [ ] **Step 1: Write the failing test**
+Confirmation input carries only the Main-issued `reservationId`, `quoteId`, and `quoteRevision`,
+plus the explicit-human decision when one is required and a typed duplicate-charge acknowledgement
+only when the safe projection requires it. Main retrieves every authority field from its cache,
+recomputes them, and rejects any missing, extra, or mismatched acknowledgement; renderer and Director
+cannot echo a replacement fingerprint into authority.
 
-Append to the same test file:
+`authoringFingerprintVersion: 1` is SHA-256 over a domain-separated canonical encoding named
+`weprompt:studio-authoring:v1`. Map keys sort lexically and arrays retain semantic order. Its common
+payload contains project id, `authoringRevision`, project name, brief/rules, Director binding, spend
+policy, and the ordered Piece id/kind/handle/prior-handle namespace. Its prepared-request arm is
+mode-discriminated: `create` adds the reserved Piece id, proposed handle and order slot plus the
+normalized words and request-scoped settings; `retry` adds `existingPieceId`, `sourceJobId`, and the
+target Piece's ordered immutable Job-lineage projection—each `jobId`, `retryOfJobId`, and
+`retryReason`—plus the copied words and settings, and has no proposed handle or new Piece/order
+identity. Retryable status and current terminal state remain separate confirmation gates. The
+fingerprint excludes Job progress/status/error text, receipts, current-asset publication caused by
+runtime completion, timestamps, and storage `revision`. Route, rate, composition, and request-plan
+equality remain separate frozen quote checks. Phase 6 proposal review must use the same
+project-authoring payload without a prepared-request arm if proposals return.
 
-```ts
-describe('pieces on the project', () => {
-  it('a new project starts with no pieces and still validates', () => {
-    const project = emptyProject();
-    expect(project.pieces).toEqual({});
-    expect(project.pieceOrder).toEqual([]);
-    expect(validateStudioProjectV2(project)).toBe(true);
-  });
+The historical revisions captured in a Job remain audit facts. They are not used as claims that
+future runtime-only writes invalidate the request.
 
-  it('rejects a pieceOrder entry with no piece behind it', () => {
-    // Order and map must agree, exactly as beatOrder/beats and referenceOrder/references do.
-    const project = emptyProject();
-    expect(validateStudioProjectV2({ ...project, pieceOrder: ['piece_missing'] })).toBe(false);
-  });
+### 2.5 Confirmed spend rule
 
-  it('rejects two pieces sharing a handle', () => {
-    // A handle is how a person and the Director refer to a Piece. Two of them is an ambiguous
-    // reference, which is worse than an ugly name.
-    const project = emptyProject();
-    const piece = {
-      id: 'piece_a',
-      handle: 'salt_flat',
-      handleIsDerived: true,
-      priorHandles: [],
-      kind: 'photograph' as const,
-      currentAssetId: null,
-      supersededAssetIds: [],
-      jobIds: [],
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-    };
-    const clash = { ...piece, id: 'piece_b' };
-    expect(
-      validateStudioProjectV2({
-        ...project,
-        pieceOrder: ['piece_a', 'piece_b'],
-        pieces: { piece_a: piece, piece_b: clash },
-      })
-    ).toBe(false);
-  });
-});
-```
+Every quote is shown in real currency before provider dispatch. There is no credit count, wallet,
+remaining balance, or draw-down display.
 
-- [ ] **Step 2: Run it and watch it fail**
+- Pilot 1 accepts only fixed-price single-image routes whose quote has equal lower and upper
+  minor-unit amounts. If an active per-batch policy exists, its currency matches, and that exact
+  amount is within its cap, the renderer presents the quote and then invokes the normal typed
+  confirmation path automatically. The app informs; it does not ask.
+- If no policy exists, currency differs, or the quote exceeds the cap, a human must explicitly
+  confirm the reviewed quote. The Director cannot perform that action.
+- Irreversible structural or destructive actions continue to require explicit human action. A
+  within-cap generation is already authorized by the human-set policy and follows the first rule.
+- Main re-derives the quote and re-evaluates the current policy immediately before commit. Renderer
+  sequencing is not spend authority.
+- Automatic and explicit confirmation use exactly the same cache claim, stale checks, atomic commit,
+  idempotency keys, receipt, and dispatch path.
+- A paid retry prepares and displays a fresh exact quote and follows the same cap/explicit-action
+  rule. The prior authorization never silently covers another provider attempt; variable-price
+  routes and unquoted or provider-internal automatic retry are deferred.
+- `submission_unknown` is an exception to within-cap automation: because the earlier provider
+  submission may already have charged, confirmation always requires the human-only reviewed
+  duplicate-charge acknowledgement. Main binds it to the reservation and persists
+  `duplicateChargeAcknowledged: true` plus the acknowledgement timestamp on the retry Job.
 
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts -t 'pieces on the project'`
-Expected: FAIL — `project.pieces` is undefined.
+A renderer test must prove the quote is rendered before automatic confirmation is requested. Main
+tests must prove a policy change between prepare and confirm fails closed.
 
-- [ ] **Step 3: Add the fields**
+The project menu retains a human-only **Spending limit** action even though the film Project settings
+dialog is removed. It edits or clears the real per-batch amount and currency, never a balance. The
+typed Main mutation increments `authoringRevision`, and changing or clearing the policy invalidates
+every prepared quote that relied on its former state.
 
-In `creativeStudioTypes.ts`, immediately after `references: Record<string, StudioProjectReferenceV2>;`
-(line 1634):
+### 2.6 Request-scoped photo settings
 
-```ts
-  pieceOrder: string[];
-  pieces: Record<string, StudioPieceV2>;
-```
+Aspect ratio, resolution, prompt wording, route choice, instruction profile, and any provider-facing
+options belong to the prepared photo request and its frozen provenance. They are not required project
+creation fields and are not read from film defaults. Renderer sends only typed user choices; Main
+resolves the provider route, model, price, limits, and exact prompt. Pilot 1 Create photo is
+text-to-image: the request plan and composition carry an exact empty conditioning-input list.
 
-In `factories.ts`, inside `createEmptyStudioProjectV2`'s project literal, beside `references: {}`:
+### 2.7 Unsupported and quarantined deletion authority
 
-```ts
-  pieceOrder: [],
-  pieces: {},
-```
+An unreadable project cannot supply a trustworthy revision, so its library entry carries a
+Main-issued opaque `deletionClaim`, not a renderer-invented path or revision. The bounded claim binds
+project/catalogue id, internal directory identity, current classification (`unsupported` or
+`quarantined`), observed manifest fingerprint, issue time, and expiry. It exposes none of the path or
+fingerprint internals to the renderer.
 
-In `validation.ts`, add `'pieceOrder'` and `'pieces'` to `PROJECT_REQUIRED_KEYS` (line 114).
-
-- [ ] **Step 4: Add the piece validator**
-
-In `validation.ts`, beside the other record validators:
-
-```ts
-const PIECE_REQUIRED_KEYS = new Set([
-  'id',
-  'handle',
-  'handleIsDerived',
-  'priorHandles',
-  'kind',
-  'currentAssetId',
-  'supersededAssetIds',
-  'jobIds',
-  'createdAt',
-  'updatedAt',
-]);
-
-const PIECE_HANDLE_PATTERN = /^[a-z0-9]+(?:_[a-z0-9]+)*$/u;
-
-const validatePiece = (value: unknown): boolean => {
-  if (!isRecord(value) || !hasKeys(value, PIECE_REQUIRED_KEYS, new Set())) return false;
-  return (
-    isSafeId(value.id) &&
-    typeof value.handle === 'string' &&
-    value.handle.length > 0 &&
-    value.handle.length <= 48 &&
-    PIECE_HANDLE_PATTERN.test(value.handle) &&
-    typeof value.handleIsDerived === 'boolean' &&
-    Array.isArray(value.priorHandles) &&
-    value.priorHandles.every((one) => typeof one === 'string' && PIECE_HANDLE_PATTERN.test(one)) &&
-    STUDIO_PIECE_KINDS.includes(value.kind as StudioPieceKindV2) &&
-    (value.currentAssetId === null || isSafeId(value.currentAssetId)) &&
-    Array.isArray(value.supersededAssetIds) &&
-    value.supersededAssetIds.every(isSafeId) &&
-    Array.isArray(value.jobIds) &&
-    value.jobIds.every(isSafeId) &&
-    isCanonicalIsoTimestamp(value.createdAt) &&
-    isCanonicalIsoTimestamp(value.updatedAt)
-  );
-};
-```
-
-Then inside `validateStudioProjectV2`, beside the `references`/`referenceOrder` checks:
-
-```ts
-if (!isRecord(value.pieces) || !Array.isArray(value.pieceOrder)) return false;
-if (!Object.values(value.pieces).every(validatePiece)) return false;
-if (!value.pieceOrder.every((id) => isSafeId(id) && ownValue(value.pieces, id) !== undefined)) return false;
-if (new Set(value.pieceOrder).size !== value.pieceOrder.length) return false;
-if (Object.keys(value.pieces).length !== value.pieceOrder.length) return false;
-{
-  const handles = Object.values(value.pieces).map((piece) => (piece as StudioPieceV2).handle);
-  if (new Set(handles).size !== handles.length) return false;
-}
-```
-
-- [ ] **Step 5: Add decode-time defaulting so the schema stays at 5**
-
-In `store.ts`, where a loaded project record is decoded — before it reaches
-`validateStudioProjectV2` — default the two new fields:
-
-```ts
-// The persisted schema stays at 5. A project written before pieces existed simply has none, and
-// defaulting here is cheaper and safer than a version bump, because a bump would make every
-// existing record fail an exact-equality check and quarantine the project.
-const withPieces = {
-  ...decoded,
-  pieceOrder: Array.isArray(decoded.pieceOrder) ? decoded.pieceOrder : [],
-  pieces: isRecord(decoded.pieces) ? decoded.pieces : {},
-};
-```
-
-- [ ] **Step 6: Run the tests**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts`
-Expected: PASS, 6 tests.
-
-- [ ] **Step 7: Run the whole store suite — this is a schema change**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/`
-Expected: PASS. If a fixture fails on the exact key set, add `pieceOrder`/`pieces` to that fixture;
-do not relax `hasKeys`.
-
-- [ ] **Step 8: Commit**
-
-```bash
-bunx tsc --noEmit
-bun run format
-git add packages/desktop/src tests/unit/process/creative-studio
-git commit -m "feat(studio): own pieces on the project, with the schema held at 5"
-```
+Deletion is human-confirmed and Main-only. Under the catalogue/project lock, Main consumes the
+single-use claim, re-traverses and reclassifies the exact directory, and compares its identity and
+fingerprint. Expired, replayed, missing, replaced, reclassified, or newly healthy targets fail
+closed. A successful deletion uses the existing bounded recovery-aware removal path and cannot
+affect another project. Healthy schema-6 deletion keeps its normal decoded revision authority.
 
 ---
 
-## Task 3: A job can target a Piece
+## 3. Independent contract version matrix
 
-**Files:**
+Contract versions move only when that contract's exact persisted or wire shape changes.
 
-- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts:552`
-- Modify: `.../creative-studio/service/schema2/validation.ts:1103` (the purpose biconditional)
-- Test: `tests/unit/process/creative-studio/service/pieces.test.ts`
+| Contract                     |      Baseline | Pilot value | Landing phase                             | Rule                                                                                         |
+| ---------------------------- | ------------: | ----------: | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
+| Persisted Studio project     |             5 |       **6** | Phase 3 isolated runtime; Phase 5 cutover | Reject schema 5; no migration/defaulting                                                     |
+| Generation composition       |             1 |       **2** | Phase 3 isolated runtime; Phase 5 cutover | Add Piece source and `piece_image`; preserve the frozen prompt as history                    |
+| Mutation batch               |             5 |       **6** | Phase 3 isolated runtime; Phase 5 cutover | Add `rename_piece` and authoring-revision authority; no create/delete                        |
+| Proposal sidecar             |             6 |           6 | Phase 6 or later                          | Unchanged and unused by Pilot 1                                                              |
+| Director command             |            10 |      **11** | Phase 5 cutover                           | Add typed Piece rename/prepare capability and authoring authority                            |
+| Export catalog/sidecar       |             2 |       **3** | Phase 3 isolated runtime; Phase 5 cutover | Add standalone Piece image plus provenance export                                            |
+| Reference request sidecar    |             5 |           5 | Phase 6 or later                          | Unchanged and unused by Pilot 1                                                              |
+| Film export facts            |             1 |           1 | Phase 6 or later                          | Unchanged and unused by Pilot 1                                                              |
+| `weprompt-studio:` asset URL |   unversioned |   unchanged | —                                         | Project/asset safe ids still address verified managed bytes                                  |
+| Provider adapter protocol    | adapter-owned |   unchanged | —                                         | `piece_image` maps through the existing image capability without changing provider protocols |
 
-- [ ] **Step 1: Write the failing test**
+Do not couple these constants. Phase 1 freezes and tests the new shapes. Phase 3 installs every new
+reader and writer behind an isolated CS4 service/store entry point while the production bridge and
+renderer remain on CS3. Phase 5 selects the CS4 Main entry point and canvas renderer together, then
+removes the former production path. Do not bump a global constant while an active consumer still
+writes the former shape, and do not keep an old version while silently accepting the new shape. Old
+sidecars attached only to unsupported schema-5 projects are not migrated.
 
-```ts
-describe('a job can target a Piece', () => {
-  it('admits a piece target whose purpose is seed_still', () => {
-    const project = projectWithOnePiece();
-    const job = pieceJob(project, { purpose: 'seed_still' });
-    expect(validateStudioProjectV2({ ...project, jobs: { [job.id]: job } })).toBe(true);
-  });
-
-  it('refuses a piece target whose purpose is reference_image', () => {
-    // reference_image is bound to a Reference by a biconditional in three validators plus the
-    // confirm builder. A Piece is not a Reference, and blurring that would let a photograph be
-    // written into a character look-sheet slot.
-    const project = projectWithOnePiece();
-    const job = pieceJob(project, { purpose: 'reference_image' });
-    expect(validateStudioProjectV2({ ...project, jobs: { [job.id]: job } })).toBe(false);
-  });
-
-  it('refuses a piece target naming a piece that does not exist', () => {
-    const project = projectWithOnePiece();
-    const job = pieceJob(project, { purpose: 'seed_still', pieceId: 'piece_absent' });
-    expect(validateStudioProjectV2({ ...project, jobs: { [job.id]: job } })).toBe(false);
-  });
-});
-```
-
-- [ ] **Step 2: Run and watch it fail**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts -t 'target a Piece'`
-Expected: FAIL — the target union has no `piece` arm.
-
-- [ ] **Step 3: Add the third arm**
-
-In `creativeStudioTypes.ts:552`, replace:
-
-```ts
-export type StudioGenerationTargetV2 = { kind: 'shot'; shotId: string } | { kind: 'reference'; referenceId: string };
-```
-
-with:
-
-```ts
-export type StudioGenerationTargetV2 =
-  | { kind: 'shot'; shotId: string }
-  | { kind: 'reference'; referenceId: string }
-  | { kind: 'piece'; pieceId: string };
-```
-
-- [ ] **Step 4: Extend the biconditional rather than loosening it**
-
-In `validation.ts:1103`, the current job rule is:
-
-```ts
-(value.purpose === 'reference_image') === (isRecord(value.target) && value.target.kind === 'reference') &&
-```
-
-Keep it exactly as it is — it is still true, because a Piece never carries `reference_image`. Add,
-beside it, the piece-target rule:
-
-```ts
-      (!isRecord(value.target) ||
-        value.target.kind !== 'piece' ||
-        (value.purpose === 'seed_still' && isSafeId(value.target.pieceId))) &&
-```
-
-- [ ] **Step 5: Validate the target resolves**
-
-In `validateStudioProjectV2`, where shot and reference targets are already resolved against their
-maps, add:
-
-```ts
-if (job.target.kind === 'piece' && ownValue(value.pieces, job.target.pieceId) === undefined) return false;
-```
-
-- [ ] **Step 6: Run the tests**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts`
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-bunx tsc --noEmit && bun run format
-git add packages/desktop/src tests/unit/process/creative-studio
-git commit -m "feat(studio): let a generation job target a Piece"
-```
+The temporary development seam is not a compatibility reader: each entry point accepts exactly one
+project schema, and only one is selected by the production bridge. It exists so Phases 1–4 can
+compile and pass the full suite without pairing a CS4 backend with a CS3 renderer. If that isolation
+cannot be made exact, hold Phases 1–5 as an unmerged implementation trench and activate them
+together; never land a half-cutover build.
 
 ---
 
-## Task 4: A Piece can own an image asset
+## 4. Cross-contract invariants
 
-**Files:**
+The Piece arm is not complete until every row below is implemented and tested together. A partial
+target-union edit must not be merged.
 
-- Modify: `.../creative-studio/service/schema2/validation.ts:753-781`
-- Test: `tests/unit/process/creative-studio/service/pieces.test.ts`
+| Surface             | Required Piece rule                                                                                                                                                                                                                                                                     |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Target              | Exactly `{kind: piece, pieceId}`; `create` reserves an absent id that resolves after atomic confirmation, while `retry` resolves and revalidates its existing owning Piece before prepare and confirm                                                                                   |
+| Purpose             | Exactly `piece_image`; it is never `seed_still`, `reference_image`, `board_still`, or `video_take`                                                                                                                                                                                      |
+| Composition 2       | Source is the reserved text-only Piece request: immutable Piece id, exact authored words, request-scoped settings, empty conditioning inputs, resolved route, instruction profile, and authoring audit facts                                                                            |
+| Request plan        | Resolved image request, no Shot duration, conditioning input, Board style, or film/reference dependency                                                                                                                                                                                 |
+| Quote               | One Piece target/purpose, generation-priced, exact route/rate/request plan, authoring authority, expiry, and deterministic identity                                                                                                                                                     |
+| Prepared cache      | Holds the Main reservation and quote; bounded, expiring, claim/release/consume safe, and non-persistent                                                                                                                                                                                 |
+| Authorization       | Exact deep copy of the revalidated quote plus provider/idempotency authority                                                                                                                                                                                                            |
+| Job                 | Same target, purpose, composition, request plan, authorization item, provider binding, cancellation policy, and idempotency key; `create` has null retry fields, while `retry` persists exact `retryOfJobId` + Pilot retry reason on the same Piece/purpose with one child and no cycle |
+| Retry spend safety  | `duplicateChargeAcknowledged` is true with a canonical acknowledgement timestamp iff reason is `submission_unknown`; all other reasons store false + null and cannot accept that acknowledgement                                                                                        |
+| Asset               | Exactly one Piece owner; imported asset has no producer/composition digest, generated asset has the exact producer Job and composition digest                                                                                                                                           |
+| Piece               | Ordered unique Job lineage; zero or one current asset resolves back to the same owner; Pilot has no replacement/superseded-asset field                                                                                                                                                  |
+| Media publication   | Validated bytes and hashes are moved into managed storage before the atomic manifest publication; failure leaves recoverable staging, not a current asset                                                                                                                               |
+| Activity projection | Derives status from persisted Jobs and receipts without exposing provider secrets or inventing spend states                                                                                                                                                                             |
+| Canvas inventory    | Returns ordered Pieces, handles/aliases, current asset, provenance summary, and lifecycle state without consulting film readiness                                                                                                                                                       |
+| Export 3            | Copies the exact current bytes and writes deterministic provenance; never initiates generation or spend                                                                                                                                                                                 |
 
-This is the real gate. Today a shot-less image **must** carry a `projectReferenceId`, a shot-less
-non-image asset is rejected outright, and ownership is an exclusive XOR.
-
-- [ ] **Step 1: Write the failing test**
-
-```ts
-describe('a Piece can own an image asset', () => {
-  it('admits a piece-owned generated image', () => {
-    const project = projectWithOnePiece();
-    const asset = pieceAsset(project, { collection: 'assets' });
-    expect(validateStudioProjectV2({ ...project, assets: { [asset.id]: asset } })).toBe(true);
-  });
-
-  it('admits a piece-owned imported image with no producer', () => {
-    // An import is a Piece too: it exists because a person made it. It must carry no producerJobId,
-    // no compositionDigest and no generation references, exactly as an imported reference must not.
-    const project = projectWithOnePiece();
-    const asset = pieceAsset(project, { collection: 'imports' });
-    expect(validateStudioProjectV2({ ...project, assets: { [asset.id]: asset } })).toBe(true);
-  });
-
-  it('refuses an asset owned by both a Piece and a Shot', () => {
-    const project = projectWithOnePiece();
-    const asset = { ...pieceAsset(project, { collection: 'assets' }), shotId: 'shot_1' };
-    expect(validateStudioProjectV2({ ...project, assets: { [asset.id]: asset } })).toBe(false);
-  });
-
-  it('refuses a piece-owned asset that is not an image', () => {
-    // Pilot 1 is photographs. Video and sound Pieces arrive in phase 6 with their own validation.
-    const project = projectWithOnePiece();
-    const asset = { ...pieceAsset(project, { collection: 'assets' }), mediaKind: 'video' as const };
-    expect(validateStudioProjectV2({ ...project, assets: { [asset.id]: asset } })).toBe(false);
-  });
-});
-```
-
-- [ ] **Step 2: Run and watch all four fail**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts -t 'own an image asset'`
-Expected: FAIL — the asset has no `pieceId` field.
-
-- [ ] **Step 3: Add the ownership field**
-
-In `creativeStudioTypes.ts`, on the asset record beside `projectReferenceId`:
-
-```ts
-/** Set when the asset belongs to a Piece. Mutually exclusive with shotId and projectReferenceId. */
-pieceId: string | null;
-```
-
-Add `'pieceId'` to the asset validator's required key set.
-
-- [ ] **Step 4: Widen the ownership branch**
-
-In `validation.ts`, replace the branch at 753-781 with:
-
-```ts
-if (value.shotId === null && value.pieceId !== null) {
-  // A Piece owns images only in Pilot 1.
-  if (
-    !isSafeId(value.pieceId) ||
-    value.projectReferenceId !== null ||
-    value.mediaKind !== 'image' ||
-    !isStudioReferenceImageMimeType(value.mimeType) ||
-    (value.managedAsset.collection !== 'assets' && value.managedAsset.collection !== 'imports')
-  ) {
-    return false;
-  }
-  if (
-    value.managedAsset.collection === 'imports' &&
-    (value.producerJobId !== null || value.compositionDigest !== null || value.generationReferenceAssetIds.length !== 0)
-  ) {
-    return false;
-  }
-} else if (value.shotId === null && value.mediaKind === 'image') {
-  if (
-    !isSafeId(value.projectReferenceId) ||
-    !isStudioReferenceImageMimeType(value.mimeType) ||
-    (value.managedAsset.collection !== 'assets' && value.managedAsset.collection !== 'imports')
-  ) {
-    return false;
-  }
-  if (
-    value.managedAsset.collection === 'imports' &&
-    (value.producerJobId !== null || value.compositionDigest !== null || value.generationReferenceAssetIds.length !== 0)
-  ) {
-    return false;
-  }
-} else if (value.shotId === null && value.mediaKind === 'audio') {
-  if (!isCanonicalStudioBedAudioAssetV2(value as StudioAssetV2)) return false;
-} else if (value.shotId === null || value.mediaKind === 'audio') {
-  return false;
-}
-```
-
-And replace the closing XOR (line 781) with a three-way exclusivity:
-
-```ts
-const owners = [value.shotId, value.projectReferenceId, value.pieceId].filter((one) => one !== null);
-return owners.length === 1;
-```
-
-- [ ] **Step 5: Run the tests**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts`
-Expected: PASS.
-
-- [ ] **Step 6: Run everything that touches assets**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/`
-Expected: PASS. Every existing asset fixture needs `pieceId: null` added — that is the exact-key set
-doing its job, not a problem to route around.
-
-- [ ] **Step 7: Commit**
-
-```bash
-bunx tsc --noEmit && bun run format
-git add packages/desktop/src tests/unit/process/creative-studio
-git commit -m "feat(studio): let a Piece own an image asset"
-```
+Composition 2 validation checks exact shape, bounds, digest, and internal stored-to-stored consistency.
+It does **not** regenerate an old prompt using current code and compare text. Prompt-template changes
+advance the instruction profile for new work; they never mutate or invalidate the recorded prompt of
+an existing Job.
 
 ---
 
-## Task 5: A Piece is an active job owner
+## 5. Delivery order
 
-**Files:**
+The phases below are dependency ordered. Do not start Phase 3 runtime work until the Phase 1 contract
+tests and Phase 2 equivalence tests are green. Do not start the canvas before the headless lifecycle
+passes.
 
-- Modify: `.../creative-studio/jobManager.ts:403-419` (`activeOwnerForJobV2`)
-- Test: `tests/unit/process/creative-studio/service/pieces.test.ts`
+### Phase 0 — amend the contract and stabilize the base
 
-`activeOwnerForJobV2` gates dispatch, gates preparation, and is re-checked inside the output-commit
-transaction. All three must accept a Piece or a paid job will be minted and then refused.
+**Purpose:** remove known false assumptions before changing persisted state.
 
-- [ ] **Step 1: Write the failing test**
+1. Update the CS4 design, this plan, wireframe notes, and all 30 open bug-list triage records as one
+   reviewed documentation tranche. Every entry must have a complete, untruncated rationale,
+   destination, claimant, and acceptance oracle. The committed count is 3 fix-before, 26 absorb, 1
+   superseded, 0 defer.
+2. Capture the behavior baseline described in §6 before the first runtime edit.
+3. Fix BUG-190 at the actual built-in-tool trust boundary. Test that an existing and a newly added
+   read-only Studio tool run without per-tool consent, while the equivalent untrusted external tool
+   still requires consent.
+4. Fix BUG-162 by deriving the turn recap from durable outcomes, not successful tool transport.
+   Queued spend, pending review, refusal, cancellation, and actual commit must produce distinct
+   truthful recaps.
+5. Complete BUG-163 with its remaining live restart/recovery verification. Preserve the existing
+   conversation and history, distrust the update echo, prove exact readback, and keep retry bounded.
+6. Inventory every exhaustive branch for target kind, purpose, composition source, asset ownership,
+   quote/authorization, Job lifecycle, projection, export, IPC parser, and Director tool schema. Save
+   the inventory in the implementation change description; missing a branch is a Phase 1 blocker.
 
-```ts
-describe('a Piece is an active job owner', () => {
-  it('resolves a piece owner when the piece lists the job', () => {
-    const project = projectWithOnePiece();
-    const job = pieceJob(project, { purpose: 'seed_still' });
-    const withJob = {
-      ...project,
-      jobs: { [job.id]: job },
-      pieces: { ...project.pieces, piece_a: { ...project.pieces.piece_a!, jobIds: [job.id] } },
-    };
-    expect(activeOwnerForJobV2(withJob, job)).not.toBeNull();
-  });
+**Focused evidence:** the tests named by BUG-190/162/163, plus a live Director recovery pass for
+BUG-163. Do not mark an entry closed from unit evidence alone when its acceptance oracle requires the
+running application.
 
-  it('refuses when the piece does not list the job', () => {
-    // Symmetry with shots and references: ownership is two-way, so an orphaned job cannot dispatch.
-    const project = projectWithOnePiece();
-    const job = pieceJob(project, { purpose: 'seed_still' });
-    expect(activeOwnerForJobV2({ ...project, jobs: { [job.id]: job } }, job)).toBeNull();
-  });
-});
-```
+**Exit:** all three base blockers satisfy their bug-list evidence, the triage is complete, and the
+real baseline fixture is committed. No CS4 production path exists yet.
 
-- [ ] **Step 2: Run and watch it fail**
+### Phase 1 — freeze schema-6 and cross-contract authority
 
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts -t 'active job owner'`
-Expected: FAIL — returns null for a piece target.
+**Purpose:** make the entire standalone-Piece contract exact before IO or UI depends on it.
 
-- [ ] **Step 3: Add the branch**
+Primary files to inspect and change:
 
-In `jobManager.ts`, inside `activeOwnerForJobV2`, before the reference branch:
+- `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/mutations/index.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/generation/composition.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/generation/generationRequest.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/generation/submissionIdentity.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/authorization.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache.ts`
+- `packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts`
 
-```ts
-if (job.target.kind === 'piece') {
-  const piece = ownValueV2(project.pieces, job.target.pieceId);
-  return piece !== undefined && piece.jobIds.includes(job.id) ? piece : null;
-}
-```
+Work, in order:
 
-Widen the function's return type to include `StudioPieceV2`.
+1. Freeze the exact schema-6 root and Piece shape, bounds, dense arrays, map-key/id equality,
+   bidirectional lineage, timestamp rules, and safe-id rules. The schema-6 validator has no schema-5
+   branch and no missing-field defaults.
+2. Implement the shared Unicode handle normalizer, collision resolver, alias bound, and rename
+   validator. Use it in factory, service, mutation parser, reducer, and projection; Phase 5's
+   Director parser must import that same helper. No second normalization algorithm is allowed.
+3. Add `authoringRevision` and the exact increment table from §2.4. Move mutation, direct Director,
+   and quote stale authority to it while preserving `revision` for the store CAS.
+4. Add the Piece target, `piece_image` purpose, composition schema 2 Piece source, resolved image
+   request plan, deterministic quote/item identity, rate classification, authorization equality,
+   and Job equality. Update all exhaustive switches; never use a catch-all branch to hide an omitted
+   owner.
+5. Extend the prepared-session contract with the complete Main reservation. Admission, byte bounds,
+   project/global capacity, expiry, concurrent claim, release on refusal, consume after commit, and
+   close behavior remain explicit.
+6. Add `rename_piece` to mutation batch 6 with exact parser keys, a Piece-catalog undo patch, digest
+   conflict protection, authoring-revision increment, and renderer-safe refusal. Assert that
+   `create_piece` and `delete_piece` are rejected as unknown operations.
+7. Define the Piece asset owner and imported/generated provenance rules without widening the old
+   nullable-owner XOR. If the implementation retains a union for later modalities, each arm must be
+   discriminated and exact; canonical project-owned audio is not forced through Piece ownership.
+8. Define renderer-safe canvas inventory, capability activity, and provenance projections. Provider
+   ids, adapter ids, hashes used only for internal proof, absolute paths, authorization ids, and
+   idempotency keys stay in Main unless a reviewed UI requirement explicitly needs a safe form.
+9. Define export schema 3's exact Piece manifest, but do not bump the export constant or expose the
+   exporter until Phase 3.
 
-- [ ] **Step 4: Run the tests**
+Focused tests must prove:
 
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts`
-Expected: PASS.
+- schema 6 accepts a factory project and rejects missing, extra, sparse, duplicate, oversized, or
+  cross-owned data;
+- schema 5 is not accepted by the schema-6 parser and no defaulting occurs;
+- all Unicode and alias cases in §2.3;
+- import basenames and concurrent new/import reservations derive distinct Unicode-safe handles while
+  explicit rename rejects instead of silently rewriting invalid input;
+- runtime Job progress changes `revision` only, while rename changes both revisions;
+- runtime activity does not stale a quote or direct action, while an authored input or policy change
+  does;
+- canonical authoring fingerprints are stable across map insertion order, differ across the
+  `create`/`retry` arms, change for authored/request mutations, ignore declared runtime fields, bind
+  the exact domain/version, bind retry's ordered immutable predecessor topology while excluding Job
+  progress/status/error text, and never appear in the renderer-safe quote projection;
+- composition 2 admits only Piece + `piece_image`, stores exact prompt/settings/route, and validates
+  historical records without recomposition;
+- target, purpose, request plan, quote, authorization, Job, receipt, asset, and Piece lineage agree;
+- Job retry lineage requires null predecessor/reason together for `create`, an exact retryable
+  same-Piece/same-purpose predecessor plus reason for `retry`, one child per predecessor, and no
+  cycles; status-to-reason mapping includes cancelled → `cancelled` and never overloads
+  `provider_failure`;
+- duplicate-charge acknowledgement/timestamp are present together exactly for a confirmed
+  `submission_unknown` retry and are false/null for every other Job;
+- fixed-price photo quotes require equal lower/upper amounts and variable-price routes fail closed;
+- no public create/delete operation parses;
+- rename undo restores handle and alias state and refuses a digest conflict;
+- `create` and `retry` reservations are exact, immutable, bounded, expiring, single-claim, and write
+  nothing; retry carries no new Piece/handle/order identity;
+- the prepared-quote projection contains only the reviewed safe fields and changes on admit,
+  release, consume, and expiry;
+- stale, duplicate, invalid, expired, and policy-invalid confirmation inputs fail closed; and
+- unsupported/quarantined deletion claims bind the exact classification and storage identity, are
+  single-use and expiring, and refuse changed or healthy targets.
 
-- [ ] **Step 5: Commit**
+**Exit:** the new contract and pure derivations compile and pass focused tests. No production decoder
+may write a partial schema-6 record, and no provider call occurs in this phase.
 
-```bash
-bunx tsc --noEmit && bun run format
-git add packages/desktop/src tests/unit/process/creative-studio
-git commit -m "feat(studio): resolve a Piece as an active job owner"
-```
+### Phase 2 — capture-backed, behavior-neutral extraction
+
+**Purpose:** create reviewable seams before installing the new runtime. This phase changes no
+observable CS3 behavior and no CS4 contract.
+
+1. Convert `packages/desktop/src/process/services/creative-studio/store.ts` into a directory module
+   with `index.ts` preserving the import path. Extract only coherent existing responsibilities:
+   project classification/manifest IO, transactional replacement/replay, proposal/reference
+   sidecars, and deletion authority. Keep each directory at ten or fewer direct children.
+2. Convert `packages/desktop/src/renderer/pages/studio/StudioPage.tsx` into a `StudioPage/` directory
+   with `index.tsx` preserving the import path. Extract existing project-command orchestration,
+   proposal/spend orchestration, and view adapter construction without changing DOM, copy, state
+   timing, or IPC calls.
+3. Move the existing `chain.ts`, `projectStatus.ts`, and `workspaceStatus.ts` projection family under
+   one projection directory before adding Piece projections. Preserve barrel exports and reduce,
+   rather than worsen, the existing direct-child count.
+4. Update `vitest.creative-studio-coverage.config.ts` for every moved runtime path in the same change.
+5. Replay the captured baseline before and after extraction. Persisted bytes that are promised
+   canonical remain byte-identical; public Main and renderer projections remain deep-equal; failure
+   classifications and side effects remain equal.
+
+Do not mix Piece behavior, schema changes, locale changes, or visual changes into an extraction
+commit. If equivalence cannot be demonstrated, narrow or revert the extraction before proceeding.
+
+**Exit:** capture replay, the existing Creative Studio focused suites, coverage, and the full test
+suite pass with behavior unchanged.
+
+### Phase 3 — implement the isolated headless schema-6 runtime
+
+**Purpose:** make Create, Import, persistence, recovery, projections, and Export work through Main,
+with no canvas yet.
+
+Primary files and seams:
+
+- a new versioned CS4 service/store entry point built from the Phase 2 extracted primitives; do not
+  select or rename `service/v2Service.ts` in production yet
+- isolated CS4 media, Job, runtime, provider-resolution, generation, pricing, lifecycle, projection,
+  and export modules
+- typed CS4 bridge and payload contracts that Phase 4 can exercise without registering them as the
+  production `creativeStudioBridge`
+- a standalone Piece exporter and export-3 catalog inside the isolated entry point
+
+Phase 5, not Phase 3, registers the CS4 providers in
+`packages/desktop/src/process/bridge/creativeStudioBridge.ts`, the common/native IPC bridge and
+payload schemas/constants, and preload. Additive shared types may land earlier; no production IPC
+method may route a CS3 renderer into schema-6 storage.
+
+Work, in order:
+
+1. Implement CS4 project creation, load, list, summary, update notifications, and deletion inside the
+   isolated CS4 entry point. Creation accepts a human-facing project name and brief only; Main mints
+   `projectId`. That entry point returns schema 5 only as unsupported inventory; malformed schema 6
+   is quarantined; both remain deletable.
+2. Implement the typed prepare-photo service. Main validates invocation settings, allocates the
+   reservation ids, resolves image capability/route and price, composes schema 2 provenance, builds
+   the request plan and quote, and admits the session without touching disk.
+3. Implement one confirmation service for automatic and explicit cases. Claim the cache entry,
+   re-read under the project queue, rederive composition/request/quote, compare authoring authority,
+   re-evaluate spend policy, then branch only on the frozen reservation mode: `create` atomically
+   commits Piece + authorization + queued Job; `retry` atomically appends authorization + queued Job
+   to the revalidated existing Piece. Consume the session after commit, release it on a retryable
+   refusal, and dispatch only the committed Job.
+4. Extend Job ownership, resume, retry, cancel, duplicate-charge handling, progress, and terminal
+   transitions for Piece Jobs. Every durable status has an explicit recovery arm.
+5. Extend media ingestion/publication for Piece-owned images. Verify MIME, dimensions, size, hash,
+   collection, producer, composition digest, and exact Job ownership before the success commit.
+   Variation grids and invalid outputs fail without publishing a current asset or silently spending
+   on a replacement.
+6. Implement atomic photo import through the existing native picker boundary and managed-media
+   transaction machinery. The renderer never supplies a path or id directly to the service contract.
+7. Implement rename and undo through the shared mutation service and authoring revision.
+8. Implement Main-owned canvas inventory, capability activity, provenance, and project-summary
+   projections. A standalone photo never calls film readiness.
+9. Implement export schema 3. Export only the current Piece image and a deterministic sidecar that
+   records project/Piece/asset identity, hash, dimensions, MIME and byte size, imported versus
+   generated origin, and—when generated—the exact frozen composition/request, route display facts,
+   authorization/receipt provenance, and producer Job linkage. Never include absolute source paths
+   or provider secrets. Verify source bytes before publication, use crash-safe/quarantine behavior,
+   retain the bounded export catalog, and never generate or spend.
+10. Keep schema-5 decode/default code confined to the still-selected CS3 entry point. The isolated
+    CS4 entry point contains no schema-5 decoder or defaults. Phase 5 deletes the former path after
+    switching production. Keep corruption containment and startup replay in both until that switch.
+
+Focused tests must include:
+
+- prepare writes no manifest or sidecar and restart loses only the ephemeral reservation;
+- renderer reload in the same Main process restores the safe prepared quote, while Main restart
+  clears it without a new Piece for `create` and without changing the existing Piece for `retry`;
+- explicit and within-cap confirmation use the same commit builder;
+- `create` commit failure creates no Piece/auth/Job and cannot dispatch; `retry` failure leaves the
+  existing Piece/lineage unchanged, appends no auth/Job, and cannot dispatch;
+- successful commit is durable before dispatch, and a dispatch throw leaves a recoverable queued Job;
+- concurrent duplicate confirmation admits one authorization and one Job;
+- authoring changes, cap removal, cap reduction, currency change, expiry, malformed cache data, and
+  route/rate changes refuse before spend;
+- a retry cannot reuse the prior quote or authorization and exposes a fresh exact price;
+- a `submission_unknown` retry remains explicit under a matching cap, refuses a missing/extra/stale
+  duplicate-charge acknowledgement, and persists the acknowledgement plus timestamp with the Job;
+- unrelated progress/receipt commits do not stale the prepared photo;
+- import success is Piece + asset atomic, cancel writes nothing, invalid input writes nothing, and a
+  crash at each file/manifest boundary recovers deterministically;
+- Unicode/RTL filenames derive the initial import handle in Main, concurrent same-name imports suffix
+  deterministically, and no source path persists or enters renderer state;
+- retry revalidates its existing Piece and source Job, appends one fresh authorization/Job without a
+  second Piece or handle/order/current-asset change, and refuses completed, imported, stale-lineage,
+  edited-request, or non-retryable targets; the persisted predecessor/reason link survives restart,
+  permits only one child, and cannot cycle;
+- output success publishes one exact current image, and late, second, invalid, or duplicate outputs
+  fail closed without changing it;
+- resume covers every nonterminal Piece status, with no second unquoted Job;
+- canvas and activity projections are stable over reload and strip Main-only authority;
+- schema-5 projects are unopenable and deletable, malformed schema-6 projects are isolated and
+  deletable through revalidated Main claims, changed/healthy targets are refused, and one bad
+  project does not disable the runtime; and
+- export copies verified bytes, produces deterministic schema-3 provenance, retains catalog bounds,
+  quarantines a malformed catalog without disabling Studio, and performs zero generation/quote calls.
+
+**Exit:** the complete Pilot lifecycle is available through the isolated typed CS4 Main/service APIs
+and durable storage, while the production bridge still selects CS3. No renderer claims are made yet.
+
+### Phase 4 — headless fake-adapter lifecycle gate
+
+**Purpose:** prove the backend journey before adding UI. This is a service/integration gate, not the
+user E2E.
+
+Use `packages/desktop/src/process/services/creative-studio/adapters/e2eFakeAdapter.ts` through the
+isolated CS4 entry point's real provider resolver, Job manager, media store, store queue, bridge
+contracts, and filesystem. Do not call internal reducers to skip the public path.
+
+Scenarios, each starting with zero Beat and Shot records:
+
+1. create project → prepare generated photo → expose quote → automatic within-cap confirmation →
+   queued/running/succeeded → rename → undo → rename → reload → export;
+2. the same generated path with no policy, over-cap, and currency mismatch, proving no provider
+   attempt before explicit confirmation;
+3. import photo → rename → reload → export, with no quote, authorization, Job, provider call, or
+   spend receipt;
+4. provider rejection, timeout, malformed payload, variation grid, download failure, cancellation,
+   same-Piece retry through a fresh exact quote/authorization, duplicate output, and app restart in
+   every nonterminal durable state;
+5. stale/expired/duplicate confirmation and runtime-only revision movement;
+6. corrupt one schema-6 manifest or export catalog while a second project remains fully usable; and
+7. unsupported schema-5 deletion and quarantined schema-6 deletion.
+
+Assertions use the persisted manifest, managed bytes, export payload, and public projections. No
+test may declare success merely because the adapter was called.
+
+**Exit:** the headless matrix passes repeatedly with deterministic ids/clock from injected Main
+dependencies. There is still no claim that the renderer journey works.
+
+### Phase 5 — canvas, Director integration, and actual renderer E2E
+
+**Purpose:** expose exactly the accepted Pilot and remove the superseded four-room workspace.
+
+1. Switch the production bridge/service selection and renderer to CS4 in the same cutover. Remove
+   the temporary isolation seam and the former schema-5 production reader only after the new Main
+   and renderer paths are wired together.
+2. Replace the four-view workspace with one automatically laid-out, dependency-ordered board. Do not
+   persist coordinates or offer hand reordering.
+3. The empty state exposes exactly **Create photo** and **Import photo**. Do not render shooting
+   script, sound, video, or Assembly offers and do not show a second composer.
+4. Create-photo UI collects words and request-scoped image settings. Use Arco controls and semantic
+   styling; no raw interactive HTML and no Node imports in renderer code.
+5. Present quote amount, currency, scope, and expiry before confirmation. For `within_cap`, transition
+   from the rendered quote to automatic confirmation without a confirmation button. For no policy,
+   over-cap, or currency mismatch, render one explicit bounded confirmation action. Never show a
+   credit/balance/envelope counter. Retain a human-only **Spending limit** project-menu action that
+   sets, changes, or clears the per-batch amount and currency through the typed Main mutation.
+6. Render the Piece from the persisted canvas/activity projections: proposed handle, Job progress,
+   truthful failure and retry/cancel affordances, current image, retained Job/authorization attempt
+   history, imported/generated origin, recorded spend, and provenance. Do not label a pending Piece
+   current.
+   Show retry only for the exact incomplete generated states allowed by §2.2; completed and imported
+   Pieces expose no replacement/regeneration action.
+7. Rename uses an Arco `Input` with a fixed visual `#`, preserves text direction correctly, reports
+   collision/bound refusals, and offers the existing undo mechanism.
+8. Export is available from the project menu only when a current Piece asset exists. It invokes the
+   schema-3 exporter and never invokes generation or quote preparation.
+9. Keep the Director rail, but update its preset surface map and tools for the canvas. Renderer and
+   Director photo preparation use the same typed Main operation. The Director may draft words and a
+   name; it cannot choose durable ids, route internals, price, explicit spend confirmation, or human
+   approval. Piece rename is a free typed direct operation; there is no proposal card for it.
+10. Do not expose proposal cards or create proposal sidecars. Pilot Director operations are the typed
+    direct prepare and rename paths; the quote block is the paid-work review surface. A collapsed
+    rail still distinguishes working from blocked on the person.
+11. Remove the four view routes, selectors, film-only Render control, film project settings, and old
+    session-storage drafts in the same cutover. Update the Main route-close contract with
+    `STUDIO_VIEWS`; do not leave a route that bypasses unsaved-work preflight.
+12. Add every user-visible key to the `conversation` locale module for all configured locales:
+    `zh-CN`, `en-US`, `ja-JP`, `zh-TW`, `ko-KR`, `tr-TR`, `ru-RU`, `uk-UA`, `pt-BR`, `de-DE`,
+    `es-ES`, and `fa-IR`. Regenerate types; do not rely on English fallback for Pilot controls or
+    errors.
+13. Meet keyboard, screen-reader, responsive, and RTL requirements: logical CSS properties, visible
+    focus, semantic regions and headings, announced progress/failure, non-color-only status, no
+    clipped German/Turkish labels, stable reading/tab order, `dir="ltr"` only on immutable technical
+    ids where needed, and correct Persian canvas flow.
+
+Focused renderer evidence:
+
+- `tests/unit/pages/studio/StudioPage.dom.test.tsx` for the empty-to-Piece state machine and IPC
+  sequencing;
+- `tests/unit/pages/studio/StudioLibrary.dom.test.tsx` for supported/unsupported/quarantined listing
+  and claim-backed, human-confirmed deletion;
+- `tests/unit/pages/studio/StudioAccessibleCopy.dom.test.tsx` for roles, names, status announcements,
+  focus, action availability, and the duplicate-charge warning/acknowledgement;
+- `tests/unit/pages/studio/studioI18n.test.ts` for exact key and placeholder parity across all twelve
+  locales;
+- Director rail tests for shared prepare, truthful recap, blocked state, absence of proposal cards,
+  and runtime activity not staling a prepared quote; and
+- project-menu tests for the human-only spend-policy editor, quote invalidation on change/clear,
+  schema-3 Piece export, and the no-generation/no-spend boundary.
+
+The actual renderer E2E in `tests/e2e/features/workspaces/creative-studio.e2e.ts` runs the real
+Electron renderer, preload, IPC bridge, Main service, filesystem, and fake provider adapter. It must
+cover both Create and Import, automatic and explicit spend paths, progress/failure, rename/undo,
+same-Piece retry, reload, provenance, export, deletion of unsupported/quarantined projects,
+a `submission_unknown` retry that stays human-gated under a matching cap, keyboard-only use, one
+narrow viewport, one wide viewport, LTR, and `fa-IR` RTL. The automatic path must hold the
+fake adapter before dispatch, observe the quote block as visible in the browser, then release the
+path and observe exactly one attempt. The unknown-submission path must show its warning, require the
+typed acknowledgement, and persist it before the next dispatch. CI never calls a paid provider. A
+live paid smoke test requires separate explicit authorization and is not a completion gate.
+
+**Exit:** the user-visible Pilot 1 journey passes through the actual renderer. Only now may the plan
+claim Pilot 1 implemented.
+
+### Phase 6 — Assembly, film, video, sound, and later modalities
+
+Phase 6 is a separate product and schema tranche, not hidden Pilot debt.
+
+- Introduce `StudioAssemblyV2` only after its ordering, ownership, stale/current, and export rules are
+  approved. An Assembly is not `StudioGenerationCompositionV2`.
+- Decide and version the post-Pilot project schema explicitly; do not append Assembly/film fields to
+  schema 6 without a discriminator bump.
+- Add Beat/Shot-derived film planning, references, video conditioning, generated/imported sound,
+  audio beds, automatic free recuts, and film projections only here.
+- Define the first proposal-producing operations, one-pending policy, authoring authority, review
+  surface, and proposal-sidecar version here; Pilot 1 deliberately creates no proposal.
+- Define completed-Piece variation/replacement, imported-to-generated replacement, and bounded
+  superseded-asset lineage here; schema 6 deliberately contains none of them.
+- Resolve ffmpeg/ffprobe packaging, LGPL notices, H.264 distribution review, hardware/software
+  encoder support, video ingestion, conditioning extraction, and film export before video is
+  declared available.
+- Carry every Phase-6 bug-list acceptance oracle into focused and actual renderer E2E tests. Do not
+  reopen a deleted CS3 surface solely to fix its pixels; preserve the surviving rule in the new
+  surface.
 
 ---
 
-## Task 6: Create, rename and delete a Piece — and version the batch contract
+## 6. Real fixture capture requirement
 
-**Files:**
+Hand-authored project, Job, asset, quote, or authorization literals are forbidden as the integration
+oracle. Their exact key sets already drifted once in the discarded plan.
 
-- Modify: `packages/desktop/src/common/types/project/creativeStudioTypes.ts:117` (version) and the
-  mutation-kind union
-- Modify: `.../creative-studio/service/schema2/mutations/index.ts`
-- Test: `tests/unit/process/creative-studio/service/pieces.test.ts`
+Before the first runtime edit, add a test-only capture harness that starts the real current Main
+store/service with an isolated temporary root and injected deterministic clock/id source, then uses
+public service calls and the existing fake adapter to produce a representative healthy schema-5
+project, sidecars, managed assets, project list, renderer project, detailed status, quote projection,
+and export catalog. Capture bytes after normal transactional publication. Do not edit the JSON by
+hand; remove machine-specific information by controlling inputs at creation time.
 
-- [ ] **Step 1: Write the failing test**
+Public APIs correctly cannot create unsupported or corrupt state. Build that classifier corpus in a
+separate, clearly named corruption-fixture harness: start from the captured runtime bytes, then make
+one deterministic storage-level schema-discriminator change for the unsupported case and one exact
+malformation for the corrupt case. Record the transform and hashes, and never describe either output
+as public-runtime data or feed it through a migration.
 
-```ts
-describe('piece mutations', () => {
-  it('creates a piece with a derived handle and appends it to the order', () => {
-    const project = emptyProject();
-    const next = applyOps(project, [
-      { kind: 'create_piece', pieceId: 'piece_a', kindOfPiece: 'photograph', fromWords: 'A salt flat at dawn' },
-    ]);
-    expect(next.pieces.piece_a!.handle).toBe('a_salt_flat_at_dawn');
-    expect(next.pieces.piece_a!.handleIsDerived).toBe(true);
-    expect(next.pieceOrder).toEqual(['piece_a']);
-  });
+The committed fixture must include:
 
-  it('renaming adopts the handle and keeps the old one as an alias', () => {
-    // The wireframe promises the old handle stays valid. Losing it would break a reference the
-    // person or the Director may already have used in conversation.
-    const project = applyOps(emptyProject(), [
-      { kind: 'create_piece', pieceId: 'piece_a', kindOfPiece: 'photograph', fromWords: 'stills two' },
-    ]);
-    const next = applyOps(project, [{ kind: 'rename_piece', pieceId: 'piece_a', handle: 'noon_closeup' }]);
-    expect(next.pieces.piece_a!.handle).toBe('noon_closeup');
-    expect(next.pieces.piece_a!.handleIsDerived).toBe(false);
-    expect(next.pieces.piece_a!.priorHandles).toEqual(['stills_two']);
-  });
+- one ordinary supported project with real manifest/brief correlation;
+- at least one authorization, Job, verified generated asset, and export catalog produced by the
+  public runtime;
+- runtime and renderer-safe projections from the same revision;
+- one derived unsupported-schema classifier fixture and one independently derived malformed-project
+  classifier fixture; and
+- a capture metadata file naming baseline `f3f9f764b`, the harness command, and SHA-256 of each raw
+  payload.
 
-  it('refuses a rename that collides with another piece', () => {
-    const project = applyOps(emptyProject(), [
-      { kind: 'create_piece', pieceId: 'piece_a', kindOfPiece: 'photograph', fromWords: 'one' },
-      { kind: 'create_piece', pieceId: 'piece_b', kindOfPiece: 'photograph', fromWords: 'two' },
-    ]);
-    expect(() => applyOps(project, [{ kind: 'rename_piece', pieceId: 'piece_b', handle: 'one' }])).toThrow();
-  });
-
-  it('refuses to delete a piece with a job still running', () => {
-    // Deleting an owner mid-flight would strand a paid job with nowhere to land.
-    const project = projectWithRunningPieceJob();
-    expect(() => applyOps(project, [{ kind: 'delete_piece', pieceId: 'piece_a' }])).toThrow();
-  });
-});
-```
-
-- [ ] **Step 2: Run and watch it fail**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts -t 'piece mutations'`
-Expected: FAIL — unknown mutation kind.
-
-- [ ] **Step 3: Bump the batch version**
-
-`creativeStudioTypes.ts:117`:
-
-```ts
-export const STUDIO_MUTATION_BATCH_SCHEMA_VERSION = 6 as const;
-```
-
-This is a wire and sidecar contract, not the persisted project schema. **Do not touch
-`STUDIO_PROJECT_SCHEMA_VERSION`, which stays at 5.**
-
-- [ ] **Step 4: Add the three operations to the union and the disposition table**
-
-```ts
-  | { kind: 'create_piece'; pieceId: string; kindOfPiece: StudioPieceKindV2; fromWords: string }
-  | { kind: 'rename_piece'; pieceId: string; handle: string }
-  | { kind: 'delete_piece'; pieceId: string }
-```
-
-In `STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2`, add:
-
-```ts
-  create_piece: 'proposal',
-  rename_piece: 'direct',
-  delete_piece: 'proposal',
-```
-
-Renaming is `direct` because it is free and reversible and the spend ruling says not to ask. Creating
-and deleting are `proposal` because one commits to work and the other destroys it.
-
-- [ ] **Step 5: Implement the reducers**
-
-In `mutations/index.ts`, beside the reference reducers:
-
-```ts
-    case 'create_piece': {
-      if (ownValue(draft.pieces, operation.pieceId) !== undefined) return fail('invalid_operation');
-      const handle = uniquePieceHandle(draft, derivedPieceHandle(operation.fromWords));
-      draft.pieces[operation.pieceId] = {
-        id: operation.pieceId,
-        handle,
-        handleIsDerived: true,
-        priorHandles: [],
-        kind: operation.kindOfPiece,
-        currentAssetId: null,
-        supersededAssetIds: [],
-        jobIds: [],
-        createdAt: now,
-        updatedAt: now,
-      };
-      draft.pieceOrder.push(operation.pieceId);
-      return;
-    }
-    case 'rename_piece': {
-      const piece = ownValue(draft.pieces, operation.pieceId);
-      if (piece === undefined) return fail('invalid_operation');
-      const handle = operation.handle;
-      if (!PIECE_HANDLE_PATTERN.test(handle) || handle.length > 48) return fail('invalid_operation');
-      if (Object.values(draft.pieces).some((one) => one.id !== piece.id && one.handle === handle)) {
-        return fail('invalid_operation');
-      }
-      if (piece.handle !== handle) piece.priorHandles = [...piece.priorHandles, piece.handle];
-      piece.handle = handle;
-      piece.handleIsDerived = false;
-      piece.updatedAt = now;
-      return;
-    }
-    case 'delete_piece': {
-      const piece = ownValue(draft.pieces, operation.pieceId);
-      if (piece === undefined) return fail('invalid_operation');
-      const live = piece.jobIds
-        .map((id) => ownValue(draft.jobs, id))
-        .filter((job) => job !== undefined && job.status !== 'succeeded' && job.status !== 'failed' && job.status !== 'cancelled');
-      if (live.length > 0) return fail('invalid_operation');
-      delete draft.pieces[operation.pieceId];
-      draft.pieceOrder = draft.pieceOrder.filter((id) => id !== operation.pieceId);
-      return;
-    }
-```
-
-Add the helper beside them:
-
-```ts
-/** A handle is a reference, so it must be unique. Collisions get a numeric suffix, not a rejection. */
-const uniquePieceHandle = (draft: StudioProjectV2, wanted: string): string => {
-  const taken = new Set(Object.values(draft.pieces).map((piece) => piece.handle));
-  if (!taken.has(wanted)) return wanted;
-  for (let index = 2; index < 1000; index += 1) {
-    const candidate = `${wanted}_${index}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-  return `${wanted}_${Object.keys(draft.pieces).length + 1}`;
-};
-```
-
-- [ ] **Step 6: Run the tests**
-
-Run: `bunx vitest run tests/unit/process/creative-studio/service/pieces.test.ts`
-Expected: PASS.
-
-- [ ] **Step 7: Commit**
-
-```bash
-bunx tsc --noEmit && bun run format
-git add packages/desktop/src tests/unit/process/creative-studio
-git commit -m "feat(studio): create, rename and delete a Piece"
-```
+Phase 2 uses the healthy capture as a before/after equivalence oracle and the derived corpus only for
+classification containment. Phase 3 uses freshly generated schema-6 fixtures from the new public
+runtime; it never mutates a schema-5 project into schema 6. Unit tests may use existing repository
+factories/builders, but must not invent stale exact-record literals.
 
 ---
 
-## Phase 1 completion gate
+## 7. Acceptance map
 
-Run in this order, from the worktree root. Do not skip 7 or 8 — both are unguarded and both have bitten
-this repository.
-
-- [ ] `bun run i18n:types` — regenerates the untracked `i18n-keys.d.ts`
-- [ ] `bunx tsc --noEmit`
-- [ ] `bun run lint -- --quiet` — errors only; ~1,300 pre-existing warnings are not failures
-- [ ] `bun run format` — **oxfmt, never prettier**
-- [ ] `node scripts/check-i18n.js`
-- [ ] `bunx vitest run tests/unit/process/creative-studio/` — the focused suite
-- [ ] **Append every new or changed runtime file to `creativeStudioRuntimeManifest`** in
-      `vitest.creative-studio-coverage.config.ts` (116 paths today, per-file 80% lines and branches).
-      Nothing enforces this; a missed file is silently uncovered.
-- [ ] **No locale keys should have been added by this phase.** If any were, they must land in all
-      twelve locales in the same change — `studioI18n.test.ts` asserts exact key sets in both
-      directions.
-- [ ] `just push` — the full gate
-
-**Definition of done:** a project can hold a standalone photograph Piece; a job can target it; an
-asset can be owned by it; the mutation contract can create, rename and delete it; and
-`STUDIO_PROJECT_SCHEMA_VERSION` is still 5.
-
-**Explicitly not done in phase 1:** no generation actually runs, no UI exists, the Director cannot
-invoke any of this, and nothing is exported. Those are phases 3–5.
+| Pilot acceptance criterion                 | Owning evidence                                                            |
+| ------------------------------------------ | -------------------------------------------------------------------------- |
+| New project has no film scaffold           | Phase 1 factory/validation tests; Phase 3 create/load integration          |
+| Prepare writes nothing                     | Prepared-cache unit test plus Phase 3 filesystem assertion                 |
+| Create/retry commits are mode-atomic       | Create fault injection; same-Piece retry append tests; Phase 4 inspection  |
+| Import Piece, asset, and handle are atomic | Media fault injection; Unicode/concurrent import tests; Phase 4 journey    |
+| Cost shown before spend                    | Phase 5 DOM sequencing test and renderer E2E                               |
+| Within-cap auto; safe exceptions explicit  | Policy matrix; unknown-submission ack; Phase 4/5 paths                     |
+| Runtime activity does not stale authoring  | Revision/direct-action/quote unit tests and restart integration            |
+| Stable identity and exact provenance       | Validation, reload, media publication, and export tests                    |
+| Unicode handles and safe aliases           | Phase 1 script/boundary/collision matrix and RTL renderer test             |
+| Rename and undo                            | Mutation/digest tests plus renderer E2E                                    |
+| Failure, retry, cancel, and recovery       | Job-manager unit tests plus Phase 4 restart matrix                         |
+| Exact current image export                 | Export schema-3 unit/integration tests plus renderer E2E                   |
+| Schema 5 rejected; corruption isolated     | Store corpus/inventory tests plus Phase 4 two-project scenario             |
+| Twelve locales and accessibility           | `studioI18n.test.ts`, `StudioAccessibleCopy.dom.test.tsx`, and LTR/RTL E2E |
 
 ---
 
-## Open questions this plan does not settle
+## 8. Gates and completion language
 
-The designer's three are **settled** (owner, 2026-08-30) and recorded in the design: canvas order is
-fixed by the dependency with no hand-reordering; no second proposal while one is pending; and
-`#final_video` auto-recuts, with the Director saying so.
+Run these from the repository root for every implementation phase. Auto-fix commands run before the
+read-only gates; any resulting change belongs to that phase and must be reviewed.
 
-One of those matters to this phase. **Fixed order means no persisted layout state, which is why
-`STUDIO_PROJECT_SCHEMA_VERSION` can stay at 5.** Had reordering been allowed, Task 2's decode-time
-defaulting would instead have been a schema bump — and a bump makes every existing record fail an
-exact-equality check and quarantine the project.
+1. `bun run lint:fix`
+2. `bun run format`
+3. `bunx tsc --noEmit`
+4. `bun run i18n:types`
+5. `node scripts/check-i18n.js`
+6. focused unit, DOM, integration, or E2E tests named by the phase
+7. `bun run test:coverage:creative-studio`
+8. `bun run test`
+9. `git diff --check`
+10. the source audit below
+11. Phase 4 headless fake-adapter matrix when Main lifecycle changes
+12. Phase 5 actual renderer E2E when renderer, preload, IPC, or user-visible behavior changes
 
-One came from reconciling the wireframe with the store, and it is owed before phase 5:
+Every new, moved, or changed executable Creative Studio file must appear in
+`creativeStudioRuntimeManifest` in `vitest.creative-studio-coverage.config.ts`. A move removes the old
+path and adds every new runtime path. Per-file line and branch coverage remains at least 80%; the
+manifest is not allowed to shrink merely to make the gate green.
 
-4. **The corner budget readout cannot be built as drawn.** Every plate shows `$34.90 / $40.00`, but
-   `StudioSpendPolicy` holds only `currency` and `maxPerBatchMinorUnits` — a per-batch ceiling. There
-   is no authorized total, no committed figure and no remaining balance. A drawn-down envelope is a
-   ledger in currency rather than credits, which the 2026-08-30 ruling declined. Pilot 1 therefore
-   ships no readout.
+The source audit is a reviewed diff plus explicit searches for:
+
+- every `StudioGenerationTarget` and target-kind branch;
+- every `StudioJobPurpose`, composition-source, request-plan, and primary-media-kind branch;
+- every nullable or discriminated asset owner and owner-resolution branch;
+- every quote, authorization, idempotency, confirmation, Job-resume, and provider-output path;
+- every project/protocol/sidecar version equality check;
+- any schema-5 defaulting, migration, or prompt recomputation;
+- any `create_piece` or `delete_piece` parser/operation;
+- project-wide aspect ratio, resolution, duration, Board style, or route defaults entering the photo
+  request;
+- renderer imports from Main/Node, raw interactive HTML, hardcoded user-visible strings, absolute
+  paths, provider secrets, or untranslated copy; and
+- new runtime files absent from the coverage manifest.
+
+No phase is “done” because focused tests pass. Do not claim Pilot completion until typecheck, i18n
+generation and validation, focused tests, Creative Studio per-file coverage, the full test suite,
+source audit, headless fake-adapter lifecycle, and actual renderer E2E all pass. Record exactly which
+commands ran and their exit codes. A skipped gate is reported as skipped, never as passed.
+
+This document is a plan only. At the `f3f9f764b` checkpoint, none of the Phase 1–6 implementation
+claims above is complete.

@@ -1,208 +1,213 @@
-# Creative Studio 4 — a commission: the workspace becomes a canvas
+# Creative Studio 4 — Pilot 1 canvas brief
 
-**For:** the designer of the Creative Studio prototype
+**For:** product design and implementation
 **From:** engineering, 2026-08-30
-**About:** the CS4 pivot — [the canvas design](./creative-studio-4-canvas-design.md), and the owner's
-direction of 2026-08-30
-**Needs:** drawings. The model is settled; what is not settled is what any of it looks like
+**Revision:** 3 · **Status:** owner-approved, binding
+**Primary contract:** [Creative Studio 4 — the canvas](./creative-studio-4-canvas-design.md)
 
-## The short version
+> The existing nine-plate wireframe is design evidence, not a literal Pilot 1 specification. This
+> brief records the contract changes that followed its review.
 
-Creative Studio's workspace is four views — References, Table, Board, Cut — over a Beat and Shot
-model. The owner's verdict on it: _"we show users a lot of screens with no content, no clear CTA
-(will Director do it or user needs to click a button kinda of problem)"_.
+## Outcome
 
-He is right, and it is worse than it sounds. **On a brand-new project all four views are locked.**
-Every readiness stage derives `not_started`, so the entire first-run workspace is one paragraph:
+From a clean schema-6 project with zero Beats and zero Shots, a person can create or import one
+standalone photo, understand any cost before spend, observe progress or failure, receive a durable
+named Piece, rename it, reload it with stable identity and exact provenance, and export it.
 
-> **The Director starts here**
-> The Director will draft the first plan from your brief. Review it here when it arrives.
+Pilot 1 contains exactly two creation actions:
 
-And if you address a locked view directly, it tells you:
+- **Create photo**
+- **Import photo**
 
-| View       | What it says                                                   |
-| ---------- | -------------------------------------------------------------- |
-| References | "Nothing to review until the Director plans references."       |
-| Table      | "Nothing to arrange until the Director drafts the storyboard." |
-| Board      | "Nothing to produce until the Table is set."                   |
-| Cut        | "Nothing to cut until Shots are produced."                     |
+Do not show shooting script, video, sound, film, Reference, or Assembly actions. An unavailable
+future capability is absent, not a disabled promise.
 
-Four sentences, each saying the Director will do it, none offering the person anything to do.
-Meanwhile the only enabled control in the app bar — **Render…** — answers an empty project with
-_"Nothing is ready to render yet"_.
+## First run
 
-The pivot: **the workspace becomes a canvas of named blocks, and every block holds finished work.**
-Nothing on the canvas is an empty container, because a block exists only because something was made.
-The Director presents work that is ready for review; it does not present rooms.
+The automatically laid-out board and Director relationship are visible immediately. One composer may
+collect the Create-photo description. It must not compete with another prompt input, and arbitrary
+typed words such as “go” are never interpreted as spend authorization.
 
-Alongside it, Creative Studio is repositioned as a **multi-modal studio** — photo, sound, video. A
-person can make one photograph. A film becomes one composition over artifacts rather than the
-container everything must live inside.
+The two actions are human-started. The Director may help draft wording and a name, but the screen
+must never leave the person waiting for an invisible Director action.
 
-## What is there now
+Pilot 1 has no Director proposal card or proposal-producing operation. Director preparation and
+Piece rename use the same typed direct Main operations as their renderer paths; the provisional quote
+block is the review surface for paid work.
 
-A fixed app bar (rail toggle, project title, a stat strip, the four-view navigation, **Render…**, and
-a menu labelled **Project**), then two panes: a resizable **Director rail** on the left — a chat — and
-a work panel on the right holding one `<main>` where a view renders.
+The current app bar is not fixed. Remove the four-view navigation and film-only Render control for
+Pilot 1. Retain only project naming and project-menu actions that still apply. Update the Director's
+workspace description together with the visible IA.
 
-That `<main>` is the only thing this commission replaces. The app bar and the Director rail stay.
+One retained menu action is **Spending limit**. It is human-only and edits or clears the real
+per-batch amount and currency; it is not a film-settings dialog and never presents a wallet or
+remaining balance.
 
-## Why the four views are not arbitrary — read this before redrawing
+## Quote block is not a Piece
 
-The order encodes a real dependency, not a taste: references condition the storyboard, the storyboard
-sets the shot list, shots are produced, production is cut. Each view was locked until its predecessor
-had content **on purpose**, and that gating shipped on 2026-08-30 as an answer to this very
-complaint.
+Create photo has two visibly distinct stages:
 
-It did not work, and the reason matters for your drawing: **gating tells you what you cannot do, and
-a person arriving at an empty studio needs to know what they can.** The canvas is not a rejection of
-the dependency. The dependency is real and the Director still honours it. What changes is that the
-person never meets it as a locked door.
+1. **Provisional quote block.** Main reserves the future Piece id and freezes wording, settings,
+   route, revision, provenance, currency, and exact cost. Preparing or displaying it creates
+   no Piece, Job, authorization, or empty inventory record. It is not a Director proposal card.
+2. **Durable Piece block.** When the spend rule permits work, Main atomically creates Piece +
+   authorization + queued Job. The block may now show running, failure, cancellation, attention, or
+   completion. Provider success later publishes the validated current asset atomically.
 
-Underneath, the app already derives seven stages — `brief · engines · references · storyboard ·
-bindings · production · cut` — each `not_started | in_progress | complete | blocked`, and every
-blocker already carries a cause, a location and a **remedy typed as free, proposal, or paid**. That
-is the signal your canvas renders. You are not inventing a state model; you are giving one a face.
+The quote block occupies the future Piece's board position so the layout does not jump, but its
+label and status must make provisional intent unmistakable. Decline, expiry, invalidation, or stale
+rederivation removes it without leaving a Piece. Duplicate confirmation cannot duplicate work or
+spend.
 
-## The reference the owner showed us
+Import photo skips the quote. After media validation, Main atomically creates the Piece, imported
+asset, and exact hash/import provenance. A failed import leaves none of those records behind.
 
-A canvas of blocks, each labelled with a `#` handle — `#narrative_script`, `#shooting_list`,
-`#video_clips`, `#final_video`, `#Frame 5`. The handles read like variables: things produced, and
-therefore things referable.
+## Spend presentation
 
-Three properties we are explicitly adopting:
+Always show the exact price and currency before paid work begins.
 
-- **The script is one document, not thirty objects.** Scenes, shots, shot scale, camera movement,
-  camera angle, visual content, atmosphere, sound, dialogue — all of it rendered as a readable
-  document inside a single card. Today we turn that same information into Beats and Shots as app
-  objects and then build four views to look at them.
-- **Cast and places are blocks, not a tab.** Character turnarounds in a row, environment plates as a
-  set — appearing because the Director made them.
-- **Nothing is an empty container.**
+Pilot 1 uses fixed-price single-image routes: the quote's lower and upper amounts must be equal. A
+paid retry requires a new quote; it is never hidden inside the earlier authorization.
 
-One property we are **not** adopting: the reference shows a credit balance (`✦ 412`). We decided on
-2026-08-12 not to price in credits, and the owner confirmed on 2026-08-30: **no credit ledger and no
-credit counter.** Please do not draw credits, or a running balance of anything. Cost is shown in
-currency, at the moment of spend, from our own rate card.
+- With an active human-authorized per-batch cap in the same currency, a fresh quote at or below the
+  cap may proceed automatically. Say that the active cap authorized the work; do not hide the cost.
+- With no cap, a currency mismatch, a quote above the cap, or an irreversible action, require one
+  explicit bounded human action.
+- A retry after an unknown provider submission always shows a duplicate-charge warning and requires
+  explicit human acknowledgement, even under the cap; persist that acknowledgement with the Job.
+- Rederive immediately before authorization and reject stale state.
 
-## A note on words, for the handoff
+Never draw credits, a wallet, an envelope drawdown, “remaining”, or “left”. The per-batch cap is a
+ceiling, not a balance. A recorded-spend fact may be labelled only as recorded spend.
 
-Draw in whatever language is natural — "block", "card", "artifact" are all fine on a drawing. But so
-you know what we will call them when we build: **a thing a capability produces is a Piece**, and **an
-ordered arrangement of Pieces is an Assembly**. We cannot use _artifact_, _composition_ or _block_ as
-type names, because all three already mean something else in this codebase — `block` alone appears
-eleven times meaning **blocker**, a reason something cannot proceed.
+## The Piece block
 
-Worth knowing for one reason only: if a drawing labels something on screen, tell us whether that word
-is the user's word or a placeholder. User-facing words go to twelve locales; ours do not.
+A Piece is purposeful durable work, not necessarily finished work. Its block supports:
 
-## The decisions that are settled — not open for redesign
+- Main-issued immutable identity and one mutable handle;
+- running, needs-attention, failed, cancelled, and current Piece presentation;
+- progress that does not imply output exists early;
+- bounded retry or cancellation only when the persisted Job permits it;
+- current image plus retained Job/authorization attempt history;
+- rename with undo;
+- provenance disclosure;
+- export of the exact current photo and sidecar.
 
-1. **Standalone artifacts are first-class.** A photograph needs no film around it. If a drawing
-   requires a project to have a story before a picture can exist, it fails this.
-2. **A film is one composition over artifacts**, not the container. Beats and Shots become the
-   structure of the film composition.
-3. **Provenance is recorded and not shown while work is current.** Every generation already records
-   what conditioned it, what it cost, and what it supersedes. The canvas stays calm by keeping that
-   silent — and must be able to surface it at the moment something breaks. See the third hard problem.
-4. **Spend has two gates and no more:** money beyond the authorized envelope, and changes that cannot
-   be undone. Everything else is shown, never asked. A product that asks permission to do something
-   free and reversible is tiring, not careful.
-5. **Sound is one imported audio file.** There is no sound generation of any kind today — no
-   voice, no music, no effects. Draw sound as something a person brings, not something a Director
-   makes.
-6. **Voice is parked.** Do not design it.
-7. **No migration.** Existing projects are test data.
-8. **A control that would fail is absent, not disabled-with-an-error.** Film export already works this
-   way and it stays that way.
+Pilot 1 has no create/delete Piece control outside atomic confirm/import, and no deletion control.
+Removal, provenance retention, and byte deletion require a later ruling.
 
-## The hard problems — these are why we are asking rather than improvising
+Retry appears only on an incomplete generated Piece in a persisted retryable state. It shows a fresh
+exact quote and appends a new authorization/Job to the same Piece using the prior words/settings. It
+cannot create a sibling accidentally, change the handle/order, edit the request, replace completed
+work, or generate over an imported Piece. Persist the exact predecessor and one of the schema-6
+reasons `provider_failure | submission_unknown | variation_grid | cancelled`; cancellation must not
+masquerade as provider failure.
 
-### 1. The first run, when there is nothing
+## Naming across twelve locales
 
-**This is the commission.** "Nothing is an empty container" is easy to say and hardest to draw at
-exactly the moment it matters most: a person opens a new project and there are no artifacts, because
-they have not made any.
+Handles are Unicode human-facing names, not ASCII slugs. Preserve usable letters, marks, and numbers
+from Vietnamese, Persian, Cyrillic, CJK, and every other supported script. Reject unsafe invisible
+or control characters and resolve collisions across current names and bounded aliases.
 
-A canvas with nothing on it is, definitionally, empty. So what is that screen? If the answer is "a
-prompt box and the Director", then CS4's first run is a conversation and the canvas arrives later —
-which is a legitimate answer, and we would rather you tell us that than have us guess.
+Derived handles may safely fold/truncate and use locale-independent `piece`; an explicit rename must
+refuse unsafe, empty, over-bound, or colliding text instead of silently changing it. Import derives
+its initial handle from the Unicode filename basename in Main, never from a renderer-supplied path.
 
-Draw the first thing a person sees, and the first thing that happens after they speak.
+Aliases are never silently evicted. Once the alias bound is reached, refuse another rename unless
+the person is returning to a retained alias; rename-back swaps current and prior handles without
+growing the alias list. Concurrent prepared photos reserve distinct normalized handles, and Main
+rechecks the namespace at confirmation.
 
-### 2. Where unfinished work lives on a canvas of finished work
+Render the complete `#handle` in a bidi-isolated element with `dir="auto"`. Do not force the handle
+left-to-right. Immutable ids, never handles, cross process boundaries.
 
-The rule is "blocks hold finished work". Real sessions are full of work that is not finished:
+## Photo settings and provenance
 
-- a **pending Director proposal** — by definition the one artifact awaiting judgement
-- a generation **awaiting spend confirmation**, or **running**, or **partially failed**
-- a **blocked** stage with a typed remedy
+Photo aspect ratio and resolution are chosen for the invocation. They do not come from hidden film
+settings. The quote and generation composition freeze the request-scoped settings, exact prompt,
+route/model revision, rate, quote revision, authorization, producer linkage, and receipt facts.
+Create photo is text-to-image only; Import photo creates a Piece but does not condition generation in
+Pilot 1.
 
-Today a proposal renders in two places at once — the work panel and the Director rail — which is its
-own confusion. On a canvas it needs one home, and unfinished work needs a treatment that does not
-make the canvas a queue.
+Create photo uses generation-composition schema 2 with purpose `piece_image` and matching Piece
+source/target. It must not masquerade as a Shot seed or character/background Reference.
 
-### 3. The disclosure moment
+## Layout and components
 
-A clip goes stale because the frame that conditioned it was replaced. The app knows precisely what
-happened, what re-making it costs, and what else it invalidates. A calm canvas must be able to say
-all of that **at that moment** without becoming a metadata panel the rest of the time.
+Reuse the wireframe's useful visual findings:
 
-Draw a block current, and the same block stale.
+- automatic dependency order rather than freeform positioning;
+- Arco cards, inputs, tags, progress, popovers, typography, and semantic tokens;
+- disclosure anchored to the affected Piece;
+- stable Create-photo replacement of quote block by Piece block, and retry activity anchored to the
+  existing Piece;
+- responsive grid behavior, light/dark, and logical properties.
 
-## What we are asking you to draw
+Do not copy these wireframe elements into Pilot 1:
 
-- **First run, zero artifacts** — the hard problem above.
-- **A canvas mid-work**, with a realistic mix: script, cast, places, clips, a cut. Enough blocks that
-  arrangement, scanning and scroll become real questions.
-- **One block of each kind**, at the size it will actually be:
-  - a **script document** — the whole shooting script as a readable card
-  - a **set of stills** — characters as turnarounds, places as plates
-  - a **set of clips**
-  - **sound** — an imported bed
-  - **the final video**
-- **A block's name.** Shots have no name field today: a Shot carries a shooting script and a
-  position, nothing else. Handles will be authored with a derived default. Show how a person renames
-  one, and what an unnamed block looks like before they bother.
-- **The pending proposal**, in its single home.
-- **In-flight and failed generation.**
-- **A stale block**, per the third hard problem.
+- script or sound offers;
+- two competing composers;
+- reference-conditioned or photo-to-photo generation;
+- film, Shot, Reference, video, or audio blocks;
+- credit or remaining-budget readouts;
+- `dir="ltr"` handles;
+- natural-language approval as a substitute for deterministic authorization.
 
-## Constraints the drawing has to live within
+## Required states to draw and test
 
-- **The Director rail is permanent and takes horizontal space.** Default 431px, resizable 280–720,
-  collapsible. The canvas is never full window width, and its width changes while a person works.
-  Blocks must survive both extremes.
-- **Twelve locales, including Persian, which is right-to-left.** Anything positioned in a corner has
-  to be corner-aware rather than side-aware. Assume text expands by a third in German.
-- **Light and dark.**
-- **Everything is built from Arco Design components.** No bespoke controls; a drawing that needs one
-  is a drawing we will build wrong.
-- **Shot length is 4–15 seconds and a Beat holds up to 8 Shots**, so a 30-second Beat is 5–6 clips.
-  Clip sets are wider than they are tall in count.
-- **Status vocabulary is fixed** — `RENDERED`, `FAILED`, `STALE` and the rest already exist on Shot
-  tiles. Reuse the words for the same states.
-- **A block may be partially filled.** A Beat with two of five Shots produced is normal and is not an
-  error.
+1. Empty schema-6 project with Create photo and Import photo.
+2. Create-photo draft before quote.
+3. Fresh quote within a matching active cap, with visible cost and automatic authorization copy.
+4. Quote requiring explicit action because no cap exists.
+5. Quote above cap and quote with currency mismatch.
+6. Stale/expired Create-photo quote removed without a Piece; stale retry quote leaves its Piece and
+   lineage unchanged.
+7. Durable Piece queued/running after atomic confirmation.
+8. Failed and needs-attention Piece, with bounded remedies.
+9. Fresh retry quote targeting that same incomplete Piece, without a new handle or canvas position.
+10. Unknown-submission retry with a duplicate-charge warning and explicit acknowledgement despite a
+    matching cap.
+11. Completed generated Piece with provenance disclosure and no replacement action.
+12. Completed imported Piece with import provenance and no generation action.
+13. Rename and undo with a non-Latin handle.
+14. Reload preserving identity, current asset, history, Job, and authorization.
+15. Exact-photo export plus provenance sidecar.
+16. Corrupt or unsupported project isolated without disabling other projects, with deletion available.
 
-## What we are not asking
+For state 16, Main supplies an opaque, expiring deletion claim because no decoded revision is
+trustworthy. The human confirms the exact library entry; Main reclassifies it under lock and refuses
+a changed, healthy, expired, or replayed target. No path crosses into the renderer.
 
-- **Do not redesign the Director rail or the chat.** It stays as it is.
-- **Do not design voice, sound generation, or a credit ledger.** None of the three exists and two are
-  ruled out.
-- **Do not design migration or an upgrade path.** There is none.
-- **Do not solve the dependency order.** References before storyboard before production before cut is
-  real; the Director enforces it. Your job is that a person never meets it as a locked door.
-- **Do not draw the app bar,** and do not draw credits or a running balance anywhere.
+## Accessibility and localization
 
-## For reference
+- Keyboard access to every action and stable focus across quote → Piece replacement.
+- Live-region announcements for meaningful lifecycle transitions, not every percentage tick.
+- Names and descriptions for quote action, import, rename, retry/cancel, provenance, and export.
+- Full copy in all twelve locales in the same tranche.
+- Persian and mixed-script names tested with bidi isolation and `dir="auto"`.
+- Text expansion wraps; status never relies on color alone.
 
-- [The CS4 canvas design](./creative-studio-4-canvas-design.md) — the model, what is kept, and the
-  four decisions still with the owner.
-- [The Beat timeline commission](./creative-studio-3-beat-timeline-commission.md) — the format this
-  follows, and the settled rulings on chained joins and hard cuts.
-- [The spend governance ruling](./creative-studio-3-spend-governance-ruling.md), 2026-08-25 — the two
-  gates, and why showing a picture beats asking a question.
-- [The bug list](./creative-studio-3-bug-list.md) — in particular BUG-171, BUG-183 and BUG-184, which
-  are all the same complaint in three places: the product tells people about controls instead of
-  showing them work.
+## Delivery order
+
+1. Contract amendment, full backlog triage, and pre-CS4 stabilization.
+2. Exact schema-6/Piece/composition-2 contracts and compiling harness.
+3. Behavior-neutral extraction behind real-backend fixtures.
+4. Headless create/import/runtime/export behind an isolated CS4 Main entry point.
+5. Fake-adapter lifecycle integration with zero Beats and Shots.
+6. Atomic production switch to the Pilot canvas and CS4 Main path, plus actual renderer-to-Main E2E.
+7. Assembly and later modalities only after Pilot acceptance.
+
+The headless fake-adapter gate precedes the UI journey. An end-to-end user journey cannot be claimed
+before the renderer surface exists.
+
+## Out of scope
+
+Assembly, film, Beats/Shots, References, video, sound, voice, ffmpeg, freeform layout, hand ordering,
+Piece deletion, migration, compatibility defaults, credits, and a remaining-balance display.
+
+## Implementation handoff
+
+The 2026-08-30 owner approval makes the project-schema cutover, generation-composition version, quote-to-Piece
+transaction, Main identity, Unicode handle policy, exact owner cross-links, request-scoped photo
+settings, spend rules, and phase order binding. A later design may choose spacing and visual
+hierarchy; it may not replace those approved contracts.

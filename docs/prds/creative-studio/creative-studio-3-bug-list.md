@@ -43,7 +43,15 @@ prevent.
 **One entry is genuinely superseded**: BUG-173, first-cell alignment inside the Table. Nothing about
 the store, spend, chain or provenance is implicated.
 
-**Counts:** 4 fix-before-CS4 · 25 absorb · 1 superseded-by-cutover · 0 defer.
+**Counts:** 3 fix-before-CS4 · 26 absorb · 1 superseded-by-cutover · 0 defer.
+
+The three base blockers are **BUG-190**, **BUG-162** and **BUG-163**. **BUG-173** is the sole
+cutover-superseded entry. Every absorbed entry below names the phase that owns its acceptance
+evidence; none is closed merely because CS4 work starts.
+
+Every triage block also carries a claimant field. `Unclaimed` is intentional at this planning
+checkpoint; the implementing agent replaces it before the first code edit. A phase destination is
+not a claim, and the list must not imply that paused or absent agents own work they have not reserved.
 
 ## How this list is shared
 
@@ -939,7 +947,18 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **The card still cannot say what failed: its only subject renders as the bare word `Beat`.** The name it needed — **Sign Off** — was sitting in the proposal's own `add_beat` operation the whole time. `refusalSubject` resolves a Beat's title from `project.beats[id]`, which is precisely the lookup that cannot succeed for a Beat the batch has not created yet.
   - **The adjacent branch was fixed on the same day, which shows how close this is.** `2c99f5e94` added a `reference` subject kind resolving `reference?.label`, three lines below the Beat branch in the same function. Whatever shape that fix takes for Beats — reading the title out of the batch, or passing the operations into `refusalSubject` — the reference case is the precedent.
   - **Contrast worth keeping, observed on one screen.** The same card renders two refusal paths very differently: the stale path says _"derived from revision 3, but the project is now revision 114"_ — specific and actionable — while the invalid path says only that something is not valid, plus a bare noun. The card is not the problem; the reason it is handed is.
-  - **CS4 triage: absorb into CS4** · **phase 6**. Not on Pilot 1's path — it needs Beats, Shots and a continuity chain, none of which exist in a one-photo pilot, so it cannot be fix-before-CS4 despite the P1. Both halves survive the cutover because neither lives in view chrome: the reducer guard is at service/schema2/mutations/index.ts:1760 (verified present) and the refusal-naming gap is at service/schema2/mutations/proposalReview.ts:178, both behind the seam. Phase 6… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — Assembly, film and later modalities.
+    - **Rationale:** End-card authoring requires Beats, Shots and continuity, which Pilot 1 does not
+      contain. The reducer's hard-cut rule and the proposal refusal language survive the deleted CS3
+      views, so the defect is deferred to the phase that restores film composition rather than
+      closed at cutover.
+    - **Acceptance evidence:** A focused proposal test must create a new end-card Shot with
+      `chainBreak: 'hard_cut'`, pass validation and apply atomically; a refusal test must name the
+      proposed Beat and Shot plus the actionable reason. The Phase 6 fake-adapter film scenario must
+      accept and render a film ending on that hard cut without a redraft loop.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-181][P2][Creative Studio] A pending proposal dies permanently the moment any generation makes progress** — found 2026-08-29, isolated by experiment
   - **Lane: Workspace.** `store.ts`, `proposalReview.ts` and the renderer's accept gates must change together. **Needs a field on `creativeStudioTypes.ts`**, which is shared — announced here rather than discovered in a merge.
@@ -949,7 +968,18 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Seen in ordinary use 2026-08-30, not only in the probe.** Two Director proposals on the promotion-video project sit permanently unacceptable — _"This review was derived from revision 3, but the project is now revision 114"_ — with **Accept proposal disabled** and only Reject or Prepare updated proposal left. Nobody deleted anything; the project simply moved on.
   - **Distinct from BUG-160, which names this only as a contributing factor.** BUG-160's fix direction — a persistent pending-proposals affordance — does not address it: a card that never scrolls away still cannot be accepted once the revision has moved.
   - **Fix direction, and why it is not a one-line change.** The fence has to ask whether anything a person **authored** changed, not whether the revision did. `baseRevision` is load-bearing in four more places: `:7753` (the reducer's own CAS), `:7761` (the accepted revision is `baseRevision + 1`, so accepting later would rewind the counter), `:721-722` (`appliedRevision === baseRevision + 1` as a hard invariant) and `:6104`/`:6136` (**crash-recovery replay**). Changing what `baseRevision` means changes how the system recovers from a crash mid-commit on paid work.
-  - **CS4 triage: absorb into CS4** · **phase 3**. The root cause is structural, not presentational: jobs and assets live inside the revisioned project document, so a job tick bumps revision and the exact-match fence kills a reviewed draft. Verified live — store.ts asserts input.snapshot.project.revision !== proposal.record.baseRevision and then writes revision: baseRevision + 1. Phase 3 (hidden artifact/run storage and Main projection) is exactly the phase that decides… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 1 for shared authoring authority; Phase 6 for proposal acceptance.
+    - **Rationale:** The defect is caused by one revision counter covering both authored state and
+      generation activity. Phase 1 must establish the shared authoring fence used by direct Pilot
+      actions. When proposals return in Phase 6, their review must bind to that fence rather than the
+      storage revision.
+    - **Acceptance evidence:** Phase 1 tests must show that job progress, terminal job state and asset
+      publication do not move the authoring authority while a genuine authoring change does. Phase 6
+      proposal tests must accept after runtime-only activity, reject changed authored inputs,
+      preserve monotonic storage revision and pass crash-recovery replay without rewinding state.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-182][P2][Creative Studio] The Beat panel can persist a pure-black poster, permanently replacing a Shot's preview** — found 2026-08-30 on disk, five real instances
   - **Lane: Workspace.** `FirstFrames/index.tsx` and its capture helper.
@@ -959,14 +989,34 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Fix direction.** Refuse a frame that is one flat colour before persisting it, so a bad capture degrades to no poster (recoverable, the tile keeps showing the video) rather than a permanent black one; and capture from a frame that has actually been presented rather than from `loadeddata`. Also worth deciding how an existing bad poster can be cleared — today nothing can.
   - **Half fixed by `f63224449`, and the entry stays open for the other half.** `carriesPicture` now reads the canvas back and refuses a single flat colour, alpha included, sampling ~4,096 pixels at an odd stride — an earlier form of this guard multiplied the stride by 997 and so sampled four pixels of a 720p frame, not the four thousand its comment claimed. Because the capture can now decline, both handlers go through a scheduler that retries on `requestVideoFrameCallback`, which also revives the `canPlay` binding: before the refusal, the `loadeddata` capture always succeeded and marked the key, so `canPlay` returned at its first line and was dead code. The existing test could not have caught any of this — it stubbed the context as `{ drawImage }` and a fixed data URL, so it could not tell a real frame from a blank one; both stubs now return pixels.
   - **Still open: the five posters already on disk.** Nothing in the product can clear or recapture one, so those Shots keep a black preview permanently. `commitCapturedPosterV2` (`mediaStore.ts:4688-4721`) has no null precondition and would already accept a replacement — unlike the provider-poster path — so only the renderer gate at `FirstFrames:397` prevents asking for one. That affordance needs new user-facing text in all twelve locales and is filed as **BUG-195**.
-  - **CS4 triage: absorb into CS4**. Correct disposition: absorb, destination phase 3 (hidden artifact/run storage and Main projection), with the user-facing affordance surfacing in phase 5/6 alongside the clip block. Not fix-before-CS4, and not superseded-by-cutover. 1) THE DECISIVE POINT: THIS CUTOVER DELETES THE FIX, NOT THE DEFECT. The other engineer states the surviving rule themselves — "never persist a capture that is a single flat colour, and a… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — clip media and film review.
+    - **Rationale:** The Beat panel is removed, but the invariant is not: a captured poster may replace
+      a usable moving preview only when it contains a presented picture. Phase 6 must carry the
+      existing flat-frame protection into the replacement clip surface.
+    - **Acceptance evidence:** Media-capture tests must reject opaque and transparent single-colour
+      frames, wait for a presented video frame, and leave the current video preview usable after a
+      rejected capture. A Phase 6 reload test must prove that no rejected poster was persisted or
+      selected as current.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-183][P2][Creative Studio] Blocking messages name a control without saying where it is, and describe an activity the person is not doing** — found 2026-08-29 by the owner in References
   - **Lane: Workspace.** `StudioPage.tsx`, the banner components, and the `en-US` locale.
   - **Actual.** Working in **References**, the owner hit _"Refresh routes for the current project settings before reviewing a cost."_ Their reply was _"no idea about the error message"_.
   - **Three things wrong at once.** _Refresh routes_ is a real button, but it lives in the **More (⋮)** project menu beside the spend-cap fields (`WorkspaceProjectMenu.tsx:1920`), unmentioned. The sentence ends _"before reviewing a cost"_ while the owner was making reference images — this one key is raised from **eight** call sites covering quite different actions and every one shows that same wording. And nothing says what a route is, or why one is missing.
   - **Fix direction.** Say what is missing in the person's terms, put the control in the banner rather than describing its location, and separate the states: a catalogue that was never fetched (refreshing helps) from settings that match no available model (refreshing never will). The renderer can already tell those apart — `routeCatalog === null` never means "fetched and empty" — but the message does not.
-  - **CS4 triage: absorb into CS4** · **phase 5**. Closest of the six to fix-before-CS4 and still not it. Pilot 1 includes 'review and confirm cost', a fresh project has imageRouteId: null, so this exact banner is on the pilot's path. But every one of the 8 call sites is inside StudioPage.tsx — verified: routeCatalogRequired is raised 8 times from that one file — which task zero splits per-block and phase 5 replaces. Fixing the copy now is work on UI scheduled for… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 5 — canvas UI and Pilot 1 E2E.
+    - **Rationale:** Cost review for a standalone photo can encounter the same missing-route states,
+      but the eight CS3 banner call sites are replaced by per-capability canvas feedback. The new
+      surface must distinguish an unfetched catalogue from settings that match no route.
+    - **Acceptance evidence:** Focused UI tests must render separate copy and actions for “catalogue
+      not loaded” and “no compatible route”; the recoverable state must expose its refresh action in
+      place and the incompatible state must explain the setting to change. All twelve locales and the
+      Pilot 1 route-recovery E2E must pass.
+    - **Claimant:** Unclaimed.
 
 - [x] **[BUG-184][P2][Creative Studio] The Director invents places in the UI, because nothing ever tells it what the surfaces are called** — found 2026-08-30 by the owner
   - **Lane: Director tooling.** The fix is a short, accurate surface map inside `openingTurn.ts` — one of the three merge hazards above, so land it on its own and not alongside other rule edits. Filed from the review side because that is where the invented names were caught; the fix is not a UI change.
@@ -987,7 +1037,18 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Clearing the offending files does not converge — measured.** Removing the 12 residue files from `proposals/slots/` and `reference-requests/pending/` moved the error from _"pending publication residue is malformed"_ to _"**proposal** publication residue is malformed"_. An earlier attempt cleared two guards and reached a third. Every record in the family is schema 5, and the subsystem validates them all, so there is no small set of files to remove.
   - **Scope note.** Migration is deliberately not done during development while every project is throwaway test data, so a project becoming unopenable is an accepted cost. What is **not** accepted is BUG-179's blast radius, or reporting a legacy record as corrupt.
   - **Current state.** `Plateau` is held aside at `config/creative-studio-held-aside/748ae58b…` — 154 files, 137 MB, all 48 hardlinked files intact. It remains BUG-165's only reproduction.
-  - **CS4 triage: absorb into CS4** · **phase 3**. The unopenability itself is accepted cost under the test-data ruling and is not work. The actionable half — reporting a legacy record as corrupt — has two homes and only one dies. The reconciler's 'residue is malformed' strings (store.ts:2224 onward) sit in the schema-1 detection, quarantine and legacy-reporting machinery that CS4's no-migration decision explicitly licenses deleting. But the collapse also happens at the… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 1 for the exact classifiers; Phase 3 for isolated runtime containment.
+    - **Rationale:** Clean cutover intentionally makes schema-5 projects unsupported; it must not
+      describe that expected result as corruption. Exact schema-6 validation must continue to
+      distinguish unsupported legacy data from damaged current data without adding migration or
+      compatibility defaults.
+    - **Acceptance evidence:** Phase 1 decoder and reconciliation tests must classify a valid schema-5
+      project as `unsupported_prototype_schema` and malformed schema-6 data as invalid. Phase 3 must
+      quarantine each with distinct diagnostics while a healthy schema-6 sibling opens and runs. No
+      schema-5 record may be rewritten or defaulted.
+    - **Claimant:** Unclaimed.
 
 - [x] **[BUG-186][P3][Creative Studio] The first-frame viewer's counter is painted over by the close button** — found 2026-08-29, measured in the running app
   - **Lane: Workspace.** One rule in `FirstFrames.module.css`.
@@ -1003,7 +1064,19 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Same root as the refusal case in BUG-180**, where a rejected proposal's subject rendered as the bare word "Beat": both resolve identity against the project, which cannot name something the proposal has not created yet.
   - **Still present 2026-08-30**, on three cards at once — two stale proposals and one freshly refused — each headlining a full UUID. Unchanged by `2c99f5e94`, which improved refusal _subject_ naming without touching the card's identity line.
   - **Fix direction.** Lead the card with what the proposal does and keep the id for the machine — a `data-testid`, a copy affordance, or the details view. The Director should name the draft the way it described it, never the id; it has no way to know the id means nothing to the reader.
-  - **CS4 triage: absorb into CS4** · **phase 5**. This is not a pixel defect; it is the load-bearing CS4 naming decision arriving early. Pilot 1's journey literally reads 'receive a named block; rename it', and CS4 settles that handles are authored with a derived-slug default. The DirectorProposalCard surface dies — CS4 gives the proposal one home instead of today's two — but the rule it violates is a phase 5 deliverable, so absorb rather than supersede, or phase 5… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — post-Pilot Director proposals and review.
+    - **Rationale:** Pilot 1 has no proposal-producing operation: photo preparation produces a quote
+      and Piece rename is direct. When proposals return with later modalities, each must be
+      identifiable to a person by its subject and effect; the immutable proposal ID remains machine
+      provenance rather than the primary label.
+    - **Acceptance evidence:** Proposal-card and Director-transcript tests must identify a proposed
+      change by its Piece handle and concise effect, including a Piece not yet in the project. The raw
+      UUID may appear only in details or machine attributes. Historical proposals must remain
+      distinguishable without reading UUIDs, while the approved pending-proposal rule prevents two
+      active proposals from competing.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-188][P2][Creative Studio] Accepting a proposal and then asking the Director about it reports an error for something that succeeded** — found 2026-08-30 by the owner
   - **Lane: Workspace.** `StudioPage.tsx:3697-3700` and the locale.
@@ -1012,7 +1085,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Why it reads as failure.** It is rendered in the error banner, in the same place and styling as real blockers, immediately after a successful action. Nothing on screen says the accept worked; the Director's own message above still says "recorded and pending your review", which is stale history and correct, so the only fresh signal contradicts the outcome.
   - **The app can tell the difference.** A decision record exists for that proposal with `status: 'accepted'`, so "already accepted" is distinguishable from "never had one" without new state.
   - **Fix direction.** When a decision intent finds nothing pending but a recent decision exists for it, say so and say what changed — the Beats it added — rather than reporting an absence. Same honesty-of-failure family as **BUG-162**: the app has the facts and reports the wrong one.
-  - **CS4 triage: absorb into CS4** · **phase 5**. The defect is renderer decision-intent resolution (StudioPage.tsx:3697-3700 + locale), and CS4 keeps proposals as a first-class concept while giving them a single home — the commission explicitly asks the designer to draw 'the pending proposal, in its single home'. Phase 5 rebuilds exactly this path, so the fix lands there rather than in code being rewritten. Caveat worth carrying: phase 2's StudioPage split is… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — post-Pilot Director proposals and review.
+    - **Rationale:** Pilot 1 deliberately creates no proposal. When a later approved operation brings
+      proposals back, its renderer resolver must distinguish an already accepted decision from an
+      absent proposal and report the recorded outcome and affected Piece directly.
+    - **Acceptance evidence:** A focused decision-intent test must accept a proposal, repeat the
+      decision request, and return an informational “already accepted” result naming the created or
+      changed Piece. The error treatment must be reserved for a genuinely unknown proposal, and the
+      accepted decision must remain correct after reload.
+    - **Claimant:** Unclaimed.
 
 - [x] **[BUG-189][P2][Creative Studio] The bordered view surface is shrunk to the window while its content is not, so every view's content spills outside its own box** — found 2026-08-30 by the owner, measured in the running app
   - **Lane: Workspace.** `Workspace.module.css`; verify all four views, since the surface is shared.
@@ -1030,7 +1113,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **What is established.** The prompt fired for a **new** tool on a built-in server whose other tools (`read_storyboard`, `propose_storyboard`, `studio_apply_edits`) had been running all session without prompting. WePrompt never sets `AUTO_APPROVE_MCP_SERVERS`; the constant appears once in the tree, in a comment in `builtinCapabilities.ts:224`, describing AionCore behaviour.
   - **What is not established.** Where the prior approvals are actually remembered — that state is AionCore's, not a file in the profile — so whether this is per-tool, first-use-per-server, or something else was not determined. The observation is solid; the mechanism needs one more look before a fix.
   - **Fix direction.** A built-in server's tools should not need per-tool consent, or adding a tool to a trusted built-in should not silently reintroduce a prompt. Whichever way it lands, a Director blocked on consent must not look like a Director that is thinking.
-  - **CS4 triage: fix before CS4**. CS4's entire creation model is 'a Director invokes capabilities', and every capability is a new tool on the same built-in server that just prompted. If consent is per-tool rather than per-server-first-use, CS4 multiplies this defect by every capability phase 5 adds, and discovering it at phase 5 is the expensive time. The first unit of work is investigation, not code: the entry itself says the mechanism is not established.… _Blocks the CS4 base; stays open until fixed._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Fix before CS4.
+    - **Destination:** Prerequisite tranche before Phase 1.
+    - **Rationale:** Pilot 1 is capability-driven, so an unresolved consent prompt on routine reads
+      would block every new Director capability and encourage indiscriminate approval. The trust
+      boundary must be established before adding more built-in tools.
+    - **Acceptance evidence:** An integration test must call an existing and then a newly registered
+      read-only tool on the trusted built-in Studio server without a per-tool consent prompt, while an
+      equivalent untrusted external tool still requires consent. A live Director run must execute the
+      conditioning-frame read without pausing for approval.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-191][P2][Creative Studio] A Director turn can be blocked on a prompt for minutes with no sign of it anywhere in the workspace** — found 2026-08-30 in live testing
   - **Lane: Director.**
@@ -1038,7 +1131,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **The rail was not merely scrolled away, it had no layout at all.** Its composer was still in the DOM and still accepted a message; the rail contributed **zero characters** to the page's rendered text. So a person can send to the Director, collapse the rail, and have no way to learn that it is waiting on them.
   - **Why it compounds.** The thing it was waiting for was a consent dialog (**BUG-190**) that only exists inside the rail. Anyone who collapses the rail to see the Table — the natural thing to do while the Director works — cannot discover why nothing is happening.
   - **Fix direction.** The rail's toggle needs to carry state: a Director that is thinking, and especially one that is blocked on the person, should be visible from the workspace. "Blocked on you" and "working" are worth distinguishing; the first is the only one that will never resolve on its own.
-  - **CS4 triage: absorb into CS4** · **phase 5**. Not a deleted surface: WorkspaceShell, the rail and its toggle are explicitly kept ('Do not redesign the Director rail or the chat'), and the rail stays collapsible while the canvas wants the width — so collapsing it becomes more natural under CS4, not less. The design's own trap list already owns this work ('In-flight work is not finished work ... a canvas whose stated rule is blocks hold finished work must say where they… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 5 — retained Director rail and canvas shell.
+    - **Rationale:** The collapsible rail survives the cutover, so its hidden working and blocked
+      states remain observable only if the workspace toggle projects them. A prompt requiring human
+      action must be distinct from ordinary in-flight work.
+    - **Acceptance evidence:** Renderer tests must show `working` and `blocked on you` indicators on
+      the collapsed-rail toggle, clear them at the correct terminal state, and reopen the rail to the
+      blocking control. The Pilot 1 browser E2E must collapse the rail during a blocked turn and
+      verify that the workspace still exposes the required action.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-192][P2][Creative Studio] The Director's composer advertises `@` file references, in a conversation whose workspace is empty by construction** — found 2026-08-30 by the owner
   - **Lane: Director.**
@@ -1047,7 +1150,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **What the owner was reaching for does not exist.** They typed `@wepr` next to a **WePrompt Premium** place carrying three photos, plainly expecting to reference it. Studio references, places, Beats and Shots are project entities, not workspace files, and `@` cannot reach any of them. The affordance offered is the one thing it cannot do; the thing the person wants has no affordance.
   - **Why it is worth more than hiding the hint.** The Director already talks about Shots and references by name in prose, and **BUG-187** is the same gap from the other side — a proposal identified by a raw UUID because nothing names project entities to the person. A `@` that completed Shot ids, Beat titles and reference labels would close both.
   - **Fix direction, cheapest first.** Stop advertising what cannot work: the hint is shared chat chrome, so the Studio rail needs its own. Better: point `@` at the project's own entities rather than the empty workspace. Note the composer is reused from the chat surface (`useSendBoxDraft`), so the hint and the search behaviour are both shared — changing them for Studio must not change them for ordinary chats.
-  - **CS4 triage: absorb into CS4** · **phase 5**. CS4's # handle model is the better fix this entry asked for ('a @ that completed Shot ids, Beat titles and reference labels would close both' — with BUG-187), so phase 5's canvas blocks plus Director integration subsume it. Two things must be explicit acceptance items rather than assumed: handles do not automatically repoint @, which still searches an is*temporary_workspace scratch dir that will still be empty in CS4; and… \_Stays open until its CS4 acceptance evidence passes.* Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 5 — Piece handles and Studio composer integration.
+    - **Rationale:** Studio conversations intentionally have no user-file workspace, so advertising
+      file completion is permanently false. CS4 supplies project entities with human handles, which
+      the Studio composer can complete without changing ordinary chat file references.
+    - **Acceptance evidence:** Studio composer tests must omit the empty-workspace file hint and
+      resolve Piece handles from the current project, including Unicode handles and aliases. An
+      ordinary chat regression test must retain file completion, and the Pilot 1 E2E must reference a
+      Piece from the Director composer without exposing an internal ID.
+    - **Claimant:** Unclaimed.
 - [x] **[BUG-193][P2][Creative Studio] Review playback starts muted in every project, and the control that turns sound on reads as a status label rather than a button** — found 2026-08-30 by the owner, who reported the film had no audio
   - **Lane: Workspace UI.** `components/PlaybackAudio/index.tsx` and the `playbackAudio` locale block; the default lives in `hooks/useStudioPlaybackAudio.tsx`.
   - **Actual.** The owner played an 18-second film and heard nothing, and reasonably concluded the audio was missing. It was not: clicking the orange **Muted** in the transport flipped `video.muted` to `false` and the decoded-audio counter went from **3,986 to 71,406 bytes** during four seconds of playback. The sound was there the whole time.
@@ -1066,21 +1179,51 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **The consequence is spend, not just fidelity.** Choosing a bed, its level against the takes, and where the fade lands are all judgements about the finished film. Today the only way to hear any of them is to render — the reviewer approves audio decisions blind and finds out afterwards.
   - **Not currently reachable, which is why it is P2 and not higher.** No project on disk has a bed selected — `bedAssetId` is `null` on all eight — so nobody has hit this yet. It becomes a live defect the moment the first bed is imported.
   - **Related.** The exported-vs-previewed mismatch is the same family as the preview-fidelity items in **BUG-182** and **BUG-189**: the screen is not showing what the artefact will be.
-  - **CS4 triage: absorb into CS4** · **phase 6**. The measured surface (the Cut transport notice and CutPlayer) is deleted at cutover, but this is a behaviour gap, not view chrome: bedAssetId reaches filmExporter.ts and appears in zero playback files. Sound and the final video are explicitly phase 6 ('Film composition and later modalities'), and the commission asks for a sound block and a final-video block — so phase 6 will rebuild playback and must carry this rule or… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — sound, film preview and export.
+    - **Rationale:** The Cut player is removed, but review must still represent the audio bed that the
+      exported film will contain. Sound returns with Assembly and must use the same timing, gain and
+      end-of-cut rules in preview and export.
+    - **Acceptance evidence:** A deterministic media test must mix a known bed into both preview and
+      exported outputs and compare its start, duration, gain and fade against the persisted Assembly.
+      The Phase 6 E2E must hear the bed before export, allow an explicit mute that does not alter the
+      project, and reload with preview/export timing unchanged.
+    - **Claimant:** Unclaimed.
 - [ ] **[BUG-195][P3][Creative Studio] A Shot that already carries a bad poster has no way to get a good one** — split out of **BUG-182** on 2026-08-30 when the capture side was fixed
   - **Lane: Workspace UI**, with nothing needed from the service.
   - **Why it is separate.** `f63224449` stops a blank frame ever being persisted again, but says nothing about the five already on disk. Those Shots show a black preview in the Beat panel and on the Board tile, and it is also their `coverAssetId`, so the picture the Shot is known by is black.
   - **The main process would already accept a replacement.** `commitCapturedPosterV2` (`mediaStore.ts:4688-4721`) has no null precondition on the existing poster, unlike the provider-poster path at `:4241`. Only the renderer gate at `FirstFrames/index.tsx:397` — which shows the poster instead of the video once one exists — stops the product ever asking for a new capture.
   - **Which is why the fix is small but not free.** It needs a visible affordance and therefore new user-facing text in all twelve locales, plus a decision about whether recapture is manual or automatic when the stored poster is detected as flat.
   - **Not P2.** It affects five known Shots on one machine and has an operator workaround: delete the poster asset and reopen the Beat.
-  - **CS4 triage: absorb into CS4**. CLAIMANT: unclaimed. No claim/ownership marker appears anywhere in the BUG-195 entry (bug-list.md:1028-1035) or in its parent BUG-182 (:920-928). DISPOSITION: overturn superseded-by-cutover → **absorb**, destination **Phase 3** (hidden artifact/run storage and Main projection), with the affordance landing in Phase 5 and the video-poster instance re-landing in Phase 6. Note the entry's contract input is needed at \*\*Task… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — clip-block media recovery.
+    - **Rationale:** Removing the old viewer does not repair a persisted bad poster. The replacement
+      clip block needs a bounded recovery action that can publish a better poster while retaining the
+      prior asset and its provenance.
+    - **Acceptance evidence:** Focused service and UI tests must replace an existing poster after a
+      valid presented-frame capture, keep the old asset in lineage, select the replacement as current,
+      and survive reload. A failed or flat recapture must leave the current poster untouched, and the
+      recovery action and outcome must be present in all twelve locales.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-141][P2][Creative Studio] A detected variation grid is refused but still charged, and nothing breaks the loop — the user pays per rejection with no way out** — found 2026-08-27 on `Morning Post` (`2f363667…`), immediately after BUG-132's detection landed
   - **The detection itself is correct and is not the defect.** `studioImageHasVariationGridV2` (`mediaStore.ts:486-520`) does exactly what BUG-132's reopened fix direction asked: full-height seam separators **plus** a repeated-subject pass across thirds and quarters, cosine-similarity based, relative to the image's own adjacent-column baseline, with the repeated-layout pass opt-in so ordinary background repetition is not read as a character sheet. It caught a turnaround that the seam-only metric in the original entry provably missed. This entry is about what happens **after** it fires.
   - **Actual.** Generating the `The Postman` character reference produced a multi-panel grid. The panel refused it — _"The generated image contains a multi-panel variation grid and cannot be used as a current first frame or reference."_ — left the reference at `NO PHOTO` / `0 PHOTOS`, and re-enabled `Generate`. The job record shows the outcome:
-  - **CS4 triage: absorb into CS4** · **phase 4**. The References card that traps the user dies at cutover, but the paid-loop rule does not, and the shipped escape is hard-scoped to purpose 'reference*image' with a reference target and a two-generation quoted authorization (jobManager.ts:730-742) — none of which a CS4 standalone photo has, so phase 4's fake adapter must re-prove it on the photo capability. Entry looks stale: the auto-retry, the gate.referenceGridRetry cost… \_Stays open until its CS4 acceptance evidence passes.* Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 4 for backend containment; Phase 5 for the recovery UI.
+    - **Rationale:** The References card is removed, but a provider can still return a variation grid
+      for a paid standalone-photo request. CS4 must quarantine that invalid output, bound any retry to
+      the reviewed authorization and give the person a way to stop or choose a new quoted attempt.
+    - **Acceptance evidence:** A fake-adapter test must return a grid, prove it never becomes the
+      Piece's current asset, and prove no unquoted retry or duplicate authorization is created. Phase
+      5 UI tests must show the paid outcome, offer one bounded recovery path, and exit the loop after
+      cancellation, success or authorization exhaustion.
+    - **Claimant:** Unclaimed.
 
-        reference_image  failed  seed_still_variation_grid   spendReceipt: YES
+      reference_image failed seed_still_variation_grid spendReceipt: YES
 
     **The refused generation was billed.** That is defensible in isolation — the provider generated an image and charged for it; only the app declined to use it — but it means every rejection costs money.
 
@@ -1094,14 +1237,24 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
 - [ ] **[BUG-142][P2][Creative Studio] Every rendered Shot permanently claims `EDITED · NOT YET RUN`, because the composed prompt is compared against the Shot's script** — found 2026-08-27 driving the new Beat panel composer on a completed film
   - **Actual.** On `Light on Water` (`dc0168b3…`, 3/3 Shots rendered, 30s, nothing edited since it was authored), every rendered Shot card shows the **`EDITED · NOT YET RUN`** tag and offers a primary-weighted `Regenerate`. No prompt was ever edited on that project.
   - **Root cause, exact.** `workspaceProjection.ts:573-586`:
-  - **CS4 triage: absorb into CS4**. absorb, destination phase 5 (Canvas UI and Director integration), with a hard dependency that must land in phase 1 (versioned contracts). Their surface observation is right and their SURVIVING RULE note is right; the bin is wrong, and the bin is what decides whether the rule reaches anyone. 1. THE RATIONALE CONTRADICTS ITS OWN BIN. superseded-by-cutover means the entry stays open until the old surface is removed, and stops… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 3 — Main projections over recorded generation provenance.
+    - **Rationale:** The CS3 label is removed, but CS4 still needs to distinguish the output produced by
+      a recorded request from work edited afterward. That comparison belongs in Main and must use the
+      producing job's frozen prompt composition, never compare composed text with an authored script.
+    - **Acceptance evidence:** Projection tests must classify an unchanged generated Piece as current,
+      then classify it as edited only after an authored input changes. Reload and prompt-profile
+      changes must not alter the status of historical output, and the comparison must use the
+      producing job's stored composition and revision.
+    - **Claimant:** Unclaimed.
 
-        const currentPicturePrompt =
-          currentVideo === null
-            ? shot.shootingScript
-            : (producingJobForAsset(project, shot, currentVideo.id)?.composition?.prompt ?? shot.shootingScript);
-        …
-        promptChanged: currentPicturePrompt !== shot.shootingScript,
+      const currentPicturePrompt =
+      currentVideo === null
+      ? shot.shootingScript
+      : (producingJobForAsset(project, shot, currentVideo.id)?.composition?.prompt ?? shot.shootingScript);
+      …
+      promptChanged: currentPicturePrompt !== shot.shootingScript,
 
     `composition.prompt` is the **fully composed generation prompt** — brief, rules, instruction profile, the `OUTPUT` block and the shooting script combined. `shot.shootingScript` is the Shot's own text alone. The two are different kinds of string and can never be equal, so `promptChanged` is **structurally always true** the moment a Shot has a current video. Measured on a real job: composed prompt **911** characters, shooting script **251**, never equal.
 
@@ -1160,7 +1313,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Still required before this bug can close.** This checkpoint deliberately adds no binaries, packaging configuration, project-schema field or migration. Distribution still needs approved and pinned LGPL-compatible `ffmpeg`/`ffprobe` artifacts for every supported target, build-time integrity/provenance checks, packaged-layout and installed-app verification, macOS signing/notarization evidence, applicable notices and source/relinking obligations, and the separate H.264 legal decision. Until those exist, packaged installs still fall through to the user or system `PATH`.
   - **DEFERRED by the owner, 2026-08-28.** Not closed and not being worked. The remaining step is a distribution decision — approved and pinned LGPL binaries, plus the counsel sign-off on LGPL obligations — rather than engineering work, so it should not sit in the actionable P1 queue.
   - **State when it was parked, so nobody re-derives it.** The resolver is already bundle-ready: `ffmpegBinaries.ts:74` looks in `resourcesPath/bundled-ffmpeg/<platform>-<arch>` first, then `FFMPEG_PATH`/`FFPROBE_PATH`, then bare `PATH`. The packaging hook exists too — `packages/desktop/electron-builder.yml:107` already declares `extraResources`, and the project ships `bundled-aioncore/<platform>-<arch>` by exactly this pattern, so ffmpeg would follow a route that is already proven in the build. What is missing is binaries and the decision to ship them, not a mechanism.
-  - **CS4 triage: absorb into CS4** · **phase 6**. Pilot 1 has no video, film or sound and a photo export needs no encoder, so ffmpeg is off the pilot's critical path, while CS4 has already absorbed and widened this as owner decision 2 — the packaging call itself belongs to phase 1, the fix lands with video and film in phase 6. Partly stale: resolveStudioFfmpegBinaries now checks resources/bundled-ffmpeg/<platform>-<arch> before falling back to PATH and the… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — packaged film export.
+    - **Rationale:** Pilot 1 photo export needs no encoder. Film export returns in Phase 6, where the
+      application must own a legally distributable FFmpeg/FFprobe capability rather than rely on a
+      developer machine's `PATH`, and must distinguish unavailable from unsupported media.
+    - **Acceptance evidence:** Distribution evidence must record the chosen build, licence notices
+      and codec decision. A packaged-app E2E in an environment with no system FFmpeg must resolve the
+      bundled binaries and export a valid film; unavailable and unsupported-capability tests must
+      produce distinct, actionable messages without initiating spend.
+    - **Claimant:** Unclaimed.
 
 - [x] **[BUG-145][P2][Creative Studio] The film export dialog's checkbox renders on two rows, control above its own label** — found 2026-08-27 by the owner on first sight of the new dialog; **fixed the same day in `72084cc65`**
   - **Actual.** In `Export one film file`, the `Trim bounded quiet tails` checkbox rendered with the orange box on one row and its label stranded on the next. Measured live: the `<label class="arco-checkbox">` computed `display: grid`, height **42px**, box at `y=488` and text at `y=509`.
@@ -1337,7 +1500,18 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Why P2.** A whole Director turn's work — 36 edits, minutes of model time — is destroyed by ordinary use, with no error and no explanation. The user is not told the proposal is gone; the card simply is not there any more. Recovering needs `acceptProposal` over IPC, which no user has.
   - **Fix direction.** A pending proposal needs a surface that does not depend on its position in a scrolling conversation — a persistent pending-proposals affordance in the workspace, not only a chat card. Separately, allow the chat path to disambiguate (accept by id, or "accept the most recent") rather than refusing whenever more than one is pending, and surface a stale proposal explicitly with a re-propose action instead of silently dropping it.
   - **How it was found, and why it matters.** Every earlier session drove the engine over IPC and never saw this. It appeared on the first attempt to use the Director the way a pilot user will: ask in plain language, approve what it asks for, then try to accept what it proposed. The engine was fine throughout; the product path was not.
-  - **CS4 triage: absorb into CS4** · **phase 5**. CS4 gives the proposal exactly one home in the canvas UI — 'The proposal gets one home' in the design, and the commission asks the designer to draw the pending proposal in it — which is precisely this entry's fix direction, so it belongs to phase 5 and stays open until that acceptance evidence passes. Stale: 195c3e345 stopped the eviction (BUG-164 was filed while verifying it), a persistent DirectorProposals surface now… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — post-Pilot Director proposals and review.
+    - **Rationale:** Pilot 1 has no proposal-producing operation, so it must not carry an empty review
+      surface. When proposals return for later modalities, a pending proposal must remain discoverable
+      and decidable independently of later Director messages, while stale proposals receive a visible
+      re-proposal path rather than disappearing.
+    - **Acceptance evidence:** UI tests must create multiple later Director messages and show that the
+      pending proposal remains in its one review location with working accept and reject actions.
+      Stale and refused proposals must remain visible with bounded update or dismissal actions, and
+      reload must preserve the same catalogue and decision status.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-161][P2][Creative Studio] A refused Director proposal is reported as containing "an unsupported change", when nothing is unsupported and the real cause is explicable** — found 2026-08-27 driving the Director on `Plateau` (`748ae58b…`)
   - **Actual.** Asked to rewrite 36 existing shooting scripts, the Director proposed six `apply_coverage` operations, one per Beat. The card rendered **"This proposal contains an unsupported change and cannot be accepted."** with Accept disabled. `acceptProposal` returns `mutation_refused` / **`dependency_blocked`**, and `proposal.review` reports `status: 'unavailable'`, `reason: 'reducer_rejected'`.
@@ -1348,7 +1522,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
     2. **The Director cannot avoid choosing it.** It has no way to know a Shot counts as "fixed", so nothing stops it selecting an operation that is structurally incapable of satisfying the request. It had used `edit_shot` correctly on its own first attempt; a later turn regressed to `apply_coverage` and burned an entire turn.
   - **Fix direction.** Surface the reducer's actual refusal code and subject on the proposal card — "these Shots already have scripts; `apply_coverage` cannot replace them" — rather than "unsupported change". Separately, either expose fixed-ness to the Director so it can pick a viable operation, or reject `apply_coverage` at proposal time with a message the Director can act on and retry from.
   - **Reproduction.** On a project whose Shots all have shooting scripts, ask the Director to rewrite them. Observed on `Plateau`; the refused proposal is `c38f15f6`.
-  - **CS4 triage: absorb into CS4** · **phase 1**. Both halves are exactly the capability-contract lesson CS4 freezes in phase 1 ('a capability declares its inputs, its outputs, and what it records'), while the card it appears on survives into phase 5's single proposal home; apply*coverage over Beats and Shots is film composition, absent from Pilot 1, so nothing here blocks. Looks stale: proposals.refusal.applyCoverage now reads 'Coverage cannot replace these fixed Shots.… \_Stays open until its CS4 acceptance evidence passes.* Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — film capability contracts and proposal review.
+    - **Rationale:** The current refusal arises from Beat and Shot coverage operations, which do not
+      exist in Pilot 1. When film composition returns, the Director-visible capability and reducer
+      must agree on legal changes, and every refusal must expose its precise cause and remedy.
+    - **Acceptance evidence:** Capability tests must prove the Director cannot emit an operation that
+      its reducer rejects as unsupported. Dependency-blocked fixtures must identify the fixed Shots,
+      explain why replacement is refused and name the legal edit path; the proposal UI and Director
+      transcript must preserve that same reason after reload.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-162][P3][Creative Studio] The Director reports "All done — everything went through as planned" when it has done nothing of the kind** — found 2026-08-27 across four Director turns on `Plateau`
   - **Actual.** The literal string _"All done — everything went through as planned. Tell me what you'd like to do next."_ was emitted at the end of turns where:
@@ -1358,7 +1542,18 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Why it matters.** The message is the Director's turn-completion summary, so it is the main signal a user has that a turn achieved something. Asserting success while work is pending approval, impossible, or refused trains the user to distrust it, and hides the cases where they genuinely must act — approve a spend gate, accept a proposal, or re-ask.
   - **Note the contrast.** The Director's _structural_ behaviour was correct throughout: it stopped at every spend gate, refused to bind before approval, and respected the operation cap. Only the prose overclaims. This is a summary-generation problem, not a capability one.
   - **Fix direction.** The completion line should be derived from what actually committed in the turn — operations applied, proposals created and their review status, requests awaiting the user — rather than asserted. When a turn ends with the user owing an action, say which action.
-  - **CS4 triage: fix before CS4**. The entry misattributes this to Director prose: the sentence is app chrome from buildTurnClose.ts in the shared conversation renderer (rendered into the Director rail via the shared MessageList), and buildTurnWorkRecap derives its status purely from tool-call transport outcomes — completed/error/canceled — so a proposal the reducer later refused and a generation merely queued for spend approval both count as 'completed'.… _Blocks the CS4 base; stays open until fixed._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Fix before CS4.
+    - **Destination:** Prerequisite tranche before Phase 1.
+    - **Rationale:** The shared turn recap treats transport completion as domain success. CS4 relies on
+      the retained Director rail for capability outcomes, so building on this false success signal
+      would make waiting authorizations look complete in Pilot 1 and refused proposals look complete
+      in retained/shared Director flows.
+    - **Acceptance evidence:** Focused recap tests must cover an accepted proposal, a reducer-refused
+      proposal, a generation waiting for authorization, a failed tool and a cancelled tool. Only the
+      accepted domain outcome may produce the all-done recap; every other case must state its actual
+      status and next action.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-163][P2][Creative Studio] A Director conversation interrupted by an app restart never recovers, and the Retry button that promises to recover it does nothing** — found 2026-08-28 verifying `44cb0a16c` against pre-existing projects
   - **Actual.** After the app was killed mid-session, three existing projects show the Director rail in an error state: _"Director setup was interrupted before the conversation could be attached to this project. Creative Studio could not complete the Director attachment. **Retry to recover it safely.**"_ Clicking **Retry** changes nothing — polled for **two minutes**, the rail never gains a composer. The state **survives a full application restart**. `Retry` is the **only** affordance rendered; no start-fresh, no detach, no way to rebind.
@@ -1374,7 +1569,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Implemented 2026-08-30 — ignore the PATCH echo, not the proof.** A thrown PATCH still fails. Any resolved PATCH proceeds to a separate exact GET, and the rail attaches only after that record proves the conversation id, MCP snapshot, persisted project authority and current rules profile. The existing conversation and its history remain intact; no replacement conversation is created or rebound. The per-project/conversation/profile attempt cache still bounds automatic retries, while the explicit Retry button grants one new attempt.
   - **Focused evidence.** Tests cover the live full-record echo, an empty successful response, a thrown write, exact readback, explicit Retry without create/rebind, and repeated history refreshes without a write loop. The same repair was previously verified live on `Panel Check` before the owner reverted the wider tranche; a current-head live restart/recovery pass remains before this entry is closed again.
   - **Separate platform follow-on.** The shared `conversation.update` bridge is still globally declared `Promise<boolean>` although successful writes can return a record or no body. This Director path is safe because it distrusts the echo and re-reads; other callers that branch on the declared boolean need a separate endpoint-contract audit rather than a broad change hidden inside this repair.
-  - **CS4 triage: fix before CS4**. CS4 explicitly keeps the Director rail and its conversation binding unchanged, and the cutover itself must rewrite `DIRECTOR_PRESET_RULES` (the canvas invalidates the shipped surface map), which drives exactly this stale-rules repair path across every existing conversation — so a broken repair becomes a cutover-wide failure. The fix is already implemented (2026-08-30) and only owes a live kill-and-reopen pass; that pass… _Blocks the CS4 base; stays open until fixed._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Fix before CS4.
+    - **Destination:** Prerequisite tranche before Phase 1.
+    - **Rationale:** CS4 retains Director conversations and must change their preset rules, forcing the
+      same interrupted-attach recovery path. The existing code fix is not complete until the promised
+      restart behavior is verified live and the retry copy matches what the control can do.
+    - **Acceptance evidence:** Kill the app during Director attachment, reopen the same project, and
+      verify one bounded automatic recovery followed by a working manual retry if needed. The
+      conversation must retain its history and accept a new turn; an irrecoverable fixture must stop
+      retrying and offer truthful start-new-conversation copy. Record the live run in this entry.
+    - **Claimant:** Unclaimed.
 
 - [x] **[BUG-164][P3][Creative Studio] Undecidable Director proposals accumulate forever in the new proposal surface, and the only way to clear one is to reject it individually** — found 2026-08-28 verifying BUG-160's fix (`195c3e345`) on `Plateau`
   - **Resolved 2026-08-28.** One terminal proposal remains visible for immediate recovery; an accumulation of two or more verified stale or reducer-refused proposals collapses into one counted disclosure. Expanding it preserves each exact proposal, its refusal/staleness evidence, **Prepare updated proposal**, and individual Reject. Refreshing, unverified, and in-flight proposals never enter the collapsed group, and no proposal is automatically rejected or discarded.
@@ -1399,7 +1604,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
 
 - [ ] **[BUG-165][P1][Creative Studio] Chained video generation — the continuity chain, the product's central mechanism — succeeds only about a third of the time; prompt authoring lacked sight of the inherited frame** — found 2026-08-28 investigating a shot that "keeps failing" on `Plateau`
   - **Measured over 84 real generation attempts on one 36-shot film:**
-  - **CS4 triage: absorb into CS4**. CLAIMANT: unclaimed. Lines 1350-1394 of docs/prds/creative-studio/creative-studio-3-bug-list.md contain no line naming who took the entry (the doc's own convention, stated at line 57, is "claim the entry, not the file... one line in the work item naming who took it and when"). The two "claim" hits inside the entry are prose ("before claiming this slice works", "an earlier note here claimed"), not ownership. DISPOSITION:… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — continuity-aware film generation.
+    - **Rationale:** Chained video and inherited frames are outside the one-photo pilot but remain a
+      core film rule. Phase 6 must give the Director the exact reviewed predecessor frame and preserve
+      its selection in the quoted request rather than relying on prompt-only repair.
+    - **Acceptance evidence:** A trim-aware fake-adapter scenario must extract the predecessor's
+      reviewed terminal frame, expose it to Director troubleshooting, freeze its asset ID and hash in
+      the quote, and dispatch exactly that frame after revalidation. Cancellation, retry and reload
+      tests must never substitute an unquoted frame; the film E2E must complete a multi-Shot chain.
+    - **Claimant:** Unclaimed.
 
     | path                                                          | attempts | succeeded | rate    |
     | ------------------------------------------------------------- | -------- | --------- | ------- |
@@ -1449,14 +1664,34 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Third dead-binding of this shape.** The declaration exists end to end — wire name, provider, payload schema — with no caller. Compare `retryJobDownload`, which looked identical until a grep on the correct identifier found its three callers; this one has none under any spelling.
   - **Why it matters more on the Board than it did before.** The Table showed one panel per Beat, so a missing picture was a gap. The Board is _thirty-six_ tiles whose entire purpose is to let the user see the film arriving; without pictures it is a status list with large empty rectangles. The design's own rule — "the panel column reports the state of the film without a status column: a drawing means not shot yet, a frame means shot" — cannot function at all.
   - **Fix direction.** Decide who captures the poster and when. The likely intent is a renderer canvas-capture at first playback, which would mean a Shot only gains a picture once someone plays it — acceptable for the Cut, useless for a monitor. A monitor wants the frame extracted at render time, and the chain already extracts a last frame per Shot (`frameExtractions`), so a first-frame extraction on the same path is the cheap option.
-  - **CS4 triage: absorb into CS4** · **phase 6**. The Board tile dies at cutover, but the underlying requirement returns unchanged the moment CS4 draws a clip block, so phase 6 (film composition and later modalities) inherits it rather than closing it. STALE in its central claim: `creative-studio.persist-captured-poster` no longer has zero call sites — `FirstFrames/index.tsx:245-248` captures and persists through `StudioPage.tsx:1854`, and BUG-182 records real posters… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — generated clip blocks and poster projection.
+    - **Rationale:** The old Board tile is deleted, but every clip block still needs a stable preview.
+      CS4 must project a valid current poster when available and fall back to playable footage when it
+      is not, using Main-owned media rather than view-local capture state.
+    - **Acceptance evidence:** A video-generation integration test must publish a poster or the video
+      fallback, project it onto the corresponding clip block, and retain it after reload. Fixtures
+      with no poster, a rejected flat poster and a superseded poster must each select the correct
+      preview without displaying an empty tile.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-167][P3][Creative Studio] Every Board tile claims its blocker details are unavailable for about a minute after the view opens** — found 2026-08-28 alongside BUG-166
   - **Actual.** On opening the Board, all 36 tiles render _"Blocker details are unavailable for this project revision."_ — including `RENDERED` Shots with no blockers at all. Measured after a reload: the message was on **36 of 36** tiles continuously for **56 seconds** before any tile showed real blocker content.
   - **Root cause.** `boardShotTiles.ts:236` sets `blockersAvailable: status !== null`, and `projectStatus` starts as `null` in `useStudioProject.ts:295` until its fetch resolves. `Board/index.tsx:221` renders the unavailable copy whenever the flag is false, so the empty initial state and a genuine per-revision mismatch are indistinguishable.
   - **The data is fine.** Invoked directly, `getProjectStatus` returns a complete object whose `projectRevision` **matches** the project's current revision exactly (1215 = 1215), with `blockerCount: 1` and all six stages. The wiring is also correct — `BoardView` accepts `projectStatus` and passes it to `deriveBoardShotTiles` at `Board/index.tsx:292`. Nothing is broken except what the user is told during the wait.
   - **Fix direction.** Distinguish "not loaded yet" from "unavailable for this revision". A loading state should be quiet — no copy at all, or a skeleton — and the alarming sentence reserved for the case it actually describes. Note the message names a revision mismatch that, in the observed case, was not occurring.
-  - **CS4 triage: absorb into CS4**. CLAIMANT: **unclaimed** — no claim line anywhere in the BUG-167 entry (`docs/prds/creative-studio/creative-studio-3-bug-list.md:1402-1406`). **Corrected disposition: absorb → phase 5 (Canvas UI and Director integration).** Not superseded-by-cutover, and emphatically not closeable now. **1. The premise is factually wrong: the defect did not live only in a surface CS4 deletes.** It also lived in the app bar, and… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 5 — capability status in the canvas shell.
+    - **Rationale:** CS4 removes Board tiles but still loads Main-owned capability state
+      asynchronously. An initial or refreshing projection is not an unavailable capability, and the
+      canvas must keep last-known good status while a refresh is in flight.
+    - **Acceptance evidence:** Projection and UI tests must distinguish uninitialised, refreshing and
+      unavailable states; refreshing must retain the previous status and must never render blocker
+      copy. A cold Pilot 1 E2E must show a neutral loading state and transition once to the resolved
+      capability without flashing “unavailable”.
+    - **Claimant:** Unclaimed.
 
 - [x] **[BUG-168][P1][Creative Studio] The Director rail retries its attach in an unbounded loop, rewriting a 7.6 KB payload ~25 times a second** — found 2026-08-28 by the owner ("the director rail keeps fluttering") on `Plateau`
   - **Actual.** The rail visibly flickers because it alternates between two states several times a second — _"Starting the Creative Director…"_ and _"Director setup was interrupted before the conversation could be attached to this project. Retry to recover it safely."_ Sampled 30 times at 350 ms, only those two states ever appear. It is not a rendering glitch; it is the attach being retried forever.
@@ -1494,7 +1729,17 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Fix direction.** One surface per view, not two. Either the outer wrapper keeps the border and the inner card loses it, or the inner card is the only surface and the outer becomes a plain layout container. The view's name should appear once — and given the chips already name it, the stronger option is for the card to carry its own working title (_"Story authoring and recovery"_, _"Canonical images"_) and drop the echo of the view name entirely.
   - **Confirmed on the Board too (2026-08-28).** `<h2>Board</h2>` at **21.75px/700** sits directly above `<h2>Beat board</h2>` at **20px/700** — two headings of nearly the same size and identical weight, stacked, saying the same thing. Cut still needs checking.
   - **The measurement exposes an inverted type hierarchy, which is the deeper problem.** The project title is `<h1>Plateau</h1>` at **14.5px**, while both of these `<h2>`s render at 20-21.75px. The page's most important label is its smallest, and the least informative labels are its largest. Fixing the duplication without fixing the scale would leave a single heading that is still louder than the project it belongs to.
-  - **CS4 triage: absorb into CS4**. **Disposition: absorb — destination phase 5 (Canvas UI and Director integration). Not superseded-by-cutover. CLAIMANT: unclaimed.** BUG-171 is at `docs/prds/creative-studio/creative-studio-3-bug-list.md:1438-1443`. There is no claim line on it, and the CS4 design's own convention ("Claim the entry, not the file. One line in the work item naming who took it and when") makes its absence meaningful: nobody has taken it. \*\*1.… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 5 — canvas information hierarchy.
+    - **Rationale:** The four nested CS3 view cards are deleted, but redundant container labels and an
+      inverted title hierarchy would be equally harmful on the new canvas. Pilot 1 should establish
+      one workspace surface and make project and Piece content more prominent than navigation chrome.
+    - **Acceptance evidence:** DOM tests must find one main canvas landmark, one project heading and no
+      wrapper heading that repeats the selected workspace. Responsive visual evidence at wide and
+      narrow widths, including RTL, must show the project and Piece titles above navigation chrome in
+      the semantic and visual hierarchy.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-172][P2][Creative Studio] The canonical reference image — the one thing the References view exists to show — is clipped to a third of itself, while the thumbnails are too small to judge** — found 2026-08-28 by the owner on `Plateau`
   - **Actual, measured live.** The hero image for KAEL is a **1376×768** asset rendered into an `<img>` box of **866×484** inside a container of **868×157**. `.pictureBand` sets `overflow: hidden`, so **327px — 67% of the rendered image — is clipped**. On a full-body character sheet the visible third is head and chest; the legs, footwear and full silhouette are cut off, and the thumbnail beside it shows a complete standing figure that the hero never displays.
@@ -1502,45 +1747,113 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **The thumbnails are the opposite problem.** `.take img` (`:453-458`) is **54×38** with `object-fit: cover`. That is a ~25× downscale from 1376px wide, cropped on top of it. At that size two takes of the same character are indistinguishable, which defeats the choice the strip exists to support — picking which image becomes canonical.
   - **Why P2.** A reference image is the product's mechanism for character consistency; every Shot is bound to it. If the owner cannot see the whole reference, they cannot tell whether the character is right, and the binding they approve is one they have not fully seen.
   - **Fix direction.** Let the band take the image's aspect rather than a fixed 156px — the assets are a known 16:9, so an `aspect-ratio` on the band would show the whole frame with no clipping and no letterboxing. If a fixed height must stay, constrain the image with `max-block-size: 100%` so `contain` can do its job. Separately, give the take strip enough size to compare two images; 54px is below the threshold where a full-body figure carries any detail.
-  - **CS4 triage: absorb into CS4**. **CLAIMANT: unclaimed.** No line in BUG-172's bullets names anyone taking it (the file's own convention, stated at `docs/prds/creative-studio/creative-studio-3-bug-list.md:57-62`, is "claim the entry, not the file" — one line naming who took it and when). Grepping the whole bug list for claim/claimant/taken-by returns no such line under this entry. **Not stale.** Filed 2026-08-28, two days old, and every measured fact… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — reference media on Assembly and film blocks.
+    - **Rationale:** The CS3 References view is removed, but film work still requires people to judge
+      canonical references and their candidates. Phase 6 must display the entire persisted frame at
+      a useful comparison size instead of inheriting fixed-height cropping.
+    - **Acceptance evidence:** Reference-block DOM and visual tests must show a complete 16:9 canonical
+      image with no clipped pixels and candidates large enough to distinguish at supported desktop
+      widths. The same assertions must pass at the narrow breakpoint and in RTL, and selecting a
+      candidate must not change its fitted geometry.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-173][P2][Creative Studio] Shot sub-rows are not indented under their Beat, so the Table's two levels are visually indistinguishable** — found 2026-08-28 by the owner on the new Table planning view
   - **Actual, measured live.** With Beat 1 expanded, its six Shot rows and the Beat rows above and below all report the **same** first-cell left edge (`344px`) and the **same** `padding-left` (`12px`). There is no indent, no rule, and no gutter separating a Shot from a Beat.
   - **It is worse than a missing indent, because the numbering collides.** Beats number `01, 02, 03…` and Shots restart at `01, 02, 03…` within each Beat. With identical alignment, the expanded table reads `01 Arrival` / `01 CHAIN HEAD` / `02 ← SHOT 1` / … / `02 First clash` — two different `01`s and two different `02`s at the same indentation, one a Beat and one a Shot. The only cue that a row is a Shot is the content of its second column.
   - **Why it matters now.** Slice 2 added these sub-rows precisely so the story can be planned in the Table. Structure is the thing the owner is reading for, and structure is what the flat alignment hides.
   - **Fix direction.** Indent the Shot rows' first cell so the hierarchy is visible without reading the text, and consider carrying the Beat number into the Shot position (`1.1`, `1.2`) the way the Board tiles already do — the Board renders `2.2` for Beat 2 Shot 2, so the vocabulary already exists and the two views would agree.
-  - **CS4 triage: superseded by cutover**. The whole defect is first-cell alignment inside the Table, one of the four views CS4 deletes; nothing about the store, spend, chain or provenance is implicated. Stale in one material way: the entry records no attempt, but a fix landed 2026-08-29 in fd22905e9 (indent plus a 46px→78px position column so '1.1' fits) and was undone by the 2026-08-30 revert a8fa12c5b — HEAD's Table.module.css `.shotRow .shotCell` again carries… _Stays open until the old surface is actually removed — this is not a closure._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Superseded by cutover.
+    - **Destination:** Phase 5 — removal of the CS3 Table surface.
+    - **Rationale:** The defect is solely the alignment of Beat and Shot rows in the Table. It carries
+      no surviving store, spend, provenance or interaction rule, and CS4 does not present film
+      hierarchy in that table.
+    - **Acceptance evidence:** The Phase 5 source audit and renderer navigation test must prove that
+      the Table route, view switch entry, row renderer and stylesheet are absent from the shipped
+      Creative Studio surface. The bug stays open until that cutover evidence passes.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-174][P3][Creative Studio] The Table's per-row move controls should be removed** — found 2026-08-28, requested by the owner
   - **Actual.** Every Beat row carries three controls in the `#` column — a drag handle plus two arrows — labelled _"Reorder Arrival at position 1"_, _"Move 1. Arrival earlier"_ and _"Move 1. Arrival later"_. Counted live on a six-Beat project: **28 move buttons** in the view. They occupy the full height of the `#` column and are the most visually prominent thing in the leftmost column, competing with the position number itself.
   - **Why remove rather than restyle.** Reordering is not how this product is meant to be driven: the Director owns structure, and `reorder_beats` / `reorder_shots` are `direct` operations it can perform on request. Three permanent controls per row spend the Table's scarcest column on an action that is rare and available by asking.
   - **Scope note — remove the controls, not the capability.** The underlying reorder operations stay; this is about the row chrome. Removing the buttons must not remove the only keyboard path to reordering if one exists, so check whether these are the sole accessible route before deleting them — if they are, the replacement needs to be reachable too, not merely absent.
-  - **CS4 triage: absorb into CS4**. CLAIMANT: **unclaimed**. The entry (bug-list lines 1458-1462) has no claim line, no `Lane:` line, and no owner. Entries before BUG-179 carry no lane line by policy. **Disposition: absorb into phase 5 (Canvas UI and Director integration), re-checked at phase 6. Not superseded-by-cutover.** I agree with the narrow half of their rationale — the 28 buttons render in `Table/index.tsx` inside `WorkspaceControls`'s `<main>` (the… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — Assembly and film-structure interaction.
+    - **Rationale:** The Table's 28 controls disappear at cutover, but film structure will return as
+      Assembly blocks. Reordering remains a Director-owned capability and must not reappear as
+      permanent per-row chrome; any human alternative must remain keyboard accessible.
+    - **Acceptance evidence:** Phase 6 DOM tests must find no always-visible move controls on every
+      Beat or Shot block, while Director reorder tests preserve the typed operation and deterministic
+      result. Keyboard and screen-reader evidence must cover the bounded human reorder path, if one is
+      exposed, without removing the Director capability.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-175][P3][Creative Studio] The Beat's name is the smallest text on the Board, smaller than every label around it** — found 2026-08-28 by the owner on `Plateau`
   - **Actual, measured live.** The Beat name _"Arrival"_ renders as a `<span>` at **13px/600**. Around it: `Beat board` at 20px/700, `Board` at 21.75px/700, and even the project title `Plateau` at 14.5px. The Beat's own name — the only text on the card that identifies which part of the film this is — is smaller than all of them.
   - **Why it is the wrong way round.** `Board` and `Beat board` are chrome; they say what screen you are on, which the view chips already say. `Arrival` is content. The card is a Beat, so its name is the thing a reader scans for when finding a place in a 6-Beat, 35-Shot film, and it is currently set below body size while two redundant headings above it are set at 20px+.
   - **Fix direction.** Promote the Beat name to the card's dominant label and demote the section headings, which **BUG-171** proposes removing outright. The two are best fixed together: deleting the duplicate heading frees exactly the visual weight the Beat name needs.
-  - **CS4 triage: absorb into CS4**. CLAIMANT: **unclaimed.** No claim line on the entry (bug list lines 1463-1466), and no `Lane:` line — consistent with the file's own note that entries before BUG-179 have none. There is no `CLAIMANT`/`Claimed`/`Taken by` string anywhere in `docs/prds/creative-studio/creative-studio-3-bug-list.md`. \*\*Verdict: the disposition label is wrong. It should be `absorb` → phase 5 (Canvas UI and Director integration), not… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — Beat and Assembly block hierarchy.
+    - **Rationale:** The Board is removed, but film blocks still need content-first hierarchy. A Beat's
+      authored name must remain the dominant label, with generic section chrome demoted or omitted.
+    - **Acceptance evidence:** Semantic and visual tests must make each Beat name the block heading and
+      give it greater prominence than generic film or section labels. A multi-Beat responsive
+      screenshot must demonstrate that Beats can be scanned by name at wide, narrow and RTL layouts
+      without duplicated headings.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-176][P2][Creative Studio] Only an 19px-tall strip of the Beat card opens the Beat — the card itself is not clickable** — found 2026-08-28 by the owner on `Plateau`
   - **Actual, measured live.** The only interactive element in the Beat header is an Arco text `<button>` of **712×19px** wrapping the name. The Beat card is a large panel — header, description, shot counts, and a row of Shot tiles — and none of it responds; the owner must hit a 19-pixel-tall band to open the Beat.
   - **Why P2.** This is the Board's primary navigation. Every Beat is entered through it, and a 19px target is below any reasonable pointer-accuracy threshold — the WCAG target-size guidance is 24px as an absolute floor, and this is a target people hit repeatedly rather than once. It reads as a broken card: the whole panel looks interactive, so clicks land on it and nothing happens.
   - **Fix direction.** Make the card the target. Keep one accessible control as the semantic handle — a card-filling `<button>`, or the existing button stretched over the card via a `::after` overlay so the accessible name stays on the name element — and leave the interior Shot tiles and action buttons as their own targets above it. Do not simply attach an `onClick` to the container: that would leave the card unreachable by keyboard, which the current button at least supports.
-  - **CS4 triage: fix before CS4**. CLAIMANT: **unclaimed.** No claim line on the entry and no `Lane:` line (the list's convention is that entries before BUG-179 carry none). Nobody has taken it, so a "stop work" ruling here is unopposed and permanent. ## What the entry says, and what HEAD actually does Entry at `docs/prds/creative-studio/creative-studio-3-bug-list.md:1468-1471`, P2, found 2026-08-28 by the owner on `Plateau`. Three bullets: the measurement… _Blocks the CS4 base; stays open until fixed._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — Beat and Assembly block navigation.
+    - **Rationale:** The inaccessible CS3 card is deleted before Pilot 1, so it does not block CS4.
+      When Beats return, the replacement block must make its apparent card target real without
+      swallowing nested Shot or action controls.
+    - **Acceptance evidence:** Pointer tests must open a Beat from the card body with a target of at
+      least 24 by 24 CSS pixels; keyboard tests must open it with Enter and Space from one correctly
+      named control. Nested Shot and action controls must perform only their own actions, and the
+      accessibility tree must contain no duplicate card links.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-177][P3][Creative Studio] The first-frame viewer opens as a modal on top of the Beat panel, stacking two scrims and two close affordances** — found 2026-08-28 by the owner
   - **Actual.** Opening a frame from the Beat panel renders an Arco `Modal` (`BeatPanel/FirstFrames/index.tsx:456`) over the already-open Beat panel. The result is two dimmed layers: the Beat panel is visible but greyed behind the viewer, its heading (`BEAT 1 · Arrival`), its `Play` button and its Shot rows all half-legible at the edges of the screen and none of them reachable. The owner's description was _"pop up over pop up"_.
   - **Why it reads as broken rather than layered.** Everything behind the viewer stays visible enough to look interactive but is inert, and there are two exits — the viewer's `×` and the Beat panel's own dismissal — with no indication which one the Escape key will take. The content behind is also mostly dead space: the viewer is centred and the Beat panel shows through as fragments down both sides.
   - **Fix direction.** The frame viewer is a detail of the Beat, not a separate context, so it wants to open **within** the Beat panel rather than over it — replacing the panel's content with a back affordance, or expanding in place. If it must stay a modal, it should cover the panel completely rather than leaving a half-lit frame around it, and only one scrim should be painted.
-  - **CS4 triage: absorb into CS4**. CLAIMANT: unclaimed. The file's protocol (bug list lines 55-65) says a claim is "one line naming who is taking it and when"; `grep -nE "Taken|taking it|in progress by"` over `/Users/lap16603/Projects/WePrompt/.worktrees/cs2-table-board-ui-design/docs/prds/creative-studio/creative-studio-3-bug-list.md` returns only the protocol sentence itself. No entry in the file is claimed. DISAGREE — the disposition should be \*\*absorb,… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 6 — first-frame detail inside film blocks.
+    - **Rationale:** Both CS3 layers are removed, but first-frame inspection returns with film. The new
+      detail experience must have one navigation context, one scrim at most and an unambiguous back or
+      close action rather than stacking a viewer modal over a panel.
+    - **Acceptance evidence:** UI tests must open frame detail from a Beat, assert that no second modal
+      or scrim is mounted, and return to the same Beat and focus origin with Escape and the visible back
+      control. A browser screenshot must show no inert, half-visible panel controls behind the detail
+      surface.
+    - **Claimant:** Unclaimed.
 
 - [ ] **[BUG-178][P2][Creative Studio] The same fixed-height-plus-`cover` pattern clips images in a third place, and it is now a systemic layout bug rather than three separate ones** — found 2026-08-28 by the owner on the Shot's frame tiles
   - **Actual.** The `Start` tile in a Shot's FRAMES row shows only the upper band of the frame; the same image rendered beside it under `CURRENT PICTURE` shows the whole thing. `FirstFrames.module.css` fixes `block-size: 74px` with `overflow: hidden` (`:107-109`) and `object-fit: cover` (`:121`), so a 16:9 frame is cropped to a letterbox strip.
   - **This is the third instance of one pattern.** **BUG-172** records the same thing twice over in References — the canonical image clipped to 33% of itself in a 157px band, and the 54×38 take thumbnails cropped by `cover`. Here it is again in a different component. In every case a fixed `block-size` is combined with `object-fit: cover` or an unconstrained image, and `overflow: hidden` removes whatever does not fit.
   - **Why it matters more than a crop.** All three surfaces exist so the owner can _judge an image_ — is this the right character, is this the right first frame, is this the frame the next Shot should continue from. Cropping is the one transformation that defeats that purpose, and it is being applied by default to every image in the product.
   - **Fix direction.** Treat this as one fix, not three. Studio's generated assets are a known 16:9, so image containers should carry `aspect-ratio: 16 / 9` and let width drive height, with `object-fit: contain` as the default and `cover` reserved for places where a deliberate crop is wanted (there may be none). A shared image-frame component would stop the pattern recurring in the next surface. See **BUG-172**.
-  - **CS4 triage: absorb into CS4** · **phase 5**. The three filed instances all sit in deleted views, but the pattern is systemic and CS4's canvas is image-first — a Pilot 1 photo delivered in a block that crops it fails the pilot's whole point — so the shared image-frame component is canvas work (phase 5), not a CS3 patch. The entry's own diagnosis is wrong and must not be inherited: 9231b0545 proved `cover`→`contain` fixes nothing where a cyclic grid row with… _Stays open until its CS4 acceptance evidence passes._ Claimant: unclaimed.
+  - **CS4 triage**
+    - **Disposition:** Absorb into CS4.
+    - **Destination:** Phase 5 — shared Pilot 1 media-frame component.
+    - **Rationale:** The three reported CS3 instances are removed, but default cropping would defeat an
+      image-first Pilot 1. The canvas needs one aspect-driven frame primitive whose container geometry
+      and image fit together, rather than a fixed-height band with hidden overflow.
+    - **Acceptance evidence:** Component geometry tests and browser screenshots must show the complete
+      generated or imported photo at every supported canvas width, including portrait and landscape
+      request ratios and RTL. No judgement surface may use deliberate cropping unless its contract
+      names that crop, and the Pilot 1 E2E must compare the displayed image with the persisted asset.
+    - **Claimant:** Unclaimed.
 
 ### Verified live 2026-08-25 — schema-v5 real-model run
 
