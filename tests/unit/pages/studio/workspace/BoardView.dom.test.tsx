@@ -708,7 +708,8 @@ describe('BoardView', () => {
     const boardVideo = secondTile.querySelector<HTMLVideoElement>('video')!;
     expect(boardVideo).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_second');
     expect(boardVideo).toHaveProperty('controls', true);
-    expect(boardVideo).toHaveProperty('muted', true);
+    // Audible by default, like every other review surface. See DEFAULT_STUDIO_PLAYBACK_AUDIO.
+    expect(boardVideo).toHaveProperty('muted', false);
     expect(boardVideo).toHaveProperty('autoplay', false);
     expect(thirdTile.querySelector('img')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/cover_third');
     expect(fourthTile.querySelector('[data-media-kind="unavailable"]')).toHaveTextContent('Preview unavailable');
