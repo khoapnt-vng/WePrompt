@@ -11,6 +11,8 @@ import KbStaleChatHint from '@/renderer/pages/conversation/knowledge/KbStaleChat
 import { CHAT_SURFACE_CONTAINER_CLASS } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
 import FlexFullContainer from '@renderer/components/layout/FlexFullContainer';
 import MessageList, { type MessageListInlineItem } from '@renderer/pages/conversation/Messages/MessageList';
+import { ToolOutcomeInterpreterProvider } from '@renderer/pages/conversation/Messages/components/MessageToolGroupSummary';
+import type { ToolOutcomeInterpreter } from '@renderer/pages/conversation/Messages/components/toolActivity/buildTurnClose';
 import { ConversationArtifactProvider } from '@renderer/pages/conversation/Messages/artifacts';
 import {
   MessageListLoadingProvider,
@@ -48,6 +50,8 @@ const AionrsChat: React.FC<{
   session_mcp_servers?: ISessionMcpServer[];
   /** Optional human-submit interception. Assistant output never enters this path. */
   beforeSend?: AionrsBeforeSend;
+  /** Optional domain interpretation for a trusted embedded chat surface. */
+  toolOutcomeInterpreter?: ToolOutcomeInterpreter;
 }> = ({
   conversation_id,
   conversation,
@@ -68,6 +72,7 @@ const AionrsChat: React.FC<{
   project_id,
   session_mcp_servers,
   beforeSend,
+  toolOutcomeInterpreter,
 }) => {
   useMessageLstCache(conversation_id);
   usePendingConfirmationsRecovery(conversation_id);
@@ -103,7 +108,13 @@ const AionrsChat: React.FC<{
       <ConversationArtifactProvider conversation_id={conversation_id}>
         <div className={`${CHAT_SURFACE_CONTAINER_CLASS} flex-1 flex flex-col px-20px min-h-0`}>
           <FlexFullContainer>
-            <MessageList className='flex-1' emptySlot={emptySlot} inlineItems={inlineItems} />
+            {toolOutcomeInterpreter === undefined ? (
+              <MessageList className='flex-1' emptySlot={emptySlot} inlineItems={inlineItems} />
+            ) : (
+              <ToolOutcomeInterpreterProvider value={toolOutcomeInterpreter}>
+                <MessageList className='flex-1' emptySlot={emptySlot} inlineItems={inlineItems} />
+              </ToolOutcomeInterpreterProvider>
+            )}
           </FlexFullContainer>
           <KbStaleChatHint
             conversationId={conversation_id}

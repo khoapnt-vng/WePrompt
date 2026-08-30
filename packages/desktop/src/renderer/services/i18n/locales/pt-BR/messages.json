@@ -144,6 +144,21 @@
       }
     },
     "close": {
+      "studio": {
+        "committed": "A alteração do Studio foi aplicada.",
+        "pendingReview": "A proposta aguarda sua revisão. Aceite-a ou peça ao Director para revisá-la.",
+        "waitingAuthorization": "A geração não começou. Revise a solicitação pendente; qualquer trabalho pago ainda requer sua autorização.",
+        "actionRequired": "O Studio tem propostas ou solicitações de geração que ainda precisam da sua revisão ou autorização. Revise cada item pendente antes de continuar.",
+        "mixedAttention": "Parte do trabalho do Studio falhou, foi interrompida ou não pôde ser confirmada, e o trabalho pendente ainda precisa da sua revisão ou autorização. Revise cada item pendente e os detalhes da ferramenta antes de continuar.",
+        "needsRevision": "A proposta está desatualizada e não pode ser aceita. Peça ao Director para revisá-la com base no projeto atual.",
+        "refused": "A alteração do Studio foi recusada e nada foi aplicado. Revise o motivo e peça ao Director para ajustá-la.",
+        "failed": "A ação do Studio falhou. Revise o erro e o estado atual do Studio antes de tentar novamente.",
+        "canceled": "A ação do Studio foi cancelada. Revise o estado atual do Studio antes de decidir se deve iniciá-la novamente.",
+        "unconfirmed": "O resultado do Studio não foi confirmado. Não tente a ação novamente; peça ao Director para verificar o status do comando.",
+        "indeterminate": "O resultado do Studio é terminal, mas indeterminado. Não tente a ação novamente; revise o estado atual do Studio e os detalhes do comando.",
+        "observed": "A verificação do Studio terminou. Nenhuma alteração do projeto foi aplicada.",
+        "unknown": "Não foi possível interpretar o resultado do Studio. Não tente a ação novamente; revise os detalhes da ferramenta e o estado atual do Studio."
+      },
       "completed": {
         "v1": "Tudo pronto — deu tudo certo, como planejado. Me diga o que você gostaria de fazer agora.",
         "v2": "Isso já está concluído e funcionando. Me diga por onde você quer seguir a partir daqui.",

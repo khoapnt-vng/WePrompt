@@ -14,7 +14,11 @@ import LocalImageView from '@/renderer/components/media/LocalImageView';
 import type { WorkJournalSourceMessage } from '@/renderer/pages/conversation/Messages/types';
 import { iconColors } from '@/renderer/styles/colors';
 import { downloadFileFromPath } from '@/renderer/utils/file/download';
-import { buildTurnClose } from './toolActivity/buildTurnClose';
+import {
+  buildTurnClose,
+  summarizeTurnDomainOutcomes,
+  type ToolOutcomeInterpreter,
+} from './toolActivity/buildTurnClose';
 import { buildTurnWorkRecap } from './toolActivity/buildTurnWorkRecap';
 import { useToolActionText } from './toolActivity/useToolActionText';
 import ToolOutputCitations, { toolUsesKnowledgeSearch } from './ToolOutputCitations';
@@ -48,6 +52,10 @@ type JournalRow =
       fallbackDoneLabel?: string;
     }
   | { key: string; kind: 'tool'; step: CoalescedStep; status: NormalizedToolStatus };
+
+const ToolOutcomeInterpreterContext = React.createContext<ToolOutcomeInterpreter | undefined>(undefined);
+
+export const ToolOutcomeInterpreterProvider = ToolOutcomeInterpreterContext.Provider;
 
 const planStatus: Record<'pending' | 'in_progress' | 'completed', NormalizedToolStatus> = {
   pending: 'pending',
@@ -473,11 +481,14 @@ const StepRow: React.FC<{ label: string; status: Exclude<NormalizedToolStatus, '
   );
 };
 
-const MessageToolGroupSummary: React.FC<{ messages: WorkJournalSourceMessage[]; isActive?: boolean }> = ({
-  messages,
-  isActive = false,
-}) => {
+const MessageToolGroupSummary: React.FC<{
+  messages: WorkJournalSourceMessage[];
+  isActive?: boolean;
+  toolOutcomeInterpreter?: ToolOutcomeInterpreter;
+}> = ({ messages, isActive = false, toolOutcomeInterpreter }) => {
   const { t } = useTranslation();
+  const inheritedToolOutcomeInterpreter = React.useContext(ToolOutcomeInterpreterContext);
+  const effectiveToolOutcomeInterpreter = toolOutcomeInterpreter ?? inheritedToolOutcomeInterpreter;
   const action = useToolActionText();
   const toolMessages = useMemo(() => messages.filter(isToolMessage), [messages]);
   const tools = useMemo(() => normalizeToolMessages(toolMessages), [toolMessages]);
@@ -519,7 +530,23 @@ const MessageToolGroupSummary: React.FC<{ messages: WorkJournalSourceMessage[]; 
       ),
     [isActive, rows]
   );
-  const turnClose = useMemo(() => (isActive ? null : buildTurnClose(recap, recap.safeSubject)), [isActive, recap]);
+  const domainOutcome = useMemo(() => {
+    if (effectiveToolOutcomeInterpreter === undefined) return undefined;
+    const toolRows = rows.filter((row): row is Extract<JournalRow, { kind: 'tool' }> => row.kind === 'tool');
+    return toolRows.length === 0
+      ? undefined
+      : summarizeTurnDomainOutcomes(
+          toolRows.map((row) => effectiveToolOutcomeInterpreter({ step: row.step, status: row.status }))
+        );
+  }, [effectiveToolOutcomeInterpreter, rows]);
+  const hasDomainToolRows = effectiveToolOutcomeInterpreter !== undefined && rows.some((row) => row.kind === 'tool');
+  const turnClose = useMemo(
+    () =>
+      isActive || (effectiveToolOutcomeInterpreter !== undefined && !hasDomainToolRows)
+        ? null
+        : buildTurnClose(recap, recap.safeSubject, domainOutcome),
+    [domainOutcome, effectiveToolOutcomeInterpreter, hasDomainToolRows, isActive, recap]
+  );
   const allSteps = useMemo(() => {
     const labeled: Array<{ key: string; label: string; status: Exclude<NormalizedToolStatus, 'error'> }> = [];
     for (const row of rows) {

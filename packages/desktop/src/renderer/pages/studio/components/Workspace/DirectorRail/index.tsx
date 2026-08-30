@@ -34,6 +34,7 @@ import { requestConversationSendBoxPrefill } from '@/renderer/hooks/chat/useSend
 import { buildContextHandoffExtraPatch } from '@/renderer/pages/conversation/contextHandoff/contextConversationUpdate';
 import { getConversationPinnedContext } from '@/renderer/pages/conversation/contextHandoff/pinnedContext';
 import AionrsChat from '@/renderer/pages/conversation/platforms/aionrs/AionrsChat';
+import type { ToolOutcomeInterpreter } from '@/renderer/pages/conversation/Messages/components/toolActivity/buildTurnClose';
 import type { MessageListInlineItem } from '@/renderer/pages/conversation/Messages/MessageList';
 import { useAionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
 import { useGuidModelSelection } from '@/renderer/pages/guid/hooks/useGuidModelSelection';
@@ -992,7 +993,8 @@ const DirectorConversationSurface: React.FC<{
   conversation: DirectorConversation;
   inlineItems?: readonly MessageListInlineItem[];
   onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
-}> = ({ conversation, inlineItems, onProposalIntent }) => {
+  toolOutcomeInterpreter?: ToolOutcomeInterpreter;
+}> = ({ conversation, inlineItems, onProposalIntent, toolOutcomeInterpreter }) => {
   const onSelectModel = useCallback(
     async (provider: IProvider, modelName: string): Promise<boolean> => {
       const model = { ...provider, use_model: modelName } as TProviderWithModel;
@@ -1015,6 +1017,7 @@ const DirectorConversationSurface: React.FC<{
       loadedMcpStatuses={conversation.extra.mcp_statuses as IConversationMcpStatus[] | undefined}
       project_id={conversation.extra.project_id}
       session_mcp_servers={conversation.extra.session_mcp_servers}
+      toolOutcomeInterpreter={toolOutcomeInterpreter}
       beforeSend={
         onProposalIntent === undefined
           ? undefined
@@ -1034,6 +1037,7 @@ export type DirectorRailProps = {
   project: StudioRendererProjectV2;
   reviewedOutputs?: readonly MessageListInlineItem[];
   onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
+  toolOutcomeInterpreter?: ToolOutcomeInterpreter;
   draftRequest?: { requestId: number; projectId: string; prompt: string } | null;
   onDraftRequestConsumed?: (requestId: number) => void;
   /** Owned by the shell: the collapse control lives in the app bar, not in this pane. */
@@ -1048,6 +1052,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
   project,
   reviewedOutputs = [],
   onProposalIntent,
+  toolOutcomeInterpreter,
   draftRequest,
   onDraftRequestConsumed,
   collapsed,
@@ -1400,6 +1405,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
               conversation={visibleState.conversation}
               inlineItems={inlineItems}
               onProposalIntent={onProposalIntent}
+              toolOutcomeInterpreter={toolOutcomeInterpreter}
             />
           ) : (
             <div className={styles.notice} aria-live='polite'>

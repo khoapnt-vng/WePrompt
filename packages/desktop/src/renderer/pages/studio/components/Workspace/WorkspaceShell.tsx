@@ -11,6 +11,7 @@ import { Link } from 'react-router-dom';
 
 import type { StudioRendererProjectV2 } from '@/common/types/project/creativeStudioTypes';
 import SidebarIcon from '@/renderer/components/base/SidebarIcon';
+import type { ToolOutcomeInterpreter } from '@/renderer/pages/conversation/Messages/components/toolActivity/buildTurnClose';
 import { STUDIO_VIEWS, studioViewPath, type StudioView } from '@/renderer/pages/studio/studioPhaseRoute';
 import { DirectorRail, type DirectorProposalChatIntent } from './DirectorRail';
 import type { WorkspaceProjectEditAuthority } from './Views/viewTypes';
@@ -26,6 +27,7 @@ export type WorkspaceShellProps = {
   stats?: StudioBarStats;
   reviewedOutputs?: readonly WorkspaceReviewedOutput[];
   onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
+  directorToolOutcomeInterpreter?: ToolOutcomeInterpreter;
   directorDraftRequest?: WorkspaceDirectorDraftRequest | null;
   onDirectorDraftRequestConsumed?: (requestId: number) => void;
   proposalInbox?: React.ReactNode;
@@ -343,6 +345,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
     stats,
     reviewedOutputs,
     onDirectorProposalIntent,
+    directorToolOutcomeInterpreter,
     directorDraftRequest,
     onDirectorDraftRequestConsumed,
     proposalInbox,
@@ -541,6 +544,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
           project={project}
           reviewedOutputs={reviewedOutputs}
           onProposalIntent={onDirectorProposalIntent}
+          toolOutcomeInterpreter={directorToolOutcomeInterpreter}
           draftRequest={directorDraftRequest}
           onDraftRequestConsumed={onDirectorDraftRequestConsumed}
           collapsed={railCollapsed}

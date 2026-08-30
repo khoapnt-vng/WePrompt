@@ -144,6 +144,21 @@
       }
     },
     "close": {
+      "studio": {
+        "committed": "Die Studio-Änderung wurde übernommen.",
+        "pendingReview": "Der Vorschlag wartet auf deine Prüfung. Nimm ihn an oder bitte den Director um eine Überarbeitung.",
+        "waitingAuthorization": "Die Generierung hat nicht begonnen. Prüfe die ausstehende Anfrage; jede kostenpflichtige Arbeit benötigt weiterhin deine Autorisierung.",
+        "actionRequired": "Studio hat Vorschläge oder Generierungsanfragen, die noch deine Prüfung oder Autorisierung benötigen. Prüfe jedes ausstehende Element, bevor du fortfährst.",
+        "mixedAttention": "Einige Studio-Arbeiten sind fehlgeschlagen, wurden gestoppt oder konnten nicht bestätigt werden, und ausstehende Arbeiten benötigen noch deine Prüfung oder Autorisierung. Prüfe jedes ausstehende Element und die Werkzeugdetails, bevor du fortfährst.",
+        "needsRevision": "Der Vorschlag ist veraltet und kann nicht angenommen werden. Bitte den Director, ihn für das aktuelle Projekt zu überarbeiten.",
+        "refused": "Die Studio-Änderung wurde abgelehnt und nichts wurde angewendet. Prüfe den Grund und bitte den Director dann um eine Überarbeitung.",
+        "failed": "Die Studio-Aktion ist fehlgeschlagen. Prüfe den Fehler und den aktuellen Studio-Status, bevor du es erneut versuchst.",
+        "canceled": "Die Studio-Aktion wurde abgebrochen. Prüfe den aktuellen Studio-Status, bevor du entscheidest, ob du sie erneut startest.",
+        "unconfirmed": "Das Studio-Ergebnis ist nicht bestätigt. Wiederhole die Aktion nicht; bitte den Director, ihren Befehlsstatus zu prüfen.",
+        "indeterminate": "Das Studio-Ergebnis ist endgültig, aber unbestimmt. Wiederhole die Aktion nicht; prüfe den aktuellen Studio-Status und die Befehlsdetails.",
+        "observed": "Die Studio-Prüfung ist abgeschlossen. Es wurde keine Projektänderung übernommen.",
+        "unknown": "Das Studio-Ergebnis konnte nicht interpretiert werden. Wiederhole die Aktion nicht; prüfe die Werkzeugdetails und den aktuellen Studio-Status."
+      },
       "completed": {
         "v1": "Alles erledigt – alles ist wie geplant durchgelaufen. Sagen Sie mir einfach, was als Nächstes kommen soll.",
         "v2": "Das ist fertig und funktioniert. Sagen Sie mir gern, wie es von hier aus weitergehen soll.",

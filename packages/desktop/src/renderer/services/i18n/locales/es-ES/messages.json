@@ -144,6 +144,21 @@
       }
     },
     "close": {
+      "studio": {
+        "committed": "El cambio de Studio se aplicó.",
+        "pendingReview": "La propuesta espera tu revisión. Acéptala o pide al Director que la revise.",
+        "waitingAuthorization": "La generación no ha comenzado. Revisa la solicitud pendiente; cualquier trabajo de pago aún requiere tu autorización.",
+        "actionRequired": "Studio tiene propuestas o solicitudes de generación que aún necesitan tu revisión o autorización. Revisa cada elemento pendiente antes de continuar.",
+        "mixedAttention": "Parte del trabajo de Studio falló, se detuvo o no pudo confirmarse, y aún hay trabajo pendiente que necesita tu revisión o autorización. Revisa cada elemento pendiente y los detalles de la herramienta antes de continuar.",
+        "needsRevision": "La propuesta está desactualizada y no se puede aceptar. Pide al Director que la revise según el proyecto actual.",
+        "refused": "El cambio de Studio fue rechazado y no se aplicó nada. Revisa el motivo y pide al Director que lo revise.",
+        "failed": "La acción de Studio falló. Revisa el error y el estado actual de Studio antes de volver a intentarlo.",
+        "canceled": "La acción de Studio se canceló. Revisa el estado actual de Studio antes de decidir si la inicias de nuevo.",
+        "unconfirmed": "El resultado de Studio no está confirmado. No repitas la acción; pide al Director que compruebe el estado del comando.",
+        "indeterminate": "El resultado de Studio es terminal, pero indeterminado. No repitas la acción; revisa el estado actual de Studio y los detalles del comando.",
+        "observed": "La comprobación de Studio terminó. No se aplicó ningún cambio al proyecto.",
+        "unknown": "No se pudo interpretar el resultado de Studio. No repitas la acción; revisa los detalles de la herramienta y el estado actual de Studio."
+      },
       "completed": {
         "v1": "Listo, todo ha salido según lo previsto. Dime qué te gustaría hacer a continuación.",
         "v2": "Esto ya está terminado y funcionando. Dime por dónde quieres seguir a partir de aquí.",

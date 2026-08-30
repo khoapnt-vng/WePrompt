@@ -38,6 +38,7 @@ import {
 import { StudioLibrary } from './components/Library';
 import { DirectorProposals, type DirectorProposalsProps } from './components/Shell/DirectorProposals';
 import type { DirectorProposalChatIntent } from './components/Workspace/DirectorRail';
+import { createStudioDirectorToolOutcomeInterpreter } from './components/Workspace/DirectorRail/turnRecap';
 import {
   SpendGateModal,
   boardGateDraft,
@@ -419,6 +420,15 @@ const StudioProjectPage: React.FC<{
   const shotEditFocusSequenceRef = useRef(0);
   const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
   const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
+  const directorToolOutcomeInterpreter = useMemo(
+    () =>
+      createStudioDirectorToolOutcomeInterpreter(
+        projectId,
+        project?.revision ?? null,
+        proposalRefreshing || proposalErrorMessageKey !== null ? null : proposalCatalog
+      ),
+    [project?.revision, projectId, proposalCatalog, proposalErrorMessageKey, proposalRefreshing]
+  );
   const workspacePendingRef = useRef(false);
   const projectRef = useRef<StudioRendererProjectV2 | null>(project);
   projectRef.current = project;
@@ -4342,6 +4352,7 @@ const StudioProjectPage: React.FC<{
       <WorkspaceShell
         ref={workspaceShellRef}
         project={project}
+        directorToolOutcomeInterpreter={directorToolOutcomeInterpreter}
         onDirectorProposalIntent={decideProposalFromDirectorChat}
         directorDraftRequest={directorDraftRequest}
         onDirectorDraftRequestConsumed={consumeDirectorDraftRequest}
