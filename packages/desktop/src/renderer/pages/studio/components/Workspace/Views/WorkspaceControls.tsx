@@ -487,12 +487,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   };
 
   return (
-    <div
-      className={styles.root}
-      data-active-view={activeView}
-      data-aspect-ratio={project.aspectRatio}
-      data-studio-workspace-controls
-    >
+    <div className={styles.root} data-studio-workspace-controls data-active-view={activeView}>
       {activeView === 'references' ? (
         <ReferencesView
           actions={
@@ -529,7 +524,6 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
                 }
           }
           errorMessageKey={referenceErrorMessageKey}
-          onRefreshRoutes={() => void mutations.refreshRoutes()}
           focusIntent={referenceFocusIntent}
           gateLocked={gateLocked || pending || referenceActions === undefined}
           pendingReferenceId={referencePendingId}
@@ -594,13 +588,11 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       {openBeat === null ? null : (
         <BeatPanel
           actions={panelActions}
-          aspectRatio={project.aspectRatio}
           beat={openBeat}
           beatIds={projection.activeBeatIds}
           beatIndex={openBeatIndex}
           drafts={drafts}
           errorMessageKey={errorMessageKey}
-          onRefreshRoutes={() => void mutations.refreshRoutes()}
           gateLocked={gateLocked}
           onClose={() => setOpenPanel(null)}
           onParkShotSuccess={(shotId) => {

@@ -1020,6 +1020,10 @@
       },
       "table": {
         "reorder": {
+          "label": "Действия для изменения порядка {{title}}",
+          "dragHandle": "Изменить порядок {{title}} на позиции {{position}}",
+          "moveEarlier": "Переместить {{title}} раньше",
+          "moveLater": "Переместить {{title}} позже",
           "announcement": "{{title}} перемещён с позиции {{from}} на {{to}} из {{total}}.",
           "failed": "Порядок битов не изменён."
         },
@@ -1060,8 +1064,7 @@
             "failed": "Ошибка",
             "cancelled": "Отменено"
           }
-        },
-        "shotPosition": "{{beat}}.{{shot}}"
+        }
       },
       "project": {
         "statusUnavailable": "Статус недоступен",

@@ -64,42 +64,6 @@ const downloadManagedAsset = (url: string, fileName: string): void => {
   document.body.removeChild(link);
 };
 
-/**
- * A `<video>` that has fired `loadeddata` has not necessarily presented a frame, and drawing one
- * that has not yields a single flat colour — in practice pure black. Persisting that is worse than
- * capturing nothing: a poster permanently replaces the video on a Board tile, so the Shot is
- * pinned to a black rectangle for good, and no later visit can correct it. Measured on `Plateau`,
- * where 28 of 30 Board captures were the same byte-identical all-black PNG.
- *
- * Sampling is strided by a prime so it cannot land on one column of a frame that is genuinely a
- * flat band, and it reads alpha as well as colour so a fully transparent draw is rejected too.
- */
-const carriesPicture = (context: CanvasRenderingContext2D, width: number, height: number): boolean => {
-  if (typeof context.getImageData !== 'function') return false;
-  let pixels: Uint8ClampedArray;
-  try {
-    pixels = context.getImageData(0, 0, width, height).data;
-  } catch {
-    // A tainted canvas cannot be read back. `toDataURL` would throw next anyway.
-    return false;
-  }
-  const total = Math.floor(pixels.length / 4);
-  if (total === 0) return false;
-  const step = Math.max(1, Math.floor(total / 4_096)) * 997;
-  for (let index = step; index < total; index += step) {
-    const at = index * 4;
-    if (
-      pixels[at] !== pixels[0] ||
-      pixels[at + 1] !== pixels[1] ||
-      pixels[at + 2] !== pixels[2] ||
-      pixels[at + 3] !== pixels[3]
-    ) {
-      return true;
-    }
-  }
-  return false;
-};
-
 export const captureStudioVideoPoster = (
   video: Pick<HTMLVideoElement, 'videoWidth' | 'videoHeight'>,
   createCanvas: () => HTMLCanvasElement = () => document.createElement('canvas')
@@ -123,7 +87,6 @@ export const captureStudioVideoPoster = (
   if (context === null) return null;
   try {
     context.drawImage(video as CanvasImageSource, 0, 0, width, height);
-    if (!carriesPicture(context, width, height)) return null;
     const dataUrl = canvas.toDataURL('image/png');
     return dataUrl.startsWith('data:image/png;base64,') ? { dataUrl, width, height } : null;
   } catch {
@@ -493,10 +456,6 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
       <Modal
         className={styles.viewerModal}
         footer={null}
-        // The Beat panel is itself a Modal, so a translucent mask here stacks a second scrim and
-        // leaves the panel half-lit, half-legible and wholly inert behind the viewer (BUG-177).
-        // An opaque mask covers it completely, so exactly one scrim reads.
-        maskStyle={{ background: 'var(--color-bg-1)', opacity: 1 }}
         onCancel={() => setViewer(null)}
         title={null}
         unmountOnExit

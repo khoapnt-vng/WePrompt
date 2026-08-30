@@ -1020,6 +1020,10 @@
       },
       "table": {
         "reorder": {
+          "label": "کنش‌های مرتب‌سازی {{title}}",
+          "dragHandle": "مرتب‌سازی مجدد {{title}} در جایگاه {{position}}",
+          "moveEarlier": "انتقال {{title}} به قبل",
+          "moveLater": "انتقال {{title}} به بعد",
           "announcement": "{{title}} از جایگاه {{from}} به {{to}} از {{total}} منتقل شد.",
           "failed": "ترتیب Beatها تغییر نکرد."
         },
@@ -1060,8 +1064,7 @@
             "failed": "ناموفق",
             "cancelled": "لغوشده"
           }
-        },
-        "shotPosition": "{{beat}}.{{shot}}"
+        }
       },
       "project": {
         "statusUnavailable": "وضعیت در دسترس نیست",

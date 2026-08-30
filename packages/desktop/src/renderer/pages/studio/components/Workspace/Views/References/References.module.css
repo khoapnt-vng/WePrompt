@@ -7,26 +7,10 @@
   inline-size: min(100%, 1000px);
   min-inline-size: 0;
   margin-inline: auto;
-}
-
-.root[data-aspect-ratio='16:9'] {
-  --studio-reference-aspect-ratio: 16 / 9;
-}
-
-.root[data-aspect-ratio='9:16'] {
-  --studio-reference-aspect-ratio: 9 / 16;
-}
-
-.root[data-aspect-ratio='1:1'] {
-  --studio-reference-aspect-ratio: 1 / 1;
-}
-
-.root[data-aspect-ratio='4:3'] {
-  --studio-reference-aspect-ratio: 4 / 3;
-}
-
-.root[data-aspect-ratio='3:4'] {
-  --studio-reference-aspect-ratio: 3 / 4;
+  border: 1px solid var(--color-border-2);
+  border-radius: 14px;
+  background: var(--color-bg-2);
+  box-shadow: var(--shadow-card);
 }
 
 .titleBar {
@@ -310,40 +294,27 @@
   flex: 0 0 auto;
 }
 
-/*
- * The band takes the project's ratio, capped so a 9:16 project does not produce a 1778px wall.
- * `grid-template-rows` and `place-items: stretch` are load-bearing: with an implicit auto row and
- * `place-items: center`, the image's `block-size: 100%` is cyclic during track sizing, so the row
- * took the asset's intrinsic height, overflowed, and was clipped to the top third (BUG-172).
- */
 .pictureBand {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
   inline-size: 100%;
-  aspect-ratio: var(--studio-reference-aspect-ratio, 16 / 9);
-  max-block-size: 560px;
+  block-size: 156px;
   min-inline-size: 0;
   border: 1px solid var(--color-border-2);
   border-radius: 10px;
-  place-items: stretch;
+  place-items: center;
   background: var(--studio-reference-matte);
 }
 
 .pictureBand img {
   inline-size: 100%;
   block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
   object-fit: contain;
 }
 
 .pictureBandEmpty {
   block-size: 108px;
-  grid-template-rows: auto auto;
-  place-items: center;
-  align-content: center;
   gap: 6px;
   border-style: dashed;
   color: var(--color-text-3);
@@ -468,7 +439,7 @@
 
 .take {
   display: grid;
-  inline-size: 112px;
+  inline-size: 54px;
   min-inline-size: 0;
   gap: 3px;
   border: 0;
@@ -480,13 +451,11 @@
 }
 
 .take img {
-  inline-size: 112px;
-  aspect-ratio: var(--studio-reference-aspect-ratio, 16 / 9);
-  max-block-size: 160px;
+  inline-size: 54px;
+  block-size: 38px;
   border: 1px solid var(--color-border-2);
   border-radius: 7px;
-  object-fit: contain;
-  background: var(--studio-reference-matte);
+  object-fit: cover;
 }
 
 .take[aria-current='true'] {
@@ -508,9 +477,8 @@
 
 .addTake {
   display: grid;
-  inline-size: 112px;
-  aspect-ratio: var(--studio-reference-aspect-ratio, 16 / 9);
-  max-block-size: 160px;
+  inline-size: 54px;
+  block-size: 38px;
   border: 1px dashed var(--color-border-3);
   border-radius: 7px;
   place-items: center;

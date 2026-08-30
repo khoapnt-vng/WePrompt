@@ -24,7 +24,6 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 
 import { applyStudioMutationBatchV2, StudioMutationErrorV2, type StudioMutationFailureSubjectV2 } from './index';
-import { authoredProjectDigest } from '../authoredDigest';
 
 const own = <Value>(record: Record<string, Value>, id: string): Value | undefined =>
   Object.hasOwn(record, id) ? record[id] : undefined;
@@ -126,24 +125,8 @@ const subject = (
   ownerBeatTitle: placement?.ownerBeatTitle ?? null,
 });
 
-/**
- * A refusal names its subject by looking it up in the project — which fails for the exact case that
- * most needs naming, a Beat the refused batch was going to create. Nothing resolves, so title and
- * position are both null and the card renders the bare word "Beat" (BUG-182: three Beats and three
- * Shots summarised as one such bullet). The batch itself carries the title the Director chose, so
- * read it from there when the project cannot answer.
- */
-const proposedBeatTitle = (operations: readonly StudioMutationOperationV2[], beatId: string): string | null => {
-  for (const operation of operations) {
-    if (operation.kind !== 'add_beat' && operation.kind !== 'add_binned_beat') continue;
-    if (operation.beatId === beatId) return operation.beat.title;
-  }
-  return null;
-};
-
 const refusalSubject = (
   project: StudioProjectV2,
-  operations: readonly StudioMutationOperationV2[],
   kind: StudioProposalReviewSubjectV2['kind'],
   id: string,
   fixedReasons: StudioProposalReviewRefusalSubjectV2['fixedReasons'] = []
@@ -154,7 +137,7 @@ const refusalSubject = (
   if (kind === 'beat') {
     const beat = own(project.beats, id);
     return {
-      subject: subject('beat', id, beat?.title ?? proposedBeatTitle(operations, id), beatPlacement(project, id)),
+      subject: subject('beat', id, beat?.title ?? null, beatPlacement(project, id)),
       fixedReasons,
     };
   }
@@ -163,22 +146,19 @@ const refusalSubject = (
 
 const refusalSubjects = (
   project: StudioProjectV2,
-  operations: readonly StudioMutationOperationV2[],
   operation: StudioMutationOperationV2 | null,
   failureSubjects: readonly StudioMutationFailureSubjectV2[]
 ): StudioProposalReviewRefusalSubjectV2[] => {
   if (failureSubjects.length > 0) {
-    return failureSubjects.map((entry) =>
-      refusalSubject(project, operations, 'shot', entry.shotId, entry.fixedReasons)
-    );
+    return failureSubjects.map((entry) => refusalSubject(project, 'shot', entry.shotId, entry.fixedReasons));
   }
   if (operation !== null && 'shotId' in operation && typeof operation.shotId === 'string') {
-    return [refusalSubject(project, operations, 'shot', operation.shotId)];
+    return [refusalSubject(project, 'shot', operation.shotId)];
   }
   if (operation !== null && 'beatId' in operation && typeof operation.beatId === 'string') {
-    return [refusalSubject(project, operations, 'beat', operation.beatId)];
+    return [refusalSubject(project, 'beat', operation.beatId)];
   }
-  return [refusalSubject(project, operations, 'project', project.id)];
+  return [refusalSubject(project, 'project', project.id)];
 };
 
 const orderedBeatIds = (before: StudioProjectV2, after: StudioProjectV2): string[] => {
@@ -341,21 +321,10 @@ export const studioProposalOperationsV2 = (
 /** Derives renderer-safe semantic review from the exact reducer result without persisting a second diff. */
 export const deriveStudioProposalReviewV2 = (
   project: StudioProjectV2,
-  proposal: Pick<StudioProposalV2, 'id' | 'projectId' | 'baseRevision' | 'payload' | 'createdAt'> & {
-    authoredDigest?: string;
-  }
+  proposal: Pick<StudioProposalV2, 'id' | 'projectId' | 'baseRevision' | 'payload' | 'createdAt'>
 ): StudioProposalReviewV2 => {
-  /*
-   * BUG-028. This label is what greys out the accept button, so it has to agree with the store's
-   * fence exactly — a card that says "ready" over a store that throws `stale_project`, or the
-   * reverse, is worse than the bug it replaces. Both now ask whether anything AUTHORED moved, and
-   * both fall back to exact revision equality for a record written before the digest existed.
-   */
   if (project.revision !== proposal.baseRevision) {
-    const recordedDigest = proposal.authoredDigest;
-    if (recordedDigest === undefined || recordedDigest !== authoredProjectDigest(project)) {
-      return { status: 'stale', groups: [], currentRevision: project.revision, baseRevision: proposal.baseRevision };
-    }
+    return { status: 'stale', groups: [], currentRevision: project.revision, baseRevision: proposal.baseRevision };
   }
   let operations: StudioMutationOperationV2[] = [];
   try {
@@ -366,7 +335,7 @@ export const deriveStudioProposalReviewV2 = (
       {
         schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
         projectId: proposal.projectId,
-        expectedRevision: project.revision,
+        expectedRevision: proposal.baseRevision,
         operations,
       },
       { mutationId: proposal.id, capturedAt: proposal.createdAt }
@@ -414,7 +383,7 @@ export const deriveStudioProposalReviewV2 = (
           ? {
               reasonCode: error.reasonCode,
               operationKind: operation?.kind ?? null,
-              subjects: refusalSubjects(project, operations, operation, error.subjects),
+              subjects: refusalSubjects(project, operation, error.subjects),
             }
           : null,
     };

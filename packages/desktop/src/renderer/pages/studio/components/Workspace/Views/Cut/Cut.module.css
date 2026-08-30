@@ -303,9 +303,8 @@
 .preview {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
   min-inline-size: 0;
-  aspect-ratio: var(--studio-frame-aspect-ratio, 16 / 9);
+  aspect-ratio: 16 / 9;
   place-items: center;
   overflow: hidden;
   border: 1px solid var(--color-border-2);

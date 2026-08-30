@@ -145,9 +145,9 @@
     },
     "close": {
       "completed": {
-        "v1": "Tüm adımlar çalıştırıldı ve hiçbiri başarısız olmadı. Sırada ne yapmak istediğinizi söyleyin.",
-        "v2": "Her adım hatasız tamamlandı. Buradan nereye gitmek istediğinizi söyleyin.",
-        "v3": "Bitti — yol boyunca hiçbir sorun çıkmadı. Sıradaki iş için hazırım."
+        "v1": "Her şey tamam — planlandığı gibi ilerledi. Şimdi ne yapmak istediğinizi söyleyin.",
+        "v2": "Bu iş tamamlandı ve sorunsuz çalışıyor. Buradan nasıl devam etmek istediğinizi bana bildirin.",
+        "v3": "Tamamlandı — her şey yerli yerine oturdu. Siz hazır olduğunuzda bir sonraki adım için hazırım."
       },
       "recovered": {
         "v1": "Tamamlandı — bir adım ikinci bir deneme gerektirdi, ama artık her şey yolunda.",

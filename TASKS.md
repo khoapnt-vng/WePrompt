@@ -11,34 +11,6 @@
 > - Every active epic records its current boundary and next admission gate. Do not infer whole-sprint progress from raw checkbox count: epics and bugs differ materially in size.
 > - Update this file after every accepted merge, blocker decision, scope change, and code-freeze checkpoint. Preserve evidence links and move completed items to **Done** instead of deleting them.
 
-## Gate health — changed 2026-08-30
-
-**The pre-push gate was failing on contention rather than on defects, and it was measured.** Five
-filesystem-heavy tests failed gate runs as 10s timeouts while passing in isolation —
-`presentationRunJournal` four times, `PresentationSourceGrantStore` three, plus
-`projectKnowledgeService`, `releasePackagingConfig` and `officeCliRunner`. Each failure cost a full
-re-run, which dwarfed the gate's own six minutes.
-
-None of the five asserts any timing of its own, so they did **not** get the isolation treatment
-beside them in `vitest.config.ts`: that exists for tests asserting wall-clock thresholds, where
-contention corrupts the measurement. These only needed headroom, so they sit in a new `io-heavy`
-project — still fully parallel, 60s ceiling. Serialising them would have added their whole cost to
-the critical path for nothing. `directorCommandLifecycle` is the opposite case and got the opposite
-treatment: its own `waitForCondition` budgets 5s internally, so no harness timeout can reach it, and
-it joins the three siblings already isolated.
-
-**The gate also no longer runs tests for documentation-only pushes.** `scripts/select-push-tests.js`
-picks between the reviewed Creative Studio coverage gate and nothing at all. Only two legs, because
-a three-leg draft that skipped instrumentation whenever no coverage-enforced file changed was
-unsound — deleting a test, or editing a helper a Studio file imports, moves a manifest file's
-coverage without touching any manifest file. `releasePackagingConfig.test.ts` guards that invariant
-and caught it; it now pins the selector to exactly one test command and the skip rule to exactly
-`.md`, both mutation-checked.
-
-**Measured on a quiet machine:** 401s with a flake before; 342s, 324s and 319s green after; 321s for
-the suite without coverage, so instrumentation is ~25% and the rest is simply running 10,666 tests.
-A documentation-only push now runs no tests at all.
-
 ## Carryover after Sprint 2 code freeze
 
 - [ ] **[BUG-042][P2][Test infrastructure] 25 updater tests fail under `CI=true` because production deliberately disables updates in CI** — found 2026-08-10 by the first CI run in this repo's history; **root cause established by controlled experiment the same day**
@@ -171,42 +143,12 @@ A documentation-only push now runs no tests at all.
   - Two code paths are **unreachable** on this call path and must not get copy: the kind check (the route is already filtered by media kind) and the scene check (the per-shot call passes no scene id). Writing copy for either would imply a state no user can reach.
   - Blocked on the designer for the copy itself — Ask B of the [open asks commission](docs/design/creative-studio-open-asks-commission.md), sent with the derivation. They estimated a day's turnaround.
 
-- [x] **[BUG-028][P2][Creative Studio] A paid storyboard result is discarded after a concurrent revision change**
+- [ ] **[BUG-028][P2][Creative Studio] A paid storyboard result is discarded after a concurrent revision change**
   - Actual: the service checks the expected revision, performs the **paid** planner request, and only then attempts the CAS write with the old revision. The CAS correctly fails closed, but the paid result has already been obtained and is thrown away. A test currently codifies that sequence.
   - Concrete failure: while storyboard drafting is in flight, another window edits the project or a running job bumps the revision. The provider charges for a completed draft, the app rejects it, and the user must pay again to regenerate.
   - Expected: a durable reservation or result path that does not discard completed provider work. This is a design change, not a patch.
   - Found by independent review of MR !71; accepted as a follow-up rather than a merge blocker because it cannot spend without consent or bypass the release gate.
   - **Design settled 2026-08-07** (`docs/design/creative-studio-bug028-durable-drafts.md`): region-guarded merge inside the serialised update fn (authored script + planner inputs compared, operational fields excluded, active-jobs overlap treated as conflict), with a true conflict recording the paid draft as a pending proposal instead of discarding it. Sequence the implementation after EPIC-006 Slice A3 — the fallback needs the proposal card UI.
-  - **Re-verified 2026-08-29 and substantially rewritten: the entry above describes code that no longer exists, but the defect is real, was reproduced, and is now worse.** `creativeStudioService.ts`, `StoryboardDraftModal`, `applyProposalPayload`, `replace_storyboard`, `StudioEditableScene` and `sceneOrder` all return **zero files**. Only `recordProposal` survives. The 2026-08-07 design's own remedy has effectively shipped by accident: a Director draft is now written as a **pending proposal** rather than a direct project write, so the original "paid result discarded by a post-call CAS" cannot happen in the shape it was filed.
-  - **What replaced it is the successor that design predicted**, in its §7 paragraph marked _recorded, not scoped_: _"the ledger's own `acceptProposal` CAS's on whole-project `baseRevision` and has the same coarseness … if proposals ever go perpetually stale under running jobs, the §3 predicate is the fix and this note is its precedent."_ They do.
-  - **Reproduced by experiment, not inferred.** A probe seeded a valid project at revision 2 with one succeeded video job, recorded a pending proposal at `baseRevision: 2`, and then made a single write that touched **only** `jobs.job_video.progress` — the exact commit shape of `jobManager.ts:649-677`. `brief`, `beats` and `shots` were asserted byte-identical afterwards. `acceptProposalV2` then failed with `{"code":"stale_project","message":"Studio project has changed"}`, and stayed failed. A control run with no intervening write accepted cleanly, so the fixture is sound.
-  - **Why it is terminal rather than a race.** Nothing rebases a pending proposal's `baseRevision`, so the only exit is reject-and-re-propose. The renderer already models it as terminal — `proposalReview.ts:341-347` returns `status: 'stale'` and `StudioPage.tsx:3600-3607` refuses the accept before it reaches main — so the user's paid, reviewed draft is simply dead the moment any job ticks.
-  - **Reachability is structural, not incidental.** `jobs` and `assets` live inside `StudioProjectV2` (`creativeStudioTypes.ts:1607-1608`); `updateProjectV2InsideQueue` bumps `revision: current.revision + 1` on **every** commit (`store.ts:8130-8134`) and its CAS is opt-in (`:8121-8123`), so the job manager's writes pass straight through. Any generation in flight while a proposal sits pending will kill it.
-  - **The fix is a design decision, not a bugfix, and was deliberately not attempted.** Relaxing the fence at `store.ts:7732` is not sufficient and not safe on its own — the base revision is load-bearing in five further places:
-    - `:7753` passes `expectedRevision: baseRevision` into the reducer's own CAS;
-    - `:7761` computes the accepted project's revision as **`baseRevision + 1`**, so accepting at a later revision would _rewind_ the counter;
-    - `:7773` writes `baseRevision` into the commit attribution;
-    - `:721-722` validates `appliedRevision === baseRevision + 1` as a hard invariant;
-    - `:6104` and `:6136` use the same equality in **crash-recovery replay**.
-  - **That chain is provenance, not bookkeeping** — it is what makes a paid, irreversible commit provable after a crash. The shape that would work is the §3 predicate carried as data: capture an **authored-state digest** at propose time (brief, rules, beats, shots, references, cut and routing — explicitly excluding `jobs`, `assets`, `frameExtractions` and spend authorisations) and fence accept on that digest instead of the revision, letting the applied revision follow the current head. That is a proposal-schema change plus a rewrite of the attribution invariant and its recovery replay, and it needs an owner decision before it is written.
-  - **A cheaper alternative was evaluated on 2026-08-29 and rejected on its own merits, so nobody repeats it.** Rather than persist a digest, the project writer could rebase every pending proposal's `baseRevision` whenever a commit leaves the authored projection unchanged — and it has both states to hand, since `updateProjectV2InsideQueue` holds `current` and `next` and already runs inside the per-project queue. It fails on cost, not on correctness: that writer is what every job poll and asset commit goes through, so rebasing there would rewrite proposal sidecars — hardlink publication and attribution fence included — on **every job progress tick**. Turning a read-mostly ledger into one rewritten dozens of times per generation is a worse defect than the one it fixes.
-  - **Measured blast radius of the digest fix, for whoever schedules it:** `baseRevision` appears **59 times across 11 source files** and **63 times across the tests**, with **58 fixtures** constructing proposal records that would need the new field. It reaches `store.ts`, `directorCommandContracts.ts`, `directorCommandProcessor.ts`, `v2Service.ts`, `proposalReview.ts`, `studioProposalWriter.ts`, `studioServer.ts`, and three renderer files. This is a day's careful work on the subsystem whose whole job is making a paid, irreversible commit provable after a crash — not an hour's patch.
-  - **The correctness core of the fix is built and validated, and is deliberately not wired in yet** (`schema2/authoredDigest.ts`). It is the authored/operational split the whole fix rests on, written as an **exhaustive classification rather than a filter**: every key of the project, a Beat, a Shot and a reference must be named on one side or the other, and the digest **throws** on any key nobody has classified. `StudioProjectV2` gains fields regularly, and this makes the next one a decision rather than an accident.
-  - **Validating it against real projects rather than a fixture immediately caught a defect that would have shipped.** `brief` is not a field on the wire at all — the text lives in `brief.md` and the project carries only `briefFile`, its `{ schemaVersion, sha256 }` pointer. A type-derived classification misses it, the digest would not have moved when someone edited the brief, and **a stale proposal could have clobbered that edit** — the exact second failure mode the split exists to prevent. All four real projects on the owner's machine now classify cleanly.
-  - **What remains is the coordinated fence change, which cannot land in slices.** `store.ts` (fence, revision arithmetic, attribution), `proposalReview.ts` (the `stale` label main sends the renderer) and the renderer's accept gates must change together — a store that accepts while the UI still greys the button out, or the reverse, is worse than the present bug. That is the piece that needs the owner's sign-off and a full run, and the plan for it is above.
-  - **The recovery contract is the real cost, and it is bigger than "add a digest". Traced 2026-08-29.** Accepting at a revision later than `baseRevision` breaks crash recovery in a way no amount of care in `acceptProposalV2` can fix, because `recoverProposalAttributionV2` decides whether an interrupted accept already landed by this test (`store.ts:6134-6141`):
-    - `isExactBefore` ⇔ `snapshot.revision === attribution.baseRevision` **and** the bytes hash to `beforeProjectSha256`;
-    - `isExactAfter` ⇔ `snapshot.revision === attribution.appliedRevision` **and** the bytes hash to `afterProjectSha256`;
-    - exactly one must hold, or it throws `Studio proposal attribution project facts mismatch`.
-  - Accept over a later revision `R` makes the un-applied state match **neither**: `isExactBefore` compares against the proposal's `baseRevision`, not `R`. And `attribution.baseRevision` cannot simply be set to `R`, because `store.ts:6104` separately requires `proposal.record.baseRevision === attribution.baseRevision` as its authority check. The two uses of one field pull in opposite directions.
-  - **So the attribution record needs a third revision** — the revision actually applied over — with `isExactBefore` and the `appliedRevision === baseRevision + 1` validator (`:721-722`) both re-anchored to it, while `baseRevision` keeps its meaning for the authority check. That is a second durable record shape changing, in the code that decides whether **paid, irreversible work already landed** after a crash.
-  - **This is why it is not a bugfix.** The proposal-record half is backwards-compatible and cheap: `authoredDigest` can be optional, accepted by widening the exact-key check to either key set, so no schema bump and none of the 58 existing fixtures move. The attribution half is not: an accept interrupted before the change would be read by the code after it, and that is exactly the case where getting it wrong loses paid work rather than merely reporting it badly.
-  - **FIXED 2026-08-29.** The fence now asks whether anything a person **authored** moved, instead of whether the revision moved. A proposal recorded before a generation started survives that generation and accepts over the live head; a proposal whose project someone has actually edited is still refused.
-  - **The whole change is backwards-compatible, so no schema bumped and none of the 58 fixtures moved.** `authoredDigest` on the proposal record and `appliedOverRevision` on the commit attribution are both **optional**, accepted by widening each exact-key check to either set — so a record carrying some _other_ stray key is still rejected. A proposal written before the digest existed cannot answer the question, so it keeps the exact-revision fence rather than being accepted on trust.
-  - **The recovery contract is preserved rather than weakened.** `attribution.baseRevision` keeps its authority meaning (`store.ts:6104` still requires it to equal the proposal record's), while the revision actually applied over moves to `appliedOverRevision`, which `isExactBefore` and the `appliedRevision === baseRevision + 1` validator are both re-anchored to. Absent means the two coincide, which is every attribution written before this.
-  - **Main and the renderer were changed together, because a split would have been worse than the bug.** `proposalReview.ts` derives its `stale` label from the same digest comparison, and the renderer's five accept gates plus the catalogue validator now trust `review.status` instead of re-testing the revision behind its back.
-  - **Covered by three tests that pin both directions**, in `store.test.ts`: a machine-only commit is accepted and applies over the live head; a real edit is still refused; a digest-less record keeps the old fence. Mutation-checked — restoring the old unconditional throw fails the first and only the first.
-  - **The authored/operational split is the correctness argument** and lives in `schema2/authoredDigest.ts` as an exhaustive classification that throws on any unclassified key, with 15 tests pinning it field by field. Validating it against the owner's real projects rather than a fixture caught `briefFile` — `brief` is not on the wire at all — which would otherwise have let a stale proposal clobber an edited brief.
 
 ## Waiting On
 

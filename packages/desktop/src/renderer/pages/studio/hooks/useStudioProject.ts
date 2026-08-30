@@ -677,15 +677,11 @@ export const useStudioProject = (projectId: string | undefined): UseStudioProjec
           catalog.proposals.every(
             (candidate) =>
               candidate.projectId === requestedProjectId &&
-              /*
-               * BUG-028. A non-stale proposal no longer has to sit at the current revision: it may
-               * have been recorded earlier and stayed acceptable because nothing authored moved.
-               * Requiring equality here would have rejected the whole catalogue as corrupt.
-               */
-              (candidate.review.status !== 'stale' ||
-                (candidate.review.currentRevision === catalog.projectRevision &&
+              (candidate.review.status === 'stale'
+                ? candidate.review.currentRevision === catalog.projectRevision &&
                   candidate.review.baseRevision === candidate.baseRevision &&
-                  candidate.baseRevision !== catalog.projectRevision))
+                  candidate.baseRevision !== catalog.projectRevision
+                : candidate.baseRevision === catalog.projectRevision)
           );
         if (!validCatalog) {
           setProposalErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');

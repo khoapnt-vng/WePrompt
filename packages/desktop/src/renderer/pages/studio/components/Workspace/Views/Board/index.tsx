@@ -14,7 +14,6 @@ import type {
   StudioProjectStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST } from '@/common/types/project/creativeStudioTypes';
-import { captureStudioVideoPoster } from '../../BeatPanel/FirstFrames';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
 import type { WorkspaceBoardPanelProjection, WorkspaceProjection } from '../../workspaceProjection';
@@ -138,13 +137,6 @@ export type BoardActions = {
   restoreBeat: (beatId: string, beforeBeatId: string | null) => Promise<boolean>;
   restoreShot: (shotId: string, beforeShotId: string | null) => Promise<boolean>;
   reorderBin: (bin: readonly StudioBinItem[]) => Promise<boolean>;
-  persistCapturedPoster: (input: {
-    shotId: string;
-    videoAssetId: string;
-    dataUrl: string;
-    width: number;
-    height: number;
-  }) => Promise<boolean>;
 };
 
 export type BoardViewProps = {
@@ -167,57 +159,15 @@ export type BoardViewProps = {
 type ShotMediaProps = {
   media: BoardShotTileMedia;
   projectId: string;
-  shotId: string;
-  onPosterCaptured: (input: {
-    shotId: string;
-    videoAssetId: string;
-    dataUrl: string;
-    width: number;
-    height: number;
-  }) => Promise<boolean>;
 };
 
-const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPosterCaptured }) => {
+const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId }) => {
   const { t } = useTranslation();
   const assetUrl = media === null ? null : createManagedStudioAssetUrl(projectId, media.assetId);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const capturedRef = useRef(new Set<string>());
   const showMedia = media !== null && assetUrl !== null && failedUrl !== assetUrl;
 
   useEffect(() => setFailedUrl(null), [assetUrl]);
-
-  /*
-   * The Board is a monitor: it shows every Shot at once, and a poster only ever existed for a Shot
-   * whose Beat panel someone had opened (BUG-166). Capturing here means the first Board visit that
-   * decodes a tile's video leaves an image behind, so later visits paint from a still rather than
-   * from dozens of concurrent video elements.
-   */
-  const capturePoster = async (video: HTMLVideoElement): Promise<boolean> => {
-    if (media === null || media.kind !== 'video') return true;
-    const captureKey = `${projectId}:${shotId}:${media.assetId}`;
-    if (capturedRef.current.has(captureKey)) return true;
-    const captured = captureStudioVideoPoster(video);
-    if (captured === null) return false;
-    capturedRef.current.add(captureKey);
-    const persisted = await onPosterCaptured({ shotId, videoAssetId: media.assetId, ...captured });
-    if (!persisted) capturedRef.current.delete(captureKey);
-    return true;
-  };
-
-  /*
-   * `loadeddata` promises data for the current position, not that a frame has been composited, and
-   * a tile's video is never played. Drawing at that moment returns a blank frame, which the capture
-   * now refuses. `requestVideoFrameCallback` fires only once a frame has actually been presented,
-   * which is the earliest a poster can carry a picture, so retry there.
-   */
-  const scheduleCapture = (video: HTMLVideoElement): void => {
-    void capturePoster(video).then((settled) => {
-      if (settled) return;
-      video.requestVideoFrameCallback?.(() => {
-        if (video.isConnected) void capturePoster(video);
-      });
-    });
-  };
 
   return (
     <div className={styles.shotMedia} data-media-kind={showMedia ? media.kind : 'unavailable'}>
@@ -227,7 +177,6 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPoste
           className={styles.shotMediaAsset}
           muted
           onError={() => setFailedUrl(assetUrl)}
-          onLoadedData={(event) => scheduleCapture(event.currentTarget)}
           playsInline
           preload='metadata'
           src={assetUrl}
@@ -411,12 +360,7 @@ const ShotTile: React.FC<ShotTileProps> = ({
       data-shot-id={shot.shotId}
       data-shot-tile
     >
-      <ShotMedia
-        media={shot.media}
-        onPosterCaptured={actions.persistCapturedPoster}
-        projectId={projectId}
-        shotId={shot.shotId}
-      />
+      <ShotMedia media={shot.media} projectId={projectId} />
       <div
         ref={panelCardRef}
         aria-label={t(`${KEY_ROOT}.panel.cardLabel`, { position: shotLabel, status: t(panelStatusKey(panel)) })}

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { authoredProjectDigest } from '@process/services/creative-studio/service/schema2/authoredDigest';
 import {
   existsSync,
   linkSync,
@@ -186,7 +185,6 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
       proposalId?: string;
       payload?: StudioProposalRecordV2['payload'];
       createdAt?: string;
-      authoredDigest?: string;
     } = {}
   ): Promise<{
     proposal: StudioProposalRecordV2;
@@ -209,7 +207,6 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
       projectId: project.id,
       status: 'pending',
       baseRevision: project.revision,
-      ...(input.authoredDigest === undefined ? {} : { authoredDigest: input.authoredDigest }),
       payload: input.payload ?? {
         kind: 'mutation_batch',
         operations: [{ kind: 'set_brief', brief: 'Accepted brief' }],
@@ -4070,61 +4067,6 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
     expect(readFileSync(prototypeIndexFile)).toEqual(prototypeIndexBefore);
     expect(existsSync(path.join(rootDir, 'projects-v2.json'))).toBe(false);
     expect(prototypeIndexAccesses).toEqual([]);
-  });
-
-  it('accepts a proposal after a job has ticked, and still refuses one after a real edit', async () => {
-    /*
-     * BUG-028, reproduced then fixed. `jobs` and `assets` live inside the project document and
-     * every write bumps the revision, so the old exact-revision fence killed a reviewed, paid draft
-     * the moment a generation made progress — permanently, since nothing rebases a pending
-     * proposal. The fence now asks whether anything a PERSON authored moved.
-     *
-     * Both directions matter. Accepting through machine noise is the fix; refusing after a real
-     * edit is what stops the fix silently clobbering someone's work.
-     */
-    const { store } = createStoreV2({ createId: () => 'proposal_project_v2', now: () => '2026-08-17T12:00:01.000Z' });
-    const project = await store.createProjectV2(inputV2);
-    const digest = authoredProjectDigest(project);
-    const { proposal } = await seedProposalV2(store, project, { authoredDigest: digest });
-
-    /*
-     * The job manager commits with no `expectedRevision` and touches only machine state
-     * (`jobManager.ts:649-677`). From the fence's point of view that reduces to exactly this: the
-     * revision moves and the authored digest does not, which the assertion below states directly
-     * rather than depending on the shape of a job fixture.
-     */
-    const afterJob = await store.updateProjectV2(project.id, (draft) => draft, undefined, 'studio_job_manager_v2');
-    expect(afterJob.revision).toBe(project.revision + 1);
-    expect(authoredProjectDigest(afterJob)).toBe(digest);
-
-    const accepted = await store.acceptProposalV2(project.id, proposal.id);
-    expect(accepted).toMatchObject({ applied: true });
-    // It applies over the live head rather than rewinding to the proposal's own base.
-    expect(accepted.project.revision).toBe(afterJob.revision + 1);
-    expect(accepted.project.brief).toBe('Accepted brief');
-  });
-
-  it('still refuses a proposal once someone has edited what it was written against', async () => {
-    const { store } = createStoreV2({ createId: () => 'proposal_project_v2', now: () => '2026-08-17T12:00:01.000Z' });
-    const project = await store.createProjectV2(inputV2);
-    const { proposal } = await seedProposalV2(store, project, { authoredDigest: authoredProjectDigest(project) });
-
-    const edited = await store.updateProjectV2(project.id, (draft) => ({ ...draft, name: 'Renamed by a person' }));
-    expect(authoredProjectDigest(edited)).not.toBe(authoredProjectDigest(project));
-
-    await expect(store.acceptProposalV2(project.id, proposal.id)).rejects.toMatchObject({ code: 'stale_project' });
-  });
-
-  it('keeps the exact-revision fence for a record written before the digest existed', async () => {
-    // Such a record cannot answer "did anything authored move?", so it must not be accepted on
-    // trust — it keeps exactly the behaviour it had.
-    const { store } = createStoreV2({ createId: () => 'proposal_project_v2', now: () => '2026-08-17T12:00:01.000Z' });
-    const project = await store.createProjectV2(inputV2);
-    const { proposal } = await seedProposalV2(store, project);
-
-    await store.updateProjectV2(project.id, (draft) => draft, undefined, 'studio_job_manager_v2');
-
-    await expect(store.acceptProposalV2(project.id, proposal.id)).rejects.toMatchObject({ code: 'stale_project' });
   });
 
   it('lists, accepts, and restart-retries one mutation proposal without reapplying it', async () => {

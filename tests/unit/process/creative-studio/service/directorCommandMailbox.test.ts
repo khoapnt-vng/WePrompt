@@ -305,27 +305,6 @@ describe('Studio Director schema-2 command mailbox', () => {
     });
   });
 
-  it('skips a project whose pending ledger cannot be read instead of failing the whole sweep', async () => {
-    /*
-     * This snapshot is the Director processor's pre-start sweep, and `start()` runs it outside its
-     * own try block. Throwing here rejected activation, and the runtime's `degradeInstalledGraph`
-     * then nulled the entire graph — so ONE unreadable project took Creative Studio down for every
-     * project in the profile: no generation, no media previews, no project status, no film export.
-     * Reproduced live on a real profile, and fixed by tolerating the project the way the sibling
-     * `listPendingPage` and `pruneReceiptsPage` sweeps already do.
-     */
-    await mailbox.ensure(projectId);
-
-    // Make the project's pending ledger unreadable, exactly as corrupt storage would.
-    const brokenPending = commandDirectories(rootDir, projectId).pending;
-    await nodeFs.rm(brokenPending, { recursive: true, force: true });
-    await nodeFs.writeFile(brokenPending, 'not a directory', 'utf8');
-
-    // Before the fix this rejected, which aborted activation for every project in the profile.
-    const page = await mailbox.snapshotPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
-    expect(page.items.every((item) => item.projectId !== projectId)).toBe(true);
-  });
-
   it('rejects malformed identities, traversal bounds, cursors, and maintenance timestamps', async () => {
     const invalidPayload = { code: 'invalid_payload' };
     await expect(mailbox.ensure('../project')).rejects.toMatchObject(invalidPayload);

@@ -1,8 +1,6 @@
 # Creative Studio — BUG-028: paid drafts survive concurrent revisions
 
-**Status:** ⚠️ **SUPERSEDED 2026-08-29 — the architecture this describes no longer exists.** `creativeStudioService.ts`, `StoryboardDraftModal`, `applyProposalPayload`, `replace_storyboard`, `StudioEditableScene` and `sceneOrder` all return zero files; only `recordProposal` survives. Its remedy shipped by accident — a draft is now recorded as a pending proposal rather than written directly — so the failure below cannot occur as written. **What is live is this note's own §7**, the paragraph marked _recorded, not scoped_: proposals do go perpetually stale under running jobs, reproduced 2026-08-29. See `TASKS.md` BUG-028 for the reproduction and the sized fix. Read the rest as history: §3's exclusion of operational fields is still the right predicate, and is the part worth carrying forward.
-
-**Original status:** agreed design (option C), ready to implement · **Date:** 2026-08-07 · **Code branch:** `creative-suite-sprint2`
+**Status:** agreed design (option C), ready to implement · **Date:** 2026-08-07 · **Code branch:** `creative-suite-sprint2`
 **Fixes:** `TASKS.md` BUG-028 · **Consumes:** the proposal ledger (live on the branch) and Slice A3's proposal cards ([EPIC-006 backlog](creative-studio-sprint3-backlog.md))
 
 ## 1. The verified failure

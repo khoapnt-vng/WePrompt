@@ -1020,6 +1020,10 @@
       },
       "table": {
         "reorder": {
+          "label": "{{title}}の並べ替え操作",
+          "dragHandle": "{{title}}（位置{{position}}）を並べ替え",
+          "moveEarlier": "{{title}}を前へ移動",
+          "moveLater": "{{title}}を後ろへ移動",
           "announcement": "{{title}}を位置{{from}}から{{to}}（全{{total}}件）へ移動しました。",
           "failed": "Beatの順序は変更されませんでした。"
         },
@@ -1060,8 +1064,7 @@
             "failed": "失敗",
             "cancelled": "キャンセル済み"
           }
-        },
-        "shotPosition": "{{beat}}.{{shot}}"
+        }
       },
       "project": {
         "statusUnavailable": "状況を取得できません",

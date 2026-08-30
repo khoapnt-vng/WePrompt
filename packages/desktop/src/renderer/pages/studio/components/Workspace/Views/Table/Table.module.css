@@ -281,9 +281,7 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-  object-fit: contain;
+  object-fit: cover;
 }
 
 .panelActivityMark {
@@ -324,10 +322,6 @@
 
 .shotRow .shotCell {
   background: var(--color-fill-1);
-}
-
-.shotRow .shotCell[data-grid-column='0'] {
-  padding-inline-start: 32px;
 }
 
 .shotRow:hover .shotCell,

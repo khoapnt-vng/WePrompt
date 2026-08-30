@@ -40,15 +40,9 @@ export default defineConfig({
             'tests/unit/**/*.dom.test.ts',
             'tests/unit/**/*.dom.test.tsx',
             'tests/integration/creative-studio/directorCommandLatency.integration.test.ts',
-            'tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts',
             'tests/integration/creative-studio/generationLifecycle.integration.test.ts',
             'tests/integration/creative-studio/projectRecovery.integration.test.ts',
             'tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts',
-            'tests/unit/knowledge/projectKnowledgeService.test.ts',
-            'tests/unit/process/services/officeArtifact/officeCliRunner.test.ts',
-            'tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts',
-            'tests/unit/process/services/presentation-template/storage/presentationRunJournal.test.ts',
-            'tests/unit/releasePackagingConfig.test.ts',
           ],
           setupFiles: ['./tests/vitest.setup.ts'],
           sequence: { groupOrder: 2 },
@@ -75,9 +69,6 @@ export default defineConfig({
           environment: 'node',
           include: [
             'tests/integration/creative-studio/directorCommandLatency.integration.test.ts',
-            // Its own `waitForCondition` budgets 5s internally, so a longer harness `testTimeout`
-            // cannot help it — only removing the contention can. Failed a gate run 2026-08-29.
-            'tests/integration/creative-studio/directorCommandLifecycle.integration.test.ts',
             // These lifecycle tests coordinate multiple asynchronous stores and fake-provider clocks.
             // Coverage instrumentation makes their fail-closed record fences race under the general
             // worker pool, so keep them isolated from unrelated repository IO.
@@ -89,32 +80,6 @@ export default defineConfig({
           fileParallelism: false,
           maxWorkers: 1,
           sequence: { groupOrder: 1 },
-        },
-      },
-      // Filesystem-heavy tests that assert no timing of their own, but do enough real IO to exceed
-      // the 10s default when the suite is loading itself. Every one of these has failed a gate run
-      // as a timeout while passing in isolation, and each failure costs a full re-run.
-      //
-      // Deliberately NOT the isolation treatment above: that exists for tests asserting wall-clock
-      // thresholds, where contention corrupts the measurement itself. These assert none — they just
-      // need headroom — so they stay in the parallel pool at the same groupOrder and only get a
-      // longer ceiling. Serialising them would add their whole cost to the critical path for
-      // nothing.
-      {
-        extends: true,
-        test: {
-          name: 'io-heavy',
-          environment: 'node',
-          include: [
-            'tests/unit/knowledge/projectKnowledgeService.test.ts',
-            'tests/unit/process/services/officeArtifact/officeCliRunner.test.ts',
-            'tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts',
-            'tests/unit/process/services/presentation-template/storage/presentationRunJournal.test.ts',
-            'tests/unit/releasePackagingConfig.test.ts',
-          ],
-          setupFiles: ['./tests/vitest.setup.ts'],
-          testTimeout: 60000,
-          sequence: { groupOrder: 2 },
         },
       },
     ],

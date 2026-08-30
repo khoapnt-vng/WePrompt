@@ -11,31 +11,6 @@
   padding: 0;
 }
 
-/*
- * The Beat panel is an Arco Modal portalled to document.body, so it is NOT a DOM descendant of
- * WorkspaceControls and cannot inherit --studio-frame-aspect-ratio from it. Publish the project's
- * ratio again on this panel's own root, the way References does for its own view.
- */
-.root[data-aspect-ratio='16:9'] {
-  --studio-frame-aspect-ratio: 16 / 9;
-}
-
-.root[data-aspect-ratio='9:16'] {
-  --studio-frame-aspect-ratio: 9 / 16;
-}
-
-.root[data-aspect-ratio='1:1'] {
-  --studio-frame-aspect-ratio: 1 / 1;
-}
-
-.root[data-aspect-ratio='4:3'] {
-  --studio-frame-aspect-ratio: 4 / 3;
-}
-
-.root[data-aspect-ratio='3:4'] {
-  --studio-frame-aspect-ratio: 3 / 4;
-}
-
 .root {
   composes: surface from '../../../StudioTypography.module.css';
   display: grid;
@@ -363,6 +338,35 @@
   box-shadow: var(--ring-focus);
 }
 
+.mediaPreview {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 7px;
+  object-fit: cover;
+  background: var(--color-fill-2);
+}
+
+.mediaPreviewFrame {
+  min-inline-size: 0;
+  overflow: hidden;
+  border-radius: 7px;
+}
+
+.mediaPreviewFrame:fullscreen {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  border-radius: 0;
+}
+
+.mediaPreviewFrame:fullscreen .mediaPreview {
+  inline-size: 100%;
+  block-size: 100%;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+
 .mediaDetails {
   display: grid;
   min-inline-size: 0;
@@ -526,7 +530,7 @@
   position: relative;
   display: grid;
   min-inline-size: 0;
-  aspect-ratio: var(--studio-frame-aspect-ratio, 16 / 9);
+  aspect-ratio: 16 / 9;
   place-items: stretch;
   overflow: hidden;
   border: 1px solid var(--color-border-2);
@@ -800,12 +804,11 @@ div.previewMedia {
   inset-block-start: 50%;
   inset-inline: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
   box-sizing: border-box;
   inline-size: 24px;
   block-size: 34px;
   margin-inline: auto;
-  place-items: stretch;
+  place-items: center;
   border: 2px solid var(--color-border-3);
   border-radius: 7px;
   background: var(--color-bg-1);
@@ -1224,10 +1227,9 @@ div.previewMedia {
 .frameSlot {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
   min-inline-size: 0;
   block-size: 66px;
-  place-items: stretch;
+  place-items: center;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--color-border-2);
@@ -1255,13 +1257,10 @@ div.previewMedia {
 .frameSlot img {
   inline-size: 100%;
   block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-  object-fit: contain;
+  object-fit: cover;
 }
 
 .emptySlotCopy {
-  place-self: center;
   font-family: var(--font-mono);
   font-size: 7.5px;
   white-space: nowrap;

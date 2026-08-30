@@ -241,27 +241,6 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/recorded when the write result proves a record exists/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/queued when the result proves work is waiting/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/proposal pending human review is pending, not applied/i);
-  });
-
-  it('tells the Director how to speak, not only what to do', () => {
-    /*
-     * Found live 2026-08-29: the Director told the owner "Redrafted proposal
-     * 7e724b3e-3a49-42cb-8b15-2ea21dd36787 is recorded and pending your review" and "All three shots,
-     * including the end card, now have chainBreak: \"none\"". Every rule above governs what it may do;
-     * the only line about how it speaks was "Answer in the language the person writes to you in", so
-     * it mirrored the engine vocabulary the rules themselves are written in. The owner's words:
-     * "we have to change the director's language. i cannot understand what it says".
-     */
-    expect(DIRECTOR_PRESET_RULES).toMatch(/never put an identifier in a sentence/i);
-    expect(DIRECTOR_PRESET_RULES).toMatch(/never name a tool, a field, or a stored value/i);
-    // The three the owner actually saw, named so a rewrite cannot quietly drop them.
-    expect(DIRECTOR_PRESET_RULES).toMatch(/not\s+chainBreak, not base_revision, not approvedAssetId/i);
-    expect(DIRECTOR_PRESET_RULES).toMatch(/never say review UI, human review/i);
-    // The state distinctions are load-bearing for honesty; only the wording may change.
-    expect(DIRECTOR_PRESET_RULES).toMatch(/waiting for you rather than pending human\s+review/i);
-    expect(DIRECTOR_PRESET_RULES).toMatch(/distinctions matter and\s+must survive; the vocabulary must not/i);
-    expect(DIRECTOR_PRESET_RULES).toMatch(/one plain sentence saying what to do and where/i);
-    expect(DIRECTOR_PRESET_RULES).toMatch(/no inline code spans/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(
       /reference request queued for the person to start[\s\S]*recorded work, not generated media/i
     );

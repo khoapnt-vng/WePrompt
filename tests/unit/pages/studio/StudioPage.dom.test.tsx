@@ -220,7 +220,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-import StudioPage, { resolveStudioBlockingMessageKey } from '@/renderer/pages/studio/StudioPage';
+import StudioPage from '@/renderer/pages/studio/StudioPage';
 import { railPreferenceKey } from '@/renderer/pages/studio/components/Workspace/WorkspaceShell';
 import { useStudioProject, type UseStudioProjectResult } from '@/renderer/pages/studio/hooks/useStudioProject';
 
@@ -3212,14 +3212,8 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
       },
     },
     {
-      /*
-       * BUG-183. This row used to assert the generic `routeCatalogRequired` line — "no generation
-       * model is ready … choose Refresh routes" — while the fixture makes the fetch fail with an
-       * exact reason. It codified the defect: the precise message was captured and then hidden
-       * behind the vague one, telling the person to refresh the very thing that just failed.
-       */
-      label: 'a route catalog whose fetch failed, named by its own reason',
-      messageKey: 'native.routesFailed',
+      label: 'an unavailable route catalog',
+      messageKey: 'conversation.creativeStudio.workspace.controls.routeCatalogRequired',
       configure: (_authority: StudioRendererProjectV2) => {
         mocks.bridge.listRoutes.invoke.mockResolvedValue({
           ok: false,
@@ -3527,29 +3521,6 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     );
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
-  });
-
-  it('lets the workspace notice refresh the routes it is complaining about', async () => {
-    /*
-     * BUG-183. The blocker named "Refresh routes" while that control sat unmentioned in the More
-     * menu. The remedy now travels with the message, and the shell owns its own role='alert'
-     * wrapper, so it takes the bare button rather than a second nested Alert.
-     */
-    // The provisioning pass only runs for an attached project whose catalogue holds no options,
-    // which is exactly the state the blocker describes.
-    mocks.bridge.listConnectionCandidates.invoke.mockRejectedValue(new Error('provisioning unavailable'));
-    mockSupportedProject(attachedProject());
-    renderStudio('/studio/project_1/board');
-
-    const notice = await screen.findByRole('alert');
-    expect(notice).toHaveTextContent('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
-
-    const before = mocks.bridge.listRoutes.invoke.mock.calls.length;
-    fireEvent.click(
-      within(notice).getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.refreshRoutes' })
-    );
-
-    await waitFor(() => expect(mocks.bridge.listRoutes.invoke.mock.calls.length).toBeGreaterThan(before));
   });
 
   it('refuses Board reference focus for retained or unknown Shot identities without navigation or spend', async () => {
@@ -7186,9 +7157,6 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     mocks.bridge.acknowledgeFilmExport.invoke
       .mockResolvedValueOnce(ok({ status: 'acknowledged' as const }))
       .mockResolvedValueOnce(ok({ status: 'not_found' as const }))
-      // A refused acknowledgement is not the same as a thrown one, and both must read as null
-      // rather than as a status the caller could act on.
-      .mockResolvedValueOnce({ ok: false as const, error: { code: 'storage_error', messageKey: 'native.failed' } })
       .mockRejectedValueOnce(new Error('acknowledgement transport failed'));
 
     renderStudio('/studio/project_1/cut');
@@ -7252,7 +7220,6 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     await expect(menu.cancelFilmExport('film_run_1')).resolves.toBe(false);
     await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBe('acknowledged');
     await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBe('not_found');
-    await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBeNull();
     await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBeNull();
     await expect(menu.revealFilm('missing_film')).resolves.toEqual({
       ok: false,

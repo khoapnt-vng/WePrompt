@@ -81,7 +81,6 @@ import {
   validatesStudioPaidRecoveryBlockerV2,
   type StudioDirectorOperationDispositionV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
-import { authoredProjectDigest } from '@process/services/creative-studio/service/schema2/authoredDigest';
 import {
   type RecordIoFileSystem,
   readBoundedRegularFileWithIdentity,
@@ -1144,33 +1143,6 @@ export function createListRoutesHandler(
   return async () => commandToolResult(await writer.listRoutes());
 }
 
-/**
- * A Shot that does not exist yet can never be created as a hard cut: `apply_coverage`'s reducer
- * fails the whole batch with `invalid_operation` when it must create a Shot whose `chainBreak` is
- * `hard_cut`, and `add_shot` mints `none`, so proposing one through either route is a dead end.
- *
- * The shape validator accepts `hard_cut` — it is a legal value — so nothing stopped the Director
- * drafting it, and the refusal that came back named neither the Shot nor the field. BUG-182: a
- * three-Beat film whose end card was a hard cut was refused whole, twice, and the person was left
- * with two proposals they could not accept and no way to learn why. Catching it here, where the
- * answer can say what to do instead, turns that dead end into one redraft.
- */
-const firstUncreatableHardCutV2 = (
-  project: StudioProjectV2,
-  operations: readonly StudioMutationOperationV2[]
-): { beatId: string; shotId: string } | null => {
-  for (const operation of operations) {
-    if (operation.kind !== 'apply_coverage') continue;
-    for (const shot of operation.shots) {
-      if (shot.chainBreak !== 'hard_cut') continue;
-      if (!Object.hasOwn(project.shots, shot.shotId)) {
-        return { beatId: operation.beatId, shotId: shot.shotId };
-      }
-    }
-  }
-  return null;
-};
-
 export function createProposeStoryboardHandlerV2(
   config: StudioServerEnv | null
 ): (input: ProposeStoryboardInputV2) => Promise<StudioToolResult> {
@@ -1189,23 +1161,11 @@ export function createProposeStoryboardHandlerV2(
             'Call read_storyboard and redraft.'
         );
       }
-      const hardCut = firstUncreatableHardCutV2(project, operations);
-      if (hardCut !== null) {
-        return errorResult(
-          `Shot ${hardCut.shotId} in Beat ${hardCut.beatId} does not exist yet and sets chainBreak ` +
-            '"hard_cut". A Shot cannot be created as a hard cut, so this batch would be refused whole. ' +
-            'Redraft it with chainBreak "none" and say in your reply that the person can cut it free ' +
-            'afterwards from the Beat panel, which is the only place a hard cut can be set.'
-        );
-      }
       await assertProjectSnapshotStatusV2(config, snapshot);
       const record = await writeProposalRecordV2({
         pendingDir: config.pendingDir,
         projectId: config.projectId,
         baseRevision: base_revision,
-        // BUG-028: recorded so the accept can ask whether anything AUTHORED moved, rather than
-        // whether the revision moved — which it does on every job poll.
-        authoredDigest: authoredProjectDigest(project),
         payload: { kind: 'mutation_batch', operations },
         fs: config.fs,
         authorityFence: () => projectSnapshotStatusV2(config, snapshot),
@@ -1259,9 +1219,6 @@ export function createProposeBriefRuleHandlerV2(
         pendingDir: config.pendingDir,
         projectId: config.projectId,
         baseRevision: base_revision,
-        // BUG-028: recorded so the accept can ask whether anything AUTHORED moved, rather than
-        // whether the revision moved — which it does on every job poll.
-        authoredDigest: authoredProjectDigest(project),
         payload: {
           kind: 'pin_rule',
           rule: { text: trimmed, predicate: terms.length === 0 ? null : { kind: 'forbidden_terms', terms } },

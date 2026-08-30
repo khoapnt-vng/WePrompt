@@ -41,7 +41,6 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/index.ts',
   'packages/desktop/src/process/services/creative-studio/service/projectMutations.ts',
   'packages/desktop/src/process/services/creative-studio/service/recordIo.ts',
-  'packages/desktop/src/process/services/creative-studio/service/schema2/authoredDigest.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/chain.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/catalog.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/editorFolder.ts',

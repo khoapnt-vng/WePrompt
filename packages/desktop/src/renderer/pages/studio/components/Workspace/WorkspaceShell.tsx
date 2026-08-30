@@ -553,9 +553,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
             )}
             {proposalInbox}
             <main aria-labelledby={viewHeadingId} className={styles.viewSurface} data-studio-view={activeView}>
-              <h2 className={styles.viewHeading} id={viewHeadingId}>
-                {t(`conversation.creativeStudio.workspace.views.${activeView}`)}
-              </h2>
+              <h2 id={viewHeadingId}>{t(`conversation.creativeStudio.workspace.views.${activeView}`)}</h2>
               {children}
             </main>
           </div>

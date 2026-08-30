@@ -22,7 +22,7 @@
   margin: 0;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 13.5px;
+  font-size: 20px;
   overflow-wrap: anywhere;
 }
 
@@ -58,7 +58,6 @@
 }
 
 .beatCard {
-  position: relative;
   display: grid;
   align-content: start;
 }
@@ -71,11 +70,12 @@
 .binCover {
   position: relative;
   min-inline-size: 0;
-  aspect-ratio: var(--studio-frame-aspect-ratio, 16 / 9);
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--color-fill-2);
 }
 
+.shotMedia,
 .shotMediaAsset,
 .binCoverImage,
 .coverPlaceholder,
@@ -83,13 +83,11 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
 }
 
 .shotMediaAsset,
 .binCoverImage {
-  object-fit: contain;
+  object-fit: cover;
 }
 
 .beatHeader {
@@ -159,16 +157,12 @@
   padding: 0;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: var(--fw-semibold);
   line-height: 1.35;
   overflow-wrap: anywhere;
   text-align: start;
   white-space: normal;
-}
-
-.beatTitle:global(.arco-btn-text) {
-  position: static;
 }
 
 .beatTitle:global(.arco-btn-text),
@@ -180,22 +174,6 @@
   color: var(--text-primary);
   background-color: transparent;
   box-shadow: none;
-}
-
-.beatTitle::after {
-  content: '';
-  position: absolute;
-  z-index: 0;
-  inset: 0;
-}
-
-/* Interior controls keep their own targets above the card-filling overlay. Lift the tiles, not
-   their container: lifting .shotGrid blanketed the card's empty space and left the overlay
-   reachable only in the header strip. */
-.beatPanelActions,
-.shotTile {
-  position: relative;
-  z-index: 1;
 }
 
 .beatTitle > span:not(.srOnly) {
@@ -305,12 +283,8 @@
 }
 
 .shotMedia {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  place-items: stretch;
-  inline-size: 100%;
   min-inline-size: 0;
-  aspect-ratio: var(--studio-frame-aspect-ratio, 16 / 9);
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--color-fill-2);
 }
@@ -411,7 +385,7 @@
   display: block;
   overflow: hidden;
   min-inline-size: 0;
-  aspect-ratio: var(--studio-frame-aspect-ratio, 16 / 9);
+  aspect-ratio: 16 / 9;
   border: 1px dashed var(--color-border-3);
   border-radius: 7px;
   background: var(--color-fill-2);
@@ -441,7 +415,7 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
-  object-fit: contain;
+  object-fit: cover;
 }
 
 .panelActivityMark {

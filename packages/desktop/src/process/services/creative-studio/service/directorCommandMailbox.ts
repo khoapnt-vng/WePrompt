@@ -1277,21 +1277,7 @@ const createStudioDirectorCommandMailboxInternal = (
         cursor,
         limit,
         directory: 'pending',
-        /*
-         * Skip a project whose ledger cannot be read, as the two sibling sweeps already do.
-         *
-         * This snapshot is the processor's pre-start sweep, and `start()` runs it before its own
-         * try block, so throwing here rejected activation and `degradeInstalledGraph` then nulled
-         * the whole graph — one unreadable project took Creative Studio down for every project in
-         * the profile: no generation, no media previews, no project status, no film export.
-         * Measured live: holding one corrupt project aside restored all of it.
-         *
-         * Skipping is safe. A project whose ledger cannot be read is quarantined and unusable
-         * anyway, so its pending commands could never be processed; the only cost is that its
-         * commands are absent from the pre-start set, which changes nothing for a project that
-         * cannot run commands.
-         */
-        tolerateProjectErrors: true,
+        tolerateProjectErrors: false,
         createIfWhollyAbsent: true,
       });
     },

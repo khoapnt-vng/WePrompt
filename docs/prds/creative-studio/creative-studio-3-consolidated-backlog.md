@@ -3,17 +3,7 @@
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on
 someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallied by hand.
 
-**123 bugs filed · 121 closed · 2 open** — both P1 and both waiting on an owner decision rather than on engineering: **BUG-144** (ffmpeg distribution) and **BUG-165** (whether a chained take's quoted upper bound may double to fund a retry). _`TASKS.md` **BUG-028** was reproduced and fixed on 2026-08-29: a pending proposal no longer dies when a generation ticks over, because the fence now asks whether anything a person authored moved rather than whether the revision did. **`creative-studio-3-mvp-plan.md` is closed the same day** — all nine tasks verified shipped against the code, adversarially challenged, zero refutations; the 75 step boxes had simply never been ticked._
-
-_Closed 2026-08-29: **BUG-163**, verified end to end by driving the repair on `Panel Check` and watching the PATCH, the proving readback and the composer arrive — and the measurement corrected the entry's stated mechanism, since the backend echoes the conversation record rather than returning an empty 204; **BUG-162**, verified by driving the real turn-close builder against the real locale bundle in the running renderer; **BUG-177**, verified live — one opaque scrim, and hit-testing finds no point that resolves into the Beat panel behind it; that verification turned up **BUG-181**, the frame counter painted over by Arco's close button, filed and fixed in the same pass; **BUG-166** — live verification found its own first fix persisting pure-black posters, now fixed and re-verified against the real capture function; **BUG-172** on live evidence from `Plateau` itself, and **BUG-180** on the owner's scope ruling that every Studio project is throwaway test data and migration is not done during development. The containment half of BUG-180 is filed and fixed as **BUG-179** and is unaffected by that ruling: one unopenable project must not degrade the runtime for every other project._
-
-_Closed 2026-08-29 after live verification in the running app: BUG-138, 171, 173, 174, 175, 176 and 178. Of the eight still open, **five carry a landed fix that could not be witnessed** — four of those five need a working Director, which never attaches in this profile — and only three need engineering: BUG-144 (owner-deferred distribution decision), BUG-165 (one Director-adjacent cause plus a pricing call) and BUG-180 (no repair route for a project bricked mid-publication)._
-
-_Added 2026-08-29 from live verification: **BUG-179** (P1, one unreadable project degraded the whole runtime — **fixed and verified live**, and it also fixed film export by consequence) and **BUG-180** (P2, a crash mid-publication leaves a project permanently unopenable with no in-app recovery)._
-
-_Status 2026-08-29: **12 of the 14 open entries carry a landed fix awaiting live verification**, recorded as `Fix landed … not yet verified live` rather than closed, because jsdom does not compute layout and this file's own standard is that a commit message describing the right fix is not evidence. Only two entries have unfinished work, and neither is engineering that can proceed today: **BUG-144** is the owner-deferred distribution decision, and **BUG-165** needs a prompt-authoring change that overlaps the in-flight Director work plus a pricing call on retry cost._
-
-_Count note 2026-08-29: the previous line read 116 filed · 98 closed. Counting `- [ ]`/`- [x]` **[BUG-nnn]** headers in `creative-studio-3-bug-list.md` returns 118 unique ids with no duplicates, so the filed and closed figures were two low; the open figure of 18 was correct. BUG-138 was reopened on 2026-08-29, taking open to 19._
+**116 bugs filed · 98 closed · 18 open** — 2 P1, 10 P2, 6 P3.
 
 ---
 
@@ -42,49 +32,36 @@ merged" while the code carried them. Compare content, not ancestry.
 
 ## 2. The P2s and P3s, grouped by what fixes them
 
-_Recounted from the bug list 2026-08-29. The previous revision of this section listed eighteen ids —
-the superseded open figure — of which **six were already closed** (BUG-141, 142, 160, 161, 164, 167)
-and it omitted **BUG-176**, an open P2 no cluster covered. Since this is the view people plan from,
-that meant six closed items were re-pickable and one real one was invisible. Regenerate this list
-from the bug list rather than editing it by hand._
+Filing them individually was right; fixing them individually would not be. Five clusters:
 
-Twelve of the fourteen open entries now carry a landed fix awaiting live verification. Three clusters
-plus two standalones remain:
+**Images are cropped wherever they matter** — **BUG-172** (P2), **BUG-178** (P2).
+Three instances of one pattern: a fixed `block-size` plus `object-fit: cover` plus `overflow: hidden`.
+The canonical reference image loses 67% of itself; the take strip is 54×38; the Shot's `Start` tile is
+74px. Every one of those surfaces exists so the owner can judge an image. One shared image frame with
+`aspect-ratio: 16/9` fixes all three; three local patches would not stop the fourth.
 
-**Images are cropped wherever they matter** — **BUG-138** (P2, _reopened and fix landed_),
-**BUG-172** (P2, _fix landed_), **BUG-178** (P2, _fix landed_).
-One pattern in two shapes: a fixed `block-size`, or a hardcoded `aspect-ratio`, each combined with
-`object-fit: cover` (or an unconstrained image) plus `overflow: hidden`. Ten instances, not three.
-**The frame must not be `aspect-ratio: 16/9`.** `StudioAspectRatio` is
-`'16:9' | '9:16' | '1:1' | '4:3' | '3:4'`, so a hardcoded landscape frame newly breaks every portrait
-and square project — precisely the defect BUG-138 was filed for. The frame takes its ratio from the
-project. Note the trap that this fix hit and had to correct: the ratio is published on
-`WorkspaceControls`, and an Arco `Modal` without `getPopupContainer` portals its subtree to
-`document.body`, escaping that DOM node. Any portalled surface must republish it.
+**Loading states that assert unavailability** — **BUG-167** (P3, _fix landed_).
+Distinct from a genuine unavailable state and repeatedly mistaken for one. Note this cluster is also
+where **S6** lands, so the new blank work area must not become a fourth variant.
 
-**The view chrome is inverted** — **BUG-171** (P3, _fix landed_), **BUG-175** (P3, _fix landed_),
-**BUG-177** (P3, _fix landed_).
-Every view wrapped itself in a card repeating its own name. Measured: two redundant headings at 20px
-and 21.75px while the project title is 14.5px and the Beat's own name 13px — the page's least
-informative labels were its largest. BUG-171 and BUG-175 were one fix.
+**The view chrome is inverted** — **BUG-171** (P3), **BUG-175** (P3), **BUG-177** (P3).
+Every view wraps itself in a card repeating its own name, across References, Table and Board. The
+measurement that matters: the two redundant headings render at 20px and 21.75px while the project
+title is 14.5px and the Beat's own name is 13px. The page's least informative labels are its largest.
+BUG-171 and BUG-175 are one fix — deleting the duplicate frees exactly the weight the name needs.
 
-**The Director's outputs cannot be resolved** — **BUG-162** (P3, _fix landed_),
-**BUG-163** (P2, _fix landed_).
-The rest of this cluster closed on inspection. What remained was two wrong root causes: BUG-162 is app
-copy chosen from transport counts, not Director prose; BUG-163 is a provider typed `Promise<boolean>`
-that resolves `undefined` on a 204, so a successful write read as a failure.
+**The Director's outputs cannot be resolved** — **BUG-160** (P2), **BUG-161** (P2), **BUG-162** (P3),
+**BUG-163** (P2), **BUG-164** (P3, _fix landed_).
+The owner's live symptom: four proposals pending at revisions 18 and 22 against a project at 1216,
+`Accept` disabled on all four, `Reject` the only exit. This is the cluster actually in the owner's way.
 
-**Money spent on nothing** — **BUG-165** (P1), **BUG-166** (P2, _fix landed_).
-BUG-165 is the chained-generation success rate; its remaining retry mitigation is a pricing decision.
-BUG-166 was a Board that could never show a preview because a poster was only ever captured inside
-the Beat panel.
+**Money spent on nothing** — **BUG-141** (P2), **BUG-142** (P2), **BUG-165** (P1), **BUG-166** (P2).
+BUG-142 and BUG-166 are the quiet ones: a status that permanently nudges toward re-rendering, and a
+Board that can never show a preview because nothing captures a poster.
 
-**Standalone** — **BUG-173** (P2, _fix landed_: Shot rows shared their Beat's indent, colliding with
-per-Beat numbering), **BUG-174** (P3, _fix landed_: the 28 move controls removed, keyboard route kept),
-and **BUG-176** (P2, _fix landed_: only a 19px strip of the Beat card opened the Beat).
-
-**Not in a cluster** — **BUG-144** (P1) is the owner-deferred ffmpeg distribution decision, covered in
-section 1.
+**Standalone** — **BUG-173** (P2, Shot rows share their Beat's exact indent, colliding with per-Beat
+numbering) and **BUG-174** (P3, remove the 28 move controls; check they are not the only keyboard
+route first).
 
 ## 3. Planned work
 

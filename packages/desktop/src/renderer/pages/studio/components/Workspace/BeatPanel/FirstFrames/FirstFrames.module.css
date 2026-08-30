@@ -57,17 +57,6 @@
   color: var(--color-text-3);
 }
 
-/*
- * Arco positions the Modal's close button absolutely in the top-right corner, over whatever the
- * content puts there. The topline's right-hand slot is the frame counter, so the two collided:
- * measured in the running app, "1 of 1" ran to x1242 and the close icon began at x1230, painting
- * over its last character. Reserve the corner rather than move the counter, so the counter keeps
- * its place opposite the label.
- */
-.viewerTopline {
-  padding-inline-end: 24px;
-}
-
 .shotChip,
 .currentBadge {
   padding: 2px 6px;
@@ -114,16 +103,11 @@
 .frameMedia {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
   inline-size: 132px;
   block-size: 74px;
-  place-items: stretch;
+  place-items: center;
   overflow: hidden;
   background: var(--color-fill-3);
-}
-
-.frameMedia > span {
-  place-self: center;
 }
 
 .frameMedia img,
@@ -134,9 +118,7 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
-  min-inline-size: 0;
-  min-block-size: 0;
-  object-fit: contain;
+  object-fit: cover;
 }
 
 .frameOpenSurface {
@@ -305,7 +287,6 @@
 
 .viewerMedia {
   display: grid;
-  grid-template-rows: minmax(0, 1fr);
   min-inline-size: 0;
   min-block-size: 0;
   block-size: 100%;

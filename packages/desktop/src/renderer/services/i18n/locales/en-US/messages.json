@@ -145,9 +145,9 @@
     },
     "close": {
       "completed": {
-        "v1": "All the steps are done, and none of them failed. Tell me what you'd like to do next.",
-        "v2": "Every step finished without an error. Let me know where you'd like to go from here.",
-        "v3": "Done — nothing hit a snag along the way. I'm ready for the next thing whenever you are."
+        "v1": "All done — everything went through as planned. Tell me what you'd like to do next.",
+        "v2": "That's finished and working. Let me know where you'd like to go from here.",
+        "v3": "Done — it all came together. I'm ready for the next thing whenever you are."
       },
       "recovered": {
         "v1": "Done — one step needed a second try, but it's all sorted now.",

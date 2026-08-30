@@ -31,7 +31,6 @@ import type {
   ReferenceRetainedShotReviewClaim,
 } from './referenceRemovalBlockers';
 import { referenceWorkspaceStatus } from './referenceStatus';
-import { StudioBlockerAlert } from '@/renderer/pages/studio/components/StudioBlockerAlert';
 
 export type ReferenceCandidateJob = Pick<
   StudioRendererJobV2,
@@ -83,7 +82,6 @@ export type ReferencesViewProps = {
   pendingReferenceId: string | null;
   gateLocked: boolean;
   errorMessageKey: string | null;
-  onRefreshRoutes?: () => void;
   focusIntent?: StudioReferenceFocusIntent | null;
   onFocusIntentConsumed?: (intentId: string) => void;
   actions: ReferencesViewActions;
@@ -128,7 +126,6 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
   pendingReferenceId,
   gateLocked,
   errorMessageKey,
-  onRefreshRoutes,
   focusIntent = null,
   onFocusIntentConsumed,
   actions,
@@ -718,7 +715,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
             </div>
           </div>
         </header>
-        <StudioBlockerAlert messageKey={errorMessageKey} onRefreshRoutes={onRefreshRoutes} />
+        {errorMessageKey === null ? null : <Alert type='error' content={t(errorMessageKey)} />}
         <section className={styles.section} aria-labelledby='studio-reference-characters'>
           <header className={styles.sectionHeader}>
             <div className={styles.sectionTitleRow}>

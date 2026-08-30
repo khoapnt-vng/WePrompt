@@ -1433,6 +1433,10 @@
       },
       "table": {
         "reorder": {
+          "label": "Actions for {{title}}",
+          "dragHandle": "Reorder {{title}} at position {{position}}",
+          "moveEarlier": "Move {{title}} earlier",
+          "moveLater": "Move {{title}} later",
           "announcement": "Moved {{title}} from position {{from}} to {{to}} of {{total}}.",
           "failed": "Beat order was not changed."
         },
@@ -1494,8 +1498,7 @@
           "ready": "Ready",
           "draft": "Draft",
           "needsAttention": "Needs attention"
-        },
-        "shotPosition": "{{beat}}.{{shot}}"
+        }
       },
       "board": {
         "controls": {
@@ -2298,7 +2301,7 @@
         "reviewRender": "Review generation cost",
         "saveBeforeReview": "Save or reset generation-affecting film setup or rule changes before reviewing a cost.",
         "statusRequired": "Refresh the revision-matched workspace and chain status before reviewing a cost.",
-        "routeCatalogRequired": "No generation model is ready for this project's current settings. Refresh routes to look again \u2014 the same control is in the More (\u22ee) menu.",
+        "routeCatalogRequired": "Refresh routes for the current project settings before reviewing a cost.",
         "selectionNotPayable": "This exact selection cannot form a bounded generation graph. Keep the uncovered alternative or change the selection.",
         "imageRouteBlocked": "Choose a ready image route before reviewing first-frame generation. Video-only work remains available.",
         "videoRouteBlocked": "Choose a ready video route before reviewing video generation. First-frame-only work remains available.",

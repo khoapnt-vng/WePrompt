@@ -98,10 +98,6 @@ import {
   type StudioView,
 } from './studioPhaseRoute';
 import styles from './StudioPage.module.css';
-import {
-  STUDIO_ROUTE_CATALOG_BLOCKER_KEY,
-  StudioBlockerRemedy,
-} from '@/renderer/pages/studio/components/StudioBlockerAlert';
 
 type StudioReferenceDecisionIntent = { kind: 'rejected' } | { kind: 'generation_gate' };
 
@@ -121,28 +117,6 @@ type StudioReviewedActionLatch = {
   token: number;
   target: StudioReviewedActionTarget | null;
 };
-
-/**
- * Which blocker the person should actually read.
- *
- * BUG-183. `routeCatalogRequired` is the generic "this project has no usable generation route"
- * line, raised from eight call sites. When the catalogue is null because the fetch itself failed,
- * `loadRoutes` has already captured the exact reason in `routeErrorMessageKey` — but that sat last
- * in the precedence chain, so the vague sentence hid the precise one and the person was told to
- * refresh the very thing that had just failed to load. Prefer the specific reason whenever the
- * generic one is all we would otherwise have shown.
- *
- * Exported because it is pure and worth covering exhaustively: four render sites read it, and a
- * wrong precedence here is invisible until someone hits a blocker in the running app.
- */
-export const resolveStudioBlockingMessageKey = (
-  actionErrorMessageKey: string | null,
-  workspaceErrorMessageKey: string | null,
-  routeErrorMessageKey: string | null
-): string | null =>
-  actionErrorMessageKey === STUDIO_ROUTE_CATALOG_BLOCKER_KEY && routeErrorMessageKey !== null
-    ? routeErrorMessageKey
-    : (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey);
 
 const shotCapabilityItemsForDraft = (draft: SpendGateDraft): StudioGenerationCapabilityItemV2[] =>
   'baseChoices' in draft
@@ -444,7 +418,6 @@ const StudioProjectPage: React.FC<{
   const referencesAutoOpenedRef = useRef<string | null>(null);
   const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
   const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
-  const posterCaptureInFlightRef = useRef(new Set<string>());
   const workspacePendingRef = useRef(false);
   const projectRef = useRef<StudioRendererProjectV2 | null>(project);
   projectRef.current = project;
@@ -783,11 +756,6 @@ const StudioProjectPage: React.FC<{
     spendGate.open,
     spendGateLocked,
   ]);
-  const blockingMessageKey = resolveStudioBlockingMessageKey(
-    actionErrorMessageKey,
-    workspaceErrorMessageKey,
-    routeErrorMessageKey
-  );
   const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
   const beatPanelReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
@@ -795,13 +763,7 @@ const StudioProjectPage: React.FC<{
       ? 'conversation.creativeStudio.workspace.controls.statusRequired'
       : routeCatalog === null
         ? 'conversation.creativeStudio.workspace.controls.routeCatalogRequired'
-        : // BUG-183: the handoff derivation below already separates "no catalogue at all" from
-          // "a catalogue that holds no usable image route", and the two need different sentences —
-          // refreshing fixes the first and can never fix the second. This one stopped at the
-          // generic line, so a Beat panel blocked by an unusable route told the person to refresh.
-          currentGenerationCapability === null && routeCatalog.image.status !== 'ready'
-          ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
-          : null;
+        : null;
   const handoffReviewBlockedMessageKey = generationDraftsBlockReview
     ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
     : statusBlocksReview
@@ -1850,51 +1812,35 @@ const StudioProjectPage: React.FC<{
         }
       },
       persistCapturedPoster: async (input) => {
-        /*
-         * Single-flight per Shot and video asset. The Board and the Beat panel both capture, and
-         * both gate on `posterAssetId === null` read from the renderer projection — so opening a
-         * Shot while the Board is still capturing produced two writes for one poster. The write
-         * carries no expectedRevision, so the loser is not rejected; its asset is simply referenced
-         * by nothing, and no surface can show it or remove it.
-         */
-        const captureKey = `${input.shotId}:${input.videoAssetId}`;
-        if (posterCaptureInFlightRef.current.has(captureKey)) return false;
-        posterCaptureInFlightRef.current.add(captureKey);
+        const current = projectRef.current;
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision
+        ) {
+          return false;
+        }
+        const matches = currentProjection.activeBeats.flatMap((beat) =>
+          beat.shots.filter(
+            (shot) =>
+              shot.id === input.shotId &&
+              shot.currentPicture?.assetId === input.videoAssetId &&
+              shot.currentPicture.posterAssetId === null
+          )
+        );
+        if (matches.length !== 1) return false;
         try {
-          return await (async () => {
-            const current = projectRef.current;
-            const currentProjection = projectionRef.current;
-            if (
-              current === null ||
-              currentProjection === null ||
-              current.id !== currentProjection.projectId ||
-              current.revision !== currentProjection.projectRevision
-            ) {
-              return false;
-            }
-            const matches = currentProjection.activeBeats.flatMap((beat) =>
-              beat.shots.filter(
-                (shot) =>
-                  shot.id === input.shotId &&
-                  shot.currentPicture?.assetId === input.videoAssetId &&
-                  shot.currentPicture.posterAssetId === null
-              )
-            );
-            if (matches.length !== 1) return false;
-            try {
-              const result = await ipcBridge.creativeStudio.persistCapturedPoster.invoke({
-                projectId: current.id,
-                ...input,
-              });
-              if (result.ok === false) return false;
-              const refreshed = await refetchProjectWorkspace();
-              return refreshed?.id === current.id && refreshed.revision >= current.revision;
-            } catch {
-              return false;
-            }
-          })();
-        } finally {
-          posterCaptureInFlightRef.current.delete(captureKey);
+          const result = await ipcBridge.creativeStudio.persistCapturedPoster.invoke({
+            projectId: current.id,
+            ...input,
+          });
+          if (result.ok === false) return false;
+          const refreshed = await refetchProjectWorkspace();
+          return refreshed?.id === current.id && refreshed.revision >= current.revision;
+        } catch {
+          return false;
         }
       },
       parkShot: async (shotId, onCommitted) =>
@@ -2215,9 +2161,7 @@ const StudioProjectPage: React.FC<{
     });
   }, [projection, refetchProjectWorkspace, runWorkspaceExclusive, setActionErrorMessageKey, spendGateLocked]);
 
-  const boardProductionActions = useMemo<
-    Omit<BoardActions, 'restoreBeat' | 'restoreShot' | 'reorderBin' | 'persistCapturedPoster'>
-  >(
+  const boardProductionActions = useMemo<Omit<BoardActions, 'restoreBeat' | 'restoreShot' | 'reorderBin'>>(
     () => ({
       drawNext: () =>
         openBoardSpendGate((current, exactProjection) =>
@@ -2410,9 +2354,8 @@ const StudioProjectPage: React.FC<{
             bin: bin.map(cloneBinItem),
           })
         ),
-      persistCapturedPoster: beatPanelActions.persistCapturedPoster,
     }),
-    [beatPanelActions.persistCapturedPoster, boardProductionActions, runWorkspaceCommit]
+    [boardProductionActions, runWorkspaceCommit]
   );
 
   const cutActions = useMemo<CutActions>(
@@ -3634,7 +3577,7 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly');
           return false;
         }
-        if (target.review.status !== 'ready') {
+        if (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision) {
           setActionErrorMessageKey(
             target.review.status === 'stale'
               ? 'conversation.creativeStudio.workspace.proposals.chatStale'
@@ -3742,7 +3685,9 @@ const StudioProjectPage: React.FC<{
           intent.decision === 'accept'
             ? pending.filter((candidate) => candidate.payload.kind !== 'paid_recovery')
             : pending;
-        const ready = eligiblePending.filter((candidate) => candidate.review.status === 'ready');
+        const ready = eligiblePending.filter(
+          (candidate) => candidate.review.status === 'ready' && candidate.baseRevision === authority.project.revision
+        );
         const target =
           intent.proposalId === null
             ? ready.length === 1
@@ -3755,7 +3700,10 @@ const StudioProjectPage: React.FC<{
               ? 'conversation.creativeStudio.workspace.proposals.chatNoPending'
               : intent.decision === 'accept' &&
                   pending.some(
-                    (candidate) => candidate.payload.kind === 'paid_recovery' && candidate.review.status === 'ready'
+                    (candidate) =>
+                      candidate.payload.kind === 'paid_recovery' &&
+                      candidate.review.status === 'ready' &&
+                      candidate.baseRevision === authority.project.revision
                   )
                 ? 'conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly'
                 : pending.some((candidate) => candidate.review.status === 'stale')
@@ -3780,7 +3728,10 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
           return;
         }
-        if (intent.decision === 'accept' && target.review.status !== 'ready') {
+        if (
+          intent.decision === 'accept' &&
+          (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision)
+        ) {
           setActionErrorMessageKey(
             target.review.status === 'stale'
               ? 'conversation.creativeStudio.workspace.proposals.chatStale'
@@ -3931,7 +3882,12 @@ const StudioProjectPage: React.FC<{
           (candidate) =>
             candidate.id === proposalId && candidate.status === 'pending' && candidate.payload.kind === 'paid_recovery'
         );
-        if (target === undefined || target.payload.kind !== 'paid_recovery' || target.review.status !== 'ready') {
+        if (
+          target === undefined ||
+          target.payload.kind !== 'paid_recovery' ||
+          target.review.status !== 'ready' ||
+          target.baseRevision !== authority.project.revision
+        ) {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
           return;
         }
@@ -4400,7 +4356,7 @@ const StudioProjectPage: React.FC<{
               detachBedAudio={cutActions.detachBedAudio}
               drafts={drafts}
               pending={workspacePending}
-              errorMessageKey={blockingMessageKey}
+              errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
               mutations={mutations}
               briefDialogRequest={briefDialogRequest}
               briefRouteFocusRole={briefRouteFocusRole}
@@ -4410,18 +4366,10 @@ const StudioProjectPage: React.FC<{
           )
         }
         notice={
-          activeView === 'references' || blockingMessageKey === null
+          activeView === 'references' ||
+          (actionErrorMessageKey === null && workspaceErrorMessageKey === null && routeErrorMessageKey === null)
             ? undefined
-            : // The shell owns the role='alert' wrapper, so the remedy travels beside the text
-              // rather than inside a second Alert (BUG-183).
-              [
-                t(blockingMessageKey!),
-                <StudioBlockerRemedy
-                  key='remedy'
-                  messageKey={blockingMessageKey}
-                  onRefreshRoutes={() => void refetchRoutes()}
-                />,
-              ]
+            : t(actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey!)
         }
         reviewedOutputs={reviewedDirectorOutputs}
       >
@@ -4441,7 +4389,7 @@ const StudioProjectPage: React.FC<{
               currentGenerationCapability !== null ||
               (project.imageRouteId !== null && routeCatalog?.image.status === 'ready')
             }
-            errorMessageKey={blockingMessageKey}
+            errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
             mutations={mutations}
             beatPanelActions={beatPanelActions}
             beatPanelReviewGraphs={beatPanelReviewGraphs}
@@ -4451,7 +4399,11 @@ const StudioProjectPage: React.FC<{
               routeCatalog?.image.selectedRoute?.constraints.maxConditioningImages ?? null
             }
             referencePendingId={pendingReferenceId}
-            referenceErrorMessageKey={activeView === 'references' ? blockingMessageKey : null}
+            referenceErrorMessageKey={
+              activeView === 'references'
+                ? (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey)
+                : null
+            }
             referenceFocusIntent={referenceFocusIntent}
             onReferenceFocusIntentConsumed={consumeReferenceFocusIntent}
             shotEditFocusIntent={shotEditFocusIntent}

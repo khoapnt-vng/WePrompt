@@ -23,11 +23,6 @@ export type WriteProposalInputV2 = {
   pendingDir: string;
   projectId: string;
   baseRevision: number;
-  /**
-   * Hash of the project's authored state at record time (BUG-028). Omitted only where the caller
-   * genuinely has no project to hash; a record without one keeps the old exact-revision fence.
-   */
-  authoredDigest?: string;
   payload: StudioProposalPayloadV2;
   /** Test seam; production omits it and gets a UUID. */
   proposalId?: string;
@@ -68,7 +63,6 @@ export const writeProposalRecordV2 = async (input: WriteProposalInputV2): Promis
         projectId: input.projectId,
         status: 'pending',
         baseRevision: input.baseRevision,
-        ...(input.authoredDigest === undefined ? {} : { authoredDigest: input.authoredDigest }),
         payload: input.payload,
         createdAt,
         decidedAt: null,
@@ -92,7 +86,6 @@ export const writeProposalRecordV2 = async (input: WriteProposalInputV2): Promis
     projectId: validated.projectId,
     status: 'pending',
     baseRevision: validated.baseRevision,
-    ...(input.authoredDigest === undefined ? {} : { authoredDigest: input.authoredDigest }),
     payload: validated.payload,
     createdAt,
     decidedAt: null,
