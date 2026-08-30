@@ -133,6 +133,10 @@ if (args.includes('-version')) {
  * which is waitFor rethrowing its last assertion after giving up on a child that had not yet been
  * spawned, not a logic error. Both are hang-detectors rather than performance budgets: a genuine hang
  * still fails, just later, and no assertion is weakened.
+ *
+ * No case here may carry its own timeout either: a per-test ceiling overrides the suite's rather
+ * than tightening it. One left at 15s survived the raise above and failed the push gate on
+ * 2026-08-30, on the run that had the machine to itself, while passing alone seconds later.
  */
 const FILM_EXPORT_TIMEOUT_MS = 120_000;
 const FILM_EXPORT_WAIT = { timeout: 30_000 } as const;
@@ -412,5 +416,5 @@ describe('schema-2 film export contract', { timeout: FILM_EXPORT_TIMEOUT_MS }, (
     expect(vi.mocked(stubbornChild!.kill)).toHaveBeenCalledWith('SIGKILL');
     expect((await readdir(binaries.root)).filter((name) => name.startsWith('weprompt-film-'))).toEqual([]);
     exporter.dispose();
-  }, 15_000);
+  });
 });
