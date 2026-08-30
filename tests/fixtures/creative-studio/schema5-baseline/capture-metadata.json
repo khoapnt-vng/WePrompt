@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "f3f9f764b",
+  "command": "bun tests/fixtures/creative-studio/schema5BaselineCapture.ts --write",
+  "healthyCapture": {
+    "source": "public_current_main_runtime",
+    "projectSchemaVersion": 5,
+    "projectId": "project_capture",
+    "fakeAdapterProfile": "explicit-selection",
+    "excludedStorageNodes": [
+      ".studio-raw-output-path-sentinel"
+    ]
+  },
+  "classifierTransforms": {
+    "unsupported": {
+      "source": "healthy/storage/project_capture/project.json",
+      "output": "classifiers/unsupported-project.json",
+      "transform": "Replace only root schemaVersion 5 with 4."
+    },
+    "malformed": {
+      "source": "healthy/storage/project_capture/project.json",
+      "output": "classifiers/malformed-project.json",
+      "transform": "Replace only root revision with \"malformed_revision\" while retaining schemaVersion 5."
+    }
+  },
+  "payloads": [
+    {
+      "path": "classifiers/malformed-project.json",
+      "byteSize": 15847,
+      "sha256": "bb9faad74183b52f66438848daf4469965da5c1794839a71f29d96a7dd712d3e"
+    },
+    {
+      "path": "classifiers/unsupported-project.json",
+      "byteSize": 15828,
+      "sha256": "1797e5e85d32d9ed57bbea78d86b49b012d0022be5357c1bd4ea49c8660b5165"
+    },
+    {
+      "path": "healthy/projections/export-catalog.json",
+      "byteSize": 201,
+      "sha256": "98bbfc2fac8b0dc0ed6c26230d70a52c76657987f6d3988185a0bc6d600ff29d"
+    },
+    {
+      "path": "healthy/projections/prepared-quote.json",
+      "byteSize": 2158,
+      "sha256": "2bd1df6da26690fef56a0c3a6041cd68916b3b70c43df3d930718b02a4d568d6"
+    },
+    {
+      "path": "healthy/projections/project-list.json",
+      "byteSize": 375,
+      "sha256": "f45625166b57aa6715c2a08faa6343cac7d064fa06858e124b0dda84aa25c976"
+    },
+    {
+      "path": "healthy/projections/project-status.json",
+      "byteSize": 2000,
+      "sha256": "bc948e52f08fe36d0ff47e68853810d9f13ea462de0ea90eb653f438f1ba6bf7"
+    },
+    {
+      "path": "healthy/projections/renderer-project.json",
+      "byteSize": 4710,
+      "sha256": "493aba22db200a8ebee1cf5edfb85a21ec86d227bd31fad4a46165cd9bb6f748"
+    },
+    {
+      "path": "healthy/projections/runtime-project.json",
+      "byteSize": 11809,
+      "sha256": "ade626116e788f2c1dbe01415064c0e8a166e302b3c20479ae3744c07df7d1d4"
+    },
+    {
+      "path": "healthy/projections/workspace.json",
+      "byteSize": 5434,
+      "sha256": "6eb375e5de07bdb87ecfae882629927df0d346c69dd91d57fa81529efad70cb9"
+    },
+    {
+      "path": "healthy/storage/connections.json",
+      "byteSize": 2410,
+      "sha256": "1c8784f63d3b1fb2312bbfd4cd29a117833571cd4308fcf2c8fbdad6b8c0dd5a"
+    },
+    {
+      "path": "healthy/storage/project_capture/assets/asset_capture_001.png",
+      "byteSize": 91,
+      "sha256": "16ed24dcad9ed16fbd7cbce176518fd2ce1af07ab0815e4e19108157d5c1be26"
+    },
+    {
+      "path": "healthy/storage/project_capture/brief.md",
+      "byteSize": 67,
+      "sha256": "7f080d24aa2489a0e370bd0f7c621e64c9fade042bd5ae53fd9f8057668fc81e"
+    },
+    {
+      "path": "healthy/storage/project_capture/exports-v2.json",
+      "byteSize": 441,
+      "sha256": "cf4e6242a1bcf7a16ecf599c56fbf339d26e2303fe91dbc493dea8f4f0f19ec4"
+    },
+    {
+      "path": "healthy/storage/project_capture/exports/export_capture_001/artifact.json",
+      "byteSize": 364,
+      "sha256": "d46f71694c217f9093a5ceb501affaccdf8e8e2848a8a047872ed8354e1d741e"
+    },
+    {
+      "path": "healthy/storage/project_capture/exports/export_capture_001/manifest.json",
+      "byteSize": 121,
+      "sha256": "4b0af635c12f394ca72973c2c46382f6e7d235cce02209e2f2bf441736a89dcf"
+    },
+    {
+      "path": "healthy/storage/project_capture/exports/export_capture_001/script.md",
+      "byteSize": 302,
+      "sha256": "6aa6fc6013add6b5af481745aacfc885211d0383c9d7ad4acb238fc99c7c9f15"
+    },
+    {
+      "path": "healthy/storage/project_capture/project.json",
+      "byteSize": 15828,
+      "sha256": "2d23c12287eff0ee3b7c62b0f051813519c5da378d612cef716492908e5b3764"
+    },
+    {
+      "path": "healthy/storage/projects-v2.json",
+      "byteSize": 375,
+      "sha256": "d6918c27cccbe6e5a96721dcc8046704334aa52608d7d4d754cfab0e3964993b"
+    }
+  ]
+}

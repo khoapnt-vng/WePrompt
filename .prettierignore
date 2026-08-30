@@ -4,3 +4,6 @@ mobile/
 # extracts with JSON.parse. Formatting unquotes the object keys and breaks that
 # contract, so these ship exactly as authored.
 packages/desktop/src/process/resources/dashboard-templates/**/template.html
+
+# Creative Studio capture fixtures are exact runtime bytes with recorded SHA-256 digests.
+tests/fixtures/creative-studio/schema5-baseline/

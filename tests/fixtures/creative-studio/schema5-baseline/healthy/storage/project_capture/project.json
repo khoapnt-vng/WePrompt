@@ -1,0 +1,382 @@
+{
+  "schemaVersion": 5,
+  "revision": 7,
+  "id": "project_capture",
+  "name": "Schema 5 capture",
+  "rules": [],
+  "briefConversationId": null,
+  "aspectRatio": "16:9",
+  "targetDurationSeconds": 5,
+  "resolution": "720p",
+  "boardStyle": "grey_tone",
+  "beatOrder": [
+    "beat_capture"
+  ],
+  "beats": {
+    "beat_capture": {
+      "id": "beat_capture",
+      "title": "Before dawn",
+      "story": "The lantern maker pauses beside the river as the first blue light appears.",
+      "targetSeconds": null,
+      "shotOrder": [
+        "shot_capture"
+      ]
+    }
+  },
+  "shots": {
+    "shot_capture": {
+      "id": "shot_capture",
+      "shootingScript": "A quiet medium portrait beside the river, lanterns glowing behind the maker.",
+      "durationSeconds": 5,
+      "trimInSeconds": null,
+      "trimOutSeconds": null,
+      "chainBreak": "none",
+      "referenceBinding": {
+        "status": "unassigned",
+        "characterReferenceIds": [],
+        "backgroundReferenceId": null
+      },
+      "seedStillId": null,
+      "dismissedSeedStillIds": [],
+      "boardAssetId": null,
+      "supersededBoardAssetIds": [],
+      "videoAssetId": null,
+      "supersededVideoAssetIds": [],
+      "assetIds": [],
+      "jobIds": []
+    }
+  },
+  "referencePlanStatus": "planned",
+  "referenceOrder": [
+    "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3"
+  ],
+  "references": {
+    "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3": {
+      "kind": "character",
+      "label": "Lantern maker",
+      "prompt": "A consistent portrait of an elderly lantern maker in an indigo work coat.",
+      "id": "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3",
+      "approvedAssetId": "asset_capture_001",
+      "supersededAssetIds": [],
+      "jobIds": [
+        "job_capture_001"
+      ],
+      "createdAt": "2026-08-30T00:00:01.000Z",
+      "updatedAt": "2026-08-30T00:00:16.000Z"
+    }
+  },
+  "bin": [],
+  "bedAssetId": null,
+  "spendPolicy": null,
+  "spendAuthorizations": [
+    {
+      "projectId": "project_capture",
+      "projectRevision": 2,
+      "originReferenceHandoffId": null,
+      "rateCardDigest": "9ef29061195c1552d859d611e1fbf76aeddeb3f167ee10fc8bc0195cf505f324",
+      "currency": "USD",
+      "baseItems": [
+        {
+          "id": "item_7b2445c8f9ff9d9c5ac9eeea11b7927daffa5a0d33f9bc97e4117abc62f30f3f",
+          "target": {
+            "kind": "reference",
+            "referenceId": "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3"
+          },
+          "purpose": "reference_image",
+          "routeId": "choice_15e03cb141cf0a5862aaf9f0",
+          "generationCount": 2,
+          "requestPlan": {
+            "kind": "resolved",
+            "snapshot": {
+              "composition": {
+                "inputs": {
+                  "schemaVersion": 1,
+                  "projectRevision": 2,
+                  "brief": "A lantern maker prepares one portrait beside the river before dawn.",
+                  "rules": [],
+                  "source": {
+                    "kind": "project_reference",
+                    "referenceId": "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3",
+                    "referenceKind": "character",
+                    "prompt": "A consistent portrait of an elderly lantern maker in an indigo work coat."
+                  },
+                  "purpose": "reference_image",
+                  "referenceInputs": [],
+                  "aspectRatio": "16:9",
+                  "resolution": "720p",
+                  "route": {
+                    "providerId": "weprompt_studio_e2e",
+                    "adapterId": "weprompt-image-v1",
+                    "model": "weprompt-e2e-image"
+                  },
+                  "boardStyle": null,
+                  "instructionProfile": "weprompt-image-v1.reference-character.v1"
+                },
+                "prompt": "PROJECT BRIEF\nA lantern maker prepares one portrait beside the river before dawn.\n\nREFERENCE DESCRIPTION\nA consistent portrait of an elderly lantern maker in an indigo work coat.\n\nRENDER SETTINGS\nPurpose: reference_image\nAspect ratio: 16:9\nResolution: 720p\nModel: weprompt-e2e-image\nInstruction profile: weprompt-image-v1.reference-character.v1\n\nOUTPUT\nCreate ONE SINGLE clean character reference photograph showing one figure in one unified scene. Keep identity, age, wardrobe, proportions, and art style precise. Not a grid, not a contact sheet, not a character sheet, not a turnaround: no panels, split screen, repeated figures, captions, borders, or UI."
+              },
+              "aspectRatio": "16:9",
+              "resolution": "720p",
+              "durationSeconds": 4,
+              "referenceInputs": [],
+              "conditioningInput": null
+            }
+          },
+          "rateUnit": "generation",
+          "rateMinorUnits": 7
+        }
+      ],
+      "cascadeItems": [],
+      "lowerMinorUnits": 7,
+      "upperMinorUnits": 14,
+      "id": "quote_capture_001",
+      "expiresAt": "2026-08-30T00:05:03.000Z",
+      "confirmedAt": "2026-08-30T00:00:05.000Z",
+      "providerBindings": [
+        {
+          "itemId": "item_7b2445c8f9ff9d9c5ac9eeea11b7927daffa5a0d33f9bc97e4117abc62f30f3f",
+          "provider": {
+            "providerId": "weprompt_studio_e2e",
+            "adapterId": "weprompt-image-v1",
+            "model": "weprompt-e2e-image"
+          }
+        }
+      ],
+      "idempotencyKeys": [
+        {
+          "itemId": "item_7b2445c8f9ff9d9c5ac9eeea11b7927daffa5a0d33f9bc97e4117abc62f30f3f",
+          "key": "idempotency_capture_001"
+        },
+        {
+          "itemId": "item_7b2445c8f9ff9d9c5ac9eeea11b7927daffa5a0d33f9bc97e4117abc62f30f3f",
+          "key": "idempotency_capture_002"
+        }
+      ]
+    }
+  ],
+  "frameExtractions": {},
+  "undoHistory": [
+    {
+      "id": "mutation_capture_plan",
+      "sourceRevision": 2,
+      "label": "mutation_batch",
+      "patches": [
+        {
+          "kind": "project_fields",
+          "before": {
+            "name": "Schema 5 capture",
+            "aspectRatio": "16:9",
+            "resolution": "720p",
+            "targetDurationSeconds": 5,
+            "boardStyle": "grey_tone",
+            "brief": "A lantern maker prepares one portrait beside the river before dawn.",
+            "rules": [],
+            "beatOrder": [],
+            "imageRouteId": null,
+            "videoRouteId": null,
+            "spendPolicy": null,
+            "bedAssetId": null
+          },
+          "afterDigest": "91bfacc1ce736fa32558fdd36304c2eface43ba9ac0c99f58c1b7d4a75d4c896"
+        },
+        {
+          "kind": "reference_catalog",
+          "before": {
+            "referencePlanStatus": "unplanned",
+            "referenceOrder": [],
+            "references": {}
+          },
+          "afterDigest": "940379fcfeda355413626f2a9536ae95d3b13a797b1fc106fc30587a7248ffdc"
+        },
+        {
+          "kind": "beat_fields",
+          "beatId": "beat_capture",
+          "before": null,
+          "afterDigest": "d98cb5a6a5f378b91aa3fca86a946f9682e3411dcaf4c44a9eba85924c26dc58"
+        },
+        {
+          "kind": "shot_fields",
+          "shotId": "shot_capture",
+          "before": null,
+          "beforeBeatId": null,
+          "beforeIndex": null,
+          "afterDigest": "e8e54820428c2897f8c053d721f6ed04373717586743490114cdee0afdd0f01f"
+        }
+      ]
+    }
+  ],
+  "assets": {
+    "asset_capture_001": {
+      "id": "asset_capture_001",
+      "projectId": "project_capture",
+      "shotId": null,
+      "mediaKind": "image",
+      "mimeType": "image/png",
+      "managedAsset": {
+        "collection": "assets",
+        "fileName": "asset_capture_001.png"
+      },
+      "byteSize": 91,
+      "sha256": "16ed24dcad9ed16fbd7cbce176518fd2ce1af07ab0815e4e19108157d5c1be26",
+      "width": 1,
+      "height": 1,
+      "projectReferenceId": "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3",
+      "generationReferenceAssetIds": [],
+      "producerJobId": "job_capture_001",
+      "compositionDigest": "998820d1dcf5b5d387f01f7ba57444bb3efbb5a52b1899280b1b242f20b81015",
+      "createdAt": "2026-08-30T00:00:15.000Z"
+    }
+  },
+  "jobs": {
+    "job_capture_001": {
+      "id": "job_capture_001",
+      "projectId": "project_capture",
+      "target": {
+        "kind": "reference",
+        "referenceId": "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3"
+      },
+      "status": "succeeded",
+      "provider": {
+        "providerId": "weprompt_studio_e2e",
+        "adapterId": "weprompt-image-v1",
+        "model": "weprompt-e2e-image"
+      },
+      "idempotencyKey": "idempotency_capture_001",
+      "providerJobId": "STUDIO_PROVIDER_JOB_SENTINEL_1",
+      "cancellationPolicy": "queued_only",
+      "outputAssetIds": [
+        "asset_capture_001"
+      ],
+      "purpose": "reference_image",
+      "authorizationId": "quote_capture_001",
+      "authorizationItemId": "item_7b2445c8f9ff9d9c5ac9eeea11b7927daffa5a0d33f9bc97e4117abc62f30f3f",
+      "composition": {
+        "inputs": {
+          "schemaVersion": 1,
+          "projectRevision": 2,
+          "brief": "A lantern maker prepares one portrait beside the river before dawn.",
+          "rules": [],
+          "source": {
+            "kind": "project_reference",
+            "referenceId": "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3",
+            "referenceKind": "character",
+            "prompt": "A consistent portrait of an elderly lantern maker in an indigo work coat."
+          },
+          "purpose": "reference_image",
+          "referenceInputs": [],
+          "aspectRatio": "16:9",
+          "resolution": "720p",
+          "route": {
+            "providerId": "weprompt_studio_e2e",
+            "adapterId": "weprompt-image-v1",
+            "model": "weprompt-e2e-image"
+          },
+          "boardStyle": null,
+          "instructionProfile": "weprompt-image-v1.reference-character.v1"
+        },
+        "prompt": "PROJECT BRIEF\nA lantern maker prepares one portrait beside the river before dawn.\n\nREFERENCE DESCRIPTION\nA consistent portrait of an elderly lantern maker in an indigo work coat.\n\nRENDER SETTINGS\nPurpose: reference_image\nAspect ratio: 16:9\nResolution: 720p\nModel: weprompt-e2e-image\nInstruction profile: weprompt-image-v1.reference-character.v1\n\nOUTPUT\nCreate ONE SINGLE clean character reference photograph showing one figure in one unified scene. Keep identity, age, wardrobe, proportions, and art style precise. Not a grid, not a contact sheet, not a character sheet, not a turnaround: no panels, split screen, repeated figures, captions, borders, or UI."
+      },
+      "requestPlan": {
+        "kind": "resolved",
+        "snapshot": {
+          "composition": {
+            "inputs": {
+              "schemaVersion": 1,
+              "projectRevision": 2,
+              "brief": "A lantern maker prepares one portrait beside the river before dawn.",
+              "rules": [],
+              "source": {
+                "kind": "project_reference",
+                "referenceId": "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3",
+                "referenceKind": "character",
+                "prompt": "A consistent portrait of an elderly lantern maker in an indigo work coat."
+              },
+              "purpose": "reference_image",
+              "referenceInputs": [],
+              "aspectRatio": "16:9",
+              "resolution": "720p",
+              "route": {
+                "providerId": "weprompt_studio_e2e",
+                "adapterId": "weprompt-image-v1",
+                "model": "weprompt-e2e-image"
+              },
+              "boardStyle": null,
+              "instructionProfile": "weprompt-image-v1.reference-character.v1"
+            },
+            "prompt": "PROJECT BRIEF\nA lantern maker prepares one portrait beside the river before dawn.\n\nREFERENCE DESCRIPTION\nA consistent portrait of an elderly lantern maker in an indigo work coat.\n\nRENDER SETTINGS\nPurpose: reference_image\nAspect ratio: 16:9\nResolution: 720p\nModel: weprompt-e2e-image\nInstruction profile: weprompt-image-v1.reference-character.v1\n\nOUTPUT\nCreate ONE SINGLE clean character reference photograph showing one figure in one unified scene. Keep identity, age, wardrobe, proportions, and art style precise. Not a grid, not a contact sheet, not a character sheet, not a turnaround: no panels, split screen, repeated figures, captions, borders, or UI."
+          },
+          "aspectRatio": "16:9",
+          "resolution": "720p",
+          "durationSeconds": 4,
+          "referenceInputs": [],
+          "conditioningInput": null
+        }
+      },
+      "requestSnapshot": {
+        "composition": {
+          "inputs": {
+            "schemaVersion": 1,
+            "projectRevision": 2,
+            "brief": "A lantern maker prepares one portrait beside the river before dawn.",
+            "rules": [],
+            "source": {
+              "kind": "project_reference",
+              "referenceId": "ref_12784fdf2179355fbfd47b76d7b55ab4a2cd42770e3858ccd2203d17165c3be3",
+              "referenceKind": "character",
+              "prompt": "A consistent portrait of an elderly lantern maker in an indigo work coat."
+            },
+            "purpose": "reference_image",
+            "referenceInputs": [],
+            "aspectRatio": "16:9",
+            "resolution": "720p",
+            "route": {
+              "providerId": "weprompt_studio_e2e",
+              "adapterId": "weprompt-image-v1",
+              "model": "weprompt-e2e-image"
+            },
+            "boardStyle": null,
+            "instructionProfile": "weprompt-image-v1.reference-character.v1"
+          },
+          "prompt": "PROJECT BRIEF\nA lantern maker prepares one portrait beside the river before dawn.\n\nREFERENCE DESCRIPTION\nA consistent portrait of an elderly lantern maker in an indigo work coat.\n\nRENDER SETTINGS\nPurpose: reference_image\nAspect ratio: 16:9\nResolution: 720p\nModel: weprompt-e2e-image\nInstruction profile: weprompt-image-v1.reference-character.v1\n\nOUTPUT\nCreate ONE SINGLE clean character reference photograph showing one figure in one unified scene. Keep identity, age, wardrobe, proportions, and art style precise. Not a grid, not a contact sheet, not a character sheet, not a turnaround: no panels, split screen, repeated figures, captions, borders, or UI."
+        },
+        "aspectRatio": "16:9",
+        "resolution": "720p",
+        "durationSeconds": 4,
+        "referenceInputs": [],
+        "conditioningInput": null
+      },
+      "spendReceipt": {
+        "authorizationId": "quote_capture_001",
+        "itemId": "item_7b2445c8f9ff9d9c5ac9eeea11b7927daffa5a0d33f9bc97e4117abc62f30f3f",
+        "jobId": "job_capture_001",
+        "purpose": "reference_image",
+        "routeId": "choice_15e03cb141cf0a5862aaf9f0",
+        "currency": "USD",
+        "rateUnit": "generation",
+        "rateMinorUnits": 7,
+        "durationSeconds": null,
+        "generationCount": 1,
+        "totalMinorUnits": 7
+      },
+      "outputAssetIdsByRole": {
+        "primary": "asset_capture_001",
+        "poster": null
+      },
+      "error": null,
+      "retryOfJobId": null,
+      "retryReason": null,
+      "duplicateChargeAcknowledged": false,
+      "duplicateChargeAcknowledgedAt": null,
+      "createdAt": "2026-08-30T00:00:05.000Z",
+      "updatedAt": "2026-08-30T00:00:16.000Z",
+      "remoteStartedAt": "2026-08-30T00:00:08.000Z"
+    }
+  },
+  "imageRouteId": "choice_15e03cb141cf0a5862aaf9f0",
+  "videoRouteId": null,
+  "createdAt": "2026-08-30T00:00:00.000Z",
+  "updatedAt": "2026-08-30T00:00:17.000Z",
+  "briefFile": {
+    "schemaVersion": 1,
+    "sha256": "7f080d24aa2489a0e370bd0f7c621e64c9fade042bd5ae53fd9f8057668fc81e"
+  }
+}

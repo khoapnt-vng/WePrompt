@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "connections": [
+    {
+      "schemaVersion": 1,
+      "id": "weprompt_studio_e2e_explicit_selection_byteplus-seedance-v1",
+      "providerId": "weprompt_studio_e2e",
+      "adapterId": "byteplus-seedance-v1",
+      "model": "dreamina-seedance-2-0-260128",
+      "capabilities": {
+        "mediaKinds": [
+          "video"
+        ],
+        "audioModes": [
+          "none"
+        ],
+        "aspectRatios": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:3",
+          "3:4"
+        ],
+        "resolutions": [
+          "720p",
+          "1080p"
+        ],
+        "minDurationSeconds": 4,
+        "maxDurationSeconds": 15,
+        "supportsFirstFrame": true,
+        "maxConditioningImages": 0,
+        "cancellationPolicy": "queued_only"
+      },
+      "validatedAt": "1970-01-01T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "weprompt_studio_e2e_explicit_selection_image",
+      "providerId": "weprompt_studio_e2e",
+      "adapterId": "weprompt-image-v1",
+      "model": "weprompt-e2e-image",
+      "capabilities": {
+        "mediaKinds": [
+          "image"
+        ],
+        "aspectRatios": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:3",
+          "3:4"
+        ],
+        "resolutions": [
+          "720p",
+          "1080p"
+        ],
+        "minDurationSeconds": 1,
+        "maxDurationSeconds": 60,
+        "supportsFirstFrame": true,
+        "maxConditioningImages": 6,
+        "cancellationPolicy": "queued_only"
+      },
+      "validatedAt": "1970-01-01T00:00:00.000Z"
+    },
+    {
+      "schemaVersion": 1,
+      "id": "weprompt_studio_e2e_explicit_selection_weprompt-media-gateway-v1",
+      "providerId": "weprompt_studio_e2e",
+      "adapterId": "weprompt-media-gateway-v1",
+      "model": "dreamina-seedance-2-0-260128",
+      "capabilities": {
+        "mediaKinds": [
+          "video"
+        ],
+        "audioModes": [
+          "none"
+        ],
+        "aspectRatios": [
+          "16:9",
+          "9:16",
+          "1:1",
+          "4:3",
+          "3:4"
+        ],
+        "resolutions": [
+          "720p",
+          "1080p"
+        ],
+        "minDurationSeconds": 4,
+        "maxDurationSeconds": 15,
+        "supportsFirstFrame": true,
+        "maxConditioningImages": 0,
+        "cancellationPolicy": "queued_only"
+      },
+      "validatedAt": "1970-01-01T00:00:00.000Z"
+    }
+  ]
+}

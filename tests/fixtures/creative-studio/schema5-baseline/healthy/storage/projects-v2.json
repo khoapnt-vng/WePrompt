@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "projects": [
+    {
+      "id": "project_capture",
+      "name": "Schema 5 capture",
+      "aspectRatio": "16:9",
+      "targetDurationSeconds": 5,
+      "resolution": "720p",
+      "beatCount": 1,
+      "shotCount": 1,
+      "pictureCount": 0,
+      "createdAt": "2026-08-30T00:00:00.000Z",
+      "updatedAt": "2026-08-30T00:00:17.000Z"
+    }
+  ]
+}

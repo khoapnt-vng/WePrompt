@@ -1,0 +1,1 @@
+A lantern maker prepares one portrait beside the river before dawn.
