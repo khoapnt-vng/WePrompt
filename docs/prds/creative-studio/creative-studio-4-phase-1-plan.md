@@ -363,6 +363,12 @@ passes.
 3. Fix BUG-190 at the actual built-in-tool trust boundary. Test that an existing and a newly added
    read-only Studio tool run without per-tool consent, while the equivalent untrusted external tool
    still requires consent.
+   - The 2026-08-30 implementation audit found that this boundary does not exist in WePrompt or the
+     pinned Aionrs approval input: every MCP call is reduced to one `mcp` category. Phase 1 remains
+     blocked until an AionCore/Aionrs release propagates backend-authenticated Studio server identity
+     plus read-only tool annotation, passes the trusted/untrusted oracle, and is pinned with verified
+     provenance. No renderer auto-click, bare-name allowlist, or global MCP approval is an acceptable
+     substitute.
 4. Fix BUG-162 by deriving the turn recap from durable outcomes, not successful tool transport.
    Queued spend, pending review, refusal, cancellation, and actual commit must produce distinct
    truthful recaps.

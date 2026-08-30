@@ -1112,6 +1112,20 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Why it matters more than an ordinary prompt.** The tool is read-only — it reads one frame out of the project's own directory — and `openingTurn.ts` now instructs the Director to call it **every time it revises a chained Shot after a failure**, which is the common case BUG-165 is about. A confirmation on every repair attempt trains people to click through MCP permission dialogs, which is exactly the habit the dialog exists to prevent.
   - **What is established.** The prompt fired for a **new** tool on a built-in server whose other tools (`read_storyboard`, `propose_storyboard`, `studio_apply_edits`) had been running all session without prompting. WePrompt never sets `AUTO_APPROVE_MCP_SERVERS`; the constant appears once in the tree, in a comment in `builtinCapabilities.ts:224`, describing AionCore behaviour.
   - **What is not established.** Where the prior approvals are actually remembered — that state is AionCore's, not a file in the profile — so whether this is per-tool, first-use-per-server, or something else was not determined. The observation is solid; the mechanism needs one more look before a fix.
+  - **Phase 0 investigation 2026-08-30.** The Director uses Aionrs, not ACP. Aionrs presents every MCP
+    proxy call to approval as the single `mcp` category, so **Allow always** covers mutating Studio
+    tools and external MCP tools too. ACP's name-based auto-approval path is not involved. WePrompt's
+    session descriptor carries no backend-authenticated trust or read-only approval identity, and the
+    renderer cannot safely manufacture one.
+  - **External prerequisite.** The accepted oracle requires AionCore/Aionrs to propagate both an exact
+    backend-authenticated built-in server identity and MCP `readOnlyHint`, then bypass consent only
+    when both match. An external or mutating tool must still prompt. That needs an AionCore/Aionrs
+    release followed by WePrompt pin/checksum/provenance updates; it cannot be completed on this
+    repository branch alone.
+  - **Unsafe shortcuts rejected.** Do not auto-click the renderer prompt, trust the bare server name,
+    accept a caller-forgeable `trusted` flag, approve the generic `mcp` category, or put the Director
+    into a global permissive mode. Each would grant more authority than this read requires and fail
+    the external-tool acceptance case.
   - **Fix direction.** A built-in server's tools should not need per-tool consent, or adding a tool to a trusted built-in should not silently reintroduce a prompt. Whichever way it lands, a Director blocked on consent must not look like a Director that is thinking.
   - **CS4 triage**
     - **Disposition:** Fix before CS4.
@@ -1123,7 +1137,8 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
       read-only tool on the trusted built-in Studio server without a per-tool consent prompt, while an
       equivalent untrusted external tool still requires consent. A live Director run must execute the
       conditioning-frame read without pausing for approval.
-    - **Claimant:** Unclaimed.
+    - **Claimant:** `codex/creative-studio-4-pilot` — blocked on an identity-bound AionCore/Aionrs
+      permission contract before an in-repository fix can begin.
 
 - [ ] **[BUG-191][P2][Creative Studio] A Director turn can be blocked on a prompt for minutes with no sign of it anywhere in the workspace** — found 2026-08-30 in live testing
   - **Lane: Director.**
@@ -1553,7 +1568,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
       proposal, a generation waiting for authorization, a failed tool and a cancelled tool. Only the
       accepted domain outcome may produce the all-done recap; every other case must state its actual
       status and next action.
-    - **Claimant:** Unclaimed.
+    - **Claimant:** `codex/creative-studio-4-pilot` — Phase 0.
 
 - [ ] **[BUG-163][P2][Creative Studio] A Director conversation interrupted by an app restart never recovers, and the Retry button that promises to recover it does nothing** — found 2026-08-28 verifying `44cb0a16c` against pre-existing projects
   - **Actual.** After the app was killed mid-session, three existing projects show the Director rail in an error state: _"Director setup was interrupted before the conversation could be attached to this project. Creative Studio could not complete the Director attachment. **Retry to recover it safely.**"_ Clicking **Retry** changes nothing — polled for **two minutes**, the rail never gains a composer. The state **survives a full application restart**. `Retry` is the **only** affordance rendered; no start-fresh, no detach, no way to rebind.
@@ -1579,7 +1594,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
       verify one bounded automatic recovery followed by a working manual retry if needed. The
       conversation must retain its history and accept a new turn; an irrecoverable fixture must stop
       retrying and offer truthful start-new-conversation copy. Record the live run in this entry.
-    - **Claimant:** Unclaimed.
+    - **Claimant:** `codex/creative-studio-4-pilot` — current-head live verification.
 
 - [x] **[BUG-164][P3][Creative Studio] Undecidable Director proposals accumulate forever in the new proposal surface, and the only way to clear one is to reject it individually** — found 2026-08-28 verifying BUG-160's fix (`195c3e345`) on `Plateau`
   - **Resolved 2026-08-28.** One terminal proposal remains visible for immediate recovery; an accumulation of two or more verified stale or reducer-refused proposals collapses into one counted disclosure. Expanding it preserves each exact proposal, its refusal/staleness evidence, **Prepare updated proposal**, and individual Reject. Refreshing, unverified, and in-flight proposals never enter the collapsed group, and no proposal is automatically rejected or discarded.
