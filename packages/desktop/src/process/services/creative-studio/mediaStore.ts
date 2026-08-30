@@ -18,6 +18,7 @@ import type {
   StudioProjectV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  STUDIO_MAX_IMAGE_ASSET_BYTES_V2,
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION,
 } from '@/common/types/project/creativeStudioTypes';
@@ -234,7 +235,7 @@ export type StudioMediaLimits = {
 
 export const STUDIO_MEDIA_LIMITS: Readonly<StudioMediaLimits> = Object.freeze({
   referenceMaxBytes: 30 * 1024 * 1024,
-  imageOutputMaxBytes: 50 * 1024 * 1024,
+  imageOutputMaxBytes: STUDIO_MAX_IMAGE_ASSET_BYTES_V2,
   videoOutputMaxBytes: 512 * 1024 * 1024,
   projectMaxBytes: 5 * 1024 * 1024 * 1024,
 });
