@@ -81,8 +81,20 @@ Three properties we are explicitly adopting:
 - **Nothing is an empty container.**
 
 One property we are **not** adopting: the reference shows a credit balance (`✦ 412`). We decided on
-2026-08-12 not to price in credits. If a readout appears in the corner it is a **currency budget**,
-not credits.
+2026-08-12 not to price in credits, and the owner confirmed on 2026-08-30 that there is **no credit
+counter and no corner readout of any kind**. Please do not draw one. Cost appears where it is owed —
+at the moment of spend, in currency — and nowhere else.
+
+## A note on words, for the handoff
+
+Draw in whatever language is natural — "block", "card", "artifact" are all fine on a drawing. But so
+you know what we will call them when we build: **a thing a capability produces is a Piece**, and **an
+ordered arrangement of Pieces is an Assembly**. We cannot use _artifact_, _composition_ or _block_ as
+type names, because all three already mean something else in this codebase — `block` alone appears
+eleven times meaning **blocker**, a reason something cannot proceed.
+
+Worth knowing for one reason only: if a drawing labels something on screen, tell us whether that word
+is the user's word or a placeholder. User-facing words go to twelve locales; ours do not.
 
 ## The decisions that are settled — not open for redesign
 
@@ -155,7 +167,6 @@ Draw a block current, and the same block stale.
 - **The pending proposal**, in its single home.
 - **In-flight and failed generation.**
 - **A stale block**, per the third hard problem.
-- **The corner readout**, if you think it earns its place — as a currency budget.
 
 ## Constraints the drawing has to live within
 
@@ -182,7 +193,7 @@ Draw a block current, and the same block stale.
 - **Do not design migration or an upgrade path.** There is none.
 - **Do not solve the dependency order.** References before storyboard before production before cut is
   real; the Director enforces it. Your job is that a person never meets it as a locked door.
-- **Do not draw the app bar.** It is settled, apart from the corner readout.
+- **Do not draw the app bar,** and do not draw a balance, budget or credit readout anywhere.
 
 ## For reference
 

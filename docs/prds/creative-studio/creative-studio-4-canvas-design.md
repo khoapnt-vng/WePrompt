@@ -361,12 +361,13 @@ the other agent keeps fixing UI the cutover deletes.
 
 ---
 
-## Decisions the owner must make
+## Decisions — all four settled
 
-Two remain open (1 and 3). Two were resolved by Pilot 1 and are kept here with their reasoning,
-because each was re-scoped rather than answered on its own terms.
+Settled by the owner on 2026-08-30. Kept with their reasoning, because two were re-scoped by Pilot 1
+rather than answered on their own terms, and because the reasoning is what a later reader will need in
+order not to reopen them by accident.
 
-### 1. The credit counter reverses D3
+### 1. No credit counter, and no readout — **decided**
 
 The reference app shows `✦ 412 Renew` in the corner. Decision D3 (2026-08-12) says: _"No credit
 ledger — out of scope. Cost is not priced in credits; any mock text showing credits is illustrative
@@ -411,11 +412,16 @@ decision is owed at **phase 6**, not now. It becomes blocking the moment video e
 matters: a take discarded during ingestion was never persisted, so a folder export has nothing to
 copy. It rescues only takes that survived probing.
 
-### 3. The canvas replaces work that shipped today
+### 3. CS4 supersedes progressive workspace readiness — **decided**
 
 Progressive workspace readiness landed on 2026-08-30 as the answer to the same four-empty-rooms
-complaint, and the four-view order is an owner-approved product amendment from 2026-08-24. CS4
-supersedes both. This should be an explicit decision, not a silent overwrite.
+complaint, and the four-view order is an owner-approved product amendment from 2026-08-24. **CS4
+supersedes both, by explicit owner decision on 2026-08-30**, so this is a recorded reversal rather
+than a silent overwrite.
+
+What is superseded is the _answer_, not the _diagnosis_. Gating told a person what they could not do;
+the canvas has to tell them what they can. And the underlying stage derivation is not discarded — it
+becomes the third of the three projections, scoped to projects that actually have a film.
 
 ### 4. What a pilot user must be able to finish — **decided**
 
