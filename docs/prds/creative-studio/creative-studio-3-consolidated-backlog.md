@@ -3,7 +3,9 @@
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on
 someone. Counts are read from `creative-studio-3-bug-list.md` rather than tallied by hand.
 
-**116 bugs filed · 98 closed · 18 open** — 2 P1, 10 P2, 6 P3.
+**129 bugs filed · 100 closed · 29 open** — 4 P1, 18 P2, 7 P3.
+
+_Ten entries added 2026-08-30 (**BUG-179**…**BUG-188**) after the 08-29/30 work was reverted at the owner's request. They are findings, not regressions: each was verified against the current code or reproduced live, and none had ever been filed. **BUG-179** is the one to read first — a single unreadable project stops Creative Studio working for every project in the profile, which is why a brand-new project reported itself unusable._
 
 ---
 

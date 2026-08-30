@@ -31,6 +31,37 @@ These touch different lines of the same entry, which is what makes concurrent wo
 one place they collide is an entry being rewritten while it is being closed; if you are about to
 rewrite an entry, close-or-comment first so the other side sees it.
 
+**Which files belong to whom.** The rules above split an _entry_ between filing and closing, which
+works. What they do not split is the _code_, and that is where two agents actually collide. The
+boundary below is drawn from what each side has been editing, not from what anyone was assigned:
+
+| Area                                                      | Lane                        |
+| --------------------------------------------------------- | --------------------------- |
+| `process/resources/builtinMcp/**` — the Director's tools  | **Director lane**           |
+| `renderer/…/Workspace/DirectorRail/**` — rail and rules   | **Director lane**           |
+| `renderer/pages/studio/**` elsewhere — views, cards, CSS  | **Workspace lane**          |
+| `services/creative-studio/store.ts`, the schema-2 service | **Workspace lane**          |
+| `common/types/project/creativeStudioTypes.ts`             | **shared — announce first** |
+
+Each open entry below carries a **Lane:** line saying which side should implement it. It records
+where the fix lands, not who found it: several Workspace-lane entries were filed from the Director's
+behaviour and vice versa.
+
+**The `DirectorRail/**`boundary was corrected the same day it was written.** It first read`openingTurn.ts`only, on the assumption that everything else under`renderer/pages/studio/**`was
+Workspace. Within minutes the Director lane pushed`0d9a8e01f`, fixing **BUG-163\*\* in
+`DirectorRail/index.tsx` — rail code, not rules. The whole rail belongs to whoever owns the Director;
+drawing the line at one file would have put two agents inside the same component.
+
+**`openingTurn.ts` is single-owner, and not only to avoid a merge conflict.** It is one exported
+string constant, so any two edits to it conflict textually. More importantly, changing it changes
+`DIRECTOR_PRESET_RULES_PROFILE`, and every existing conversation is then stale and rewrites its rules
+on next open. Two agents editing it means repeated invalidation of every conversation in the profile.
+If you are in the Workspace lane and an entry needs the Director to say something different, file it
+and leave the file alone.
+
+**`creativeStudioTypes.ts` is genuinely shared** — both lanes add fields to it. Say so in the entry
+before you start, rather than in the commit message afterwards.
+
 **Id allocation.** Ids are global across the repository and are already inconsistent between branches
 — `main` stopped at 030, `sprint2` at 041, `sprint4` at 060 — so two branches allocating the same
 number is not hypothetical, it has happened. To keep it from happening here:
@@ -829,6 +860,91 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Incidentally validated:** a no-reference film is a legitimate case the product previously could not make at all — landscape, abstract and object studies need no canonical characters or recurring places.
   - **Why not the obvious fix.** Adding a UI affordance that calls `set_reference_plan([])` also works — the engine accepts an empty plan and marks it `planned`, verified live — but it is a **one-way door**: `set_reference_plan` is only valid while `unplanned`, and `amend_reference_plan` accepts backgrounds only, so confirming "no references" would permanently prevent ever adding a character to that film. Relaxing the binding guard avoids forcing that irreversible choice. If the panel later grows an explicit "this film needs no references" affordance, it should not be built on `set_reference_plan` until characters can be appended.
   - **Fixed and verified live 2026-08-28.** The `bindsNothing` guard from `012caa7e9` is present at `mutations/index.ts:1464`. Live evidence needing no mutation: three projects — `68af3df4`, `a72c7f92`, `dc0168b3` — each have `referencePlanStatus: 'unplanned'`, **zero references**, **3 shots** and **0 unassigned**. Under the bug a film that plans no references could bind no Shot, so all three shots would be unassigned. Two of them additionally hold 8 and 4 jobs, so they have generated: the entry's "can never render" is disproven directly.
+
+- [ ] **[BUG-179][P1][Creative Studio] One unreadable project stops Creative Studio working for every project in the profile** — found 2026-08-30, reproduced and then worked around live
+  - **Lane: Workspace.** The fix is the activation sweep in `directorCommandMailbox.ts` — Director-adjacent by filename, and outside the `DirectorRail/**` boundary, but it is the sweep that installs the graph rather than anything the Director calls. Flagged as the one genuinely arguable assignment; say so in this entry if the Director lane would rather hold it.
+  - **Actual.** With `Plateau` (`748ae58b…`) unreadable, a **brand-new, empty, perfectly valid project** showed _"Creative Studio generation is not ready. Open or create a supported project, then try again"_ with `STATUS UNAVAILABLE` in its header. The owner created that project specifically to get away from the broken one and it made no difference.
+  - **Proved by removing the cause, not by reading the code.** Moving `Plateau` out of `config/creative-studio/` took the startup log from **4 quarantine lines and 1 `Schema-2 runtime activation failed` to zero of each**, and every remaining project became usable immediately. Moving it back reproduces the failure.
+  - **The blast radius is the defect.** One project failing to load is expected and survivable; the failure escaping its own project is not. Every failure line names `748ae58b…` alone, yet the runtime graph is degraded for the whole profile, so the error the user sees is attached to whichever project they happen to open.
+  - **It also destroys the diagnosis.** The message points at the project in front of the user, which is healthy, so the natural next step — make a fresh project — cannot work and looks like a second failure. It took most of a day to find the first time precisely because the symptom and the cause are never the same project.
+  - **Fix direction.** The activation sweep must tolerate a project it cannot read, the same way the other sweeps already do, so an unreadable project is quarantined without taking the installed graph down with it. Whatever lands, the test is the live one above: hold a broken project alongside a healthy one and confirm the healthy one still generates.
+
+- [ ] **[BUG-180][P1][Creative Studio] The Director cannot storyboard a film that ends on an end card, and the refusal names neither the Shot nor the reason** — found 2026-08-29 by the owner on the first real use of a fresh project
+  - **Lane: Director.** The refusal belongs at the tool boundary in `builtinMcp/studioServer.ts`, where the answer can tell the Director what to draft instead. The card half — naming the subject of a refused proposal — is Workspace, and is the same root as **BUG-187**.
+  - **Actual.** The owner asked for an 18-second launch film. The Director drafted 3 Beats and 3 Shots and reported it _"recorded and pending your review"_. The card refused it — **"This proposed change is not valid for the current project"**, Accept disabled. The owner asked for a redraft; the Director produced an equivalent proposal that failed identically. The screen then read **"2 Director proposals cannot be accepted"** with no way forward.
+  - **Root cause, from both proposal files on disk.** Each carries exactly one `chainBreak: 'hard_cut'`, on the end-card Shot. `apply_coverage`'s reducer refuses to create a Shot as a hard cut — `(existing === undefined && proposed.chainBreak === 'hard_cut') → fail('invalid_operation')` — and that one operation fails the **entire batch**.
+  - **The proposals are not malformed.** Running the real `validateStudioProposedShotV2` over both files returns `valid` for all six Shots: exact key set, duration in range, `chainBreak` one of the two permitted values. **The shape validator accepts `hard_cut` and the reducer then refuses it**, so the Director's tool surface can emit an operation the engine will never apply.
+  - **The Director was creatively right.** An end card must not continue from the previous Shot's last frame; a hard cut is exactly what it needs. The product has no way to express that at authoring time.
+  - **It loops rather than failing once.** The refusal carries nothing the model can act on, so a redraft reproduces the same operation. Same honesty-of-failure family as **BUG-140**, **BUG-147**, **BUG-158**, **BUG-161** and **BUG-163**.
+  - **The card cannot explain it either.** It identifies the proposal by raw UUID and summarises three Beats and three Shots as the single bullet **"Beat"** — the subject is resolved against the project, which is exactly the lookup that cannot succeed for a Beat the batch was going to create.
+  - **Workaround.** Redraft with `chainBreak: 'none'` everywhere, accept, then cut the end card free from the Beat panel's continuity control — the owner-only spend-gated path that BUG-165 established as the only live route to `hard_cut`.
+  - **Live reproduction.** Project `cecdd13e_293a…`, both records under `proposals/pending/`.
+
+- [ ] **[BUG-181][P2][Creative Studio] A pending proposal dies permanently the moment any generation makes progress** — found 2026-08-29, isolated by experiment
+  - **Lane: Workspace.** `store.ts`, `proposalReview.ts` and the renderer's accept gates must change together. **Needs a field on `creativeStudioTypes.ts`**, which is shared — announced here rather than discovered in a merge.
+  - **Actual.** `acceptProposalV2` requires an exact revision match (`store.ts:7732`). `jobs` and `assets` live **inside** the project document, and every project write bumps `revision` unconditionally (`store.ts:8133`, `:8210`) with an **opt-in** CAS that the job manager does not use. So a job ticking over invalidates a reviewed, paid draft.
+  - **Reproduced, not inferred.** A probe seeded a project at revision 2, recorded a proposal at `baseRevision: 2`, then made a write touching **only** job state — `brief`, `beats` and `shots` asserted byte-identical afterwards. `acceptProposalV2` then failed `{"code":"stale_project"}` and stayed failed. A control run with no intervening write accepted cleanly.
+  - **Terminal, not a race.** Nothing rebases a pending proposal's `baseRevision`, so the only exit is reject-and-re-propose. The renderer already models it as final: `proposalReview.ts:341-347` returns `status: 'stale'` and `StudioPage.tsx:3600-3607` refuses before it reaches main.
+  - **Distinct from BUG-160, which names this only as a contributing factor.** BUG-160's fix direction — a persistent pending-proposals affordance — does not address it: a card that never scrolls away still cannot be accepted once the revision has moved.
+  - **Fix direction, and why it is not a one-line change.** The fence has to ask whether anything a person **authored** changed, not whether the revision did. `baseRevision` is load-bearing in four more places: `:7753` (the reducer's own CAS), `:7761` (the accepted revision is `baseRevision + 1`, so accepting later would rewind the counter), `:721-722` (`appliedRevision === baseRevision + 1` as a hard invariant) and `:6104`/`:6136` (**crash-recovery replay**). Changing what `baseRevision` means changes how the system recovers from a crash mid-commit on paid work.
+
+- [ ] **[BUG-182][P2][Creative Studio] The Beat panel can persist a pure-black poster, permanently replacing a Shot's preview** — found 2026-08-30 on disk, five real instances
+  - **Lane: Workspace.** `FirstFrames/index.tsx` and its capture helper.
+  - **Actual.** `Mochi Morning` has **3 of 3** thumbnails pure black and `Light on Water` **2 of 3**, all byte-identical (`31aac255…`, 17,713 bytes) against 325,896 bytes for a genuine poster. Every sampled pixel is `(0, 0, 0)`.
+  - **Root cause.** `captureStudioVideoPoster` draws the video and calls `toDataURL` immediately, with **no check that anything was drawn**. It is bound to both `onCanPlay` and `onLoadedData` (`FirstFrames/index.tsx:390-391`), and `loadeddata` promises decoded data for the current position, not that a frame has been composited — so the draw can return a flat frame.
+  - **Worse than capturing nothing.** `shotMedia` prefers a poster over the video, and the product has no way to invalidate one, so each blank capture pins its Shot to a black rectangle for good. Rendering the `<video>` — the behaviour when no poster exists — is strictly better.
+  - **Fix direction.** Refuse a frame that is one flat colour before persisting it, so a bad capture degrades to no poster (recoverable, the tile keeps showing the video) rather than a permanent black one; and capture from a frame that has actually been presented rather than from `loadeddata`. Also worth deciding how an existing bad poster can be cleared — today nothing can.
+
+- [ ] **[BUG-183][P2][Creative Studio] Blocking messages name a control without saying where it is, and describe an activity the person is not doing** — found 2026-08-29 by the owner in References
+  - **Lane: Workspace.** `StudioPage.tsx`, the banner components, and the `en-US` locale.
+  - **Actual.** Working in **References**, the owner hit _"Refresh routes for the current project settings before reviewing a cost."_ Their reply was _"no idea about the error message"_.
+  - **Three things wrong at once.** _Refresh routes_ is a real button, but it lives in the **More (⋮)** project menu beside the spend-cap fields (`WorkspaceProjectMenu.tsx:1920`), unmentioned. The sentence ends _"before reviewing a cost"_ while the owner was making reference images — this one key is raised from **eight** call sites covering quite different actions and every one shows that same wording. And nothing says what a route is, or why one is missing.
+  - **Fix direction.** Say what is missing in the person's terms, put the control in the banner rather than describing its location, and separate the states: a catalogue that was never fetched (refreshing helps) from settings that match no available model (refreshing never will). The renderer can already tell those apart — `routeCatalog === null` never means "fetched and empty" — but the message does not.
+
+- [ ] **[BUG-184][P2][Creative Studio] The Director invents places in the UI, because nothing ever tells it what the surfaces are called** — found 2026-08-30 by the owner
+  - **Lane: Director.** The fix is a short, accurate surface map inside `openingTurn.ts`, which is single-owner. Filed from the Workspace side because that is where the invented names were caught; it is not a Workspace change.
+  - **Actual.** Asked how to accept a proposal, the Director said to open _"the storyboard proposal card in the **storyboard panel**"_ and that it would appear _"beneath or alongside the **storyboard area**"_. **Neither string exists anywhere in the product.** The card is in the right-hand pane under the heading **Reviewed Director output**. The owner asked twice and still had to find it themselves.
+  - **Root cause.** The Director's preset rules describe what it may do in detail and say to name where to look, but **zero** references to any real surface name appear anywhere in its instructions. It is asked to give directions around a UI it has never been shown, so it invents plausible ones.
+  - **Distinct from BUG-183.** There the app knew the location and did not say it; here the Director cannot know it.
+  - **The vocabulary is small and fixed**, which is what makes this cheap: four views named References, Table, Board and Cut; proposals under **Reviewed Director output** on a card headed **Director proposal** with **Accept proposal** / **Reject proposal** / **Prepare updated proposal**; film setup and **Refresh routes** in the **More** menu; **Render…** in the header.
+  - **Related, and worth saying in the same breath.** The owner also asked _"can i just say accept"_. The Director correctly said no — acceptance is human-only by design — but it has no tool that could accept, so this will recur for every person who tries the obvious thing.
+
+- [ ] **[BUG-185][P2][Creative Studio] A project written before a schema bump becomes permanently unopenable, is reported as corrupt, and cannot be repaired by clearing files** — found 2026-08-29, retested 2026-08-30
+  - **Lane: Workspace.** Only the diagnosability half is actionable — reporting a legacy record as corrupt. The unopenability itself is accepted cost under the owner's test-data ruling and is not work.
+  - **Actual.** `Plateau`'s whole proposal family is schema **5** against a current **6** (`STUDIO_PROPOSAL_SCHEMA_VERSION_V2`, bumped by `916e8e51c` with no migration). The project is reported as a **corrupt manifest**, and it is the cause of **BUG-179**.
+  - **"Corrupt" is wrong and costly.** `sidecarSchemaV2` already separates a legacy record (`unsupported_prototype_schema`) from a damaged one (`invalid`), but the reconciler reports both as **malformed**, so a routine schema bump is indistinguishable from storage corruption in the log. That misdirection is most of why BUG-179 took a day to find.
+  - **Clearing the offending files does not converge — measured.** Removing the 12 residue files from `proposals/slots/` and `reference-requests/pending/` moved the error from _"pending publication residue is malformed"_ to _"**proposal** publication residue is malformed"_. An earlier attempt cleared two guards and reached a third. Every record in the family is schema 5, and the subsystem validates them all, so there is no small set of files to remove.
+  - **Scope note.** Migration is deliberately not done during development while every project is throwaway test data, so a project becoming unopenable is an accepted cost. What is **not** accepted is BUG-179's blast radius, or reporting a legacy record as corrupt.
+  - **Current state.** `Plateau` is held aside at `config/creative-studio-held-aside/748ae58b…` — 154 files, 137 MB, all 48 hardlinked files intact. It remains BUG-165's only reproduction.
+
+- [ ] **[BUG-186][P3][Creative Studio] The first-frame viewer's counter is painted over by the close button** — found 2026-08-29, measured in the running app
+  - **Lane: Workspace.** One rule in `FirstFrames.module.css`.
+  - **Actual.** The viewer's top line puts a label left and the frame counter right. Arco positions a Modal's close button absolutely in that same corner, so the two overlap: `1 of 1` ran from x1206 to x1242 while the close icon began at x1230 — a 12px overlap eating the counter's last character. With ten frames it would eat the total.
+  - **No layout inside the row can fix it.** The row is a flex `space-between`, so both children are placed correctly relative to each other; the close button is outside that flow. The corner has to be reserved — `.viewerTopline` currently sets `padding: 2px 6px` and nothing that accounts for the control.
+
+- [ ] **[BUG-187][P2][Creative Studio] A proposal is identified only by a raw UUID, in both the card and the Director's prose, and that id appears nowhere else a person can see** — found 2026-08-30 by the owner
+  - **Lane: split.** The card is Workspace (`DirectorProposalCard`); the Director repeating the id in prose is Director lane and belongs with **BUG-184**, since both are about what the Director may say. Neither half fixes the other.
+  - **Actual.** The review card's first line is _"Proposal ID: `0a00e892-4ce7-44e6-925c-6cc7408b3615`"_, and the Director repeats the same string in chat: _"The storyboard proposal is recorded and pending your review (Proposal `0a00e892-…`)"_. The owner's words: **"Proposal ID does not make any sense."**
+  - **It identifies nothing.** That id appears on no Beat, no Shot, nowhere in the Table, Board or Cut. With one proposal it is noise; with two it is the only thing distinguishing them, and it is 36 characters of hex.
+  - **The card knows enough to name it properly.** It already renders _"Based on revision 3"_ and _"6 proposed edits"_, and the proposal's own payload carries the Beat titles it would create. A person deciding whether to accept needs the shape of the change — _"3 Beats, 4 Shots, 16 seconds"_ or the Beat names — not the primary key.
+  - **Same root as the refusal case in BUG-180**, where a rejected proposal's subject rendered as the bare word "Beat": both resolve identity against the project, which cannot name something the proposal has not created yet.
+  - **Fix direction.** Lead the card with what the proposal does and keep the id for the machine — a `data-testid`, a copy affordance, or the details view. The Director should name the draft the way it described it, never the id; it has no way to know the id means nothing to the reader.
+
+- [ ] **[BUG-188][P2][Creative Studio] Accepting a proposal and then asking the Director about it reports an error for something that succeeded** — found 2026-08-30 by the owner
+  - **Lane: Workspace.** `StudioPage.tsx:3697-3700` and the locale.
+  - **Actual.** After the owner accepted the storyboard — which worked; the project went to **revision 4** with the Beat and its 4 Shots in the Table, and `proposals/decisions/` records `accepted` — the workspace showed the red banner **"There is no pending Director proposal to act on."**
+  - **Mechanism.** `StudioPage.tsx:3697-3700`: a chat-driven decision with no explicit `proposalId` filters the catalogue to `status === 'pending'`, finds none because the proposal was just accepted, and raises `chatNoPending`. The sentence is literally true and completely misleading — the proposal the person meant did not go missing, it went through.
+  - **Why it reads as failure.** It is rendered in the error banner, in the same place and styling as real blockers, immediately after a successful action. Nothing on screen says the accept worked; the Director's own message above still says "recorded and pending your review", which is stale history and correct, so the only fresh signal contradicts the outcome.
+  - **The app can tell the difference.** A decision record exists for that proposal with `status: 'accepted'`, so "already accepted" is distinguishable from "never had one" without new state.
+  - **Fix direction.** When a decision intent finds nothing pending but a recent decision exists for it, say so and say what changed — the Beats it added — rather than reporting an absence. Same honesty-of-failure family as **BUG-162**: the app has the facts and reports the wrong one.
+
+- [ ] **[BUG-189][P2][Creative Studio] The bordered view surface is shrunk to the window while its content is not, so every view's content spills outside its own box** — found 2026-08-30 by the owner, measured in the running app
+  - **Lane: Workspace.** `Workspace.module.css`; verify all four views, since the surface is shared.
+  - **Actual.** On the Board with two Beats, the bordered card that draws each view's surface measures **779px tall while its own content is 1649px** — `scrollHeight` 1649 against `clientHeight` 778. Its border, radius and background therefore paint around only the first half of the view, and the rest of the Beat cards sit outside it with no box around them. The owner's words: \_"the outer boxes do not cover all content."\* Measured the same way on the Cut.
+  - **Root cause, confirmed from computed style, not inferred.** `.viewSurface` is a flex item of `.workScroll` (`display: flex; flex-direction: column; overflow: auto`), and it carries **`flex-shrink: 1`** — the default — with no `overflow` of its own. `.workPanel` above it is `flex: 1; overflow: hidden`, so the column has a bounded height and the flex algorithm compresses the surface to fit it. Content is not compressed, and `overflow: visible` lets it paint straight through the border.
+  - **The scroll is on the wrong element for the border to follow.** `.workScroll` is what scrolls (`scrollHeight` 1678 against `clientHeight` 835), so scrolling moves the content past a border that stays the size of the window. The card is not a card so much as a 779px-tall frame the content happens to start inside.
+  - **Why it reads as broken rather than as scrolling.** Every Beat below the fold appears un-carded, and the surface's own background stops mid-view, so the second Beat looks like it belongs to a different container. On the Board this is most of the screen: the second Beat card ends at y=1605 against a surface bottom of y=908.
+  - **Fix direction.** The surface should take its content's height and let the ancestor scroll the whole card — `flex-shrink: 0` (or `flex: none`) on `.viewSurface` is the one-line form. If instead the card is meant to stay window-height and scroll internally, it needs its own `overflow` and the ancestor's must come off; what it cannot do is have neither. Worth checking every view, since the surface is shared by References, Table, Board and Cut.
 
 - [ ] **[BUG-141][P2][Creative Studio] A detected variation grid is refused but still charged, and nothing breaks the loop — the user pays per rejection with no way out** — found 2026-08-27 on `Morning Post` (`2f363667…`), immediately after BUG-132's detection landed
   - **The detection itself is correct and is not the defect.** `studioImageHasVariationGridV2` (`mediaStore.ts:486-520`) does exactly what BUG-132's reopened fix direction asked: full-height seam separators **plus** a repeated-subject pass across thirds and quarters, cosine-similarity based, relative to the image's own adjacent-column baseline, with the repeated-layout pass opt-in so ordinary background repetition is not read as a character sheet. It caught a turnaround that the seam-only metric in the original entry provably missed. This entry is about what happens **after** it fires.
