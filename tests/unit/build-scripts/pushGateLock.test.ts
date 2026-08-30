@@ -61,6 +61,12 @@ const log = process.env.EVENT_LOG;
 const label = process.env.LABEL;
 const options = JSON.parse(process.env.LOCK_OPTIONS);
 
+if (process.env.BREAK_STDERR === '1') {
+  process.stderr.write = () => {
+    throw new Error('stderr has gone away');
+  };
+}
+
 const claimedAt = () => {
   try {
     return JSON.parse(readFileSync(options.lockPath, 'utf8')).startedAt;
@@ -345,6 +351,20 @@ describe('push gate lock', () => {
 
       expect(ran.code).toBe(0);
       expect(ran.stderr).toMatch(/without serialising/);
+    });
+
+    /*
+     * Reporting happens after the claim is written but before the release traps are installed, so a
+     * report that could throw would reach the fail-open path holding a lock nothing would give back
+     * -- every later push blocked until the ceiling expired.
+     */
+    it('breaks a stale lock and gives it back even when it cannot report a word', async () => {
+      writeFileSync(lockPath, `${JSON.stringify({ pid: 0x7ffffffe, startedAt: Date.now() })}\n`);
+
+      const ran = await startHolder('mute', 10, { BREAK_STDERR: '1' }).done;
+
+      expect(ran.code).toBe(0);
+      expect(existsSync(lockPath)).toBe(false);
     });
 
     it('takes a lock left behind by a process that no longer exists', async () => {

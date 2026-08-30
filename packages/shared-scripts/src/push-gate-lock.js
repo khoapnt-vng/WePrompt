@@ -60,7 +60,19 @@ const formatDuration = (ms) => {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 };
 
-const report = (message) => process.stderr.write(`pre-push: ${message}\n`);
+/*
+ * Never throws. Between writing the claim and installing the release traps there is one call out of
+ * this file, and it is this one -- a write to a closed stderr propagating from there would reach the
+ * fail-open path with the lock already taken and nothing left to release it. Losing a progress line
+ * is the cheapest possible outcome; wedging every later push is the most expensive one.
+ */
+const report = (message) => {
+  try {
+    process.stderr.write(`pre-push: ${message}\n`);
+  } catch {
+    // A gate that cannot narrate itself still has to release its lock.
+  }
+};
 
 /** Synchronous by necessity: everything around it, the gate included, blocks. */
 const sleepSync = (ms) => {
