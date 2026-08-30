@@ -19,6 +19,13 @@ export default defineConfig({
   test: {
     globals: true,
     testTimeout: 10000,
+    // Hooks assert nothing — they build and tear down fixtures — so a ceiling on them can only
+    // ever manufacture a flake. The observed gate failures were `ENOTEMPTY: directory not empty,
+    // rmdir`: a recursive rm of an os.tmpdir workspace overrunning the default 10s in afterEach,
+    // which no `testTimeout` can reach. Raised globally rather than per project because the same
+    // mkdtemp/rm pair appears in the office integration tests, the presentation-template storage
+    // tests and the grant-store tests alike.
+    hookTimeout: 60000,
     // Use projects to run different environments (Vitest 4+)
     projects: [
       // Node environment tests (existing tests)

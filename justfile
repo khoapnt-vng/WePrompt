@@ -335,9 +335,10 @@ check: lint fmt-check typecheck i18n-check
 # Pre-push gate: lint + format check + typecheck + i18n + the tests the change actually needs,
 # then push. Uses --quiet to suppress warnings (exit code is still non-zero on errors).
 #
-# The test leg is chosen from the commits being pushed: the Creative Studio coverage gate when a
-# coverage-enforced file changed, the plain suite when other source changed, and nothing when the
-# push is documentation only. It fails safe to the coverage gate whenever it cannot tell.
+# The test leg is chosen from the commits being pushed: the reviewed Creative Studio coverage gate
+# whenever anything carrying behaviour changed, and nothing at all when the push is inert
+# documentation. Two legs only -- see the script for why a third was unsound, and for why ".md" is
+# not the same thing as "documentation" here. It fails safe to the coverage gate when it cannot tell.
 push *ARGS: lint-strict fmt-check typecheck i18n-check test-for-push
     git push {{ ARGS }}
 

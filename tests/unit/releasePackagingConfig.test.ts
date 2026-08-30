@@ -649,6 +649,33 @@ describe('release packaging configuration', () => {
     const pushDependencies = justfile.match(/^push \*ARGS: (.+)$/m)?.[1].split(/\s+/) ?? [];
 
     /*
+     * Run the real selector and read the leg it chooses. `.md` is NOT a safe proxy for
+     * "documentation" in this repository: the twelve `presentation-templates/<pack>/THEME.md` files are
+     * imported into source with `?raw` and asserted byte-for-byte, and documentation.test.ts reads
+     * seven `docs/design/creative-studio-2-*` files and matches exact sentences out of them, and
+     * the eleven `tests/eval/fixture/corpus*` documents are the KB retrieval regression corpus
+     * whose baseline is computed over their bytes. All three classes must reach the gate; ordinary
+     * prose must still skip it, or the optimisation is pointless.
+     */
+    const legFor = (...files: string[]) =>
+      spawnSync('node', ['scripts/select-push-tests.js', '--classify', ...files], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      }).stdout.trim();
+    const decisions = {
+      inertProse: legFor('docs/prds/creative-studio/creative-studio-3-bug-list.md'),
+      nothingAtAll: legFor(),
+      shippedTemplateContent: legFor(
+        'packages/desktop/src/process/resources/presentation-templates/business-review/THEME.md'
+      ),
+      testReadDesignDoc: legFor('docs/design/creative-studio-2-programme-plan.md'),
+      testReadGateRecord: legFor('docs/design/creative-studio-2-gates/phase-1.md'),
+      testFixtureCorpus: legFor('tests/eval/fixture/corpus/quy-dinh-bao-mat-thong-tin.md'),
+      sourceFile: legFor('packages/desktop/src/renderer/pages/studio/StudioPage.tsx'),
+      prosePlusSource: legFor('docs/prds/x.md', 'packages/desktop/src/main.ts'),
+    };
+
+    /*
      * The local push reaches the coverage gate through a selector that skips tests for
      * documentation-only pushes, rather than depending on the recipe directly. What must stay true
      * is that any change able to move coverage still runs the reviewed script — so the selector is
@@ -666,10 +693,11 @@ describe('release packaging configuration', () => {
       selectorOnlyEverRunsTheReviewedScript:
         [...selector.matchAll(/bun[^\n]*run['"\s,]+([\w:-]+)/g)].map((match) => match[1]).join() ===
         'test:coverage:creative-studio',
-      // Pinned exactly, not merely "mentions .md": widening this predicate to any source
-      // extension would let a real change push with no tests at all, and a looser assertion did
-      // not notice when that mutation was tried.
-      selectorSkipsOnlyMarkdown: /const isDocumentation = \(file\) => file\.endsWith\('\.md'\);/.test(selector),
+      // The skip rule is pinned by BEHAVIOUR, below, not by matching this file's source text. An
+      // earlier version asserted the predicate's exact source line, which a mutation walked
+      // straight around: making `classify` return 'none' unconditionally left the predicate's text
+      // untouched, so every push — source changes included — ran zero tests and this stayed green.
+      selectorDecisions: decisions,
       pullRequestGateRunsReviewedScript: workflow.includes('if bun run test:coverage:creative-studio 2>&1'),
       quarantineCanHideCoverageFailure: !workflow.includes(
         '! grep -Eq \'Coverage for .* does not meet .*threshold\' "$clean"'
@@ -679,7 +707,16 @@ describe('release packaging configuration', () => {
       localPushStillRunsRedundantSuite: false,
       localGateRunsReviewedScript: true,
       selectorOnlyEverRunsTheReviewedScript: true,
-      selectorSkipsOnlyMarkdown: true,
+      selectorDecisions: {
+        inertProse: 'none',
+        nothingAtAll: 'none',
+        shippedTemplateContent: 'coverage',
+        testReadDesignDoc: 'coverage',
+        testReadGateRecord: 'coverage',
+        testFixtureCorpus: 'coverage',
+        sourceFile: 'coverage',
+        prosePlusSource: 'coverage',
+      },
       pullRequestGateRunsReviewedScript: true,
       quarantineCanHideCoverageFailure: false,
     });
