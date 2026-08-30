@@ -66,6 +66,43 @@ const downloadManagedAsset = (url: string, fileName: string): void => {
   document.body.removeChild(link);
 };
 
+/**
+ * A `<video>` that has fired `loadeddata` has not necessarily presented a frame, and drawing one
+ * that has not yields a single flat colour -- in practice pure black. Persisting that is worse than
+ * capturing nothing: the poster outranks the video in the Beat panel and on the Board tile and
+ * becomes the Shot's `coverAssetId`, and nothing in the product can then clear it. Five such
+ * posters were persisted before this guard existed, all sharing one sha256.
+ *
+ * Roughly four thousand samples at an odd stride, so an even-width frame is never sampled down a
+ * single column, compared against pixel 0. Alpha is read alongside colour so a fully transparent
+ * draw is refused too.
+ */
+const carriesPicture = (context: CanvasRenderingContext2D, width: number, height: number): boolean => {
+  if (typeof context.getImageData !== 'function') return false;
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = context.getImageData(0, 0, width, height).data;
+  } catch {
+    // A tainted canvas cannot be read back, and `toDataURL` would throw next anyway.
+    return false;
+  }
+  const total = Math.floor(pixels.length / 4);
+  if (total === 0) return false;
+  const step = Math.max(1, Math.floor(total / 4_096)) | 1;
+  for (let index = 0; index < total; index += step) {
+    const at = index * 4;
+    if (
+      pixels[at] !== pixels[0] ||
+      pixels[at + 1] !== pixels[1] ||
+      pixels[at + 2] !== pixels[2] ||
+      pixels[at + 3] !== pixels[3]
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export const captureStudioVideoPoster = (
   video: Pick<HTMLVideoElement, 'videoWidth' | 'videoHeight'>,
   createCanvas: () => HTMLCanvasElement = () => document.createElement('canvas')
@@ -89,6 +126,7 @@ export const captureStudioVideoPoster = (
   if (context === null) return null;
   try {
     context.drawImage(video as CanvasImageSource, 0, 0, width, height);
+    if (!carriesPicture(context, width, height)) return null;
     const dataUrl = canvas.toDataURL('image/png');
     return dataUrl.startsWith('data:image/png;base64,') ? { dataUrl, width, height } : null;
   } catch {
@@ -198,11 +236,14 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
     await actions.cancelGenerationJob(job.id);
   };
 
-  const persistPoster = async (video: HTMLVideoElement, picture: WorkspaceCurrentPictureProjection): Promise<void> => {
+  const persistPoster = async (
+    video: HTMLVideoElement,
+    picture: WorkspaceCurrentPictureProjection
+  ): Promise<boolean> => {
     const captureKey = `${projectId}:${shot.id}:${picture.assetId}`;
-    if (posterCapturesRef.current.has(captureKey)) return;
+    if (posterCapturesRef.current.has(captureKey)) return true;
     const captured = captureStudioVideoPoster(video);
-    if (captured === null) return;
+    if (captured === null) return false;
     posterCapturesRef.current.add(captureKey);
     const persisted = await actions.persistCapturedPoster({
       shotId: shot.id,
@@ -210,6 +251,23 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
       ...captured,
     });
     if (!persisted) posterCapturesRef.current.delete(captureKey);
+    return true;
+  };
+
+  /*
+   * `loadeddata` promises data for the current position, not that a frame has been composited, and
+   * this video is never played. `canPlay` was not a second chance either: before the refusal above,
+   * the `loadeddata` capture always succeeded and marked the key, so the `canPlay` handler returned
+   * at its first line -- the binding was dead. `requestVideoFrameCallback` fires only once a frame
+   * has actually been presented, which is the earliest moment a poster can carry a picture.
+   */
+  const scheduleCapture = (video: HTMLVideoElement, picture: WorkspaceCurrentPictureProjection): void => {
+    void persistPoster(video, picture).then((settled) => {
+      if (settled) return;
+      video.requestVideoFrameCallback?.(() => {
+        if (video.isConnected) void persistPoster(video, picture);
+      });
+    });
   };
 
   const frameMenu = (frame: WorkspaceSeedStillProjection, index: number): React.ReactNode => {
@@ -398,8 +456,8 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
                 <video
                   aria-label={t(`${KEY_ROOT}.pictureAlt`, { shot: shotIndex + 1 })}
                   muted
-                  onCanPlay={(event) => void persistPoster(event.currentTarget, currentPicture)}
-                  onLoadedData={(event) => void persistPoster(event.currentTarget, currentPicture)}
+                  onCanPlay={(event) => scheduleCapture(event.currentTarget, currentPicture)}
+                  onLoadedData={(event) => scheduleCapture(event.currentTarget, currentPicture)}
                   preload='auto'
                   src={createManagedStudioAssetUrl(projectId, currentPicture.assetId) ?? undefined}
                 />

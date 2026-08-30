@@ -2462,11 +2462,31 @@ describe('BeatPanel', () => {
     anchorClick.mockRestore();
   });
 
+  /*
+   * A stub that always reports the same bytes cannot tell a real frame from a blank one, which is
+   * exactly the distinction the capture now makes -- so these give back pixels. `varied` is a frame
+   * with picture in it; `flat` is what drawing a video that has not yet presented produces.
+   */
+  const pixelContext = (drawImage: ReturnType<typeof vi.fn>, kind: 'varied' | 'flat'): CanvasRenderingContext2D => {
+    const data = new Uint8ClampedArray(1280 * 720 * 4);
+    if (kind === 'varied') {
+      for (let index = 0; index < data.length; index += 4) {
+        data[index] = index % 251;
+        data[index + 1] = index % 241;
+        data[index + 2] = index % 239;
+        data[index + 3] = 255;
+      }
+    } else {
+      for (let index = 3; index < data.length; index += 4) data[index] = 255;
+    }
+    return { drawImage, getImageData: () => ({ data }) } as unknown as CanvasRenderingContext2D;
+  };
+
   it('captures and persists one poster when the current video becomes readable', async () => {
     const drawImage = vi.fn();
     const getContext = vi
       .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+      .mockReturnValue(pixelContext(drawImage, 'varied'));
     const toDataUrl = vi
       .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
       .mockReturnValue('data:image/png;base64,cG9zdGVy');
@@ -2495,6 +2515,40 @@ describe('BeatPanel', () => {
     fireEvent.canPlay(video);
     expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
     expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 1280, 720);
+
+    getContext.mockRestore();
+    toDataUrl.mockRestore();
+  });
+
+  it('refuses to persist a poster drawn from a frame that has not been presented', async () => {
+    /*
+     * `loadeddata` guarantees decoded data for the current position, not that a frame has been
+     * composited, and this video is never played. Drawing then yields one flat colour -- black in
+     * practice -- and persisting it is worse than capturing nothing, because the poster outranks the
+     * video everywhere and nothing in the product can clear it. Five were persisted this way.
+     */
+    const drawImage = vi.fn();
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(pixelContext(drawImage, 'flat'));
+    const toDataUrl = vi
+      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,cG9zdGVy');
+    const shot = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_current', 8) });
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+    openFirstFramePicker(container, shot.id);
+    const video = container.querySelector<HTMLVideoElement>('[data-current-picture] video');
+    if (video === null) throw new Error('Missing posterless current picture');
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1280 });
+    Object.defineProperty(video, 'videoHeight', { configurable: true, value: 720 });
+
+    fireEvent.loadedData(video);
+    fireEvent.canPlay(video);
+    await Promise.resolve();
+
+    expect(drawImage).toHaveBeenCalled();
+    expect(actions.persistCapturedPoster).not.toHaveBeenCalled();
 
     getContext.mockRestore();
     toDataUrl.mockRestore();
