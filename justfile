@@ -370,9 +370,14 @@ test-watch:
 test-coverage:
     bun run test:coverage
 
-# Enforce the reviewed Creative Studio runtime manifest's per-file coverage thresholds
+# Enforce the reviewed Creative Studio runtime manifest's per-file coverage thresholds.
+#
+# Takes the same machine-wide lock the push gate takes, because it is the same ~6-minute suite:
+# running it beside someone's `just push` manufactures the very timeouts both are trying to avoid.
+# It queues and says what it is waiting for rather than failing. CI is untouched -- the workflow
+# calls the package script directly, and one runner has nothing to contend with.
 test-coverage-creative-studio:
-    bun run test:coverage:creative-studio
+    node packages/shared-scripts/src/push-gate-lock.js bun run test:coverage:creative-studio
 
 # Run contract tests
 test-contract:

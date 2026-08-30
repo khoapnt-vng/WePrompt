@@ -700,6 +700,14 @@ describe('release packaging configuration', () => {
        * and so contends for nothing.
        */
       localGateSerialisesTheCoverageRun: /withPushGateLock\(\{\}, \(\) => execFileSync\(command\[0\]/.test(selector),
+      // The manual recipe runs the same six-minute suite, so it queues behind a push gate rather
+      // than running beside it and manufacturing the timeouts both are trying to avoid. CI is
+      // deliberately not in this: the workflow calls the package script directly, and one runner
+      // has nothing to contend with.
+      manualCoverageRecipeSerialises:
+        /^test-coverage-creative-studio:\s*\n\s+node packages\/shared-scripts\/src\/push-gate-lock\.js bun run test:coverage:creative-studio$/m.test(
+          justfile
+        ),
       selectorOnlyEverRunsTheReviewedScript:
         [...selector.matchAll(/bun[^\n]*run['"\s,]+([\w:-]+)/g)].map((match) => match[1]).join() ===
         'test:coverage:creative-studio',
@@ -717,6 +725,7 @@ describe('release packaging configuration', () => {
       localPushStillRunsRedundantSuite: false,
       localGateRunsReviewedScript: true,
       localGateSerialisesTheCoverageRun: true,
+      manualCoverageRecipeSerialises: true,
       selectorOnlyEverRunsTheReviewedScript: true,
       selectorDecisions: {
         inertProse: 'none',
