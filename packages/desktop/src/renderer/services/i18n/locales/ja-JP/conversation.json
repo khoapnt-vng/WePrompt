@@ -1316,6 +1316,7 @@
         },
         "subject": {
           "project": "プロジェクト",
+          "reference": "参照",
           "beat": "Beat",
           "shot": "Shot"
         },
@@ -1338,6 +1339,7 @@
           "resolution": "解像度",
           "targetDurationSeconds": "目標時間",
           "boardStyle": "Board スタイル",
+          "prompt": "プロンプト",
           "title": "タイトル",
           "story": "ストーリー",
           "targetSeconds": "Beat の目標",

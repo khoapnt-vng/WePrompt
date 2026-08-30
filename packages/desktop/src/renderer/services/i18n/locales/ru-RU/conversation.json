@@ -1316,6 +1316,7 @@
         },
         "subject": {
           "project": "Проект",
+          "reference": "Референс",
           "beat": "Бит",
           "shot": "Шот"
         },
@@ -1338,6 +1339,7 @@
           "resolution": "Разрешение",
           "targetDurationSeconds": "Целевая длительность",
           "boardStyle": "Стиль борда",
+          "prompt": "Промпт",
           "title": "Заголовок",
           "story": "История",
           "targetSeconds": "Цель бита",

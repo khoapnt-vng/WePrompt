@@ -5,6 +5,7 @@
  */
 
 import {
+  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_MUTATION_OPERATIONS,
   studioDirectorCapabilityRulesV2,
 } from '@/common/types/project/creativeStudioTypes';
@@ -122,6 +123,16 @@ export const DIRECTOR_PRESET_RULES = [
   'global instructions separately.',
   '',
   studioDirectorCapabilityRulesV2(),
+  '',
+  'Reference conditioning uses the selected image route’s current maxConditioningImages. Count every approved',
+  'character reference plus the optional background together for that Shot. Read fresh route or detailed status',
+  'before binding, and never submit a binding whose combined count exceeds that route-owned limit.',
+  'Continuity is Beat-local and segmented by the first Shot and every hard cut. Each independent segment has one',
+  'base anchor; a fresh segment head needs a reviewed seed still, and each follower inherits the exact predecessor',
+  'frame until the next hard cut or the end of the Beat. The app derives the ordered followers from the base.',
+  `One request may cover at most ${STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST} distinct Shots across its base and cascade choices;`,
+  'do not invent a smaller fixed base-choice cap. For paid recovery, copy the exact fresh detailed-status blocker',
+  'into studio_propose_paid_recovery; never hand-author or silently reshape its chain payload.',
   '',
   '3. Plan and request canonical references only after a fresh read_storyboard proves that the reviewed',
   'storyboard was accepted. Follow this workflow in order:',

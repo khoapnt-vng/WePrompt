@@ -12,6 +12,7 @@ import {
   type StudioBriefRule,
   type StudioMutationOperationV2,
   type StudioProjectV2,
+  type StudioProjectReferenceV2,
   type StudioProposalReviewRefusalSubjectV2,
   type StudioProposalReviewFieldKeyV2,
   type StudioProposalReviewFieldV2,
@@ -111,6 +112,17 @@ const shotPlacement = (project: StudioProjectV2, shotId: string): Placement => {
   };
 };
 
+const referencePlacement = (project: StudioProjectV2, referenceId: string): Placement => {
+  const position = project.referenceOrder.indexOf(referenceId);
+  return {
+    kind: 'placement',
+    value: position >= 0 ? 'active' : 'removed',
+    position: position >= 0 ? position + 1 : null,
+    ownerBeatId: null,
+    ownerBeatTitle: null,
+  };
+};
+
 const subject = (
   kind: StudioProposalReviewSubjectV2['kind'],
   id: string,
@@ -141,6 +153,13 @@ const refusalSubject = (
       fixedReasons,
     };
   }
+  if (kind === 'reference') {
+    const reference = own(project.references, id);
+    return {
+      subject: subject('reference', id, reference?.label ?? null, referencePlacement(project, id)),
+      fixedReasons,
+    };
+  }
   return { subject: subject('shot', id, null, shotPlacement(project, id)), fixedReasons };
 };
 
@@ -158,7 +177,25 @@ const refusalSubjects = (
   if (operation !== null && 'beatId' in operation && typeof operation.beatId === 'string') {
     return [refusalSubject(project, 'beat', operation.beatId)];
   }
+  if (operation !== null && 'referenceId' in operation && typeof operation.referenceId === 'string') {
+    return [refusalSubject(project, 'reference', operation.referenceId)];
+  }
   return [refusalSubject(project, 'project', project.id)];
+};
+
+const orderedReferenceIds = (before: StudioProjectV2, after: StudioProjectV2): string[] => {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  const append = (id: string): void => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    result.push(id);
+  };
+  before.referenceOrder.forEach(append);
+  Object.keys(before.references).toSorted().forEach(append);
+  after.referenceOrder.forEach(append);
+  Object.keys(after.references).toSorted().forEach(append);
+  return result;
 };
 
 const orderedBeatIds = (before: StudioProjectV2, after: StudioProjectV2): string[] => {
@@ -255,6 +292,14 @@ const shotFields = (
     ),
   ]);
 
+const referenceFields = (
+  before: StudioProjectReferenceV2 | undefined,
+  after: StudioProjectReferenceV2 | undefined
+): StudioProposalReviewFieldV2[] =>
+  compactFields([
+    field('prompt', before === undefined ? null : text(before.prompt), after === undefined ? null : text(after.prompt)),
+  ]);
+
 const projectGroup = (before: StudioProjectV2, after: StudioProjectV2): StudioProposalReviewGroupV2 | null => {
   const fields = compactFields([
     field('name', text(before.name), text(after.name)),
@@ -343,6 +388,22 @@ export const deriveStudioProposalReviewV2 = (
     const groups: StudioProposalReviewGroupV2[] = [];
     const projectChanges = projectGroup(project, after);
     if (projectChanges !== null) groups.push(projectChanges);
+    for (const referenceId of orderedReferenceIds(project, after)) {
+      const beforeReference = own(project.references, referenceId);
+      const afterReference = own(after.references, referenceId);
+      const fields = referenceFields(beforeReference, afterReference);
+      if (fields.length === 0) continue;
+      const presentedReference = afterReference ?? beforeReference;
+      const placement =
+        afterReference === undefined
+          ? referencePlacement(project, referenceId)
+          : referencePlacement(after, referenceId);
+      groups.push({
+        change: entityChange(beforeReference !== undefined, afterReference !== undefined, fields),
+        subject: subject('reference', referenceId, presentedReference?.label ?? null, placement),
+        fields,
+      });
+    }
     for (const beatId of orderedBeatIds(project, after)) {
       const beforeBeat = own(project.beats, beatId);
       // Current schema-5 operations can add or park Beats, but never erase their records.

@@ -622,13 +622,13 @@ describe('Studio Director V2 command contracts', () => {
 
   it('freezes the exhaustive schema-5 capability table and rejects unknown provenance', () => {
     const expected = {
-      edit_project: 'operation_not_permitted',
+      edit_project: 'proposal',
       set_brief: 'direct',
       set_rules: 'operation_not_permitted',
       set_reference_plan: 'direct',
       amend_reference_plan: 'direct',
       set_reference_label: 'operation_not_permitted',
-      set_reference_prompt: 'operation_not_permitted',
+      set_reference_prompt: 'proposal',
       select_reference_image: 'operation_not_permitted',
       remove_reference_image: 'operation_not_permitted',
       set_shot_reference_binding: 'direct',
@@ -682,15 +682,20 @@ describe('Studio Director V2 command contracts', () => {
   });
 
   it.each([
-    { kind: 'edit_project', changes: { name: 'Not direct' } },
     { kind: 'park_beat', beatId: 'section_1' },
     { kind: 'set_reference_label', referenceId: 'reference_1', label: 'Human name' },
-    { kind: 'set_reference_prompt', referenceId: 'reference_1', prompt: 'A human edit' },
     { kind: 'select_reference_image', referenceId: 'reference_1', assetId: 'asset_1' },
     { kind: 'remove_reference_image', referenceId: 'reference_1', assetId: 'asset_1' },
     { kind: 'set_routes', imageRouteId: null, videoRouteId: null },
     { kind: 'undo_last', entryId: 'mutation_1' },
   ])('rejects the known but unavailable $kind capability', (operation) => {
+    expect(parsePendingV2(validCommandV2({ operations: [operation as never] })).status).toBe('invalid');
+  });
+
+  it.each([
+    { kind: 'edit_project', changes: { name: 'Review this rename' } },
+    { kind: 'set_reference_prompt', referenceId: 'reference_1', prompt: 'Review this prompt' },
+  ])('keeps the proposal-only $kind capability out of the direct command lane', (operation) => {
     expect(parsePendingV2(validCommandV2({ operations: [operation as never] })).status).toBe('invalid');
   });
 
@@ -2023,7 +2028,7 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     reservedAt: NOW,
   };
 
-  it('accepts exact prose and pin-rule proposals', () => {
+  it('accepts exact authoring, editable-project, reference-prompt, and pin-rule proposals', () => {
     const pinRule: StudioProposalRecordV2 = {
       ...mutationProposal,
       id: 'proposal_rule',
@@ -2039,6 +2044,19 @@ describe('Studio proposal and reference sidecar V2 contracts', () => {
     expect(
       parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_rule', value: pinRule })
     ).toEqual({ status: 'valid', record: pinRule });
+    for (const operation of [
+      { kind: 'edit_project', changes: { name: 'A reviewed title', targetDurationSeconds: 45 } },
+      { kind: 'set_reference_prompt', referenceId: 'reference_1', prompt: 'A reviewed reference prompt.' },
+    ]) {
+      const record = {
+        ...mutationProposal,
+        payload: { kind: 'mutation_batch' as const, operations: [operation] },
+      };
+      expect(parseStudioProposalRecordV2({ projectId: 'project_1', proposalId: 'proposal_1', value: record })).toEqual({
+        status: 'valid',
+        record,
+      });
+    }
     expect(parseStudioProposalDecisionV2({ proposalId: 'proposal_1', value: proposalDecision })).toEqual({
       status: 'valid',
       record: proposalDecision,

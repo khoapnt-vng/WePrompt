@@ -1322,6 +1322,7 @@
         },
         "subject": {
           "project": "Projeto",
+          "reference": "Referência",
           "beat": "Beat",
           "shot": "Shot"
         },
@@ -1344,6 +1345,7 @@
           "resolution": "Resolução",
           "targetDurationSeconds": "Duração alvo",
           "boardStyle": "Estilo do Board",
+          "prompt": "Prompt",
           "title": "Título",
           "story": "História",
           "targetSeconds": "Meta do Beat",

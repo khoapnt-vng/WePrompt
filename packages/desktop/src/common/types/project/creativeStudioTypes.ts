@@ -1725,13 +1725,13 @@ export type StudioDirectorOperationDispositionV2 = 'direct' | 'proposal' | 'oper
  * Director's capability instructions from the same value so self-description cannot drift.
  */
 export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
-  edit_project: 'operation_not_permitted',
+  edit_project: 'proposal',
   set_brief: 'direct',
   set_rules: 'operation_not_permitted',
   set_reference_plan: 'direct',
   amend_reference_plan: 'direct',
   set_reference_label: 'operation_not_permitted',
-  set_reference_prompt: 'operation_not_permitted',
+  set_reference_prompt: 'proposal',
   select_reference_image: 'operation_not_permitted',
   remove_reference_image: 'operation_not_permitted',
   set_shot_reference_binding: 'direct',
@@ -1884,7 +1884,7 @@ export type StudioProposalV2 =
     });
 
 export type StudioProposalReviewSubjectV2 = {
-  kind: 'project' | 'beat' | 'shot';
+  kind: 'project' | 'reference' | 'beat' | 'shot';
   id: string;
   title: string | null;
   position: number | null;
@@ -1900,6 +1900,7 @@ export type StudioProposalReviewFieldKeyV2 =
   | 'resolution'
   | 'targetDurationSeconds'
   | 'boardStyle'
+  | 'prompt'
   | 'title'
   | 'story'
   | 'targetSeconds'

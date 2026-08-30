@@ -1316,6 +1316,7 @@
         },
         "subject": {
           "project": "프로젝트",
+          "reference": "참조",
           "beat": "Beat",
           "shot": "Shot"
         },
@@ -1338,6 +1339,7 @@
           "resolution": "해상도",
           "targetDurationSeconds": "목표 길이",
           "boardStyle": "Board 스타일",
+          "prompt": "프롬프트",
           "title": "제목",
           "story": "스토리",
           "targetSeconds": "Beat 목표",

@@ -1316,6 +1316,7 @@
         },
         "subject": {
           "project": "项目",
+          "reference": "参考",
           "beat": "Beat",
           "shot": "Shot"
         },
@@ -1338,6 +1339,7 @@
           "resolution": "分辨率",
           "targetDurationSeconds": "目标时长",
           "boardStyle": "Board 风格",
+          "prompt": "提示词",
           "title": "标题",
           "story": "故事",
           "targetSeconds": "Beat 目标",

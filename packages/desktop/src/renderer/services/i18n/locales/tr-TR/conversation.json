@@ -1318,6 +1318,7 @@
         },
         "subject": {
           "project": "Proje",
+          "reference": "Referans",
           "beat": "Beat",
           "shot": "Shot"
         },
@@ -1340,6 +1341,7 @@
           "resolution": "Çözünürlük",
           "targetDurationSeconds": "Hedef süre",
           "boardStyle": "Board stili",
+          "prompt": "İstem",
           "title": "Başlık",
           "story": "Hikâye",
           "targetSeconds": "Beat hedefi",

@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
+  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_MUTATION_OPERATIONS,
 } from '@/common/types/project/creativeStudioTypes';
 
@@ -200,6 +201,41 @@ describe('the Director preset rules', () => {
       );
       expect(section, `${operation} must be described as ${disposition}`).toContain(operation);
     }
+  });
+
+  it('routes editable project settings and reference prompts through human-reviewed proposals', () => {
+    const proposalHeading = 'Permitted through propose_storyboard and human review:';
+    const proposalSection = DIRECTOR_PRESET_RULES.slice(
+      DIRECTOR_PRESET_RULES.indexOf(proposalHeading),
+      DIRECTOR_PRESET_RULES.indexOf('\n', DIRECTOR_PRESET_RULES.indexOf(proposalHeading))
+    );
+    expect(proposalSection).toContain('edit_project');
+    expect(proposalSection).toContain('set_reference_prompt');
+  });
+
+  it('counts character and background references together against the fresh route-owned budget', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/selected image route’s current maxConditioningImages/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /every approved\s+character reference plus the optional background together/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/read fresh route or detailed status\s+before binding/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/combined count exceeds that route-owned limit/i);
+  });
+
+  it('teaches the current base, follower, seed-head, and hard-cut chain shape without the stale four-base cap', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /continuity is Beat-local and segmented by the first Shot and every hard cut/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/each independent segment has one\s+base anchor/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/fresh segment head needs a reviewed seed still/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/follower inherits the exact predecessor\s+frame/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/until the next hard cut or the end of the Beat/i);
+    expect(DIRECTOR_PRESET_RULES).toContain(
+      `at most ${STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST} distinct Shots across its base and cascade choices`
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/do not invent a smaller fixed base-choice cap/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/copy the exact fresh detailed-status blocker/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never hand-author or silently reshape its chain payload/i);
   });
 
   it('authors Beats and Shots through review without claiming it can spend', () => {

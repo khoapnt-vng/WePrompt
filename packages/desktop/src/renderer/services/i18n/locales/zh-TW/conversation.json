@@ -1316,6 +1316,7 @@
         },
         "subject": {
           "project": "專案",
+          "reference": "參考",
           "beat": "Beat",
           "shot": "Shot"
         },
@@ -1338,6 +1339,7 @@
           "resolution": "解析度",
           "targetDurationSeconds": "目標時長",
           "boardStyle": "Board 風格",
+          "prompt": "提示詞",
           "title": "標題",
           "story": "故事",
           "targetSeconds": "Beat 目標",

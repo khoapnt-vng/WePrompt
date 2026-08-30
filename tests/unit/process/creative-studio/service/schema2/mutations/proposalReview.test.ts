@@ -64,6 +64,16 @@ const createProject = (): StudioProjectV2 => {
           shot: { shootingScript: 'Medium shot. Mei looks up from the counter.', durationSeconds: 5 },
           beforeShotId: null,
         },
+        {
+          kind: 'set_reference_plan',
+          references: [
+            {
+              kind: 'character',
+              label: 'Ming',
+              prompt: 'Canonical character sheet for Ming beneath the red awning.',
+            },
+          ],
+        },
       ],
     },
     { mutationId: 'setup', capturedAt: createdAt }
@@ -257,6 +267,74 @@ describe('schema-5 semantic proposal review', () => {
     const fieldKeys = review.groups.flatMap((group) => group.fields.map((entry) => entry.key));
     expect(fieldKeys).toEqual(expect.arrayContaining(['boardStyle', 'targetDurationSeconds', 'placement', 'order']));
     expect(JSON.stringify(review)).not.toMatch(/edit_project|reorder_shots|delete_shot/);
+  });
+
+  it('shows an exact reference-prompt edit under the human reference label', () => {
+    const project = createProject();
+    const referenceId = project.referenceOrder[0]!;
+    const review = deriveStudioProposalReviewV2(
+      project,
+      proposal(project, [
+        {
+          kind: 'set_reference_prompt',
+          referenceId,
+          prompt: 'Canonical character sheet for Ming in his charcoal raincoat.',
+        },
+      ])
+    );
+
+    expect(review).toEqual({
+      status: 'ready',
+      groups: [
+        {
+          change: 'edited',
+          subject: {
+            kind: 'reference',
+            id: referenceId,
+            title: 'Ming',
+            position: 1,
+            ownerBeatId: null,
+            ownerBeatTitle: null,
+          },
+          fields: [
+            {
+              key: 'prompt',
+              before: { kind: 'text', value: 'Canonical character sheet for Ming beneath the red awning.' },
+              after: { kind: 'text', value: 'Canonical character sheet for Ming in his charcoal raincoat.' },
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('identifies the exact reference when a prompt proposal cannot be reduced', () => {
+    const project = createProject();
+    const referenceId = project.referenceOrder[0]!;
+    const review = deriveStudioProposalReviewV2(
+      project,
+      proposal(project, [
+        {
+          kind: 'set_reference_prompt',
+          referenceId,
+          prompt: project.references[referenceId]!.prompt,
+        },
+      ])
+    );
+
+    expect(review).toMatchObject({
+      status: 'unavailable',
+      refusal: {
+        reasonCode: 'invalid_operation',
+        operationKind: 'set_reference_prompt',
+        subjects: [
+          {
+            subject: { kind: 'reference', id: referenceId, title: 'Ming', position: 1 },
+            fixedReasons: [],
+          },
+        ],
+      },
+    });
   });
 
   it('includes enforced forbidden terms in a pinned-rule review', () => {

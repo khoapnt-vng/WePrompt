@@ -286,6 +286,51 @@ describe('DirectorProposalCard semantic review', () => {
     expect(screen.getByText('conversation.creativeStudio.workspace.proposals.field.shootingScript')).toBeVisible();
   });
 
+  it('shows a reference-prompt proposal as an exact human-labelled before/after review', () => {
+    const value = proposal({
+      status: 'ready',
+      groups: [
+        {
+          change: 'edited',
+          subject: {
+            kind: 'reference',
+            id: 'reference_ming',
+            title: 'Ming',
+            position: 1,
+            ownerBeatId: null,
+            ownerBeatTitle: null,
+          },
+          fields: [
+            {
+              key: 'prompt',
+              before: { kind: 'text', value: 'Ming beneath the red awning.' },
+              after: { kind: 'text', value: 'Ming in his charcoal raincoat beneath the red awning.' },
+            },
+          ],
+        },
+      ],
+    });
+    value.payload = {
+      kind: 'mutation_batch',
+      operations: [
+        {
+          kind: 'set_reference_prompt',
+          referenceId: 'reference_ming',
+          prompt: 'Ming in his charcoal raincoat beneath the red awning.',
+        },
+      ],
+    };
+    const { container } = renderCard(value);
+    openReview();
+
+    expect(screen.getByText(/workspace\.proposals\.subject\.reference/)).toHaveTextContent('Ming');
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.field.prompt')).toBeVisible();
+    expect(screen.getByText('Ming beneath the red awning.')).toBeVisible();
+    expect(screen.getByText('Ming in his charcoal raincoat beneath the red awning.')).toBeVisible();
+    expect(container).not.toHaveTextContent('set_reference_prompt');
+    expect(container).not.toHaveTextContent('reference_ming');
+  });
+
   it('never substitutes raw mutation operation names for the semantic review', () => {
     const { container } = renderCard();
     openReview();

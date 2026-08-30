@@ -1824,7 +1824,7 @@ build it alongside that assignment, not independently.
 
 ## Assignable follow-on — Director troubleshooting: diagnose freely, repair free things, propose the rest
 
-**Status:** implementation in progress; items 1–3 implemented and verified, items 4–5 remain. Full
+**Status:** implemented and verified 2026-08-30; all five items are current. Full
 direction and the fourteen-action inventory live in
 [the Director as first responder](../../design/creative-studio-3-director-troubleshooting.md).
 Charter: **diagnose freely · repair freely when free · propose when it costs · never confirm its
@@ -1852,9 +1852,11 @@ own spend.**
    Missing or expired quote authority refreshes the estimate without confirming, so a second click
    is required. The crash-safe proposal commit records the exact authorization attribution before
    publishing the project revision.
-4. **Add proposal dispositions** for `edit_project`'s editable settings and `set_reference_prompt`.
-5. **Regenerate the Director's self-description from the capability table** (BUG-139) and teach the
-   conditioning-budget and chain-shape rules in its rules text.
+4. **Implemented and verified 2026-08-30 — proposal dispositions** for `edit_project`'s editable
+   settings and `set_reference_prompt`, including exact semantic review before human acceptance.
+5. **Implemented and verified 2026-08-30 — the Director's self-description derives from the
+   capability table** (BUG-139), and its rules teach the route-owned conditioning budget and current
+   Beat-local chain shape without hard-coding a stale base-choice limit.
 
 **Do not weaken:** no autonomous spend of any size; no cross-project access; quarantine, spend
 gating and the duplicate-charge acknowledgement stay exactly as they are. Acceptance: the Director
@@ -1924,17 +1926,16 @@ by **consequence**.
 ### Dependency — do not skip
 
 The owner's framing was that rename and sizing could move to chat. **They cannot today.**
-`edit_project` is `operation_not_permitted` for the Director in
-`STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2` (`creativeStudioTypes.ts:1418`) **with no proposal path**,
-so the Director can neither perform nor propose a rename, a target-duration change, or a reshape.
+`edit_project` is proposal-only for the Director in `STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2`.
+The Director can suggest a rename, target-duration change, or reshape, but only the owner's explicit
+acceptance applies it.
 
 Consequently:
 
 - **Inline rename in the UI is safe to build now** — it is an owner action, not a chat action.
-- **"Rename it via the Director" is not available** until the Director charter's item 4 lands
-  (a `proposal` disposition for `edit_project`'s editable settings). Do not remove any UI affordance
-  on the assumption that chat can replace it, or the field becomes unreachable — the same failure
-  shape as BUG-140, where a legitimate state had no route to it.
+- **"Rename it via the Director" is now available through a proposal and human review.** Keep the
+  inline UI affordance: chat is an additional reviewed path, not a replacement for direct owner
+  editing.
 
 ### Do not weaken
 

@@ -28,7 +28,7 @@ export type WorkspaceShellProps = {
   proposalInbox?: React.ReactNode;
   /** The bar's primary action. It spends money, so it is the control that never leaves the bar. */
   renderAction?: React.ReactNode;
-  /** Owner-only, revision-checked rename. The Director still has no edit_project disposition. */
+  /** Owner-direct, revision-checked rename. The Director may only propose the same change for human review. */
   onRenameProject?: (name: string, authority: WorkspaceProjectEditAuthority) => Promise<boolean>;
   renamePending?: boolean;
   notice?: React.ReactNode;

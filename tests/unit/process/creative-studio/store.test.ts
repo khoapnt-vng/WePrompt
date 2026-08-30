@@ -4100,6 +4100,70 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
     expect(retry.project.undoHistory.filter((entry) => entry.id === proposal.id)).toHaveLength(1);
   });
 
+  it('applies editable project settings and a reference prompt only after human proposal acceptance', async () => {
+    const { store } = createStoreV2({
+      createId: () => 'proposal_settings_project_v2',
+      now: () => '2026-08-17T12:00:01.000Z',
+    });
+    const created = await store.createProjectV2(inputV2);
+    const planned = await store.applyMutationBatchV2(
+      makeStudioMutationBatchV2(created, [
+        {
+          kind: 'set_reference_plan',
+          references: [{ kind: 'character', label: 'Ming', prompt: 'Ming beneath the red awning.' }],
+        },
+      ]),
+      makeMutationContextV2({ mutationId: 'plan_for_review' })
+    );
+    const referenceId = planned.project.referenceOrder[0]!;
+    const before = structuredClone(planned.project);
+    const { proposal } = await seedProposalV2(store, planned.project, {
+      proposalId: 'proposal_settings_and_prompt',
+      payload: {
+        kind: 'mutation_batch',
+        operations: [
+          {
+            kind: 'edit_project',
+            changes: { name: 'Night Market Reunion', targetDurationSeconds: 45 },
+          },
+          {
+            kind: 'set_reference_prompt',
+            referenceId,
+            prompt: 'Ming in his charcoal raincoat beneath the red awning.',
+          },
+        ],
+      },
+    });
+
+    await expect(store.getProjectV2(created.id)).resolves.toMatchObject({
+      status: 'supported',
+      project: { name: before.name, targetDurationSeconds: before.targetDurationSeconds },
+    });
+    const accepted = await store.acceptProposalV2(created.id, proposal.id);
+
+    expect(accepted).toMatchObject({
+      applied: true,
+      proposal: { id: proposal.id, status: 'accepted' },
+      project: {
+        revision: before.revision + 1,
+        name: 'Night Market Reunion',
+        targetDurationSeconds: 45,
+      },
+    });
+    expect(accepted.project.references[referenceId]).toMatchObject({
+      id: referenceId,
+      label: 'Ming',
+      prompt: 'Ming in his charcoal raincoat beneath the red awning.',
+      approvedAssetId: before.references[referenceId]!.approvedAssetId,
+      supersededAssetIds: before.references[referenceId]!.supersededAssetIds,
+      jobIds: before.references[referenceId]!.jobIds,
+    });
+    expect(accepted.project.referenceOrder).toEqual(before.referenceOrder);
+    expect(accepted.project.assets).toEqual(before.assets);
+    expect(accepted.project.jobs).toEqual(before.jobs);
+    expect(accepted.project.spendAuthorizations).toEqual(before.spendAuthorizations);
+  });
+
   it('records a paid recovery without changing project authority and refuses the generic proposal accept path', async () => {
     const { store } = createStoreV2({
       createId: () => 'paid_recovery_store_project',

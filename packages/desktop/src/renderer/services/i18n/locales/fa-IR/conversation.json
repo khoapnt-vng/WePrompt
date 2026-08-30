@@ -1316,6 +1316,7 @@
         },
         "subject": {
           "project": "پروژه",
+          "reference": "مرجع",
           "beat": "Beat",
           "shot": "Shot"
         },
@@ -1338,6 +1339,7 @@
           "resolution": "وضوح",
           "targetDurationSeconds": "مدت هدف",
           "boardStyle": "سبک Board",
+          "prompt": "پرامپت",
           "title": "عنوان",
           "story": "داستان",
           "targetSeconds": "هدف Beat",
