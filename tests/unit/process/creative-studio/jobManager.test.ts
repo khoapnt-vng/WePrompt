@@ -561,6 +561,11 @@ afterEach(async () => {
  * slowest. It is a hang-detector, not a performance budget: a genuine hang still fails, just later,
  * and no assertion is weakened. See tests/unit/assets/prepareAioncoreActionsArtifact.test.ts, where
  * 30s was tried for the same class of case and proved too tight.
+ *
+ * No case here may carry its own timeout: a per-test ceiling overrides the suite's rather than
+ * tightening it, so a leftover cap silently keeps that case outside this raise. Three sat at the
+ * very 30s named above as too tight, from before this ceiling existed, until 2026-08-30 -- the
+ * sibling film.test.ts lost a gate run to the same oversight at 15s.
  */
 const JOB_MANAGER_TIMEOUT_MS = 120_000;
 
@@ -1232,7 +1237,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', { timeout: JOB_MANA
     expect(JSON.stringify(await rejectedAuth.store.getProjectV2(rejectedAuth.project.id))).not.toContain(
       'private credential detail'
     );
-  }, 30_000);
+  });
 
   it('ignores queued progress regression after a V2 remote job has entered running', async () => {
     const snapshots: ProviderJobSnapshot[] = [
@@ -1353,7 +1358,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', { timeout: JOB_MANA
       // eslint-disable-next-line no-await-in-loop -- The concurrent durable winner remains authoritative.
       await expectV2Job(harness, candidate.expected);
     }
-  }, 30_000);
+  });
 
   it('bounds V2 polling before and after backoff and classifies per-attempt deadline errors', async () => {
     const startedAt = Date.parse('2026-08-17T12:00:00.000Z');
@@ -1464,7 +1469,7 @@ describe('StudioJobManager V2 durable authorized lifecycle', { timeout: JOB_MANA
       const loaded = await harness.store.getProjectV2(harness.project.id);
       expect(JSON.stringify(loaded)).not.toContain('secret provider body');
     }
-  }, 30_000);
+  });
 
   it('normalizes malformed, future, and primitive submit failures without leaking provider detail', async () => {
     const cases = [

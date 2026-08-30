@@ -96,6 +96,11 @@ class ControlledPollClock {
  * slowest. It is a hang-detector, not a performance budget: a genuine hang still fails, just later,
  * and no assertion is weakened. See tests/unit/assets/prepareAioncoreActionsArtifact.test.ts, where
  * 30s was tried for the same class of case and proved too tight.
+ *
+ * No case here may carry its own timeout: a per-test ceiling overrides the suite's rather than
+ * tightening it, so a leftover cap silently keeps that case outside this raise. Two sat at 60s
+ * and 30s, from before this ceiling existed, until 2026-08-30 -- the sibling film.test.ts lost a
+ * gate run to the same oversight at 15s.
  */
 const GENERATION_LIFECYCLE_TIMEOUT_MS = 120_000;
 
@@ -847,7 +852,7 @@ describe('Creative Studio generation lifecycle integration', { timeout: GENERATI
       await fake.dispose().catch((): undefined => undefined);
       await rm(rootDir, { recursive: true, force: true });
     }
-  }, 60_000);
+  });
 
   it('runs a real V2 paid seed submission through durable authorization, job, and primary ownership', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-generation-integration-'));
@@ -1210,7 +1215,7 @@ describe('Creative Studio generation lifecycle integration', { timeout: GENERATI
       await fake.dispose().catch((): undefined => undefined);
       await rm(rootDir, { recursive: true, force: true });
     }
-  }, 30_000);
+  });
 
   it('runs a publicly selected Board style through confirmation before one image dispatch and atomic ownership', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-board-generation-integration-'));
