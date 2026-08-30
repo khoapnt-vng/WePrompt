@@ -346,3 +346,54 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/language/i);
   });
 });
+
+describe('the surface map the Director is given', () => {
+  /*
+   * The Director cannot see the app. It was repeatedly told to say where to look without ever being
+   * told what anything is called, so it invented plausible names -- a Storyboard tab, a Shots panel,
+   * an Apply button -- and sent people to places that do not exist. The rules now carry a map, and
+   * this test is the coupling that was missing: every name the map asserts must be a string the
+   * product actually ships, so renaming a control fails here instead of silently making the
+   * Director wrong again.
+   *
+   * A draft of this map called the menu "More". Its trigger reads "Project".
+   */
+  const productStrings = (): Set<string> => {
+    const bundle: unknown = JSON.parse(
+      readFileSync(
+        resolve(process.cwd(), 'packages/desktop/src/renderer/services/i18n/locales/en-US/conversation.json'),
+        'utf8'
+      )
+    );
+    const found = new Set<string>();
+    const walk = (node: unknown): void => {
+      if (typeof node === 'string') found.add(node);
+      else if (node !== null && typeof node === 'object') Object.values(node).forEach(walk);
+    };
+    walk(bundle);
+    return found;
+  };
+
+  const NAMES = [
+    'References',
+    'Table',
+    'Board',
+    'Cut',
+    'Render',
+    'Project',
+    'Reviewed Director output',
+    'Director proposal',
+    'Accept proposal',
+    'Reject proposal',
+  ] as const;
+
+  it.each(NAMES)('names %s, and the product really calls it that', (name) => {
+    expect(DIRECTOR_PRESET_RULES).toContain(name);
+    expect(productStrings()).toContain(name);
+  });
+
+  it('tells the Director to describe the action when it does not know a name', () => {
+    // Without this, a map that is merely incomplete becomes a new source of invented names.
+    expect(DIRECTOR_PRESET_RULES).toContain('describe the action instead of naming a place or a button');
+  });
+});
