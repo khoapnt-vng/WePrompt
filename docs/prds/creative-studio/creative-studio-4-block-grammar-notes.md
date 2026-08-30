@@ -4,6 +4,7 @@
 [the block grammar](./creative-studio-4-block-grammar.html.txt), delivered in answer to
 [the commission](./creative-studio-4-block-grammar-commission.md)
 **Status:** accepted. These are implementation notes, not objections
+**Updated 2026-08-31:** CS4 is a clean cutover; the four views are removed when the canvas ships
 
 ## What it settles
 
@@ -71,9 +72,9 @@ all twelve locales. Reasons:
 
 1. The grammar's whole premise is one vocabulary across six kinds. Inheriting four view-scoped sets
    reproduces the fragmentation the canvas exists to remove.
-2. The views are going away. Under the coexistence decision they stay for now, so both key sets
-   co-exist temporarily and are deleted together with the views — no migration, no shared key to
-   untangle later.
+2. The views are removed at cutover (owner decision, 2026-08-31: CS4 is a clean cutover, not an
+   additive surface). Their key sets are deleted with them, so a canvas namespace inherits nothing and
+   leaves nothing behind — no migration, no shared key to untangle later.
 3. This repository has already been bitten by the inverse: **four distinct keys all read "Report
    Issue" in `en-US` and diverge in `de-DE`.** Two keys that agree in English are not one string.
 

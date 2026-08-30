@@ -20,14 +20,19 @@ below.
 
 ## What changed since the last commission
 
-**We are no longer deleting the four views on day one.** The canvas arrives as an additional surface;
-References, Table, Board and Cut keep working; deletion becomes a later phase once the canvas has
-earned it.
-
-That is a schedule decision, and it has a design consequence you should know about: **the canvas now
-has to win.** It is not the only way to see the work, so it has to be visibly better than the views it
-will eventually replace, or people drift back and we have paid for two surfaces. A canvas that is
-merely equivalent is a failure under this plan in a way it would not have been under a clean cutover.
+> **Superseded 2026-08-31.** This section briefly said the four views would survive alongside the
+> canvas. That is no longer true and the grammar you delivered is unaffected — but the reasoning
+> below was sent to you, so it is corrected here rather than quietly deleted.
+>
+> **CS4 is a clean cutover.** References, Table, Board and Cut are removed when the canvas ships.
+> Coexistence was considered and withdrawn: the CS4 project schema does not carry the film
+> collections those views read, so running both would have meant either a compatibility reader or two
+> production readers — a contract change, not a scheduling one.
+>
+> The design consequence for you is _smaller_ than what you were told, not larger. The canvas does not
+> have to out-compete a surviving alternative; it only has to be right. Everything in the grammar
+> stands, and the parts written to make the canvas earn its place — one grammar across kinds, density
+> that never quietens a decision — are good design rather than competitive necessity.
 
 ## Why a grammar, and not more drawings
 
