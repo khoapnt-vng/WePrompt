@@ -888,6 +888,16 @@
       "views": {
         "references": "Referências"
       },
+      "start": {
+        "title": "Comece pelo Diretor",
+        "description": "O Diretor criará o primeiro plano a partir do seu briefing. Quando estiver pronto, revise-o aqui."
+      },
+      "notReady": {
+        "references": "Não há nada para revisar até o Diretor planejar as referências.",
+        "table": "Não há nada para organizar até o Diretor criar o storyboard.",
+        "board": "Não há nada para produzir até a Tabela estar pronta.",
+        "cut": "Não há nada para editar até a produção começar."
+      },
       "referenceWorkflow": {
         "panel": {
           "canonicalImages": "Imagens canônicas",

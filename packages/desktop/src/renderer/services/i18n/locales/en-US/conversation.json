@@ -1310,6 +1310,16 @@
         "board": "Board",
         "cut": "Cut"
       },
+      "start": {
+        "title": "The Director starts here",
+        "description": "The Director will draft the first plan from your brief. Review it here when it arrives."
+      },
+      "notReady": {
+        "references": "Nothing to review until the Director plans references.",
+        "table": "Nothing to arrange until the Director drafts the storyboard.",
+        "board": "Nothing to produce until the Table is set.",
+        "cut": "Nothing to edit until production starts."
+      },
       "referenceWorkflow": {
         "panel": {
           "canonicalImages": "Canonical images",

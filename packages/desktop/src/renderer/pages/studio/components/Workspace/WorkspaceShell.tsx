@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button, Input, Tooltip } from '@arco-design/web-react';
+import { Button, Input, Spin, Tooltip } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -19,7 +19,10 @@ import type { StudioBarStats } from './workspaceProjection';
 
 export type WorkspaceShellProps = {
   project: StudioRendererProjectV2;
-  activeView: StudioView;
+  activeView: StudioView | null;
+  viewReadiness: Readonly<Record<StudioView, boolean>> | null;
+  projectStatusPending: boolean;
+  onChooseView: (view: StudioView) => void;
   stats?: StudioBarStats;
   reviewedOutputs?: readonly WorkspaceReviewedOutput[];
   onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
@@ -222,7 +225,7 @@ export type WorkspaceDirectorDraftRequest = {
 
 export type WorkspaceShellHandle = {
   /** Opens and focuses the Director without changing the person's persisted collapse choice. */
-  revealDirector: (expectedScope: { projectId: string; view: StudioView }) => boolean;
+  revealDirector: (expectedScope: { projectId: string; view: StudioView | null }) => boolean;
 };
 
 type DirectorFocusRequest = {
@@ -288,20 +291,20 @@ const storeRailWidth = (width: number): void => {
  * there; the Board and the Cut are judgements about pixels and motion the Director cannot see, so it
  * starts shut.
  */
-export const railCollapsedDefaultForView = (view: StudioView): boolean => view === 'board' || view === 'cut';
+export const railCollapsedDefaultForView = (view: StudioView | null): boolean => view === 'board' || view === 'cut';
 
 /** One view of one project. Ids are opaque and may contain the separator, so the id is length-tagged. */
-export const railPreferenceKey = (projectId: string, view: StudioView): string =>
-  `aionui.studio.railCollapsed.${projectId.length}.${projectId}.${view}`;
+export const railPreferenceKey = (projectId: string, view: StudioView | null): string =>
+  `aionui.studio.railCollapsed.${projectId.length}.${projectId}.${view ?? 'workspace'}`;
 
 /**
  * A choice outranks the default from then on, in both directions. This is what stops the default from
  * re-opening a rail somebody shut — the named failure mode.
  */
-export const railCollapsedForView = (view: StudioView, stored: boolean | null): boolean =>
+export const railCollapsedForView = (view: StudioView | null, stored: boolean | null): boolean =>
   stored ?? railCollapsedDefaultForView(view);
 
-const readStoredRailCollapsed = (projectId: string, view: StudioView): boolean | null => {
+const readStoredRailCollapsed = (projectId: string, view: StudioView | null): boolean | null => {
   try {
     const stored = window.localStorage.getItem(railPreferenceKey(projectId, view));
     return stored === 'true' ? true : stored === 'false' ? false : null;
@@ -310,7 +313,7 @@ const readStoredRailCollapsed = (projectId: string, view: StudioView): boolean |
   }
 };
 
-const storeRailCollapsed = (projectId: string, view: StudioView, collapsed: boolean): void => {
+const storeRailCollapsed = (projectId: string, view: StudioView | null, collapsed: boolean): void => {
   try {
     window.localStorage.setItem(railPreferenceKey(projectId, view), String(collapsed));
   } catch {
@@ -334,6 +337,9 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
   {
     project,
     activeView,
+    viewReadiness,
+    projectStatusPending,
+    onChooseView,
     stats,
     reviewedOutputs,
     onDirectorProposalIntent,
@@ -350,7 +356,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
   ref
 ) {
   const { t } = useTranslation();
-  const viewHeadingId = `studio-${activeView}-heading`;
+  const viewHeadingId = `studio-${activeView ?? 'workspace'}-heading`;
   const railContentId = useId();
   const railScopeKey = railPreferenceKey(project.id, activeView);
   const [railCollapsed, setRailCollapsed] = useState(() =>
@@ -379,7 +385,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
   }, [activeView, project.id, railCollapsed]);
 
   const revealDirector = useCallback(
-    (expectedScope: { projectId: string; view: StudioView }): boolean => {
+    (expectedScope: { projectId: string; view: StudioView | null }): boolean => {
       if (expectedScope.projectId !== project.id || expectedScope.view !== activeView) return false;
       setRailCollapsed(false);
       nextDirectorFocusRequestId.current += 1;
@@ -417,6 +423,9 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
   );
   const filmClock = clock(stats?.filmSeconds);
   const targetClock = clock(stats?.targetSeconds);
+  const allViewsUnready = viewReadiness !== null && STUDIO_VIEWS.every((view) => viewReadiness[view] === false);
+  const waitingForInitialStatus = projectStatusPending && viewReadiness === null;
+  const activeViewUnready = activeView !== null && viewReadiness !== null && viewReadiness[activeView] === false;
 
   return (
     <div className={styles.shell} data-studio-workspace-shell>
@@ -480,16 +489,49 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
           className={styles.viewNavigation}
           data-studio-view-navigation
         >
-          {STUDIO_VIEWS.map((view) => (
-            <Link
-              key={view}
-              aria-current={view === activeView ? 'page' : undefined}
-              className={view === activeView ? styles.viewLinkActive : styles.viewLink}
-              to={studioViewPath(project.id, view)}
-            >
-              {t(`conversation.creativeStudio.workspace.views.${view}`)}
-            </Link>
-          ))}
+          {STUDIO_VIEWS.map((view) => {
+            const label = t(`conversation.creativeStudio.workspace.views.${view}`);
+            const reason = t(`conversation.creativeStudio.workspace.notReady.${view}`);
+            const reasonId = `studio-${project.id}-${view}-not-ready`;
+            const current = view === activeView;
+            if (viewReadiness?.[view] === false) {
+              return (
+                <React.Fragment key={view}>
+                  <Tooltip content={reason}>
+                    <Button
+                      aria-current={current ? 'page' : undefined}
+                      aria-describedby={reasonId}
+                      aria-disabled='true'
+                      aria-label={label}
+                      className={`${current ? styles.viewLinkActive : styles.viewLink} ${styles.viewLinkDisabled}`}
+                      disabled
+                      role='link'
+                      type='text'
+                    >
+                      {label}
+                    </Button>
+                  </Tooltip>
+                  <span className={styles.srOnly} id={reasonId}>
+                    {reason}
+                  </span>
+                </React.Fragment>
+              );
+            }
+            return (
+              <Link
+                key={view}
+                aria-current={current ? 'page' : undefined}
+                className={current ? styles.viewLinkActive : styles.viewLink}
+                to={studioViewPath(project.id, view)}
+                onClick={(event) => {
+                  event.preventDefault();
+                  onChooseView(view);
+                }}
+              >
+                {label}
+              </Link>
+            );
+          })}
         </nav>
         {renderAction === undefined ? null : <span className={styles.barAction}>{renderAction}</span>}
         {projectMenu}
@@ -552,9 +594,51 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
               </div>
             )}
             {proposalInbox}
-            <main aria-labelledby={viewHeadingId} className={styles.viewSurface} data-studio-view={activeView}>
-              <h2 id={viewHeadingId}>{t(`conversation.creativeStudio.workspace.views.${activeView}`)}</h2>
-              {children}
+            <main
+              aria-labelledby={viewHeadingId}
+              className={styles.viewSurface}
+              data-studio-surface-state={
+                waitingForInitialStatus
+                  ? 'loading'
+                  : activeView === null
+                    ? allViewsUnready
+                      ? 'start'
+                      : viewReadiness === null
+                        ? 'unavailable'
+                        : 'loading'
+                    : activeViewUnready
+                      ? 'unready'
+                      : 'content'
+              }
+              data-studio-view={activeView ?? undefined}
+            >
+              {waitingForInitialStatus || (activeView === null && viewReadiness !== null && !allViewsUnready) ? (
+                <div className={styles.quietState}>
+                  <h2 id={viewHeadingId}>{t('conversation.creativeStudio.workspace.project.loading')}</h2>
+                  <Spin dot />
+                </div>
+              ) : activeView === null ? (
+                allViewsUnready ? (
+                  <div className={styles.quietState}>
+                    <h2 id={viewHeadingId}>{t('conversation.creativeStudio.workspace.start.title')}</h2>
+                    <p>{t('conversation.creativeStudio.workspace.start.description')}</p>
+                  </div>
+                ) : (
+                  <div className={styles.quietState}>
+                    <h2 id={viewHeadingId}>{t('conversation.creativeStudio.workspace.project.statusUnavailable')}</h2>
+                  </div>
+                )
+              ) : activeViewUnready ? (
+                <div className={styles.quietState}>
+                  <h2 id={viewHeadingId}>{t(`conversation.creativeStudio.workspace.views.${activeView}`)}</h2>
+                  <p>{t(`conversation.creativeStudio.workspace.notReady.${activeView}`)}</p>
+                </div>
+              ) : (
+                <>
+                  <h2 id={viewHeadingId}>{t(`conversation.creativeStudio.workspace.views.${activeView}`)}</h2>
+                  {children}
+                </>
+              )}
             </main>
           </div>
         </div>

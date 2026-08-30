@@ -78,15 +78,18 @@ it. The export already mixes Shot audio and a music bed.
   the Director to author narration, dialogue, ambience and sound hits in the existing shooting script
   · **S4** music bed _(deferred — needs an audio import path)_
 
-### Piece 2 — Progressive work area _(planned, unstarted)_
+### Piece 2 — Progressive work area _(S5–S9 implemented 2026-08-30)_
 
-Extends three mechanisms that already exist: the view-less entry route, `defaultStudioView`, and the
-seven project-status stages, which already say which views have content.
+Extends the view-less entry route and the seven Main-owned project-status stages, which say which
+views have content.
 
 - **S5** readiness from status stages · **S6** blank work area · **S7** disable empty views ·
   **S8** auto-advance on first content · **S9** retire the References one-time transition
 
-Order matters: S5 first, then S6/S7, then S8, then S9.
+Readiness now comes from exact revision-matched status. Empty projects stay view-less with Director
+guidance; unready views remain visible with an accessible reason; direct unready URLs are preserved;
+and automatic reveal stops after any explicit view choice. The retired References-opened key is inert
+rather than migrated.
 
 ### Piece 3 — The Beat track _(fully specified, not yet sliced)_
 

@@ -1,4 +1,9 @@
-import { STUDIO_VIEWS, type StudioView } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_VIEWS,
+  type StudioProjectStatusStageIdV2,
+  type StudioProjectStatusV2,
+  type StudioView,
+} from '@/common/types/project/creativeStudioTypes';
 
 /**
  * Re-exported, not redeclared: the view vocabulary is shared with the main process, which gates its
@@ -13,8 +18,8 @@ export { STUDIO_VIEWS, type StudioView };
  * a migration map would buy a nicer first landing at the cost of code that outlives its reason.
  */
 const viewStorageKey = (projectId: string): string => `aionui:creative-studio:last-view:${projectId}`;
-const referencesOpenedStorageKey = (projectId: string): string =>
-  `aionui:creative-studio:references-opened:${projectId}`;
+
+export type StudioViewReadiness = Readonly<Record<StudioView, boolean>>;
 
 const resolveStorage = (storage?: Storage): Storage | null => {
   if (storage !== undefined) return storage;
@@ -33,14 +38,32 @@ export function studioViewPath(projectId: string, view: StudioView): string {
   return `/studio/${encodeURIComponent(projectId)}/${view}`;
 }
 
-/** A view-less entry lets the loaded project decide whether first-time reference work comes first. */
+/** A view-less entry lets exact project status decide whether any work area has content yet. */
 export function studioProjectPath(projectId: string): string {
   return `/studio/${encodeURIComponent(projectId)}`;
 }
 
-/** A new reference plan precedes the script; a project without one still begins at the Table. */
-export function defaultStudioView(hasReferenceWork = false): StudioView {
-  return hasReferenceWork ? 'references' : 'table';
+const stageHasContent = (status: StudioProjectStatusV2, stageId: StudioProjectStatusStageIdV2): boolean =>
+  status.stages.some((stage) => stage.id === stageId && stage.state !== 'not_started');
+
+/** Derives view content only from Main's exact project-status stages. */
+export function studioViewReadiness(status: StudioProjectStatusV2): StudioViewReadiness {
+  return {
+    references: stageHasContent(status, 'references'),
+    table: stageHasContent(status, 'storyboard') || stageHasContent(status, 'bindings'),
+    board: stageHasContent(status, 'production'),
+    cut: stageHasContent(status, 'cut'),
+  };
+}
+
+/** Reports whether any Studio view has authoritative content. */
+export function hasReadyStudioView(readiness: StudioViewReadiness): boolean {
+  return STUDIO_VIEWS.some((view) => readiness[view]);
+}
+
+/** Returns the first ready view in the document's fixed References-to-Cut order. */
+export function firstReadyStudioView(readiness: StudioViewReadiness): StudioView | null {
+  return STUDIO_VIEWS.find((view) => readiness[view]) ?? null;
 }
 
 export function readLastStudioView(projectId: string, storage?: Storage): StudioView | null {
@@ -59,29 +82,18 @@ export function rememberStudioView(projectId: string, view: StudioView, storage?
   }
 }
 
-export function resolveStudioEntryView(projectId: string, storage?: Storage, hasReferenceWork = false): StudioView {
-  return readLastStudioView(projectId, storage) ?? defaultStudioView(hasReferenceWork);
+/** An explicit remembered choice outranks readiness; otherwise an empty workspace stays view-less. */
+export function resolveStudioEntryView(
+  projectId: string,
+  readiness: StudioViewReadiness,
+  storage?: Storage
+): StudioView | null {
+  const remembered = readLastStudioView(projectId, storage);
+  return remembered ?? firstReadyStudioView(readiness);
 }
 
 /** A remembered choice is explicit; otherwise defer first-entry routing until the project is loaded. */
 export function studioEntryPath(projectId: string, storage?: Storage): string {
   const remembered = readLastStudioView(projectId, storage);
   return remembered === null ? studioProjectPath(projectId) : studioViewPath(projectId, remembered);
-}
-
-export function hasOpenedStudioReferences(projectId: string, storage?: Storage): boolean {
-  try {
-    return resolveStorage(storage)?.getItem(referencesOpenedStorageKey(projectId)) === '1';
-  } catch {
-    return false;
-  }
-}
-
-/** Set before navigation so a render interruption cannot replay the one-time References transition. */
-export function markStudioReferencesOpened(projectId: string, storage?: Storage): void {
-  try {
-    resolveStorage(storage)?.setItem(referencesOpenedStorageKey(projectId), '1');
-  } catch {
-    // The page also carries an in-memory fence when storage is unavailable.
-  }
 }

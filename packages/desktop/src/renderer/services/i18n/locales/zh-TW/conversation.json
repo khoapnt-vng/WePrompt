@@ -882,6 +882,16 @@
       "views": {
         "references": "參考圖"
       },
+      "start": {
+        "title": "先從導演開始",
+        "description": "導演會根據你的簡介擬定第一份方案。方案完成後，請在這裡審核。"
+      },
+      "notReady": {
+        "references": "導演規劃參考資料後，才能進行審核。",
+        "table": "導演擬定分鏡後，才能進行編排。",
+        "board": "表格設定完成後，才能開始製作。",
+        "cut": "製作開始後，才能進行剪輯。"
+      },
       "referenceWorkflow": {
         "panel": {
           "canonicalImages": "規範圖像",

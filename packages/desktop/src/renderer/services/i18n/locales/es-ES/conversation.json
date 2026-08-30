@@ -883,6 +883,16 @@
       "views": {
         "references": "Referencias"
       },
+      "start": {
+        "title": "Empieza con el Director",
+        "description": "El Director redactará el primer plan a partir de tu brief. Revísalo aquí cuando llegue."
+      },
+      "notReady": {
+        "references": "No hay nada que revisar hasta que el Director planifique las referencias.",
+        "table": "No hay nada que organizar hasta que el Director prepare el storyboard.",
+        "board": "No hay nada que producir hasta que la Tabla esté lista.",
+        "cut": "No hay nada que montar hasta que empiece la producción."
+      },
       "referenceWorkflow": {
         "panel": {
           "canonicalImages": "Imágenes canónicas",

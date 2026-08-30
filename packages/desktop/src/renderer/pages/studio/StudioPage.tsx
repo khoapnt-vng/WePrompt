@@ -8,8 +8,9 @@ import { Button, Spin } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { pickDefaultRoutes } from '@/common/types/project/creativeStudioDefaultRoutes';
 import { planStudioConnections } from '@/common/types/project/creativeStudioConnectionPlan';
+import { exactStudioProjectStatusV2 } from '@/common/types/project/creativeStudioProjectSummary';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 
 import { ipcBridge } from '@/common';
 import {
@@ -90,13 +91,13 @@ import { useStudioProject } from './hooks/useStudioProject';
 import { StudioPlaybackAudioProvider } from './hooks/useStudioPlaybackAudio';
 import { StudioShotAudioAnalysisProvider } from './hooks/useStudioShotAudioAnalysis';
 import {
-  hasOpenedStudioReferences,
-  markStudioReferencesOpened,
   parseStudioView,
-  readLastStudioView,
   rememberStudioView,
   resolveStudioEntryView,
+  studioProjectPath,
+  studioViewReadiness,
   studioViewPath,
+  type StudioViewReadiness,
   type StudioView,
 } from './studioPhaseRoute';
 import styles from './StudioPage.module.css';
@@ -309,9 +310,8 @@ const projectDraftValues = (project: StudioRendererProjectV2): Record<string, Wo
 const StudioProjectPage: React.FC<{
   projectId: string;
   routeView: StudioView | null;
-  routeViewWasSpecified: boolean;
   onCloseContractChange: (contract: StudioCloseContract | null) => void;
-}> = ({ projectId, routeView, routeViewWasSpecified, onCloseContractChange }) => {
+}> = ({ projectId, routeView, onCloseContractChange }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const {
@@ -417,7 +417,6 @@ const StudioProjectPage: React.FC<{
   } | null>(null);
   const referenceFocusSequenceRef = useRef(0);
   const shotEditFocusSequenceRef = useRef(0);
-  const referencesAutoOpenedRef = useRef<string | null>(null);
   const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
   const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
   const workspacePendingRef = useRef(false);
@@ -425,8 +424,32 @@ const StudioProjectPage: React.FC<{
   projectRef.current = project;
   const exportCatalogRef = useRef<StudioRendererExportCatalogV2 | null>(exportCatalog);
   exportCatalogRef.current = exportCatalog;
-  const activeView =
-    routeView ?? resolveStudioEntryView(projectId, undefined, (project?.referenceOrder.length ?? 0) > 0);
+  const activeView = routeView;
+  const exactProjectStatus = useMemo(
+    () => (project === null ? null : exactStudioProjectStatusV2(projectStatus, project.id, project.revision)),
+    [project, projectStatus]
+  );
+  const currentViewReadiness = useMemo(
+    () => (exactProjectStatus === null ? null : studioViewReadiness(exactProjectStatus)),
+    [exactProjectStatus]
+  );
+  const lastTrustedViewReadinessRef = useRef<StudioViewReadiness | null>(null);
+  useEffect(() => {
+    if (currentViewReadiness !== null) lastTrustedViewReadinessRef.current = currentViewReadiness;
+  }, [currentViewReadiness]);
+  const viewReadiness = currentViewReadiness ?? (projectStatusPending ? lastTrustedViewReadinessRef.current : null);
+  const explicitViewChoiceRef = useRef(routeView !== null);
+  const autoNavigationRef = useRef<{ view: StudioView | null } | null>(null);
+
+  const chooseStudioView = useCallback(
+    (view: StudioView): void => {
+      explicitViewChoiceRef.current = true;
+      autoNavigationRef.current = null;
+      rememberStudioView(projectId, view);
+      navigate(studioViewPath(projectId, view));
+    },
+    [navigate, projectId]
+  );
 
   const projection = useMemo(
     () => (project === null ? null : projectWorkspace(project, workspaceStatus, chainStatus)),
@@ -454,30 +477,25 @@ const StudioProjectPage: React.FC<{
     drafts.staleRevision || activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
 
   useEffect(() => {
-    if (
-      project !== null &&
-      project.referenceOrder.length > 0 &&
-      referencesAutoOpenedRef.current !== projectId &&
-      !hasOpenedStudioReferences(projectId)
-    ) {
-      referencesAutoOpenedRef.current = projectId;
-      markStudioReferencesOpened(projectId);
-      if (routeView !== 'references') {
-        navigate(studioViewPath(projectId, 'references'), { replace: true });
-        return;
-      }
-    }
-    if (routeView !== null) {
-      rememberStudioView(projectId, routeView);
+    if (routeView === null) return;
+    if (autoNavigationRef.current?.view === routeView) {
+      autoNavigationRef.current = null;
       return;
     }
-    if (
-      project !== null &&
-      (routeViewWasSpecified || project.referenceOrder.length > 0 || readLastStudioView(projectId) !== null)
-    ) {
-      navigate(studioViewPath(projectId, activeView), { replace: true });
-    }
-  }, [activeView, navigate, project, projectId, routeView, routeViewWasSpecified]);
+    autoNavigationRef.current = null;
+    explicitViewChoiceRef.current = true;
+    rememberStudioView(projectId, routeView);
+  }, [projectId, routeView]);
+
+  useEffect(() => {
+    if (project === null || currentViewReadiness === null || explicitViewChoiceRef.current) return;
+    const nextView = resolveStudioEntryView(projectId, currentViewReadiness);
+    if (nextView === routeView) return;
+    autoNavigationRef.current = { view: nextView };
+    navigate(nextView === null ? studioProjectPath(projectId) : studioViewPath(projectId, nextView), {
+      replace: true,
+    });
+  }, [currentViewReadiness, navigate, project, projectId, routeView]);
 
   useEffect(() => {
     setReferenceFocusIntent(null);
@@ -505,14 +523,11 @@ const StudioProjectPage: React.FC<{
         assetIds,
         shotIds,
       });
-      navigate(
-        studioViewPath(
-          current.id,
-          shotIds.length > 0 && referenceIds.length === 0 && assetIds.length === 0 ? 'table' : 'references'
-        )
+      chooseStudioView(
+        shotIds.length > 0 && referenceIds.length === 0 && assetIds.length === 0 ? 'table' : 'references'
       );
     },
-    [navigate]
+    [chooseStudioView]
   );
   const consumeReferenceFocusIntent = useCallback((intentId: string): void => {
     setReferenceFocusIntent((current) => (current?.id === intentId ? null : current));
@@ -540,16 +555,18 @@ const StudioProjectPage: React.FC<{
       ) {
         return;
       }
+      const targetView = activeView ?? 'table';
       shotEditFocusSequenceRef.current += 1;
       setShotEditFocusIntent({
         id: `${current.id}:shot-edit:${shotEditFocusSequenceRef.current}`,
         projectId: current.id,
-        view: activeView,
+        view: targetView,
         beatId,
         shotIds,
       });
+      if (activeView === null) chooseStudioView(targetView);
     },
-    [activeView]
+    [activeView, chooseStudioView]
   );
   const consumeShotEditFocusIntent = useCallback((intentId: string): void => {
     setShotEditFocusIntent((current) => (current?.id === intentId ? null : current));
@@ -3241,7 +3258,7 @@ const StudioProjectPage: React.FC<{
           }
           projectRef.current = refreshed;
           if (!exactReviewClaimExists(refreshed)) return false;
-          navigate(studioViewPath(projectId, 'board'));
+          chooseStudioView('board');
           return true;
         } catch {
           setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
@@ -3264,7 +3281,7 @@ const StudioProjectPage: React.FC<{
             })
         ),
       openBindings: (): void => {
-        navigate(studioViewPath(projectId, 'table'));
+        chooseStudioView('table');
       },
       saveBinding: async (shotId, characterReferenceIds, backgroundReferenceId): Promise<boolean> => {
         const current = projectRef.current;
@@ -3301,8 +3318,8 @@ const StudioProjectPage: React.FC<{
     }),
     [
       currentGenerationCapability,
+      chooseStudioView,
       generationDraftsBlockReview,
-      navigate,
       pendingReferenceId,
       projectId,
       referenceGenerationHandoffs,
@@ -4330,7 +4347,10 @@ const StudioProjectPage: React.FC<{
         onDirectorDraftRequestConsumed={consumeDirectorDraftRequest}
         proposalInbox={proposalInbox}
         activeView={activeView}
-        stats={projection === null ? undefined : buildStudioBarStats(projection, projectStatus)}
+        viewReadiness={viewReadiness}
+        projectStatusPending={projectStatusPending}
+        onChooseView={chooseStudioView}
+        stats={projection === null || projectStatusPending ? undefined : buildStudioBarStats(projection, projectStatus)}
         renderAction={
           <Button type='primary' disabled={workspacePending || spendGateLocked} onClick={renderFilm}>
             {t('conversation.creativeStudio.workspace.controls.renderFilm')}
@@ -4375,7 +4395,7 @@ const StudioProjectPage: React.FC<{
         }
         reviewedOutputs={reviewedDirectorOutputs}
       >
-        {projection === null ? null : (
+        {projection === null || activeView === null ? null : (
           <StudioPlaybackAudioProvider projectId={project.id}>
             <StudioShotAudioAnalysisProvider
               projectId={project.id}
@@ -4467,12 +4487,13 @@ const StudioPage: React.FC = () => {
     <>
       <StudioCloseResponse resolve={resolveCloseContract} />
       <div className={`${styles.page} ${id ? styles.pageProject : ''}`} data-studio-workspace>
-        {id ? (
+        {id && view !== undefined && routeView === null ? (
+          <Navigate replace to={studioProjectPath(id)} />
+        ) : id ? (
           <StudioProjectPage
             key={id}
             projectId={id}
             routeView={routeView}
-            routeViewWasSpecified={view !== undefined}
             onCloseContractChange={updateProjectCloseContract}
           />
         ) : (

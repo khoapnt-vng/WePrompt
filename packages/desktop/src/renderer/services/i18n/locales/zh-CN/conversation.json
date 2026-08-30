@@ -882,6 +882,16 @@
       "views": {
         "references": "参考图"
       },
+      "start": {
+        "title": "先从导演开始",
+        "description": "导演会根据你的简介起草第一份方案。方案完成后，请在这里审核。"
+      },
+      "notReady": {
+        "references": "导演规划参考资料后，才能进行审核。",
+        "table": "导演起草故事板后，才能进行编排。",
+        "board": "表格设置完成后，才能开始制作。",
+        "cut": "制作开始后，才能进行剪辑。"
+      },
       "referenceWorkflow": {
         "panel": {
           "canonicalImages": "规范图像",

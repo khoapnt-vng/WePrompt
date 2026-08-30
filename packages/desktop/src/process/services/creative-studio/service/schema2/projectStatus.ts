@@ -437,7 +437,7 @@ const deriveReferencesStage = (
 ): StudioProjectStatusStageV2 => {
   const plannedCount = project.referenceOrder.length;
   if (plannedCount === 0 && Object.keys(project.references).length === 0) {
-    return stage('references', 'complete', { stage: 'references', plannedCount: 0, approvedCount: 0 });
+    return stage('references', 'not_started', { stage: 'references', plannedCount: 0, approvedCount: 0 });
   }
   if (project.referencePlanStatus !== 'planned' || !referencePlanIsExact(project)) {
     return stage('references', 'blocked', { stage: 'references', plannedCount, approvedCount: 0 }, [
@@ -1043,7 +1043,6 @@ const deriveProductionStage = (
   const details: StudioProjectStatusShotDetailV2[] = [];
   let currentTakeCount = 0;
   let activeJobCount = 0;
-  let anyCurrentLineage = false;
   for (const location of locations) {
     const shot = ownValue(project.shots, location.shotId)!;
     const take = canonicalCurrentTake(project, shot);
@@ -1057,7 +1056,6 @@ const deriveProductionStage = (
     const latestGenerationJob = latestJob([...seedJobs, ...videoJobs]);
     const authority = startsSegment && seed === null ? currentSeed : currentVideo;
     const current = authority?.status === 'succeeded' || authority?.status === 'cancelled' ? null : authority;
-    if (current !== null) anyCurrentLineage = true;
     activeJobCount += [...videoJobs, ...seedJobs].filter((job) => HEALTHY_JOB_STATUSES.has(job.status)).length;
     const conditioning = conditioningRecord(project, location);
     if (detailRequested) {
@@ -1190,9 +1188,7 @@ const deriveProductionStage = (
         ? 'complete'
         : uniqueBlockers.length > 0
           ? 'blocked'
-          : currentTakeCount === 0 && !anyCurrentLineage
-            ? 'not_started'
-            : 'in_progress';
+          : 'in_progress';
   return {
     stage: stage(
       'production',
@@ -1316,7 +1312,10 @@ export const projectStudioStatusV2 = (
     options.detail === true,
     bindingLimit,
     engines.state === 'complete' &&
-      references.state === 'complete' &&
+      (references.state === 'complete' ||
+        (references.state === 'not_started' &&
+          references.summary.stage === 'references' &&
+          references.summary.plannedCount === 0)) &&
       storyboard.summary.stage === 'storyboard' &&
       storyboard.summary.beatCount > 0 &&
       storyboard.summary.authoredShotCount === storyboard.summary.shotCount &&

@@ -543,7 +543,11 @@ describe('projectStudioStatusV2', () => {
 
     expect(status.stages.map((item) => item.id)).toEqual(STUDIO_PROJECT_STATUS_STAGE_ORDER_V2);
     expect(stage(status, 'brief').state).toBe('complete');
-    expect(stage(status, 'references').state).toBe('complete');
+    expect(stage(status, 'references')).toMatchObject({
+      state: 'not_started',
+      blockers: [],
+      summary: { plannedCount: 0, approvedCount: 0 },
+    });
     expect(stage(status, 'storyboard').state).toBe('not_started');
     expect(status.boards).toEqual({ currentPictureCount: 0, shotCount: 0 });
     expect(status.detail).toBeNull();
@@ -696,17 +700,17 @@ describe('projectStudioStatusV2', () => {
     expect(status.detail?.shots[0]?.binding).toEqual({ status: 'unassigned', selectedCount: 0, limit: 3 });
   });
 
-  it('keeps the fully authored VNG acceptance film not started when nothing has been submitted', () => {
+  it('opens production for a fully authored film before anything has been submitted', () => {
     const value = project();
     addBeat(value, [shot('shot_1', 30)]);
     const status = projectStudioStatusV2(value, readyRoutes());
 
     expect(stage(status, 'engines').state).toBe('complete');
-    expect(stage(status, 'references').state).toBe('complete');
+    expect(stage(status, 'references').state).toBe('not_started');
     expect(stage(status, 'storyboard').state).toBe('complete');
     expect(stage(status, 'bindings').state).toBe('complete');
     expect(stage(status, 'production')).toMatchObject({
-      state: 'not_started',
+      state: 'in_progress',
       blockers: [],
       summary: { currentTakeCount: 0, shotCount: 1, activeJobCount: 0 },
     });
@@ -1029,7 +1033,9 @@ describe('projectStudioStatusV2', () => {
     addSeedImage(value, 'shot_1', `seed_${code}`);
     value.shots.shot_1!.seedStillId = `seed_${code}`;
     addVideoAttempt(value, 'shot_1', `error_${code}`, 'failed', { code, messageKey: 'safe' });
-    expect(stage(projectStudioStatusV2(value, readyRoutes()), 'production').blockers[0]?.cause).toBe(cause);
+    const production = stage(projectStudioStatusV2(value, readyRoutes()), 'production');
+    expect(production.state).toBe('blocked');
+    expect(production.blockers[0]?.cause).toBe(cause);
   });
 
   it('keeps every needs-attention recovery in a free or owner lane and never proposes new spend', () => {

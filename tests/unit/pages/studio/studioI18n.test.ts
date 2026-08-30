@@ -416,12 +416,22 @@ const localizedVideoAudioCapabilityKeys = [
   'controls.videoAudioCapability.audioCapable',
 ] as const;
 
+const localizedProgressiveWorkspaceKeys = [
+  'start.title',
+  'start.description',
+  'notReady.references',
+  'notReady.table',
+  'notReady.board',
+  'notReady.cut',
+] as const;
+
 const expectedLeaves = [
   ...localizedFirstFramesPanelKeys,
   ...localizedShotStatusKeys,
   ...localizedShotComposerKeys,
   ...localizedPlaybackAudioKeys,
   ...localizedVideoAudioCapabilityKeys,
+  ...localizedProgressiveWorkspaceKeys,
   'director.title',
   'director.show',
   'director.hide',
@@ -1430,6 +1440,7 @@ const localizedWorkspaceKeys = [
   ...localizedShotComposerKeys,
   ...localizedPlaybackAudioKeys,
   ...localizedVideoAudioCapabilityKeys,
+  ...localizedProgressiveWorkspaceKeys,
   ...localizedReferencesPanelKeys,
   'proposals.proposalId',
   'proposals.mutationCount',

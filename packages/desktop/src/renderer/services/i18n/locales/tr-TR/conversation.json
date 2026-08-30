@@ -884,6 +884,16 @@
       "views": {
         "references": "Referanslar"
       },
+      "start": {
+        "title": "Yönetmenle başlayın",
+        "description": "Yönetmen ilk planı brifinizden hazırlayacak. Hazır olduğunda burada inceleyin."
+      },
+      "notReady": {
+        "references": "Yönetmen referansları planlayana kadar incelenecek bir şey yok.",
+        "table": "Yönetmen storyboard'u hazırlayana kadar düzenlenecek bir şey yok.",
+        "board": "Tablo hazır olana kadar üretilecek bir şey yok.",
+        "cut": "Prodüksiyon başlayana kadar kurgulanacak bir şey yok."
+      },
       "referenceWorkflow": {
         "panel": {
           "canonicalImages": "Kanonik görseller",

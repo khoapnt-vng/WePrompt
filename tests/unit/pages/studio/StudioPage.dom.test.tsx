@@ -1201,7 +1201,11 @@ const chainStatus = (source: number | StudioRendererProjectV2): StudioRendererCh
   };
 };
 
-const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV2 => {
+const projectStatus = (
+  authority: StudioRendererProjectV2,
+  options: { readyEmptyViews?: boolean } = {}
+): StudioProjectStatusV2 => {
+  const readyEmptyViews = options.readyEmptyViews ?? true;
   const positions = authority.beatOrder.flatMap((beatId, beatIndex) => {
     const beat = authority.beats[beatId];
     if (beat?.id !== beatId) return [];
@@ -1289,7 +1293,14 @@ const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV
     },
     {
       id: 'references',
-      state: referenceDetails.length === 0 ? 'not_started' : referenceBlockers.length === 0 ? 'complete' : 'blocked',
+      state:
+        referenceDetails.length === 0
+          ? readyEmptyViews
+            ? 'complete'
+            : 'not_started'
+          : referenceBlockers.length === 0
+            ? 'complete'
+            : 'blocked',
       summary: {
         stage: 'references',
         plannedCount: referenceDetails.length,
@@ -1299,7 +1310,7 @@ const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV
     },
     {
       id: 'storyboard',
-      state: shotCount === 0 ? 'not_started' : 'complete',
+      state: shotCount === 0 && !readyEmptyViews ? 'not_started' : 'complete',
       summary: {
         stage: 'storyboard',
         beatCount: authority.beatOrder.length,
@@ -1312,7 +1323,14 @@ const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV
     },
     {
       id: 'bindings',
-      state: shotCount === 0 ? 'not_started' : bindingBlockers.length === 0 ? 'complete' : 'blocked',
+      state:
+        shotCount === 0
+          ? readyEmptyViews
+            ? 'complete'
+            : 'not_started'
+          : bindingBlockers.length === 0
+            ? 'complete'
+            : 'blocked',
       summary: {
         stage: 'bindings',
         readyShotCount: bindingDetails.filter(({ binding }) => binding.status === 'ready').length,
@@ -1325,7 +1343,9 @@ const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV
       id: 'production',
       state:
         currentTakeCount === 0
-          ? 'not_started'
+          ? readyEmptyViews || shotCount > 0
+            ? 'in_progress'
+            : 'not_started'
           : currentTakeCount === shotCount && shotCount > 0
             ? 'complete'
             : 'in_progress',
@@ -1336,7 +1356,9 @@ const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV
       id: 'cut',
       state:
         currentTakeCount === 0
-          ? 'not_started'
+          ? readyEmptyViews
+            ? 'in_progress'
+            : 'not_started'
           : currentTakeCount === shotCount && shotCount > 0
             ? 'complete'
             : 'in_progress',
@@ -2173,10 +2195,14 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
   });
 
-  it('canonicalizes a retired route and keeps the shared Table, Board, and Cut views', async () => {
+  it('canonicalizes a retired route to the safe view-less workspace', async () => {
+    const authority = project();
+    mockSupportedProject(authority);
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(authority, { readyEmptyViews: false })));
     renderStudio('/studio/project_1/write');
 
-    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/studio\/project_1$/));
+    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.start.title' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.references' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' })).toBeVisible();
@@ -2212,6 +2238,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
 
   it('opens first-time Director-defined reference work before the Table', async () => {
     mockSupportedProject(projectWithReferenceHandoff());
+    window.localStorage.setItem('aionui:creative-studio:references-opened:project_1', '1');
 
     renderStudio('/studio/project_1');
 
@@ -2221,13 +2248,31 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     ).toBeVisible();
   });
 
+  it('restores a remembered explicit view from the view-less project route', async () => {
+    mockSupportedProject(projectWithReferenceHandoff());
+    window.localStorage.setItem('aionui:creative-studio:last-view:project_1', 'board');
+
+    renderStudio('/studio/project_1');
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.board' })).toBeVisible();
+  });
+
   it('keeps a new empty project view-less until its first Director reference plan arrives', async () => {
+    const empty = project();
+    mockSupportedProject(empty);
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(empty, { readyEmptyViews: false })));
     renderStudio('/studio/project_1');
 
     await screen.findByRole('heading', { name: 'Launch film' });
     expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1');
     expect(screen.getByTestId('location')).not.toHaveTextContent('/studio/project_1/table');
-    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.start.title' })).toBeVisible();
+    const board = screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' });
+    expect(board).toBeDisabled();
+    expect(document.getElementById(board.getAttribute('aria-describedby')!)).toHaveTextContent(
+      'conversation.creativeStudio.workspace.notReady.board'
+    );
 
     const updated = projectWithReferenceHandoff();
     updated.revision = 4;
@@ -2252,6 +2297,71 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
     expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table');
     expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
+  });
+
+  it('keeps an explicit chip choice when local storage cannot remember it', async () => {
+    const authority = projectWithReferenceHandoff();
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references'));
+
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+    try {
+      fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+
+      const updated = structuredClone(authority);
+      updated.revision = 4;
+      mockSupportedProject(updated);
+      act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+      await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+      expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table');
+    } finally {
+      storageWrite.mockRestore();
+    }
+  });
+
+  it('keeps a direct unready URL and explains the same prerequisite as its disabled chip', async () => {
+    const authority = project();
+    mockSupportedProject(authority);
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(authority, { readyEmptyViews: false })));
+
+    renderStudio('/studio/project_1/board');
+
+    const surface = await waitFor(() => {
+      const candidate = document.querySelector<HTMLElement>('[data-studio-surface-state="unready"]');
+      expect(candidate).not.toBeNull();
+      return candidate!;
+    });
+    expect(within(surface).getByText('conversation.creativeStudio.workspace.notReady.board')).toBeVisible();
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board');
+    const board = screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' });
+    expect(board).toHaveAttribute('aria-current', 'page');
+    expect(board).toBeDisabled();
+    expect(document.getElementById(board.getAttribute('aria-describedby')!)).toHaveTextContent(
+      'conversation.creativeStudio.workspace.notReady.board'
+    );
+  });
+
+  it('shows quiet loading without claiming status is unavailable while readiness is pending', async () => {
+    const status = deferred<ReturnType<typeof ok<StudioProjectStatusV2>>>();
+    mocks.bridge.getProjectStatus.invoke.mockReturnValue(status.promise);
+
+    renderStudio('/studio/project_1/table');
+
+    expect(
+      await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.project.loading' })
+    ).toBeVisible();
+    expect(document.querySelector('[data-studio-bar-blockers]')).toBeNull();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.project.statusUnavailable')).toBeNull();
+
+    await act(async () => status.resolve(ok(projectStatus(project()))));
+    expect(
+      await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.table' })
+    ).toBeVisible();
   });
 
   it('keeps an empty, coherent reference plan navigable with completion disabled until references are current', async () => {

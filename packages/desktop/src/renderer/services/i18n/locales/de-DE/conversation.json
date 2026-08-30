@@ -883,6 +883,16 @@
       "views": {
         "references": "Referenzen"
       },
+      "start": {
+        "title": "Mit dem Director beginnen",
+        "description": "Der Director erstellt anhand deines Briefings den ersten Plan. Prüfe ihn hier, sobald er vorliegt."
+      },
+      "notReady": {
+        "references": "Es gibt nichts zu prüfen, bis der Director die Referenzen geplant hat.",
+        "table": "Es gibt nichts anzuordnen, bis der Director das Storyboard entworfen hat.",
+        "board": "Es gibt nichts zu produzieren, bis die Tabelle vorbereitet ist.",
+        "cut": "Es gibt nichts zu schneiden, bis die Produktion begonnen hat."
+      },
       "referenceWorkflow": {
         "panel": {
           "canonicalImages": "Kanonische Bilder",
