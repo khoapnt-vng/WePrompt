@@ -164,8 +164,12 @@ describe('the Director preset rules', () => {
     );
   });
 
-  it('keeps shooting scripts bounded to shot-specific content without duplicating global composition inputs', () => {
-    expect(DIRECTOR_PRESET_RULES).toMatch(/shootingScript bounded to shot-specific visible depiction and action/i);
+  it('keeps seen-and-heard shooting scripts bounded without duplicating global composition inputs', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /shootingScript bounded to Shot-specific direction for what is seen and heard/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/visible depiction\s+and action/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/narration, dialogue, ambience, and discrete sound hits/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/never repeat the project\s+brief/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/project or organization rules/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/BOARD STYLE, or STYLE boilerplate/i);

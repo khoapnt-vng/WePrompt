@@ -65,14 +65,16 @@ route first).
 
 ## 3. Planned work
 
-### Piece 1 — Sound _(planned, unstarted)_
+### Piece 1 — Sound _(S1–S3 implemented 2026-08-30; S4 deferred)_
 
 Sound is not missing, only inaudible: every Shot video already carries an AAC stereo stream, real on
 some models and silence on others, and three hardcoded `muted` attributes stand between the owner and
 it. The export already mixes Shot audio and a music bed.
 
-- **S1** make it audible in review · **S2** say when a route cannot produce sound · **S3** the Director
-  writes sound into the shooting script · **S4** music bed _(deferred — needs an audio import path)_
+- **S1** adds default-muted, per-project mute and volume control across review players · **S2** keeps
+  route capability separate from revision-correlated current-take loudness analysis · **S3** teaches
+  the Director to author narration, dialogue, ambience and sound hits in the existing shooting script
+  · **S4** music bed _(deferred — needs an audio import path)_
 
 ### Piece 2 — Progressive work area _(planned, unstarted)_
 

@@ -87,6 +87,8 @@ import {
 } from './components/Workspace/Gate/generationBlockers';
 import { deriveReferenceRemovalBlockers } from './components/Workspace/Views/References/referenceRemovalBlockers';
 import { useStudioProject } from './hooks/useStudioProject';
+import { StudioPlaybackAudioProvider } from './hooks/useStudioPlaybackAudio';
+import { StudioShotAudioAnalysisProvider } from './hooks/useStudioShotAudioAnalysis';
 import {
   hasOpenedStudioReferences,
   markStudioReferencesOpened,
@@ -4374,42 +4376,54 @@ const StudioProjectPage: React.FC<{
         reviewedOutputs={reviewedDirectorOutputs}
       >
         {projection === null ? null : (
-          <WorkspaceControls
-            activeView={activeView}
-            boardActions={boardActions}
-            cutActions={cutActions}
-            project={project}
-            projectStatus={projectStatus}
-            projectStatusPending={projectStatusPending}
-            projection={projection}
-            drafts={drafts}
-            pending={workspacePending}
-            gateLocked={spendGateLocked}
-            imageRouteReady={
-              currentGenerationCapability !== null ||
-              (project.imageRouteId !== null && routeCatalog?.image.status === 'ready')
-            }
-            errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
-            mutations={mutations}
-            beatPanelActions={beatPanelActions}
-            beatPanelReviewGraphs={beatPanelReviewGraphs}
-            beatPanelReviewBlockedMessageKey={beatPanelReviewBlockedMessageKey}
-            referenceActions={referenceActions}
-            referenceMaxConditioningImages={
-              routeCatalog?.image.selectedRoute?.constraints.maxConditioningImages ?? null
-            }
-            referencePendingId={pendingReferenceId}
-            referenceErrorMessageKey={
-              activeView === 'references'
-                ? (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey)
-                : null
-            }
-            referenceFocusIntent={referenceFocusIntent}
-            onReferenceFocusIntentConsumed={consumeReferenceFocusIntent}
-            shotEditFocusIntent={shotEditFocusIntent}
-            onShotEditFocusIntentConsumed={consumeShotEditFocusIntent}
-            onReviewShotReferenceBinding={reviewShotBinding}
-          />
+          <StudioPlaybackAudioProvider projectId={project.id}>
+            <StudioShotAudioAnalysisProvider
+              projectId={project.id}
+              projectRevision={project.revision}
+              shots={projection.activeBeats.flatMap((beat) =>
+                beat.shots.flatMap((shot) =>
+                  shot.currentPicture === null ? [] : [{ shotId: shot.id, assetId: shot.currentPicture.assetId }]
+                )
+              )}
+            >
+              <WorkspaceControls
+                activeView={activeView}
+                boardActions={boardActions}
+                cutActions={cutActions}
+                project={project}
+                projectStatus={projectStatus}
+                projectStatusPending={projectStatusPending}
+                projection={projection}
+                drafts={drafts}
+                pending={workspacePending}
+                gateLocked={spendGateLocked}
+                imageRouteReady={
+                  currentGenerationCapability !== null ||
+                  (project.imageRouteId !== null && routeCatalog?.image.status === 'ready')
+                }
+                errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
+                mutations={mutations}
+                beatPanelActions={beatPanelActions}
+                beatPanelReviewGraphs={beatPanelReviewGraphs}
+                beatPanelReviewBlockedMessageKey={beatPanelReviewBlockedMessageKey}
+                referenceActions={referenceActions}
+                referenceMaxConditioningImages={
+                  routeCatalog?.image.selectedRoute?.constraints.maxConditioningImages ?? null
+                }
+                referencePendingId={pendingReferenceId}
+                referenceErrorMessageKey={
+                  activeView === 'references'
+                    ? (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey)
+                    : null
+                }
+                referenceFocusIntent={referenceFocusIntent}
+                onReferenceFocusIntentConsumed={consumeReferenceFocusIntent}
+                shotEditFocusIntent={shotEditFocusIntent}
+                onShotEditFocusIntentConsumed={consumeShotEditFocusIntent}
+                onReviewShotReferenceBinding={reviewShotBinding}
+              />
+            </StudioShotAudioAnalysisProvider>
+          </StudioPlaybackAudioProvider>
         )}
       </WorkspaceShell>
       <SpendGateModal

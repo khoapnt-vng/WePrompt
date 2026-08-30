@@ -145,6 +145,8 @@ import type {
   StudioProjectLoadResultV2,
   StudioProjectStatusRequestV2,
   StudioProjectStatusV2,
+  StudioShotAudioAnalysisRequestV2,
+  StudioShotAudioAnalysisResultV2,
   StudioProjectWorkspaceLoadResultV2,
   StudioProposalV2,
   StudioRendererProposalCatalogV2,
@@ -1334,6 +1336,10 @@ export const creativeStudio = {
   getProjectStatus: bridge.buildProvider<StudioCommandResult<StudioProjectStatusV2>, StudioProjectStatusRequestV2>(
     'creative-studio.get-project-status'
   ),
+  analyzeShotAudio: bridge.buildProvider<
+    StudioCommandResult<StudioShotAudioAnalysisResultV2>,
+    StudioShotAudioAnalysisRequestV2
+  >('creative-studio.analyze-shot-audio'),
   retryConditioningFrame: bridge.buildProvider<
     StudioCommandResult<StudioRendererProjectCommitResultV2>,
     StudioCascadeBarrierActionRequestV2

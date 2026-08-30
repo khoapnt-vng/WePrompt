@@ -1211,6 +1211,7 @@
           "pause": "Filmi duraklat",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Yalnızca görüntü — ses parçası burada sessize alınır",
+          "shotAudioOnly": "Yalnızca çekim sesi — müzik yatağı bu önizlemeye dahil değildir",
           "controlsLabel": "Film oynatma kontrolleri",
           "seekLabel": "Film arama rayı",
           "previousJoin": "Önceki birleşim",
@@ -1350,6 +1351,21 @@
           "chainBreak": "Süreklilik",
           "placement": "Konum",
           "order": "Sıra"
+        }
+      },
+      "playbackAudio": {
+        "label": "Oynatma sesi",
+        "mute": "Sesi kapat",
+        "unmute": "Sesi aç",
+        "muted": "Ses kapalı",
+        "audible": "Ses açık",
+        "volume": "Oynatma ses düzeyi: %{{percent}}",
+        "shotStatus": {
+          "analyzing": "Çekim sesi analiz ediliyor…",
+          "audible": "Duyulabilir ses var",
+          "effectivelySilent": "Fiilen sessiz",
+          "noAudioStream": "Ses akışı yok",
+          "unavailable": "Ses analizi kullanılamıyor"
         }
       },
       "shotStatus": {
@@ -1559,6 +1575,10 @@
       },
       "controls": {
         "briefAndRulesTitle": "Film kurulumu",
+        "videoAudioCapability": {
+          "silentOnly": "Bu motor sessiz klipler üretir.",
+          "audioCapable": "Bu motor ses üretebilir; tamamlanan çekimin sesi ayrı olarak analiz edilir."
+        },
         "undoLabel": {
           "promote_board_panel": "Paneli ilk kare olarak kullan",
           "set_reference_plan": "referans planı",

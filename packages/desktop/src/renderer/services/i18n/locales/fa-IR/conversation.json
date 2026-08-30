@@ -1209,6 +1209,7 @@
           "pause": "توقف موقت فیلم",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "فقط تصویر — بستر صوتی در اینجا بی‌صدا است",
+          "shotAudioOnly": "فقط صدای نما — بستر موسیقی در این پیش‌نمایش وجود ندارد",
           "controlsLabel": "کنترل‌های پخش فیلم",
           "seekLabel": "نوار پیمایش فیلم",
           "previousJoin": "اتصال قبلی",
@@ -1348,6 +1349,21 @@
           "chainBreak": "پیوستگی",
           "placement": "جایگاه",
           "order": "ترتیب"
+        }
+      },
+      "playbackAudio": {
+        "label": "صدای پخش",
+        "mute": "بی‌صدا کردن",
+        "unmute": "باصدا کردن",
+        "muted": "بی‌صدا",
+        "audible": "صدا روشن است",
+        "volume": "بلندی صدای پخش: {{percent}}٪",
+        "shotStatus": {
+          "analyzing": "در حال تحلیل صدای نما…",
+          "audible": "صدای قابل شنیدن",
+          "effectivelySilent": "عملاً بی‌صدا",
+          "noAudioStream": "جریان صوتی ندارد",
+          "unavailable": "تحلیل صدا در دسترس نیست"
         }
       },
       "shotStatus": {
@@ -1557,6 +1573,10 @@
       },
       "controls": {
         "briefAndRulesTitle": "تنظیمات فیلم",
+        "videoAudioCapability": {
+          "silentOnly": "این موتور کلیپ‌های بی‌صدا تولید می‌کند.",
+          "audioCapable": "این موتور می‌تواند صدا تولید کند؛ صدای نمای نهایی جداگانه تحلیل می‌شود."
+        },
         "undoLabel": {
           "promote_board_panel": "استفاده از پنل به‌عنوان فریم اول",
           "set_reference_plan": "برنامهٔ مراجع",

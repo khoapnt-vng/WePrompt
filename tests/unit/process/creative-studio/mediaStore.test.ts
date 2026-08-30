@@ -19,7 +19,11 @@ import type {
   StudioQuotedGeneration,
   StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_MUTATION_BATCH_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_EFFECTIVE_SILENCE_MEAN_DBFS_V1,
+  STUDIO_EFFECTIVE_SILENCE_PEAK_DBFS_V1,
+  STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+} from '@/common/types/project/creativeStudioTypes';
 import {
   createCreativeStudioStore,
   type CreativeStudioStore,
@@ -36,6 +40,7 @@ import { createStudioSpendReceiptV2 } from '@process/services/creative-studio/se
 import { createStudioExportCatalogStoreV2 } from '@process/services/creative-studio/service/schema2/exports/catalog';
 import { StudioConditioningFrameError } from '@process/services/creative-studio/adapters/conditioningFrame';
 import {
+  classifyStudioVideoAudioLoudnessV2,
   createStudioMediaStore,
   CreativeStudioMediaError,
   getAvailableStudioDiskBytes,
@@ -747,6 +752,33 @@ afterEach(async () => {
 const MEDIA_STORE_TIMEOUT_MS = 120_000;
 
 describe('createStudioMediaStore schema 2 final lifecycle', { timeout: MEDIA_STORE_TIMEOUT_MS }, () => {
+  it('classifies effective silence at both profile boundaries and becomes audible above either boundary', () => {
+    expect(
+      classifyStudioVideoAudioLoudnessV2(STUDIO_EFFECTIVE_SILENCE_MEAN_DBFS_V1, STUDIO_EFFECTIVE_SILENCE_PEAK_DBFS_V1)
+    ).toEqual({
+      status: 'effectively_silent',
+      meanVolumeDbfs: STUDIO_EFFECTIVE_SILENCE_MEAN_DBFS_V1,
+      peakVolumeDbfs: STUDIO_EFFECTIVE_SILENCE_PEAK_DBFS_V1,
+    });
+    expect(classifyStudioVideoAudioLoudnessV2(null, null)).toEqual({
+      status: 'effectively_silent',
+      meanVolumeDbfs: null,
+      peakVolumeDbfs: null,
+    });
+    expect(
+      classifyStudioVideoAudioLoudnessV2(
+        STUDIO_EFFECTIVE_SILENCE_MEAN_DBFS_V1 + 0.001,
+        STUDIO_EFFECTIVE_SILENCE_PEAK_DBFS_V1
+      ).status
+    ).toBe('audible');
+    expect(
+      classifyStudioVideoAudioLoudnessV2(
+        STUDIO_EFFECTIVE_SILENCE_MEAN_DBFS_V1,
+        STUDIO_EFFECTIVE_SILENCE_PEAK_DBFS_V1 + 0.001
+      ).status
+    ).toBe('audible');
+  });
+
   it('detects repeated quartile sheet seams without rejecting one strong central edge', () => {
     const image = (panelValues: readonly number[]): Uint8Array => {
       const width = 40;
@@ -1799,6 +1831,50 @@ describe('createStudioMediaStore schema 2 final lifecycle', { timeout: MEDIA_STO
     expect(edited.assets.take_1!.durationSeconds).toBe(10);
     const restarted = await store.getProjectV2(project.id);
     expect(restarted.status === 'supported' ? restarted.project.assets.take_1!.durationSeconds : null).toBe(10);
+  });
+
+  it('analyzes only verified managed video bytes through the injected seam and fails closed', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const probeVideoAudioContentV2 = vi
+      .fn()
+      .mockImplementationOnce(async ({ openVerifiedStream }: { openVerifiedStream: () => Promise<Readable> }) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of await openVerifiedStream()) chunks.push(Buffer.from(chunk));
+        expect(Buffer.concat(chunks)).toEqual(mp4);
+        return { status: 'audible' as const, meanVolumeDbfs: -22, peakVolumeDbfs: -4 };
+      })
+      .mockRejectedValueOnce(new Error('probe unavailable'));
+    const media = createStudioMediaStore({
+      store,
+      createId: () => 'take_audio_analysis',
+      probeVideoDurationSecondsV2: async () => 10,
+      probeVideoAudioContentV2,
+    });
+    const asset = await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+
+    await expect(media.analyzeVideoAudioV2(project.id, asset.id)).resolves.toEqual({
+      status: 'audible',
+      meanVolumeDbfs: -22,
+      peakVolumeDbfs: -4,
+    });
+    await expect(media.analyzeVideoAudioV2(project.id, asset.id)).resolves.toEqual({
+      status: 'unavailable',
+      meanVolumeDbfs: null,
+      peakVolumeDbfs: null,
+    });
+    await expect(media.analyzeVideoAudioV2(project.id, 'missing_asset')).resolves.toEqual({
+      status: 'unavailable',
+      meanVolumeDbfs: null,
+      peakVolumeDbfs: null,
+    });
+    expect(probeVideoAudioContentV2).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the newest successful video job current when an older download finishes last', async () => {

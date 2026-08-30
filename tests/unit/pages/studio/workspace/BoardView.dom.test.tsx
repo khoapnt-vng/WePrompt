@@ -705,7 +705,11 @@ describe('BoardView', () => {
     const thirdTile = result.container.querySelector<HTMLElement>('[data-shot-id="shot_3"]')!;
     const fourthTile = result.container.querySelector<HTMLElement>('[data-shot-id="shot_4"]')!;
     expect(firstTile.querySelector('img')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/poster_first');
-    expect(secondTile.querySelector('video')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_second');
+    const boardVideo = secondTile.querySelector<HTMLVideoElement>('video')!;
+    expect(boardVideo).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_second');
+    expect(boardVideo).toHaveProperty('controls', true);
+    expect(boardVideo).toHaveProperty('muted', true);
+    expect(boardVideo).toHaveProperty('autoplay', false);
     expect(thirdTile.querySelector('img')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/cover_third');
     expect(fourthTile.querySelector('[data-media-kind="unavailable"]')).toHaveTextContent('Preview unavailable');
     expect(firstTile.querySelector('[data-composer-status-word]')).toHaveAttribute(

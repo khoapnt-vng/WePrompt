@@ -1209,6 +1209,7 @@
           "pause": "フィルムを一時停止",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "映像のみ — ここではオーディオベッドはミュートされています",
+          "shotAudioOnly": "ショット音声のみ — このプレビューにはBGMトラックは含まれません",
           "controlsLabel": "フィルム再生コントロール",
           "seekLabel": "フィルムシークレール",
           "previousJoin": "前のつなぎ目",
@@ -1348,6 +1349,21 @@
           "chainBreak": "連続性",
           "placement": "配置",
           "order": "順序"
+        }
+      },
+      "playbackAudio": {
+        "label": "再生音声",
+        "mute": "ミュート",
+        "unmute": "ミュート解除",
+        "muted": "ミュート中",
+        "audible": "音声オン",
+        "volume": "再生音量：{{percent}}%",
+        "shotStatus": {
+          "analyzing": "ショットの音声を解析中…",
+          "audible": "聞き取れる音声あり",
+          "effectivelySilent": "実質無音",
+          "noAudioStream": "音声ストリームなし",
+          "unavailable": "音声解析を利用できません"
         }
       },
       "shotStatus": {
@@ -1557,6 +1573,10 @@
       },
       "controls": {
         "briefAndRulesTitle": "映画設定",
+        "videoAudioCapability": {
+          "silentOnly": "このエンジンは無音のクリップを生成します。",
+          "audioCapable": "このエンジンは音声を生成できます。完成したショットの音声は別途解析されます。"
+        },
         "undoLabel": {
           "promote_board_panel": "パネルを最初のフレームに使用",
           "set_reference_plan": "リファレンス計画",

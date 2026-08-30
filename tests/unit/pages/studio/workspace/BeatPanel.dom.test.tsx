@@ -61,6 +61,15 @@ vi.mock('@arco-design/web-react', async () => {
       onChange={(event) => onChange?.(event.target.value === '' ? undefined : Number(event.target.value))}
     />
   );
+  const Slider = ({ onChange, value, ...props }: any) => (
+    <input
+      {...props}
+      onChange={(event) => onChange?.(Number(event.target.value))}
+      role='slider'
+      type='range'
+      value={value}
+    />
+  );
   const optionText = (value: React.ReactNode): string =>
     ReactModule.Children.toArray(value)
       .map((child) => {
@@ -187,6 +196,7 @@ vi.mock('@arco-design/web-react', async () => {
     Modal,
     Popconfirm,
     Select,
+    Slider,
     default: ReactModule,
   };
 });
@@ -2519,6 +2529,10 @@ describe('BeatPanel', () => {
     expect(within(viewer).queryByRole('button', { name: 'Previous' })).toBeNull();
     expect(within(viewer).queryByRole('button', { name: 'Next' })).toBeNull();
     expect(within(viewer).queryByRole('button', { name: /use this take|remove take/iu })).toBeNull();
+    const reviewedVideo = viewer.querySelector<HTMLVideoElement>('video')!;
+    expect(reviewedVideo).toHaveProperty('controls', true);
+    expect(reviewedVideo).toHaveProperty('muted', true);
+    expect(reviewedVideo).toHaveProperty('autoplay', false);
   });
 
   it('judges the current picture full screen, downloads it, and offers the explicit last-frame handoff', () => {

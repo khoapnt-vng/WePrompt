@@ -397,10 +397,31 @@ const localizedPaidRecoveryKeys = [
   'proposals.paidRecovery.location.shot',
 ] as const;
 
+const localizedPlaybackAudioKeys = [
+  'playbackAudio.label',
+  'playbackAudio.mute',
+  'playbackAudio.unmute',
+  'playbackAudio.muted',
+  'playbackAudio.audible',
+  'playbackAudio.volume',
+  'playbackAudio.shotStatus.analyzing',
+  'playbackAudio.shotStatus.audible',
+  'playbackAudio.shotStatus.effectivelySilent',
+  'playbackAudio.shotStatus.noAudioStream',
+  'playbackAudio.shotStatus.unavailable',
+] as const;
+
+const localizedVideoAudioCapabilityKeys = [
+  'controls.videoAudioCapability.silentOnly',
+  'controls.videoAudioCapability.audioCapable',
+] as const;
+
 const expectedLeaves = [
   ...localizedFirstFramesPanelKeys,
   ...localizedShotStatusKeys,
   ...localizedShotComposerKeys,
+  ...localizedPlaybackAudioKeys,
+  ...localizedVideoAudioCapabilityKeys,
   'director.title',
   'director.show',
   'director.hide',
@@ -597,6 +618,7 @@ const expectedLeaves = [
   'cut.preview.pause',
   'cut.preview.position',
   'cut.preview.pictureOnly',
+  'cut.preview.shotAudioOnly',
   'cut.preview.controlsLabel',
   'cut.preview.seekLabel',
   'cut.preview.previousJoin',
@@ -1229,6 +1251,7 @@ const localizedCutPreviewKeys = [
   'cut.preview.pause',
   'cut.preview.position',
   'cut.preview.pictureOnly',
+  'cut.preview.shotAudioOnly',
   'cut.preview.controlsLabel',
   'cut.preview.seekLabel',
   'cut.preview.previousJoin',
@@ -1405,6 +1428,8 @@ const localizedWorkspaceKeys = [
   ...localizedFirstFramesPanelKeys,
   ...localizedShotStatusKeys,
   ...localizedShotComposerKeys,
+  ...localizedPlaybackAudioKeys,
+  ...localizedVideoAudioCapabilityKeys,
   ...localizedReferencesPanelKeys,
   'proposals.proposalId',
   'proposals.mutationCount',

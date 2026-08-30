@@ -1210,6 +1210,7 @@
           "pause": "Film pausieren",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Nur Bild — das Audiobett ist hier stummgeschaltet",
+          "shotAudioOnly": "Nur Shot-Audio — das Musikbett ist in dieser Vorschau nicht enthalten",
           "controlsLabel": "Filmsteuerung",
           "seekLabel": "Film-Suchleiste",
           "previousJoin": "Vorheriger Schnitt",
@@ -1349,6 +1350,21 @@
           "chainBreak": "Kontinuität",
           "placement": "Position",
           "order": "Reihenfolge"
+        }
+      },
+      "playbackAudio": {
+        "label": "Wiedergabeton",
+        "mute": "Stummschalten",
+        "unmute": "Ton einschalten",
+        "muted": "Stumm",
+        "audible": "Ton an",
+        "volume": "Wiedergabelautstärke: {{percent}}%",
+        "shotStatus": {
+          "analyzing": "Shot-Audio wird analysiert…",
+          "audible": "Hörbarer Ton",
+          "effectivelySilent": "Praktisch stumm",
+          "noAudioStream": "Kein Audiostream",
+          "unavailable": "Audioanalyse nicht verfügbar"
         }
       },
       "shotStatus": {
@@ -1558,6 +1574,10 @@
       },
       "controls": {
         "briefAndRulesTitle": "Film-Einrichtung",
+        "videoAudioCapability": {
+          "silentOnly": "Diese Engine erzeugt stumme Clips.",
+          "audioCapable": "Diese Engine kann Ton erzeugen; das Audio des fertigen Shots wird separat analysiert."
+        },
         "undoLabel": {
           "promote_board_panel": "Panel als erstes Bild verwenden",
           "set_reference_plan": "Referenzplan",

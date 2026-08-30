@@ -1209,6 +1209,7 @@
           "pause": "필름 일시 정지",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "영상만 — 여기에서는 오디오 베드가 음소거됩니다",
+          "shotAudioOnly": "샷 오디오만 재생 — 이 미리보기에는 배경 음악 트랙이 포함되지 않습니다",
           "controlsLabel": "필름 재생 컨트롤",
           "seekLabel": "필름 탐색 레일",
           "previousJoin": "이전 연결점",
@@ -1348,6 +1349,21 @@
           "chainBreak": "연속성",
           "placement": "위치",
           "order": "순서"
+        }
+      },
+      "playbackAudio": {
+        "label": "재생 소리",
+        "mute": "음소거",
+        "unmute": "음소거 해제",
+        "muted": "음소거됨",
+        "audible": "소리 켜짐",
+        "volume": "재생 음량: {{percent}}%",
+        "shotStatus": {
+          "analyzing": "샷 오디오 분석 중…",
+          "audible": "들리는 소리 있음",
+          "effectivelySilent": "사실상 무음",
+          "noAudioStream": "오디오 스트림 없음",
+          "unavailable": "오디오 분석을 사용할 수 없음"
         }
       },
       "shotStatus": {
@@ -1557,6 +1573,10 @@
       },
       "controls": {
         "briefAndRulesTitle": "영화 설정",
+        "videoAudioCapability": {
+          "silentOnly": "이 엔진은 무음 클립을 생성합니다.",
+          "audioCapable": "이 엔진은 소리를 생성할 수 있습니다. 완성된 샷의 오디오는 별도로 분석됩니다."
+        },
         "undoLabel": {
           "promote_board_panel": "패널을 첫 프레임으로 사용",
           "set_reference_plan": "참조 계획",

@@ -832,6 +832,11 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
   const currentGenerationCapability = generationCapabilityIsCurrent(project, generationCapability)
     ? generationCapability
     : null;
+  const draftedVideoRouteId = asString(drafts.value('brief.videoRouteId')) || null;
+  const draftedVideoRoute =
+    draftedVideoRouteId === null
+      ? null
+      : (routeCatalog?.video.options.find((route) => route.choiceId === draftedVideoRouteId) ?? null);
   const generationBlocksForRole = (role: 'image' | 'video') => {
     const blocks =
       currentGenerationCapability === null
@@ -1855,6 +1860,15 @@ const ProjectScopedWorkspaceProjectMenu: React.FC<WorkspaceProjectMenuProps> = (
                     `conversation.creativeStudio.workspace.controls.routeStatus.${routeCatalog?.video.status ?? 'unavailable'}`
                   )}
                 </small>
+                {draftedVideoRoute === null ? null : (
+                  <small
+                    data-video-route-audio-capability={draftedVideoRoute.constraints.silentOutput ? 'none' : 'audio'}
+                  >
+                    {t(
+                      `conversation.creativeStudio.workspace.controls.videoAudioCapability.${draftedVideoRoute.constraints.silentOutput ? 'silentOnly' : 'audioCapable'}`
+                    )}
+                  </small>
+                )}
                 {generationBlocksForRole('video').map((block) => {
                   const message = generationBlockMessage(block);
                   return (

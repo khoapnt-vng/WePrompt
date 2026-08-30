@@ -18,6 +18,8 @@ import React, {
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
+import { StudioPlaybackAudioControl } from '@/renderer/pages/studio/components/PlaybackAudio';
+import { useStudioPlaybackAudio } from '@/renderer/pages/studio/hooks/useStudioPlaybackAudio';
 import type { WorkspaceProjection } from '../../workspaceProjection';
 import {
   buildCutPlaybackSequence,
@@ -178,6 +180,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
   ref
 ) {
   const { t } = useTranslation();
+  const { muted, syncFromMedia, volume } = useStudioPlaybackAudio();
   const candidate = useMemo(() => buildCutPlaybackSequence(projection), [projection]);
   const sequence = candidate !== null && candidate.projectId === projectId ? candidate : null;
   const planToken = useMemo(() => JSON.stringify({ pending, projectId, sequence }), [pending, projectId, sequence]);
@@ -188,6 +191,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
   const [storedPrewarmTarget, setStoredPrewarmTarget] = useState<PrewarmTarget | null>(null);
   const prewarmTarget = storedPrewarmTarget?.token === planToken ? storedPrewarmTarget : null;
   const stateRef = useRef(state);
+  const playbackAudioRef = useRef({ muted, volume });
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const prewarmVideoRef = useRef<HTMLVideoElement | null>(null);
   const playingMediaRef = useRef<HTMLVideoElement | null>(null);
@@ -206,6 +210,14 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
     activeTokenRef.current = planToken;
     stateRef.current = state;
   }, [planToken, state]);
+
+  useLayoutEffect(() => {
+    playbackAudioRef.current = { muted, volume };
+    if (videoRef.current !== null) {
+      videoRef.current.muted = muted;
+      videoRef.current.volume = volume;
+    }
+  }, [muted, volume]);
 
   const invalidatePlayAttempt = useCallback((): void => {
     playAttemptIdRef.current += 1;
@@ -340,6 +352,10 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
         }
       }
       videoRef.current = node;
+      if (node !== null) {
+        node.muted = playbackAudioRef.current.muted;
+        node.volume = playbackAudioRef.current.volume;
+      }
     },
     [stopMediaBoundaryWatch]
   );
@@ -1013,7 +1029,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
                   className={styles.previewMedia}
                   data-cut-preview-media
                   data-media-kind='video'
-                  muted
+                  muted={muted}
                   playsInline
                   poster={posterSource ?? undefined}
                   preload='metadata'
@@ -1022,6 +1038,9 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
                   onEnded={(event) => onEnded(event.currentTarget, segment)}
                   onError={(event) => failMedia(planToken, state.segmentIndex, event.currentTarget)}
                   onLoadedMetadata={(event) => onLoadedMetadata(event.currentTarget, segment)}
+                  onVolumeChange={(event) =>
+                    syncFromMedia({ muted: event.currentTarget.muted, volume: event.currentTarget.volume })
+                  }
                   onPlaying={(event) => {
                     const media = event.currentTarget;
                     const token = planToken;
@@ -1130,7 +1149,8 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
         <output aria-live='off' className={styles.transportTime} data-cut-time role='timer'>
           <bdi dir='auto'>{positionCopy}</bdi>
         </output>
-        <span className={styles.pictureOnly}>{t(`${PREVIEW_ROOT}.pictureOnly`)}</span>
+        <StudioPlaybackAudioControl />
+        <span className={styles.pictureOnly}>{t(`${PREVIEW_ROOT}.shotAudioOnly`)}</span>
       </div>
       <p
         aria-atomic='true'

@@ -11,6 +11,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { IProvider, ISessionMcpServer } from '@/common/config/storage';
 import {
   isStudioPricingRefusalReasonV2,
+  STUDIO_SHOT_AUDIO_ANALYSIS_PROFILE_V1,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_SHOT_SECONDS,
@@ -96,6 +97,9 @@ import {
   type StudioRevealExportResultV2,
   type StudioSaveConnectionRequest,
   type StudioShot,
+  type StudioShotAudioAnalysisRequestV2,
+  type StudioShotAudioAnalysisResultV2,
+  type StudioVideoAudioContentAnalysisV2,
   type StudioSpendAuthorization,
   type StudioSubmissionQuote,
   type StudioSubmissionQuoteCore,
@@ -300,6 +304,7 @@ export type CreativeStudioServiceV2 = {
   }): Promise<StudioAssetV2>;
   listRoutes(input?: { projectId?: string }): Promise<StudioRouteCatalogV2>;
   getProjectStatus(input: StudioProjectStatusRequestV2): Promise<StudioProjectStatusV2>;
+  analyzeShotAudio(input: StudioShotAudioAnalysisRequestV2): Promise<StudioShotAudioAnalysisResultV2>;
   getGenerationCapability(input: StudioGenerationCapabilityRequestV2): Promise<StudioGenerationCapabilityV2>;
   getProjectWorkspace(input: { projectId: string }): Promise<StudioProjectWorkspaceLoadResultV2>;
   listProposals(input: { projectId: string }): Promise<StudioRendererProposalCatalogV2>;
@@ -1544,6 +1549,12 @@ const supportedProject = (result: StudioProjectStoreLoadResultV2): StudioProject
   throw new CreativeStudioStoreError('not_found', 'Studio project not found');
 };
 
+const unavailableVideoAudioAnalysisV2 = (): StudioVideoAudioContentAnalysisV2 => ({
+  status: 'unavailable',
+  meanVolumeDbfs: null,
+  peakVolumeDbfs: null,
+});
+
 /** Creates the sole registered Beat/Shot service after the atomic schema-2 cutover. */
 export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps): CreativeStudioServiceV2 => {
   const readNow = (): Date => {
@@ -1577,6 +1588,8 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   const activeFilmRenders = new Map<string, ActiveFilmRenderV2>();
   const terminalFilmRenders = new Map<string, TerminalFilmRenderV2>();
   const activeClaims = new Set<StudioPreparedSubmissionClaimV2>();
+  const shotAudioAnalysisCache = new Map<string, Promise<StudioVideoAudioContentAnalysisV2>>();
+  const MAX_SHOT_AUDIO_ANALYSIS_CACHE_ENTRIES = 2 * STUDIO_MAX_SHOTS_PER_PROJECT;
   type PaidRecoveryQuoteAuthorityV2 = {
     projectId: string;
     proposalId: string;
@@ -3509,6 +3522,87 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       return deriveFreshProjectStatus(input.projectId, detail);
     },
 
+    async analyzeShotAudio(input): Promise<StudioShotAudioAnalysisResultV2> {
+      if (
+        !isRecord(input) ||
+        !hasExactKeys(input, ['projectId', 'expectedRevision', 'shots']) ||
+        !isDenseArray(input.shots, STUDIO_MAX_SHOTS_PER_PROJECT) ||
+        input.shots.length === 0
+      ) {
+        throw invalid('Invalid Studio Shot audio analysis request');
+      }
+      assertSafeId(input.projectId, 'project id');
+      assertRevision(input.expectedRevision);
+      const requested = input.shots.map((candidate) => {
+        if (!isRecord(candidate) || !hasExactKeys(candidate, ['shotId', 'assetId'])) {
+          throw invalid('Invalid Studio Shot audio analysis item');
+        }
+        assertSafeId(candidate.shotId, 'shot id');
+        assertSafeId(candidate.assetId, 'asset id');
+        return { shotId: candidate.shotId, assetId: candidate.assetId };
+      });
+      if (new Set(requested.map(({ shotId }) => shotId)).size !== requested.length) {
+        throw invalid('Duplicate Studio Shot audio analysis item');
+      }
+      assertGeneralServiceActive();
+      const project = await loadSupported(input.projectId);
+      if (project.revision !== input.expectedRevision) {
+        throw new CreativeStudioStoreError('stale_project', 'Studio Shot audio analysis revision is stale');
+      }
+      const assets = requested.map(({ shotId, assetId }) => {
+        const shot = ownValue(project.shots, shotId);
+        const asset = ownValue(project.assets, assetId);
+        if (
+          shot?.id !== shotId ||
+          shot.videoAssetId !== assetId ||
+          asset?.id !== assetId ||
+          asset.projectId !== project.id ||
+          asset.shotId !== shotId ||
+          asset.mediaKind !== 'video' ||
+          !asset.mimeType.startsWith('video/')
+        ) {
+          throw new CreativeStudioStoreError('stale_project', 'Studio Shot audio analysis target is stale');
+        }
+        return { shotId, asset };
+      });
+      const results: StudioShotAudioAnalysisResultV2['shots'] = Array.from({ length: assets.length });
+      let nextIndex = 0;
+      const analyzeNext = async (): Promise<void> => {
+        const index = nextIndex;
+        nextIndex += 1;
+        const target = assets[index];
+        if (target === undefined) return;
+        const cacheKey = `${target.asset.id}\0${target.asset.sha256}`;
+        let analysis = shotAudioAnalysisCache.get(cacheKey);
+        if (analysis === undefined) {
+          analysis = (
+            deps.mediaStore?.analyzeVideoAudioV2(project.id, target.asset.id) ??
+            Promise.resolve(unavailableVideoAudioAnalysisV2())
+          ).catch(unavailableVideoAudioAnalysisV2);
+          shotAudioAnalysisCache.set(cacheKey, analysis);
+          void analysis.then((resolved) => {
+            if (resolved.status === 'unavailable' && shotAudioAnalysisCache.get(cacheKey) === analysis) {
+              shotAudioAnalysisCache.delete(cacheKey);
+            }
+          });
+          while (shotAudioAnalysisCache.size > MAX_SHOT_AUDIO_ANALYSIS_CACHE_ENTRIES) {
+            const oldest = shotAudioAnalysisCache.keys().next().value;
+            if (oldest === undefined) break;
+            shotAudioAnalysisCache.delete(oldest);
+          }
+        }
+        results[index] = { shotId: target.shotId, assetId: target.asset.id, ...(await analysis) };
+        await analyzeNext();
+      };
+      await Promise.all(Array.from({ length: Math.min(2, assets.length) }, () => analyzeNext()));
+      return {
+        projectId: project.id,
+        projectRevision: project.revision,
+        profile: STUDIO_SHOT_AUDIO_ANALYSIS_PROFILE_V1,
+        shots: results,
+      };
+    },
+
     async getGenerationCapability(input): Promise<StudioGenerationCapabilityV2> {
       if (!isRecord(input) || !hasExactKeys(input, ['projectId', 'expectedRevision', 'items'])) {
         throw invalid('Invalid Studio generation capability request');
@@ -4380,6 +4474,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       activeClaims.clear();
       paidRecoveryQuoteAuthorities.clear();
       activePaidRecoveryConfirmations.clear();
+      shotAudioAnalysisCache.clear();
       preparedSubmissionCache.close();
     },
   };

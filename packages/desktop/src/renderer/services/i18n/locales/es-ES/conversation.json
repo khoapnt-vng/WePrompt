@@ -1210,6 +1210,7 @@
           "pause": "Pausar película",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Solo imagen — aquí la pista de audio está silenciada",
+          "shotAudioOnly": "Solo audio del plano — la pista musical no se incluye en esta vista previa",
           "controlsLabel": "Controles de reproducción de la película",
           "seekLabel": "Barra de búsqueda de la película",
           "previousJoin": "Unión anterior",
@@ -1349,6 +1350,21 @@
           "chainBreak": "Continuidad",
           "placement": "Ubicación",
           "order": "Orden"
+        }
+      },
+      "playbackAudio": {
+        "label": "Sonido de reproducción",
+        "mute": "Silenciar",
+        "unmute": "Activar sonido",
+        "muted": "Silenciado",
+        "audible": "Sonido activado",
+        "volume": "Volumen de reproducción: {{percent}}%",
+        "shotStatus": {
+          "analyzing": "Analizando el audio del plano…",
+          "audible": "Sonido audible",
+          "effectivelySilent": "Prácticamente sin sonido",
+          "noAudioStream": "Sin flujo de audio",
+          "unavailable": "Análisis de audio no disponible"
         }
       },
       "shotStatus": {
@@ -1558,6 +1574,10 @@
       },
       "controls": {
         "briefAndRulesTitle": "Configuración de la película",
+        "videoAudioCapability": {
+          "silentOnly": "Este motor produce clips sin sonido.",
+          "audioCapable": "Este motor puede generar sonido; el audio del plano terminado se analiza por separado."
+        },
         "undoLabel": {
           "promote_board_panel": "Usar panel como primer fotograma",
           "set_reference_plan": "plan de referencias",

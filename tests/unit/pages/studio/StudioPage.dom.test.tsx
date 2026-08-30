@@ -74,6 +74,7 @@ const mocks = vi.hoisted(() => {
       getProject: { invoke: vi.fn() },
       getProjectWorkspace: { invoke: vi.fn() },
       getProjectStatus: { invoke: vi.fn() },
+      analyzeShotAudio: { invoke: vi.fn() },
       listProposals: { invoke: vi.fn() },
       acceptProposal: { invoke: vi.fn() },
       rejectProposal: { invoke: vi.fn() },
@@ -1807,6 +1808,25 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(3)));
     mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(3)));
     mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(project())));
+    mocks.bridge.analyzeShotAudio.invoke.mockImplementation(
+      async (input: {
+        projectId: string;
+        expectedRevision: number;
+        shots: Array<{ shotId: string; assetId: string }>;
+      }) =>
+        ok({
+          projectId: input.projectId,
+          projectRevision: input.expectedRevision,
+          profile: 'effective-loudness-v1' as const,
+          shots: input.shots.map(({ shotId, assetId }) => ({
+            shotId,
+            assetId,
+            status: 'unavailable' as const,
+            meanVolumeDbfs: null,
+            peakVolumeDbfs: null,
+          })),
+        })
+    );
     installCompositeProjectWorkspaceRead();
     mocks.bridge.listRoutes.invoke.mockResolvedValue(
       ok({

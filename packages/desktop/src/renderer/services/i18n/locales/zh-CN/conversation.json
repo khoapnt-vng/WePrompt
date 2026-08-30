@@ -1209,6 +1209,7 @@
           "pause": "暂停影片",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "仅画面 — 此处音轨已静音",
+          "shotAudioOnly": "仅播放镜头音频——此预览不包含配乐音轨",
           "controlsLabel": "影片播放控制",
           "seekLabel": "影片定位轨",
           "previousJoin": "上一个接点",
@@ -1348,6 +1349,21 @@
           "chainBreak": "连续性",
           "placement": "位置",
           "order": "顺序"
+        }
+      },
+      "playbackAudio": {
+        "label": "播放声音",
+        "mute": "静音",
+        "unmute": "取消静音",
+        "muted": "已静音",
+        "audible": "声音已开启",
+        "volume": "播放音量：{{percent}}%",
+        "shotStatus": {
+          "analyzing": "正在分析镜头音频…",
+          "audible": "有可听声音",
+          "effectivelySilent": "实际无声",
+          "noAudioStream": "无音频流",
+          "unavailable": "无法分析音频"
         }
       },
       "shotStatus": {
@@ -1557,6 +1573,10 @@
       },
       "controls": {
         "briefAndRulesTitle": "影片设置",
+        "videoAudioCapability": {
+          "silentOnly": "此引擎生成无声片段。",
+          "audioCapable": "此引擎可以生成声音；生成完成的镜头音频将另行分析。"
+        },
         "undoLabel": {
           "promote_board_panel": "将分镜用作首帧",
           "set_reference_plan": "参考计划",

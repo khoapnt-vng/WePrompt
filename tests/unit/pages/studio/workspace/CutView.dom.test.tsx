@@ -213,7 +213,7 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.preview.pause')) return 'Pause film';
       if (key.endsWith('.preview.controlsLabel')) return 'Film transport';
       if (key.endsWith('.preview.position')) return `${String(values?.current)} / ${String(values?.total)}`;
-      if (key.endsWith('.preview.pictureOnly')) return 'Picture only — the bed is muted here';
+      if (key.endsWith('.preview.shotAudioOnly')) return 'Shot audio only — the music bed is excluded here';
       if (key.endsWith('.preview.noMedia')) return 'No film preview is available.';
       if (key.endsWith('.preview.awaitingPictureOne')) {
         return `Beat ${String(values?.beatPosition)} · Shot ${String(values?.shotPosition)} needs a current picture before the film can play.`;
@@ -869,7 +869,7 @@ describe('the truthful Cut player and transport', () => {
     play: vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined),
   });
 
-  it('renders the first current picture through the managed protocol with a custom muted transport', () => {
+  it('renders the first current picture through the managed protocol with a default-muted sound transport', () => {
     renderCutPlayer();
 
     const preview = document.querySelector<HTMLElement>('[data-cut-preview]');
@@ -893,7 +893,8 @@ describe('the truthful Cut player and transport', () => {
     expect(time).toHaveAttribute('aria-live', 'off');
     expect(time).toHaveAttribute('role', 'timer');
     expect(time?.querySelector('bdi')).toHaveAttribute('dir', 'auto');
-    expect(within(transport).getByText('Picture only — the bed is muted here')).toBeVisible();
+    expect(within(transport).getByText('Shot audio only — the music bed is excluded here')).toBeVisible();
+    expect(transport.querySelector('[data-studio-playback-mute]')).toBeInTheDocument();
     expect(document.querySelector('audio')).toBeNull();
   });
 

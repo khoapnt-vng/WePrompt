@@ -315,6 +315,11 @@ const VALID_PAYLOADS = {
   'creative-studio.undo-last': { projectId: 'project_1', expectedRevision: 1, entryId: 'undo_1' },
   'creative-studio.get-project-workspace': { projectId: 'project_1' },
   'creative-studio.get-project-status': { projectId: 'project_1', detail: true },
+  'creative-studio.analyze-shot-audio': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    shots: [{ shotId: 'shot_1', assetId: 'take_1' }],
+  },
   'creative-studio.retry-conditioning-frame': {
     projectId: 'project_1',
     expectedRevision: 1,
@@ -1635,6 +1640,10 @@ describe('native bridge payload schemas', () => {
     ['creative-studio.get-project-workspace', { projectId: 'project_1' }],
     ['creative-studio.get-project-status', { projectId: 'project_1', detail: true }],
     [
+      'creative-studio.analyze-shot-audio',
+      { projectId: 'project_1', expectedRevision: 1, shots: [{ shotId: 'shot_1', assetId: 'take_1' }] },
+    ],
+    [
       'creative-studio.retry-conditioning-frame',
       { projectId: 'project_1', expectedRevision: 1, dependentShotId: 'shot_2' },
     ],
@@ -1648,6 +1657,26 @@ describe('native bridge payload schemas', () => {
     ];
     expect(schema?.safeParse(payload).success).toBe(true);
     expect(schema?.safeParse({ ...payload, jobId: 'internal_job' }).success).toBe(false);
+  });
+
+  it('requires a non-empty, unique, exact Shot audio analysis batch', () => {
+    const base = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      shots: [{ shotId: 'shot_1', assetId: 'take_1' }],
+    };
+    expect(parseNativeBridgePayload('creative-studio.analyze-shot-audio', base)).toEqual(base);
+
+    for (const payload of [
+      { ...base, shots: [] },
+      { ...base, shots: [...base.shots, { shotId: 'shot_1', assetId: 'take_2' }] },
+      { ...base, shots: [{ ...base.shots[0], internal: true }] },
+      { ...base, shots: [{ shotId: '', assetId: 'take_1' }] },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.analyze-shot-audio', payload)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
   });
 
   it('rejects an inherited Creative Studio project-status detail option', () => {
@@ -2136,6 +2165,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.undo-last',
       'creative-studio.get-project-workspace',
       'creative-studio.get-project-status',
+      'creative-studio.analyze-shot-audio',
       'creative-studio.retry-conditioning-frame',
       'creative-studio.cancel-waiting-cascade',
       'creative-studio.edit-project',
@@ -2204,6 +2234,7 @@ describe('native bridge payload schemas', () => {
       'creative-studio.get-director-session-authority',
       'creative-studio.bind-director-conversation',
       'creative-studio.get-project-status',
+      'creative-studio.analyze-shot-audio',
       'creative-studio.get-generation-capability',
       'creative-studio.prepare-project-references',
       'creative-studio.prepare-submission',
@@ -2237,9 +2268,9 @@ describe('native bridge payload schemas', () => {
       expect(providerKeys).not.toContain(providerKey);
       expect(schemaKeys).not.toContain(providerKey);
     }
-    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(56);
-    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(56);
-    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(56);
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(57);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(57);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(57);
     for (const providerKey of exactOnceProviderKeys) {
       expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
       expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);

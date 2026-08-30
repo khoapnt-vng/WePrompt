@@ -194,6 +194,18 @@ const readyRouteCatalog = {
         providerId: 'provider_image',
         providerName: 'Image provider',
         model: 'image-model',
+        integrationLabelKey: 'imageApi',
+        health: 'available',
+        kind: 'image',
+        constraints: {
+          aspectRatios: ['16:9'],
+          resolutions: ['720p'],
+          minDurationSeconds: 1,
+          maxDurationSeconds: 60,
+          supportsFirstFrame: false,
+          maxConditioningImages: 3,
+          silentOutput: true,
+        },
       },
     ],
   },
@@ -207,7 +219,37 @@ const readyRouteCatalog = {
         choiceId: 'route_video',
         providerId: 'provider_video',
         providerName: 'Video provider',
-        model: 'video-model',
+        model: 'silent-video-model',
+        integrationLabelKey: 'openRouterVideo',
+        health: 'available',
+        kind: 'video',
+        constraints: {
+          aspectRatios: ['16:9'],
+          resolutions: ['720p'],
+          minDurationSeconds: 4,
+          maxDurationSeconds: 12,
+          supportsFirstFrame: true,
+          maxConditioningImages: 0,
+          silentOutput: true,
+        },
+      },
+      {
+        choiceId: 'route_video_audio',
+        providerId: 'provider_video',
+        providerName: 'Video provider',
+        model: 'audio-video-model',
+        integrationLabelKey: 'openRouterVideo',
+        health: 'available',
+        kind: 'video',
+        constraints: {
+          aspectRatios: ['16:9'],
+          resolutions: ['720p'],
+          minDurationSeconds: 4,
+          maxDurationSeconds: 12,
+          supportsFirstFrame: true,
+          maxConditioningImages: 0,
+          silentOutput: false,
+        },
       },
     ],
   },
@@ -1128,6 +1170,28 @@ describe('WorkspaceProjectMenu', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: REFRESH_ROUTES }));
 
     expect(refreshRoutes).toHaveBeenCalledTimes(1);
+    expect(applyAuthoring).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes silent-only and audio-capable video routes before saving the Film setup draft', async () => {
+    const { callbacks, applyAuthoring } = makeMutations();
+    render(<MenuHarness mutations={callbacks} routeCatalog={readyRouteCatalog} />);
+    const dialog = await openBriefAndRules();
+
+    const initialCapability = dialog.querySelector<HTMLElement>('[data-video-route-audio-capability]');
+    expect(initialCapability).toHaveAttribute('data-video-route-audio-capability', 'none');
+    expect(initialCapability).toHaveTextContent(
+      'conversation.creativeStudio.workspace.controls.videoAudioCapability.silentOnly'
+    );
+
+    fireEvent.click(within(dialog).getByRole('combobox', { name: VIDEO_ROUTE }));
+    fireEvent.click(await screen.findByRole('option', { name: 'Video provider · audio-video-model' }));
+
+    const audioCapability = dialog.querySelector<HTMLElement>('[data-video-route-audio-capability]');
+    expect(audioCapability).toHaveAttribute('data-video-route-audio-capability', 'audio');
+    expect(audioCapability).toHaveTextContent(
+      'conversation.creativeStudio.workspace.controls.videoAudioCapability.audioCapable'
+    );
     expect(applyAuthoring).not.toHaveBeenCalled();
   });
 

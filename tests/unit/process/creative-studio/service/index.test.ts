@@ -137,6 +137,33 @@ const createStudioMcpProtocolHarnessV2 = async (
   };
 };
 
+const proposalOperationVariant = (schema: unknown, operationKind: string): Record<string, unknown> | null => {
+  if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) return null;
+  const properties = Reflect.get(schema, 'properties');
+  if (properties === null || typeof properties !== 'object' || Array.isArray(properties)) return null;
+  const operations = Reflect.get(properties, 'operations');
+  if (operations === null || typeof operations !== 'object' || Array.isArray(operations)) return null;
+  const items = Reflect.get(operations, 'items');
+  if (items === null || typeof items !== 'object' || Array.isArray(items)) return null;
+  const candidates = Reflect.get(items, 'oneOf') ?? Reflect.get(items, 'anyOf');
+  if (!Array.isArray(candidates)) return null;
+  return (
+    candidates.find((candidate): candidate is Record<string, unknown> => {
+      if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) return false;
+      const candidateProperties = Reflect.get(candidate, 'properties');
+      if (candidateProperties === null || typeof candidateProperties !== 'object' || Array.isArray(candidateProperties))
+        return false;
+      const kind = Reflect.get(candidateProperties, 'kind');
+      return (
+        kind !== null &&
+        typeof kind === 'object' &&
+        !Array.isArray(kind) &&
+        Reflect.get(kind, 'const') === operationKind
+      );
+    }) ?? null
+  );
+};
+
 const SERVICE_REFERENCE_AUTHORIZATION_ID = 'authorization_reference_background';
 const SERVICE_REFERENCE_JOB_ID = 'job_reference_background';
 
@@ -549,6 +576,7 @@ describe('CreativeStudioServiceV2', () => {
       importReferenceImageFromPathV2?: StudioMediaStore['importReferenceImageFromPathV2'];
       importBedAudioFromPathV2?: StudioMediaStore['importBedAudioFromPathV2'];
       detachBedAudioV2?: StudioMediaStore['detachBedAudioV2'];
+      analyzeVideoAudioV2?: StudioMediaStore['analyzeVideoAudioV2'];
     } = {}
   ) => {
     let current = structuredClone(project);
@@ -908,6 +936,13 @@ describe('CreativeStudioServiceV2', () => {
     const verifyConditioningFrameV2 = options.verifyConditioningFrameV2 ?? vi.fn(async () => null);
     const resolveAssetV2 = options.resolveAssetV2 ?? vi.fn(async () => null);
     const resolveAssetWithProjectAuthorityV2 = options.resolveAssetWithProjectAuthorityV2 ?? vi.fn(async () => null);
+    const analyzeVideoAudioV2 =
+      options.analyzeVideoAudioV2 ??
+      vi.fn<StudioMediaStore['analyzeVideoAudioV2']>(async () => ({
+        status: 'unavailable',
+        meanVolumeDbfs: null,
+        peakVolumeDbfs: null,
+      }));
     const providerResolver = {
       listConnectionCandidates: vi.fn(async () => [
         {
@@ -1030,6 +1065,7 @@ describe('CreativeStudioServiceV2', () => {
               verifyConditioningFrameV2,
               resolveAssetV2,
               resolveAssetWithProjectAuthorityV2,
+              analyzeVideoAudioV2,
             } as never,
           }),
       onProjectUpdated,
@@ -1052,6 +1088,7 @@ describe('CreativeStudioServiceV2', () => {
       verifyConditioningFrameV2,
       resolveAssetV2,
       resolveAssetWithProjectAuthorityV2,
+      analyzeVideoAudioV2,
       providerResolver,
       onProjectUpdated,
       proposal,
@@ -5341,6 +5378,161 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.importBedAudioFromPathV2).not.toHaveBeenCalled();
   });
 
+  it('analyzes only exact current Shot assets at the requested revision and caches by asset content', async () => {
+    const project = makeSchema2ServiceProject();
+    const attachVideo = (target: StudioProjectV2, assetId: string, sha256: string): void => {
+      const shot = target.shots.clip_1!;
+      if (shot.videoAssetId !== null) shot.supersededVideoAssetIds.push(shot.videoAssetId);
+      shot.videoAssetId = assetId;
+      shot.assetIds.push(assetId);
+      target.assets[assetId] = {
+        id: assetId,
+        projectId: target.id,
+        shotId: shot.id,
+        mediaKind: 'video',
+        mimeType: 'video/mp4',
+        managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
+        byteSize: 128,
+        sha256,
+        durationSeconds: 5,
+        createdAt: '2026-08-17T00:00:01.000Z',
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: null,
+        compositionDigest: null,
+      };
+    };
+    attachVideo(project, 'take_audio_1', 'c'.repeat(64));
+    const analyzeVideoAudioV2 = vi.fn<StudioMediaStore['analyzeVideoAudioV2']>(async (_projectId, assetId) =>
+      assetId === 'take_audio_1'
+        ? { status: 'audible', meanVolumeDbfs: -21, peakVolumeDbfs: -3 }
+        : { status: 'no_audio_stream', meanVolumeDbfs: null, peakVolumeDbfs: null }
+    );
+    const harness = makeHarness(project, { analyzeVideoAudioV2 });
+    const firstRequest = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      shots: [{ shotId: 'clip_1', assetId: 'take_audio_1' }],
+    };
+
+    const [first, duplicate] = await Promise.all([
+      harness.service.analyzeShotAudio(firstRequest),
+      harness.service.analyzeShotAudio(firstRequest),
+    ]);
+    expect(first).toEqual({
+      projectId: project.id,
+      projectRevision: project.revision,
+      profile: 'effective-loudness-v1',
+      shots: [
+        {
+          shotId: 'clip_1',
+          assetId: 'take_audio_1',
+          status: 'audible',
+          meanVolumeDbfs: -21,
+          peakVolumeDbfs: -3,
+        },
+      ],
+    });
+    expect(duplicate).toEqual(first);
+    expect(analyzeVideoAudioV2).toHaveBeenCalledExactlyOnceWith(project.id, 'take_audio_1');
+
+    const replacement = harness.getProject();
+    replacement.revision += 1;
+    attachVideo(replacement, 'take_audio_2', 'd'.repeat(64));
+    harness.setProject(replacement);
+    await expect(harness.service.analyzeShotAudio(firstRequest)).rejects.toMatchObject({ code: 'stale_project' });
+    await expect(
+      harness.service.analyzeShotAudio({
+        ...firstRequest,
+        expectedRevision: replacement.revision,
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    await expect(
+      harness.service.analyzeShotAudio({
+        projectId: project.id,
+        expectedRevision: replacement.revision,
+        shots: [{ shotId: 'clip_1', assetId: 'take_audio_2' }],
+      })
+    ).resolves.toMatchObject({
+      projectRevision: replacement.revision,
+      shots: [{ shotId: 'clip_1', assetId: 'take_audio_2', status: 'no_audio_stream' }],
+    });
+    expect(analyzeVideoAudioV2).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects malformed or duplicate Shot audio analysis targets before probing media', async () => {
+    const project = makeSchema2ServiceProject();
+    const harness = makeHarness(project);
+    const base = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      shots: [{ shotId: 'clip_1', assetId: 'take_audio_1' }],
+    };
+    const sparse: unknown[] = [];
+    sparse.length = 1;
+    const attempts = [
+      null,
+      { ...base, internal: true },
+      { ...base, shots: [] },
+      { ...base, shots: sparse },
+      { ...base, shots: [{ ...base.shots[0], internal: true }] },
+      { ...base, shots: [...base.shots, { shotId: 'clip_1', assetId: 'take_audio_2' }] },
+    ];
+
+    for (const input of attempts) {
+      // eslint-disable-next-line no-await-in-loop -- each hostile query envelope must fail independently.
+      await expect(harness.service.analyzeShotAudio(input as never)).rejects.toMatchObject({
+        code: 'invalid_payload',
+      });
+    }
+    expect(harness.analyzeVideoAudioV2).not.toHaveBeenCalled();
+    expect(harness.store.getProjectV2).not.toHaveBeenCalled();
+  });
+
+  it('returns unavailable without inventing an audio fact when the media analyzer is absent or fails', async () => {
+    const project = makeSchema2ServiceProject();
+    const asset: StudioAssetV2 = {
+      id: 'take_audio_unavailable',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'take_audio_unavailable.mp4' },
+      byteSize: 128,
+      sha256: 'e'.repeat(64),
+      durationSeconds: 5,
+      createdAt: '2026-08-17T00:00:01.000Z',
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
+    };
+    project.assets[asset.id] = asset;
+    project.shots.clip_1!.videoAssetId = asset.id;
+    project.shots.clip_1!.assetIds.push(asset.id);
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      shots: [{ shotId: 'clip_1', assetId: asset.id }],
+    };
+    const absent = makeHarness(project, { includeMediaStore: false });
+    const rejectedProbe = vi.fn<StudioMediaStore['analyzeVideoAudioV2']>(async () => {
+      throw new Error('ffmpeg unavailable');
+    });
+    const failed = makeHarness(project, { analyzeVideoAudioV2: rejectedProbe });
+
+    await expect(absent.service.analyzeShotAudio(request)).resolves.toMatchObject({
+      shots: [{ status: 'unavailable', meanVolumeDbfs: null, peakVolumeDbfs: null }],
+    });
+    await expect(failed.service.analyzeShotAudio(request)).resolves.toMatchObject({
+      shots: [{ status: 'unavailable', meanVolumeDbfs: null, peakVolumeDbfs: null }],
+    });
+    await expect(failed.service.analyzeShotAudio(request)).resolves.toMatchObject({
+      shots: [{ status: 'unavailable' }],
+    });
+    expect(rejectedProbe).toHaveBeenCalledTimes(2);
+  });
+
   it('admits only an exact fresh paid blocker, records a bounded quote, and performs no spend or project write', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
@@ -9097,6 +9289,19 @@ describe('Studio MCP schema-2 server', () => {
       expect(applyTool?.description).toMatch(/capability preflight remains a fail-closed backstop/i);
       expect(applyTool?.description).toMatch(/whole proposal-eligible subset to propose_storyboard/i);
       expect(applyTool?.description).toMatch(/only when the direct subset is independently valid/i);
+      expect(proposalTool?.description).toMatch(/every shootingScript/i);
+      expect(proposalTool?.description).toMatch(/what is seen and heard/i);
+      expect(proposalTool?.description).toMatch(/narration, dialogue, ambience, and discrete sound hits/i);
+
+      const proposalSchemaText = JSON.stringify(proposalTool?.inputSchema);
+      for (const operationKind of ['add_shot', 'edit_shot', 'apply_coverage']) {
+        const operationVariant = proposalOperationVariant(proposalTool?.inputSchema, operationKind);
+        expect(JSON.stringify(operationVariant), operationKind).toMatch(/what is seen and heard/i);
+        expect(JSON.stringify(operationVariant), operationKind).toMatch(
+          /narration, dialogue, ambience, and discrete sound hits/i
+        );
+      }
+      expect(proposalSchemaText).not.toMatch(/new Shot sound field/i);
     } finally {
       await harness.close();
       await rm(projectDir, { recursive: true, force: true });

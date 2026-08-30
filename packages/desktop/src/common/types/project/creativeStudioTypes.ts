@@ -1168,6 +1168,41 @@ export type StudioAssetV2 = {
   compositionDigest: string | null;
 };
 
+/** Read-only file analysis; this profile is independent from the project schema. */
+export const STUDIO_SHOT_AUDIO_ANALYSIS_PROFILE_V1 = 'effective-loudness-v1' as const;
+export const STUDIO_EFFECTIVE_SILENCE_MEAN_DBFS_V1 = -45;
+export const STUDIO_EFFECTIVE_SILENCE_PEAK_DBFS_V1 = -30;
+
+export type StudioVideoAudioContentAnalysisV2 =
+  | {
+      status: 'audible' | 'effectively_silent';
+      meanVolumeDbfs: number | null;
+      peakVolumeDbfs: number | null;
+    }
+  | {
+      status: 'no_audio_stream' | 'unavailable';
+      meanVolumeDbfs: null;
+      peakVolumeDbfs: null;
+    };
+
+export type StudioShotAudioAnalysisRequestV2 = {
+  projectId: string;
+  expectedRevision: number;
+  shots: Array<{ shotId: string; assetId: string }>;
+};
+
+export type StudioShotAudioAnalysisV2 = StudioVideoAudioContentAnalysisV2 & {
+  shotId: string;
+  assetId: string;
+};
+
+export type StudioShotAudioAnalysisResultV2 = {
+  projectId: string;
+  projectRevision: number;
+  profile: typeof STUDIO_SHOT_AUDIO_ANALYSIS_PROFILE_V1;
+  shots: StudioShotAudioAnalysisV2[];
+};
+
 export const STUDIO_EXPORT_SHAPES = ['editor_folder', 'still', 'script', 'film'] as const;
 export type StudioExportShapeV2 = (typeof STUDIO_EXPORT_SHAPES)[number];
 

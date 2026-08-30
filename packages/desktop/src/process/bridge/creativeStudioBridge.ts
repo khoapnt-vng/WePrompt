@@ -1181,4 +1181,7 @@ export function initCreativeStudioBridge(dependencies: CreativeStudioBridgeDepen
   ipcBridge.creativeStudio.getProjectStatus.provider((input) =>
     runCommand(() => dependencies.getService().getProjectStatus(input))
   );
+  ipcBridge.creativeStudio.analyzeShotAudio.provider((input) =>
+    runCommand(() => dependencies.getService().analyzeShotAudio(input))
+  );
 }

@@ -40,6 +40,7 @@ export type BoardShotTile = {
   seedAuthorizationLocked: boolean;
   status: WorkspaceShotStatus;
   chain: BoardShotTileChain;
+  currentVideoAssetId: string | null;
   media: BoardShotTileMedia;
   blockersAvailable: boolean;
   blockers: BoardShotTileBlocker[];
@@ -254,6 +255,7 @@ export const deriveBoardShotTiles = (
         chain: shot.segmentHead
           ? { kind: 'head' }
           : { kind: 'after', beatPosition: beatIndex + 1, shotPosition: shotIndex },
+        currentVideoAssetId: shot.currentPicture?.assetId ?? null,
         media: shotMedia(shot),
         blockersAvailable: status !== null,
         blockers: status === null ? [] : tileBlockers(status, position),

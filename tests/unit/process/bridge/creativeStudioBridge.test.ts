@@ -54,6 +54,7 @@ const providerNames = [
   'undoLast',
   'getProjectWorkspace',
   'getProjectStatus',
+  'analyzeShotAudio',
   'retryConditioningFrame',
   'cancelWaitingCascade',
   'editProject',
@@ -117,6 +118,7 @@ const mocks = vi.hoisted(() => ({
       'undoLast',
       'getProjectWorkspace',
       'getProjectStatus',
+      'analyzeShotAudio',
       'retryConditioningFrame',
       'cancelWaitingCascade',
       'editProject',
@@ -396,6 +398,20 @@ const createService = () =>
       },
     })),
     getProjectStatus: vi.fn(async () => projectStatus),
+    analyzeShotAudio: vi.fn(async () => ({
+      projectId: 'project_1',
+      projectRevision: 8,
+      profile: 'effective-loudness-v1' as const,
+      shots: [
+        {
+          shotId: 'shot_1',
+          assetId: 'take_1',
+          status: 'effectively_silent' as const,
+          meanVolumeDbfs: -48,
+          peakVolumeDbfs: -34,
+        },
+      ],
+    })),
     retryConditioningFrame: vi.fn(async () => workspaceStatus),
     cancelWaitingCascade: vi.fn(async () => workspaceStatus),
     deleteProject: vi.fn(async () => true),
@@ -769,6 +785,34 @@ describe('initCreativeStudioBridge', () => {
     });
     expect(service.getProjectStatus).toHaveBeenCalledExactlyOnceWith(input);
     expect(service.applyMutations).not.toHaveBeenCalled();
+  });
+
+  it('forwards the revision-bound Shot audio analysis query through the command envelope', async () => {
+    initCreativeStudioBridge(dependencies);
+    const input = {
+      projectId: 'project_1',
+      expectedRevision: 8,
+      shots: [{ shotId: 'shot_1', assetId: 'take_1' }],
+    };
+
+    await expect(registeredHandler('analyzeShotAudio')(input as never)).resolves.toEqual({
+      ok: true,
+      data: {
+        projectId: 'project_1',
+        projectRevision: 8,
+        profile: 'effective-loudness-v1',
+        shots: [
+          {
+            shotId: 'shot_1',
+            assetId: 'take_1',
+            status: 'effectively_silent',
+            meanVolumeDbfs: -48,
+            peakVolumeDbfs: -34,
+          },
+        ],
+      },
+    });
+    expect(service.analyzeShotAudio).toHaveBeenCalledExactlyOnceWith(input);
   });
 
   it('forwards the ephemeral project revision catalog through the library query', async () => {

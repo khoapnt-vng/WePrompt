@@ -341,6 +341,16 @@ const studioV2MutationRequestShape = {
   projectId: safeIdSchema,
   expectedRevision: studioExpectedRevisionSchema,
 };
+const studioV2ShotAudioAnalysisSchema = z
+  .object({
+    ...studioV2MutationRequestShape,
+    shots: z
+      .array(z.object({ shotId: safeIdSchema, assetId: safeIdSchema }).strict())
+      .min(1)
+      .max(STUDIO_MAX_SHOTS_PER_PROJECT)
+      .refine((shots) => new Set(shots.map(({ shotId }) => shotId)).size === shots.length),
+  })
+  .strict();
 const studioGenerationCapabilityItemSchema = z.union([
   z
     .object({
@@ -995,6 +1005,7 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.undo-last': z.object({ ...studioV2MutationRequestShape, entryId: safeIdSchema }).strict(),
   'creative-studio.get-project-workspace': studioV2ProjectRequestSchema,
   'creative-studio.get-project-status': studioV2ProjectStatusRequestSchema,
+  'creative-studio.analyze-shot-audio': studioV2ShotAudioAnalysisSchema,
   'creative-studio.retry-conditioning-frame': z
     .object({ ...studioV2MutationRequestShape, dependentShotId: safeIdSchema })
     .strict(),

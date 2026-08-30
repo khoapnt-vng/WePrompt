@@ -16,8 +16,11 @@ import type {
   StudioFrameExtraction,
   StudioJobPurpose,
   StudioProjectV2,
+  StudioVideoAudioContentAnalysisV2,
 } from '@/common/types/project/creativeStudioTypes';
 import {
+  STUDIO_EFFECTIVE_SILENCE_MEAN_DBFS_V1,
+  STUDIO_EFFECTIVE_SILENCE_PEAK_DBFS_V1,
   STUDIO_MAX_IMAGE_ASSET_BYTES_V2,
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION,
@@ -418,6 +421,7 @@ export type StudioMediaStore = {
   persistProviderPosterFromUrlForJobV2(input: PersistProviderJobPosterUrlInputV2): Promise<StudioAssetV2>;
   persistCapturedPosterV2(input: PersistCapturedPosterInputV2): Promise<StudioAssetV2>;
   resolveAssetV2(projectId: string, assetId: string): Promise<StudioResolvedAssetV2 | null>;
+  analyzeVideoAudioV2(projectId: string, assetId: string): Promise<StudioVideoAudioContentAnalysisV2>;
   /** Resolves media while the caller already owns the Store project queue; never re-enters that queue. */
   resolveAssetWithProjectAuthorityV2(
     authority: Pick<StudioProjectAuthoritySnapshotV2, 'project' | 'projectDir' | 'assertCurrent'>,
@@ -465,6 +469,10 @@ export type StudioMediaStoreDeps = {
   afterV2ManagedDirectorySync?: (directory: string) => void | Promise<void>;
   /** V2 video duration is decoded from the finalized managed bytes, never trusted from provider metadata. */
   probeVideoDurationSecondsV2?: (input: { filePath: string; byteSize: number; sha256: string }) => Promise<number>;
+  /** Read-only test seam; production analyzes verified bytes with the resolved ffmpeg pair. */
+  probeVideoAudioContentV2?: (input: {
+    openVerifiedStream: () => Promise<Readable>;
+  }) => Promise<StudioVideoAudioContentAnalysisV2>;
   /** Rejects multi-panel provider images before they can become a current first frame or reference. */
   detectImageVariationGridV2?: (input: { filePath: string; detectRepeatedSubjects: boolean }) => Promise<boolean>;
   /** V2 bed metadata is decoded from finalized managed bytes and must describe one audio-only stream. */
@@ -1187,6 +1195,157 @@ const digestOpenedFile = async (handle: Awaited<ReturnType<typeof fs.open>>): Pr
   }
 };
 
+type StudioAudioInspectionChildResultV2 = { stdout: string; stderr: string };
+
+const runAudioInspectionChildV2 = async (
+  binary: string,
+  args: readonly string[],
+  input: Readable
+): Promise<StudioAudioInspectionChildResultV2> =>
+  new Promise<StudioAudioInspectionChildResultV2>((resolve, reject) => {
+    const child = spawn(binary, [...args], {
+      detached: studioChildProcessDetached(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    let failed = false;
+    let termination: Promise<void> | null = null;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      input.destroy();
+      if (error) reject(error);
+      else resolve({ stdout, stderr });
+    };
+    const terminate = (): void => {
+      if (termination !== null) return;
+      termination = terminateStudioChildProcessTree(child, { nativeChild: true }).catch((): void => {
+        failed = true;
+      });
+      void termination.then(() => {
+        if (!settled && failed) finish(new CreativeStudioMediaError('invalid_media'));
+      });
+    };
+    const timer = setTimeout(() => {
+      failed = true;
+      terminate();
+    }, 60_000);
+    timer.unref?.();
+    const append = (current: string, chunk: Buffer): string | null =>
+      current.length + chunk.length > 64 * 1024 ? null : current + chunk.toString('utf8');
+    child.stdout.on('data', (chunk: Buffer) => {
+      const next = append(stdout, chunk);
+      if (next === null) {
+        failed = true;
+        terminate();
+      } else stdout = next;
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      const next = append(stderr, chunk);
+      if (next === null) {
+        failed = true;
+        terminate();
+      } else stderr = next;
+    });
+    child.stdout.on('error', () => {
+      failed = true;
+      terminate();
+    });
+    child.stderr.on('error', () => {
+      failed = true;
+      terminate();
+    });
+    child.once('error', () => {
+      failed = true;
+      terminate();
+    });
+    if (child.stdin === null) {
+      failed = true;
+      terminate();
+    } else {
+      void pipeline(input, child.stdin).catch(() => {
+        if (settled) return;
+        failed = true;
+        terminate();
+      });
+    }
+    child.once('close', (code, signal) => {
+      void (async (): Promise<void> => {
+        await termination;
+        if (settled) return;
+        if (failed || code !== 0 || signal !== null) {
+          finish(new CreativeStudioMediaError('invalid_media'));
+          return;
+        }
+        finish();
+      })();
+    });
+  });
+
+export const classifyStudioVideoAudioLoudnessV2 = (
+  meanVolumeDbfs: number | null,
+  peakVolumeDbfs: number | null
+): StudioVideoAudioContentAnalysisV2 => ({
+  status:
+    (meanVolumeDbfs === null || meanVolumeDbfs <= STUDIO_EFFECTIVE_SILENCE_MEAN_DBFS_V1) &&
+    (peakVolumeDbfs === null || peakVolumeDbfs <= STUDIO_EFFECTIVE_SILENCE_PEAK_DBFS_V1)
+      ? 'effectively_silent'
+      : 'audible',
+  meanVolumeDbfs,
+  peakVolumeDbfs,
+});
+
+const parsedVolumeDbfsV2 = (
+  output: string,
+  field: 'mean_volume' | 'max_volume'
+): { found: boolean; value: number | null } => {
+  const match = output.match(new RegExp(`${field}:\\s*(-inf|-?\\d+(?:\\.\\d+)?)\\s*dB`, 'iu'));
+  if (match === null) return { found: false, value: null };
+  if (match[1]?.toLowerCase() === '-inf') return { found: true, value: null };
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? { found: true, value } : { found: false, value: null };
+};
+
+const defaultProbeVideoAudioContentV2 = async (input: {
+  openVerifiedStream: () => Promise<Readable>;
+  ffprobeBinary: string;
+  ffmpegBinary: string;
+}): Promise<StudioVideoAudioContentAnalysisV2> => {
+  try {
+    const streams = await runAudioInspectionChildV2(
+      input.ffprobeBinary,
+      ['-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', 'pipe:0'],
+      await input.openVerifiedStream()
+    );
+    const audioStreams = streams.stdout
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean);
+    if (audioStreams.length === 0) {
+      return { status: 'no_audio_stream', meanVolumeDbfs: null, peakVolumeDbfs: null };
+    }
+    if (audioStreams.length !== 1) {
+      return { status: 'unavailable', meanVolumeDbfs: null, peakVolumeDbfs: null };
+    }
+    const loudness = await runAudioInspectionChildV2(
+      input.ffmpegBinary,
+      ['-hide_banner', '-nostdin', '-i', 'pipe:0', '-map', '0:a:0', '-af', 'volumedetect', '-f', 'null', '-'],
+      await input.openVerifiedStream()
+    );
+    const mean = parsedVolumeDbfsV2(loudness.stderr, 'mean_volume');
+    const peak = parsedVolumeDbfsV2(loudness.stderr, 'max_volume');
+    return mean.found && peak.found
+      ? classifyStudioVideoAudioLoudnessV2(mean.value, peak.value)
+      : { status: 'unavailable', meanVolumeDbfs: null, peakVolumeDbfs: null };
+  } catch {
+    return { status: 'unavailable', meanVolumeDbfs: null, peakVolumeDbfs: null };
+  }
+};
+
 const runFfprobeDurationV2 = async (binary: string, handle: Awaited<ReturnType<typeof fs.open>>): Promise<number> =>
   new Promise<number>((resolve, reject) => {
     const child = spawn(
@@ -1587,6 +1746,14 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       defaultProbeVideoDurationSecondsV2({
         ...input,
         ffprobeBinary: ffmpegBinaries.ffprobe,
+      }));
+  const probeVideoAudioContentV2 =
+    deps.probeVideoAudioContentV2 ??
+    ((input: { openVerifiedStream: () => Promise<Readable> }) =>
+      defaultProbeVideoAudioContentV2({
+        ...input,
+        ffprobeBinary: ffmpegBinaries.ffprobe,
+        ffmpegBinary: ffmpegBinaries.ffmpeg,
       }));
   const probeBedAudioV2 =
     deps.probeBedAudioV2 ??
@@ -3460,6 +3627,26 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     return resolveAssetFromContextV2(await loadCurrentContext(), assetId, loadCurrentContext);
   };
 
+  const analyzeVideoAudioV2 = async (
+    projectId: string,
+    assetId: string
+  ): Promise<StudioVideoAudioContentAnalysisV2> => {
+    const resolved = await resolveAssetV2(projectId, assetId);
+    if (
+      resolved === null ||
+      resolved.asset.mediaKind !== 'video' ||
+      resolved.asset.shotId === null ||
+      !resolved.asset.mimeType.startsWith('video/')
+    ) {
+      return { status: 'unavailable', meanVolumeDbfs: null, peakVolumeDbfs: null };
+    }
+    try {
+      return await probeVideoAudioContentV2({ openVerifiedStream: () => resolved.openVerifiedStream() });
+    } catch {
+      return { status: 'unavailable', meanVolumeDbfs: null, peakVolumeDbfs: null };
+    }
+  };
+
   const resolveAssetWithProjectAuthorityV2 = async (
     authority: Pick<StudioProjectAuthoritySnapshotV2, 'project' | 'projectDir' | 'assertCurrent'>,
     assetId: string
@@ -4642,6 +4829,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     persistProviderPosterFromUrlForJobV2,
     persistCapturedPosterV2,
     resolveAssetV2,
+    analyzeVideoAudioV2,
     resolveAssetWithProjectAuthorityV2,
     resolveProviderInputV2,
     extractConditioningFrameV2,

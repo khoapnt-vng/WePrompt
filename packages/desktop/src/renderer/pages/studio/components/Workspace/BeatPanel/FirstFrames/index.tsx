@@ -12,6 +12,8 @@ import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
+import { StudioShotAudioStatus } from '@/renderer/pages/studio/components/PlaybackAudio';
+import { useStudioPlaybackAudio } from '@/renderer/pages/studio/hooks/useStudioPlaybackAudio';
 import { copyText } from '@/renderer/utils/ui/clipboard';
 
 import type { BeatPanelActions, BeatPanelImportResult } from '..';
@@ -112,10 +114,12 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   showGenerationAction = true,
 }) => {
   const { t } = useTranslation();
+  const { muted, syncFromMedia, volume } = useStudioPlaybackAudio();
   const [viewer, setViewer] = useState<ViewerState>(null);
   const [importing, setImporting] = useState(false);
   const [working, setWorking] = useState(false);
   const posterCapturesRef = useRef(new Set<string>());
+  const reviewedVideoRef = useRef<HTMLVideoElement | null>(null);
   // Workspace projection is authoritative. Empty fallbacks keep a stale renderer
   // snapshot fail-closed while Main refreshes it after a schema cutover.
   const frames = shot.firstFrames ?? [];
@@ -128,6 +132,12 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   useEffect(() => {
     setViewer(null);
   }, [projectId, shot.id]);
+
+  useEffect(() => {
+    if (reviewedVideoRef.current === null) return;
+    reviewedVideoRef.current.muted = muted;
+    reviewedVideoRef.current.volume = volume;
+  }, [muted, viewer, volume]);
 
   useEffect(() => {
     if (viewer === null) return;
@@ -387,6 +397,7 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
               {currentPicture.posterAssetId === null ? (
                 <video
                   aria-label={t(`${KEY_ROOT}.pictureAlt`, { shot: shotIndex + 1 })}
+                  muted
                   onCanPlay={(event) => void persistPoster(event.currentTarget, currentPicture)}
                   onLoadedData={(event) => void persistPoster(event.currentTarget, currentPicture)}
                   preload='auto'
@@ -427,6 +438,7 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
             {currentPicture.promptChanged ? (
               <span className={styles.changedTag}>{t(`${KEY_ROOT}.promptChanged`)}</span>
             ) : null}
+            <StudioShotAudioStatus assetId={currentPicture.assetId} shotId={shot.id} />
           </article>
         )}
         {showGenerationAction ? (
@@ -491,7 +503,17 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
                 {viewer.kind === 'frame' ? (
                   <img alt={t(`${KEY_ROOT}.previewAlt`, { label: viewer.index + 1 })} src={viewedUrl} />
                 ) : (
-                  <video controls preload='metadata' src={viewedUrl} />
+                  <video
+                    ref={reviewedVideoRef}
+                    controls
+                    muted={muted}
+                    onVolumeChange={(event) =>
+                      syncFromMedia({ muted: event.currentTarget.muted, volume: event.currentTarget.volume })
+                    }
+                    playsInline
+                    preload='metadata'
+                    src={viewedUrl}
+                  />
                 )}
               </FullscreenMediaFrame>
               {viewer.kind === 'frame' ? (

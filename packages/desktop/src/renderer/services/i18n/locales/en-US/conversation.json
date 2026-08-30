@@ -1635,6 +1635,7 @@
           "pause": "Pause film",
           "position": "{{current}} / {{total}}",
           "pictureOnly": "Picture only — the bed is muted here",
+          "shotAudioOnly": "Shot audio only — the music bed is excluded from this preview",
           "controlsLabel": "Film transport",
           "seekLabel": "Film seek rail",
           "previousJoin": "Previous join",
@@ -1769,6 +1770,21 @@
           "statusUnavailable": "Refresh the current workspace status before restoring this item.",
           "ownerUnavailable": "The recorded owner Beat is unavailable.",
           "anchorUnavailable": "No valid current restore position is available."
+        }
+      },
+      "playbackAudio": {
+        "label": "Playback sound",
+        "mute": "Mute",
+        "unmute": "Unmute",
+        "muted": "Muted",
+        "audible": "Sound on",
+        "volume": "Playback volume: {{percent}}%",
+        "shotStatus": {
+          "analyzing": "Analyzing Shot audio…",
+          "audible": "Audible sound",
+          "effectivelySilent": "Effectively silent",
+          "noAudioStream": "No audio stream",
+          "unavailable": "Audio analysis unavailable"
         }
       },
       "shotStatus": {
@@ -2291,6 +2307,10 @@
         "brief": "Project brief",
         "imageRoute": "Image route",
         "videoRoute": "Video route",
+        "videoAudioCapability": {
+          "silentOnly": "This engine produces silent clips.",
+          "audioCapable": "This engine can generate sound; the finished Shot is analyzed separately."
+        },
         "spendCurrency": "Policy currency",
         "spendCap": "Maximum per batch (major units; leave empty to clear)",
         "saveBrief": "Save film setup",

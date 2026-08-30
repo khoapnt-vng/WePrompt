@@ -10,6 +10,8 @@ import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import { FullscreenMediaFrame } from '@/renderer/pages/studio/components/FullscreenMediaFrame';
+import { StudioPlaybackAudioControl } from '@/renderer/pages/studio/components/PlaybackAudio';
+import { useStudioPlaybackAudio } from '@/renderer/pages/studio/hooks/useStudioPlaybackAudio';
 
 import type { WorkspaceBeatProjection, WorkspaceProjection } from '../workspaceProjection';
 import styles from './BeatPanel.module.css';
@@ -127,6 +129,7 @@ const isEditableDescendant = (target: EventTarget | null, root: HTMLElement): bo
 /** Owns truthful current-picture/slate playback and exposes a controlled Beat seek position. */
 export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspector, projectId, projection }) => {
   const { t } = useTranslation();
+  const { muted, syncFromMedia, volume } = useStudioPlaybackAudio();
   const keyboardGuidanceId = useId();
   const sequence = useMemo(() => buildBeatPlaybackSequence(projectId, beat, projection), [beat, projectId, projection]);
   const planToken = useMemo(() => JSON.stringify({ projectId, sequence }), [projectId, sequence]);
@@ -136,6 +139,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   const [storedPrewarmTarget, setStoredPrewarmTarget] = useState<PrewarmTarget | null>(null);
   const prewarmTarget = storedPrewarmTarget?.token === planToken ? storedPrewarmTarget : null;
   const stateRef = useRef(state);
+  const playbackAudioRef = useRef({ muted, volume });
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const prewarmVideoRef = useRef<HTMLVideoElement | null>(null);
   const readyMediaRef = useRef<ReadyMedia | null>(null);
@@ -154,6 +158,14 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
     activeTokenRef.current = planToken;
     stateRef.current = state;
   }, [planToken, state]);
+
+  useLayoutEffect(() => {
+    playbackAudioRef.current = { muted, volume };
+    if (videoRef.current !== null) {
+      videoRef.current.muted = muted;
+      videoRef.current.volume = volume;
+    }
+  }, [muted, volume]);
 
   const invalidatePlayAttempt = useCallback((): void => {
     playAttemptIdRef.current += 1;
@@ -288,6 +300,10 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
         }
       }
       videoRef.current = node;
+      if (node !== null) {
+        node.muted = playbackAudioRef.current.muted;
+        node.volume = playbackAudioRef.current.volume;
+      }
     },
     [stopMediaBoundaryWatch]
   );
@@ -910,7 +926,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
                   className={styles.previewMedia}
                   data-beat-preview-media
                   data-media-kind='video'
-                  muted
+                  muted={muted}
                   playsInline
                   poster={posterSource ?? undefined}
                   preload='metadata'
@@ -926,6 +942,9 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
                   }}
                   onError={(event) => failMedia(planToken, state.segmentIndex, event.currentTarget)}
                   onLoadedMetadata={(event) => onLoadedMetadata(event.currentTarget, segment)}
+                  onVolumeChange={(event) =>
+                    syncFromMedia({ muted: event.currentTarget.muted, volume: event.currentTarget.volume })
+                  }
                   onPlaying={(event) => {
                     const media = event.currentTarget;
                     const current = stateRef.current;
@@ -1030,7 +1049,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
             <output aria-live='off' className={styles.transportTime} data-beat-time role='timer'>
               <bdi dir='auto'>{t(`${PREVIEW_ROOT}.position`, { current: currentClock, total: totalClock })}</bdi>
             </output>
-            <span className={styles.pictureOnly}>{t(`${PREVIEW_ROOT}.pictureOnly`)}</span>
+            <StudioPlaybackAudioControl />
             <Button
               aria-label={t(`${PREVIEW_ROOT}.previousJoin`)}
               data-beat-previous-join

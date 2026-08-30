@@ -59,22 +59,28 @@ BUG-142/167/169 lesson: a control that implies something untrue is worse than no
 
 ### Slices
 
-**S1 — Make sound audible in review.** _(small)_
+**S1 — Make sound audible in review.** _(implemented 2026-08-30)_
 Remove the hardcoded `muted` from the three players; add a mute/volume control that persists per
 project, defaulting to **muted** so nothing surprises the owner mid-session. Do not autoplay with
 sound. This alone makes the `−18.6 dB` Shot above audible for the first time.
 
-**S2 — Say whether a Shot has sound.** _(small)_
+**S2 — Say whether a Shot has sound.** _(implemented 2026-08-30)_
 Two distinct facts, and they must not be conflated: the bound route is silent-only
 (`silentOutput`), or the route supports audio but this Shot's stream is effectively silent. The
 first is knowable before generating and belongs next to the binding; the second is a property of
 the file. Reuse the `audioModes` capability already catalogued.
 
-**S3 — The Director writes sound into the script.** _(small, prompt-side)_
+**S3 — The Director writes sound into the script.** _(implemented 2026-08-30)_
 Extend the Director's drafting instructions so a shooting script carries what is heard as well as
 what is seen — narration, dialogue, ambience, hits. No schema change (D1). Note the constraint from
 memory: KB/tool output is user-visible in the work journal, so model-facing guidance belongs in the
 **tool description**, not in emitted text.
+
+The file-level status uses a migration-free, read-only analysis profile independent from the project
+schema. It classifies a take as effectively silent only when its mean is at or below −45 dBFS and its
+peak is at or below −30 dBFS; missing streams and failed analysis remain distinct states. Results are
+revision-correlated, bounded to two concurrent analyses, and cached ephemerally by asset identity and
+hash.
 
 **S4 — Music bed selection.** _(optional, deferred)_
 The export contract already accepts `bedAssetId` with gain and fade. Nothing in the UI sets it.

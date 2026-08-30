@@ -184,9 +184,16 @@ const studioBeatInputSchemaV2 = z4
   })
   .strict();
 
+const studioShootingScriptSchemaV2 = z4
+  .string()
+  .max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH)
+  .describe(
+    'Shot-specific direction for what is seen and heard, including intended narration, dialogue, ambience, and discrete sound hits. Do not repeat project-wide or global instruction boilerplate.'
+  );
+
 const studioShotInputSchemaV2 = z4
   .object({
-    shootingScript: z4.string().max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH),
+    shootingScript: studioShootingScriptSchemaV2,
     durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
   })
   .strict();
@@ -203,7 +210,7 @@ const studioBeatChangesSchemaV2 = z4.union([
 ]);
 
 const studioShotChangesFieldsV2 = {
-  shootingScript: z4.string().max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH),
+  shootingScript: studioShootingScriptSchemaV2,
   durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
 };
 const studioShotChangesSchemaV2 = z4.union([
@@ -318,7 +325,7 @@ const studioProjectReferencePlanAdditionsSchemaV2 = z4
 const studioProposedShotSchemaV2 = z4
   .object({
     shotId: studioDirectorIdSchemaV2,
-    shootingScript: z4.string().max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH),
+    shootingScript: studioShootingScriptSchemaV2,
     durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
     chainBreak: z4.enum(['none', 'hard_cut']),
   })
@@ -1682,7 +1689,7 @@ export function registerStudioToolsV2(
     'propose_storyboard',
     {
       description:
-        'Record one ordered schema-5 authoring mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. The input schema exposes only proposal-capable authoring operations, including editable project settings and reference prompts, plus the non-reference direct operations that may be needed in the same atomic review. Reference planning and shot-reference binding are Director-direct operations and must use studio_apply_edits; approval remains renderer-only. Unavailable operations are invalid arguments and must not be retried or translated into another tool. The final serialized proposal record must fit within 256 KiB.',
+        'Record one ordered schema-5 authoring mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Author every shootingScript with Shot-specific direction for what is seen and heard, including intended narration, dialogue, ambience, and discrete sound hits; do not repeat project-wide boilerplate. The input schema exposes only proposal-capable authoring operations, including editable project settings and reference prompts, plus the non-reference direct operations that may be needed in the same atomic review. Reference planning and shot-reference binding are Director-direct operations and must use studio_apply_edits; approval remains renderer-only. Unavailable operations are invalid arguments and must not be retried or translated into another tool. The final serialized proposal record must fit within 256 KiB.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
     },
     async (input) =>

@@ -5,7 +5,7 @@
  */
 
 import { Button, Popconfirm } from '@arco-design/web-react';
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
@@ -15,6 +15,8 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST } from '@/common/types/project/creativeStudioTypes';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
+import { StudioShotAudioStatus } from '@/renderer/pages/studio/components/PlaybackAudio';
+import { useStudioPlaybackAudio } from '@/renderer/pages/studio/hooks/useStudioPlaybackAudio';
 
 import type { WorkspaceBoardPanelProjection, WorkspaceProjection } from '../../workspaceProjection';
 import { Bin, binItemFocusKey } from './Bin';
@@ -157,26 +159,40 @@ export type BoardViewProps = {
 };
 
 type ShotMediaProps = {
+  currentVideoAssetId: string | null;
   media: BoardShotTileMedia;
   projectId: string;
+  shotId: string;
 };
 
-const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId }) => {
+const ShotMedia: React.FC<ShotMediaProps> = ({ currentVideoAssetId, media, projectId, shotId }) => {
   const { t } = useTranslation();
+  const { muted, syncFromMedia, volume } = useStudioPlaybackAudio();
   const assetUrl = media === null ? null : createManagedStudioAssetUrl(projectId, media.assetId);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const showMedia = media !== null && assetUrl !== null && failedUrl !== assetUrl;
 
   useEffect(() => setFailedUrl(null), [assetUrl]);
+  useLayoutEffect(() => {
+    if (videoRef.current === null) return;
+    videoRef.current.muted = muted;
+    videoRef.current.volume = volume;
+  }, [assetUrl, muted, volume]);
 
   return (
     <div className={styles.shotMedia} data-media-kind={showMedia ? media.kind : 'unavailable'}>
       {showMedia && media.kind === 'video' ? (
         <video
+          ref={videoRef}
           aria-label={t(`${KEY_ROOT}.shot.videoPreview`)}
           className={styles.shotMediaAsset}
-          muted
+          controls
+          muted={muted}
           onError={() => setFailedUrl(assetUrl)}
+          onVolumeChange={(event) =>
+            syncFromMedia({ muted: event.currentTarget.muted, volume: event.currentTarget.volume })
+          }
           playsInline
           preload='metadata'
           src={assetUrl}
@@ -192,6 +208,7 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId }) => {
       ) : (
         <span className={styles.coverPlaceholder}>{t(`${KEY_ROOT}.coverUnavailable`)}</span>
       )}
+      <StudioShotAudioStatus assetId={currentVideoAssetId} shotId={shotId} />
     </div>
   );
 };
@@ -360,7 +377,12 @@ const ShotTile: React.FC<ShotTileProps> = ({
       data-shot-id={shot.shotId}
       data-shot-tile
     >
-      <ShotMedia media={shot.media} projectId={projectId} />
+      <ShotMedia
+        currentVideoAssetId={shot.currentVideoAssetId}
+        media={shot.media}
+        projectId={projectId}
+        shotId={shot.shotId}
+      />
       <div
         ref={panelCardRef}
         aria-label={t(`${KEY_ROOT}.panel.cardLabel`, { position: shotLabel, status: t(panelStatusKey(panel)) })}
