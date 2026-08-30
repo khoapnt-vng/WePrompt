@@ -81,9 +81,9 @@ Three properties we are explicitly adopting:
 - **Nothing is an empty container.**
 
 One property we are **not** adopting: the reference shows a credit balance (`✦ 412`). We decided on
-2026-08-12 not to price in credits, and the owner confirmed on 2026-08-30 that there is **no credit
-counter and no corner readout of any kind**. Please do not draw one. Cost appears where it is owed —
-at the moment of spend, in currency — and nowhere else.
+2026-08-12 not to price in credits, and the owner confirmed on 2026-08-30: **no credit ledger and no
+credit counter.** Please do not draw credits, or a running balance of anything. Cost is shown in
+currency, at the moment of spend, from our own rate card.
 
 ## A note on words, for the handoff
 
@@ -193,7 +193,7 @@ Draw a block current, and the same block stale.
 - **Do not design migration or an upgrade path.** There is none.
 - **Do not solve the dependency order.** References before storyboard before production before cut is
   real; the Director enforces it. Your job is that a person never meets it as a locked door.
-- **Do not draw the app bar,** and do not draw a balance, budget or credit readout anywhere.
+- **Do not draw the app bar,** and do not draw credits or a running balance anywhere.
 
 ## For reference
 

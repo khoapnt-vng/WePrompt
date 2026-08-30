@@ -242,8 +242,8 @@ Revision 1 recommended a currency envelope drawn down by summing receipts. That 
 receipts gives **recorded spend**, not remaining budget. Authorized-but-not-yet-billed commitments are
 not represented anywhere, and `maxPerBatchMinorUnits` is a per-batch ceiling, not a total envelope.
 
-**For Pilot 1: either omit the corner readout, or show "Recorded spend" by currency and label it that
-way.** This also keeps decision D3 (2026-08-12, no credit ledger) intact.
+**Settled: no credit ledger and no credit counter** (owner, 2026-08-30), which keeps D3 intact and
+means Pilot 1 ships no such readout. See decision 1.
 
 ---
 
@@ -367,7 +367,7 @@ Settled by the owner on 2026-08-30. Kept with their reasoning, because two were 
 rather than answered on their own terms, and because the reasoning is what a later reader will need in
 order not to reopen them by accident.
 
-### 1. No credit counter, and no readout — **decided**
+### 1. No credit ledger, no credit counter, D3 kept — **decided**
 
 The reference app shows `✦ 412 Renew` in the corner. Decision D3 (2026-08-12) says: _"No credit
 ledger — out of scope. Cost is not priced in credits; any mock text showing credits is illustrative
@@ -381,11 +381,19 @@ with no drawdown, and per-job `spendReceipt` rows.
 Summing receipts gives _recorded spend_, not remaining budget: authorized-but-unbilled commitments are
 represented nowhere, and `maxPerBatchMinorUnits` is a per-batch ceiling, not a total envelope.
 
-**Options:** (a) omit the readout from the first tranche; (b) show **"Recorded spend"** by currency,
-labelled as exactly that; (c) build a real drawn-down ledger, which is a product decision, not a
-readout; (d) adopt credits, reversing D3.
-**Recommendation: (a) or (b).** Both keep D3 intact. Anything that reads as a _balance_ is
-(c) wearing a disguise.
+**Decision (owner, 2026-08-30): no credit ledger and no credit counter. D3 stands unamended.**
+
+So the reference app's `✦ 412` is the one element of its design language CS4 does not adopt, and the
+designer is told so rather than left to draw something that will not be built.
+
+Cost still appears where it is owed — at the moment of spend, in currency, from our own rate card,
+which is what the spend ruling asked for. What is not built is a ledger, or anything that accumulates
+into a balance of credits.
+
+> Scoped to what was actually decided. A draft of this line said "no corner readout of any kind",
+> which was wider than the ruling — mine, not the owner's. A plain **recorded spend by currency**
+> line would break neither D3 nor this decision and remains available if it is ever wanted. What is
+> settled is that nothing counts credits and nothing accumulates into a balance.
 
 ### 2. ffmpeg gates four capabilities, not one
 
