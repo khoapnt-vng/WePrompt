@@ -644,7 +644,16 @@ const refreshDirectorPresetRules = (conversation: DirectorConversation): Promise
   if (proof === undefined) {
     proof = (async (): Promise<boolean> => {
       try {
-        const updated = await ipcBridge.conversation.update.invoke({
+        /*
+         * The update provider's declared boolean response is not authoritative. A successful
+         * backend PATCH currently echoes the conversation record, while an empty successful body
+         * resolves undefined; transport failures throw. Requiring a literal `true` therefore
+         * strands a conversation after a write that may already have committed (BUG-163).
+         *
+         * Ignore only the echo. The exact GET below still proves the conversation id, MCP snapshot,
+         * persisted Studio authority, and current rules profile before the rail can attach.
+         */
+        await ipcBridge.conversation.update.invoke({
           id: conversation.id,
           merge_extra: true,
           updates: {
@@ -654,7 +663,6 @@ const refreshDirectorPresetRules = (conversation: DirectorConversation): Promise
             } as TChatConversation['extra'],
           },
         });
-        if (updated !== true) return false;
       } catch {
         return false;
       }
