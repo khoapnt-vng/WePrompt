@@ -1371,8 +1371,6 @@
         "label": "Som da reprodução",
         "mute": "Desativar som",
         "unmute": "Ativar som",
-        "muted": "Sem som",
-        "audible": "Som ativado",
         "volume": "Volume da reprodução: {{percent}}%",
         "shotStatus": {
           "analyzing": "Analisando o áudio do plano…",

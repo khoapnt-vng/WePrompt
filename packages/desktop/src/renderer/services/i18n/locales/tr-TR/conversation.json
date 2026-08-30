@@ -1367,8 +1367,6 @@
         "label": "Oynatma sesi",
         "mute": "Sesi kapat",
         "unmute": "Sesi aç",
-        "muted": "Ses kapalı",
-        "audible": "Ses açık",
         "volume": "Oynatma ses düzeyi: %{{percent}}",
         "shotStatus": {
           "analyzing": "Çekim sesi analiz ediliyor…",

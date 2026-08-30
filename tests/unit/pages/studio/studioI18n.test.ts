@@ -401,8 +401,6 @@ const localizedPlaybackAudioKeys = [
   'playbackAudio.label',
   'playbackAudio.mute',
   'playbackAudio.unmute',
-  'playbackAudio.muted',
-  'playbackAudio.audible',
   'playbackAudio.volume',
   'playbackAudio.shotStatus.analyzing',
   'playbackAudio.shotStatus.audible',

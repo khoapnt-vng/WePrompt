@@ -22,15 +22,15 @@ export const StudioPlaybackAudioControl: React.FC = () => {
 
   return (
     <span aria-label={t(`${KEY_ROOT}.label`)} className={styles.control} data-studio-playback-audio role='group'>
-      <Button
-        aria-label={t(`${KEY_ROOT}.${muted ? 'unmute' : 'mute'}`)}
-        aria-pressed={!muted}
-        data-studio-playback-mute
-        onClick={() => setMuted(!muted)}
-        size='mini'
-        type='text'
-      >
-        {t(`${KEY_ROOT}.${muted ? 'muted' : 'audible'}`)}
+      {/*
+       * The visible word is the action, not the state. Showing "Muted" between a timecode and a
+       * volume slider reads as a caption rather than a control, so a reviewer never presses it and
+       * reviews every take in silence -- which defeats the point of a sound-aware review. The
+       * accessible name now comes from that same content, so aria-label would only duplicate it.
+       * aria-pressed describes the state being toggled, matching the Play buttons in this group.
+       */}
+      <Button aria-pressed={muted} data-studio-playback-mute onClick={() => setMuted(!muted)} size='mini'>
+        {t(`${KEY_ROOT}.${muted ? 'unmute' : 'mute'}`)}
       </Button>
       <Slider
         aria-label={t(`${KEY_ROOT}.volume`, { percent })}

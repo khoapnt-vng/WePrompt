@@ -1365,8 +1365,6 @@
         "label": "再生音声",
         "mute": "ミュート",
         "unmute": "ミュート解除",
-        "muted": "ミュート中",
-        "audible": "音声オン",
         "volume": "再生音量：{{percent}}%",
         "shotStatus": {
           "analyzing": "ショットの音声を解析中…",

@@ -1366,8 +1366,6 @@
         "label": "Sonido de reproducción",
         "mute": "Silenciar",
         "unmute": "Activar sonido",
-        "muted": "Silenciado",
-        "audible": "Sonido activado",
         "volume": "Volumen de reproducción: {{percent}}%",
         "shotStatus": {
           "analyzing": "Analizando el audio del plano…",

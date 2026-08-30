@@ -869,7 +869,7 @@ describe('the truthful Cut player and transport', () => {
     play: vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined),
   });
 
-  it('renders the first current picture through the managed protocol with a default-muted sound transport', () => {
+  it('renders the first current picture through the managed protocol with an audible sound transport', () => {
     renderCutPlayer();
 
     const preview = document.querySelector<HTMLElement>('[data-cut-preview]');
@@ -882,7 +882,9 @@ describe('the truthful Cut player and transport', () => {
     expect(video).toHaveAttribute('poster', 'weprompt-studio://asset/project_1/take_1_poster');
     expect(video).toHaveAccessibleName('Beat 01 · Opening · Shot 01 · Shooting script shot_1');
     expect(video).toHaveAttribute('playsinline');
-    expect(video.muted).toBe(true);
+    // Audible by default: nothing autoplays here, so the browser constraint that makes
+    // muted-by-default correct on the web does not apply. See DEFAULT_STUDIO_PLAYBACK_AUDIO.
+    expect(video.muted).toBe(false);
     expect(video.controls).toBe(false);
     expect(video).toHaveAttribute('preload', 'metadata');
     const play = within(transport).getByRole('button', { name: 'Play film' });

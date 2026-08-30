@@ -1365,8 +1365,6 @@
         "label": "播放声音",
         "mute": "静音",
         "unmute": "取消静音",
-        "muted": "已静音",
-        "audible": "声音已开启",
         "volume": "播放音量：{{percent}}%",
         "shotStatus": {
           "analyzing": "正在分析镜头音频…",

@@ -880,7 +880,9 @@ const captureCutViewportReference = async (
       controls: false,
       currentSrc: managedVideoUrl,
       duration: 10,
-      muted: true,
+      // Audible by default: nothing autoplays here, so the constraint that makes muted-by-default
+      // correct on the web does not apply. See DEFAULT_STUDIO_PLAYBACK_AUDIO.
+      muted: false,
       playsInline: true,
       ready: true,
       videoHeight: 16,
@@ -3172,7 +3174,7 @@ test.describe('Creative Studio workspace', () => {
       await expect
         .poll(async () => beatMedia.evaluate((element: HTMLVideoElement) => element.currentSrc))
         .toBe(`weprompt-studio://asset/${projectId}/${videoAssetId}`);
-      await expect(beatMedia).toHaveJSProperty('muted', true);
+      await expect(beatMedia).toHaveJSProperty('muted', false);
       await expect(beatMedia).toHaveJSProperty('playsInline', true);
       await expect(beatMedia).toHaveJSProperty('controls', false);
       await expect(panel.locator('audio')).toHaveCount(0);

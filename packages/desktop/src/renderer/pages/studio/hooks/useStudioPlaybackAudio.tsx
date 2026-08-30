@@ -18,8 +18,15 @@ type StudioPlaybackAudioContextValue = StudioPlaybackAudioPreference & {
 };
 
 const STORAGE_KEY_PREFIX = 'weprompt.creativeStudio.playbackAudio.v1.';
+/*
+ * Audible by default. Muted-by-default is the right pattern on the web, where browsers refuse to
+ * autoplay with sound; nothing here autoplays -- playback is behind an explicit Play press -- so the
+ * constraint that justifies it does not apply, and every project opening silent is what made the
+ * shot audio look missing entirely. The key stays project-scoped: the residual case is someone who
+ * deliberately mutes one project and gets sound in the next, which is the correct behaviour.
+ */
 export const DEFAULT_STUDIO_PLAYBACK_AUDIO: StudioPlaybackAudioPreference = Object.freeze({
-  muted: true,
+  muted: false,
   volume: 1,
 });
 const ignoreBooleanPreference = (_value: boolean): void => undefined;

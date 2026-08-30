@@ -1366,8 +1366,6 @@
         "label": "Wiedergabeton",
         "mute": "Stummschalten",
         "unmute": "Ton einschalten",
-        "muted": "Stumm",
-        "audible": "Ton an",
         "volume": "Wiedergabelautstärke: {{percent}}%",
         "shotStatus": {
           "analyzing": "Shot-Audio wird analysiert…",

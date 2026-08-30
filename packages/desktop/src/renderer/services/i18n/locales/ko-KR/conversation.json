@@ -1365,8 +1365,6 @@
         "label": "재생 소리",
         "mute": "음소거",
         "unmute": "음소거 해제",
-        "muted": "음소거됨",
-        "audible": "소리 켜짐",
         "volume": "재생 음량: {{percent}}%",
         "shotStatus": {
           "analyzing": "샷 오디오 분석 중…",

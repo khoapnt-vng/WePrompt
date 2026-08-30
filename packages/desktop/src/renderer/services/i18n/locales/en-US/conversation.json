@@ -1786,8 +1786,6 @@
         "label": "Playback sound",
         "mute": "Mute",
         "unmute": "Unmute",
-        "muted": "Muted",
-        "audible": "Sound on",
         "volume": "Playback volume: {{percent}}%",
         "shotStatus": {
           "analyzing": "Analyzing Shot audio…",

@@ -1406,7 +1406,7 @@ describe('BeatPlayer', () => {
     const initial = screen.getByRole('region', { name: 'Beat preview' }).querySelector<HTMLVideoElement>('video')!;
     expect(initial).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_1');
     expect(initial).toHaveAttribute('poster', 'weprompt-studio://asset/project_1/poster_1');
-    expect(initial).toHaveProperty('muted', true);
+    expect(initial).toHaveProperty('muted', false);
     expect(initial).toHaveProperty('controls', false);
     expect(screen.getByRole('timer')).toHaveTextContent('0:00 / 0:14');
 
@@ -2531,7 +2531,7 @@ describe('BeatPanel', () => {
     expect(within(viewer).queryByRole('button', { name: /use this take|remove take/iu })).toBeNull();
     const reviewedVideo = viewer.querySelector<HTMLVideoElement>('video')!;
     expect(reviewedVideo).toHaveProperty('controls', true);
-    expect(reviewedVideo).toHaveProperty('muted', true);
+    expect(reviewedVideo).toHaveProperty('muted', false);
     expect(reviewedVideo).toHaveProperty('autoplay', false);
   });
 
