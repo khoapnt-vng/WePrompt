@@ -361,6 +361,79 @@ the other agent keeps fixing UI the cutover deletes.
 
 ---
 
+## The wireframe answers the three hard problems
+
+[`creative-studio-4-canvas-wireframe.html.txt`](./creative-studio-4-canvas-wireframe.html.txt),
+delivered 2026-08-30. Three scenarios (one photograph · face replace · a three-minute film) and nine
+plates. It settles the three questions the commission put to the designer, and a good deal more.
+
+**1. First run is a conversation that happens on the canvas.** Not a prompt widget and not a chat that
+later becomes a canvas: one composer, centred, **occupying the first block slot at the width a block
+will be**, so nothing moves when work arrives. Beside it, three one-step offers — a photograph, a
+shooting script, import sound. The composer does not fly to the bottom afterwards; the sentence typed
+becomes the block's provisional handle and the block materialises directly beneath the words that
+caused it.
+
+**2. Unfinished work is a block in place, never a queue.** A block exists from the first second of
+work and carries its state on its face. `RUNNING` shows progress along the clip, not a spinner.
+`PARTIAL` is a range on the scrubber — "0:12–0:15, face not replaced, your original frames kept" —
+not a verdict, with a free re-do scoped to those seconds. `NEEDS BUDGET` is the one question the
+product asks, on the block that needs it, with a smaller option beside it.
+
+**3. Disclosure is a popover anchored to the block that broke.** Provenance lives behind exactly one
+affordance — _"Why this is stale"_ — and appears only while the block is not current. It names the
+cause, shows v1 → v2 of the thing that changed, prices the re-make, states what else it invalidates,
+and offers **"Keep this version"**, because a stale clip someone likes is a choice rather than a bug.
+
+### What else it settles
+
+- **A prompt is speech; an image is a thing.** Approval is the next thing typed — "go", "make it
+  wider", "not at dawn". No prompt widget, no confirm button. This is the spend ruling's _inform,
+  don't gate_ made literal.
+- **No nesting.** A photograph made from a reference is a **sibling**, not a child. A reference
+  conditions a generation; it does not own the result.
+- **A Beat is a row inside one block, never a screen.** Thirty-one Shots live in two blocks. Scanning
+  is vertical; shots scroll horizontally as the canvas narrows.
+- **An unproduced Shot is not an empty container** — a dashed tile carrying its own shooting script.
+  This is how the dependency order stays real without a locked door anywhere.
+- **Imports are blocks**, with `IMPORTED` — the one status the Director can never produce. A
+  generation never mutates its source.
+- **The script is the spine.** It never leaves the canvas, reports each Beat's state in one line, and
+  Beats and Shots are _derived from it_, not authored beside it.
+- Handles are derived from birth, never blank; unnamed renders in placeholder grey; renaming is an
+  Arco `Input` with a fixed `#` prefix and the old handle stays valid as an alias.
+- Twelve-column field halving to six under 720px. Nothing collapses to a single stack; set-blocks shed
+  tiles per row and a clip set never goes below three across.
+- Full Arco mapping, and RTL handled properly: handles never mirror (`dir="ltr"` on the handle span),
+  German `ABGELAUFEN` is 60% longer than `STALE` so headers wrap rather than truncate.
+
+### The one thing that cannot be built as drawn
+
+Every plate carries a corner readout of the form **`$34.90 / $40.00`**, and the rail says things like
+_"$4.80 committed · $35.20 left of the envelope"_. **That data does not exist.** `StudioSpendPolicy`
+has exactly two fields, `currency` and `maxPerBatchMinorUnits` — a per-batch ceiling. There is no
+authorized total, no committed-but-unbilled figure, and no remaining balance anywhere in the store.
+
+A drawn-down envelope is a ledger in currency rather than credits, so building it as drawn would
+reverse the 2026-08-30 ruling by another route.
+
+**Resolution for Pilot 1: ship no readout**, per decision 1. Everything else on the plates is
+buildable. The `NEEDS BUDGET` block is unaffected — it compares one batch against the per-batch
+ceiling, which is exactly what the store already supports, and it is the only place the product asks
+about money.
+
+### Three questions the designer left open — none block Pilot 1
+
+1. Whether canvas order is fixed by dependency or reorderable by hand.
+2. Whether a second proposal can exist while one is pending. _Drawn as: no — the Director waits._
+3. Whether `#final_video` auto-recuts when a clip is re-made, given re-cutting is free and reversible
+   and the spend ruling says do not ask.
+
+All three concern films. **Pilot 1 is one photograph**, so none of them gate the start of work; they
+are owed by phase 6. The drawn default for (2) is the safer one and should stand unless overturned.
+
+---
+
 ## Decisions — all four settled
 
 Settled by the owner on 2026-08-30. Kept with their reasoning, because two were re-scoped by Pilot 1
