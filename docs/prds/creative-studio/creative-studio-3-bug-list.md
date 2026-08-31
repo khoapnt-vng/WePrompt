@@ -1549,7 +1549,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
       transcript must preserve that same reason after reload.
     - **Claimant:** Unclaimed.
 
-- [x] **[BUG-162][P3][Creative Studio] The Director reports "All done — everything went through as planned" when it has done nothing of the kind** — found 2026-08-27 across four Director turns on `Plateau`
+- [ ] **[BUG-162][P3][Creative Studio] The Director reports "All done — everything went through as planned" when it has done nothing of the kind** — found 2026-08-27 across four Director turns on `Plateau`; **REOPENED 2026-08-31 after the durable-recap fix regressed on compacted read output**
   - **Actual.** The literal string _"All done — everything went through as planned. Tell me what you'd like to do next."_ was emitted at the end of turns where:
     - the reference plan had been created but **zero of 36 Shots were bound** (bindings were impossible at that point, because binding requires an approved reference — the sequencing was right, the claim was not);
     - a reference generation had only been **queued for the user's spend approval**, not performed;
@@ -1560,6 +1560,34 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Resolved 2026-08-30 — the Director recap now follows durable Studio outcomes.** The Studio-owned Aionrs surface installs a scoped interpreter without changing generic chat. It recognizes only the exact built-in Studio tool identity, independently versioned command/proposal records, exact receipt shapes and the current Main-correlated proposal catalogue; stale, mismatched, replay-ambiguous, malformed or truncated evidence fails closed. A successful transport can no longer turn a pending proposal, queued generation request, refusal, cancellation or uncertain command into a success claim.
   - **Truthful lifecycle and next actions.** Committed, pending-review, waiting-authorization, stale, refused, failed, cancelled, unconfirmed, terminal-indeterminate, read-only and unknown results have distinct localized recaps. Mixed turns preserve pending human work and uncertainty rather than inviting an unsafe retry. Exact command-status receipts resolve only the same durable command identity; a busy result cannot borrow the incumbent command's later success. Plan-only Director activity emits no synthetic completion line.
   - **Focused evidence.** The final focused audit passes **326/326** tests across the recap builder, DOM summary, Director rail and Aionrs provider boundary. It includes accepted and reducer-refused proposals, queued reference authorization, failed and cancelled transport, terminal indeterminacy, stale/erroring catalogues, wrong sidecar versions, skipped revisions, malformed/truncated results, a real `IMessageToolGroup → normalize → coalesce → interpreter` path, busy-command isolation, uncertainty dominance, all 12 locales and generic-chat isolation. Typecheck, i18n generation/validation and diff checks pass; the explicit Creative Studio coverage manifest includes every changed runtime file.
+  - **Regression root cause.** `turnRecap.ts` currently converts every terminal call carrying
+    `_compact.truncated: true` to `unknown` before considering the exact Studio tool contract, and
+    `buildTurnClose.ts` deliberately ranks `unknown` above `committed`. The Director rules require
+    `studio_get_project_status` with `detail: true` immediately before acting; that exact read-only
+    response routinely exceeds the roughly 4 KB persisted-preview threshold. A turn can therefore
+    contain a valid durable mutation receipt followed by a successfully completed, compacted project
+    status read, yet close with **"The Studio result could not be interpreted. Do not retry"** instead
+    of reporting the proven commit. Flipping only the compaction marker while holding the payload and
+    turn outcomes constant reproduces the regression.
+  - **Narrow repair boundary.** An explicit compaction marker on a completed, exactly identified
+    _observation-only_ Studio tool is benign only when a nonempty bounded preview remains. The bounded
+    set is `read_storyboard`, `studio_get_conditioning_frame`, `studio_get_project_status` and
+    `studio_list_routes`; none can commit or resolve a project mutation. Classify that case as
+    `observed`, so it cannot erase a separately proven commit, pending review or waiting
+    authorization. Do not infer this set as the complement of mutations. In particular,
+    `studio_get_command_status` and `studio_get_proposal` are transport reads but can resolve a prior
+    mutation or proposal outcome, so their truncated results remain `unknown`. Truncated mutations,
+    proposal/reference-request tools, ambiguous Studio identity, and missing, empty, oversized or
+    malformed output without the explicit compaction evidence also remain fail-closed as `unknown`.
+  - **Required regression evidence.** Focused interpreter, aggregation and rendered-summary tests
+    must prove: a durable commit plus a compacted detailed project-status read reports `committed` in
+    either order; `pending_review` and `waiting_authorization` survive that same read without becoming
+    `mixed_attention`; and a compacted observation-only call by itself reports `observed`. The inverse
+    cases must prove that a compacted mutation or ambiguous read/mutation identity still outranks a
+    separate commit as `unknown`, a compacted command-status call cannot resolve an earlier
+    `unconfirmed` command, compacted proposal status remains `unknown`, and missing or malformed
+    unmarked read output remains `unknown`. Transport error and cancellation must continue to report
+    `failed` and `canceled` before output inspection.
   - **CS4 triage**
     - **Disposition:** Fix before CS4.
     - **Destination:** Prerequisite tranche before Phase 1.
@@ -1568,9 +1596,10 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
       would make waiting authorizations look complete in Pilot 1 and refused proposals look complete
       in retained/shared Director flows.
     - **Acceptance evidence:** Focused recap tests must cover an accepted proposal, a reducer-refused
-      proposal, a generation waiting for authorization, a failed tool and a cancelled tool. Only the
-      accepted domain outcome may produce the all-done recap; every other case must state its actual
-      status and next action.
+      proposal, a generation waiting for authorization, a failed tool and a cancelled tool, plus the
+      compacted-read matrix above. Only a durable committed outcome may produce the committed recap;
+      every other case must state its actual status and next action, while a benign compacted pure
+      observation must not conceal a separately proven outcome.
     - **Claimant:** `codex/creative-studio-4-pilot` — Phase 0.
 
 - [x] **[BUG-163][P2][Creative Studio] A Director conversation interrupted by an app restart never recovers, and the Retry button that promises to recover it does nothing** — found 2026-08-28 verifying `44cb0a16c` against pre-existing projects

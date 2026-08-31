@@ -154,6 +154,12 @@ const MUTATION_TOOLS = new Set<StudioToolName>([
   'studio_propose_paid_recovery',
   'studio_get_command_status',
 ]);
+const OBSERVATION_ONLY_TOOLS = new Set<StudioToolName>([
+  'studio_list_routes',
+  'read_storyboard',
+  'studio_get_conditioning_frame',
+  'studio_get_project_status',
+]);
 const DIRECT_COMMAND_TOOLS = new Set<StudioToolName>([
   'studio_apply_edits',
   'studio_apply_free_fix',
@@ -706,8 +712,19 @@ export const createStudioDirectorToolOutcomeInterpreter = (
     const terminalCall = input.step.calls.at(-1);
     const output = terminalCall?.output;
     if (
+      terminalCall?.truncated === true &&
+      typeof output === 'string' &&
+      output.length > 0 &&
+      output.length <= MAX_STORED_OUTPUT_CHARS
+    ) {
+      // These exact queries cannot change project state. Renderer compaction of
+      // their completed output must not conceal a separate durable mutation or
+      // turn routine pending review into a false failure. Queries that can
+      // resolve mutation/proposal uncertainty deliberately remain fail-closed.
+      return OBSERVATION_ONLY_TOOLS.has(tool) ? 'observed' : 'unknown';
+    }
+    if (
       terminalCall === undefined ||
-      terminalCall.truncated === true ||
       typeof output !== 'string' ||
       output.length === 0 ||
       output.length > MAX_STORED_OUTPUT_CHARS

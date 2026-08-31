@@ -853,6 +853,67 @@ describe('Studio Director turn recap', () => {
     ).toBe('unknown');
   });
 
+  it('treats explicit compaction of a pure observation as benign without weakening uncertain outcomes', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    const committed = studioToolObservation({
+      interpreter,
+      name: 'studio_apply_edits',
+      output: JSON.stringify({
+        ...receiptBase,
+        expectedRevision: 3,
+        appliedRevision: 4,
+        createdBeatIds: [],
+        createdShotIds: [],
+        status: 'applied',
+      }),
+    });
+    const compactedObservation = studioToolObservation({
+      interpreter,
+      name: 'studio_get_project_status',
+      output: '{"schemaVersion":10,"status":"answered",',
+      truncated: true,
+    });
+
+    expect(typeof committed === 'string' ? committed : committed.outcome).toBe('committed');
+    expect(compactedObservation).toBe('observed');
+    expect(summarizeTurnDomainOutcomes([committed, compactedObservation])).toBe('committed');
+    expect(summarizeTurnDomainOutcomes([compactedObservation, committed])).toBe('committed');
+    expect(summarizeTurnDomainOutcomes(['pending_review', compactedObservation])).toBe('pending_review');
+    expect(summarizeTurnDomainOutcomes(['waiting_authorization', compactedObservation])).toBe('waiting_authorization');
+
+    const incompleteMutation = studioToolObservation({
+      interpreter,
+      name: 'studio_apply_edits',
+      output: '{"schemaVersion":10,"status":"applied",',
+      truncated: true,
+    });
+    expect(incompleteMutation).toBe('unknown');
+    expect(summarizeTurnDomainOutcomes([committed, incompleteMutation])).toBe('unknown');
+
+    const incompleteCommandStatus = studioToolObservation({
+      interpreter,
+      name: 'studio_get_command_status',
+      toolInput: JSON.stringify({ commandId: 'command_1' }),
+      output: '{"schemaVersion":10,"commandId":"command_1",',
+      truncated: true,
+    });
+    expect(incompleteCommandStatus).toBe('unknown');
+    expect(
+      summarizeTurnDomainOutcomes([{ outcome: 'unconfirmed', commandId: 'command_1' }, incompleteCommandStatus])
+    ).toBe('unconfirmed');
+
+    expect(
+      studioToolObservation({
+        interpreter,
+        name: 'studio_get_proposal',
+        output: '{"schemaVersion":10,"status":"answered",',
+        truncated: true,
+      })
+    ).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'studio_get_project_status', output: '' })).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'studio_get_project_status', output: '{"status":' })).toBe('unknown');
+  });
+
   it('reports failed and canceled transport before inspecting output', () => {
     const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
     expect(studioToolOutcome({ interpreter, status: 'error', output: recordedProposal })).toBe('failed');

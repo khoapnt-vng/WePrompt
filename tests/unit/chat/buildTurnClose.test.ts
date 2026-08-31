@@ -129,6 +129,11 @@ describe('buildTurnClose', () => {
     expect(summarizeTurnDomainOutcomes(['canceled', 'unknown'])).toBe('unknown');
     expect(summarizeTurnDomainOutcomes(['failed', 'unconfirmed'])).toBe('unconfirmed');
     expect(summarizeTurnDomainOutcomes(['failed', 'indeterminate'])).toBe('indeterminate');
+    expect(summarizeTurnDomainOutcomes(['committed', 'observed'])).toBe('committed');
+    expect(summarizeTurnDomainOutcomes(['observed', 'committed'])).toBe('committed');
+    expect(summarizeTurnDomainOutcomes(['pending_review', 'observed'])).toBe('pending_review');
+    expect(summarizeTurnDomainOutcomes(['waiting_authorization', 'observed'])).toBe('waiting_authorization');
+    expect(summarizeTurnDomainOutcomes(['unknown', 'committed', 'observed'])).toBe('unknown');
   });
 
   it('lets a later exact command-status receipt resolve only the same earlier uncertainty', () => {

@@ -1244,6 +1244,24 @@ describe('MessageToolGroupSummary plain-language activity', () => {
       expect(screen.queryByText('messages.toolActivity.close.studio.failed')).not.toBeInTheDocument();
     });
 
+    it('keeps a durable commit visible when a separate pure observation was compacted', () => {
+      render(
+        <MessageToolGroupSummary
+          messages={[
+            activityStep('completed', 'studio-commit', 'studio_apply_edits', 'execute'),
+            activityStep('completed', 'studio-read', 'studio_get_project_status', 'read'),
+          ]}
+          toolOutcomeInterpreter={({ step }) =>
+            step.rawName === 'studio_get_project_status' ? 'observed' : 'committed'
+          }
+        />
+      );
+
+      expect(screen.getByText('messages.toolActivity.close.studio.committed')).toBeInTheDocument();
+      expect(screen.queryByText('messages.toolActivity.close.studio.unknown')).not.toBeInTheDocument();
+      expect(screen.queryByText('messages.toolActivity.close.studio.failed')).not.toBeInTheDocument();
+    });
+
     it('keeps an unconfirmed Studio command ahead of canceled-tool retry guidance', () => {
       render(
         <MessageToolGroupSummary
