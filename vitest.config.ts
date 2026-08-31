@@ -52,6 +52,7 @@ export default defineConfig({
             'tests/integration/creative-studio/generationLifecycle.integration.test.ts',
             'tests/integration/creative-studio/projectRecovery.integration.test.ts',
             'tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts',
+            'tests/unit/process/creative-studio/service/index.test.ts',
             'tests/unit/knowledge/projectKnowledgeService.test.ts',
             'tests/unit/process/services/officeArtifact/officeCliRunner.test.ts',
             'tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts',
@@ -117,6 +118,11 @@ export default defineConfig({
             // Spawns competing gate processes and waits on a real lock file, with no wall-clock
             // assertion of its own -- it polls for conditions, so load slows it instead of failing it.
             'tests/unit/build-scripts/pushGateLock.test.ts',
+            // 302 tests and ~58s for the file. Its reference-writer cases each `Promise.all` over 100 real
+            // writeFile calls (50 pending slots x 2 files) plus two readdirs and a recursive rm, and assert no
+            // wall-clock threshold of their own. It timed out at the 10s default during a loaded gate run and
+            // passed twice on an idle machine -- exactly the criterion above.
+            'tests/unit/process/creative-studio/service/index.test.ts',
             'tests/unit/knowledge/projectKnowledgeService.test.ts',
             'tests/unit/process/services/officeArtifact/officeCliRunner.test.ts',
             'tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts',
