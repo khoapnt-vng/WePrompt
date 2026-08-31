@@ -851,7 +851,9 @@ const captureCutViewportReference = async (
   await expect(transport.locator('[data-cut-play]')).toHaveAccessibleName('Play film');
   await expect(transport.locator('[data-cut-play]')).toHaveAttribute('aria-pressed', 'false');
   await expect(transport.locator('[data-cut-time]')).toHaveText('0:00 / 0:10');
-  await expect(transport.getByText('Picture only — the bed is muted here', { exact: true })).toBeVisible();
+  await expect(
+    transport.getByText('Shot audio only — the music bed is excluded from this preview', { exact: true })
+  ).toBeVisible();
   await expect(cut.getByRole('slider', { name: 'Film seek rail' })).toHaveCount(1);
   await expect(cut.locator('[data-cut-seek]')).not.toHaveAttribute('aria-label');
   await expect(cut.locator('[data-cut-previous-join]')).toBeDisabled();

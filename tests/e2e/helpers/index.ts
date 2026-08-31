@@ -35,7 +35,6 @@ export {
   agentLogoByBackend,
   AGENT_PILL,
   AGENT_PILL_SELECTED,
-  agentPillByBackend,
   MODE_SELECTOR,
   modeMenuItemByValue,
   MODEL_SELECTOR_BTN,
