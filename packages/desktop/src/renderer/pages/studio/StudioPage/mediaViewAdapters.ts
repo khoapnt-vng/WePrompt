@@ -12,7 +12,6 @@ import {
   type StudioBinItem,
   type StudioCommandResult,
   type StudioGenerationBlockV2,
-  type StudioGenerationCapabilityItemV2,
   type StudioGenerationCapabilityV2,
   type StudioRendererJobV2,
   type StudioRendererProjectCommitResultV2,
@@ -36,6 +35,7 @@ import {
   type WorkspaceProjection,
 } from '../components/Workspace';
 import { generationBlockGroupsForItems } from '../components/Workspace/Gate/generationBlockers';
+import { shotCapabilityItemsForDraft } from './spendOrchestration';
 
 type MutableValueRef<Value> = { current: Value };
 
@@ -83,20 +83,6 @@ type StudioMediaViewAdaptersInput = {
     buildDraft: (current: StudioRendererProjectV2, exactProjection: WorkspaceProjection) => SpendGateDraft | null
   ) => void;
 };
-
-export const shotCapabilityItemsForDraft = (draft: SpendGateDraft): StudioGenerationCapabilityItemV2[] =>
-  'baseChoices' in draft
-    ? [...draft.baseChoices, ...draft.cascadeChoices].flatMap((choice) =>
-        choice.target.kind === 'shot'
-          ? [
-              {
-                target: { kind: 'shot' as const, shotId: choice.target.shotId },
-                purpose: choice.purpose,
-              },
-            ]
-          : []
-      )
-    : [];
 
 const cloneBinItem = (item: StudioBinItem): StudioBinItem => {
   if (item.kind === 'beat') return { kind: 'beat', beatId: item.beatId, reason: item.reason };
