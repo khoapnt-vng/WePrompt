@@ -5,5 +5,6 @@
  */
 
 export * from './export';
+export * from './generatedUrlResolver';
 export * from './jobs';
 export * from './media';

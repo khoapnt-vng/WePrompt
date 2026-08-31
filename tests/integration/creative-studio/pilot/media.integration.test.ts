@@ -20,9 +20,11 @@ import {
 } from '@/process/services/creative-studio/service/pilot';
 import {
   createStudioPilotMediaStoreV3,
+  imageHasVariationGrid,
   type StudioPilotMediaStorageStepV3,
   type StudioPilotNativePhotoSelectionV3,
 } from '@/process/services/creative-studio/service/pilot/runtime/media';
+import type { StudioPilotGeneratedUrlResolutionV3 } from '@/process/services/creative-studio/service/pilot/runtime/generatedUrlResolver';
 import { createStudioPieceSpendReceiptV3 } from '@/process/services/creative-studio/service/schema2/pricing';
 import { StudioPreparedPhotoCacheV3 } from '@/process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import { createCreativeStudioPilotStoreV3 } from '@/process/services/creative-studio/store/pilotStore';
@@ -205,7 +207,7 @@ const createRunningGeneratedHarness = async (options: {
   providerSubmissionKind?: 'complete' | 'remote';
   detectVariationGrid?: (filePath: string) => Promise<boolean>;
   onStorageStep?: (step: StudioPilotMediaStorageStepV3) => void;
-  resolveGeneratedUrl?: (url: string, signal: AbortSignal | undefined) => Promise<{ path: string }>;
+  resolveGeneratedUrl?: (url: string, signal: AbortSignal | undefined) => Promise<StudioPilotGeneratedUrlResolutionV3>;
 }) => {
   const root = await temporaryRoot();
   const clock = createClock();
@@ -323,6 +325,28 @@ const expectPilotError = async (promise: Promise<unknown>, code: string): Promis
 };
 
 describe('schema-6 managed photo transactions', () => {
+  it('detects a deterministic four-panel image through the real variation-grid heuristic', () => {
+    const width = 16;
+    const height = 16;
+    const data = Uint8Array.from({ length: width * height * 3 }, (_value, offset) => {
+      const column = Math.floor(offset / 3) % width;
+      return Math.floor(column / 4) % 2 === 0 ? 0 : 255;
+    });
+
+    expect(imageHasVariationGrid({ data, width, height, channels: 3 })).toBe(true);
+  });
+
+  it('does not label one continuous image as a variation grid', () => {
+    const width = 16;
+    const height = 16;
+    const data = Uint8Array.from({ length: width * height * 3 }, (_value, offset) => {
+      const pixel = Math.floor(offset / 3);
+      return (pixel + (offset % 3) * 17) % 256;
+    });
+
+    expect(imageHasVariationGrid({ data, width, height, channels: 3 })).toBe(false);
+  });
+
   it('imports a verified image with a Unicode handle and persists no source path', async () => {
     const sourceRoot = await temporaryRoot();
     const source = await writePng(path.join(sourceRoot, 'private-source.png'));
@@ -1350,7 +1374,12 @@ describe('schema-6 managed photo transactions', () => {
     const sourceRoot = await temporaryRoot();
     const source = await writePng(path.join(sourceRoot, 'downloaded.png'));
     const secretUrl = 'https://provider.invalid/private-token/image';
-    const resolver = vi.fn(async (_url: string, _signal: AbortSignal | undefined) => ({ path: source }));
+    let cleanupAttempt = 0;
+    const cleanup = vi.fn(async () => {
+      cleanupAttempt += 1;
+      if (cleanupAttempt === 1) throw new Error('transient cleanup refusal');
+    });
+    const resolver = vi.fn(async (_url: string, _signal: AbortSignal | undefined) => ({ path: source, cleanup }));
     const harness = await createRunningGeneratedHarness({ outputFile: source, resolveGeneratedUrl: resolver });
     const signal = new AbortController().signal;
 
@@ -1364,6 +1393,7 @@ describe('schema-6 managed photo transactions', () => {
       signal,
     });
     expect(resolver).toHaveBeenCalledExactlyOnceWith(secretUrl, signal);
+    expect(cleanup).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(await harness.store.loadProjectV3(harness.project.id))).not.toContain(secretUrl);
 
     resolver.mockClear();
@@ -1380,6 +1410,34 @@ describe('schema-6 managed photo transactions', () => {
       'job_ineligible'
     );
     expect(resolver).not.toHaveBeenCalled();
+  });
+
+  it('bounds generated URL cleanup without changing a successful publication', async () => {
+    const sourceRoot = await temporaryRoot();
+    const source = await writePng(path.join(sourceRoot, 'cleanup-refused.png'));
+    const cleanup = vi.fn(async () => {
+      throw new Error('persistent cleanup refusal');
+    });
+    const harness = await createRunningGeneratedHarness({
+      outputFile: source,
+      resolveGeneratedUrl: async () => ({ path: source, cleanup }),
+    });
+
+    await expect(
+      harness.media.publishGeneratedOutputV3({
+        projectId: harness.project.id,
+        pieceId: harness.pieceId,
+        jobId: harness.jobId,
+        providerSubmissionKind: 'remote',
+        providerJobId: 'provider_job_1',
+        outputs: [{ ...harness.output, source: { kind: 'url', url: 'https://provider.invalid/image' } }],
+      })
+    ).resolves.toMatchObject({ status: 'published' });
+    expect(cleanup).toHaveBeenCalledTimes(3);
+    expect((await harness.store.loadProjectV3(harness.project.id)).jobs[harness.jobId]).toMatchObject({
+      status: 'succeeded',
+      outputAssetId: expect.any(String),
+    });
   });
 
   it('fails closed on invalid publication and verification boundaries', async () => {

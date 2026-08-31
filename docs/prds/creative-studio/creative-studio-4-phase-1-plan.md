@@ -709,9 +709,11 @@ contracts, and filesystem. Do not call internal reducers to skip the public path
 The gate configures the fake route and adapter through the same catalog/provider registration that
 production resolution consumes. Tests must not inject a pre-resolved route catalog or replace the
 resolver at the CS4 runtime boundary. The fake adapter exposes both managed-file output and a
-deterministic `kind: 'url'` profile. The latter runs through the real bounded downloader and has a
-failing-download arm, so `download_failed` and same-Job recovery are proved without manually writing
-a terminal Job or replacing the media resolver.
+deterministic `kind: 'url'` profile. The latter runs through the real bounded downloader. Failure
+before Main can persist a media intent records the paid remote result as `poll_deadline` and resumes
+the same provider Job; a separate real-filesystem failure after the exact media intent is durable
+records `download_failed` and recovers through `retryDownloadV3` on that same Job. Neither arm may
+manually write a terminal Job or replace the media resolver.
 
 Scenarios, each starting with zero Beat and Shot records:
 
@@ -721,9 +723,9 @@ Scenarios, each starting with zero Beat and Shot records:
    attempt before explicit confirmation;
 3. import photo → rename → reload → export, with no quote, authorization, Job, provider call, or
    spend receipt;
-4. provider rejection, timeout, malformed payload, variation grid, download failure, cancellation,
-   same-Piece retry through a fresh exact quote/authorization, duplicate output, and app restart in
-   every nonterminal durable state;
+4. provider rejection, timeout, malformed payload, variation grid, pre-intent URL-download failure,
+   post-intent storage failure, cancellation, same-Piece retry through a fresh exact
+   quote/authorization, duplicate output, and app restart in every nonterminal durable state;
 5. stale/expired/duplicate confirmation and runtime-only revision movement;
 6. create and export two schema-6 projects through public calls, stop the runtime, corrupt project
    A's export catalog, then restart, quarantine that catalog and rebuild it from valid artifacts while

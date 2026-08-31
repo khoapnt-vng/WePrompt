@@ -29,6 +29,8 @@ import {
   STUDIO_E2E_FAKE_PROVIDER_CALL_COUNTS_FILE,
   STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE,
   STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION,
+  STUDIO_E2E_OUTPUT_URL_SENTINEL,
+  STUDIO_E2E_PROVIDER_JOB_SENTINEL,
   STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL,
   type StudioE2EFakeProviderRequestLog,
 } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
@@ -627,6 +629,525 @@ describe('Creative Studio provider adapters', () => {
     expect((await fs.readdir(fixtureDirectory)).filter((entry) => entry.endsWith('.tmp'))).toEqual([]);
   });
 
+  it('retains a held remote task and its lifecycle observations across a fake-provider restart', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-restart-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      {
+        pollSteps: [
+          { kind: 'queued' },
+          { kind: 'hold', status: 'running', progress: 45 },
+          { kind: 'succeeded', output: { kind: 'url' } },
+        ],
+      },
+    ]);
+    const firstBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const firstAdapter = firstBundle.adapters.get('weprompt-image-v1');
+    const firstProvider = { ...firstBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!firstAdapter) throw new Error('expected fake image adapter');
+
+    const submission = await firstAdapter.submit(
+      { ...request, mediaKind: 'image' },
+      firstProvider,
+      new AbortController().signal
+    );
+    if (submission.kind !== 'remote') throw new Error('expected a remote fake provider task');
+    await expect(
+      firstAdapter.poll(submission.providerJobId, firstProvider, new AbortController().signal)
+    ).resolves.toEqual({ status: 'queued' });
+    await expect(
+      firstAdapter.poll(submission.providerJobId, firstProvider, new AbortController().signal)
+    ).resolves.toEqual({ status: 'running', progress: 45 });
+    const stoppedPollController = new AbortController();
+    const stoppedPoll = firstAdapter.poll(submission.providerJobId, firstProvider, stoppedPollController.signal);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    stoppedPollController.abort();
+    await expect(stoppedPoll).rejects.toMatchObject({ name: 'AbortError' });
+    await firstBundle.dispose();
+
+    const restartedBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const restartedAdapter = restartedBundle.adapters.get('weprompt-image-v1');
+    const restartedProvider = { ...restartedBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!restartedAdapter) throw new Error('expected restarted fake image adapter');
+    const releasedPoll = restartedAdapter.poll(
+      submission.providerJobId,
+      restartedProvider,
+      new AbortController().signal
+    );
+    expect(restartedBundle.releaseTaskHold(submission.providerJobId)).toBe(true);
+    await expect(releasedPoll).resolves.toEqual({
+      status: 'succeeded',
+      outputs: [
+        {
+          mediaKind: 'image',
+          role: 'primary',
+          source: { kind: 'url', url: STUDIO_E2E_OUTPUT_URL_SENTINEL },
+          mimeType: 'image/png',
+        },
+      ],
+    });
+
+    expect(restartedBundle.getProviderCallCounts()).toEqual({ validateConnection: 0, submit: 1, poll: 4, cancel: 0 });
+    expect(restartedBundle.getProviderRequestLog().requests).toHaveLength(1);
+    expect(remoteState.tasks.get(submission.providerJobId)?.pollCount).toBe(4);
+  });
+
+  it('releases a held poll from a second fake-provider bundle sharing the remote task', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-shared-release-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      {
+        pollSteps: [
+          { kind: 'hold', status: 'queued' },
+          { kind: 'succeeded', output: { kind: 'managed_file' } },
+        ],
+      },
+    ]);
+    const workerBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const controlBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const adapter = workerBundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...workerBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    const submission = await adapter.submit(
+      { ...request, mediaKind: 'image' },
+      fakeProvider,
+      new AbortController().signal
+    );
+    if (submission.kind !== 'remote') throw new Error('expected a held remote task');
+    await expect(adapter.poll(submission.providerJobId, fakeProvider, new AbortController().signal)).resolves.toEqual({
+      status: 'queued',
+    });
+    const blockedPoll = adapter.poll(submission.providerJobId, fakeProvider, new AbortController().signal);
+    await vi.waitFor(() => expect(remoteState.taskHoldWaiters.get(submission.providerJobId)?.size).toBe(1));
+
+    expect(controlBundle.releaseTaskHold(submission.providerJobId)).toBe(true);
+    await expect(blockedPoll).resolves.toMatchObject({
+      status: 'succeeded',
+      outputs: [{ source: { kind: 'file' } }],
+    });
+    expect(remoteState.taskHoldWaiters.has(submission.providerJobId)).toBe(false);
+  });
+
+  it('wakes a held poll when a second fake-provider bundle cancels the shared queued task', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-shared-cancel-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      {
+        pollSteps: [
+          { kind: 'hold', status: 'queued' },
+          { kind: 'succeeded', output: { kind: 'managed_file' } },
+        ],
+      },
+    ]);
+    const workerBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const controlBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const workerAdapter = workerBundle.adapters.get('weprompt-image-v1');
+    const controlAdapter = controlBundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...workerBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!workerAdapter || !controlAdapter) throw new Error('expected fake image adapters');
+
+    const submission = await workerAdapter.submit(
+      { ...request, mediaKind: 'image' },
+      fakeProvider,
+      new AbortController().signal
+    );
+    if (submission.kind !== 'remote') throw new Error('expected a held remote task');
+    await expect(
+      workerAdapter.poll(submission.providerJobId, fakeProvider, new AbortController().signal)
+    ).resolves.toEqual({ status: 'queued' });
+    const blockedPoll = workerAdapter.poll(submission.providerJobId, fakeProvider, new AbortController().signal);
+    await vi.waitFor(() => expect(remoteState.taskHoldWaiters.get(submission.providerJobId)?.size).toBe(1));
+
+    await expect(
+      controlAdapter.cancel(submission.providerJobId, fakeProvider, new AbortController().signal)
+    ).resolves.toEqual({ kind: 'cancelled' });
+    await expect(blockedPoll).resolves.toEqual({ status: 'cancelled', error: { code: 'unknown' } });
+    expect(remoteState.taskHoldWaiters.has(submission.providerJobId)).toBe(false);
+  });
+
+  it('scripts provider rejection, timeout, and malformed polling without losing later plans', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-failures-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      { pollSteps: [{ kind: 'failed', code: 'content_rejected' }] },
+      { pollSteps: [{ kind: 'failed', code: 'timeout' }] },
+      { pollSteps: [{ kind: 'malformed' }] },
+    ]);
+    const bundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const signal = new AbortController().signal;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    let failureIndex = 0;
+    const pollNext = async (): Promise<unknown> => {
+      failureIndex += 1;
+      const submission = await adapter.submit(
+        { ...request, mediaKind: 'image', idempotencyKey: `failure_${failureIndex}` },
+        fakeProvider,
+        signal
+      );
+      if (submission.kind !== 'remote') throw new Error('expected a remote fake provider task');
+      return adapter.poll(submission.providerJobId, fakeProvider, signal);
+    };
+    await expect(pollNext()).resolves.toEqual({ status: 'failed', error: { code: 'content_rejected' } });
+    await expect(pollNext()).resolves.toEqual({ status: 'failed', error: { code: 'timeout' } });
+    await expect(pollNext()).resolves.toEqual({ status: 'running', progress: 'malformed' });
+    expect(remoteState.pendingTaskScripts).toEqual([]);
+  });
+
+  it('scripts complete, URL, duplicate, and variation-grid outputs with real managed bytes', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-outputs-'));
+    temporaryDirectories.push(rootDir);
+    const bundle = createStudioE2EFakeBundle({ rootDir });
+    bundle.enqueueTaskScript({ submit: { kind: 'complete', output: { kind: 'managed_file' } } });
+    bundle.enqueueTaskScript({
+      submit: { kind: 'complete', output: { kind: 'url', url: 'https://example.invalid/photo.png' } },
+    });
+    bundle.enqueueTaskScript({ pollSteps: [{ kind: 'succeeded', output: { kind: 'duplicate_outputs' } }] });
+    bundle.enqueueTaskScript({ pollSteps: [{ kind: 'succeeded', output: { kind: 'variation_grid' } }] });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const signal = new AbortController().signal;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    const managed = await adapter.submit(
+      { ...request, mediaKind: 'image', idempotencyKey: 'output_managed' },
+      fakeProvider,
+      signal
+    );
+    const hosted = await adapter.submit(
+      { ...request, mediaKind: 'image', idempotencyKey: 'output_hosted' },
+      fakeProvider,
+      signal
+    );
+    expect(managed).toMatchObject({ kind: 'complete', outputs: [{ source: { kind: 'file' }, width: 1, height: 1 }] });
+    expect(hosted).toEqual({
+      kind: 'complete',
+      outputs: [
+        {
+          mediaKind: 'image',
+          role: 'primary',
+          source: { kind: 'url', url: 'https://example.invalid/photo.png' },
+          mimeType: 'image/png',
+        },
+      ],
+    });
+
+    const duplicateSubmission = await adapter.submit(
+      { ...request, mediaKind: 'image', idempotencyKey: 'output_duplicate' },
+      fakeProvider,
+      signal
+    );
+    if (duplicateSubmission.kind !== 'remote') throw new Error('expected duplicate remote task');
+    const duplicate = await adapter.poll(duplicateSubmission.providerJobId, fakeProvider, signal);
+    expect(duplicate).toMatchObject({ status: 'succeeded' });
+    if (duplicate.status !== 'succeeded') throw new Error('expected duplicate outputs');
+    expect(duplicate.outputs).toHaveLength(2);
+
+    const variationSubmission = await adapter.submit(
+      { ...request, mediaKind: 'image', idempotencyKey: 'output_variation' },
+      fakeProvider,
+      signal
+    );
+    if (variationSubmission.kind !== 'remote') throw new Error('expected variation-grid remote task');
+    const variation = await adapter.poll(variationSubmission.providerJobId, fakeProvider, signal);
+    if (variation.status !== 'succeeded' || variation.outputs[0]?.source.kind !== 'file') {
+      throw new Error('expected managed variation-grid output');
+    }
+    expect(variation.outputs[0]).toMatchObject({ width: 64, height: 64, mimeType: 'image/png' });
+    expect((await fs.readFile(variation.outputs[0].source.path)).byteLength).toBeGreaterThan(0);
+  });
+
+  it('replays one exact remote submission across bundles and refuses same-key drift', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-remote-replay-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      { pollSteps: [{ kind: 'succeeded', output: { kind: 'managed_file' } }] },
+      { submit: { kind: 'rejected', code: 'timeout' } },
+    ]);
+    const firstBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const secondBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const firstAdapter = firstBundle.adapters.get('weprompt-image-v1');
+    const secondAdapter = secondBundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...firstBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const exactRequest = { ...request, mediaKind: 'image' as const, idempotencyKey: 'remote_replay' };
+    if (!firstAdapter || !secondAdapter) throw new Error('expected fake image adapters');
+
+    const first = await firstAdapter.submit(exactRequest, fakeProvider, new AbortController().signal);
+    const replay = await secondAdapter.submit(exactRequest, fakeProvider, new AbortController().signal);
+    expect(first).toMatchObject({ kind: 'remote', providerJobId: `${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_1` });
+    expect(replay).toMatchObject({ kind: 'remote', providerJobId: `${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_1` });
+    await expect(
+      secondAdapter.submit(
+        { ...exactRequest, prompt: 'Drifted replay prompt' },
+        fakeProvider,
+        new AbortController().signal
+      )
+    ).rejects.toMatchObject({ code: 'unknown' });
+    expect(remoteState.taskCounter).toBe(1);
+    expect([...remoteState.tasks.keys()]).toEqual([`${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_1`]);
+    expect(remoteState.pendingTaskScripts).toHaveLength(1);
+    expect(remoteState.submissionOutcomes.get(exactRequest.idempotencyKey)).toMatchObject({
+      result: { kind: 'remote', providerJobId: `${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_1` },
+    });
+    expect(firstBundle.getProviderCallCounts().submit).toBe(3);
+  });
+
+  it('replays one complete output authority without consuming another script', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-complete-replay-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      { submit: { kind: 'complete', output: { kind: 'url', url: 'https://example.invalid/exact.png' } } },
+      { submit: { kind: 'rejected', code: 'timeout' } },
+    ]);
+    const firstBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const secondBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const firstAdapter = firstBundle.adapters.get('weprompt-image-v1');
+    const secondAdapter = secondBundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...firstBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const exactRequest = { ...request, mediaKind: 'image' as const, idempotencyKey: 'complete_replay' };
+    if (!firstAdapter || !secondAdapter) throw new Error('expected fake image adapters');
+
+    const first = await firstAdapter.submit(exactRequest, fakeProvider, new AbortController().signal);
+    const replay = await secondAdapter.submit(exactRequest, fakeProvider, new AbortController().signal);
+    expect(replay).toEqual(first);
+    expect(first).toEqual({
+      kind: 'complete',
+      outputs: [
+        {
+          mediaKind: 'image',
+          role: 'primary',
+          source: { kind: 'url', url: 'https://example.invalid/exact.png' },
+          mimeType: 'image/png',
+        },
+      ],
+    });
+    expect(remoteState.taskCounter).toBe(1);
+    expect(remoteState.tasks.size).toBe(0);
+    expect(remoteState.pendingTaskScripts).toHaveLength(1);
+    expect(remoteState.submissionOutcomes.get(exactRequest.idempotencyKey)).toMatchObject({
+      result: { kind: 'complete', output: { kind: 'url', url: 'https://example.invalid/exact.png' } },
+    });
+    expect(firstBundle.getProviderCallCounts().submit).toBe(2);
+  });
+
+  it('allows cancellation while a scripted task is held as queued and refuses it once running', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-cancel-hold-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      {
+        pollSteps: [
+          { kind: 'hold', status: 'queued' },
+          { kind: 'succeeded', output: { kind: 'managed_file' } },
+        ],
+      },
+      {
+        pollSteps: [
+          { kind: 'hold', status: 'running', progress: 10 },
+          { kind: 'succeeded', output: { kind: 'managed_file' } },
+        ],
+      },
+    ]);
+    const bundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const signal = new AbortController().signal;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    const queued = await adapter.submit(
+      { ...request, mediaKind: 'image', idempotencyKey: 'cancel_queued' },
+      fakeProvider,
+      signal
+    );
+    if (queued.kind !== 'remote') throw new Error('expected queued remote task');
+    await expect(adapter.poll(queued.providerJobId, fakeProvider, signal)).resolves.toEqual({ status: 'queued' });
+    await expect(adapter.cancel(queued.providerJobId, fakeProvider, signal)).resolves.toEqual({ kind: 'cancelled' });
+
+    const running = await adapter.submit(
+      { ...request, mediaKind: 'image', idempotencyKey: 'cancel_running' },
+      fakeProvider,
+      signal
+    );
+    if (running.kind !== 'remote') throw new Error('expected running remote task');
+    await expect(adapter.poll(running.providerJobId, fakeProvider, signal)).resolves.toEqual({
+      status: 'running',
+      progress: 10,
+    });
+    await expect(adapter.cancel(running.providerJobId, fakeProvider, signal)).resolves.toEqual({
+      kind: 'refused',
+      error: { code: 'cancellation_refused' },
+    });
+  });
+
+  it('persists an abort-aware submitting hold without minting a second provider task after restart', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-submit-hold-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      {
+        submit: { kind: 'hold' },
+        pollSteps: [{ kind: 'succeeded', output: { kind: 'managed_file' } }],
+      },
+    ]);
+    const firstBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const adapter = firstBundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...firstBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const controller = new AbortController();
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    const heldSubmission = adapter.submit({ ...request, mediaKind: 'image' }, fakeProvider, controller.signal);
+    await vi.waitFor(() => expect(remoteState.submissionHolds.has(request.idempotencyKey)).toBe(true));
+    controller.abort();
+    await expect(heldSubmission).rejects.toMatchObject({ name: 'AbortError' });
+    expect(remoteState.taskCounter).toBe(1);
+    expect(remoteState.tasks.size).toBe(0);
+    await firstBundle.dispose();
+
+    const restartedBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    expect(restartedBundle.releaseSubmitHold(request.idempotencyKey)).toBe(false);
+    expect(restartedBundle.getProviderCallCounts().submit).toBe(1);
+    expect(remoteState.taskCounter).toBe(1);
+  });
+
+  it('settles every same-key submission observer when one held waiter aborts', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-submit-observers-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([{ submit: { kind: 'hold' } }]);
+    const firstBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const secondBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const firstAdapter = firstBundle.adapters.get('weprompt-image-v1');
+    const secondAdapter = secondBundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...firstBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    if (!firstAdapter || !secondAdapter) throw new Error('expected fake image adapters');
+
+    const firstSubmission = firstAdapter.submit(
+      { ...request, mediaKind: 'image' },
+      fakeProvider,
+      firstController.signal
+    );
+    await vi.waitFor(() => expect(remoteState.submissionHolds.has(request.idempotencyKey)).toBe(true));
+    const secondSubmission = secondAdapter.submit(
+      { ...request, mediaKind: 'image' },
+      fakeProvider,
+      secondController.signal
+    );
+    await vi.waitFor(() => expect(remoteState.submitHoldWaiters.get(request.idempotencyKey)?.size).toBe(2));
+    const firstOutcome = expect(firstSubmission).rejects.toMatchObject({ code: 'unknown' });
+    const secondOutcome = expect(secondSubmission).rejects.toMatchObject({ name: 'AbortError' });
+
+    secondController.abort();
+    await Promise.all([firstOutcome, secondOutcome]);
+    expect(remoteState.submissionHolds.get(request.idempotencyKey)).toMatchObject({ aborted: true, released: false });
+    expect(remoteState.submitHoldWaiters.has(request.idempotencyKey)).toBe(false);
+    expect(firstBundle.releaseSubmitHold(request.idempotencyKey)).toBe(false);
+    expect(remoteState.tasks.size).toBe(0);
+    expect(remoteState.taskCounter).toBe(1);
+  });
+
+  it('refuses same-key prompt, settings, and reference drift without replacing the held provider task', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-submit-fingerprint-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([{ submit: { kind: 'hold' } }]);
+    const workerBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const controlBundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const workerAdapter = workerBundle.adapters.get('weprompt-image-v1');
+    const controlAdapter = controlBundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...workerBundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const references = [conditioningInput(1), conditioningInput(2)];
+    const frozenRequest: ResolvedStudioGenerationRequest = {
+      ...request,
+      prompt: 'Exact held prompt',
+      mediaKind: 'image',
+      durationSeconds: 4,
+      conditioningImages: references,
+      conditioningImageLimit: 6,
+      routeConstraints: {
+        aspectRatios: ['16:9'],
+        resolutions: ['720p', '1080p'],
+        minDurationSeconds: 1,
+        maxDurationSeconds: 60,
+        supportsFirstFrame: true,
+        maxConditioningImages: 6,
+        silentOutput: true,
+      },
+    };
+    if (!workerAdapter || !controlAdapter) throw new Error('expected fake image adapters');
+
+    const heldSubmission = workerAdapter.submit(frozenRequest, fakeProvider, new AbortController().signal);
+    await vi.waitFor(() => expect(remoteState.submissionHolds.has(request.idempotencyKey)).toBe(true));
+    const driftedRequests: ResolvedStudioGenerationRequest[] = [
+      { ...frozenRequest, prompt: 'Changed held prompt' },
+      { ...frozenRequest, resolution: '1080p' },
+      { ...frozenRequest, conditioningImages: references.toReversed() },
+      {
+        ...frozenRequest,
+        routeConstraints: { ...frozenRequest.routeConstraints!, silentOutput: false },
+      },
+    ];
+
+    await Promise.all(
+      driftedRequests.map((candidate) =>
+        expect(controlAdapter.submit(candidate, fakeProvider, new AbortController().signal)).rejects.toMatchObject({
+          code: 'unknown',
+        })
+      )
+    );
+    expect(remoteState.taskCounter).toBe(1);
+    expect(remoteState.tasks.size).toBe(0);
+    expect(controlBundle.releaseSubmitHold(request.idempotencyKey)).toBe(true);
+    await expect(heldSubmission).resolves.toMatchObject({
+      kind: 'remote',
+      providerJobId: `${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_1`,
+    });
+    expect(remoteState.tasks.size).toBe(1);
+  });
+
+  it('releases a held submission into its exact scripted remote task', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-submit-release-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([
+      {
+        submit: { kind: 'hold' },
+        pollSteps: [{ kind: 'succeeded', output: { kind: 'url' } }],
+      },
+    ]);
+    const bundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    const signal = new AbortController().signal;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    const heldSubmission = adapter.submit({ ...request, mediaKind: 'image' }, fakeProvider, signal);
+    await vi.waitFor(() => expect(remoteState.submissionHolds.has(request.idempotencyKey)).toBe(true));
+    expect(bundle.releaseSubmitHold(request.idempotencyKey)).toBe(true);
+    const submission = await heldSubmission;
+    if (submission.kind !== 'remote') throw new Error('expected released remote task');
+    await expect(adapter.poll(submission.providerJobId, fakeProvider, signal)).resolves.toMatchObject({
+      status: 'succeeded',
+      outputs: [{ source: { kind: 'url', url: STUDIO_E2E_OUTPUT_URL_SENTINEL } }],
+    });
+    expect(remoteState.taskCounter).toBe(1);
+  });
+
+  it('scripts a submit-time provider failure without creating a remote task', async () => {
+    const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-submit-failure-'));
+    temporaryDirectories.push(rootDir);
+    const remoteState = createStudioE2EFakeRemoteState([{ submit: { kind: 'rejected', code: 'timeout' } }]);
+    const bundle = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const adapter = bundle.adapters.get('weprompt-image-v1');
+    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } as TProviderWithModel;
+    if (!adapter) throw new Error('expected fake image adapter');
+
+    await expect(
+      adapter.submit({ ...request, mediaKind: 'image' }, fakeProvider, new AbortController().signal)
+    ).rejects.toMatchObject({ code: 'timeout' });
+    expect(remoteState.tasks.size).toBe(0);
+    expect(bundle.getProviderCallCounts().submit).toBe(1);
+  });
+
   it('records exact ordered provider inputs without serializing process-only request fields', async () => {
     const rootDir = await fs.mkdtemp(path.join(tmpdir(), 'weprompt-fake-adapter-request-oracle-'));
     temporaryDirectories.push(rootDir);
@@ -646,6 +1167,7 @@ describe('Creative Studio provider adapters', () => {
     await imageAdapter.submit(
       {
         ...request,
+        idempotencyKey: 'request_oracle_image',
         prompt: 'Exact board prompt',
         mediaKind: 'image',
         conditioningImages: [secondReference, firstReference],
@@ -664,7 +1186,12 @@ describe('Creative Studio provider adapters', () => {
     );
     const reviewedFrame = { ...firstFrame(), assetId: 'asset_reviewed_first_frame' };
     await videoAdapter.submit(
-      { ...request, prompt: 'Exact video prompt', firstFrame: reviewedFrame },
+      {
+        ...request,
+        idempotencyKey: 'request_oracle_video',
+        prompt: 'Exact video prompt',
+        firstFrame: reviewedFrame,
+      },
       videoRoute,
       new AbortController().signal
     );
@@ -786,8 +1313,12 @@ describe('Creative Studio provider adapters', () => {
     if (!adapter) throw new Error('expected fake image adapter');
     const signal = new AbortController().signal;
     const submissions = await Promise.all(
-      Array.from({ length: 12 }, () =>
-        adapter.submit({ ...request, mediaKind: 'image', durationSeconds: 4 }, fakeProvider, signal)
+      Array.from({ length: 12 }, (_, index) =>
+        adapter.submit(
+          { ...request, mediaKind: 'image', durationSeconds: 4, idempotencyKey: `concurrent_${index}` },
+          fakeProvider,
+          signal
+        )
       )
     );
     const providerJobIds = submissions.map((submission) => {
@@ -828,7 +1359,7 @@ describe('Creative Studio provider adapters', () => {
       issues: [{ code: 'invalid_duration' }],
     });
     const cancelledSubmission = await adapter.submit(
-      { ...request, mediaKind: 'image', durationSeconds: 4 },
+      { ...request, mediaKind: 'image', durationSeconds: 4, idempotencyKey: 'call_boundary_cancelled' },
       fakeProvider,
       signal
     );
@@ -855,7 +1386,12 @@ describe('Creative Studio provider adapters', () => {
     for (let taskIndex = 0; taskIndex < 2; taskIndex += 1) {
       // eslint-disable-next-line no-await-in-loop
       const submission = await adapter.submit(
-        { ...request, mediaKind: 'image', durationSeconds: 4 },
+        {
+          ...request,
+          mediaKind: 'image',
+          durationSeconds: 4,
+          idempotencyKey: `call_boundary_completed_${taskIndex}`,
+        },
         fakeProvider,
         signal
       );

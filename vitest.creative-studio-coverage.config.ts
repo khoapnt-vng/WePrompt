@@ -81,6 +81,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/pilot/projections.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/runtimeFactory.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/runtime/export.ts',
+  'packages/desktop/src/process/services/creative-studio/service/pilot/runtime/generatedUrlResolver.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/runtime/index.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/runtime/jobs.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/runtime/media.ts',

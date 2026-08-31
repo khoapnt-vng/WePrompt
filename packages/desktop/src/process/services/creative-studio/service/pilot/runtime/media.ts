@@ -33,9 +33,11 @@ import {
 } from '../../schema2/mutations/pieceHandles';
 import { parseStudioImportPhotoRequestV3 } from '../contracts';
 import { CreativeStudioPilotServiceErrorV3, normalizeCreativeStudioPilotErrorV3 } from '../errors';
+import type { StudioPilotGeneratedUrlResolutionV3 } from './generatedUrlResolver';
 
 const MEDIA_DIRECTORY = 'media-v3';
 const IMPORTS_DIRECTORY = 'imports';
+const GENERATED_SOURCE_CLEANUP_ATTEMPTS = 3;
 const ASSETS_DIRECTORY = 'assets';
 const PARTS_DIRECTORY = '.parts';
 const INTENTS_DIRECTORY = '.intents';
@@ -131,7 +133,7 @@ export type StudioPilotMediaStoreOptionsV3 = {
   store: CreativeStudioPilotStoreV3;
   pickPhoto: () => Promise<StudioPilotNativePhotoSelectionV3 | null>;
   /** Main-owned provider download boundary; renderer calls can never supply it. */
-  resolveGeneratedUrl?: (url: string, signal: AbortSignal | undefined) => Promise<{ path: string }>;
+  resolveGeneratedUrl?: (url: string, signal: AbortSignal | undefined) => Promise<StudioPilotGeneratedUrlResolutionV3>;
   fs?: StudioPilotMediaFileSystemV3;
   now?: () => string;
   mintIdentity?: (kind: StudioPilotMediaIdentityKindV3) => string;
@@ -314,7 +316,7 @@ const cosineSimilarity = (left: readonly number[], right: readonly number[]): nu
   return leftMagnitude === 0 || rightMagnitude === 0 ? 0 : dot / Math.sqrt(leftMagnitude * rightMagnitude);
 };
 
-const imageHasVariationGrid = (input: {
+export const imageHasVariationGrid = (input: {
   data: Uint8Array;
   width: number;
   height: number;
@@ -1410,7 +1412,7 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
         }
         const pieceId = durableIdentity('piece');
         const assetId = durableIdentity('asset');
-        const intentId = temporaryId();
+        const intentId = durableIdentity('media_intent');
         if (!identityAvailable(project, pieceId, assetId)) return storageFailure();
         const handle = deriveStudioPieceHandleFromImportFileNameV3(
           selection.fileName,
@@ -1516,16 +1518,37 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
     }
   };
 
-  const resolveGeneratedSource = async (output: ProviderOutput, signal: AbortSignal | undefined): Promise<string> => {
-    if (output.source.kind === 'file') return output.source.path;
+  const resolveGeneratedSource = async (
+    output: ProviderOutput,
+    signal: AbortSignal | undefined
+  ): Promise<{ path: string; cleanup: (() => Promise<void>) | null }> => {
+    if (output.source.kind === 'file') return { path: output.source.path, cleanup: null };
     if (options.resolveGeneratedUrl === undefined) return invalidMedia();
     const resolved = await options.resolveGeneratedUrl(output.source.url, signal).catch(() => {
       throw new CreativeStudioPilotServiceErrorV3('download_failed');
     });
-    if (!isPlainRecord(resolved) || !hasExactKeys(resolved, new Set(['path'])) || typeof resolved.path !== 'string') {
+    if (
+      !isPlainRecord(resolved) ||
+      !hasExactKeys(resolved, new Set(['path', 'cleanup'])) ||
+      typeof resolved.path !== 'string' ||
+      typeof resolved.cleanup !== 'function'
+    ) {
       throw new CreativeStudioPilotServiceErrorV3('download_failed');
     }
-    return resolved.path;
+    return { path: resolved.path, cleanup: resolved.cleanup };
+  };
+
+  const cleanupGeneratedSource = async (cleanup: (() => Promise<void>) | null): Promise<void> => {
+    if (cleanup === null) return;
+    for (let attempt = 0; attempt < GENERATED_SOURCE_CLEANUP_ATTEMPTS; attempt += 1) {
+      try {
+        // eslint-disable-next-line no-await-in-loop -- cleanup retries are bounded and must remain ordered/idempotent.
+        await cleanup();
+        return;
+      } catch {
+        // A successful publication remains authoritative even if best-effort OS-temp cleanup exhausts its retries.
+      }
+    }
   };
 
   const assertGeneratedPublicationOwner = (
@@ -1603,7 +1626,7 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
           input.providerJobId
         );
       });
-      const sourcePath = await resolveGeneratedSource(output, input.signal);
+      const source = await resolveGeneratedSource(output, input.signal);
       crashState = { preserveResidue: false };
       return await withRecoveredProjectAuthority(input.projectId, async (authority, directories) => {
         const project = authority.project;
@@ -1621,7 +1644,7 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
           throw new CreativeStudioPilotServiceErrorV3('project_piece_capacity_reached');
         }
         const assetId = durableIdentity('asset');
-        const intentId = temporaryId();
+        const intentId = durableIdentity('media_intent');
         if (!identityAvailable(project, assetId)) return storageFailure();
         let intent: StudioPilotMediaIntentV3 | null = null;
         let intentPath: string | null = null;
@@ -1629,7 +1652,7 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
         try {
           let staged: StudioPilotStagedImageV3;
           try {
-            staged = await stageSource(directories, sourcePath, intentId, crashState, project.id, false);
+            staged = await stageSource(directories, source.path, intentId, crashState, project.id, false);
           } catch (error) {
             if (output.source.kind === 'url') {
               throw new CreativeStudioPilotServiceErrorV3('download_failed');
@@ -1644,7 +1667,9 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
           ) {
             return invalidMedia();
           }
-          if (await detectVariationGrid(staged.stagePath)) {
+          const variationGrid = await detectVariationGrid(staged.stagePath);
+          if (typeof variationGrid !== 'boolean') return invalidMedia();
+          if (variationGrid) {
             throw new CreativeStudioPilotServiceErrorV3('variation_grid');
           }
           const createdAt = now();
@@ -1728,7 +1753,7 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
           await settleIntent(directories, committed, intent, intentPath);
           await storageStep(crashState, 'media:cleanup_complete', project.id);
           return {
-            status: 'published',
+            status: 'published' as const,
             projectId: project.id,
             pieceId: piece.id,
             jobId: job.id,
@@ -1757,7 +1782,7 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
           }
           throw error;
         }
-      });
+      }).finally(() => cleanupGeneratedSource(source.cleanup));
     } catch (error) {
       if (projectId !== null && crashState !== null && !crashState.preserveResidue) {
         await recoverAfterAmbiguousCommit(projectId);

@@ -297,23 +297,39 @@ describe('isolated schema-6 typed entry point', () => {
         expectedAuthoringRevision: fixture.project.authoringRevision,
         operations: [{ kind: 'rename_piece', pieceId: fixture.pieceId, handle: 'new_name' }],
       });
-      let project = await fixture.runtime.store.loadProjectV3(fixture.project.id);
-      expect(project.pieces[fixture.pieceId]?.handle).toBe('new_name');
-      expect(project.pieces[fixture.pieceId]?.priorHandles).toEqual(['first_photo']);
-      const undoId = project.undoHistory.at(-1)!.id;
+      let loaded = await fixture.runtime.entryPoint.loadProjectV3(fixture.project.id);
+      if (loaded.status !== 'supported') throw new Error('renamed fixture became unreadable');
+      expect(loaded.canvas.pieces[0]).toMatchObject({ handle: 'new_name', priorHandles: ['first_photo'] });
+      expect(renamed.undoEntryId).toMatch(/^mutation_/u);
+      if (renamed.undoEntryId === null) throw new Error('rename did not return its committed undo authority');
 
-      await fixture.runtime.entryPoint.applyMutationBatchV3({
+      const undone = await fixture.runtime.entryPoint.applyMutationBatchV3({
         schemaVersion: 6,
         projectId: fixture.project.id,
         expectedAuthoringRevision: renamed.authoringRevision,
-        operations: [{ kind: 'undo_last', entryId: undoId }],
+        operations: [{ kind: 'undo_last', entryId: renamed.undoEntryId }],
       });
-      project = await fixture.runtime.store.loadProjectV3(fixture.project.id);
-      expect(project.pieces[fixture.pieceId]?.handle).toBe('first_photo');
-      expect(project.pieces[fixture.pieceId]?.priorHandles).toEqual([]);
+      loaded = await fixture.runtime.entryPoint.loadProjectV3(fixture.project.id);
+      if (loaded.status !== 'supported') throw new Error('undone fixture became unreadable');
+      expect(loaded.canvas.pieces[0]).toMatchObject({ handle: 'first_photo', priorHandles: [] });
+      expect(undone.undoEntryId).toBeNull();
     } finally {
       await fixture.cleanup();
     }
+  });
+
+  it('returns no undo authority for an authoring batch that does not rename a Piece', async () => {
+    const harness = await createHarness();
+    const created = await harness.entry.createProjectV3({ name: 'No undo', brief: '' });
+
+    const edited = await harness.entry.applyMutationBatchV3({
+      schemaVersion: 6,
+      projectId: created.summary.id,
+      expectedAuthoringRevision: 1,
+      operations: [{ kind: 'set_brief', brief: 'Changed without a Piece rename.' }],
+    });
+
+    expect(edited).toMatchObject({ authoringRevision: 2, undoEntryId: null });
   });
 
   it('reserves a proposed handle for import and rename only at its matching authoring revision', async () => {
@@ -613,5 +629,17 @@ describe('isolated schema-6 typed entry point', () => {
     await harness.entry.dispose();
     expect(harness.jobs.dispose).toHaveBeenCalledOnce();
     await expect(harness.entry.listProjectsV3()).rejects.toMatchObject({ code: 'runtime_inactive' });
+  });
+
+  it('retries startup recovery after a transient failure instead of caching the rejection', async () => {
+    const harness = await createHarness();
+    harness.media.recoverAllMediaV3.mockRejectedValueOnce(new Error('temporary media scan failure'));
+
+    await expect(harness.entry.startV3()).rejects.toThrow('temporary media scan failure');
+    await expect(harness.entry.startV3()).resolves.toBeUndefined();
+
+    expect(harness.media.recoverAllMediaV3).toHaveBeenCalledTimes(2);
+    expect(harness.exports.recoverAllExportsV3).toHaveBeenCalledOnce();
+    expect(harness.jobs.resumePendingJobsV3).toHaveBeenCalledOnce();
   });
 });

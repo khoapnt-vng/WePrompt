@@ -15,6 +15,7 @@ import type { StudioGenerationRouteCatalog } from '@/process/services/creative-s
 import {
   createCreativeStudioPilotRuntimeV3,
   type CreativeStudioPilotRuntimeDepsV3,
+  type StudioPilotRuntimeIdentityKindV3,
   type CreativeStudioPilotRuntimeV3,
 } from '@/process/services/creative-studio/service/pilot';
 import sharp from 'sharp';
@@ -76,6 +77,127 @@ describe('composed schema-6 Pilot runtime', () => {
     const created = await runtime.entryPoint.createProjectV3({ name: 'Default runtime', brief: '' });
 
     expect(Date.parse(created.summary.createdAt)).toBeGreaterThan(0);
+  });
+
+  it('forwards one deterministic Main identity source across the composed runtime', async () => {
+    const sandbox = await mkdtemp(path.join(os.tmpdir(), 'studio-pilot-v3-identities-'));
+    sandboxes.push(sandbox);
+    const rootDir = path.join(sandbox, 'projects');
+    const sourcePath = path.join(sandbox, 'identity-source.png');
+    await makePng(sourcePath);
+    const route: StudioGenerationRouteCatalog['routes'][number] = {
+      choiceId: 'route_identity',
+      providerId: 'provider_identity',
+      providerName: 'Identity provider',
+      adapterId: 'weprompt-image-v1',
+      model: 'identity-model',
+      health: 'available',
+      kind: 'image',
+      constraints: {
+        aspectRatios: ['16:9'],
+        resolutions: ['1080p'],
+        minDurationSeconds: 1,
+        maxDurationSeconds: 60,
+        supportsFirstFrame: false,
+        maxConditioningImages: 0,
+        silentOutput: true,
+      },
+      cancellationPolicy: 'none',
+    };
+    const identityCounts = new Map<StudioPilotRuntimeIdentityKindV3, number>();
+    const mintIdentity = vi.fn((kind: StudioPilotRuntimeIdentityKindV3): string => {
+      const next = (identityCounts.get(kind) ?? 0) + 1;
+      identityCounts.set(kind, next);
+      return `${kind}_${String(next).padStart(8, '0')}`;
+    });
+    let clock = Date.parse('2026-08-31T12:00:00.000Z');
+    const runtime = createCreativeStudioPilotRuntimeV3({
+      rootDir,
+      providerResolver: {
+        listGenerationRoutes: async () => ({
+          routes: [route],
+          diagnostics: [],
+          generationCatalogVersion: 'identity-catalog',
+        }),
+      },
+      adapters: new Map(),
+      listProviders: async () => [],
+      pickPhoto: async () => ({ path: sourcePath, fileName: 'Identity source.png' }),
+      resolveGeneratedUrl: async () => {
+        throw new Error('identity test does not download generated output');
+      },
+      now: () => clock++,
+      mintIdentity,
+    });
+    runtimes.push(runtime);
+    await runtime.startV3();
+
+    const created = await runtime.entryPoint.createProjectV3({ name: 'Identity runtime', brief: '' });
+    const imported = await runtime.entryPoint.importPhotoV3({
+      projectId: created.summary.id,
+      expectedAuthoringRevision: 1,
+    });
+    if (imported.status !== 'imported') throw new Error('identity fixture import was cancelled');
+    const intentsDirectory = path.join(rootDir, created.summary.id, 'media-v3', '.intents');
+    await writeFile(path.join(intentsDirectory, 'malformed.json'), '{}\n');
+    await runtime.media.recoverProjectMediaV3(created.summary.id);
+    const edited = await runtime.entryPoint.applyMutationBatchV3({
+      schemaVersion: 6,
+      projectId: created.summary.id,
+      expectedAuthoringRevision: imported.authoringRevision,
+      operations: [{ kind: 'set_brief', brief: 'A deterministic identity fixture.' }],
+    });
+    const prepared = await runtime.entryPoint.preparePhotoV3({
+      mode: 'create',
+      projectId: created.summary.id,
+      expectedAuthoringRevision: edited.authoringRevision,
+      words: 'A second photograph',
+      settings: { aspectRatio: '16:9', resolution: '1080p' },
+      suggestedHandle: null,
+    });
+    const exportCatalog = await runtime.entryPoint.listPieceExportsV3(created.summary.id);
+    const exported = await runtime.entryPoint.exportPieceV3({
+      projectId: created.summary.id,
+      pieceId: imported.pieceId,
+      expectedRevision: edited.revision,
+      expectedCatalogRevision: exportCatalog.revision,
+    });
+
+    expect({
+      projectId: created.summary.id,
+      pieceId: imported.pieceId,
+      assetId: imported.assetId,
+      reservationId: prepared.quote.reservationId,
+      quoteId: prepared.quote.quoteId,
+      targetPieceId: prepared.quote.targetPieceId,
+      exportId: exported.catalog.artifacts[0]?.id,
+    }).toEqual({
+      projectId: 'project_00000001',
+      pieceId: 'piece_00000001',
+      assetId: 'asset_00000001',
+      reservationId: 'reservation_00000001',
+      quoteId: 'quote_00000001',
+      targetPieceId: 'piece_00000002',
+      exportId: 'export_00000001',
+    });
+    expect(new Set(mintIdentity.mock.calls.map(([kind]) => kind))).toEqual(
+      new Set<StudioPilotRuntimeIdentityKindV3>([
+        'project',
+        'store_temporary',
+        'piece',
+        'asset',
+        'media_intent',
+        'media_temporary',
+        'mutation',
+        'reservation',
+        'job',
+        'authorization',
+        'quote',
+        'idempotency',
+        'export',
+        'export_nonce',
+      ])
+    );
   });
 
   it('fails closed when a custom process clock cannot produce a durable timestamp', async () => {
@@ -628,9 +750,10 @@ describe('composed schema-6 Pilot runtime', () => {
     };
     const listProviders = vi.fn(async () => [provider]);
     const pickPhoto = vi.fn(async () => null);
+    const cleanupGeneratedUrl = vi.fn(async () => undefined);
     const resolveGeneratedUrl = vi.fn(async (url: string) => {
       if (url !== privateProviderUrl) throw new Error('unexpected provider URL');
-      return { path: privateProviderPath };
+      return { path: privateProviderPath, cleanup: cleanupGeneratedUrl };
     });
     const runtimeDeps = {
       rootDir,
@@ -705,6 +828,7 @@ describe('composed schema-6 Pilot runtime', () => {
     expect(adapter.submit).toHaveBeenCalledOnce();
     expect(resolveGeneratedUrl).toHaveBeenCalledOnce();
     expect(resolveGeneratedUrl).toHaveBeenCalledWith(privateProviderUrl, expect.any(AbortSignal));
+    expect(cleanupGeneratedUrl).toHaveBeenCalledOnce();
     expect(pickPhoto).not.toHaveBeenCalled();
 
     const rendererPayload = JSON.stringify(firstProjection);

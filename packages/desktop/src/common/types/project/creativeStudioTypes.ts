@@ -2061,7 +2061,10 @@ export type StudioMutationBatchResultV3 = {
 
 /** Public Pilot naming keeps the one existing exact schema-6 mutation batch contract. */
 export type StudioApplyMutationBatchRequestV3 = StudioMutationBatchV3;
-export type StudioApplyMutationBatchResultV3 = StudioMutationBatchResultV3;
+export type StudioApplyMutationBatchResultV3 = StudioMutationBatchResultV3 & {
+  /** Main-issued authority for the undo entry committed by a rename; other mutations create none. */
+  undoEntryId: string | null;
+};
 
 export type StudioRendererPieceCurrentProvenanceV3 =
   | {

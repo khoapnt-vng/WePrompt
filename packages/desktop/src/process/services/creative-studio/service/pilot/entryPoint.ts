@@ -294,6 +294,7 @@ export const createCreativeStudioPilotEntryPointV3 = (
             projectId: committed.id,
             revision: committed.revision,
             authoringRevision: committed.authoringRevision,
+            undoEntryId: rename === null ? null : mutationId,
           };
         });
       } catch (error) {
@@ -350,12 +351,19 @@ export const createCreativeStudioPilotEntryPointV3 = (
 
     async startV3() {
       assertActive();
-      startPromise ??= (async () => {
-        const inventory = await deps.store.inspectProjectsV3();
-        await deps.media.recoverAllMediaV3(inventory.healthyProjectIds);
-        await deps.exports.recoverAllExportsV3(inventory.healthyProjectIds);
-        await deps.jobs.resumePendingJobsV3(inventory.healthyProjectIds);
-      })();
+      if (startPromise === null) {
+        startPromise = (async () => {
+          try {
+            const inventory = await deps.store.inspectProjectsV3();
+            await deps.media.recoverAllMediaV3(inventory.healthyProjectIds);
+            await deps.exports.recoverAllExportsV3(inventory.healthyProjectIds);
+            await deps.jobs.resumePendingJobsV3(inventory.healthyProjectIds);
+          } catch (error) {
+            startPromise = null;
+            throw error;
+          }
+        })();
+      }
       return startPromise;
     },
 

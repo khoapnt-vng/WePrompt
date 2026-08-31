@@ -20,6 +20,7 @@ import type {
   ProviderOutput,
   ProviderSubmitResult,
   ResolvedStudioGenerationRequest,
+  SanitizedProviderErrorCode,
   StudioRouteValidation,
 } from './types';
 import { hasImageConditioningFields } from './types';
@@ -30,6 +31,7 @@ export const STUDIO_E2E_FAKE_PROVIDER_ID = 'weprompt_studio_e2e';
 export const STUDIO_E2E_CREDENTIAL_SENTINEL = 'STUDIO_SECRET_CREDENTIAL_SENTINEL';
 export const STUDIO_E2E_PROVIDER_URL_SENTINEL = 'https://studio-provider-url-sentinel.invalid/v1';
 export const STUDIO_E2E_PROVIDER_JOB_SENTINEL = 'STUDIO_PROVIDER_JOB_SENTINEL';
+export const STUDIO_E2E_OUTPUT_URL_SENTINEL = 'https://studio-output-sentinel.invalid/generated.png';
 export const STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL = 'STUDIO_RAW_OUTPUT_BODY_SENTINEL';
 export const STUDIO_E2E_RAW_OUTPUT_PATH_SENTINEL = '/private/STUDIO_RAW_OUTPUT_PATH_SENTINEL/provider-output.bin';
 export const STUDIO_E2E_BOUNDARY_SENTINELS = {
@@ -53,8 +55,12 @@ const PROVIDER_REQUESTS_MAX_RECORDS = 32;
 const PROVIDER_REQUESTS_MAX_BYTES = 8 * 1024 * 1024;
 const PROVIDER_REQUEST_MAX_INPUTS = 6;
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
-const IMAGE_BYTES = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==',
+export const STUDIO_E2E_FAKE_IMAGE_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==';
+const IMAGE_BYTES = Buffer.from(STUDIO_E2E_FAKE_IMAGE_BASE64, 'base64');
+// Four identical checkerboard bands exercise the real variation-grid detector without a paid provider.
+const VARIATION_GRID_IMAGE_BYTES = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAo0lEQVRoge2SIQ4AQRDC+P+ne3bsOboBWdUmJGecGXnahFiAgdMgcbbb2Hj0AU/FUCbEAgycBomz3cbGow94KoYyIRZg4DRInO02Nh59wFMxlAmxAAOnQeJst7Hx6AOeiqFMiAUYOA0SZ7uNjUcf8FQMZUIswMBpkDjbbWw8+oCnYigTYgEGToPE2W5j49EHPBVDmRALMHAaJM52GxtPm9Bf/gH9QulaQafBsQAAAABJRU5ErkJggg==',
   'base64'
 );
 // A deterministic 16x16, ten-second H.264 MP4. The comment metadata intentionally retains the
@@ -64,21 +70,103 @@ const VIDEO_BYTES = Buffer.from(
   'base64'
 );
 
+export type StudioE2EFakeOutputScript =
+  | { kind: 'managed_file' }
+  | { kind: 'url'; url?: string }
+  | { kind: 'variation_grid' }
+  | { kind: 'duplicate_outputs' };
+
+export type StudioE2EFakePollStep =
+  | { kind: 'queued' }
+  | { kind: 'running'; progress?: number }
+  | { kind: 'hold'; status: 'queued' | 'running'; progress?: number }
+  | { kind: 'succeeded'; output: StudioE2EFakeOutputScript }
+  | { kind: 'failed'; code: SanitizedProviderErrorCode }
+  | { kind: 'malformed' };
+
+export type StudioE2EFakeTaskScript =
+  | { submit?: { kind: 'remote' }; pollSteps?: readonly StudioE2EFakePollStep[] }
+  | { submit: { kind: 'hold' }; pollSteps?: readonly StudioE2EFakePollStep[] }
+  | { submit: { kind: 'complete'; output: StudioE2EFakeOutputScript } }
+  | { submit: { kind: 'rejected'; code: SanitizedProviderErrorCode } };
+
 export type StudioE2EFakeTask = {
   mediaKind: StudioMediaKind;
   model: string;
   pollCount: number;
   cancelled: boolean;
+  cancellationOpen: boolean;
+  holdObserved: boolean;
+  pollStepIndex: number;
+  pollSteps: StudioE2EFakePollStep[];
 };
 
 export type StudioE2EFakeRemoteState = {
   tasks: Map<string, StudioE2EFakeTask>;
+  submissionHolds: Map<string, StudioE2EFakeSubmissionHold>;
+  submissionOutcomes: Map<string, StudioE2EFakeSubmissionOutcome>;
+  submitHoldWaiters: Map<string, Set<() => void>>;
+  taskHoldWaiters: Map<string, Set<() => void>>;
   taskCounter: number;
+  pendingTaskScripts: StudioE2EFakeTaskScript[];
+  providerCallCounts: StudioE2EFakeProviderCallCounts;
+  providerRequests: StudioE2EFakeProviderRequest[];
 };
 
-export const createStudioE2EFakeRemoteState = (): StudioE2EFakeRemoteState => ({
+export type StudioE2EFakeSubmissionHold = {
+  idempotencyKey: string;
+  providerJobId: string;
+  mediaKind: StudioMediaKind;
+  model: string;
+  requestFingerprint: string;
+  pollSteps: StudioE2EFakePollStep[];
+  released: boolean;
+  aborted: boolean;
+};
+
+export type StudioE2EFakeSubmissionOutcome = {
+  mediaKind: StudioMediaKind;
+  model: string;
+  requestFingerprint: string;
+  result: { kind: 'remote'; providerJobId: string } | { kind: 'complete'; output: StudioE2EFakeOutputScript };
+};
+
+const cloneOutputScript = (output: StudioE2EFakeOutputScript): StudioE2EFakeOutputScript => ({ ...output });
+
+const clonePollStep = (step: StudioE2EFakePollStep): StudioE2EFakePollStep =>
+  step.kind === 'succeeded' ? { ...step, output: cloneOutputScript(step.output) } : { ...step };
+
+const cloneTaskScript = (script: StudioE2EFakeTaskScript): StudioE2EFakeTaskScript => {
+  if (script.submit?.kind === 'complete') {
+    return { submit: { kind: 'complete', output: cloneOutputScript(script.submit.output) } };
+  }
+  if (script.submit?.kind === 'rejected') return { submit: { ...script.submit } };
+  const pollSteps = 'pollSteps' in script ? script.pollSteps : undefined;
+  const clonedPollSteps = pollSteps === undefined ? {} : { pollSteps: pollSteps.map(clonePollStep) };
+  if (script.submit?.kind === 'hold') return { submit: { kind: 'hold' }, ...clonedPollSteps };
+  return {
+    ...(script.submit === undefined ? {} : { submit: { kind: 'remote' as const } }),
+    ...clonedPollSteps,
+  };
+};
+
+export const createStudioE2EFakeRemoteState = (
+  taskScripts: readonly StudioE2EFakeTaskScript[] = []
+): StudioE2EFakeRemoteState => ({
   tasks: new Map(),
+  submissionHolds: new Map(),
+  submissionOutcomes: new Map(),
+  submitHoldWaiters: new Map(),
+  taskHoldWaiters: new Map(),
   taskCounter: 0,
+  pendingTaskScripts: taskScripts.map(cloneTaskScript),
+  providerCallCounts: {
+    validateConnection: 0,
+    submit: 0,
+    poll: 0,
+    cancel: 0,
+  },
+  providerRequests: [],
 });
 
 export type StudioE2EFakeBundle = {
@@ -86,6 +174,11 @@ export type StudioE2EFakeBundle = {
   provider: IProvider;
   connections: StudioConnectionBinding[];
   adapters: ReadonlyMap<StudioProviderAdapterId, GenerationProviderAdapter>;
+  getProviderCallCounts(): StudioE2EFakeProviderCallCounts;
+  getProviderRequestLog(): StudioE2EFakeProviderRequestLog;
+  enqueueTaskScript(script: StudioE2EFakeTaskScript): void;
+  releaseSubmitHold(idempotencyKey: string): boolean;
+  releaseTaskHold(providerJobId: string): boolean;
   dispose(): Promise<void>;
 };
 
@@ -121,7 +214,7 @@ export type StudioE2EFakeBundleDeps = {
 };
 
 class StudioE2EFakeAdapterError extends Error {
-  readonly code: 'unsupported' | 'unknown';
+  readonly code: SanitizedProviderErrorCode;
 
   constructor(code: StudioE2EFakeAdapterError['code']) {
     super(code);
@@ -178,6 +271,45 @@ const validateRequest = (
       };
 };
 
+const fingerprintSubmission = (request: ResolvedStudioGenerationRequest, model: string): string =>
+  JSON.stringify({
+    model,
+    prompt: request.prompt,
+    mediaKind: request.mediaKind,
+    aspectRatio: request.aspectRatio,
+    resolution: request.resolution,
+    durationSeconds: request.durationSeconds,
+    routeConstraints:
+      request.routeConstraints === undefined
+        ? null
+        : {
+            aspectRatios: [...request.routeConstraints.aspectRatios],
+            resolutions: [...request.routeConstraints.resolutions],
+            minDurationSeconds: request.routeConstraints.minDurationSeconds,
+            maxDurationSeconds: request.routeConstraints.maxDurationSeconds,
+            supportedDurationSeconds:
+              request.routeConstraints.supportedDurationSeconds === undefined
+                ? null
+                : [...request.routeConstraints.supportedDurationSeconds],
+            supportsFirstFrame: request.routeConstraints.supportsFirstFrame,
+            maxConditioningImages: request.routeConstraints.maxConditioningImages,
+            silentOutput: request.routeConstraints.silentOutput,
+          },
+    firstFrame:
+      request.firstFrame === undefined
+        ? null
+        : {
+            assetId: request.firstFrame.assetId,
+            mimeType: request.firstFrame.mimeType,
+            byteSize: request.firstFrame.byteSize,
+          },
+    conditioningImages:
+      request.conditioningImages === undefined
+        ? null
+        : request.conditioningImages.map(({ assetId, mimeType, byteSize }) => ({ assetId, mimeType, byteSize })),
+    conditioningImageLimit: request.conditioningImageLimit ?? null,
+  });
+
 /** Builds the deterministic fake only for a runtime that has already passed both E2E flag gates. */
 export const createStudioE2EFakeBundle = ({
   rootDir,
@@ -190,19 +322,11 @@ export const createStudioE2EFakeBundle = ({
 
   const remoteState = injectedRemoteState ?? createStudioE2EFakeRemoteState();
   const ownsRemoteState = injectedRemoteState === undefined;
-  const providerCallCounts: StudioE2EFakeProviderCallCounts = {
-    validateConnection: 0,
-    submit: 0,
-    poll: 0,
-    cancel: 0,
-  };
   let providerCallCountWrite = Promise.resolve();
   let providerCallCountWriteOrdinal = 0;
-  const providerRequests: StudioE2EFakeProviderRequest[] = [];
   let providerRequestWrite = Promise.resolve();
   let providerRequestWriteOrdinal = 0;
-  const fixtureFlights = new Map<StudioMediaKind, Promise<ProviderOutput>>();
-
+  const fixtureFlights = new Map<StudioMediaKind | 'variation_grid', Promise<ProviderOutput>>();
   const ensureFixtureDirectory = async (): Promise<void> => {
     await mkdir(fixtureDirectory, { recursive: true });
     const directoryStats = await lstat(fixtureDirectory);
@@ -211,12 +335,80 @@ export const createStudioE2EFakeBundle = ({
     }
   };
 
-  /** The explicit-selection profile exists only behind the runtime's dual E2E flags. */
+  const releaseTaskWaiters = (providerJobId: string): void => {
+    const waiters = remoteState.taskHoldWaiters.get(providerJobId);
+    if (waiters === undefined) return;
+    remoteState.taskHoldWaiters.delete(providerJobId);
+    for (const release of waiters) release();
+  };
+
+  const releaseSubmitWaiters = (idempotencyKey: string): void => {
+    const waiters = remoteState.submitHoldWaiters.get(idempotencyKey);
+    if (waiters === undefined) return;
+    remoteState.submitHoldWaiters.delete(idempotencyKey);
+    for (const release of waiters) release();
+  };
+
+  const waitForSubmitRelease = async (hold: StudioE2EFakeSubmissionHold, signal: AbortSignal): Promise<void> => {
+    signal.throwIfAborted();
+    if (hold.aborted) throw new StudioE2EFakeAdapterError('unknown');
+    if (hold.released) return;
+    await new Promise<void>((resolve, reject) => {
+      const waiters = remoteState.submitHoldWaiters.get(hold.idempotencyKey) ?? new Set<() => void>();
+      remoteState.submitHoldWaiters.set(hold.idempotencyKey, waiters);
+      const cleanup = (): void => {
+        signal.removeEventListener('abort', abort);
+        waiters.delete(release);
+        if (waiters.size === 0) remoteState.submitHoldWaiters.delete(hold.idempotencyKey);
+      };
+      const release = (): void => {
+        cleanup();
+        if (hold.aborted) reject(new StudioE2EFakeAdapterError('unknown'));
+        else resolve();
+      };
+      const abort = (): void => {
+        cleanup();
+        hold.aborted = true;
+        reject(signal.reason ?? new Error('aborted'));
+        releaseSubmitWaiters(hold.idempotencyKey);
+      };
+      waiters.add(release);
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    });
+  };
+
+  const waitForTaskRelease = async (providerJobId: string, signal: AbortSignal): Promise<void> => {
+    signal.throwIfAborted();
+    await new Promise<void>((resolve, reject) => {
+      const waiters = remoteState.taskHoldWaiters.get(providerJobId) ?? new Set<() => void>();
+      remoteState.taskHoldWaiters.set(providerJobId, waiters);
+      const cleanup = (): void => {
+        signal.removeEventListener('abort', abort);
+        waiters.delete(release);
+        if (waiters.size === 0) remoteState.taskHoldWaiters.delete(providerJobId);
+      };
+      const release = (): void => {
+        cleanup();
+        resolve();
+      };
+      const abort = (): void => {
+        cleanup();
+        reject(signal.reason ?? new Error('aborted'));
+      };
+      waiters.add(release);
+      signal.addEventListener('abort', abort, { once: true });
+      if (signal.aborted) abort();
+    });
+  };
+
   const recordProviderCall = async (method: keyof StudioE2EFakeProviderCallCounts): Promise<void> => {
+    if (remoteState.providerCallCounts[method] >= Number.MAX_SAFE_INTEGER) {
+      throw new StudioE2EFakeAdapterError('unknown');
+    }
+    remoteState.providerCallCounts[method] += 1;
     if (catalogProfile !== 'explicit-selection') return;
-    if (providerCallCounts[method] >= Number.MAX_SAFE_INTEGER) throw new StudioE2EFakeAdapterError('unknown');
-    providerCallCounts[method] += 1;
-    const snapshot = JSON.stringify(providerCallCounts);
+    const snapshot = JSON.stringify(remoteState.providerCallCounts);
     if (Buffer.byteLength(snapshot, 'utf8') > PROVIDER_CALL_COUNTS_MAX_BYTES) {
       throw new StudioE2EFakeAdapterError('unknown');
     }
@@ -243,18 +435,17 @@ export const createStudioE2EFakeBundle = ({
    * Never serialize the provider, callbacks, paths, URLs, credentials, or the arbitrary request.
    */
   const recordProviderRequest = async (request: ResolvedStudioGenerationRequest, model: string): Promise<void> => {
-    if (catalogProfile !== 'explicit-selection') return;
     const conditioningAssetIds = request.conditioningImages?.map(({ assetId }) => assetId) ?? [];
     const firstFrameAssetId = request.firstFrame?.assetId ?? null;
     if (
-      request.prompt.length === 0 ||
-      request.prompt.length > STUDIO_MAX_GENERATION_PROMPT_LENGTH ||
-      conditioningAssetIds.length > PROVIDER_REQUEST_MAX_INPUTS ||
-      conditioningAssetIds.some((assetId) => !SAFE_STUDIO_ID.test(assetId)) ||
-      (firstFrameAssetId !== null && !SAFE_STUDIO_ID.test(firstFrameAssetId))
-    ) {
+      catalogProfile === 'explicit-selection' &&
+      (request.prompt.length === 0 ||
+        request.prompt.length > STUDIO_MAX_GENERATION_PROMPT_LENGTH ||
+        conditioningAssetIds.length > PROVIDER_REQUEST_MAX_INPUTS ||
+        conditioningAssetIds.some((assetId) => !SAFE_STUDIO_ID.test(assetId)) ||
+        (firstFrameAssetId !== null && !SAFE_STUDIO_ID.test(firstFrameAssetId)))
+    )
       throw new StudioE2EFakeAdapterError('unsupported');
-    }
     const safeRequest = {
       mediaKind: request.mediaKind,
       model,
@@ -263,43 +454,60 @@ export const createStudioE2EFakeBundle = ({
       firstFrameAssetId,
     };
     providerRequestWrite = providerRequestWrite.then(async () => {
-      if (providerRequests.length >= PROVIDER_REQUESTS_MAX_RECORDS) {
+      if (
+        catalogProfile === 'explicit-selection' &&
+        remoteState.providerRequests.length >= PROVIDER_REQUESTS_MAX_RECORDS
+      ) {
         throw new StudioE2EFakeAdapterError('unknown');
       }
       const record: StudioE2EFakeProviderRequest = {
-        ordinal: providerRequests.length + 1,
+        ordinal: remoteState.providerRequests.length + 1,
         ...safeRequest,
       };
       const nextLog: StudioE2EFakeProviderRequestLog = {
         schemaVersion: STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION,
-        requests: [...providerRequests, record],
+        requests: [...remoteState.providerRequests, record],
       };
-      const snapshot = JSON.stringify(nextLog);
-      if (Buffer.byteLength(snapshot, 'utf8') > PROVIDER_REQUESTS_MAX_BYTES) {
-        throw new StudioE2EFakeAdapterError('unknown');
+      if (catalogProfile === 'explicit-selection') {
+        const snapshot = JSON.stringify(nextLog);
+        if (Buffer.byteLength(snapshot, 'utf8') > PROVIDER_REQUESTS_MAX_BYTES) {
+          throw new StudioE2EFakeAdapterError('unknown');
+        }
+        providerRequestWriteOrdinal += 1;
+        const temporaryFile = path.join(
+          fixtureDirectory,
+          `.${STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE}.${process.pid}.${providerRequestWriteOrdinal}.tmp`
+        );
+        await ensureFixtureDirectory();
+        try {
+          await writeFile(temporaryFile, snapshot, { flag: 'wx' });
+          await rename(temporaryFile, path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE));
+        } catch (error) {
+          await rm(temporaryFile, { force: true });
+          throw error;
+        }
       }
-      providerRequestWriteOrdinal += 1;
-      const temporaryFile = path.join(
-        fixtureDirectory,
-        `.${STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE}.${process.pid}.${providerRequestWriteOrdinal}.tmp`
-      );
-      await ensureFixtureDirectory();
-      try {
-        await writeFile(temporaryFile, snapshot, { flag: 'wx' });
-        await rename(temporaryFile, path.join(fixtureDirectory, STUDIO_E2E_FAKE_PROVIDER_REQUESTS_FILE));
-      } catch (error) {
-        await rm(temporaryFile, { force: true });
-        throw error;
-      }
-      providerRequests.push(record);
+      remoteState.providerRequests.push(record);
     });
     await providerRequestWrite;
   };
 
-  const publishFixture = async (mediaKind: StudioMediaKind): Promise<ProviderOutput> => {
-    const bytes = mediaKind === 'image' ? IMAGE_BYTES : VIDEO_BYTES;
+  const publishFixture = async (
+    mediaKind: StudioMediaKind,
+    fixtureKind: 'managed_file' | 'variation_grid' = 'managed_file'
+  ): Promise<ProviderOutput> => {
+    if (fixtureKind === 'variation_grid' && mediaKind !== 'image') {
+      throw new StudioE2EFakeAdapterError('unsupported');
+    }
+    const bytes =
+      fixtureKind === 'variation_grid' ? VARIATION_GRID_IMAGE_BYTES : mediaKind === 'image' ? IMAGE_BYTES : VIDEO_BYTES;
     const mimeType = mediaKind === 'image' ? 'image/png' : 'video/mp4';
-    const fileName = mediaKind === 'image' ? 'fake-image.png' : 'fake-video.mp4';
+    const fileName =
+      fixtureKind === 'variation_grid'
+        ? 'fake-variation-grid.png'
+        : mediaKind === 'image'
+          ? 'fake-image.png'
+          : 'fake-video.mp4';
     await ensureFixtureDirectory();
     const outputPath = path.join(fixtureDirectory, fileName);
     if (path.dirname(outputPath) !== fixtureDirectory) throw new StudioE2EFakeAdapterError('unknown');
@@ -318,20 +526,114 @@ export const createStudioE2EFakeBundle = ({
       source: { kind: 'file', path: outputPath },
       mimeType,
       byteSize: bytes.byteLength,
-      ...(mediaKind === 'video' ? { durationSeconds: 10 } : { width: 1, height: 1 }),
+      ...(mediaKind === 'video'
+        ? { durationSeconds: 10 }
+        : fixtureKind === 'variation_grid'
+          ? { width: 64, height: 64 }
+          : { width: 1, height: 1 }),
     };
   };
 
-  const ensureFixture = (mediaKind: StudioMediaKind): Promise<ProviderOutput> => {
-    const existing = fixtureFlights.get(mediaKind);
+  const ensureFixture = (
+    mediaKind: StudioMediaKind,
+    fixtureKind: 'managed_file' | 'variation_grid' = 'managed_file'
+  ): Promise<ProviderOutput> => {
+    const flightKey = fixtureKind === 'variation_grid' ? fixtureKind : mediaKind;
+    const existing = fixtureFlights.get(flightKey);
     if (existing !== undefined) return existing;
-    const flight = publishFixture(mediaKind);
-    fixtureFlights.set(mediaKind, flight);
+    const flight = publishFixture(mediaKind, fixtureKind);
+    fixtureFlights.set(flightKey, flight);
     const release = (): void => {
-      if (fixtureFlights.get(mediaKind) === flight) fixtureFlights.delete(mediaKind);
+      if (fixtureFlights.get(flightKey) === flight) fixtureFlights.delete(flightKey);
     };
     void flight.then(release, release);
     return flight;
+  };
+
+  const outputForScript = async (
+    mediaKind: StudioMediaKind,
+    outputScript: StudioE2EFakeOutputScript
+  ): Promise<ProviderOutput[]> => {
+    if (outputScript.kind === 'url') {
+      return [
+        {
+          mediaKind,
+          role: 'primary',
+          source: { kind: 'url', url: outputScript.url ?? STUDIO_E2E_OUTPUT_URL_SENTINEL },
+          mimeType: mediaKind === 'image' ? 'image/png' : 'video/mp4',
+          ...(mediaKind === 'video' ? { durationSeconds: 10 } : {}),
+        },
+      ];
+    }
+    if (outputScript.kind === 'variation_grid') {
+      return [await ensureFixture(mediaKind, 'variation_grid')];
+    }
+    const primary = await ensureFixture(mediaKind);
+    if (outputScript.kind === 'duplicate_outputs') {
+      return [primary, { ...primary, source: { ...primary.source } }];
+    }
+    return [primary];
+  };
+
+  const defaultPollSteps = (): StudioE2EFakePollStep[] => [
+    ...(catalogProfile === 'lifecycle'
+      ? ([{ kind: 'queued' }, { kind: 'running', progress: 50 }] satisfies StudioE2EFakePollStep[])
+      : []),
+    { kind: 'succeeded', output: { kind: 'managed_file' } },
+  ];
+
+  const nextTaskScript = (): StudioE2EFakeTaskScript => {
+    const scripted = remoteState.pendingTaskScripts.shift();
+    if (scripted !== undefined) return cloneTaskScript(scripted);
+    return { submit: { kind: 'remote' }, pollSteps: defaultPollSteps() };
+  };
+
+  const snapshotForStep = async (
+    task: StudioE2EFakeTask,
+    step: StudioE2EFakePollStep
+  ): Promise<ProviderJobSnapshot> => {
+    if (step.kind === 'queued') {
+      task.cancellationOpen = true;
+      return { status: 'queued' };
+    }
+    if (step.kind === 'running') {
+      task.cancellationOpen = false;
+      return { status: 'running', ...(step.progress === undefined ? {} : { progress: step.progress }) };
+    }
+    if (step.kind === 'hold') {
+      task.cancellationOpen = step.status === 'queued';
+      return {
+        status: step.status,
+        ...(step.progress === undefined ? {} : { progress: step.progress }),
+      };
+    }
+    task.cancellationOpen = false;
+    if (step.kind === 'failed') return { status: 'failed', error: { code: step.code } };
+    if (step.kind === 'malformed') {
+      return { status: 'running', progress: 'malformed' } as unknown as ProviderJobSnapshot;
+    }
+    return { status: 'succeeded', outputs: await outputForScript(task.mediaKind, step.output) };
+  };
+
+  const pollScriptedTask = async (
+    providerJobId: string,
+    task: StudioE2EFakeTask,
+    signal: AbortSignal
+  ): Promise<ProviderJobSnapshot> => {
+    const stepIndex = Math.min(task.pollStepIndex, task.pollSteps.length - 1);
+    const step = task.pollSteps[stepIndex];
+    if (step === undefined) throw new StudioE2EFakeAdapterError('unknown');
+    if (step.kind === 'hold') {
+      if (!task.holdObserved) {
+        task.holdObserved = true;
+        return snapshotForStep(task, step);
+      }
+      await waitForTaskRelease(providerJobId, signal);
+      if (task.cancelled) return { status: 'cancelled', error: { code: 'unknown' } };
+      return pollScriptedTask(providerJobId, task, signal);
+    }
+    if (task.pollStepIndex < task.pollSteps.length - 1) task.pollStepIndex += 1;
+    return snapshotForStep(task, step);
   };
 
   const createAdapter = (
@@ -366,13 +668,90 @@ export const createStudioE2EFakeBundle = ({
       if (!validateRequest(request, provider, catalogProfile, mediaKind).ok)
         throw new StudioE2EFakeAdapterError('unsupported');
       await recordProviderRequest(request, provider.use_model);
+      const requestFingerprint = fingerprintSubmission(request, provider.use_model);
+      const existingOutcome = remoteState.submissionOutcomes.get(request.idempotencyKey);
+      if (existingOutcome !== undefined) {
+        if (
+          existingOutcome.mediaKind !== mediaKind ||
+          existingOutcome.model !== provider.use_model ||
+          existingOutcome.requestFingerprint !== requestFingerprint
+        ) {
+          throw new StudioE2EFakeAdapterError('unknown');
+        }
+        if (existingOutcome.result.kind === 'remote') {
+          return { kind: 'remote', providerJobId: existingOutcome.result.providerJobId };
+        }
+        return {
+          kind: 'complete',
+          outputs: await outputForScript(mediaKind, existingOutcome.result.output),
+        };
+      }
+      const existingHold = remoteState.submissionHolds.get(request.idempotencyKey);
+      if (existingHold !== undefined) {
+        if (
+          existingHold.mediaKind !== mediaKind ||
+          existingHold.model !== provider.use_model ||
+          existingHold.requestFingerprint !== requestFingerprint ||
+          existingHold.aborted
+        ) {
+          throw new StudioE2EFakeAdapterError('unknown');
+        }
+        await waitForSubmitRelease(existingHold, signal);
+        return { kind: 'remote', providerJobId: existingHold.providerJobId };
+      }
+      const taskScript = nextTaskScript();
       remoteState.taskCounter += 1;
+      if (taskScript.submit?.kind === 'rejected') {
+        throw new StudioE2EFakeAdapterError(taskScript.submit.code);
+      }
+      if (taskScript.submit?.kind === 'complete') {
+        const outcome: StudioE2EFakeSubmissionOutcome = {
+          mediaKind,
+          model: provider.use_model,
+          requestFingerprint,
+          result: { kind: 'complete', output: cloneOutputScript(taskScript.submit.output) },
+        };
+        remoteState.submissionOutcomes.set(request.idempotencyKey, outcome);
+        return {
+          kind: 'complete',
+          outputs: await outputForScript(mediaKind, taskScript.submit.output),
+        };
+      }
       const providerJobId = `${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_${remoteState.taskCounter}`;
+      const scriptedPollSteps = 'pollSteps' in taskScript ? taskScript.pollSteps : undefined;
+      const pollSteps =
+        scriptedPollSteps === undefined || scriptedPollSteps.length === 0
+          ? defaultPollSteps()
+          : scriptedPollSteps.map(clonePollStep);
+      if (taskScript.submit?.kind === 'hold') {
+        const hold: StudioE2EFakeSubmissionHold = {
+          idempotencyKey: request.idempotencyKey,
+          providerJobId,
+          mediaKind,
+          model: provider.use_model,
+          requestFingerprint,
+          pollSteps,
+          released: false,
+          aborted: false,
+        };
+        remoteState.submissionHolds.set(request.idempotencyKey, hold);
+        await waitForSubmitRelease(hold, signal);
+      }
       remoteState.tasks.set(providerJobId, {
         mediaKind,
         model: provider.use_model,
         pollCount: 0,
         cancelled: false,
+        cancellationOpen: true,
+        holdObserved: false,
+        pollStepIndex: 0,
+        pollSteps,
+      });
+      remoteState.submissionOutcomes.set(request.idempotencyKey, {
+        mediaKind,
+        model: provider.use_model,
+        requestFingerprint,
+        result: { kind: 'remote', providerJobId },
       });
       return {
         kind: 'remote',
@@ -392,9 +771,7 @@ export const createStudioE2EFakeBundle = ({
       }
       if (task.cancelled) return { status: 'cancelled', error: { code: 'unknown' } };
       task.pollCount += 1;
-      if (catalogProfile === 'lifecycle' && task.pollCount === 1) return { status: 'queued' };
-      if (catalogProfile === 'lifecycle' && task.pollCount === 2) return { status: 'running', progress: 50 };
-      return { status: 'succeeded', outputs: [await ensureFixture(mediaKind)] };
+      return pollScriptedTask(providerJobId, task, signal);
     },
     async cancel(providerJobId, provider, signal) {
       signal.throwIfAborted();
@@ -407,10 +784,11 @@ export const createStudioE2EFakeBundle = ({
         throw new StudioE2EFakeAdapterError('unknown');
       }
       if (task.cancelled) return { kind: 'cancelled' };
-      if (task.pollCount >= (catalogProfile === 'explicit-selection' ? 1 : 2)) {
+      if (!task.cancellationOpen) {
         return { kind: 'refused', error: { code: 'cancellation_refused' } };
       }
       task.cancelled = true;
+      releaseTaskWaiters(providerJobId);
       return { kind: 'cancelled' };
     },
   });
@@ -550,6 +928,34 @@ export const createStudioE2EFakeBundle = ({
     provider,
     connections,
     adapters,
+    getProviderCallCounts: (): StudioE2EFakeProviderCallCounts => ({ ...remoteState.providerCallCounts }),
+    getProviderRequestLog: (): StudioE2EFakeProviderRequestLog => ({
+      schemaVersion: STUDIO_E2E_FAKE_PROVIDER_REQUESTS_SCHEMA_VERSION,
+      requests: remoteState.providerRequests.map((request) => ({
+        ...request,
+        conditioningAssetIds: [...request.conditioningAssetIds],
+      })),
+    }),
+    enqueueTaskScript(script: StudioE2EFakeTaskScript): void {
+      remoteState.pendingTaskScripts.push(cloneTaskScript(script));
+    },
+    releaseSubmitHold(idempotencyKey: string): boolean {
+      const hold = remoteState.submissionHolds.get(idempotencyKey);
+      if (hold === undefined || hold.released || hold.aborted) return false;
+      hold.released = true;
+      releaseSubmitWaiters(idempotencyKey);
+      return true;
+    },
+    releaseTaskHold(providerJobId: string): boolean {
+      const task = remoteState.tasks.get(providerJobId);
+      if (task === undefined) return false;
+      const step = task.pollSteps[Math.min(task.pollStepIndex, task.pollSteps.length - 1)];
+      if (step?.kind !== 'hold' || task.pollStepIndex >= task.pollSteps.length - 1) return false;
+      task.pollStepIndex += 1;
+      task.holdObserved = false;
+      releaseTaskWaiters(providerJobId);
+      return true;
+    },
     async dispose(): Promise<void> {
       if (ownsRemoteState) remoteState.tasks.clear();
       await Promise.allSettled([providerCallCountWrite, providerRequestWrite]);

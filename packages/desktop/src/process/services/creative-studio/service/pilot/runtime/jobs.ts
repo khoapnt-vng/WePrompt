@@ -282,9 +282,9 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
     jobId: string,
     mutate: (project: StudioProjectV3, job: StudioPieceJobV3, timestamp: string) => boolean,
     allowDuringProviderCancellation = false
-  ): Promise<StudioProjectV3> => {
+  ): Promise<{ project: StudioProjectV3; applied: boolean }> => {
     try {
-      return await deps.store.withProjectAuthorityV3(projectId, async (authority) => {
+      const project = await deps.store.withProjectAuthorityV3(projectId, async (authority) => {
         const current = authority.project;
         const job = current.jobs[jobId];
         if (job === undefined) throw new CreativeStudioPilotServiceErrorV3('not_found');
@@ -299,8 +299,9 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
         draftJob.updatedAt = timestamp;
         return authority.commit(() => draft, { kind: 'runtime', expectedRevision: current.revision });
       });
+      return { project, applied: true };
     } catch (error) {
-      if (error instanceof JobTransitionSkipped) return error.project;
+      if (error instanceof JobTransitionSkipped) return { project: error.project, applied: false };
       throw error;
     }
   };
@@ -651,7 +652,7 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
       job.progress = null;
       return true;
     });
-    if (submitting.jobs[jobId]?.status !== 'submitting' || signal.aborted) return;
+    if (!submitting.applied || submitting.project.jobs[jobId]?.status !== 'submitting' || signal.aborted) return;
     try {
       const submitted = await runWithProviderDeadline(signal, submissionTimeoutMs, (attemptSignal) =>
         context.adapter.submit(context.request, context.provider, attemptSignal)
@@ -677,7 +678,7 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
         job.error = null;
         return true;
       });
-      if (remote.jobs[jobId]?.status === 'queued_remote') {
+      if (remote.project.jobs[jobId]?.status === 'queued_remote') {
         await pollRemote(context, submitted.providerJobId, signal);
       }
     } catch (error) {
@@ -714,35 +715,59 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
       kind === 'download' ? parseStudioRetryPieceDownloadRequestV3(input) : parseStudioResumePieceJobRequestV3(input);
     if (disposed) throw new CreativeStudioPilotServiceErrorV3('runtime_inactive');
     const key = executionKey(request.projectId, request.jobId);
-    if (active.has(key) || providerCancellationClaims.has(key)) {
+    if (providerCancellationClaims.has(key)) {
       throw new CreativeStudioPilotServiceErrorV3('busy');
     }
 
-    const candidate = await deps.store.loadProjectV3(request.projectId);
-    if (candidate.revision !== request.expectedRevision) {
-      throw new CreativeStudioPilotServiceErrorV3('stale_project');
-    }
-    const candidatePiece = candidate.pieces[request.pieceId];
-    const candidateJob = candidate.jobs[request.jobId];
-    if (
-      candidatePiece === undefined ||
-      candidateJob === undefined ||
-      candidateJob.target.pieceId !== candidatePiece.id ||
-      candidatePiece.currentAssetId !== null ||
-      candidatePiece.jobIds.at(-1) !== candidateJob.id ||
-      candidateJob.outputAssetId !== null ||
-      (kind === 'download'
-        ? candidateJob.status !== 'failed' ||
-          candidateJob.error?.code !== 'download_failed' ||
-          candidateJob.spendReceipt === null ||
-          candidateJob.providerSubmissionKind === null
-        : candidateJob.status !== 'needs_attention' ||
-          candidateJob.error?.code !== 'poll_deadline' ||
-          candidateJob.providerSubmissionKind !== 'remote' ||
-          candidateJob.providerJobId === null ||
-          candidateJob.remoteStartedAt === null)
-    ) {
-      throw new CreativeStudioPilotServiceErrorV3('job_ineligible');
+    const loadEligibleCandidate = async (): Promise<StudioPieceJobV3> => {
+      const candidate = await deps.store.loadProjectV3(request.projectId);
+      if (candidate.revision !== request.expectedRevision) {
+        throw new CreativeStudioPilotServiceErrorV3('stale_project');
+      }
+      const candidatePiece = candidate.pieces[request.pieceId];
+      const candidateJob = candidate.jobs[request.jobId];
+      if (
+        candidatePiece === undefined ||
+        candidateJob === undefined ||
+        candidateJob.target.pieceId !== candidatePiece.id ||
+        candidatePiece.currentAssetId !== null ||
+        candidatePiece.jobIds.at(-1) !== candidateJob.id ||
+        candidateJob.outputAssetId !== null ||
+        (kind === 'download'
+          ? candidateJob.status !== 'failed' ||
+            candidateJob.error?.code !== 'download_failed' ||
+            candidateJob.spendReceipt === null ||
+            candidateJob.providerSubmissionKind === null
+          : candidateJob.status !== 'needs_attention' ||
+            candidateJob.error?.code !== 'poll_deadline' ||
+            candidateJob.providerSubmissionKind !== 'remote' ||
+            candidateJob.providerJobId === null ||
+            candidateJob.remoteStartedAt === null)
+      ) {
+        throw new CreativeStudioPilotServiceErrorV3('job_ineligible');
+      }
+      return candidateJob;
+    };
+
+    const schedulerTail = active.get(key);
+    let candidateJob: StudioPieceJobV3;
+    if (schedulerTail !== undefined) {
+      try {
+        candidateJob = await loadEligibleCandidate();
+      } catch {
+        // Preserve the public arbitration contract for ordinary queued/running work, stale
+        // recovery requests, and mismatched targets while this Job is already owned in memory.
+        throw new CreativeStudioPilotServiceErrorV3('busy');
+      }
+      // The durable failure is already renderer-actionable, but its scheduler Promise may remain
+      // registered until the same microtask unwinds. Join only that proven terminal/actionable tail;
+      // never make an ineligible recovery request wait on ordinary queued or running provider work.
+      await schedulerTail;
+      if (disposed) throw new CreativeStudioPilotServiceErrorV3('runtime_inactive');
+      if (providerCancellationClaims.has(key)) throw new CreativeStudioPilotServiceErrorV3('busy');
+      candidateJob = await loadEligibleCandidate();
+    } else {
+      candidateJob = await loadEligibleCandidate();
     }
 
     if (kind === 'download' && deps.media.recoverGeneratedJobV3 !== undefined) {
@@ -876,7 +901,7 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
             current.progress = null;
             return true;
           });
-          if (committed.jobs[request.jobId]?.status !== 'cancelled') {
+          if (committed.project.jobs[request.jobId]?.status !== 'cancelled') {
             throw new CreativeStudioPilotServiceErrorV3('cancellation_refused');
           }
           controllers.get(key)?.abort();
@@ -886,7 +911,7 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
             projectId: request.projectId,
             pieceId: request.pieceId,
             jobId: request.jobId,
-            revision: committed.revision,
+            revision: committed.project.revision,
           };
         }
         if (job.status === 'submitting') {

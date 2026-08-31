@@ -63,6 +63,7 @@ type HarnessOptions = {
   submitGate?: Promise<void>;
   listProvidersGate?: Promise<void>;
   publicationGate?: Promise<void>;
+  publicationFailureTailGate?: Promise<void>;
   cancellationGate?: Promise<void>;
   publicationErrorCodes?: readonly string[];
   preIntentPublicationErrorCodes?: readonly string[];
@@ -377,6 +378,7 @@ const createHarness = async (options: HarnessOptions = {}) => {
             );
           });
         }
+        await options.publicationFailureTailGate;
         throw Object.assign(new Error(publicationErrorCode), { code: publicationErrorCode });
       }
       if (input.signal.aborted || input.outputs.length !== 1 || input.outputs[0]?.mediaKind !== 'image') {
@@ -609,6 +611,37 @@ const settleWithin = async <T>(promise: Promise<T>, milliseconds = 1_000): Promi
 };
 
 describe('schema-6 Piece job manager', () => {
+  it('submits only when this scheduler wins the queued-local transition', async () => {
+    let releaseProviderLookup: (() => void) | undefined;
+    const listProvidersGate = new Promise<void>((resolve) => {
+      releaseProviderLookup = resolve;
+    });
+    const harness = await createHarness({ listProvidersGate });
+    for (let attempt = 0; attempt < 100 && harness.calls.listProviders === 0; attempt += 1) {
+      // eslint-disable-next-line no-await-in-loop -- wait for the scheduler's already-loaded context to reach the gate.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(harness.calls.listProviders).toBe(1);
+    const queued = await harness.store.loadProjectV3(harness.projectId);
+    await harness.store.updateProjectV3(
+      queued.id,
+      (draft) => {
+        const next = structuredClone(draft);
+        next.jobs[harness.confirmed.jobId]!.status = 'submitting';
+        return next;
+      },
+      { kind: 'runtime', expectedRevision: queued.revision }
+    );
+
+    releaseProviderLookup?.();
+    await harness.manager.waitForIdleV3();
+
+    expect(harness.calls.submit).toBe(0);
+    await expect(harness.store.loadProjectV3(harness.projectId)).resolves.toMatchObject({
+      jobs: { [harness.confirmed.jobId]: { status: 'submitting' } },
+    });
+  });
+
   it('dispatches the one committed Job through queued, running, receipt, media, and succeeded', async () => {
     const harness = await createHarness();
     await harness.manager.waitForIdleV3();
@@ -1382,6 +1415,19 @@ describe('schema-6 Piece job manager', () => {
       currentAssetId: null,
       jobIds: before.pieces[harness.confirmed.pieceId]!.jobIds,
     });
+    const callsBeforeBlockedResume = { ...harness.calls };
+    await expect(
+      harness.manager.resumeJobV3({
+        projectId: harness.projectId,
+        pieceId: harness.confirmed.pieceId,
+        jobId: harness.confirmed.jobId,
+        expectedRevision: paid.revision,
+      })
+    ).rejects.toMatchObject({ code: 'busy' });
+    expect(harness.calls).toMatchObject({
+      poll: callsBeforeBlockedResume.poll,
+      publish: callsBeforeBlockedResume.publish,
+    });
 
     releaseCancellation!();
     await expect(cancellation).rejects.toMatchObject({ code: 'cancellation_refused' });
@@ -1665,6 +1711,67 @@ describe('schema-6 Piece job manager', () => {
     releaseSubmit!();
     await harness.manager.waitForIdleV3();
     expect((await originalLoad(harness.projectId)).jobs[harness.confirmed.jobId]?.status).toBe('succeeded');
+  });
+
+  it('joins an already-actionable scheduler tail before recovering the same paid Job', async () => {
+    let releaseFailureTail: (() => void) | undefined;
+    const publicationFailureTailGate = new Promise<void>((resolve) => {
+      releaseFailureTail = resolve;
+    });
+    const harness = await createHarness({
+      publicationErrorCodes: ['download_failed'],
+      publicationFailureTailGate,
+    });
+
+    await expect
+      .poll(async () => (await harness.store.loadProjectV3(harness.projectId)).jobs[harness.confirmed.jobId])
+      .toMatchObject({
+        status: 'failed',
+        error: { code: 'download_failed' },
+        spendReceipt: { jobId: harness.confirmed.jobId },
+      });
+    const failed = await harness.store.loadProjectV3(harness.projectId);
+    const failedJob = structuredClone(failed.jobs[harness.confirmed.jobId]!);
+    const callsBeforeRecovery = { ...harness.calls };
+    harness.setPollSnapshots([{ status: 'succeeded', outputs: [harness.output] }]);
+
+    let recoverySettled = false;
+    const recoveryFlight = harness.manager
+      .retryDownloadV3({
+        projectId: harness.projectId,
+        pieceId: harness.confirmed.pieceId,
+        jobId: harness.confirmed.jobId,
+        expectedRevision: failed.revision,
+      })
+      .finally(() => {
+        recoverySettled = true;
+      });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(recoverySettled).toBe(false);
+    expect(harness.calls).toMatchObject({
+      submit: callsBeforeRecovery.submit,
+      poll: callsBeforeRecovery.poll,
+      publish: callsBeforeRecovery.publish,
+    });
+
+    releaseFailureTail?.();
+    await expect(recoveryFlight).resolves.toMatchObject({
+      status: 'recovering',
+      pieceId: harness.confirmed.pieceId,
+      jobId: harness.confirmed.jobId,
+    });
+    await harness.manager.waitForIdleV3();
+
+    const recovered = await harness.store.loadProjectV3(harness.projectId);
+    expect(recovered.jobs[harness.confirmed.jobId]).toMatchObject({
+      id: failedJob.id,
+      status: 'succeeded',
+      authorizationId: failedJob.authorizationId,
+      spendReceipt: failedJob.spendReceipt,
+    });
+    expect(Object.keys(recovered.jobs)).toEqual([failedJob.id]);
+    expect(recovered.spendAuthorizations).toHaveLength(1);
+    expect(harness.calls.submit).toBe(1);
   });
 
   it('retries paid output download on the same Job and refuses stale or duplicate recovery requests', async () => {

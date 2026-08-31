@@ -142,7 +142,7 @@ export const createPilotPhotoFixtureV3 = async (options: PilotPhotoFixtureOption
     adapters: new Map([['weprompt-image-v1', adapter]]),
     listProviders: async () => [provider],
     pickPhoto: async () => ({ path: sourcePath, fileName: options.fileName ?? `Native photo.${extension}` }),
-    resolveGeneratedUrl: async () => ({ path: sourcePath }),
+    resolveGeneratedUrl: async () => ({ path: sourcePath, cleanup: async () => undefined }),
     now: () => milliseconds++,
     sleep: async () => undefined,
   });
