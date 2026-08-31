@@ -706,6 +706,13 @@ Use `packages/desktop/src/process/services/creative-studio/adapters/e2eFakeAdapt
 isolated CS4 entry point's real provider resolver, Job manager, media store, store queue, bridge
 contracts, and filesystem. Do not call internal reducers to skip the public path.
 
+The gate configures the fake route and adapter through the same catalog/provider registration that
+production resolution consumes. Tests must not inject a pre-resolved route catalog or replace the
+resolver at the CS4 runtime boundary. The fake adapter exposes both managed-file output and a
+deterministic `kind: 'url'` profile. The latter runs through the real bounded downloader and has a
+failing-download arm, so `download_failed` and same-Job recovery are proved without manually writing
+a terminal Job or replacing the media resolver.
+
 Scenarios, each starting with zero Beat and Shot records:
 
 1. create project → prepare generated photo → expose quote → automatic within-cap confirmation →
@@ -718,10 +725,23 @@ Scenarios, each starting with zero Beat and Shot records:
    same-Piece retry through a fresh exact quote/authorization, duplicate output, and app restart in
    every nonterminal durable state;
 5. stale/expired/duplicate confirmation and runtime-only revision movement;
-6. corrupt one schema-6 manifest or export catalog while a second project remains fully usable; and
+6. create and export two schema-6 projects through public calls, stop the runtime, corrupt project
+   A's export catalog, then restart, quarantine that catalog and rebuild it from valid artifacts while
+   proving project A remains healthy and project B still loads, mutates, and exports through the
+   public entry point;
 7. concurrent create/import at the 95→96 boundary, proving the 97th attempt produces no quote,
    authorization, Job, provider call, or spend; and
-8. unsupported schema-5 deletion and quarantined schema-6 deletion.
+8. unsupported schema-5 deletion and quarantined schema-6 deletion. The unsupported input is
+   `healthy/storage/project_capture/project.json` from the committed schema-5 capture in §6. The
+   schema-6 corruption fixture starts as a fresh project created through the public CS4 runtime,
+   then replaces only the root integer `revision` with the string `"malformed_revision"` while
+   retaining `schemaVersion: 6`; do not substitute minimal hand-authored JSON.
+
+Phase 4 injects the native picker response at the existing Main-owned media-picker seam, then uses
+the public import operation, and calls the managed schema-3 exporter directly through the isolated
+CS4 entry point. Opening the real native import/save dialogs, project-menu initiation, and reveal-in-
+folder behavior are renderer/IPC legs owned by Phase 5 and are not silently claimed by this headless
+gate.
 
 Assertions use the persisted manifest, managed bytes, export payload, and public projections. No
 test may declare success merely because the adapter was called.

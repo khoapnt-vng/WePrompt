@@ -1140,6 +1140,13 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
     tools and external MCP tools too. ACP's name-based auto-approval path is not involved. WePrompt's
     session descriptor carries no backend-authenticated trust or read-only approval identity, and the
     renderer cannot safely manufacture one.
+  - **Permission-copy payload verified 2026-08-31.** A loopback-only real Director run crossed Aionrs,
+    the built-in Studio MCP server, WebSocket delivery, and the renderer. The pending payload carried
+    `command_type: "mcp"`, `action: "studio_get_project_status"`, and
+    `description: "MCP aionui-creative-studio/studio_get_project_status: {\"detail\":false}"`; its
+    permission card rendered **I'd like to use a tool**, not the exec-path copy. This closes the
+    diagnostic-copy uncertainty only. The trusted-read consent oracle below remains open. Repeatable
+    evidence lives in `tests/e2e/features/workspaces/director-mcp-permission.e2e.ts`.
   - **External prerequisite.** The accepted oracle requires AionCore/Aionrs to propagate both an exact
     backend-authenticated built-in server identity and MCP `readOnlyHint`, then bypass consent only
     when both match. An external or mutating tool must still prompt. That needs an AionCore/Aionrs

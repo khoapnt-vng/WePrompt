@@ -52,6 +52,7 @@ export default defineConfig({
             'tests/integration/creative-studio/generationLifecycle.integration.test.ts',
             'tests/integration/creative-studio/projectRecovery.integration.test.ts',
             'tests/unit/process/creative-studio/service/directorCommandMailbox.test.ts',
+            'tests/unit/process/creative-studio/service/index.test.ts',
             'tests/unit/knowledge/projectKnowledgeService.test.ts',
             'tests/unit/process/services/officeArtifact/officeCliRunner.test.ts',
             'tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts',
@@ -117,6 +118,7 @@ export default defineConfig({
             // Spawns competing gate processes and waits on a real lock file, with no wall-clock
             // assertion of its own -- it polls for conditions, so load slows it instead of failing it.
             'tests/unit/build-scripts/pushGateLock.test.ts',
+            'tests/unit/process/creative-studio/service/index.test.ts',
             'tests/unit/knowledge/projectKnowledgeService.test.ts',
             'tests/unit/process/services/officeArtifact/officeCliRunner.test.ts',
             'tests/unit/process/services/presentation-template/grants/PresentationSourceGrantStore.test.ts',
