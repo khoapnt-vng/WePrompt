@@ -14,7 +14,7 @@ export {
   studioShotHasBlockingInboundReferenceV2,
   type StudioInboundShotReferenceKindV2,
   type StudioInboundShotReferenceV2,
-} from './chain';
+} from './projections';
 export {
   advanceStudioWaitingBindingsV2,
   terminalizeStudioUnboundDependenciesV2,
@@ -25,8 +25,8 @@ export {
   projectStudioChainBoundaryVerificationIdsV2,
   projectStudioChainStatusV2,
   projectStudioWorkspaceStatusV2,
-} from './workspaceStatus';
-export { projectStudioStatusV2 } from './projectStatus';
+} from './projections';
+export { projectStudioStatusV2 } from './projections';
 export {
   applyStudioMutationBatchV2,
   StudioMutationErrorV2,

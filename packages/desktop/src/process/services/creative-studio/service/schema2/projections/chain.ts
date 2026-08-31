@@ -22,9 +22,9 @@ import {
   deriveStudioInstructionProfileV2,
   isStudioGenerationRequestCurrent,
   studioConditioningInputsEqual,
-} from './generation';
-import { resolveStudioCanonicalBoardAssetV2 } from './generation/boardPanel';
-import { resolveStudioReferenceBindingV2 } from './generation/referenceBinding';
+} from '../generation';
+import { resolveStudioCanonicalBoardAssetV2 } from '../generation/boardPanel';
+import { resolveStudioReferenceBindingV2 } from '../generation/referenceBinding';
 
 const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
   'queued_local',

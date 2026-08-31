@@ -30,9 +30,9 @@ import {
   type StudioShot,
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioDirtyShotsV2 } from './chain';
-import { createStudioFrameExtractionId } from './generation';
-import { resolveStudioCanonicalBoardAssetV2 } from './generation/boardPanel';
-import { resolveStudioReferenceBindingV2 } from './generation/referenceBinding';
+import { createStudioFrameExtractionId } from '../generation';
+import { resolveStudioCanonicalBoardAssetV2 } from '../generation/boardPanel';
+import { resolveStudioReferenceBindingV2 } from '../generation/referenceBinding';
 import { projectStudioWorkspaceStatusV2 } from './workspaceStatus';
 
 type ActiveShotLocation = {

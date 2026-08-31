@@ -24,7 +24,7 @@ import {
   deriveStudioDirtyShotsV2,
   deriveStudioInboundShotReferencesV2,
   studioShotHasBlockingInboundReferenceV2,
-} from '@/process/services/creative-studio/service/schema2/chain';
+} from '@/process/services/creative-studio/service/schema2/projections/chain';
 import {
   createStudioFrameExtractionId,
   createStudioGenerationRequestTemplate,

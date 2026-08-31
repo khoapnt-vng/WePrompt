@@ -22,9 +22,9 @@ import {
   type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioDirtyShotsV2, deriveStudioInboundShotReferencesV2 } from './chain';
-import { createStudioFrameExtractionId } from './generation';
-import { studioBoardPanelFreshnessV2 } from './generation/boardPanel';
-import type { StudioVerifiedConditioningFrameV2 } from './lifecycle';
+import { createStudioFrameExtractionId } from '../generation';
+import { studioBoardPanelFreshnessV2 } from '../generation/boardPanel';
+import type { StudioVerifiedConditioningFrameV2 } from '../lifecycle';
 
 const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
   'waiting_for_conditioning',

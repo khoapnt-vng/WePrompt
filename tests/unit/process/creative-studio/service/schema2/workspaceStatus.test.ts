@@ -28,7 +28,7 @@ import {
   projectStudioChainBoundaryVerificationIdsV2,
   projectStudioChainStatusV2,
   projectStudioWorkspaceStatusV2,
-} from '@/process/services/creative-studio/service/schema2/workspaceStatus';
+} from '@/process/services/creative-studio/service/schema2/projections/workspaceStatus';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 const digest = 'a'.repeat(64);

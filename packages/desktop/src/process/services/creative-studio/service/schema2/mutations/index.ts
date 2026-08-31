@@ -49,7 +49,7 @@ import {
   type StudioUndoPatch,
 } from '@/common/types/project/creativeStudioTypes';
 export type { StudioMutationReasonV2 } from '@/common/types/project/creativeStudioTypes';
-import { deriveStudioInboundShotReferencesV2 } from '../chain';
+import { deriveStudioInboundShotReferencesV2 } from '../projections/chain';
 import { deriveStudioFixedShotReasonsV2, studioJobReferencesShotV2 } from '../fixedShots';
 import {
   resolveStudioCanonicalBoardAssetV2,

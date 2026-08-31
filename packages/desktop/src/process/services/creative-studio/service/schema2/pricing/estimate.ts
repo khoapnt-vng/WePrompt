@@ -43,7 +43,7 @@ import {
   resolveStudioCanonicalBoardAssetV2,
   resolveStudioCurrentBoardPanelAuthorityV2,
 } from '../generation/boardPanel';
-import { deriveStudioInboundShotReferencesV2 } from '../chain';
+import { deriveStudioInboundShotReferencesV2 } from '../projections/chain';
 import {
   calculateStudioQuoteTotals,
   calculateStudioQuotedGenerationAmounts,
