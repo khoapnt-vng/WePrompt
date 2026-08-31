@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { constants as fsConstants, promises as nodeFs } from 'node:fs';
+import { promises as nodeFs } from 'node:fs';
 import { watch as watchFileSystem } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import {
-  isUnsupportedStudioPrototypeSchemaVersion,
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   type CreateStudioProjectInputV2,
@@ -37,11 +36,7 @@ import {
   validateStudioProjectV2,
   type StudioMutationApplyResultV2,
 } from '../service/schema2';
-import {
-  decodeStudioProjectManifestV2,
-  STUDIO_BRIEF_FILE_MAX_BYTES,
-  STUDIO_BRIEF_FILE_NAME,
-} from '../service/briefFile';
+import { STUDIO_BRIEF_FILE_MAX_BYTES, STUDIO_BRIEF_FILE_NAME } from '../service/briefFile';
 import {
   CreativeStudioStoreError,
   StudioProjectConfirmationError,
@@ -63,7 +58,7 @@ import {
   type StudioReferenceGenerationHandoffStoreV2,
   type StudioReferenceRequestLedgerEntryV2,
 } from './contracts';
-import { hasTopLevelPriorProjectSchemaVersion } from './projectRecords';
+import { createStudioProjectRecordsV2 } from './projectRecords';
 import { createStudioDeletionAuthorityV2 } from './deletionAuthority';
 import {
   createStudioProposalSidecarsV2,
@@ -74,7 +69,6 @@ import { createStudioReferenceSidecarsV2 } from './referenceSidecars';
 import { createStudioSidecarJournalV2, type StudioIdentifiedRecordV2 as IdentifiedRecordV2 } from './sidecarJournal';
 import {
   createStudioProjectTransactionsV2,
-  type StudioFileIdentityV2 as FileIdentityV2,
   type StudioProjectFileInspectionV2 as ProjectFileInspectionV2,
 } from './projectTransactions';
 
@@ -590,104 +584,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return file;
   };
 
-  const sniffOversizedStudioProjectSchema = async (
-    root: string,
-    file: string,
-    preliminaryStats: Awaited<ReturnType<typeof fs.lstat>>
-  ): Promise<boolean> => {
-    const parent = path.dirname(file);
-    let handle: Awaited<ReturnType<typeof fs.open>> | undefined;
-    try {
-      const parentStats = await fs.lstat(parent);
-      if (
-        parentStats.isSymbolicLink() ||
-        !parentStats.isDirectory() ||
-        (await fs.realpath(parent)) !== parent ||
-        !isInsideRoot(root, parent)
-      ) {
-        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio project directory is unsafe');
-      }
-      const flags =
-        process.platform === 'win32'
-          ? fsConstants.O_RDONLY
-          : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK;
-      handle = await fs.open(file, flags);
-      const openedStats = await handle.stat();
-      if (
-        !openedStats.isFile() ||
-        openedStats.dev !== preliminaryStats.dev ||
-        openedStats.ino !== preliminaryStats.ino
-      ) {
-        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio file changed during schema inspection');
-      }
-
-      const isPriorProjectSchema = await hasTopLevelPriorProjectSchemaVersion(handle, openedStats.size);
-      const [finalHandleStats, finalPathStats, finalParentStats, finalParent] = await Promise.all([
-        handle.stat(),
-        fs.lstat(file),
-        fs.lstat(parent),
-        fs.realpath(parent),
-      ]);
-      if (
-        finalHandleStats.size !== openedStats.size ||
-        finalHandleStats.mtimeMs !== openedStats.mtimeMs ||
-        finalHandleStats.ctimeMs !== openedStats.ctimeMs ||
-        finalPathStats.isSymbolicLink() ||
-        !finalPathStats.isFile() ||
-        finalPathStats.dev !== openedStats.dev ||
-        finalPathStats.ino !== openedStats.ino ||
-        finalParentStats.isSymbolicLink() ||
-        !finalParentStats.isDirectory() ||
-        finalParentStats.dev !== parentStats.dev ||
-        finalParentStats.ino !== parentStats.ino ||
-        finalParent !== parent
-      ) {
-        throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio file changed during schema inspection');
-      }
-      return isPriorProjectSchema;
-    } catch (error) {
-      if (error instanceof CreativeStudioStoreError) throw error;
-      throw storageError(error, 'Schema-2 Studio file could not be inspected');
-    } finally {
-      await handle?.close().catch((): undefined => undefined);
-    }
-  };
-
-  const readBoundedStudioV2File = async (
-    root: string,
-    file: string
-  ): Promise<
-    { status: 'bytes'; bytes: string; identity: FileIdentityV2 } | { status: 'unsupported_prototype_schema' } | null
-  > => {
-    let stats: Awaited<ReturnType<typeof fs.lstat>>;
-    try {
-      stats = await fs.lstat(file);
-    } catch (error) {
-      if (isRecord(error) && error.code === 'ENOENT') return null;
-      throw storageError(error, 'Schema-2 Studio file is unavailable');
-    }
-    if (stats.isSymbolicLink() || !stats.isFile()) {
-      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio file is unsafe');
-    }
-    if (stats.size > STUDIO_PROJECT_V2_MAX_RECORD_BYTES) {
-      if (await sniffOversizedStudioProjectSchema(root, file, stats)) {
-        return { status: 'unsupported_prototype_schema' };
-      }
-      throw new CreativeStudioStoreError('storage_error', 'Schema-2 Studio file is too large');
-    }
-    try {
-      const record = await readBoundedRegularFileWithIdentity({
-        fs,
-        canonicalRoot: root,
-        file,
-        maxBytes: stats.size,
-      });
-      return record === null ? null : { status: 'bytes', bytes: record.bytes, identity: record.identity };
-    } catch (error) {
-      throw storageError(error, 'Schema-2 Studio file could not be read');
-    }
-  };
-
   const connectionsFile = async (root: string): Promise<string> => {
     const file = resolveRootChild(root, 'connections.json');
     await assertRegularFileOrMissing(file);
@@ -731,6 +627,20 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     observeProjectCommit,
     storageError,
   });
+
+  const { inspectProjectFileV2, readBoundedStudioV2File, requireSupportedProjectInspectionV2 } =
+    createStudioProjectRecordsV2({
+      fs,
+      maxProjectBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
+      projectDirectory,
+      resolveRootChild,
+      isInsideRoot,
+      assertRegularFileOrMissing,
+      captureDirectoryAuthority: captureDirectoryAuthorityV2,
+      assertDirectoryAuthority: assertDirectoryAuthorityV2,
+      recoverBriefTransaction: recoverBriefTransactionV2,
+      storageError,
+    });
 
   const readConnections = async (root: string): Promise<StudioConnectionBinding[]> => {
     const file = await connectionsFile(root);
@@ -776,106 +686,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       })
       .catch((): undefined => undefined);
     return next;
-  };
-
-  const inspectProjectFileV2 = async (root: string, projectId: string): Promise<ProjectFileInspectionV2> => {
-    const directoryPath = await projectDirectory(root, projectId, false);
-    if (directoryPath === null) return { status: 'not_found', projectId };
-    const directory = await captureDirectoryAuthorityV2(directoryPath);
-    const file = resolveRootChild(directory.path, 'project.json');
-    await assertRegularFileOrMissing(file);
-    const initialRecord = await readBoundedStudioV2File(root, file);
-    if (initialRecord === null) return { status: 'not_found', projectId };
-    if (initialRecord.status === 'unsupported_prototype_schema') {
-      return { status: 'unsupported_prototype_schema', projectId };
-    }
-    let initialParsed: unknown;
-    try {
-      initialParsed = JSON.parse(initialRecord.bytes) as unknown;
-    } catch {
-      return {
-        status: 'malformed_v2',
-        projectId,
-        error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
-      };
-    }
-    if (isRecord(initialParsed) && isUnsupportedStudioPrototypeSchemaVersion(initialParsed.schemaVersion)) {
-      return { status: 'unsupported_prototype_schema', projectId };
-    }
-    if (!isRecord(initialParsed) || initialParsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION) {
-      return {
-        status: 'malformed_v2',
-        projectId,
-        error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
-      };
-    }
-    await recoverBriefTransactionV2(root, directory, initialRecord);
-    await assertRegularFileOrMissing(file);
-    const record = await readBoundedStudioV2File(root, file);
-    if (record === null) return { status: 'not_found', projectId };
-    if (record.status === 'unsupported_prototype_schema') {
-      return { status: 'unsupported_prototype_schema', projectId };
-    }
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(record.bytes) as unknown;
-    } catch {
-      return {
-        status: 'malformed_v2',
-        projectId,
-        error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
-      };
-    }
-    if (isRecord(parsed) && isUnsupportedStudioPrototypeSchemaVersion(parsed.schemaVersion)) {
-      return { status: 'unsupported_prototype_schema', projectId };
-    }
-    let briefFile: Extract<ProjectFileInspectionV2, { status: 'supported' }>['briefFile'];
-    try {
-      const briefRecord = await readBoundedRegularFileWithIdentity({
-        fs,
-        canonicalRoot: root,
-        file: resolveRootChild(directory.path, STUDIO_BRIEF_FILE_NAME),
-        maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
-      });
-      if (briefRecord === null) {
-        return {
-          status: 'malformed_v2',
-          projectId,
-          error: new CreativeStudioStoreError('storage_error', 'Schema-5 Studio Brief is missing'),
-        };
-      }
-      briefFile = { status: 'present', ...briefRecord };
-    } catch (error) {
-      return {
-        status: 'malformed_v2',
-        projectId,
-        error: storageError(error, 'Schema-2 Studio Brief could not be read'),
-      };
-    }
-    const decoded = decodeStudioProjectManifestV2(parsed, briefFile.status === 'present' ? briefFile.bytes : null);
-    if (
-      !isRecord(parsed) ||
-      parsed.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION ||
-      decoded === null ||
-      decoded.project.id !== projectId
-    ) {
-      return {
-        status: 'malformed_v2',
-        projectId,
-        error: new CreativeStudioStoreError('storage_error', 'Malformed schema-2 Studio project manifest'),
-      };
-    }
-    await assertDirectoryAuthorityV2(directory);
-    return {
-      status: 'supported',
-      project: decoded.project,
-      bytes: record.bytes,
-      identity: record.identity,
-      directory,
-      briefFile,
-      briefSynchronized: decoded.synchronized,
-    };
   };
 
   const {
@@ -1030,19 +840,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
 
   const inspectProjectThroughAttributionFenceV2 = (root: string, projectId: string): Promise<ProjectFileInspectionV2> =>
     enqueue(projectId, () => inspectProjectWithAttributionFenceV2InsideQueue(root, projectId));
-
-  const requireSupportedProjectInspectionV2 = (
-    inspected: ProjectFileInspectionV2
-  ): Extract<ProjectFileInspectionV2, { status: 'supported' }> => {
-    if (inspected.status === 'supported') return inspected;
-    if (inspected.status === 'not_found') {
-      throw new CreativeStudioStoreError('not_found', 'Studio project not found');
-    }
-    if (inspected.status === 'unsupported_prototype_schema') {
-      throw new CreativeStudioStoreError('unsupported_prototype_schema', 'Unsupported prototype Studio schema');
-    }
-    throw inspected.error;
-  };
 
   const scanProjectsV2 = async (root: string): Promise<ProjectListingSweepV2> => {
     let entries: import('node:fs').Dirent[];
