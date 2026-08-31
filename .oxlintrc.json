@@ -27,7 +27,8 @@
       }
     ],
     "no-floating-promises": "error",
-    "no-await-thenable": "error"
+    "no-await-thenable": "error",
+    "prefer-set-has": "off"
   },
   "overrides": [
     {
