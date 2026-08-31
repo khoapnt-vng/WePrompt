@@ -82,7 +82,7 @@ import {
   classifyStudioDirectorOperationV2,
   validatesStudioPaidRecoveryBlockerV2,
   type StudioDirectorOperationDispositionV2,
-} from '@process/services/creative-studio/service/directorCommandContracts';
+} from '@process/services/creative-studio/service/director/contracts';
 import {
   type RecordIoFileSystem,
   readBoundedRegularBinaryFileWithIdentity,
@@ -92,7 +92,7 @@ import {
 import {
   deriveStudioFixedShotReasonsV2,
   STUDIO_FIXED_SHOT_REASON_ORDER_V2,
-} from '@process/services/creative-studio/service/schema2/fixedShots';
+} from '@process/services/creative-studio/service/schema2/mutations/fixedShots';
 import { createStudioFrameExtractionId } from '@process/services/creative-studio/service/schema2/generation/frameExtraction';
 
 export type StudioServerEnv = {

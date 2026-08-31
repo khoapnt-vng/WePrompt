@@ -178,6 +178,7 @@ const generatedProject = (): StudioProjectV3 => {
     status: 'succeeded',
     provider,
     idempotencyKey: 'idempotency_1',
+    providerSubmissionKind: 'remote',
     providerJobId: 'provider_job_1',
     remoteStartedAt: T1,
     cancellationPolicy: 'queued_and_running',

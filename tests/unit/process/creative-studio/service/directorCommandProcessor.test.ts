@@ -34,16 +34,16 @@ import {
   type StudioDirectorCommandProcessorV2,
   type StudioDirectorCommandProcessorDepsV2,
   type StudioDirectorCommitTrackerV2,
-} from '@process/services/creative-studio/service/directorCommandProcessor';
+} from '@process/services/creative-studio/service/director/processor';
 import {
   StudioDirectorCommandApplyErrorV2,
   type StudioDirectorCommandServiceV2,
-} from '@process/services/creative-studio/service/directorCommandService';
+} from '@process/services/creative-studio/service/director/service';
 import {
   createStudioDirectorCommandMailboxV2,
   type StudioDirectorCommandMailboxV2,
-} from '@process/services/creative-studio/service/directorCommandMailbox';
-import { createStudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
+} from '@process/services/creative-studio/service/director/mailbox';
+import { createStudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/director/service';
 import { CreativeStudioServiceError } from '@process/services/creative-studio/service/projectMutations';
 import { createCreativeStudioStore, CreativeStudioStoreError } from '@process/services/creative-studio/store';
 

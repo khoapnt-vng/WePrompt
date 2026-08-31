@@ -38,7 +38,7 @@ import {
   type StudioProjectStatusV2,
   type StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
-import * as directorCommandContracts from '@process/services/creative-studio/service/directorCommandContracts';
+import * as directorCommandContracts from '@process/services/creative-studio/service/director/contracts';
 import {
   classifyStudioDirectorOperationV2,
   isStudioDirectorFreeRecoveryCommandV2,
@@ -57,7 +57,7 @@ import {
   parseStudioReferenceRequestV2,
   STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
   studioDirectorCommandReceiptMatchesRecordV2,
-} from '@process/services/creative-studio/service/directorCommandContracts';
+} from '@process/services/creative-studio/service/director/contracts';
 
 const NOW = '2026-08-16T12:00:00.000Z';
 const WAIT_MS = 15_000;
@@ -610,7 +610,7 @@ describe('Studio Director V2 command contracts', () => {
     const source = readFileSync(
       path.resolve(
         process.cwd(),
-        'packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts'
+        'packages/desktop/src/process/services/creative-studio/service/director/contracts.ts'
       ),
       'utf8'
     );

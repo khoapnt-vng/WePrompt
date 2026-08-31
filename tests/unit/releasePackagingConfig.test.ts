@@ -742,6 +742,64 @@ describe('release packaging configuration', () => {
     });
   });
 
+  it('re-runs reviewed coverage for an already-pushed HEAD without changing empty unpushed or docs-only decisions', () => {
+    const tempRoot = mkdtempSync(resolve(tmpdir(), 'weprompt-push-selector-'));
+    const remoteRoot = resolve(tempRoot, 'remote.git');
+    const workRoot = resolve(tempRoot, 'work');
+    const selectorPath = resolve(projectRoot, 'scripts/select-push-tests.js');
+    mkdirSync(workRoot);
+
+    const runGit = (cwd: string, ...args: string[]) => {
+      const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+    const runSelector = () => {
+      const result = spawnSync('node', [selectorPath, '--dry-run'], {
+        cwd: workRoot,
+        encoding: 'utf8',
+      });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout.trim();
+    };
+
+    try {
+      runGit(tempRoot, 'init', '--bare', remoteRoot);
+      runGit(workRoot, 'init', '--initial-branch=main');
+      runGit(workRoot, 'config', 'user.name', 'Push Selector Test');
+      runGit(workRoot, 'config', 'user.email', 'push-selector@example.invalid');
+      runGit(workRoot, 'config', 'commit.gpgsign', 'false');
+
+      writeFileSync(resolve(workRoot, 'README.md'), 'baseline\n');
+      runGit(workRoot, 'add', 'README.md');
+      runGit(workRoot, 'commit', '-m', 'baseline');
+      runGit(workRoot, 'remote', 'add', 'origin', remoteRoot);
+      runGit(workRoot, 'push', '--set-upstream', 'origin', 'main');
+
+      expect(runSelector()).toBe(
+        'pre-push tests: coverage — HEAD already matches its upstream; re-running the reviewed gate'
+      );
+
+      writeFileSync(resolve(workRoot, 'temporary.txt'), 'temporary\n');
+      runGit(workRoot, 'add', 'temporary.txt');
+      runGit(workRoot, 'commit', '-m', 'add temporary file');
+      rmSync(resolve(workRoot, 'temporary.txt'));
+      runGit(workRoot, 'add', '--all');
+      runGit(workRoot, 'commit', '-m', 'remove temporary file');
+
+      expect(runSelector()).toBe('pre-push tests: none — nothing to push');
+
+      mkdirSync(resolve(workRoot, 'docs'));
+      writeFileSync(resolve(workRoot, 'docs/note.md'), 'inert prose\n');
+      runGit(workRoot, 'add', 'docs/note.md');
+      runGit(workRoot, 'commit', '-m', 'document the selector');
+
+      expect(runSelector()).toBe('pre-push tests: none — 1 file(s) changed, all documentation');
+    } finally {
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it('runs lineage recovery acceptance on architecture-matched native package runners', () => {
     const manualWorkflow = readProjectFile('.github/workflows/build-manual.yml');
     const releaseWorkflow = readProjectFile('.github/workflows/build-and-release.yml');

@@ -22,7 +22,7 @@ import {
   parseStudioReferenceRequestDecisionV2,
   parseStudioReferenceRequestSlotV2,
   parseStudioReferenceRequestV2,
-} from '../service/directorCommandContracts';
+} from '../service/director/contracts';
 import {
   CreativeStudioStoreError,
   type StudioDecideReferenceRequestInputV2,

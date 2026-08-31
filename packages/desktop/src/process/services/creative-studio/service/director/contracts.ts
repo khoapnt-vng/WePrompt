@@ -49,7 +49,7 @@ import {
   type StudioReferenceRequestV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { hasRuleToken, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
-import { validateStudioMutationOperationV2 } from './schema2/mutations';
+import { validateStudioMutationOperationV2 } from '../schema2/mutations';
 
 type JsonRecord = Record<string, unknown>;
 

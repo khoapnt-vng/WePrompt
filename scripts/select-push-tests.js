@@ -76,8 +76,13 @@ const changedFiles = () => {
   const branch = git('rev-parse', '--abbrev-ref', 'HEAD');
   if (branch === 'HEAD') throw new Error('detached HEAD');
   const upstream = git('rev-parse', '--abbrev-ref', `${branch}@{upstream}`);
+  const headRevision = git('rev-parse', 'HEAD');
+  const upstreamRevision = git('rev-parse', upstream);
   const base = git('merge-base', upstream, 'HEAD');
-  return git('diff', '--name-only', base, 'HEAD').split('\n').filter(Boolean);
+  return {
+    files: git('diff', '--name-only', base, 'HEAD').split('\n').filter(Boolean),
+    headEqualsUpstream: headRevision === upstreamRevision,
+  };
 };
 
 /** The whole decision, as a pure function of the changed paths, so it can be tested directly. */
@@ -94,14 +99,26 @@ const classify = (files) => {
   return { leg: 'none', why: `${files.length} file(s) changed, all documentation` };
 };
 
+/**
+ * `classify([])` remains the right answer for unpushed commits whose combined tree is unchanged.
+ * It is not sufficient for a branch whose HEAD has already reached its upstream, though: in that
+ * state a repeated `just push` is the only available way to repair or re-run a gate after the
+ * original push, and reporting `none` makes an untested push look green. Treat that exact relation
+ * as an explicit request for the reviewed gate; keep all other path classification unchanged.
+ */
+const classifyPushState = ({ files, headEqualsUpstream }) =>
+  headEqualsUpstream
+    ? { leg: 'coverage', why: 'HEAD already matches its upstream; re-running the reviewed gate' }
+    : classify(files);
+
 const select = () => {
-  let files;
+  let state;
   try {
-    files = changedFiles();
+    state = changedFiles();
   } catch (error) {
     return { leg: 'coverage', why: `cannot tell what is being pushed (${error.message}); running the gate` };
   }
-  return classify(files);
+  return classifyPushState(state);
 };
 
 /**
@@ -114,7 +131,7 @@ const COMMANDS = {
   none: null,
 };
 
-module.exports = { BEHAVIOUR_BEARING_MARKDOWN, classify, isDocumentation };
+module.exports = { BEHAVIOUR_BEARING_MARKDOWN, classify, classifyPushState, isDocumentation };
 
 const main = () => {
   // `--classify <paths...>` prints the leg for a hypothetical change set and runs nothing. The

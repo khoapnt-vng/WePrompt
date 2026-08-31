@@ -29,7 +29,7 @@ import {
   parseStudioProposalDecisionV2,
   parseStudioProposalRecordV2,
   parseStudioProposalSlotV2,
-} from '../service/directorCommandContracts';
+} from '../service/director/contracts';
 import { studioProposalOperationsV2 } from '../service/schema2/mutations/proposalReview';
 import { applyStudioMutationBatchV2, validateStudioProjectV2 } from '../service/schema2';
 import {

@@ -30,7 +30,7 @@ import {
   studioDirectorCommandReceiptMatchesRecordV2,
   type StudioDirectorCommandParseResultV2,
   type StudioDirectorSidecarParseResultV2,
-} from './directorCommandContracts';
+} from './contracts';
 import {
   canonicalizeRecordRoot,
   publishExclusiveLeaseRecord,
@@ -41,7 +41,7 @@ import {
   resolveCompleteDirectorySet,
   resolveConfinedRecordPath,
   type RecordIoFileSystem,
-} from './recordIo';
+} from '../recordIo';
 import { CreativeStudioStoreError, type CreativeStudioStore } from '@process/services/creative-studio/store';
 
 export type StudioDirectorPendingReadV2 = StudioDirectorCommandParseResultV2;

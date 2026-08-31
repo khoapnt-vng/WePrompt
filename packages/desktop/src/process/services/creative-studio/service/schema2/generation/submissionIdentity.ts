@@ -338,6 +338,7 @@ const DECLARED_JOB_KEYS_V3 = [
   'status',
   'provider',
   'idempotencyKey',
+  'providerSubmissionKind',
   'providerJobId',
   'remoteStartedAt',
   'cancellationPolicy',

@@ -1,0 +1,1448 @@
+/**
+ * @license
+ * Copyright 2025 AionUi (aionui.com)
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { createHash, randomBytes } from 'node:crypto';
+import { promises as nodeFs } from 'node:fs';
+import path from 'node:path';
+import { types as nodeTypes } from 'node:util';
+import { STUDIO_PROJECT_SCHEMA_VERSION_V3, type StudioProjectV3 } from '@/common/types/project/creativeStudioTypes';
+import {
+  canonicalizeRecordRoot,
+  readBoundedRegularBinaryFileWithIdentity,
+  resolveConfinedRecordPath,
+  resolveSafeRecordDirectory,
+  type RecordIoFileSystem,
+} from '../service/recordIo';
+import { createEmptyStudioProjectV3 } from '../service/schema2/factories';
+import {
+  createStudioDeletionClaimCacheV3,
+  StudioDeletionClaimErrorV3,
+  type StudioDeletionClaimCacheOptionsV3,
+  type StudioDeletionClaimCacheV3,
+  type StudioIssuedDeletionClaimV3,
+  type StudioProjectDeletionObservationV3,
+  type StudioProjectDirectoryIdentityV3,
+  type StudioUnreadableProjectDeletionObservationV3,
+} from '../service/schema2/mutations/deletionClaimsV3';
+import { validateStudioProjectV3 } from '../service/schema2/validation';
+
+const PROJECT_MANIFEST = 'project.json';
+const PROJECT_BRIEF = 'brief.md';
+const PROJECT_TRANSACTION = '.project-write-v3.json';
+const PROJECT_ENVELOPE_SCHEMA_VERSION = 1 as const;
+const PROJECT_TRANSACTION_SCHEMA_VERSION = 1 as const;
+const PROJECT_DELETION_SCHEMA_VERSION = 1 as const;
+const MAX_MANIFEST_BYTES = 1_048_576;
+const MAX_BRIEF_BYTES = 65_536;
+const MAX_CONTROL_RECORD_BYTES = 16_384;
+const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
+const SAFE_TEMPORARY_ID = /^[A-Za-z0-9_-]{8,128}$/;
+const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
+const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+const PROJECT_MANIFEST_KEYS = new Set([
+  'schemaVersion',
+  'revision',
+  'authoringRevision',
+  'id',
+  'name',
+  'rules',
+  'forgeProjectId',
+  'briefConversationId',
+  'pieceOrder',
+  'pieces',
+  'spendPolicy',
+  'spendAuthorizations',
+  'undoHistory',
+  'assets',
+  'jobs',
+  'createdAt',
+  'updatedAt',
+  'briefFile',
+]);
+const BRIEF_FILE_KEYS = new Set(['schemaVersion', 'sha256']);
+const CREATE_INPUT_KEYS = new Set(['name', 'brief']);
+const TRANSACTION_KEYS = new Set([
+  'schemaVersion',
+  'projectId',
+  'transactionId',
+  'manifestTemporaryFile',
+  'briefTemporaryFile',
+  'previousManifestSha256',
+  'previousBriefSha256',
+  'nextManifestSha256',
+  'nextBriefSha256',
+]);
+const DELETION_MARKER_KEYS = new Set([
+  'schemaVersion',
+  'catalogueId',
+  'classification',
+  'directoryIdentity',
+  'manifestFingerprint',
+  'expectedRevision',
+  'quarantineName',
+]);
+const DIRECTORY_IDENTITY_KEYS = new Set(['dev', 'ino']);
+
+type PlainRecord = Record<string, unknown>;
+
+export type StudioPilotProjectSummaryV3 = {
+  id: string;
+  name: string;
+  revision: number;
+  authoringRevision: number;
+  pieceCount: number;
+  updatedAt: string;
+};
+
+export type StudioPilotUnreadableProjectV3 = {
+  catalogueId: string;
+  classification: 'unsupported' | 'quarantined';
+  deletionClaim: string;
+  deletionClaimExpiresAt: string;
+};
+
+export type StudioPilotProjectListEntryV3 =
+  | { classification: 'healthy'; summary: StudioPilotProjectSummaryV3 }
+  | StudioPilotUnreadableProjectV3;
+
+export type StudioPilotProjectInventoryV3 = {
+  healthyProjectIds: string[];
+  unsupportedProjectIds: string[];
+  quarantinedProjectIds: string[];
+};
+
+export type StudioPilotProjectLoadResultV3 =
+  | { status: 'healthy'; project: StudioProjectV3 }
+  | { status: 'unsupported'; catalogueId: string }
+  | { status: 'quarantined'; catalogueId: string }
+  | { status: 'not_found'; catalogueId: string };
+
+export type StudioPilotProjectCommitKindV3 = 'authoring' | 'runtime';
+
+export type StudioPilotProjectCommitFactsV3 = Readonly<{
+  projectId: string;
+  operation: 'created' | 'updated' | 'deleted';
+  previousRevision: number | null;
+  committedRevision: number | null;
+  committedAt: string;
+}>;
+
+export type StudioPilotProjectUpdateOptionsV3 = {
+  expectedRevision?: number;
+  kind: StudioPilotProjectCommitKindV3;
+  authorizeBeforeReplace?: () => void | Promise<void>;
+};
+
+export type StudioPilotProjectAuthoritySnapshotV3 = {
+  project: StudioProjectV3;
+  projectDir: string;
+  assertCurrent(): Promise<void>;
+  commit(
+    update: (project: StudioProjectV3) => StudioProjectV3,
+    options: StudioPilotProjectUpdateOptionsV3
+  ): Promise<StudioProjectV3>;
+  delete(expectedRevision: number): Promise<boolean>;
+};
+
+export type StudioPilotStorageStepV3 =
+  | 'create:brief_durable'
+  | 'create:manifest_durable'
+  | 'create:stage_durable'
+  | 'create:published'
+  | 'create:root_durable'
+  | 'update:candidates_durable'
+  | 'update:journal_durable'
+  | 'update:brief_published'
+  | 'update:manifest_published'
+  | 'update:directory_durable'
+  | 'update:complete'
+  | 'delete:marker_durable'
+  | 'delete:quarantined'
+  | 'delete:root_durable'
+  | 'delete:tree_removed'
+  | 'delete:complete';
+
+export type CreativeStudioPilotStoreOptionsV3 = {
+  rootDir: string;
+  fs?: RecordIoFileSystem;
+  now?: () => string;
+  createProjectId?: () => string;
+  createTemporaryId?: () => string;
+  deletionClaims?: StudioDeletionClaimCacheV3;
+  deletionClaimOptions?: StudioDeletionClaimCacheOptionsV3;
+  onStorageStep?: (step: StudioPilotStorageStepV3, projectId: string) => void | Promise<void>;
+};
+
+export type CreativeStudioPilotStoreV3 = {
+  inspectProjectsV3(): Promise<StudioPilotProjectInventoryV3>;
+  listProjectsV3(): Promise<StudioPilotProjectListEntryV3[]>;
+  createProjectV3(input: { name: string; brief: string }): Promise<StudioProjectV3>;
+  getProjectV3(projectId: string): Promise<StudioPilotProjectLoadResultV3>;
+  loadProjectV3(projectId: string): Promise<StudioProjectV3>;
+  summarizeProjectV3(projectId: string): Promise<StudioPilotProjectSummaryV3>;
+  updateProjectV3(
+    projectId: string,
+    update: (project: StudioProjectV3) => StudioProjectV3,
+    options: StudioPilotProjectUpdateOptionsV3
+  ): Promise<StudioProjectV3>;
+  withProjectAuthorityV3<T>(
+    projectId: string,
+    operation: (snapshot: StudioPilotProjectAuthoritySnapshotV3) => Promise<T>
+  ): Promise<T>;
+  issueDeletionClaimV3(projectId: string): Promise<StudioIssuedDeletionClaimV3>;
+  deleteProjectV3(
+    projectId: string,
+    authority: { expectedRevision: number } | { deletionClaim: string }
+  ): Promise<boolean>;
+  watchProjectsV3(listener: (facts: StudioPilotProjectCommitFactsV3) => void): () => void;
+  close(): void;
+};
+
+export type CreativeStudioPilotStoreErrorCodeV3 =
+  | 'invalid_payload'
+  | 'not_found'
+  | 'stale_project'
+  | 'unsupported'
+  | 'quarantined'
+  | 'already_exists'
+  | 'storage_error';
+
+export class CreativeStudioPilotStoreErrorV3 extends Error {
+  readonly code: CreativeStudioPilotStoreErrorCodeV3;
+
+  constructor(code: CreativeStudioPilotStoreErrorCodeV3) {
+    super(code);
+    this.name = 'CreativeStudioPilotStoreErrorV3';
+    this.code = code;
+  }
+}
+
+type ProjectEnvelopeV3 = Omit<StudioProjectV3, 'brief'> & {
+  briefFile: { schemaVersion: typeof PROJECT_ENVELOPE_SCHEMA_VERSION; sha256: string };
+};
+
+type ProjectWriteTransactionV3 = {
+  schemaVersion: typeof PROJECT_TRANSACTION_SCHEMA_VERSION;
+  projectId: string;
+  transactionId: string;
+  manifestTemporaryFile: string;
+  briefTemporaryFile: string;
+  previousManifestSha256: string;
+  previousBriefSha256: string;
+  nextManifestSha256: string;
+  nextBriefSha256: string;
+};
+
+type ProjectDeletionMarkerV3 = {
+  schemaVersion: typeof PROJECT_DELETION_SCHEMA_VERSION;
+  catalogueId: string;
+  classification: 'healthy' | 'unsupported' | 'quarantined';
+  directoryIdentity: StudioProjectDirectoryIdentityV3;
+  manifestFingerprint: string;
+  expectedRevision: number | null;
+  quarantineName: string;
+};
+
+type RootState = {
+  canonicalRoot: string;
+  projectsRoot: string;
+};
+
+type HealthyInspection = {
+  status: 'healthy';
+  catalogueId: string;
+  project: StudioProjectV3;
+  projectDir: string;
+  directoryIdentity: StudioProjectDirectoryIdentityV3;
+  manifestFingerprint: string;
+  manifestSha256: string;
+  briefSha256: string;
+};
+
+type UnreadableInspection = {
+  status: 'unsupported' | 'quarantined';
+  catalogueId: string;
+  projectDir: string;
+  directoryIdentity: StudioProjectDirectoryIdentityV3;
+  manifestFingerprint: string;
+};
+
+type ProjectInspection = HealthyInspection | UnreadableInspection | { status: 'not_found'; catalogueId: string };
+
+type NodeError = { code?: unknown };
+
+const isNodeError = (error: unknown): error is NodeError => typeof error === 'object' && error !== null;
+const hasErrorCode = (error: unknown, code: string): boolean => isNodeError(error) && error.code === code;
+const sha256 = (bytes: string | Uint8Array): string => createHash('sha256').update(bytes).digest('hex');
+const sameIdentity = (left: StudioProjectDirectoryIdentityV3, right: StudioProjectDirectoryIdentityV3): boolean =>
+  left.dev === right.dev && left.ino === right.ino;
+const isSafePositiveInteger = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 1;
+const isPlainRecord = (value: unknown): value is PlainRecord =>
+  typeof value === 'object' &&
+  value !== null &&
+  !Array.isArray(value) &&
+  !nodeTypes.isProxy(value) &&
+  (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
+
+const hasExactDataKeys = (value: PlainRecord, keys: ReadonlySet<string>): boolean => {
+  const ownKeys = Reflect.ownKeys(value);
+  if (ownKeys.length !== keys.size) return false;
+  return ownKeys.every((key) => {
+    if (typeof key !== 'string' || !keys.has(key)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor !== undefined && descriptor.enumerable && Object.hasOwn(descriptor, 'value');
+  });
+};
+
+const clone = <T>(value: T): T => structuredClone(value);
+
+const canonicalJson = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
+
+const toSummary = (project: StudioProjectV3): StudioPilotProjectSummaryV3 => ({
+  id: project.id,
+  name: project.name,
+  revision: project.revision,
+  authoringRevision: project.authoringRevision,
+  pieceCount: project.pieceOrder.length,
+  updatedAt: project.updatedAt,
+});
+
+const parseCanonicalTimestamp = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  CANONICAL_TIMESTAMP.test(value) &&
+  Number.isFinite(Date.parse(value)) &&
+  new Date(value).toISOString() === value;
+
+const snapshotCreateInput = (input: unknown): { name: string; brief: string } | null => {
+  if (!isPlainRecord(input) || !hasExactDataKeys(input, CREATE_INPUT_KEYS)) return null;
+  return typeof input.name === 'string' && typeof input.brief === 'string'
+    ? { name: input.name, brief: input.brief }
+    : null;
+};
+
+const envelopeFor = (project: StudioProjectV3): ProjectEnvelopeV3 => {
+  const { brief, ...withoutBrief } = project;
+  return {
+    ...withoutBrief,
+    briefFile: { schemaVersion: PROJECT_ENVELOPE_SCHEMA_VERSION, sha256: sha256(brief) },
+  };
+};
+
+const serializeProject = (project: StudioProjectV3): { manifestBytes: string; briefBytes: string } => ({
+  manifestBytes: canonicalJson(envelopeFor(project)),
+  briefBytes: project.brief,
+});
+
+const parseProjectEnvelope = (manifestBytes: string, briefBytes: string): StudioProjectV3 | null => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(manifestBytes) as unknown;
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(parsed) || !hasExactDataKeys(parsed, PROJECT_MANIFEST_KEYS)) return null;
+  const briefFile = parsed.briefFile;
+  if (
+    !isPlainRecord(briefFile) ||
+    !hasExactDataKeys(briefFile, BRIEF_FILE_KEYS) ||
+    briefFile.schemaVersion !== PROJECT_ENVELOPE_SCHEMA_VERSION ||
+    typeof briefFile.sha256 !== 'string' ||
+    !LOWERCASE_SHA256.test(briefFile.sha256) ||
+    briefFile.sha256 !== sha256(briefBytes)
+  ) {
+    return null;
+  }
+  const { briefFile: ignoredBriefFile, ...withoutBrief } = parsed;
+  void ignoredBriefFile;
+  const project: unknown = { ...withoutBrief, brief: briefBytes };
+  return validateStudioProjectV3(project) ? project : null;
+};
+
+const parseObservedSchemaVersion = (manifestBytes: string): number | null => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(manifestBytes) as unknown;
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(parsed) || !Object.hasOwn(parsed, 'schemaVersion')) return null;
+  return Number.isSafeInteger(parsed.schemaVersion) ? (parsed.schemaVersion as number) : null;
+};
+
+const parseTransaction = (bytes: string): ProjectWriteTransactionV3 | null => {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes) as unknown;
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(value) || !hasExactDataKeys(value, TRANSACTION_KEYS)) return null;
+  if (
+    value.schemaVersion !== PROJECT_TRANSACTION_SCHEMA_VERSION ||
+    typeof value.projectId !== 'string' ||
+    !SAFE_ID.test(value.projectId) ||
+    typeof value.transactionId !== 'string' ||
+    !SAFE_TEMPORARY_ID.test(value.transactionId) ||
+    value.manifestTemporaryFile !== `.project-${value.transactionId}.tmp` ||
+    value.briefTemporaryFile !== `.brief-${value.transactionId}.tmp`
+  ) {
+    return null;
+  }
+  for (const key of [
+    'previousManifestSha256',
+    'previousBriefSha256',
+    'nextManifestSha256',
+    'nextBriefSha256',
+  ] as const) {
+    if (typeof value[key] !== 'string' || !LOWERCASE_SHA256.test(value[key])) return null;
+  }
+  return value as ProjectWriteTransactionV3;
+};
+
+const parseDirectoryIdentity = (value: unknown): StudioProjectDirectoryIdentityV3 | null => {
+  if (!isPlainRecord(value) || !hasExactDataKeys(value, DIRECTORY_IDENTITY_KEYS)) return null;
+  if (
+    typeof value.dev !== 'string' ||
+    !/^(?:0|[1-9][0-9]*)$/.test(value.dev) ||
+    typeof value.ino !== 'string' ||
+    !/^(?:0|[1-9][0-9]*)$/.test(value.ino)
+  ) {
+    return null;
+  }
+  return { dev: value.dev, ino: value.ino };
+};
+
+const parseDeletionMarker = (bytes: string): ProjectDeletionMarkerV3 | null => {
+  let value: unknown;
+  try {
+    value = JSON.parse(bytes) as unknown;
+  } catch {
+    return null;
+  }
+  if (!isPlainRecord(value) || !hasExactDataKeys(value, DELETION_MARKER_KEYS)) return null;
+  const directoryIdentity = parseDirectoryIdentity(value.directoryIdentity);
+  if (
+    value.schemaVersion !== PROJECT_DELETION_SCHEMA_VERSION ||
+    typeof value.catalogueId !== 'string' ||
+    !SAFE_ID.test(value.catalogueId) ||
+    (value.classification !== 'healthy' &&
+      value.classification !== 'unsupported' &&
+      value.classification !== 'quarantined') ||
+    directoryIdentity === null ||
+    typeof value.manifestFingerprint !== 'string' ||
+    !LOWERCASE_SHA256.test(value.manifestFingerprint) ||
+    (value.expectedRevision !== null && !isSafePositiveInteger(value.expectedRevision)) ||
+    typeof value.quarantineName !== 'string' ||
+    !/^\.deleting-[A-Za-z0-9_-]{8,128}$/.test(value.quarantineName) ||
+    (value.classification === 'healthy') !== (value.expectedRevision !== null)
+  ) {
+    return null;
+  }
+  return { ...(value as Omit<ProjectDeletionMarkerV3, 'directoryIdentity'>), directoryIdentity };
+};
+
+const syncDirectory = async (fs: RecordIoFileSystem, directory: string): Promise<void> => {
+  const handle = await fs.open(directory, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+};
+
+const writeExclusiveDurable = async (fs: RecordIoFileSystem, file: string, bytes: string): Promise<void> => {
+  const handle = await fs.open(file, 'wx');
+  try {
+    await handle.writeFile(bytes, { encoding: 'utf8' });
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+};
+
+const publishExclusiveControlRecord = async (
+  fs: RecordIoFileSystem,
+  directory: string,
+  file: string,
+  temporaryFile: string,
+  bytes: string
+): Promise<void> => {
+  await writeExclusiveDurable(fs, temporaryFile, bytes);
+  try {
+    await fs.link(temporaryFile, file);
+    await syncDirectory(fs, directory);
+  } finally {
+    await removeRegularIfPresent(fs, temporaryFile).catch((): undefined => undefined);
+  }
+};
+
+const lstatDirectoryIdentity = async (
+  fs: RecordIoFileSystem,
+  directory: string
+): Promise<StudioProjectDirectoryIdentityV3> => {
+  const stats = await fs.lstat(directory);
+  if (!stats.isDirectory() || stats.isSymbolicLink() || (await fs.realpath(directory)) !== directory) {
+    throw new CreativeStudioPilotStoreErrorV3('storage_error');
+  }
+  return { dev: String(stats.dev), ino: String(stats.ino) };
+};
+
+const pathExists = async (fs: RecordIoFileSystem, target: string): Promise<boolean> => {
+  try {
+    await fs.lstat(target);
+    return true;
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return false;
+    throw error;
+  }
+};
+
+const removeRegularIfPresent = async (fs: RecordIoFileSystem, file: string): Promise<void> => {
+  try {
+    const stats = await fs.lstat(file);
+    if (!stats.isFile() || stats.isSymbolicLink()) throw new CreativeStudioPilotStoreErrorV3('storage_error');
+    await fs.rm(file);
+  } catch (error) {
+    if (!hasErrorCode(error, 'ENOENT')) throw error;
+  }
+};
+
+const readBoundedBytes = async (
+  fs: RecordIoFileSystem,
+  canonicalRoot: string,
+  file: string,
+  maximumBytes: number
+): Promise<Uint8Array | null> =>
+  (
+    await readBoundedRegularBinaryFileWithIdentity({
+      fs,
+      canonicalRoot,
+      file,
+      maxBytes: maximumBytes,
+    })
+  )?.bytes ?? null;
+
+const decodeUtf8 = (bytes: Uint8Array): string => new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+
+const readDigest = async (
+  fs: RecordIoFileSystem,
+  canonicalRoot: string,
+  file: string,
+  maximumBytes: number
+): Promise<string | null> => {
+  const bytes = await readBoundedBytes(fs, canonicalRoot, file, maximumBytes);
+  return bytes === null ? null : sha256(bytes);
+};
+
+const manifestFingerprint = async (
+  fs: RecordIoFileSystem,
+  canonicalRoot: string,
+  manifestFile: string
+): Promise<string> => {
+  try {
+    const bytes = await readBoundedBytes(fs, canonicalRoot, manifestFile, MAX_MANIFEST_BYTES);
+    return bytes === null ? sha256('missing-project-manifest-v3') : sha256(bytes);
+  } catch {
+    try {
+      const stats = await fs.lstat(manifestFile);
+      return sha256(
+        canonicalJson({
+          kind: 'unreadable-project-manifest-v3',
+          dev: String(stats.dev),
+          ino: String(stats.ino),
+          size: String(stats.size),
+          mtimeMs: String(stats.mtimeMs),
+          ctimeMs: String(stats.ctimeMs),
+        })
+      );
+    } catch {
+      return sha256('missing-project-manifest-v3');
+    }
+  }
+};
+
+const normalizeError = (error: unknown): never => {
+  if (error instanceof CreativeStudioPilotStoreErrorV3 || error instanceof StudioDeletionClaimErrorV3) throw error;
+  throw new CreativeStudioPilotStoreErrorV3('storage_error');
+};
+
+const observationFor = (
+  inspection: Exclude<ProjectInspection, { status: 'not_found' }>
+): StudioProjectDeletionObservationV3 => ({
+  catalogueId: inspection.catalogueId,
+  classification: inspection.status,
+  directoryIdentity: inspection.directoryIdentity,
+  manifestFingerprint: inspection.manifestFingerprint,
+});
+
+const sameObservation = (
+  marker: ProjectDeletionMarkerV3,
+  inspection: Exclude<ProjectInspection, { status: 'not_found' }>
+): boolean =>
+  marker.catalogueId === inspection.catalogueId &&
+  marker.classification === inspection.status &&
+  sameIdentity(marker.directoryIdentity, inspection.directoryIdentity) &&
+  marker.manifestFingerprint === inspection.manifestFingerprint &&
+  (inspection.status !== 'healthy' || marker.expectedRevision === inspection.project.revision);
+
+export const createCreativeStudioPilotStoreV3 = (
+  options: CreativeStudioPilotStoreOptionsV3
+): CreativeStudioPilotStoreV3 => {
+  const fs = options.fs ?? nodeFs;
+  const readNow = options.now ?? (() => new Date().toISOString());
+  const mintProjectId = options.createProjectId ?? (() => `project_${randomBytes(18).toString('base64url')}`);
+  const mintTemporaryId = options.createTemporaryId ?? (() => randomBytes(12).toString('base64url'));
+  const deletionClaims = options.deletionClaims ?? createStudioDeletionClaimCacheV3(options.deletionClaimOptions ?? {});
+  const listeners = new Set<(facts: StudioPilotProjectCommitFactsV3) => void>();
+  const queues = new Map<string, Promise<void>>();
+  let closed = false;
+  let initialization: Promise<RootState> | null = null;
+
+  const now = (): string => {
+    const value = readNow();
+    if (!parseCanonicalTimestamp(value)) throw new CreativeStudioPilotStoreErrorV3('storage_error');
+    return value;
+  };
+
+  const temporaryId = (): string => {
+    const value = mintTemporaryId();
+    if (typeof value !== 'string' || !SAFE_TEMPORARY_ID.test(value)) {
+      throw new CreativeStudioPilotStoreErrorV3('storage_error');
+    }
+    return value;
+  };
+
+  const storageStep = async (step: StudioPilotStorageStepV3, projectId: string): Promise<void> => {
+    await options.onStorageStep?.(step, projectId);
+  };
+
+  const emit = (facts: StudioPilotProjectCommitFactsV3): void => {
+    const frozen = Object.freeze({ ...facts });
+    for (const listener of listeners) {
+      try {
+        listener(frozen);
+      } catch {
+        // A renderer observer cannot roll back or poison an already durable Main commit.
+      }
+    }
+  };
+
+  const enqueue = async <T>(
+    projectId: string,
+    operation: () => Promise<T>,
+    preserveOperationError = false
+  ): Promise<T> => {
+    const previous = queues.get(projectId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.catch((): undefined => undefined).then(() => current);
+    queues.set(projectId, tail);
+    await previous.catch((): undefined => undefined);
+    try {
+      try {
+        return await operation();
+      } catch (error) {
+        if (preserveOperationError) throw error;
+        return normalizeError(error);
+      }
+    } finally {
+      release();
+      if (queues.get(projectId) === tail) queues.delete(projectId);
+    }
+  };
+
+  const projectDirectory = (root: RootState, projectId: string): string =>
+    resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, projectId);
+
+  const resolveExistingProjectDirectory = async (root: RootState, projectId: string): Promise<string | null> =>
+    resolveSafeRecordDirectory({
+      fs,
+      canonicalRoot: root.canonicalRoot,
+      parent: root.projectsRoot,
+      name: projectId,
+      createIfMissing: false,
+    });
+
+  const readProjectPair = async (
+    root: RootState,
+    projectDir: string
+  ): Promise<{ manifestBytes: string; briefBytes: string; manifestSha256: string; briefSha256: string } | null> => {
+    const manifest = await readBoundedBytes(
+      fs,
+      root.canonicalRoot,
+      path.join(projectDir, PROJECT_MANIFEST),
+      MAX_MANIFEST_BYTES
+    );
+    const brief = await readBoundedBytes(fs, root.canonicalRoot, path.join(projectDir, PROJECT_BRIEF), MAX_BRIEF_BYTES);
+    if (manifest === null || brief === null) return null;
+    return {
+      manifestBytes: decodeUtf8(manifest),
+      briefBytes: decodeUtf8(brief),
+      manifestSha256: sha256(manifest),
+      briefSha256: sha256(brief),
+    };
+  };
+
+  const publishTransactionFile = async (
+    root: RootState,
+    projectDir: string,
+    temporaryFile: string,
+    liveFile: string,
+    previousDigest: string,
+    nextDigest: string,
+    maximumBytes: number
+  ): Promise<void> => {
+    const temporaryPath = resolveConfinedRecordPath(root.canonicalRoot, projectDir, temporaryFile);
+    const livePath = resolveConfinedRecordPath(root.canonicalRoot, projectDir, liveFile);
+    const liveDigest = await readDigest(fs, root.canonicalRoot, livePath, maximumBytes);
+    if (liveDigest === nextDigest) {
+      await removeRegularIfPresent(fs, temporaryPath);
+      return;
+    }
+    if (liveDigest !== previousDigest) throw new CreativeStudioPilotStoreErrorV3('quarantined');
+    const temporaryDigest = await readDigest(fs, root.canonicalRoot, temporaryPath, maximumBytes);
+    if (temporaryDigest !== nextDigest) throw new CreativeStudioPilotStoreErrorV3('quarantined');
+    await fs.rename(temporaryPath, livePath);
+  };
+
+  const replayProjectTransaction = async (root: RootState, projectId: string, projectDir: string): Promise<void> => {
+    const transactionFile = path.join(projectDir, PROJECT_TRANSACTION);
+    const transactionBytes = await readBoundedBytes(fs, root.canonicalRoot, transactionFile, MAX_CONTROL_RECORD_BYTES);
+    if (transactionBytes === null) return;
+    const transaction = parseTransaction(decodeUtf8(transactionBytes));
+    if (transaction === null || transaction.projectId !== projectId) {
+      throw new CreativeStudioPilotStoreErrorV3('quarantined');
+    }
+    await publishTransactionFile(
+      root,
+      projectDir,
+      transaction.briefTemporaryFile,
+      PROJECT_BRIEF,
+      transaction.previousBriefSha256,
+      transaction.nextBriefSha256,
+      MAX_BRIEF_BYTES
+    );
+    await publishTransactionFile(
+      root,
+      projectDir,
+      transaction.manifestTemporaryFile,
+      PROJECT_MANIFEST,
+      transaction.previousManifestSha256,
+      transaction.nextManifestSha256,
+      MAX_MANIFEST_BYTES
+    );
+    await syncDirectory(fs, projectDir);
+    const liveManifest = await readDigest(
+      fs,
+      root.canonicalRoot,
+      path.join(projectDir, PROJECT_MANIFEST),
+      MAX_MANIFEST_BYTES
+    );
+    const liveBrief = await readDigest(fs, root.canonicalRoot, path.join(projectDir, PROJECT_BRIEF), MAX_BRIEF_BYTES);
+    if (liveManifest !== transaction.nextManifestSha256 || liveBrief !== transaction.nextBriefSha256) {
+      throw new CreativeStudioPilotStoreErrorV3('quarantined');
+    }
+    await removeRegularIfPresent(fs, transactionFile);
+    await syncDirectory(fs, projectDir);
+  };
+
+  const inspectProject = async (root: RootState, projectId: string): Promise<ProjectInspection> => {
+    const projectDir = await resolveExistingProjectDirectory(root, projectId);
+    if (projectDir === null) return { status: 'not_found', catalogueId: projectId };
+    const directoryIdentity = await lstatDirectoryIdentity(fs, projectDir);
+    try {
+      await replayProjectTransaction(root, projectId, projectDir);
+    } catch {
+      return {
+        status: 'quarantined',
+        catalogueId: projectId,
+        projectDir,
+        directoryIdentity,
+        manifestFingerprint: await manifestFingerprint(fs, root.canonicalRoot, path.join(projectDir, PROJECT_MANIFEST)),
+      };
+    }
+    let manifest: Uint8Array | null;
+    try {
+      manifest = await readBoundedBytes(
+        fs,
+        root.canonicalRoot,
+        path.join(projectDir, PROJECT_MANIFEST),
+        MAX_MANIFEST_BYTES
+      );
+    } catch {
+      manifest = null;
+    }
+    const fingerprint =
+      (manifest === null ? null : sha256(manifest)) ??
+      (await manifestFingerprint(fs, root.canonicalRoot, path.join(projectDir, PROJECT_MANIFEST)));
+    if (manifest === null) {
+      return {
+        status: 'quarantined',
+        catalogueId: projectId,
+        projectDir,
+        directoryIdentity,
+        manifestFingerprint: fingerprint,
+      };
+    }
+    let manifestBytes: string;
+    try {
+      manifestBytes = decodeUtf8(manifest);
+    } catch {
+      return {
+        status: 'quarantined',
+        catalogueId: projectId,
+        projectDir,
+        directoryIdentity,
+        manifestFingerprint: fingerprint,
+      };
+    }
+    const observedVersion = parseObservedSchemaVersion(manifestBytes);
+    if (observedVersion !== null && observedVersion !== STUDIO_PROJECT_SCHEMA_VERSION_V3) {
+      return {
+        status: 'unsupported',
+        catalogueId: projectId,
+        projectDir,
+        directoryIdentity,
+        manifestFingerprint: fingerprint,
+      };
+    }
+    let brief: Uint8Array | null;
+    try {
+      brief = await readBoundedBytes(fs, root.canonicalRoot, path.join(projectDir, PROJECT_BRIEF), MAX_BRIEF_BYTES);
+    } catch {
+      brief = null;
+    }
+    let briefBytes: string | null = null;
+    if (brief !== null) {
+      try {
+        briefBytes = decodeUtf8(brief);
+      } catch {
+        briefBytes = null;
+      }
+    }
+    const project = briefBytes === null ? null : parseProjectEnvelope(manifestBytes, briefBytes);
+    if (observedVersion !== STUDIO_PROJECT_SCHEMA_VERSION_V3 || project === null || project.id !== projectId) {
+      return {
+        status: 'quarantined',
+        catalogueId: projectId,
+        projectDir,
+        directoryIdentity,
+        manifestFingerprint: fingerprint,
+      };
+    }
+    return {
+      status: 'healthy',
+      catalogueId: projectId,
+      project,
+      projectDir,
+      directoryIdentity,
+      manifestFingerprint: fingerprint,
+      manifestSha256: sha256(manifest),
+      briefSha256: sha256(brief!),
+    };
+  };
+
+  const assertInspectionCurrent = async (root: RootState, captured: HealthyInspection): Promise<void> => {
+    const current = await inspectProject(root, captured.catalogueId);
+    if (
+      current.status !== 'healthy' ||
+      current.project.revision !== captured.project.revision ||
+      current.manifestFingerprint !== captured.manifestFingerprint ||
+      !sameIdentity(current.directoryIdentity, captured.directoryIdentity)
+    ) {
+      throw new CreativeStudioPilotStoreErrorV3('stale_project');
+    }
+  };
+
+  const writeProjectUpdate = async (
+    root: RootState,
+    captured: HealthyInspection,
+    next: StudioProjectV3,
+    authorizeBeforeReplace?: () => void | Promise<void>
+  ): Promise<void> => {
+    const transactionId = temporaryId();
+    const serialized = serializeProject(next);
+    const transaction: ProjectWriteTransactionV3 = {
+      schemaVersion: PROJECT_TRANSACTION_SCHEMA_VERSION,
+      projectId: next.id,
+      transactionId,
+      manifestTemporaryFile: `.project-${transactionId}.tmp`,
+      briefTemporaryFile: `.brief-${transactionId}.tmp`,
+      previousManifestSha256: captured.manifestSha256,
+      previousBriefSha256: captured.briefSha256,
+      nextManifestSha256: sha256(serialized.manifestBytes),
+      nextBriefSha256: sha256(serialized.briefBytes),
+    };
+    const manifestTemporaryPath = path.join(captured.projectDir, transaction.manifestTemporaryFile);
+    const briefTemporaryPath = path.join(captured.projectDir, transaction.briefTemporaryFile);
+    const transactionPath = path.join(captured.projectDir, PROJECT_TRANSACTION);
+    const transactionPublicationTemporaryPath = path.join(captured.projectDir, `.transaction-${transactionId}.tmp`);
+    let journalPublished = false;
+    try {
+      await writeExclusiveDurable(fs, manifestTemporaryPath, serialized.manifestBytes);
+      await writeExclusiveDurable(fs, briefTemporaryPath, serialized.briefBytes);
+      await syncDirectory(fs, captured.projectDir);
+      await storageStep('update:candidates_durable', next.id);
+      await assertInspectionCurrent(root, captured);
+      await authorizeBeforeReplace?.();
+      await writeExclusiveDurable(fs, transactionPublicationTemporaryPath, canonicalJson(transaction));
+      await fs.link(transactionPublicationTemporaryPath, transactionPath);
+      journalPublished = true;
+      await syncDirectory(fs, captured.projectDir);
+      await removeRegularIfPresent(fs, transactionPublicationTemporaryPath);
+      await storageStep('update:journal_durable', next.id);
+      await publishTransactionFile(
+        root,
+        captured.projectDir,
+        transaction.briefTemporaryFile,
+        PROJECT_BRIEF,
+        transaction.previousBriefSha256,
+        transaction.nextBriefSha256,
+        MAX_BRIEF_BYTES
+      );
+      await storageStep('update:brief_published', next.id);
+      await publishTransactionFile(
+        root,
+        captured.projectDir,
+        transaction.manifestTemporaryFile,
+        PROJECT_MANIFEST,
+        transaction.previousManifestSha256,
+        transaction.nextManifestSha256,
+        MAX_MANIFEST_BYTES
+      );
+      await storageStep('update:manifest_published', next.id);
+      await syncDirectory(fs, captured.projectDir);
+      await storageStep('update:directory_durable', next.id);
+      await removeRegularIfPresent(fs, transactionPath);
+      await syncDirectory(fs, captured.projectDir);
+      await storageStep('update:complete', next.id);
+    } catch (error) {
+      if (!journalPublished) {
+        await removeRegularIfPresent(fs, manifestTemporaryPath).catch((): undefined => undefined);
+        await removeRegularIfPresent(fs, briefTemporaryPath).catch((): undefined => undefined);
+        await removeRegularIfPresent(fs, transactionPublicationTemporaryPath).catch((): undefined => undefined);
+      }
+      throw error;
+    }
+  };
+
+  const updateInsideQueue = async (
+    root: RootState,
+    captured: HealthyInspection,
+    update: (project: StudioProjectV3) => StudioProjectV3,
+    optionsInput: StudioPilotProjectUpdateOptionsV3
+  ): Promise<StudioProjectV3> => {
+    if (
+      typeof update !== 'function' ||
+      !isPlainRecord(optionsInput) ||
+      (optionsInput.kind !== 'authoring' && optionsInput.kind !== 'runtime') ||
+      (optionsInput.expectedRevision !== undefined && !isSafePositiveInteger(optionsInput.expectedRevision)) ||
+      (optionsInput.authorizeBeforeReplace !== undefined && typeof optionsInput.authorizeBeforeReplace !== 'function')
+    ) {
+      throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+    }
+    if (optionsInput.expectedRevision !== undefined && optionsInput.expectedRevision !== captured.project.revision) {
+      throw new CreativeStudioPilotStoreErrorV3('stale_project');
+    }
+    if (
+      captured.project.revision >= Number.MAX_SAFE_INTEGER ||
+      captured.project.authoringRevision >= Number.MAX_SAFE_INTEGER
+    ) {
+      throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+    }
+    const candidate = update(clone(captured.project));
+    if (
+      !isPlainRecord(candidate) ||
+      candidate.id !== captured.project.id ||
+      candidate.createdAt !== captured.project.createdAt
+    ) {
+      throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+    }
+    const committedAt = now();
+    const next: StudioProjectV3 = {
+      ...(candidate as StudioProjectV3),
+      schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION_V3,
+      revision: captured.project.revision + 1,
+      authoringRevision: captured.project.authoringRevision + (optionsInput.kind === 'authoring' ? 1 : 0),
+      id: captured.project.id,
+      createdAt: captured.project.createdAt,
+      updatedAt: committedAt,
+    };
+    if (!validateStudioProjectV3(next)) throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+    await writeProjectUpdate(root, captured, next, optionsInput.authorizeBeforeReplace);
+    emit({
+      projectId: next.id,
+      operation: 'updated',
+      previousRevision: captured.project.revision,
+      committedRevision: next.revision,
+      committedAt,
+    });
+    return clone(next);
+  };
+
+  const quarantineOwnedTree = async (root: RootState, directory: string, quarantineName: string): Promise<void> => {
+    const quarantine = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, quarantineName);
+    if (await pathExists(fs, quarantine)) throw new CreativeStudioPilotStoreErrorV3('storage_error');
+    await fs.rename(directory, quarantine);
+    await syncDirectory(fs, root.projectsRoot);
+  };
+
+  const recoverCreateStage = async (root: RootState, entryName: string): Promise<void> => {
+    const stage = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, entryName);
+    await lstatDirectoryIdentity(fs, stage);
+    let pair: Awaited<ReturnType<typeof readProjectPair>>;
+    try {
+      pair = await readProjectPair(root, stage);
+    } catch {
+      pair = null;
+    }
+    const project = pair === null ? null : parseProjectEnvelope(pair.manifestBytes, pair.briefBytes);
+    if (project === null || !SAFE_ID.test(project.id)) {
+      await quarantineOwnedTree(root, stage, `.abandoned-${temporaryId()}`);
+      return;
+    }
+    const target = projectDirectory(root, project.id);
+    if (!(await pathExists(fs, target))) {
+      await fs.rename(stage, target);
+      await syncDirectory(fs, root.projectsRoot);
+      return;
+    }
+    const existing = await inspectProject(root, project.id);
+    if (
+      existing.status === 'healthy' &&
+      pair !== null &&
+      existing.manifestSha256 === pair.manifestSha256 &&
+      existing.briefSha256 === pair.briefSha256
+    ) {
+      await fs.rm(stage, { recursive: true });
+      await syncDirectory(fs, root.projectsRoot);
+      return;
+    }
+    await quarantineOwnedTree(root, stage, `.abandoned-${temporaryId()}`);
+  };
+
+  const removeDeletionTree = async (
+    root: RootState,
+    quarantinePath: string,
+    expectedIdentity: StudioProjectDirectoryIdentityV3
+  ): Promise<void> => {
+    const actualIdentity = await lstatDirectoryIdentity(fs, quarantinePath);
+    if (!sameIdentity(actualIdentity, expectedIdentity)) throw new CreativeStudioPilotStoreErrorV3('storage_error');
+    await fs.rm(quarantinePath, { recursive: true });
+    await syncDirectory(fs, root.projectsRoot);
+  };
+
+  const replayDeletionMarker = async (root: RootState, markerName: string): Promise<void> => {
+    const markerPath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, markerName);
+    const bytes = await readBoundedBytes(fs, root.canonicalRoot, markerPath, MAX_CONTROL_RECORD_BYTES);
+    if (bytes === null) return;
+    const marker = parseDeletionMarker(decodeUtf8(bytes));
+    if (marker === null) {
+      await fs.rename(
+        markerPath,
+        resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, `.invalid-${temporaryId()}`)
+      );
+      await syncDirectory(fs, root.projectsRoot);
+      return;
+    }
+    const quarantinePath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, marker.quarantineName);
+    if (await pathExists(fs, quarantinePath)) {
+      await removeDeletionTree(root, quarantinePath, marker.directoryIdentity);
+      await removeRegularIfPresent(fs, markerPath);
+      await syncDirectory(fs, root.projectsRoot);
+      return;
+    }
+    const current = await inspectProject(root, marker.catalogueId);
+    if (current.status === 'not_found') {
+      await removeRegularIfPresent(fs, markerPath);
+      await syncDirectory(fs, root.projectsRoot);
+      return;
+    }
+    if (!sameObservation(marker, current)) {
+      await removeRegularIfPresent(fs, markerPath);
+      await syncDirectory(fs, root.projectsRoot);
+      return;
+    }
+    await fs.rename(current.projectDir, quarantinePath);
+    await syncDirectory(fs, root.projectsRoot);
+    await removeDeletionTree(root, quarantinePath, marker.directoryIdentity);
+    await removeRegularIfPresent(fs, markerPath);
+    await syncDirectory(fs, root.projectsRoot);
+  };
+
+  const initializeRoot = async (): Promise<RootState> => {
+    if (closed) throw new CreativeStudioPilotStoreErrorV3('storage_error');
+    const canonicalRoot = await canonicalizeRecordRoot({ fs, rootDir: options.rootDir });
+    // Schema 6 owns the same per-project catalog root as schema 5. The decoder—not a parallel
+    // namespace—makes old records unsupported at the clean cutover and keeps them deletable.
+    const projectsRoot = canonicalRoot;
+    const root = { canonicalRoot, projectsRoot };
+    const entries = await fs.readdir(projectsRoot, { withFileTypes: true });
+    for (const entry of entries.filter((candidate) => candidate.name.startsWith('.delete-'))) {
+      if (!entry.isFile() || entry.isSymbolicLink()) continue;
+      try {
+        // Replay root mutations serially so two recovery records cannot authorize the same path concurrently.
+        // eslint-disable-next-line no-await-in-loop
+        await replayDeletionMarker(root, entry.name);
+      } catch {
+        // One unsafe or incomplete deletion record must not disable unrelated projects.
+      }
+    }
+    const afterDeletion = await fs.readdir(projectsRoot, { withFileTypes: true });
+    for (const entry of afterDeletion.filter((candidate) => candidate.name.startsWith('.create-'))) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      try {
+        // Creation stages can claim the same minted id and therefore recover in lexical sequence.
+        // eslint-disable-next-line no-await-in-loop
+        await recoverCreateStage(root, entry.name);
+      } catch {
+        // The stage remains isolated from inventory for a later diagnostic/recovery pass.
+      }
+    }
+    const projectEntries = await fs.readdir(projectsRoot, { withFileTypes: true });
+    for (const entry of projectEntries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink() || !SAFE_ID.test(entry.name)) continue;
+      const directory = projectDirectory(root, entry.name);
+      try {
+        // Per-project journals are replayed serially during the one-time root bootstrap.
+        // eslint-disable-next-line no-await-in-loop
+        await replayProjectTransaction(root, entry.name, directory);
+      } catch {
+        // Inspection classifies only this project as quarantined.
+      }
+    }
+    return root;
+  };
+
+  const rootState = (): Promise<RootState> => {
+    if (closed) return Promise.reject(new CreativeStudioPilotStoreErrorV3('storage_error'));
+    initialization ??= initializeRoot().catch((error: unknown) => {
+      initialization = null;
+      return normalizeError(error);
+    });
+    return initialization;
+  };
+
+  const scan = async (root: RootState): Promise<ProjectInspection[]> => {
+    const entries = await fs.readdir(root.projectsRoot, { withFileTypes: true });
+    const projectIds = entries
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink() && SAFE_ID.test(entry.name))
+      .map((entry) => entry.name)
+      .toSorted();
+    const inspections: ProjectInspection[] = [];
+    for (const projectId of projectIds) {
+      try {
+        // Keep bounded inventory traversal deterministic and avoid burst-opening every project manifest.
+        // eslint-disable-next-line no-await-in-loop
+        inspections.push(await inspectProject(root, projectId));
+      } catch {
+        // A raced or unsafe entry is omitted; it cannot poison the remaining inventory.
+      }
+    }
+    return inspections;
+  };
+
+  const deleteInsideQueue = async (
+    root: RootState,
+    inspection: Exclude<ProjectInspection, { status: 'not_found' }>,
+    expectedRevision: number | null
+  ): Promise<boolean> => {
+    const committedAt = now();
+    const id = temporaryId();
+    const markerName = `.delete-${id}.json`;
+    const quarantineName = `.deleting-${id}`;
+    const markerPath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, markerName);
+    const markerTemporaryPath = resolveConfinedRecordPath(
+      root.canonicalRoot,
+      root.projectsRoot,
+      `.deletion-marker-${id}.tmp`
+    );
+    const marker: ProjectDeletionMarkerV3 = {
+      schemaVersion: PROJECT_DELETION_SCHEMA_VERSION,
+      catalogueId: inspection.catalogueId,
+      classification: inspection.status,
+      directoryIdentity: inspection.directoryIdentity,
+      manifestFingerprint: inspection.manifestFingerprint,
+      expectedRevision,
+      quarantineName,
+    };
+    await publishExclusiveControlRecord(fs, root.projectsRoot, markerPath, markerTemporaryPath, canonicalJson(marker));
+    await storageStep('delete:marker_durable', inspection.catalogueId);
+    const current = await inspectProject(root, inspection.catalogueId);
+    if (current.status === 'not_found' || !sameObservation(marker, current)) {
+      await removeRegularIfPresent(fs, markerPath);
+      await syncDirectory(fs, root.projectsRoot);
+      throw new CreativeStudioPilotStoreErrorV3('stale_project');
+    }
+    const quarantinePath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, quarantineName);
+    await fs.rename(current.projectDir, quarantinePath);
+    await storageStep('delete:quarantined', inspection.catalogueId);
+    await syncDirectory(fs, root.projectsRoot);
+    await storageStep('delete:root_durable', inspection.catalogueId);
+    await removeDeletionTree(root, quarantinePath, marker.directoryIdentity);
+    await storageStep('delete:tree_removed', inspection.catalogueId);
+    await removeRegularIfPresent(fs, markerPath);
+    await syncDirectory(fs, root.projectsRoot);
+    await storageStep('delete:complete', inspection.catalogueId);
+    emit({
+      projectId: inspection.catalogueId,
+      operation: 'deleted',
+      previousRevision: inspection.status === 'healthy' ? inspection.project.revision : null,
+      committedRevision: null,
+      committedAt,
+    });
+    return true;
+  };
+
+  const publicStore: CreativeStudioPilotStoreV3 = {
+    async inspectProjectsV3() {
+      const root = await rootState();
+      const inspections = await scan(root);
+      return {
+        healthyProjectIds: inspections
+          .filter((entry): entry is HealthyInspection => entry.status === 'healthy')
+          .map((entry) => entry.catalogueId),
+        unsupportedProjectIds: inspections
+          .filter((entry): entry is UnreadableInspection => entry.status === 'unsupported')
+          .map((entry) => entry.catalogueId),
+        quarantinedProjectIds: inspections
+          .filter((entry): entry is UnreadableInspection => entry.status === 'quarantined')
+          .map((entry) => entry.catalogueId),
+      };
+    },
+
+    async listProjectsV3() {
+      const root = await rootState();
+      const inspections = await scan(root);
+      return inspections.map((inspection): StudioPilotProjectListEntryV3 => {
+        if (inspection.status === 'healthy')
+          return { classification: 'healthy', summary: toSummary(inspection.project) };
+        if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV3('storage_error');
+        const issued = deletionClaims.issue(observationFor(inspection) as StudioUnreadableProjectDeletionObservationV3);
+        return {
+          catalogueId: inspection.catalogueId,
+          classification: inspection.status,
+          deletionClaim: issued.deletionClaim,
+          deletionClaimExpiresAt: issued.expiresAt,
+        };
+      });
+    },
+
+    async createProjectV3(input) {
+      const exactInput = snapshotCreateInput(input);
+      if (exactInput === null) throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      const projectId = mintProjectId();
+      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+        throw new CreativeStudioPilotStoreErrorV3('storage_error');
+      }
+      return enqueue(projectId, async () => {
+        const root = await rootState();
+        if ((await inspectProject(root, projectId)).status !== 'not_found') {
+          throw new CreativeStudioPilotStoreErrorV3('already_exists');
+        }
+        const createdAt = now();
+        let project: StudioProjectV3;
+        try {
+          project = createEmptyStudioProjectV3(exactInput, projectId, createdAt);
+        } catch {
+          throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+        }
+        const stageName = `.create-${temporaryId()}`;
+        const stage = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, stageName);
+        const serialized = serializeProject(project);
+        let published = false;
+        try {
+          await fs.mkdir(stage);
+          await writeExclusiveDurable(fs, path.join(stage, PROJECT_BRIEF), serialized.briefBytes);
+          await storageStep('create:brief_durable', projectId);
+          await writeExclusiveDurable(fs, path.join(stage, PROJECT_MANIFEST), serialized.manifestBytes);
+          await storageStep('create:manifest_durable', projectId);
+          await syncDirectory(fs, stage);
+          await storageStep('create:stage_durable', projectId);
+          const target = projectDirectory(root, projectId);
+          if (await pathExists(fs, target)) throw new CreativeStudioPilotStoreErrorV3('already_exists');
+          await fs.rename(stage, target);
+          published = true;
+          await storageStep('create:published', projectId);
+          await syncDirectory(fs, root.projectsRoot);
+          await storageStep('create:root_durable', projectId);
+        } catch (error) {
+          if (!published) {
+            // Keep a partial stage when a fault models process death; startup will isolate or finish it.
+            const stageExists = await pathExists(fs, stage).catch(() => false);
+            if (stageExists && options.onStorageStep === undefined) {
+              await fs.rm(stage, { recursive: true }).catch((): undefined => undefined);
+              await syncDirectory(fs, root.projectsRoot).catch((): undefined => undefined);
+            }
+          }
+          return normalizeError(error);
+        }
+        emit({
+          projectId,
+          operation: 'created',
+          previousRevision: null,
+          committedRevision: project.revision,
+          committedAt: createdAt,
+        });
+        return clone(project);
+      });
+    },
+
+    async getProjectV3(projectId) {
+      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+        throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      }
+      return enqueue(projectId, async () => {
+        const inspection = await inspectProject(await rootState(), projectId);
+        if (inspection.status === 'healthy') return { status: 'healthy', project: clone(inspection.project) };
+        return { status: inspection.status, catalogueId: projectId } as StudioPilotProjectLoadResultV3;
+      });
+    },
+
+    async loadProjectV3(projectId) {
+      const result = await publicStore.getProjectV3(projectId);
+      if (result.status === 'healthy') return result.project;
+      if (result.status === 'not_found') throw new CreativeStudioPilotStoreErrorV3('not_found');
+      throw new CreativeStudioPilotStoreErrorV3(result.status);
+    },
+
+    async summarizeProjectV3(projectId) {
+      return toSummary(await publicStore.loadProjectV3(projectId));
+    },
+
+    async updateProjectV3(projectId, update, updateOptions) {
+      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+        throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      }
+      return enqueue(projectId, async () => {
+        const root = await rootState();
+        const inspection = await inspectProject(root, projectId);
+        if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV3('not_found');
+        if (inspection.status !== 'healthy') throw new CreativeStudioPilotStoreErrorV3(inspection.status);
+        return updateInsideQueue(root, inspection, update, updateOptions);
+      });
+    },
+
+    async withProjectAuthorityV3(projectId, operation) {
+      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId) || typeof operation !== 'function') {
+        throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      }
+      return enqueue(
+        projectId,
+        async () => {
+          const root = await rootState();
+          const inspection = await inspectProject(root, projectId);
+          if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV3('not_found');
+          if (inspection.status !== 'healthy') throw new CreativeStudioPilotStoreErrorV3(inspection.status);
+          let active = true;
+          let mutationUsed = false;
+          let pending: Promise<unknown> | null = null;
+          try {
+            return await operation({
+              project: clone(inspection.project),
+              projectDir: inspection.projectDir,
+              assertCurrent: () => {
+                if (!active) return Promise.reject(new CreativeStudioPilotStoreErrorV3('invalid_payload'));
+                return assertInspectionCurrent(root, inspection);
+              },
+              commit: (update, updateOptions) => {
+                if (!active || mutationUsed)
+                  return Promise.reject(new CreativeStudioPilotStoreErrorV3('invalid_payload'));
+                mutationUsed = true;
+                pending = updateInsideQueue(root, inspection, update, updateOptions);
+                return pending as Promise<StudioProjectV3>;
+              },
+              delete: (expectedRevision) => {
+                if (!active || mutationUsed || !isSafePositiveInteger(expectedRevision)) {
+                  return Promise.reject(new CreativeStudioPilotStoreErrorV3('invalid_payload'));
+                }
+                if (expectedRevision !== inspection.project.revision) {
+                  return Promise.reject(new CreativeStudioPilotStoreErrorV3('stale_project'));
+                }
+                mutationUsed = true;
+                pending = deleteInsideQueue(root, inspection, expectedRevision);
+                return pending as Promise<boolean>;
+              },
+            });
+          } finally {
+            try {
+              await pending;
+            } finally {
+              active = false;
+            }
+          }
+        },
+        true
+      );
+    },
+
+    async issueDeletionClaimV3(projectId) {
+      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+        throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      }
+      return enqueue(projectId, async () => {
+        const inspection = await inspectProject(await rootState(), projectId);
+        if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV3('not_found');
+        if (inspection.status === 'healthy') throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+        return deletionClaims.issue(observationFor(inspection) as StudioUnreadableProjectDeletionObservationV3);
+      });
+    },
+
+    async deleteProjectV3(projectId, authority) {
+      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId) || !isPlainRecord(authority)) {
+        throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      }
+      return enqueue(projectId, async () => {
+        const root = await rootState();
+        const inspection = await inspectProject(root, projectId);
+        if (inspection.status === 'not_found') return false;
+        const authorityRecord = authority as unknown as PlainRecord;
+        if (
+          hasExactDataKeys(authorityRecord, new Set(['deletionClaim'])) &&
+          typeof authorityRecord.deletionClaim === 'string'
+        ) {
+          deletionClaims.consume(authorityRecord.deletionClaim, observationFor(inspection));
+          if (inspection.status === 'healthy') {
+            throw new CreativeStudioPilotStoreErrorV3('stale_project');
+          }
+          return deleteInsideQueue(root, inspection, null);
+        }
+        if (inspection.status === 'healthy') {
+          if (
+            !hasExactDataKeys(authorityRecord, new Set(['expectedRevision'])) ||
+            !isSafePositiveInteger(authorityRecord.expectedRevision)
+          ) {
+            throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+          }
+          if (authorityRecord.expectedRevision !== inspection.project.revision) {
+            throw new CreativeStudioPilotStoreErrorV3('stale_project');
+          }
+          return deleteInsideQueue(root, inspection, authorityRecord.expectedRevision);
+        }
+        throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      });
+    },
+
+    watchProjectsV3(listener) {
+      if (typeof listener !== 'function' || closed) throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+
+    close() {
+      if (closed) return;
+      closed = true;
+      listeners.clear();
+      deletionClaims.clear();
+    },
+  };
+
+  return publicStore;
+};

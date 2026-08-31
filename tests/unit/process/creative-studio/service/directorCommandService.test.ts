@@ -24,7 +24,7 @@ import {
   createStudioDirectorCommandServiceV2,
   StudioDirectorCommandApplyErrorV2,
   type StudioDirectorCommandServiceV2,
-} from '@process/services/creative-studio/service/directorCommandService';
+} from '@process/services/creative-studio/service/director/service';
 import {
   CreativeStudioStoreError,
   createCreativeStudioStore,

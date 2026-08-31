@@ -963,9 +963,14 @@ export class StudioPreparedPhotoCacheV3 {
   }
 
   /** Main-only namespace input for deterministic handle derivation before the quote is composed. */
-  reservedCreateHandles(projectId: string): string[] {
+  reservedCreateHandles(projectId: string, authoringRevision?: number): string[] {
     this.#assertOpen();
-    if (!isSafeIdV3(projectId)) throw new StudioPreparedPhotoCacheErrorV3('quote_not_found');
+    if (
+      !isSafeIdV3(projectId) ||
+      (authoringRevision !== undefined && (!Number.isSafeInteger(authoringRevision) || authoringRevision < 1))
+    ) {
+      throw new StudioPreparedPhotoCacheErrorV3('quote_not_found');
+    }
     this.#expire(this.#readClock());
     return [...this.#entries]
       .filter(
@@ -973,7 +978,11 @@ export class StudioPreparedPhotoCacheV3 {
           entry
         ): entry is PreparedPhotoEntryV3 & {
           reservation: Extract<StudioPreparedPhotoReservationV3, { mode: 'create' }>;
-        } => !entry.expired && entry.reservation.projectId === projectId && entry.reservation.mode === 'create'
+        } =>
+          !entry.expired &&
+          entry.reservation.projectId === projectId &&
+          entry.reservation.mode === 'create' &&
+          (authoringRevision === undefined || entry.reservation.authoringRevision === authoringRevision)
       )
       .map((entry) => entry.reservation.proposedHandle)
       .toSorted();

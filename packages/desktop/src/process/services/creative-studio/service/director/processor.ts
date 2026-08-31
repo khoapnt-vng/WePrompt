@@ -37,10 +37,10 @@ import {
   type CreativeStudioStore,
   type StudioProjectCommitFacts,
 } from '@process/services/creative-studio/store';
-import { StudioDirectorCommandApplyErrorV2, type StudioDirectorCommandServiceV2 } from './directorCommandService';
-import type { CreativeStudioServiceV2 } from './v2Service';
-import { CreativeStudioServiceError } from './projectMutations';
-import type { StudioDirectorCommandMailboxV2 } from './directorCommandMailbox';
+import { StudioDirectorCommandApplyErrorV2, type StudioDirectorCommandServiceV2 } from './service';
+import type { CreativeStudioServiceV2 } from '../v2Service';
+import { CreativeStudioServiceError } from '../projectMutations';
+import type { StudioDirectorCommandMailboxV2 } from './mailbox';
 import {
   isStudioDirectorQueryCommandV2,
   isStudioDirectorFreeRecoveryCommandV2,
@@ -49,7 +49,7 @@ import {
   parseStudioDirectorCommandReceiptV2,
   snapshotStudioDirectorQueryResultV2,
   studioDirectorQueryForCommandV2,
-} from './directorCommandContracts';
+} from './contracts';
 
 export type StudioDirectorCommandProcessorV2 = {
   start(): Promise<void>;

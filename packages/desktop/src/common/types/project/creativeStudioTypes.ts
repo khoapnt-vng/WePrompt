@@ -1706,6 +1706,9 @@ export const STUDIO_MAX_SPEND_AUTHORIZATIONS_V3 = STUDIO_MAX_JOBS_V3;
 export const STUDIO_MAX_UNDO_ENTRIES_V3 = 20;
 /** Schema-6 owns this limit; later schema-5 changes must not silently alter the Pilot contract. */
 export const STUDIO_MAX_IMAGE_ASSET_BYTES_V3 = 50 * 1024 * 1024;
+/** Export-3 retains the five newest immutable artifacts for each Piece. */
+export const STUDIO_MAX_PIECE_EXPORTS_PER_PIECE_V3 = 5;
+export const STUDIO_MAX_PIECE_EXPORTS_PER_PROJECT_V3 = STUDIO_MAX_PIECES_V3 * STUDIO_MAX_PIECE_EXPORTS_PER_PIECE_V3;
 
 export type StudioPieceKindV2 = 'photograph';
 export type StudioPieceImagePurposeV3 = 'piece_image';
@@ -1838,6 +1841,9 @@ export type StudioPieceJobErrorV3 = {
   messageKey: string;
 };
 
+/** Durable authority for interpreting the provider submit result without provider-id sentinels. */
+export type StudioPieceProviderSubmissionKindV3 = 'complete' | 'remote';
+
 export type StudioPieceJobV3 = {
   id: string;
   projectId: string;
@@ -1846,6 +1852,7 @@ export type StudioPieceJobV3 = {
   status: StudioJobStatus;
   provider: StudioProviderRef;
   idempotencyKey: string;
+  providerSubmissionKind: StudioPieceProviderSubmissionKindV3 | null;
   providerJobId: string | null;
   remoteStartedAt: string | null;
   cancellationPolicy: StudioCancellationPolicy;
@@ -2052,6 +2059,10 @@ export type StudioMutationBatchResultV3 = {
   authoringRevision: number;
 };
 
+/** Public Pilot naming keeps the one existing exact schema-6 mutation batch contract. */
+export type StudioApplyMutationBatchRequestV3 = StudioMutationBatchV3;
+export type StudioApplyMutationBatchResultV3 = StudioMutationBatchResultV3;
+
 export type StudioRendererPieceCurrentProvenanceV3 =
   | {
       origin: 'imported';
@@ -2103,6 +2114,8 @@ export type StudioRendererPieceActivityJobV3 = {
   error: StudioPieceJobErrorV3 | null;
   canCancel: boolean;
   canRetry: boolean;
+  canRetryDownload: boolean;
+  canResume: boolean;
   recordedSpend: null | {
     currency: string;
     totalMinorUnits: number;
@@ -2152,6 +2165,240 @@ export type StudioPieceExportManifestV3 = {
   provenance: StudioPieceExportProvenanceV3;
   exportedAt: string;
 };
+
+/** Exact renderer/Director input for creating a schema-6 Pilot project. Main mints its identity. */
+export type StudioCreateProjectRequestV3 = {
+  name: string;
+  brief: string;
+};
+
+/** Exact create-photo preparation input. Route, price, and every durable identity remain Main-owned. */
+export type StudioPreparePhotoRequestV3 = {
+  mode: 'create';
+  projectId: string;
+  expectedAuthoringRevision: number;
+  words: string;
+  settings: StudioPiecePhotoSettingsV3;
+  suggestedHandle: string | null;
+};
+
+/** Exact same-Piece retry preparation input; words and settings are copied from the predecessor. */
+export type StudioRetryPieceJobRequestV3 = {
+  mode: 'retry';
+  projectId: string;
+  expectedAuthoringRevision: number;
+  pieceId: string;
+  sourceJobId: string;
+};
+
+export type StudioPreparePhotoIntentV3 = StudioPreparePhotoRequestV3 | StudioRetryPieceJobRequestV3;
+
+/** Native-picker import input. No renderer path or caller-minted identity is accepted. */
+export type StudioImportPhotoRequestV3 = {
+  projectId: string;
+  expectedAuthoringRevision: number;
+};
+
+/** Runtime cancellation targets immutable ownership rather than renderer-supplied storage revision. */
+export type StudioCancelPieceJobRequestV3 = {
+  projectId: string;
+  pieceId: string;
+  jobId: string;
+};
+
+/** Same-Job recovery for paid output bytes; it cannot mint a quote, authorization, or replacement Job. */
+export type StudioRetryPieceDownloadRequestV3 = {
+  projectId: string;
+  pieceId: string;
+  jobId: string;
+  expectedRevision: number;
+};
+
+/** Same-provider-Job status recovery after a bounded poll deadline. */
+export type StudioResumePieceJobRequestV3 = {
+  projectId: string;
+  pieceId: string;
+  jobId: string;
+  expectedRevision: number;
+};
+
+/** Creates one managed export-3 artifact for the exact current image of one Piece. */
+export type StudioExportPieceRequestV3 = {
+  projectId: string;
+  pieceId: string;
+  expectedRevision: number;
+  expectedCatalogRevision: number;
+};
+
+/** Healthy deletion uses decoded revision authority; unreadable deletion uses an opaque Main claim. */
+export type StudioDeleteProjectRequestV3 =
+  | {
+      mode: 'healthy';
+      projectId: string;
+      expectedRevision: number;
+    }
+  | {
+      mode: 'unreadable';
+      projectId: string;
+      deletionClaim: string;
+    };
+
+export type StudioProjectSummaryV3 = {
+  id: string;
+  name: string;
+  pieceCount: number;
+  currentPieceCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type StudioUnreadableProjectLibraryEntryV3 = {
+  projectId: string;
+  deletionClaim: string;
+  deletionClaimExpiresAt: string;
+};
+
+export type StudioProjectLibraryEntryV3 =
+  | { status: 'supported'; summary: StudioProjectSummaryV3 }
+  | (StudioUnreadableProjectLibraryEntryV3 & { status: 'unsupported' | 'quarantined' });
+
+export type StudioProjectListResultV3 = {
+  entries: StudioProjectLibraryEntryV3[];
+};
+
+export type StudioProjectLoadResultV3 =
+  | {
+      status: 'supported';
+      summary: StudioProjectSummaryV3;
+      canvas: StudioRendererCanvasInventoryV3;
+      activity: StudioRendererCapabilityActivityV3;
+    }
+  | (StudioUnreadableProjectLibraryEntryV3 & { status: 'unsupported' | 'quarantined' })
+  | { status: 'not_found'; projectId: string };
+
+export type StudioCreateProjectResultV3 = {
+  status: 'created';
+  summary: StudioProjectSummaryV3;
+};
+
+export type StudioPreparePhotoResultV3 = {
+  status: 'prepared';
+  quote: StudioRendererPreparedPhotoQuoteV3;
+};
+
+export type StudioRetryPieceJobResultV3 = StudioPreparePhotoResultV3;
+
+export type StudioConfirmPreparedPhotoResultV3 = {
+  status: 'queued';
+  projectId: string;
+  pieceId: string;
+  jobId: string;
+  revision: number;
+  authoringRevision: number;
+};
+
+export type StudioImportPhotoResultV3 =
+  | { status: 'cancelled' }
+  | {
+      status: 'imported';
+      projectId: string;
+      pieceId: string;
+      assetId: string;
+      revision: number;
+      authoringRevision: number;
+    };
+
+export type StudioCancelPieceJobResultV3 = {
+  status: 'cancelled';
+  projectId: string;
+  pieceId: string;
+  jobId: string;
+  revision: number;
+};
+
+export type StudioRetryPieceDownloadResultV3 = {
+  status: 'recovering';
+  projectId: string;
+  pieceId: string;
+  jobId: string;
+  revision: number;
+};
+
+export type StudioResumePieceJobResultV3 = StudioRetryPieceDownloadResultV3;
+
+export type StudioPieceExportArtifactV3 = {
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V3;
+  id: string;
+  projectId: string;
+  pieceId: string;
+  sourceRevision: number;
+  handleAtExport: string;
+  managedExport: { collection: 'exports'; fileName: string };
+  byteSize: number;
+  payloadFileCount: 2;
+  manifestSha256: string;
+  createdAt: string;
+};
+
+export type StudioPieceExportCatalogV3 = {
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V3;
+  projectId: string;
+  revision: number;
+  artifacts: StudioPieceExportArtifactV3[];
+};
+
+export type StudioRendererPieceExportArtifactV3 = Pick<
+  StudioPieceExportArtifactV3,
+  'id' | 'pieceId' | 'sourceRevision' | 'handleAtExport' | 'byteSize' | 'payloadFileCount' | 'createdAt'
+> & { folderName: string };
+
+export type StudioRendererPieceExportCatalogV3 = {
+  revision: number;
+  artifacts: StudioRendererPieceExportArtifactV3[];
+};
+
+export type StudioExportPieceResultV3 = {
+  status: 'exported';
+  catalog: StudioRendererPieceExportCatalogV3;
+};
+
+export type StudioDeleteProjectResultV3 = {
+  status: 'deleted' | 'not_found';
+  projectId: string;
+};
+
+/** Stable CS4 Pilot service failures. Provider bodies, paths, and authority snapshots never cross. */
+export type CreativeStudioPilotErrorCodeV3 =
+  | 'invalid_payload'
+  | 'not_found'
+  | 'unsupported_project'
+  | 'project_quarantined'
+  | 'stale_project'
+  | 'stale_authoring'
+  | 'project_piece_capacity_reached'
+  | 'route_unavailable'
+  | 'rate_not_found'
+  | 'variable_price_unsupported'
+  | 'quote_not_found'
+  | 'quote_in_use'
+  | 'quote_expired'
+  | 'stale_quote'
+  | 'confirmation_required'
+  | 'duplicate_charge_acknowledgement_required'
+  | 'job_ineligible'
+  | 'busy'
+  | 'cancellation_refused'
+  | 'invalid_media'
+  | 'download_failed'
+  | 'variation_grid'
+  | 'stale_export_catalog'
+  | 'export_unavailable'
+  | 'deletion_claim_not_found'
+  | 'deletion_claim_expired'
+  | 'deletion_claim_mismatch'
+  | 'deletion_claim_capacity'
+  | 'storage_error'
+  | 'runtime_inactive';
 
 /** Task 7 public project names now resolve exclusively to the Beat/Shot contract. */
 export type StudioProject = StudioProjectV2;

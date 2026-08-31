@@ -100,6 +100,20 @@ A Piece is the durable owner of one standalone photograph. Pilot 1 supports exac
   `download_failed` retains the existing same-Job byte-download recovery. `poll_deadline`
   retains the existing same-Job provider-status recovery. Neither may mint a second paid Job.
 
+  A complete-only adapter can return after paid work while Main is still securing its output. If
+  URL resolution or byte staging fails before a generated-media intent becomes durable, there is no
+  safe same-Job replay source and the app must not call that state `download_failed`. Main records
+  the exact receipt plus `providerSubmissionKind: complete`, retains a null provider Job id, and
+  uses `needs_attention / submission_unknown`; a fresh quote therefore requires the existing
+  human-only duplicate-charge acknowledgement. Once an exact media intent is durable, recovery
+  remains on the same Job and may use `download_failed`. No path resubmits implicitly.
+
+  Generated-media intent protocol version 3 is independent from the Project schema version. It
+  freezes the exact provider submission pair: `complete` requires a null provider Job id, while
+  `remote` requires the opaque provider Job id that the owning Job persisted. Publication and
+  recovery reject a different remote flight before creating sidecars, assets, receipts, or Piece
+  pointers.
+
 - **Confirm new generation:** under the project queue, Main claims the `create` reservation,
   re-derives the request and quote, checks authoring and spend authority, and atomically writes the
   Piece, authorization, and queued Job. Dispatch begins only after that commit succeeds.
@@ -208,6 +222,11 @@ derives from the selected file's Unicode basename without its final extension wh
 project queue; no raw path crosses into renderer state or persisted provenance. Empty/unsafe
 basenames use `piece`. Concurrent same-name imports receive deterministic suffixes, and explicit
 rename remains available afterward.
+
+For repeated creative attempts at one Piece concept, the Director suggestion is the stable handle
+stem: the Director repeats that suggestion and Main resolves the next project-wide numeric suffix.
+Attempt-specific prompt wording never replaces a non-null suggestion. When no suggestion is
+provided, normalized prompt text remains the fallback and no sibling grouping is implied.
 
 #### Exact Pilot 1 shape and bounds
 

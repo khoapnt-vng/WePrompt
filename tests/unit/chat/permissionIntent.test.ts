@@ -64,4 +64,49 @@ describe('summarizePermission', () => {
     expect(summary.destructive).toBe(false);
     expect(summary.command).toBe('');
   });
+
+  it('announces an MCP tool call as a tool, driven by command_type rather than action', () => {
+    const summary = summarizePermission({
+      action: 'studio_get_conditioning_frame',
+      command: 'Read the conditioning frame for shot_2',
+      commandType: 'mcp',
+    });
+
+    expect(summary.intentKey).toBe('messages.permission.intent.tool');
+    expect(summary.destructive).toBe(false);
+    expect(summary.command).toBe('Read the conditioning frame for shot_2');
+  });
+
+  it('still announces a shell command as a command when command_type is not mcp', () => {
+    expect(summarizePermission({ action: 'exec', command: 'ls -la' }).intentKey).toBe('messages.permission.intent.run');
+    expect(summarizePermission({ action: 'bash', command: 'cat package.json' }).intentKey).toBe(
+      'messages.permission.intent.run'
+    );
+    expect(summarizePermission({ action: 'exec', command: 'npm test', commandType: 'npm' }).intentKey).toBe(
+      'messages.permission.intent.run'
+    );
+  });
+
+  it('keeps destructive precedence over an MCP tool call', () => {
+    const summary = summarizePermission({
+      action: 'some_tool',
+      command: 'rm -rf build',
+      commandType: 'mcp',
+    });
+
+    expect(summary.intentKey).toBe('messages.permission.intent.destructive');
+    expect(summary.destructive).toBe(true);
+  });
+
+  it('accepts an mcp action directly, for any caller that sends a category instead of a tool name', () => {
+    expect(summarizePermission({ action: 'mcp', command: 'anything' }).intentKey).toBe(
+      'messages.permission.intent.tool'
+    );
+  });
+
+  it('ignores an unknown command_type rather than guessing', () => {
+    expect(summarizePermission({ action: 'read', command: 'a.txt', commandType: 'something_new' }).intentKey).toBe(
+      'messages.permission.intent.read'
+    );
+  });
 });

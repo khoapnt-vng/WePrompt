@@ -18,7 +18,6 @@ import {
   STUDIO_MAX_ASSETS_V3,
   STUDIO_MAX_EXPORT_DIRECTORY_DEPTH,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
-  STUDIO_MAX_IMAGE_ASSET_BYTES_V2,
   STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
   STUDIO_MAX_GENERATION_PROMPT_LENGTH,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
@@ -87,7 +86,7 @@ import {
   studioGenerationTargetKey,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from './generation';
-import { STUDIO_FIXED_SHOT_REASON_ORDER_V2 } from './fixedShots';
+import { STUDIO_FIXED_SHOT_REASON_ORDER_V2 } from './mutations/fixedShots';
 import { isCanonicalStudioPieceHandleV3 } from './mutations/pieceHandles';
 import { studioBoardAuthorizationScopeIsValidV2 } from './pricing/authorization';
 
@@ -2839,6 +2838,7 @@ const JOB_KEYS_V3 = new Set([
   'status',
   'provider',
   'idempotencyKey',
+  'providerSubmissionKind',
   'providerJobId',
   'remoteStartedAt',
   'cancellationPolicy',
@@ -3127,6 +3127,9 @@ const validatePieceJobV3 = (jobId: string, projectId: string, value: unknown): v
     !PIECE_JOB_STATUSES_V3.has(value.status as StudioPieceJobV3['status']) ||
     !validateProvider(value.provider) ||
     !isSafeId(value.idempotencyKey) ||
+    (value.providerSubmissionKind !== null &&
+      value.providerSubmissionKind !== 'complete' &&
+      value.providerSubmissionKind !== 'remote') ||
     (value.providerJobId !== null &&
       (typeof value.providerJobId !== 'string' || !isValidProviderJobId(value.providerJobId))) ||
     (value.remoteStartedAt !== null && !isCanonicalTimestamp(value.remoteStartedAt)) ||
@@ -3182,25 +3185,69 @@ const validatePieceJobV3 = (jobId: string, projectId: string, value: unknown): v
   }
   const status = value.status as StudioPieceJobV3['status'];
   const errorCode = isRecord(value.error) && typeof value.error.code === 'string' ? value.error.code : null;
+  if (status === 'needs_attention' && errorCode !== 'submission_unknown' && errorCode !== 'poll_deadline') {
+    return false;
+  }
   if (
     status === 'queued_local' &&
-    (value.providerJobId !== null || value.remoteStartedAt !== null || value.progress !== null || value.error !== null)
+    (value.providerSubmissionKind !== null ||
+      value.providerJobId !== null ||
+      value.remoteStartedAt !== null ||
+      value.progress !== null ||
+      value.error !== null)
   ) {
     return false;
   }
   if (
     status === 'submitting' &&
-    (value.providerJobId !== null || value.remoteStartedAt !== null || value.progress !== null || value.error !== null)
+    (value.providerSubmissionKind !== null ||
+      value.providerJobId !== null ||
+      value.remoteStartedAt !== null ||
+      value.progress !== null ||
+      value.error !== null)
+  ) {
+    return false;
+  }
+  const hasRemoteSubmission =
+    value.providerSubmissionKind === 'remote' && value.providerJobId !== null && value.remoteStartedAt !== null;
+  const hasCompleteSubmission =
+    value.providerSubmissionKind === 'complete' && value.providerJobId === null && value.remoteStartedAt === null;
+  if (
+    (value.providerSubmissionKind === 'remote' && !hasRemoteSubmission) ||
+    (value.providerSubmissionKind !== 'remote' && (value.providerJobId !== null || value.remoteStartedAt !== null))
   ) {
     return false;
   }
   if (
-    (status === 'queued_remote' || status === 'running' || status === 'succeeded') &&
-    (value.providerJobId === null || value.remoteStartedAt === null)
+    (status === 'queued_remote' ||
+      status === 'running' ||
+      (status === 'needs_attention' && errorCode === 'poll_deadline')) &&
+    !hasRemoteSubmission
+  ) {
+    return false;
+  }
+  if ((status === 'succeeded' || value.spendReceipt !== null) && !hasRemoteSubmission && !hasCompleteSubmission) {
+    return false;
+  }
+  if (
+    value.providerSubmissionKind === 'complete' &&
+    !(
+      status === 'succeeded' ||
+      (status === 'failed' &&
+        (errorCode === 'no_output' || errorCode === 'variation_grid' || errorCode === 'download_failed')) ||
+      (status === 'needs_attention' && errorCode === 'submission_unknown' && value.spendReceipt !== null)
+    )
+  ) {
+    return false;
+  }
+  if (
+    value.providerSubmissionKind === 'remote' &&
+    ((status === 'needs_attention' && errorCode !== 'poll_deadline') || errorCode === 'submission_unknown')
   ) {
     return false;
   }
   if (errorCode === 'variation_grid' && status !== 'failed') return false;
+  if (errorCode === 'poll_deadline' && status !== 'needs_attention') return false;
   if (errorCode === 'submission_unknown' && status !== 'failed' && status !== 'needs_attention') {
     return false;
   }
@@ -3208,7 +3255,10 @@ const validatePieceJobV3 = (jobId: string, projectId: string, value: unknown): v
     status === 'succeeded' ||
     (status === 'failed' &&
       (errorCode === 'no_output' || errorCode === 'variation_grid' || errorCode === 'download_failed'));
-  const receiptAllowed = receiptRequired || status === 'running';
+  const receiptAllowed =
+    receiptRequired ||
+    status === 'running' ||
+    (status === 'needs_attention' && (errorCode === 'poll_deadline' || errorCode === 'submission_unknown'));
   if ((receiptRequired && value.spendReceipt === null) || (!receiptAllowed && value.spendReceipt !== null)) {
     return false;
   }
@@ -3286,6 +3336,8 @@ const validatePieceRecordV3 = (pieceId: string, value: unknown): value is Studio
 const validateUndoHistoryV3 = (value: unknown, project: StudioProjectV3): boolean => {
   if (!isDenseArray(value, STUDIO_MAX_UNDO_ENTRIES_V3)) return false;
   const entryIds = new Set<string>();
+  let previousSourceRevision = 0;
+  let previousSourceAuthoringRevision = 0;
   for (let entryIndex = 0; entryIndex < value.length; entryIndex += 1) {
     const entry = value[entryIndex];
     if (
@@ -3296,6 +3348,8 @@ const validateUndoHistoryV3 = (value: unknown, project: StudioProjectV3): boolea
       !isIntegerInRange(entry.sourceRevision, 1, project.revision) ||
       !isIntegerInRange(entry.sourceAuthoringRevision, 1, project.authoringRevision) ||
       (entry.sourceAuthoringRevision as number) > (entry.sourceRevision as number) ||
+      (entry.sourceRevision as number) <= previousSourceRevision ||
+      (entry.sourceAuthoringRevision as number) <= previousSourceAuthoringRevision ||
       !isNonEmptyStringWithin(entry.label, STUDIO_MAX_UNDO_LABEL_LENGTH) ||
       !isDenseArray(entry.patches, 1) ||
       entry.patches.length !== 1
@@ -3303,6 +3357,8 @@ const validateUndoHistoryV3 = (value: unknown, project: StudioProjectV3): boolea
       return false;
     }
     entryIds.add(entry.id as string);
+    previousSourceRevision = entry.sourceRevision as number;
+    previousSourceAuthoringRevision = entry.sourceAuthoringRevision as number;
     const patch = entry.patches[0];
     if (
       !isRecord(patch) ||
@@ -3412,6 +3468,7 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
   const assetIds = Object.keys(project.assets);
   const jobIds = Object.keys(project.jobs);
   if (
+    !arrayEvery(project.rules, (rule) => rule.createdAt >= project.createdAt && rule.createdAt <= project.updatedAt) ||
     pieceIds.length > STUDIO_MAX_PIECES_V3 ||
     assetIds.length > STUDIO_MAX_ASSETS_V3 ||
     jobIds.length > STUDIO_MAX_JOBS_V3 ||
@@ -3464,6 +3521,8 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
       if (
         job === undefined ||
         job.target.pieceId !== piece.id ||
+        job.createdAt < piece.createdAt ||
+        job.createdAt > piece.updatedAt ||
         job.createdAt < previousCreatedAt ||
         jobOwners.has(jobId)
       ) {
@@ -3482,9 +3541,11 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
     const piece = ownValue(project.pieces, asset.pieceId);
     if (
       piece === undefined ||
+      asset.id === piece.id ||
       piece.currentAssetId !== asset.id ||
       currentAssetOwners.get(asset.id) !== piece.id ||
       asset.createdAt < piece.createdAt ||
+      asset.createdAt > piece.updatedAt ||
       asset.createdAt > project.updatedAt
     ) {
       return false;
@@ -3496,9 +3557,12 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
     const producer = ownValue(project.jobs, asset.producerJobId);
     if (
       producer === undefined ||
+      asset.id === producer.id ||
       producer.target.pieceId !== piece.id ||
       producer.status !== 'succeeded' ||
       producer.outputAssetId !== asset.id ||
+      asset.createdAt < producer.createdAt ||
+      asset.createdAt > producer.updatedAt ||
       asset.compositionDigest !== pieceCompositionDigestV3(producer.composition)
     ) {
       return false;
@@ -3507,23 +3571,50 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
 
   const authorizationsById = new Map<string, StudioPieceSpendAuthorizationV3>();
   const quoteIds = new Set<string>();
+  const reservationIds = new Set<string>();
   const authorizationItemIds = new Set<string>();
   const idempotencyKeys = new Set<string>();
+  const persistentIdentities = new Set<string>([project.id, ...pieceIds, ...assetIds, ...jobIds]);
+  if (persistentIdentities.size !== 1 + pieceIds.length + assetIds.length + jobIds.length) return false;
+  const undoSourceRevisions = new Set(project.undoHistory.map((entry) => entry.sourceRevision));
+  let previousAuthorizationRevision = 0;
+  let previousConfirmedAt = '';
   for (let index = 0; index < project.spendAuthorizations.length; index += 1) {
     const authorization = project.spendAuthorizations[index]!;
     if (
       !validatePieceAuthorizationV3(authorization, project) ||
       authorization.confirmedAt < project.createdAt ||
       authorization.confirmedAt > project.updatedAt ||
+      authorization.projectRevisionAtAuthorization <= previousAuthorizationRevision ||
+      authorization.confirmedAt < previousConfirmedAt ||
+      undoSourceRevisions.has(authorization.projectRevisionAtAuthorization) ||
       authorizationsById.has(authorization.id) ||
       quoteIds.has(authorization.quote.id) ||
+      reservationIds.has(authorization.quote.reservationId) ||
       authorizationItemIds.has(authorization.quote.item.id) ||
       idempotencyKeys.has(authorization.idempotencyKey.key)
     ) {
       return false;
     }
+    const linkedIdentities = [
+      authorization.id,
+      authorization.quote.id,
+      authorization.quote.reservationId,
+      authorization.quote.item.id,
+      authorization.idempotencyKey.key,
+    ];
+    if (
+      new Set(linkedIdentities).size !== linkedIdentities.length ||
+      linkedIdentities.some((identity) => persistentIdentities.has(identity))
+    ) {
+      return false;
+    }
     authorizationsById.set(authorization.id, authorization);
+    for (const identity of linkedIdentities) persistentIdentities.add(identity);
+    previousAuthorizationRevision = authorization.projectRevisionAtAuthorization;
+    previousConfirmedAt = authorization.confirmedAt;
     quoteIds.add(authorization.quote.id);
+    reservationIds.add(authorization.quote.reservationId);
     authorizationItemIds.add(authorization.quote.item.id);
     idempotencyKeys.add(authorization.idempotencyKey.key);
   }
@@ -3550,6 +3641,10 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
       authorization.quote.projectRevisionAtPreparation !== job.projectRevisionAtPreparation ||
       authorization.quote.authoringRevision !== job.authoringRevision ||
       authorization.quote.authoringFingerprint !== job.authoringFingerprint ||
+      !arrayEvery(
+        job.composition.inputs.rules,
+        (rule) => rule.createdAt >= project.createdAt && rule.createdAt <= authorization.confirmedAt
+      ) ||
       job.createdAt < authorization.confirmedAt ||
       (job.remoteStartedAt !== null && (job.remoteStartedAt < job.createdAt || job.remoteStartedAt > job.updatedAt)) ||
       (job.duplicateChargeAcknowledgedAt !== null &&
@@ -3558,6 +3653,7 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
       (job.spendReceipt !== null &&
         (job.spendReceipt.recordedAt < authorization.confirmedAt ||
           job.spendReceipt.recordedAt < job.createdAt ||
+          (job.remoteStartedAt !== null && job.spendReceipt.recordedAt < job.remoteStartedAt) ||
           job.spendReceipt.recordedAt > job.updatedAt ||
           job.spendReceipt.authorizationId !== authorization.id ||
           job.spendReceipt.quoteId !== authorization.quote.id ||
@@ -3595,6 +3691,7 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
       predecessor === undefined ||
       predecessorOwner?.pieceId !== piece.id ||
       predecessorOwner.position >= owner.position ||
+      predecessor.updatedAt > job.createdAt ||
       predecessor.purpose !== job.purpose ||
       predecessor.composition.inputs.source.words !== job.composition.inputs.source.words ||
       !photoSettingsEqualV3(predecessor.composition.inputs.source.settings, job.composition.inputs.source.settings) ||
@@ -3701,7 +3798,7 @@ export const validateStudioPieceExportManifestV3 = (value: unknown): value is St
     !isSafeId(value.asset.id) ||
     !isLowercaseDigest(value.asset.sha256) ||
     !isStudioReferenceImageMimeType(value.asset.mimeType) ||
-    !isIntegerInRange(value.asset.byteSize, 1, STUDIO_MAX_IMAGE_ASSET_BYTES_V2) ||
+    !isIntegerInRange(value.asset.byteSize, 1, STUDIO_MAX_IMAGE_ASSET_BYTES_V3) ||
     !isIntegerInRange(value.asset.width, 1, Number.MAX_SAFE_INTEGER) ||
     !isIntegerInRange(value.asset.height, 1, Number.MAX_SAFE_INTEGER) ||
     !isCanonicalTimestamp(value.asset.createdAt) ||

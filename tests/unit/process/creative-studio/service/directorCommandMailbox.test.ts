@@ -30,7 +30,7 @@ import {
 import {
   createStudioDirectorCommandMailboxV2,
   type StudioDirectorCommandMailboxV2,
-} from '@process/services/creative-studio/service/directorCommandMailbox';
+} from '@process/services/creative-studio/service/director/mailbox';
 import {
   createCreativeStudioStore,
   CreativeStudioStoreError,

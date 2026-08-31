@@ -138,6 +138,39 @@ describe('MessagePermission', () => {
     expect(container.querySelector('[data-testid="permission-icon-exec"]')).toBeTruthy();
     expect(container.textContent).not.toMatch(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u);
   });
+
+  it('uses the generic presentation and sends the exact always-allow response', async () => {
+    confirmInvoke.mockResolvedValue(undefined);
+    const message = {
+      ...buildMessage({
+        action: 'unknown_tool',
+        title: 'Review this tool',
+        description: '',
+        options: [{ label: 'Always allow', value: 'proceed_always' }],
+      }),
+      msg_id: '',
+    } as IMessagePermission;
+    render(<MessagePermission message={message} />);
+
+    expect(screen.getByTestId('permission-icon-generic')).toBeTruthy();
+    expect(screen.getByText('Review this tool')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('message-permission-option-proceed_always'));
+
+    await waitFor(() =>
+      expect(confirmInvoke).toHaveBeenCalledWith({
+        conversation_id: 'c1',
+        call_id: 'call-1',
+        msg_id: '',
+        data: { value: 'proceed_always' },
+        always_allow: true,
+      })
+    );
+  });
+
+  it('explains when a permission request has no response options', () => {
+    render(<MessagePermission message={buildMessage({ options: undefined })} />);
+    expect(screen.getByText('messages.noOptionsAvailable')).toBeTruthy();
+  });
 });
 
 describe('MessageAcpPermission', () => {

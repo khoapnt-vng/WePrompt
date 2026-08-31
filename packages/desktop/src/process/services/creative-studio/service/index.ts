@@ -22,11 +22,11 @@ export {
   type StudioDirectorCommandApplyResultV2,
   type StudioDirectorCommandServiceDepsV2,
   type StudioDirectorCommandServiceV2,
-} from './directorCommandService';
+} from './director';
 export {
   createStudioDirectorCommandProcessorV2,
   createStudioDirectorCommitTrackerV2,
   type StudioDirectorCommandProcessorDepsV2,
   type StudioDirectorCommandProcessorV2,
   type StudioDirectorCommitTrackerV2,
-} from './directorCommandProcessor';
+} from './director';

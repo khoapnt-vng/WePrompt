@@ -30,14 +30,14 @@ const actionIcons: Record<string, React.ReactNode> = {
 
 const MessagePermission: React.FC<MessagePermissionProps> = React.memo(({ message }) => {
   const { t } = useTranslation();
-  const { options = [], description, title, action, call_id } = message.content || {};
+  const { options = [], description, title, action, call_id, command_type } = message.content || {};
 
   // Which option is in flight, rather than a bare boolean: the pressed button gets Arco's
   // spinner while its siblings only grey out, so a slow confirm shows WHICH answer is pending.
   const [pendingValue, setPendingValue] = useState<string | null>(null);
   const [hasResponded, setHasResponded] = useState(false);
 
-  const summary = summarizePermission({ action, command: description });
+  const summary = summarizePermission({ action, command: description, commandType: command_type });
   const icon = summary.destructive ? (
     <Attention theme='outline' size={ICON_SIZE} fill={iconColors.danger} data-testid='permission-icon-destructive' />
   ) : (

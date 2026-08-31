@@ -29,13 +29,13 @@ import {
   StudioExportCatalogErrorV2,
   type StudioExportCatalogStoreV2,
 } from '@process/services/creative-studio/service/schema2/exports';
-import type { StudioDirectorCommandMailboxV2 } from '@process/services/creative-studio/service/directorCommandMailbox';
-import type { StudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
+import type { StudioDirectorCommandMailboxV2 } from '@process/services/creative-studio/service/director/mailbox';
+import type { StudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/director/service';
 import type {
   StudioDirectorCommandProcessorV2,
   StudioDirectorCommandProcessorDepsV2,
   StudioDirectorCommitTrackerV2,
-} from '@process/services/creative-studio/service/directorCommandProcessor';
+} from '@process/services/creative-studio/service/director/processor';
 import { describe, expect, it, vi } from 'vitest';
 
 const provider = (): IProvider => ({

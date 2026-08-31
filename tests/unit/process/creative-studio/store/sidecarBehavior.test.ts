@@ -25,8 +25,22 @@ type CapturedWatcher = {
   onError(error: Error): void;
 };
 
+const proposalAuthority = (name: string) => ({ path: `/studio/project_1/proposals/${name}` });
+
+type FakeDirectoryEntry = {
+  name: string;
+  isFile: () => boolean;
+  isSymbolicLink: () => boolean;
+};
+
 const createProposalHarness = (
-  options: { throwOnWatch?: boolean; root?: string | null; projectIds?: string[] } = {}
+  options: {
+    throwOnWatch?: boolean;
+    root?: string | null;
+    projectIds?: string[];
+    pendingEntries?: FakeDirectoryEntry[];
+    pendingResidues?: unknown[];
+  } = {}
 ) => {
   let watcher: CapturedWatcher | undefined;
   const close = vi.fn();
@@ -54,7 +68,32 @@ const createProposalHarness = (
     observeProjectCommit: vi.fn(),
     repairSummaryAfterCommit: vi.fn(),
     listSupportedProjectIds: async () => options.projectIds ?? [],
-    sidecarJournal: { resolveCompleteSidecarDirectoryFamilyV2: async () => null },
+    sidecarJournal:
+      options.pendingEntries === undefined
+        ? { resolveCompleteSidecarDirectoryFamilyV2: async () => null }
+        : {
+            /*
+             * Supplying a resolved family is what makes readProposalLedgerV2 reachable at all. With
+             * the default null family the whole recovery path — including every malformed-directory
+             * refusal below — is unreachable, which is why it had no coverage.
+             */
+            resolveCompleteSidecarDirectoryFamilyV2: async () => ({
+              project: proposalAuthority(''),
+              root: proposalAuthority('proposals'),
+              children: {
+                pending: proposalAuthority('pending'),
+                decisions: proposalAuthority('decisions'),
+                slots: proposalAuthority('slots'),
+                commits: proposalAuthority('commits'),
+              },
+            }),
+            reconcileOwnedPendingPublicationResiduesV2: async () => options.pendingResidues ?? [],
+            reconcileOwnedSlotCleanupResiduesV2: async () => [],
+            reconcileJournalPublicationResiduesV2: async () => [],
+            readStableDirectoryEntriesV2: async (authority: { path: string }) =>
+              authority.path.endsWith('/pending') ? options.pendingEntries : [],
+            assertDirectoryAuthorityV2: vi.fn(),
+          },
   } as never);
   return { service, watcher: () => watcher, close, safeLogError };
 };
@@ -345,6 +384,80 @@ describe('extracted proposal sidecar behavior', () => {
   it('classifies synchronous watcher startup failure as storage failure', async () => {
     const harness = createProposalHarness({ throwOnWatch: true });
     await expect(harness.service.watchProposalsV2(vi.fn())).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
+  /*
+   * The proposal recovery ledger's refusals had no coverage because the harness returned a null
+   * sidecar family, which short-circuits before readProposalLedgerV2 runs. Supplying a family reaches
+   * them. These are the guards that stop a corrupted proposals directory from being read as authority.
+   */
+  const jsonEntry = (name: string): FakeDirectoryEntry => ({
+    name,
+    isFile: () => true,
+    isSymbolicLink: () => false,
+  });
+
+  it('refuses a proposal directory holding anything but plain .json files', async () => {
+    const notJson = createProposalHarness({ root: '/studio', pendingEntries: [jsonEntry('proposal_1.txt')] });
+    await expect(notJson.service.listProposalsV2('project_1')).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Malformed schema-2 Studio proposal directory',
+    });
+
+    const symlink = createProposalHarness({
+      root: '/studio',
+      pendingEntries: [{ name: 'proposal_1.json', isFile: () => true, isSymbolicLink: () => true }],
+    });
+    await expect(symlink.service.listProposalsV2('project_1')).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Malformed schema-2 Studio proposal directory',
+    });
+
+    const notAFile = createProposalHarness({
+      root: '/studio',
+      pendingEntries: [{ name: 'proposal_1.json', isFile: () => false, isSymbolicLink: () => false }],
+    });
+    await expect(notAFile.service.listProposalsV2('project_1')).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Malformed schema-2 Studio proposal directory',
+    });
+  });
+
+  it('refuses a proposal file whose name is not a safe identity', async () => {
+    // A traversal segment in a filename would otherwise become a proposal id.
+    const harness = createProposalHarness({ root: '/studio', pendingEntries: [jsonEntry('../escape.json')] });
+    await expect(harness.service.listProposalsV2('project_1')).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Malformed schema-2 Studio proposal identity',
+    });
+  });
+
+  it('refuses a pending publication residue that does not parse as a proposal record', async () => {
+    /*
+     * A residue is a half-published record recovered from the journal. If it survives JSON parsing but
+     * is not a valid proposal, or if it collides with a record already read from the directory, the
+     * ledger must refuse rather than treat it as authority — both arms throw the same refusal because
+     * either way the recovered identity is ambiguous.
+     */
+    const harness = createProposalHarness({
+      root: '/studio',
+      pendingEntries: [],
+      pendingResidues: [
+        {
+          effective: true,
+          namedFile: '/studio/project_1/proposals/pending/proposal_1.json',
+          identified: {
+            file: '/studio/project_1/proposals/pending/proposal_1.json',
+            bytes: JSON.stringify({ notAProposal: true }),
+          },
+        },
+      ],
+    });
+
+    await expect(harness.service.listProposalsV2('project_1')).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Ambiguous schema-2 Studio proposal recovery record',
+    });
   });
 });
 

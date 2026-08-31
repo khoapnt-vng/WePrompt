@@ -24,7 +24,7 @@ import {
 import {
   parseStudioReferenceRequestSlotV2,
   parseStudioReferenceRequestV2,
-} from '@process/services/creative-studio/service/directorCommandContracts';
+} from '@process/services/creative-studio/service/director/contracts';
 import {
   RecordIoError,
   publishExclusiveLeaseRecord,

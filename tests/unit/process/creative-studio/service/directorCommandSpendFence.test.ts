@@ -23,7 +23,7 @@ import {
   type StudioShot,
   type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
-import { createStudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
+import { createStudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/director/service';
 import {
   applyStudioMutationBatchV2,
   calculateStudioQuoteTotals,

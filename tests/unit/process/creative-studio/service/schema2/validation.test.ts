@@ -226,6 +226,7 @@ const makeGeneratedProjectV3 = (): StudioProjectV3 => {
     status: 'succeeded',
     provider,
     idempotencyKey: 'idempotency_1',
+    providerSubmissionKind: 'remote',
     providerJobId: 'provider_job_1',
     remoteStartedAt: confirmedAtV3,
     cancellationPolicy: 'queued_and_running',
@@ -356,6 +357,7 @@ const makeRetryProjectV3 = (): StudioProjectV3 => {
     status: 'queued_local',
     provider,
     idempotencyKey: 'idempotency_2',
+    providerSubmissionKind: null,
     providerJobId: null,
     remoteStartedAt: null,
     cancellationPolicy: 'queued_and_running',
@@ -394,6 +396,7 @@ const extendRetryChainV3 = (project: StudioProjectV3, totalJobs: number): void =
     predecessor.status = 'failed';
     predecessor.error = { code: 'timeout', messageKey: 'timeout' };
     predecessor.progress = null;
+    predecessor.providerSubmissionKind = null;
     predecessor.providerJobId = null;
     predecessor.remoteStartedAt = null;
     predecessor.spendReceipt = null;
@@ -467,6 +470,7 @@ const extendRetryChainV3 = (project: StudioProjectV3, totalJobs: number): void =
       status: 'queued_local',
       provider,
       idempotencyKey,
+      providerSubmissionKind: null,
       providerJobId: null,
       remoteStartedAt: null,
       cancellationPolicy: 'queued_and_running',
@@ -545,6 +549,12 @@ const makeGeneratedProjectWithJobStatusV3 = (status: StudioPieceJobV3['status'])
         ? { code: 'submission_unknown', messageKey: 'submission_unknown' }
         : null;
   if (status === 'queued_local' || status === 'submitting') {
+    job.providerSubmissionKind = null;
+    job.providerJobId = null;
+    job.remoteStartedAt = null;
+  }
+  if (status === 'needs_attention') {
+    job.providerSubmissionKind = null;
     job.providerJobId = null;
     job.remoteStartedAt = null;
   }
@@ -2779,6 +2789,29 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
     }
   });
 
+  it('requires every schema-6 rule timestamp to remain inside the Project lifetime', () => {
+    const project = makeEmptyProjectV3();
+    project.updatedAt = completedAtV3;
+    project.rules = [
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'Keep the portrait quiet.',
+        predicate: null,
+        createdAt: confirmedAtV3,
+      },
+    ];
+    expect(validateStudioProjectV3(project)).toBe(true);
+
+    const beforeProject = structuredClone(project);
+    beforeProject.rules[0]!.createdAt = '2026-08-29T23:59:59.999Z';
+    expect(validateStudioProjectV3(beforeProject)).toBe(false);
+
+    const afterProject = structuredClone(project);
+    afterProject.rules[0]!.createdAt = '2026-08-30T00:00:02.001Z';
+    expect(validateStudioProjectV3(afterProject)).toBe(false);
+  });
+
   it('accepts the exact schema-6 image byte ceiling and rejects one byte over', () => {
     const project = makeEmptyProjectV3();
     addImportedPieceV3(project, 'piece_1', 'photo');
@@ -2791,10 +2824,12 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
   it('accepts 20 exact one-patch undo entries and rejects 21', () => {
     const project = makeEmptyProjectV3();
     addImportedPieceV3(project, 'piece_1', 'photo');
+    project.revision = STUDIO_MAX_UNDO_ENTRIES_V3 + 1;
+    project.authoringRevision = STUDIO_MAX_UNDO_ENTRIES_V3 + 1;
     project.undoHistory = Array.from({ length: STUDIO_MAX_UNDO_ENTRIES_V3 }, (_unused, index) => ({
       id: `undo_${index + 1}`,
-      sourceRevision: project.revision,
-      sourceAuthoringRevision: project.authoringRevision,
+      sourceRevision: index + 2,
+      sourceAuthoringRevision: index + 2,
       label: 'rename_piece',
       patches: [
         {
@@ -2821,6 +2856,52 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
       ],
     });
     expect(validateStudioProjectV3(project)).toBe(false);
+  });
+
+  it('requires retained undo authorities to be strictly chronological', () => {
+    const project = makeEmptyProjectV3();
+    addImportedPieceV3(project, 'piece_1', 'photo');
+    project.revision = 4;
+    project.authoringRevision = 4;
+    project.undoHistory = [
+      {
+        id: 'undo_1',
+        sourceRevision: 3,
+        sourceAuthoringRevision: 3,
+        label: 'rename_piece',
+        patches: [
+          {
+            kind: 'piece_catalog',
+            pieceId: 'piece_1',
+            before: { handle: 'photo_before_1', priorHandles: [] },
+            afterDigest: digest,
+          },
+        ],
+      },
+      {
+        id: 'undo_2',
+        sourceRevision: 4,
+        sourceAuthoringRevision: 4,
+        label: 'rename_piece',
+        patches: [
+          {
+            kind: 'piece_catalog',
+            pieceId: 'piece_1',
+            before: { handle: 'photo_before_2', priorHandles: [] },
+            afterDigest: digest,
+          },
+        ],
+      },
+    ];
+    expect(validateStudioProjectV3(project)).toBe(true);
+
+    const duplicateRevision = structuredClone(project);
+    duplicateRevision.undoHistory[1]!.sourceRevision = 3;
+    expect(validateStudioProjectV3(duplicateRevision)).toBe(false);
+
+    const reversedAuthoring = structuredClone(project);
+    reversedAuthoring.undoHistory[1]!.sourceAuthoringRevision = 2;
+    expect(validateStudioProjectV3(reversedAuthoring)).toBe(false);
   });
 
   it('accepts 32 coherent Jobs and authorizations for one Piece and rejects 33', () => {
@@ -2890,6 +2971,26 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
     const wrongDigest = structuredClone(generated);
     (wrongDigest.assets.asset_1 as Extract<StudioAssetV3, { origin: 'generated' }>).compositionDigest = digest;
     expect(validateStudioProjectV3(wrongDigest)).toBe(false);
+
+    const assetCollidesWithPiece = structuredClone(generated);
+    const pieceCollisionAsset = assetCollidesWithPiece.assets.asset_1!;
+    delete assetCollidesWithPiece.assets.asset_1;
+    pieceCollisionAsset.id = 'piece_1';
+    pieceCollisionAsset.managedAsset.fileName = 'piece_1.png';
+    assetCollidesWithPiece.assets.piece_1 = pieceCollisionAsset;
+    assetCollidesWithPiece.pieces.piece_1!.currentAssetId = 'piece_1';
+    assetCollidesWithPiece.jobs.job_1!.outputAssetId = 'piece_1';
+    expect(validateStudioProjectV3(assetCollidesWithPiece)).toBe(false);
+
+    const assetCollidesWithProducer = structuredClone(generated);
+    const producerCollisionAsset = assetCollidesWithProducer.assets.asset_1!;
+    delete assetCollidesWithProducer.assets.asset_1;
+    producerCollisionAsset.id = 'job_1';
+    producerCollisionAsset.managedAsset.fileName = 'job_1.png';
+    assetCollidesWithProducer.assets.job_1 = producerCollisionAsset;
+    assetCollidesWithProducer.pieces.piece_1!.currentAssetId = 'job_1';
+    assetCollidesWithProducer.jobs.job_1!.outputAssetId = 'job_1';
+    expect(validateStudioProjectV3(assetCollidesWithProducer)).toBe(false);
   });
 
   it('requires identity-derived managed image names with exact MIME extensions and unique managed paths', () => {
@@ -3005,11 +3106,13 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
     }
 
     const cancelledBeforeSubmission = makeGeneratedProjectWithJobStatusV3('cancelled');
+    cancelledBeforeSubmission.jobs.job_1!.providerSubmissionKind = null;
     cancelledBeforeSubmission.jobs.job_1!.providerJobId = null;
     cancelledBeforeSubmission.jobs.job_1!.remoteStartedAt = null;
     expect(validateStudioProjectV3(cancelledBeforeSubmission)).toBe(true);
 
     const failedBeforeSubmission = makeGeneratedProjectWithJobStatusV3('failed');
+    failedBeforeSubmission.jobs.job_1!.providerSubmissionKind = null;
     failedBeforeSubmission.jobs.job_1!.providerJobId = null;
     failedBeforeSubmission.jobs.job_1!.remoteStartedAt = null;
     failedBeforeSubmission.jobs.job_1!.error = { code: 'invalid_request', messageKey: 'invalid_request' };
@@ -3061,12 +3164,124 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
     }
 
     const halfRemoteIdentity = makeGeneratedProjectWithJobStatusV3('needs_attention');
+    halfRemoteIdentity.jobs.job_1!.providerSubmissionKind = 'remote';
+    halfRemoteIdentity.jobs.job_1!.providerJobId = 'provider_job_1';
+    halfRemoteIdentity.jobs.job_1!.error = { code: 'poll_deadline', messageKey: 'poll_deadline' };
     halfRemoteIdentity.jobs.job_1!.remoteStartedAt = null;
     expect(validateStudioProjectV3(halfRemoteIdentity)).toBe(false);
 
     const wrongErrorState = makeGeneratedProjectWithJobStatusV3('needs_attention');
     wrongErrorState.jobs.job_1!.error = { code: 'variation_grid', messageKey: 'variation_grid' };
     expect(validateStudioProjectV3(wrongErrorState)).toBe(false);
+
+    for (const code of [
+      'invalid_request',
+      'content_rejected',
+      'auth',
+      'quota',
+      'rate_limited',
+      'provider_unavailable',
+      'timeout',
+      'no_output',
+      'variation_grid',
+      'download_failed',
+      'unsupported',
+      'unknown',
+    ] as const) {
+      const unsupportedRecoveryState = makeGeneratedProjectWithJobStatusV3('needs_attention');
+      unsupportedRecoveryState.jobs.job_1!.error = { code, messageKey: code };
+      expect(validateStudioProjectV3(unsupportedRecoveryState), code).toBe(false);
+    }
+  });
+
+  it('requires complete remote authority for receipt-bearing failures and poll-deadline recovery', () => {
+    const removeGeneratedOutput = (project: StudioProjectV3): StudioPieceJobV3 => {
+      const job = project.jobs.job_1!;
+      job.outputAssetId = null;
+      job.progress = null;
+      delete project.assets.asset_1;
+      project.pieces.piece_1!.currentAssetId = null;
+      return job;
+    };
+    const invalidateRemoteAuthority = (
+      project: StudioProjectV3,
+      identity: 'missing' | 'missing_provider_job' | 'missing_started_at'
+    ): void => {
+      const job = project.jobs.job_1!;
+      if (identity !== 'missing_started_at') job.providerJobId = null;
+      if (identity !== 'missing_provider_job') job.remoteStartedAt = null;
+    };
+
+    for (const code of ['no_output', 'variation_grid', 'download_failed'] as const) {
+      const valid = makeGeneratedProjectV3();
+      const validJob = removeGeneratedOutput(valid);
+      validJob.status = 'failed';
+      validJob.error = { code, messageKey: code };
+      expect(validateStudioProjectV3(valid), `${code}: valid`).toBe(true);
+
+      for (const identity of ['missing', 'missing_provider_job', 'missing_started_at'] as const) {
+        const invalid = structuredClone(valid);
+        invalidateRemoteAuthority(invalid, identity);
+        expect(validateStudioProjectV3(invalid), `${code}: ${identity}`).toBe(false);
+      }
+    }
+
+    for (const withReceipt of [false, true]) {
+      const valid = makeGeneratedProjectV3();
+      const validJob = removeGeneratedOutput(valid);
+      validJob.status = 'needs_attention';
+      validJob.error = { code: 'poll_deadline', messageKey: 'poll_deadline' };
+      if (!withReceipt) validJob.spendReceipt = null;
+      expect(validateStudioProjectV3(valid), `poll_deadline receipt=${withReceipt}: valid`).toBe(true);
+
+      for (const identity of ['missing', 'missing_provider_job', 'missing_started_at'] as const) {
+        const invalid = structuredClone(valid);
+        invalidateRemoteAuthority(invalid, identity);
+        expect(validateStudioProjectV3(invalid), `poll_deadline receipt=${withReceipt}: ${identity}`).toBe(false);
+      }
+    }
+
+    const deadEnd = makeGeneratedProjectV3();
+    const deadEndJob = removeGeneratedOutput(deadEnd);
+    deadEndJob.status = 'failed';
+    deadEndJob.error = { code: 'poll_deadline', messageKey: 'poll_deadline' };
+    deadEndJob.spendReceipt = null;
+    expect(validateStudioProjectV3(deadEnd), 'poll_deadline must remain resumable').toBe(false);
+  });
+
+  it('treats complete versus remote provider submission as exact immutable authority', () => {
+    const complete = makeGeneratedProjectV3();
+    complete.jobs.job_1!.providerSubmissionKind = 'complete';
+    complete.jobs.job_1!.providerJobId = null;
+    complete.jobs.job_1!.remoteStartedAt = null;
+    expect(validateStudioProjectV3(complete)).toBe(true);
+
+    const collidingRemoteId = makeGeneratedProjectV3();
+    collidingRemoteId.jobs.job_1!.providerJobId = `local_${collidingRemoteId.jobs.job_1!.id}`;
+    expect(validateStudioProjectV3(collidingRemoteId)).toBe(true);
+
+    const completeWithRemoteIdentity = structuredClone(complete);
+    completeWithRemoteIdentity.jobs.job_1!.providerJobId = 'provider_job_forbidden';
+    completeWithRemoteIdentity.jobs.job_1!.remoteStartedAt = confirmedAtV3;
+    expect(validateStudioProjectV3(completeWithRemoteIdentity)).toBe(false);
+
+    const missingRemoteIdentity = makeGeneratedProjectV3();
+    missingRemoteIdentity.jobs.job_1!.providerJobId = null;
+    missingRemoteIdentity.jobs.job_1!.remoteStartedAt = null;
+    expect(validateStudioProjectV3(missingRemoteIdentity)).toBe(false);
+
+    const paidCompleteHandoffFailure = structuredClone(complete);
+    paidCompleteHandoffFailure.pieces.piece_1!.currentAssetId = null;
+    paidCompleteHandoffFailure.assets = {};
+    Object.assign(paidCompleteHandoffFailure.jobs.job_1!, {
+      status: 'needs_attention',
+      outputAssetId: null,
+      progress: null,
+      error: { code: 'submission_unknown', messageKey: 'submission_unknown' },
+    });
+    expect(validateStudioProjectV3(paidCompleteHandoffFailure)).toBe(true);
+    paidCompleteHandoffFailure.jobs.job_1!.spendReceipt = null;
+    expect(validateStudioProjectV3(paidCompleteHandoffFailure)).toBe(false);
   });
 
   it('rejects authorization, Job, acknowledgement, remote, and receipt timestamps outside their authority window', () => {
@@ -3100,6 +3315,9 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
     const makeAcknowledgedRetry = (): StudioProjectV3 => {
       const project = makeRetryProjectV3();
       project.jobs.job_1!.status = 'needs_attention';
+      project.jobs.job_1!.providerSubmissionKind = null;
+      project.jobs.job_1!.providerJobId = null;
+      project.jobs.job_1!.remoteStartedAt = null;
       project.jobs.job_1!.error = { code: 'submission_unknown', messageKey: 'submission_unknown' };
       project.jobs.job_2!.retryReason = 'submission_unknown';
       project.jobs.job_2!.duplicateChargeAcknowledged = true;
@@ -3117,6 +3335,114 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
     expect(validateStudioProjectV3(acknowledgementAfterJobCreation)).toBe(false);
   });
 
+  it('requires Piece, Job, generated asset, retry, frozen-rule, and remote-receipt chronology', () => {
+    const jobBeforePiece = makeGeneratedProjectV3();
+    jobBeforePiece.pieces.piece_1!.createdAt = completedAtV3;
+    expect(validateStudioProjectV3(jobBeforePiece)).toBe(false);
+
+    const jobAfterPiece = makeRetryProjectV3();
+    jobAfterPiece.jobs.job_2!.createdAt = '2026-08-30T00:00:05.000Z';
+    jobAfterPiece.jobs.job_2!.updatedAt = '2026-08-30T00:00:05.000Z';
+    jobAfterPiece.updatedAt = '2026-08-30T00:00:05.000Z';
+    expect(validateStudioProjectV3(jobAfterPiece)).toBe(false);
+
+    const assetBeforeProducer = makeGeneratedProjectV3();
+    assetBeforeProducer.pieces.piece_1!.createdAt = timestampV3;
+    assetBeforeProducer.assets.asset_1!.createdAt = timestampV3;
+    expect(validateStudioProjectV3(assetBeforeProducer)).toBe(false);
+
+    const assetAfterProducer = makeGeneratedProjectV3();
+    assetAfterProducer.jobs.job_1!.updatedAt = confirmedAtV3;
+    assetAfterProducer.jobs.job_1!.spendReceipt!.recordedAt = confirmedAtV3;
+    expect(validateStudioProjectV3(assetAfterProducer)).toBe(false);
+
+    const predecessorOverlapsRetry = makeRetryProjectV3();
+    predecessorOverlapsRetry.jobs.job_1!.updatedAt = '2026-08-30T00:00:05.000Z';
+    predecessorOverlapsRetry.pieces.piece_1!.updatedAt = '2026-08-30T00:00:05.000Z';
+    predecessorOverlapsRetry.updatedAt = '2026-08-30T00:00:05.000Z';
+    expect(validateStudioProjectV3(predecessorOverlapsRetry)).toBe(false);
+
+    const withFrozenRuleAt = (createdAt: string): StudioProjectV3 => {
+      const project = makeGeneratedProjectV3();
+      const rule = {
+        id: 'rule_1',
+        scope: 'project' as const,
+        text: 'Keep the portrait quiet.',
+        predicate: null,
+        createdAt,
+      };
+      project.jobs.job_1!.composition.inputs.rules = [structuredClone(rule)];
+      project.jobs.job_1!.requestPlan.snapshot.composition.inputs.rules = [structuredClone(rule)];
+      project.spendAuthorizations[0]!.quote.item.requestPlan.snapshot.composition.inputs.rules = [
+        structuredClone(rule),
+      ];
+      (project.assets.asset_1 as Extract<StudioAssetV3, { origin: 'generated' }>).compositionDigest =
+        studioPieceGenerationCompositionDigestV3(project.jobs.job_1!.composition);
+      return project;
+    };
+    expect(validateStudioProjectV3(withFrozenRuleAt(timestampV3))).toBe(true);
+    expect(validateStudioProjectV3(withFrozenRuleAt('2026-08-29T23:59:59.999Z'))).toBe(false);
+    expect(validateStudioProjectV3(withFrozenRuleAt(completedAtV3))).toBe(false);
+
+    const receiptBeforeRemoteStart = makeGeneratedProjectV3();
+    receiptBeforeRemoteStart.jobs.job_1!.remoteStartedAt = completedAtV3;
+    receiptBeforeRemoteStart.jobs.job_1!.spendReceipt!.recordedAt = confirmedAtV3;
+    expect(validateStudioProjectV3(receiptBeforeRemoteStart)).toBe(false);
+  });
+
+  it('requires unique reservation authority and ordered, disjoint authorization commits', () => {
+    const project = makeRetryProjectV3();
+    expect(validateStudioProjectV3(project)).toBe(true);
+
+    const duplicateReservation = structuredClone(project);
+    const firstReservationId = duplicateReservation.spendAuthorizations[0]!.quote.reservationId;
+    const secondAuthorization = duplicateReservation.spendAuthorizations[1]!;
+    secondAuthorization.quote.reservationId = firstReservationId;
+    const itemId = createStudioPieceQuotedGenerationIdV3({
+      projectId: duplicateReservation.id,
+      reservationId: firstReservationId,
+      quoteId: secondAuthorization.quote.id,
+      quoteRevision: secondAuthorization.quote.quoteRevision,
+      target: secondAuthorization.quote.item.target,
+      purpose: secondAuthorization.quote.item.purpose,
+    });
+    secondAuthorization.quote.item.id = itemId;
+    secondAuthorization.providerBinding.itemId = itemId;
+    secondAuthorization.idempotencyKey.itemId = itemId;
+    duplicateReservation.jobs.job_2!.authorizationItemId = itemId;
+    expect(validateStudioProjectV3(duplicateReservation)).toBe(false);
+
+    const reversedRevision = structuredClone(project);
+    reversedRevision.spendAuthorizations[1]!.projectRevisionAtAuthorization = 2;
+    reversedRevision.jobs.job_2!.projectRevisionAtAuthorization = 2;
+    expect(validateStudioProjectV3(reversedRevision)).toBe(false);
+
+    const reversedTime = structuredClone(project);
+    reversedTime.spendAuthorizations[1]!.confirmedAt = timestampV3;
+    reversedTime.jobs.job_2!.createdAt = timestampV3;
+    reversedTime.jobs.job_2!.updatedAt = timestampV3;
+    expect(validateStudioProjectV3(reversedTime)).toBe(false);
+
+    const overlapsUndo = structuredClone(project);
+    overlapsUndo.undoHistory = [
+      {
+        id: 'undo_1',
+        sourceRevision: 4,
+        sourceAuthoringRevision: 2,
+        label: 'rename_piece',
+        patches: [
+          {
+            kind: 'piece_catalog',
+            pieceId: 'piece_1',
+            before: { handle: 'quiet_portrait_before', priorHandles: [] },
+            afterDigest: digest,
+          },
+        ],
+      },
+    ];
+    expect(validateStudioProjectV3(overlapsUndo)).toBe(false);
+  });
+
   it('fails closed on cross-contract quote, authorization, receipt, Job, and Piece mismatches', () => {
     const corruptions: Array<(project: StudioProjectV3) => void> = [
       (project) => {
@@ -3124,6 +3450,33 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
       },
       (project) => {
         project.spendAuthorizations[0]!.providerBinding.itemId = 'item_missing';
+      },
+      (project) => {
+        const authorization = project.spendAuthorizations[0]!;
+        authorization.id = project.id;
+        project.jobs.job_1!.authorizationId = project.id;
+        project.jobs.job_1!.spendReceipt!.authorizationId = project.id;
+      },
+      (project) => {
+        const authorization = project.spendAuthorizations[0]!;
+        authorization.quote.reservationId = 'job_1';
+        const itemId = createStudioPieceQuotedGenerationIdV3({
+          projectId: project.id,
+          reservationId: 'job_1',
+          quoteId: authorization.quote.id,
+          quoteRevision: authorization.quote.quoteRevision,
+          target: authorization.quote.item.target,
+          purpose: authorization.quote.item.purpose,
+        });
+        authorization.quote.item.id = itemId;
+        authorization.providerBinding.itemId = itemId;
+        authorization.idempotencyKey.itemId = itemId;
+        project.jobs.job_1!.authorizationItemId = itemId;
+        project.jobs.job_1!.spendReceipt!.itemId = itemId;
+      },
+      (project) => {
+        project.spendAuthorizations[0]!.idempotencyKey.key = 'piece_1';
+        project.jobs.job_1!.idempotencyKey = 'piece_1';
       },
       (project) => {
         const itemId = `item_${'f'.repeat(64)}`;
@@ -3278,6 +3631,9 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
   it('requires duplicate-charge acknowledgement and timestamp exactly for submission-unknown retry', () => {
     const project = makeRetryProjectV3();
     project.jobs.job_1!.status = 'needs_attention';
+    project.jobs.job_1!.providerSubmissionKind = null;
+    project.jobs.job_1!.providerJobId = null;
+    project.jobs.job_1!.remoteStartedAt = null;
     project.jobs.job_1!.error = { code: 'submission_unknown', messageKey: 'submission_unknown' };
     project.jobs.job_2!.retryReason = 'submission_unknown';
     project.jobs.job_2!.duplicateChargeAcknowledged = true;
@@ -3327,6 +3683,18 @@ describe('validateStudioPieceExportManifestV3', () => {
       exportedAt: '2026-08-30T00:00:03.000Z',
     };
     expect(validateStudioPieceExportManifestV3(manifest)).toBe(true);
+    expect(
+      validateStudioPieceExportManifestV3({
+        ...manifest,
+        asset: { ...manifest.asset, byteSize: STUDIO_MAX_IMAGE_ASSET_BYTES_V3 },
+      })
+    ).toBe(true);
+    expect(
+      validateStudioPieceExportManifestV3({
+        ...manifest,
+        asset: { ...manifest.asset, byteSize: STUDIO_MAX_IMAGE_ASSET_BYTES_V3 + 1 },
+      })
+    ).toBe(false);
     expect(validateStudioPieceExportManifestV3({ ...manifest, piece: { ...manifest.piece, kind: 'video' } })).toBe(
       false
     );

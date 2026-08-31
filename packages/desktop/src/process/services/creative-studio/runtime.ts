@@ -25,19 +25,19 @@ import {
   createStudioDirectorCommandMailboxV2,
   type StudioDirectorCommandMailboxDepsV2,
   type StudioDirectorCommandMailboxV2,
-} from './service/directorCommandMailbox';
+} from './service/director/mailbox';
 import {
   createStudioDirectorCommandServiceV2,
   type StudioDirectorCommandServiceDepsV2,
   type StudioDirectorCommandServiceV2,
-} from './service/directorCommandService';
+} from './service/director/service';
 import {
   createStudioDirectorCommandProcessorV2,
   createStudioDirectorCommitTrackerV2,
   type StudioDirectorCommandProcessorDepsV2,
   type StudioDirectorCommandProcessorV2,
   type StudioDirectorCommitTrackerV2,
-} from './service/directorCommandProcessor';
+} from './service/director/processor';
 import { createStudioMediaStore, getAvailableStudioDiskBytes, type StudioMediaStore } from './mediaStore';
 import {
   createStudioProviderResolver,

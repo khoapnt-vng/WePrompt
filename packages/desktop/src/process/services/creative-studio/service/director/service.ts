@@ -15,7 +15,7 @@ import {
   deriveStudioDirtyShotsV2,
   StudioMutationErrorV2,
   type StudioMutationReasonV2,
-} from './schema2';
+} from '../schema2';
 
 export type StudioDirectorCommitAttribution = Readonly<{
   commitTag: string;

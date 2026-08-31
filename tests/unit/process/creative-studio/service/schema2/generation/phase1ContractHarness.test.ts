@@ -140,6 +140,7 @@ const makeSucceededProject = (): StudioProjectV3 => {
     status: 'succeeded',
     provider,
     idempotencyKey: authorization.idempotencyKey.key,
+    providerSubmissionKind: 'remote',
     providerJobId: 'provider_job_1',
     remoteStartedAt,
     cancellationPolicy: 'queued_and_running',

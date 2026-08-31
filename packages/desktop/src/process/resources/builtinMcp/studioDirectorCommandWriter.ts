@@ -39,7 +39,7 @@ import {
   studioDirectorCommandReceiptMatchesRecordV2,
   validateStudioDirectorFreeRecoveryV2,
   validatesStudioPaidRecoveryBlockerV2,
-} from '@process/services/creative-studio/service/directorCommandContracts';
+} from '@process/services/creative-studio/service/director/contracts';
 import { validateStudioMutationOperationV2 } from '@process/services/creative-studio/service/schema2';
 import {
   decodeStudioProjectManifestV2,

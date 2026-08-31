@@ -20,7 +20,7 @@ import { createEmptyStudioProjectV2 } from '@/process/services/creative-studio/s
 import {
   deriveStudioFixedShotReasonsV2,
   studioJobReferencesShotV2,
-} from '@/process/services/creative-studio/service/schema2/fixedShots';
+} from '@/process/services/creative-studio/service/schema2/mutations/fixedShots';
 
 const NOW = '2026-08-28T00:00:00.000Z';
 

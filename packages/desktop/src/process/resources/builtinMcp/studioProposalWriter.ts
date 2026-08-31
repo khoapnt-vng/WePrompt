@@ -13,7 +13,7 @@ import {
   type StudioPendingRecordWriteErrorCode,
   writePendingRecordV2,
 } from '@process/resources/builtinMcp/studioPendingRecordWriter';
-import { parseStudioProposalRecordV2 } from '@process/services/creative-studio/service/directorCommandContracts';
+import { parseStudioProposalRecordV2 } from '@process/services/creative-studio/service/director/contracts';
 import type { RecordIoFileSystem } from '@process/services/creative-studio/service/recordIo';
 
 export { StudioPendingRecordWriteError as StudioProposalWriteError };

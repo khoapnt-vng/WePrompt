@@ -30,12 +30,12 @@ import { registerStudioToolsV2 } from '@process/resources/builtinMcp/studioServe
 import {
   createStudioDirectorCommandMailboxV2,
   type StudioDirectorCommandMailboxV2,
-} from '@process/services/creative-studio/service/directorCommandMailbox';
+} from '@process/services/creative-studio/service/director/mailbox';
 import {
   createStudioDirectorCommandProcessorV2,
   createStudioDirectorCommitTrackerV2,
-} from '@process/services/creative-studio/service/directorCommandProcessor';
-import { createStudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
+} from '@process/services/creative-studio/service/director/processor';
+import { createStudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/director/service';
 import { createCreativeStudioServiceV2 } from '@process/services/creative-studio/service';
 import {
   calculateStudioQuoteTotals,

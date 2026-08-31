@@ -584,4 +584,87 @@ describe('Creative Studio project deletion authority', () => {
       message: 'Studio project deletion quarantine manifest changed',
     });
   });
+  /*
+   * The two guards below are the deletion authority's time-of-check-to-time-of-use defences. It
+   * captures a proof of the tree it is about to delete, then re-verifies that proof around every
+   * child so a directory swapped underneath it cannot redirect the removal. Nothing exercised either
+   * of them, which is the worst combination: code whose only purpose is to catch an attack that has
+   * never been simulated.
+   *
+   * Both are reached by perturbing the INJECTED `fs` rather than by racing the real filesystem, so
+   * they are deterministic. `deps.fs` exists as a dependency precisely so this is testable.
+   */
+
+  /** Replaces one directory entry name so `path.join` escapes the parent it was read from. */
+  const fsWithEntryName = (targetDirectory: string, name: string): typeof nodeFs =>
+    ({
+      ...nodeFs,
+      opendir: async (directory: Parameters<typeof nodeFs.opendir>[0]) => {
+        const real = await nodeFs.opendir(directory);
+        if (String(directory) !== targetDirectory) return real;
+        let served = false;
+        return {
+          read: async () => {
+            if (served) return null;
+            served = true;
+            return { name, isDirectory: () => false, isFile: () => true, isSymbolicLink: () => false };
+          },
+          close: async () => real.close(),
+        } as unknown as Awaited<ReturnType<typeof nodeFs.opendir>>;
+      },
+    }) as typeof nodeFs;
+
+  /** Reports a different inode for `targetPath` from the nth lstat onward: an identity swap. */
+  const fsWithInodeSwap = (targetPath: string, fromCall: number): typeof nodeFs => {
+    let calls = 0;
+    return {
+      ...nodeFs,
+      lstat: async (target: Parameters<typeof nodeFs.lstat>[0]) => {
+        const real = await nodeFs.lstat(target);
+        if (String(target) !== targetPath) return real;
+        calls += 1;
+        if (calls < fromCall) return real;
+        return Object.assign(Object.create(Object.getPrototypeOf(real)), real, {
+          ino: Number(real.ino) + 1,
+        }) as typeof real;
+      },
+    } as typeof nodeFs;
+  };
+
+  it('refuses a cleanup whose directory entry would escape the parent it was read from', async () => {
+    const snapshot = await seedProject('project_escaping_entry', { nestedTree: true });
+    const marker = deletionMarker(snapshot);
+    const claim = cleanupDirectory(marker);
+    await nodeFs.rename(snapshot.directory.path, claim);
+    await writeMarker(marker);
+
+    // A real filesystem cannot produce this name, so only a compromised or emulated directory
+    // handle can. The guard is the reason such a name cannot redirect a delete.
+    const authority = createStudioDeletionAuthorityV2({ ...deps, fs: fsWithEntryName(claim, '../outside.txt') });
+    const identified = await authority.readProjectDeletionMarkerV2(root, snapshot.project.id);
+
+    await expect(authority.finishProjectDeletionV2(root, identified!)).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Studio project deletion cleanup path is unsafe',
+    });
+    await expect(nodeFs.readFile(path.join(root, 'outside.txt'), 'utf8')).resolves.toBe('preserve me');
+  });
+
+  it('refuses a cleanup whose claim directory changes identity after the marker is read', async () => {
+    const snapshot = await seedProject('project_parent_swap', { nestedTree: true });
+    const marker = deletionMarker(snapshot);
+    const claim = cleanupDirectory(marker);
+    await nodeFs.rename(snapshot.directory.path, claim);
+    await writeMarker(marker);
+
+    const authority = createStudioDeletionAuthorityV2({ ...deps, fs: fsWithInodeSwap(claim, 2) });
+    const identified = await authority.readProjectDeletionMarkerV2(root, snapshot.project.id);
+
+    await expect(authority.finishProjectDeletionV2(root, identified!)).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Studio project deletion cleanup claim changed',
+    });
+    // The claim survives: a refused cleanup must not have started removing anything.
+    await expect(nodeFs.lstat(claim)).resolves.toBeDefined();
+  });
 });

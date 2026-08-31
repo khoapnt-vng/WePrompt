@@ -33,7 +33,7 @@ import {
   parseStudioReferenceRequestDecisionV2,
   parseStudioReferenceRequestV2,
   parseStudioReferenceRequestSlotV2,
-} from '@process/services/creative-studio/service/directorCommandContracts';
+} from '@process/services/creative-studio/service/director/contracts';
 
 export {
   STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT,
