@@ -278,12 +278,20 @@ const readTitleButtonLayout = async (button: Locator) =>
   button.evaluate((element) => {
     const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
+    const frame = element.closest<HTMLElement>('h1')?.getBoundingClientRect();
+    if (frame === undefined) throw new Error('Project title layout frame is missing');
     return {
       geometry: {
         height: rect.height,
         width: rect.width,
         x: rect.x,
         y: rect.y,
+      },
+      relativeGeometry: {
+        blockStart: rect.top - frame.top,
+        inlineEnd: frame.right - rect.right,
+        inlineStart: rect.left - frame.left,
+        widthSlack: frame.width - rect.width,
       },
       padding: {
         bottom: style.paddingBottom,
@@ -851,7 +859,9 @@ const captureCutViewportReference = async (
   await expect(transport.locator('[data-cut-play]')).toHaveAccessibleName('Play film');
   await expect(transport.locator('[data-cut-play]')).toHaveAttribute('aria-pressed', 'false');
   await expect(transport.locator('[data-cut-time]')).toHaveText('0:00 / 0:10');
-  await expect(transport.getByText('Picture only — the bed is muted here', { exact: true })).toBeVisible();
+  await expect(
+    transport.getByText('Shot audio only — the music bed is excluded from this preview', { exact: true })
+  ).toBeVisible();
   await expect(cut.getByRole('slider', { name: 'Film seek rail' })).toHaveCount(1);
   await expect(cut.locator('[data-cut-seek]')).not.toHaveAttribute('aria-label');
   await expect(cut.locator('[data-cut-previous-join]')).toBeDisabled();
@@ -1708,7 +1718,7 @@ test.describe('Creative Studio workspace', () => {
   test.describe.configure({ timeout: 60_000 });
   test.skip(process.env.AIONUI_E2E_TEST !== '1', 'Creative Studio E2E requires an isolated test profile.');
 
-  test('creates and reloads a Beat/Shot project across the shared Table, Board, and Cut routes', async ({
+  test('creates and reloads an empty project through the progressive workspace and direct unready routes', async ({
     electronApp,
     page,
   }) => {
@@ -1737,8 +1747,22 @@ test.describe('Creative Studio workspace', () => {
     await expect(page.locator('[data-studio-bar-blockers]')).toHaveText(initialBlockerCopy);
 
     const navigation = page.locator(viewNavigationSelector);
-    await expect(navigation.getByRole('link', { name: 'Table' })).toHaveAttribute('aria-current', 'page');
-    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
+    const startSurface = page.locator('[data-studio-surface-state="start"]');
+    await expect(startSurface.getByRole('heading', { name: 'The Director starts here' })).toBeVisible();
+    await expect(page.locator(activeViewSelector)).toHaveCount(0);
+    for (const [view, reason] of [
+      ['References', 'Nothing to review until the Director plans references.'],
+      ['Table', 'Nothing to arrange until the Director drafts the storyboard.'],
+      ['Board', 'Nothing to produce until the Table is set.'],
+      ['Cut', 'Nothing to edit until production starts.'],
+    ] as const) {
+      const chip = navigation.getByRole('link', { name: view, exact: true });
+      await expect(chip).toBeDisabled();
+      await expect(chip).not.toHaveAttribute('aria-current', 'page');
+      const describedBy = await chip.getAttribute('aria-describedby');
+      expect(describedBy).not.toBeNull();
+      await expect(page.locator(`#${describedBy}`)).toHaveText(reason);
+    }
     await expectProjectConfigurationOutsideActiveView(page);
 
     const projectTitle = page.locator(projectHeaderSelector).getByRole('heading', { level: 1 });
@@ -1771,51 +1795,23 @@ test.describe('Creative Studio workspace', () => {
     await renameButton.hover();
     await expect(renameButton).not.toHaveCSS('border-bottom-color', 'rgba(0, 0, 0, 0)');
 
-    await navigation.getByRole('link', { name: 'Board' }).click();
-    await expect(page).toHaveURL(/#\/studio\/[^/]+\/board$/);
-    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
+    await navigateTo(page, `#/studio/${projectId}/board`);
+    const unreadyBoard = page.locator('[data-studio-view="board"][data-studio-surface-state="unready"]');
+    await expect(unreadyBoard.getByRole('heading', { name: 'Board', exact: true })).toBeVisible();
+    await expect(unreadyBoard.getByText('Nothing to produce until the Table is set.', { exact: true })).toBeVisible();
+    await expect(navigation.getByRole('link', { name: 'Board', exact: true })).toHaveAttribute('aria-current', 'page');
+
+    await navigateTo(page, `#/studio/${projectId}/cut`);
+    const unreadyCut = page.locator('[data-studio-view="cut"][data-studio-surface-state="unready"]');
+    await expect(unreadyCut.getByRole('heading', { name: 'Cut', exact: true })).toBeVisible();
+    await expect(unreadyCut.getByText('Nothing to edit until production starts.', { exact: true })).toBeVisible();
+    await expect(navigation.getByRole('link', { name: 'Cut', exact: true })).toHaveAttribute('aria-current', 'page');
     await expectProjectConfigurationOutsideActiveView(page);
     await expect(projectTitle).toHaveText(renamedProject);
 
-    await navigation.getByRole('link', { name: 'Cut' }).click();
-    await expect(page).toHaveURL(/#\/studio\/[^/]+\/cut$/);
-    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
-    await expectProjectConfigurationOutsideActiveView(page);
-    await expect(projectTitle).toHaveText(renamedProject);
-    const editTargetDuration = page.getByRole('button', { name: 'Edit: Target duration (seconds)' });
-    await editTargetDuration.click();
-    const targetDraft = page.getByRole('spinbutton', { name: 'Target duration (seconds)' });
-    await expect(targetDraft).toBeFocused();
-    await targetDraft.fill('30');
-    await page.mouse.move(0, 0);
+    // The film-setup modal can change the viewport's scrollbar width while Main's response is held,
+    // so compare the button against its title frame rather than against absolute page coordinates.
     const enabledTitleLayout = await readTitleButtonLayout(renameButton);
-    await installEditProjectResponseHold(electronApp, page.url());
-    try {
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
-      await expect.poll(() => hasCapturedEditProjectResponse(electronApp)).toBe(true);
-      await expect(renameButton).toBeDisabled();
-      const pendingTitleLayout = await readTitleButtonLayout(renameButton);
-      expect(pendingTitleLayout.typography).toEqual(enabledTitleLayout.typography);
-      expect(pendingTitleLayout.padding).toEqual(enabledTitleLayout.padding);
-      for (const dimension of ['height', 'width', 'x', 'y'] as const) {
-        expect(
-          Math.abs(pendingTitleLayout.geometry[dimension] - enabledTitleLayout.geometry[dimension])
-        ).toBeLessThanOrEqual(0.5);
-      }
-    } finally {
-      await releaseEditProjectResponseHold(electronApp);
-    }
-    await expect(page.locator('[data-cut-film]')).toContainText('of 0:30');
-    await expect(page.getByRole('button', { name: 'Edit: Target duration (seconds)' })).toBeFocused();
-
-    const cutUrl = page.url();
-    await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page).toHaveURL(cutUrl);
-    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
-    await expectProjectConfigurationOutsideActiveView(page);
-    await expect(page.locator(projectHeaderSelector).getByRole('heading', { level: 1 })).toHaveText(renamedProject);
-    await expect(page.locator('[data-cut-film]')).toContainText('of 0:30');
-
     const briefDialog = await openStudioProjectDialog(page, briefAndRulesTitle);
     await expect(briefDialog.getByLabel('Project brief')).toHaveValue(projectBrief);
     await expect(briefDialog.getByRole('combobox', { name: 'Image route', exact: true })).toBeVisible();
@@ -1825,7 +1821,44 @@ test.describe('Creative Studio workspace', () => {
     await expect(briefDialog.getByLabel('Policy currency')).toBeVisible();
     await expect(briefDialog.getByLabel('Rule', { exact: true })).toBeVisible();
     await expect(briefDialog.getByLabel('Project rule drafts (JSON)')).toHaveCount(0);
+    await chooseArcoSelectOption(page, 'Aspect ratio', '1:1');
+    await page.mouse.move(0, 0);
+    await installEditProjectResponseHold(electronApp, page.url());
+    try {
+      await briefDialog.getByRole('button', { name: 'Save film setup', exact: true }).click();
+      await expect.poll(() => hasCapturedEditProjectResponse(electronApp)).toBe(true);
+      await expect(renameButton).toBeDisabled();
+      const pendingTitleLayout = await readTitleButtonLayout(renameButton);
+      expect(pendingTitleLayout.typography).toEqual(enabledTitleLayout.typography);
+      expect(pendingTitleLayout.padding).toEqual(enabledTitleLayout.padding);
+      expect(Math.abs(pendingTitleLayout.geometry.height - enabledTitleLayout.geometry.height)).toBeLessThanOrEqual(
+        0.5
+      );
+      for (const dimension of ['blockStart', 'inlineEnd', 'inlineStart', 'widthSlack'] as const) {
+        expect(
+          Math.abs(pendingTitleLayout.relativeGeometry[dimension] - enabledTitleLayout.relativeGeometry[dimension]),
+          `pending project title relative ${dimension} changed (${String(
+            enabledTitleLayout.relativeGeometry[dimension]
+          )} -> ${String(pendingTitleLayout.relativeGeometry[dimension])})`
+        ).toBeLessThanOrEqual(0.5);
+      }
+    } finally {
+      await releaseEditProjectResponseHold(electronApp);
+    }
+    await expect(briefDialog.getByRole('combobox', { name: 'Aspect ratio', exact: true })).toContainText('1:1');
     await closeStudioProjectDialog(briefDialog);
+
+    const projectUrl = page.url();
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page).toHaveURL(projectUrl);
+    await expect(page.locator('[data-studio-view="cut"][data-studio-surface-state="unready"]')).toBeVisible();
+    await expectProjectConfigurationOutsideActiveView(page);
+    await expect(page.locator(projectHeaderSelector).getByRole('heading', { level: 1 })).toHaveText(renamedProject);
+
+    const reloadedBriefDialog = await openStudioProjectDialog(page, briefAndRulesTitle);
+    await expect(reloadedBriefDialog.getByLabel('Project brief')).toHaveValue(projectBrief);
+    await expect(reloadedBriefDialog.getByRole('combobox', { name: 'Aspect ratio', exact: true })).toContainText('1:1');
+    await closeStudioProjectDialog(reloadedBriefDialog);
 
     await navigateTo(page, ROUTES.studio);
     const libraryProjectButton = page.getByRole('button', { name: renamedProject, exact: true });
@@ -2751,8 +2784,11 @@ test.describe('Creative Studio workspace', () => {
     await page.keyboard.press('Escape');
     await expect(selectedBoardPanel).toBeHidden();
     await expect(selectedBoardOpener).toHaveAttribute('aria-current', 'true');
-    await navigation.getByRole('link', { name: 'Cut' }).click();
-    await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
+    const cut = navigation.getByRole('link', { name: 'Cut', exact: true });
+    await expect(cut).toBeDisabled();
+    const cutDescription = await cut.getAttribute('aria-describedby');
+    expect(cutDescription).not.toBeNull();
+    await expect(page.locator(`#${cutDescription}`)).toHaveText('Nothing to edit until production starts.');
     await navigation.getByRole('link', { name: 'Table' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
     await expect(page.getByRole('grid', { name: 'Beat table' }).getByRole('row').nth(24)).toHaveAttribute(
