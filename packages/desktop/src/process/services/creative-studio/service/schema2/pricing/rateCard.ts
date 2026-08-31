@@ -113,7 +113,7 @@ const compareEntries = (left: StudioRateCardEntryV2, right: StudioRateCardEntryV
 /** Parses a main-only rate-card config and freezes its canonical, route-sorted representation. */
 export const createStudioRateCardV2 = (input: unknown): StudioRateCardV2 => {
   if (!isDenseArray(input)) return invalidRateCard();
-  const entries = input.map(parseEntry).sort(compareEntries);
+  const entries = input.map(parseEntry).toSorted(compareEntries);
   for (let index = 1; index < entries.length; index += 1) {
     if (entries[index - 1]!.routeId === entries[index]!.routeId) return invalidRateCard();
   }

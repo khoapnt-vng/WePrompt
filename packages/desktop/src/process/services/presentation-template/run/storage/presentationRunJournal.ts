@@ -145,8 +145,8 @@ function journalCorrupt(): never {
 }
 
 function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  return actual.length === keys.length && actual.every((key, index) => key === [...keys].sort()[index]);
+  const actual = Object.keys(value).toSorted();
+  return actual.length === keys.length && actual.every((key, index) => key === [...keys].toSorted()[index]);
 }
 
 function isIsoTimestamp(value: unknown): value is string {

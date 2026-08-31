@@ -722,7 +722,7 @@ const dedupeAndSortBlockers = (
       seen.add(identity);
       return true;
     })
-    .sort((left, right) => {
+    .toSorted((left, right) => {
       const byShot =
         (left.shotId === null ? Number.MAX_SAFE_INTEGER : (shotPositions.get(left.shotId) ?? Number.MAX_SAFE_INTEGER)) -
         (right.shotId === null

@@ -1104,7 +1104,11 @@ const SOURCE_FORMATS: ReadonlySet<PresentationSourceFormat> = new Set([
   'md',
   'csv',
 ]);
-const SOURCE_KINDS: readonly PresentationSourceKind[] = ['native-picker', 'external-drop', 'workspace-relative'];
+const SOURCE_KINDS: ReadonlySet<PresentationSourceKind> = new Set([
+  'native-picker',
+  'external-drop',
+  'workspace-relative',
+]);
 const SOURCE_STATES: readonly PresentationSourceGrantManifest['state'][] = [
   'active',
   'claimed',
@@ -1224,7 +1228,7 @@ export function assertPresentationSourceGrantManifest(value: PresentationSourceG
     value.displayName.includes('/') ||
     value.displayName.includes('\\') ||
     !SOURCE_FORMATS.has(value.format) ||
-    !SOURCE_KINDS.includes(value.sourceKind) ||
+    !SOURCE_KINDS.has(value.sourceKind) ||
     value.snapshotRelativePath !== `source.${value.format}` ||
     !/^[0-9a-f]{64}$/.test(value.sha256) ||
     !Number.isSafeInteger(value.byteLength) ||
