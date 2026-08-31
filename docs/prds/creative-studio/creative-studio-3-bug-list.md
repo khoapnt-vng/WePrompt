@@ -57,22 +57,6 @@ Every triage block also carries a claimant field. `Unclaimed` is intentional at 
 checkpoint; the implementing agent replaces it before the first code edit. A phase destination is
 not a claim, and the list must not imply that paused or absent agents own work they have not reserved.
 
-### Tranche 0 — the prerequisite, before any CS4 phase starts
-
-Four entries block the CS4 base. They are not part of a phase; they are the gate in front of phase 1,
-and they must land somewhere mergeable on its own, **not on the CS4 branch** — a fix trapped behind a
-cutover that deletes four views can never be merged independently.
-
-| Entry       | Why it blocks the base                                                                                                                                                                                                                                                                             |
-| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **BUG-190** | CS4's creation model is "a Director invokes capabilities", and every capability is a new tool on the same built-in server. If consent is per-tool rather than per-server, every new capability stops the Director dead on a permission prompt — which would make phase 5 unusable by construction. |
-| **BUG-163** | CS4 keeps the Director rail and its conversation binding unchanged, and the cutover must itself rewrite `DIRECTOR_PRESET_RULES`. A rules rewrite that cannot recover an interrupted conversation would strand every existing project on the first launch after cutover.                            |
-| **BUG-162** | The dishonest-completion sentence is app chrome in the shared conversation renderer, not Director prose, so it survives the cutover untouched and would report CS4's own failures as successes.                                                                                                    |
-| **BUG-176** | A target-size defect whose rule — a control's hit area is the control — becomes a phase-5 canvas acceptance criterion. Fixing the rule before the canvas is drawn is cheaper than discovering it on every block kind.                                                                              |
-
-**Tranche 0 is done when all four are fixed and merged into whatever CS4 branches from.** Phase 1
-does not start before that.
-
 ### Evidence that closes an absorbed entry
 
 An `absorb` entry stays open until its destination phase produces evidence. "The phase shipped" is not

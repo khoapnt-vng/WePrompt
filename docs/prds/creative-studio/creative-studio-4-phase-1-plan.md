@@ -649,7 +649,7 @@ Focused tests must include:
 - successful commit is durable before dispatch, and a dispatch throw leaves a recoverable queued Job;
 - concurrent duplicate confirmation admits one authorization and one Job;
 - at 95 Pieces, two concurrent create/import attempts admit exactly the 96th Piece; the losing 97th
-  attempt receives the typed `catalog_capacity` refusal before quote or spend, and confirmation
+  attempt receives the typed `project_piece_capacity_reached` refusal before quote or spend, and confirmation
   rechecks capacity under the project queue;
 - authoring changes, cap removal, cap reduction, currency change, expiry, malformed cache data, and
   route/rate changes refuse before spend;
@@ -746,7 +746,7 @@ approval is not an acceptable substitute.
    current.
    Show retry only for the exact incomplete generated states allowed by §2.2; completed and imported
    Pieces expose no replacement/regeneration action.
-   A `catalog_capacity` refusal is announced before any quote or spend and explains that this Pilot
+   A `project_piece_capacity_reached` refusal is announced before any quote or spend and explains that this Pilot
    project has reached 96 Pieces and another project is required.
 7. Rename uses an Arco `Input` with a fixed visual `#`, preserves text direction correctly, reports
    collision/bound refusals, and offers the existing undo mechanism.
