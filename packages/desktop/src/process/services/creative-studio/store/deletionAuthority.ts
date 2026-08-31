@@ -14,6 +14,7 @@ import {
   STUDIO_BRIEF_FILE_NAME,
 } from '../service/briefFile';
 import { CreativeStudioStoreError } from './contracts';
+import type { StudioIdentifiedRecordV2 } from './sidecarJournal';
 import type {
   StudioDirectoryAuthorityV2,
   StudioFileIdentityV2,
@@ -54,14 +55,6 @@ export type StudioProjectDeletionMarkerV2 = {
   projectSha256: string;
 };
 
-export type StudioDeletionIdentifiedRecordV2<RecordType> = {
-  file: string;
-  bytes: string;
-  identity: StudioFileIdentityV2;
-  record: RecordType;
-  quarantined: boolean;
-};
-
 type SupportedProjectFileInspectionV2 = Extract<StudioProjectFileInspectionV2, { status: 'supported' }>;
 
 type DeletionAuthorityDepsV2 = {
@@ -71,12 +64,13 @@ type DeletionAuthorityDepsV2 = {
   captureDirectoryAuthority: (directory: string) => Promise<StudioDirectoryAuthorityV2>;
   assertDirectoryAuthority: (authority: StudioDirectoryAuthorityV2) => Promise<void>;
   syncDirectoryAuthority: (authority: StudioDirectoryAuthorityV2) => Promise<void>;
+  sameIdentity: (left: StudioFileIdentityV2, right: StudioFileIdentityV2) => boolean;
   assertPathAbsent: (file: string) => Promise<void>;
   assertProjectSnapshotCurrent: (input: { root: string; snapshot: SupportedProjectFileInspectionV2 }) => Promise<void>;
   assertIdentifiedRecordCurrent: (input: {
     root: string;
     authority: StudioDirectoryAuthorityV2;
-    identified: StudioDeletionIdentifiedRecordV2<unknown>;
+    identified: StudioIdentifiedRecordV2<unknown>;
     maxBytes?: number;
   }) => Promise<void>;
   publishImmutableJournalRecord: (input: {
@@ -85,7 +79,7 @@ type DeletionAuthorityDepsV2 = {
     file: string;
     bytes: string;
     maxBytes?: number;
-    authorizeBeforeLink?: (temporary: StudioDeletionIdentifiedRecordV2<null>) => Promise<void>;
+    authorizeBeforeLink?: (temporary: StudioIdentifiedRecordV2<null>) => Promise<void>;
     retainTemporary?: boolean;
   }) => Promise<void>;
   inspectProjectFile: (root: string, projectId: string) => Promise<StudioProjectFileInspectionV2>;
@@ -130,9 +124,6 @@ const sha256Utf8 = (bytes: string): string => createHash('sha256').update(bytes,
 
 const serializeJsonExact = (value: unknown): string => JSON.stringify(value, null, 2);
 
-const sameIdentityV2 = (left: StudioFileIdentityV2, right: StudioFileIdentityV2): boolean =>
-  left.dev === right.dev && left.ino === right.ino;
-
 export const createStudioDeletionAuthorityV2 = (deps: DeletionAuthorityDepsV2) => {
   const {
     fs,
@@ -141,6 +132,7 @@ export const createStudioDeletionAuthorityV2 = (deps: DeletionAuthorityDepsV2) =
     captureDirectoryAuthority,
     assertDirectoryAuthority,
     syncDirectoryAuthority,
+    sameIdentity: sameIdentityV2,
     assertPathAbsent,
     assertProjectSnapshotCurrent,
     assertIdentifiedRecordCurrent,
@@ -386,7 +378,7 @@ export const createStudioDeletionAuthorityV2 = (deps: DeletionAuthorityDepsV2) =
   const readProjectDeletionMarkerV2 = async (
     root: string,
     projectId: string
-  ): Promise<StudioDeletionIdentifiedRecordV2<StudioProjectDeletionMarkerV2> | null> => {
+  ): Promise<StudioIdentifiedRecordV2<StudioProjectDeletionMarkerV2> | null> => {
     const { markerFile } = projectDeletionPathsV2(root, projectId);
     let identified: Awaited<ReturnType<typeof readBoundedRegularFileWithIdentity>>;
     let publication: Awaited<ReturnType<typeof readBoundedRegularFileWithIdentity>>;
@@ -444,7 +436,7 @@ export const createStudioDeletionAuthorityV2 = (deps: DeletionAuthorityDepsV2) =
     marker: StudioProjectDeletionMarkerV2,
     snapshot: SupportedProjectFileInspectionV2,
     authorizeBeforePublish?: () => void | Promise<void>
-  ): Promise<StudioDeletionIdentifiedRecordV2<StudioProjectDeletionMarkerV2>> => {
+  ): Promise<StudioIdentifiedRecordV2<StudioProjectDeletionMarkerV2>> => {
     const rootAuthority = await captureDirectoryAuthority(root);
     const { markerFile } = projectDeletionPathsV2(root, marker.projectId);
     const bytes = serializeJsonExact(marker);
@@ -547,7 +539,7 @@ export const createStudioDeletionAuthorityV2 = (deps: DeletionAuthorityDepsV2) =
 
   const finishProjectDeletionV2 = async (
     root: string,
-    marker: StudioDeletionIdentifiedRecordV2<StudioProjectDeletionMarkerV2>
+    marker: StudioIdentifiedRecordV2<StudioProjectDeletionMarkerV2>
   ): Promise<void> => {
     const rootAuthority = await captureDirectoryAuthority(root);
     const {
