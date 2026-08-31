@@ -1109,17 +1109,17 @@ const SOURCE_KINDS: ReadonlySet<PresentationSourceKind> = new Set([
   'external-drop',
   'workspace-relative',
 ]);
-const SOURCE_STATES: readonly PresentationSourceGrantManifest['state'][] = [
+const SOURCE_STATES: ReadonlySet<PresentationSourceGrantManifest['state']> = new Set([
   'active',
   'claimed',
   'consumed',
   'revoked',
   'expired',
-];
+]);
 
 function hasExactManifestKeys(value: object, keys: readonly string[]): boolean {
-  const actual = Object.keys(value).sort();
-  const expected = [...keys].sort();
+  const actual = Object.keys(value).toSorted();
+  const expected = [...keys].toSorted();
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
@@ -1234,7 +1234,7 @@ export function assertPresentationSourceGrantManifest(value: PresentationSourceG
     !Number.isSafeInteger(value.byteLength) ||
     value.byteLength < 1 ||
     value.byteLength > PRESENTATION_RUN_LIMITS.MAX_SOURCE_BYTES ||
-    !SOURCE_STATES.includes(value.state) ||
+    !SOURCE_STATES.has(value.state) ||
     (value.queueExtendedAt === null) !== (value.queueItemId === null) ||
     (value.queueItemId !== null && !isIdentifier(value.queueItemId)) ||
     (value.state === 'claimed' || value.state === 'consumed') !== (value.claimedRunId !== null) ||
