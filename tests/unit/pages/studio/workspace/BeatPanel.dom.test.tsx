@@ -371,7 +371,6 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.beatPanel.preview.slate': 'Planning slate',
         'conversation.creativeStudio.workspace.beatPanel.preview.play': 'Play Beat',
         'conversation.creativeStudio.workspace.beatPanel.preview.pause': 'Pause Beat',
-        'conversation.creativeStudio.workspace.beatPanel.preview.pictureOnly': 'Picture only',
         'conversation.creativeStudio.workspace.beatPanel.preview.controlsLabel': 'Beat transport',
         'conversation.creativeStudio.workspace.beatPanel.preview.previousJoin': 'Previous join',
         'conversation.creativeStudio.workspace.beatPanel.preview.nextJoin': 'Next join',
