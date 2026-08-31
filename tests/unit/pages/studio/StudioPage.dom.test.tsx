@@ -55,6 +55,8 @@ const mocks = vi.hoisted(() => {
   });
   return {
     callOrder: [] as string[],
+    translate: (key: string, values?: Record<string, unknown>) =>
+      values === undefined ? key : `${key}:${JSON.stringify(values)}`,
     listeners,
     closeHandlers,
     beatPanelActions: null as BeatPanelActions | null,
@@ -215,8 +217,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string, values?: Record<string, unknown>) =>
-      values === undefined ? key : `${key}:${JSON.stringify(values)}`,
+    t: mocks.translate,
     i18n: { language: 'en-US', resolvedLanguage: 'en-US' },
   }),
 }));
@@ -7414,6 +7415,64 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     });
 
     expect(result).toBe(false);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('retains renderer command identities when a local validation error is the only state change', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => {
+      expect(mocks.workspaceMutations).not.toBeNull();
+      expect(mocks.beatPanelActions).not.toBeNull();
+      expect(mocks.boardActions).not.toBeNull();
+      expect(mocks.cutActions).not.toBeNull();
+      expect(mocks.referenceActions).not.toBeNull();
+      expect(mocks.directorProposalIntent).not.toBeNull();
+      expect(mocks.workspaceControlsProps?.projectStatusPending).toBe(false);
+      expect(mocks.projectMenuProps?.routeCatalog).not.toBeNull();
+      expect(mocks.projectMenuProps?.generationCapability).not.toBeNull();
+      expect(mocks.projectMenuProps?.exportCatalog).not.toBeNull();
+    });
+
+    const commandIdentities = {
+      mutations: capturedWorkspaceMutations(),
+      beatPanel: capturedBeatPanelActions(),
+      board: capturedBoardActions(),
+      cut: capturedCutActions(),
+      references: capturedReferenceActions(),
+      directorIntent: capturedDirectorProposalIntent(),
+    };
+    const shell = document.querySelector('[data-studio-workspace-shell]');
+    expect(shell).not.toBeNull();
+    const invalidApplyAuthoring = commandIdentities.mutations.applyAuthoring as unknown as (
+      operations: Array<{ kind: 'set_hard_cut'; shotId: string; hardCut: boolean }>
+    ) => Promise<boolean>;
+
+    let applied: boolean | undefined;
+    await act(async () => {
+      applied = await invalidApplyAuthoring([{ kind: 'set_hard_cut', shotId: 'shot_0', hardCut: true }]);
+    });
+
+    expect(applied).toBe(false);
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.beatPanel.chain.hardCutUnavailable')
+    ).toBeVisible();
+    expect({
+      mutations: capturedWorkspaceMutations() === commandIdentities.mutations,
+      beatPanel: capturedBeatPanelActions() === commandIdentities.beatPanel,
+      board: capturedBoardActions() === commandIdentities.board,
+      cut: capturedCutActions() === commandIdentities.cut,
+      references: capturedReferenceActions() === commandIdentities.references,
+      directorIntent: capturedDirectorProposalIntent() === commandIdentities.directorIntent,
+    }).toEqual({
+      mutations: true,
+      beatPanel: true,
+      board: true,
+      cut: true,
+      references: true,
+      directorIntent: true,
+    });
+    expect(document.querySelector('[data-studio-workspace-shell]')).toBe(shell);
     expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
   });
 
