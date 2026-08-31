@@ -14,7 +14,11 @@
  *   alongside it by the caller, so an imperfect summary can never mislead the
  *   user about what they're approving.
  * - Destructive detection errs toward flagging: a false positive is just an
- *   extra (harmless) caution, a false negative would hide a real risk.
+ *   extra (harmless) caution, a false negative would hide a real risk. It keeps
+ *   precedence over every other intent, including an MCP tool call.
+ * - `commandType` is the backend's `command_type`. For an MCP call `action` is
+ *   the tool name, not a category, so this is the only field that identifies
+ *   the request as a tool rather than a shell command.
  */
 
 export type PermissionSummary = {
@@ -47,10 +51,15 @@ export const extractCommand = (raw?: string): string => (raw ?? '').replace(COMM
 export const isDestructiveCommand = (command: string): boolean =>
   command.length > 0 && DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command));
 
-export const summarizePermission = (input: { action?: string; command?: string }): PermissionSummary => {
+export const summarizePermission = (input: {
+  action?: string;
+  command?: string;
+  commandType?: string;
+}): PermissionSummary => {
   const command = extractCommand(input.command);
   const destructive = isDestructiveCommand(command);
   const action = (input.action ?? '').toLowerCase();
+  const commandType = (input.commandType ?? '').toLowerCase();
 
   let intentKey = 'messages.permission.intent.generic';
   if (destructive) {
@@ -61,7 +70,11 @@ export const summarizePermission = (input: { action?: string; command?: string }
     intentKey = 'messages.permission.intent.read';
   } else if (action === 'fetch') {
     intentKey = 'messages.permission.intent.fetch';
-  } else if (action === 'mcp') {
+  } else if (commandType === 'mcp' || action === 'mcp') {
+    // `action` carries the tool name for an MCP call, so the marker is in `command_type`. Without
+    // this the populated MCP description reached the exec fall-through below and a tool call was
+    // announced as "I'd like to run a command" — which is why BUG-190 was diagnosed against the
+    // wrong renderer path twice.
     intentKey = 'messages.permission.intent.tool';
   } else if (action === 'exec' || command.length > 0) {
     intentKey = 'messages.permission.intent.run';

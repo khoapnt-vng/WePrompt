@@ -64,4 +64,59 @@ describe('summarizePermission', () => {
     expect(summary.destructive).toBe(false);
     expect(summary.command).toBe('');
   });
+  /*
+   * An MCP tool call arrives with `action` set to the TOOL NAME, not to a category, and the `mcp`
+   * marker in `command_type`. Before this was honoured the populated MCP description reached the
+   * `command.length > 0` fall-through and a read-only tool call announced itself as "I'd like to run
+   * a command" — the copy that made BUG-190 look like an exec-path defect to two readers in a row.
+   */
+  it('announces an MCP tool call as a tool, driven by command_type rather than action', () => {
+    const summary = summarizePermission({
+      action: 'studio_get_conditioning_frame',
+      command: 'Read the conditioning frame for shot_2',
+      commandType: 'mcp',
+    });
+
+    expect(summary.intentKey).toBe('messages.permission.intent.tool');
+    expect(summary.destructive).toBe(false);
+    // The exact request is still shown alongside the summary, so an imperfect summary cannot mislead.
+    expect(summary.command).toBe('Read the conditioning frame for shot_2');
+  });
+
+  it('still announces a shell command as a command when command_type is not mcp', () => {
+    // The regression that matters: this module is shared by every conversation type, so the exec path
+    // must be provably unchanged.
+    expect(summarizePermission({ action: 'exec', command: 'ls -la' }).intentKey).toBe('messages.permission.intent.run');
+    expect(summarizePermission({ action: 'bash', command: 'cat package.json' }).intentKey).toBe(
+      'messages.permission.intent.run'
+    );
+    expect(summarizePermission({ action: 'exec', command: 'npm test', commandType: 'npm' }).intentKey).toBe(
+      'messages.permission.intent.run'
+    );
+  });
+
+  it('keeps destructive precedence over an MCP tool call', () => {
+    // Owner decision, 2026-08-31: destructive detection outranks every other intent, MCP included.
+    // A false caution is cheaper than a missed one, and the raw request is always displayed.
+    const summary = summarizePermission({
+      action: 'some_tool',
+      command: 'rm -rf build',
+      commandType: 'mcp',
+    });
+
+    expect(summary.intentKey).toBe('messages.permission.intent.destructive');
+    expect(summary.destructive).toBe(true);
+  });
+
+  it('accepts an mcp action directly, for any caller that sends a category instead of a tool name', () => {
+    expect(summarizePermission({ action: 'mcp', command: 'anything' }).intentKey).toBe(
+      'messages.permission.intent.tool'
+    );
+  });
+
+  it('ignores an unknown command_type rather than guessing', () => {
+    expect(summarizePermission({ action: 'read', command: 'a.txt', commandType: 'something_new' }).intentKey).toBe(
+      'messages.permission.intent.read'
+    );
+  });
 });
