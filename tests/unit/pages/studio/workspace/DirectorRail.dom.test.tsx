@@ -9,10 +9,20 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IProvider, ISessionMcpServer, TChatConversation, TProviderWithModel } from '@/common/config/storage';
+import type { IMessageAcpToolCall, IMessageToolGroup } from '@/common/chat/chatLib';
+import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
+import { coalesceToolCalls } from '@/common/chat/toolActivity/coalesceToolCalls';
+import type { CoalescedStep } from '@/common/chat/toolActivity/types';
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROJECT_STATUS_STAGE_ORDER_V2,
   type StudioRendererProjectV2,
+  type StudioRendererProposalCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
+import {
+  summarizeTurnDomainOutcomes,
+  type ToolOutcomeInterpreter,
+} from '@/renderer/pages/conversation/Messages/components/toolActivity/buildTurnClose';
 import {
   DIRECTOR_PRESET_RULES,
   DIRECTOR_PRESET_RULES_PROFILE,
@@ -30,6 +40,7 @@ const harness = vi.hoisted(() => ({
   beforeSend: undefined as
     | ((input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>)
     | undefined,
+  toolOutcomeInterpreter: undefined as ToolOutcomeInterpreter | undefined,
   uuid: vi.fn(),
   descriptor: vi.fn(),
   authority: vi.fn(),
@@ -101,14 +112,17 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
     conversation,
     beforeSend,
     inlineItems,
+    toolOutcomeInterpreter,
   }: {
     conversation_id: string;
     conversation: TChatConversation;
     beforeSend?: (input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>;
     inlineItems?: readonly { id: string; createdAt: number; content: React.ReactNode }[];
+    toolOutcomeInterpreter?: ToolOutcomeInterpreter;
   }) => {
     harness.renderedChatConversation = conversation;
     harness.beforeSend = beforeSend;
+    harness.toolOutcomeInterpreter = toolOutcomeInterpreter;
     const [draft, setDraft] = React.useState('');
     React.useEffect(() => {
       harness.chatMounts += 1;
@@ -198,6 +212,7 @@ import {
   hasSafeRouteCatalog,
   parseDirectorProposalChatIntent,
 } from '@/renderer/pages/studio/components/Workspace/DirectorRail';
+import { createStudioDirectorToolOutcomeInterpreter } from '@/renderer/pages/studio/components/Workspace/DirectorRail/turnRecap';
 
 const provider = {
   id: 'provider_1',
@@ -341,6 +356,863 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 
+const proposalCatalog = (
+  input: {
+    status?: 'pending' | 'accepted' | 'rejected' | 'expired';
+    review?: 'ready' | 'stale' | 'unavailable';
+    projectId?: string;
+    projectRevision?: number;
+    duplicate?: boolean;
+  } = {}
+): StudioRendererProposalCatalogV2 => {
+  const projectId = input.projectId ?? 'project_1';
+  const projectRevision = input.projectRevision ?? 3;
+  const status = input.status ?? 'pending';
+  const reviewStatus = input.review ?? 'ready';
+  const review =
+    reviewStatus === 'ready'
+      ? { status: 'ready', groups: [] }
+      : reviewStatus === 'stale'
+        ? { status: 'stale', groups: [], currentRevision: projectRevision, baseRevision: 3 }
+        : { status: 'unavailable', groups: [], reason: 'reducer_rejected', refusal: null };
+  const proposal = {
+    schemaVersion: 6,
+    id: 'proposal_1',
+    projectId,
+    status,
+    baseRevision: 3,
+    payload: { kind: 'mutation_batch', operations: [] },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    decidedAt: status === 'pending' ? null : '2026-01-01T00:01:00.000Z',
+    review,
+  };
+  return {
+    projectId,
+    projectRevision,
+    proposals: input.duplicate ? [proposal, structuredClone(proposal)] : [proposal],
+  } as unknown as StudioRendererProposalCatalogV2;
+};
+
+const studioToolObservation = (input: {
+  interpreter: ToolOutcomeInterpreter;
+  name?: string;
+  terminalName?: string;
+  description?: string;
+  output?: string;
+  status?: 'pending' | 'running' | 'completed' | 'error' | 'canceled';
+  truncated?: boolean;
+  toolInput?: string;
+}) => {
+  const name = input.name ?? 'propose_storyboard';
+  const status = input.status ?? 'completed';
+  const step: CoalescedStep = {
+    key: 'studio-call-1',
+    rawName: name,
+    status,
+    hadError: status === 'error',
+    attempts: 1,
+    action: { category: 'generic', purpose: 'changing' },
+    calls: [
+      {
+        key: 'studio-call-1',
+        name: input.terminalName ?? name,
+        description: input.description,
+        input: input.toolInput,
+        status,
+        output: input.output,
+        truncated: input.truncated,
+      },
+    ],
+  };
+  return input.interpreter({ step, status });
+};
+
+const studioToolOutcome = (input: Parameters<typeof studioToolObservation>[0]) => {
+  const interpreted = studioToolObservation(input);
+  return typeof interpreted === 'string' ? interpreted : interpreted.outcome;
+};
+
+describe('Studio Director turn recap', () => {
+  const recordedProposal = 'Proposal proposal_1 recorded for user review; the user decides what happens next.';
+  const receiptBase = {
+    schemaVersion: 10,
+    commandId: 'command_1',
+    projectId: 'project_1',
+    decidedAt: '2026-01-01T00:01:00.000Z',
+  };
+  const pendingProposalRecord = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
+    schemaVersion: 6,
+    id: 'proposal_1',
+    projectId: 'project_1',
+    status: 'pending',
+    baseRevision: 3,
+    payload: { kind: 'mutation_batch', operations: [] },
+    createdAt: '2026-01-01T00:00:00.000Z',
+    decidedAt: null,
+    ...overrides,
+  });
+  const paidRecoveryProposal = pendingProposalRecord({
+    payload: {
+      kind: 'paid_recovery',
+      blocker: {
+        cause: 'reference_generation_required',
+        where: { kind: 'project' },
+        remedy: {
+          kind: 'proposal',
+          prepare: { kind: 'project_references', referenceIds: ['reference_1'] },
+          estimatedMinorUnits: null,
+          currency: null,
+        },
+      },
+      quote: {
+        quoteId: 'quote_1',
+        projectRevision: 3,
+        expiresAt: '2026-01-01T00:05:00.000Z',
+        currency: 'USD',
+        lowerMinorUnits: 100,
+        upperMinorUnits: 120,
+        itemCount: 1,
+        includesCascade: false,
+      },
+    },
+  });
+  const projectStatusResult = (detail = false) => ({
+    projectId: 'project_1',
+    projectRevision: 3,
+    catalogVersion: null,
+    stages: STUDIO_PROJECT_STATUS_STAGE_ORDER_V2.map((id) => ({
+      id,
+      state: 'complete',
+      summary: {},
+      blockers: [],
+    })),
+    blockerCount: 0,
+    advisories: [],
+    boards: { currentPictureCount: 0, shotCount: 0 },
+    detail: detail ? { shots: [], references: [] } : null,
+  });
+  const routeCatalogResult =
+    descriptor.transport.type === 'stdio'
+      ? JSON.parse(descriptor.transport.env?.AIONUI_STUDIO_ROUTE_CATALOG ?? '{}')
+      : {};
+  const receiptOutcome = (interpreter: ToolOutcomeInterpreter, receipt: Record<string, unknown>) =>
+    studioToolOutcome({
+      interpreter,
+      name: 'studio_get_command_status',
+      toolInput: JSON.stringify({ commandId: String(receipt.commandId ?? 'command_1') }),
+      output: JSON.stringify(receipt),
+    });
+
+  it('tracks a pending proposal through authoritative acceptance or refusal', () => {
+    const pending = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(studioToolOutcome({ interpreter: pending, output: recordedProposal })).toBe('pending_review');
+
+    const accepted = createStudioDirectorToolOutcomeInterpreter(
+      'project_1',
+      4,
+      proposalCatalog({ status: 'accepted', review: 'stale', projectRevision: 4 })
+    );
+    expect(studioToolOutcome({ interpreter: accepted, output: recordedProposal })).toBe('committed');
+
+    const rejected = createStudioDirectorToolOutcomeInterpreter(
+      'project_1',
+      3,
+      proposalCatalog({ status: 'rejected' })
+    );
+    expect(studioToolOutcome({ interpreter: rejected, output: recordedProposal })).toBe('refused');
+  });
+
+  it('reports reducer-refused and stale proposals without claiming a commit', () => {
+    const refused = createStudioDirectorToolOutcomeInterpreter(
+      'project_1',
+      3,
+      proposalCatalog({ review: 'unavailable' })
+    );
+    expect(studioToolOutcome({ interpreter: refused, output: recordedProposal })).toBe('refused');
+
+    const stale = createStudioDirectorToolOutcomeInterpreter(
+      'project_1',
+      4,
+      proposalCatalog({ review: 'stale', projectRevision: 4 })
+    );
+    expect(studioToolOutcome({ interpreter: stale, output: recordedProposal })).toBe('needs_revision');
+  });
+
+  it('reports a reference request as waiting for human authorization', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'mcp__aionui-creative-studio__studio_request_reference_images',
+        output: 'Queued 2 reference image request(s) for user approval. Nothing was generated.',
+      })
+    ).toBe('waiting_authorization');
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'studio_request_reference_images',
+        output: 'Queued zero reference requests.',
+      })
+    ).toBe('unknown');
+  });
+
+  it('correlates a rule proposal through the same authoritative catalog', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'propose_brief_rule',
+        output: 'Rule proposal_1 recorded for user review; nothing is pinned until the user accepts it.',
+      })
+    ).toBe('pending_review');
+    expect(studioToolOutcome({ interpreter, name: 'propose_brief_rule', output: 'Rule proposal_1 recorded.' })).toBe(
+      'unknown'
+    );
+  });
+
+  it('uses durable command receipts for committed and refused direct edits', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'studio_apply_edits',
+        output: JSON.stringify({
+          schemaVersion: 10,
+          commandId: 'command_1',
+          projectId: 'project_1',
+          expectedRevision: 3,
+          appliedRevision: 4,
+          createdBeatIds: [],
+          createdShotIds: [],
+          decidedAt: '2026-01-01T00:01:00.000Z',
+          status: 'applied',
+        }),
+      })
+    ).toBe('committed');
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'studio_apply_edits',
+        output: JSON.stringify({
+          schemaVersion: 10,
+          commandId: 'command_2',
+          projectId: 'project_1',
+          expectedRevision: 3,
+          observedRevision: 3,
+          decidedAt: '2026-01-01T00:01:00.000Z',
+          reasonCode: 'operation_not_permitted',
+          status: 'rejected',
+        }),
+      })
+    ).toBe('refused');
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        expectedRevision: 3,
+        appliedRevision: 3,
+        createdBeatIds: [],
+        createdShotIds: [],
+        status: 'applied',
+      })
+    ).toBe('unknown');
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        expectedRevision: 3,
+        appliedRevision: 5,
+        createdBeatIds: [],
+        createdShotIds: [],
+        status: 'applied',
+      })
+    ).toBe('unknown');
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        expectedRevision: null,
+        observedRevision: null,
+        reasonCode: '',
+        status: 'rejected',
+      })
+    ).toBe('unknown');
+  });
+
+  it('reports recorded paid recovery as waiting for authorization', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        commandId: 'proposal_1',
+        expectedRevision: 3,
+        status: 'recorded',
+        proposal: paidRecoveryProposal,
+      })
+    ).toBe('waiting_authorization');
+    expect(receiptOutcome(interpreter, { ...receiptBase, status: 'recorded', proposal: null })).toBe('unknown');
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        status: 'recorded',
+        proposal: {
+          schemaVersion: 5,
+          id: 'proposal_1',
+          projectId: 'project_1',
+          status: 'pending',
+          baseRevision: 3,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          decidedAt: null,
+        },
+      })
+    ).toBe('unknown');
+  });
+
+  it('requires exact independent command and proposal sidecar versions', () => {
+    const catalog = structuredClone(proposalCatalog());
+    catalog.proposals[0]!.schemaVersion = 5 as 6;
+    const staleProposalVersion = createStudioDirectorToolOutcomeInterpreter('project_1', 3, catalog);
+    expect(studioToolOutcome({ interpreter: staleProposalVersion, output: recordedProposal })).toBe('unknown');
+
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(receiptOutcome(interpreter, { ...receiptBase, schemaVersion: 9, status: 'failed' })).toBe('unknown');
+
+    const malformedReview = structuredClone(proposalCatalog({ status: 'accepted' }));
+    (malformedReview.proposals[0] as unknown as { review: null }).review = null;
+    expect(
+      studioToolOutcome({
+        interpreter: createStudioDirectorToolOutcomeInterpreter('project_1', 3, malformedReview),
+        output: recordedProposal,
+      })
+    ).toBe('unknown');
+  });
+
+  it.each([
+    [{ kind: 'get_project_status', detail: false }, projectStatusResult(), 'observed'],
+    [{ kind: 'list_routes' }, routeCatalogResult, 'observed'],
+    [{ kind: 'unsupported_query' }, {}, 'unknown'],
+  ] as const)('interprets an answered $0 query as $2', (query, result, expected) => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        status: 'answered',
+        query,
+        result,
+      })
+    ).toBe(expected);
+  });
+
+  it.each([
+    [{ status: 'not_found' }, 'observed', 'pending'],
+    [{ status: 'no_longer_pending', proposalId: 'proposal_1', decision: 'accepted' }, 'committed', 'accepted'],
+    [{ status: 'no_longer_pending', proposalId: 'proposal_1', decision: 'rejected' }, 'refused', 'rejected'],
+    [{ status: 'no_longer_pending', proposalId: 'proposal_1', decision: 'expired' }, 'refused', 'expired'],
+    [{ status: 'no_longer_pending', proposalId: 'proposal_1', decision: 'accepted' }, 'unknown', 'rejected'],
+    [{ status: 'no_longer_pending', proposalId: 'proposal_2', decision: 'accepted' }, 'unknown', 'accepted'],
+    [{ status: 'no_longer_pending', proposalId: 'proposal_1', decision: 'pending' }, 'unknown', 'pending'],
+    [{ status: 'no_longer_pending', proposalId: 'bad id', decision: 'accepted' }, 'unknown', 'accepted'],
+    [
+      {
+        status: 'pending',
+        proposal: pendingProposalRecord(),
+      },
+      'pending_review',
+      'pending',
+    ],
+    [
+      {
+        status: 'pending',
+        proposal: pendingProposalRecord({ projectId: 'project_2' }),
+      },
+      'unknown',
+      'pending',
+    ],
+    [{ status: 'unexpected' }, 'unknown', 'pending'],
+  ] as const)('interprets proposal lookup result %#', (result, expected, catalogStatus) => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter(
+      'project_1',
+      3,
+      proposalCatalog({ status: catalogStatus })
+    );
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        status: 'answered',
+        query: { kind: 'get_proposal', proposalId: 'proposal_1' },
+        result,
+      })
+    ).toBe(expected);
+  });
+
+  it('fails a proposal lookup closed when the query identity is unsafe', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        status: 'answered',
+        query: { kind: 'get_proposal', proposalId: 'bad id' },
+        result: { status: 'not_found' },
+      })
+    ).toBe('unknown');
+  });
+
+  it.each([
+    ['storage_error', 'failed'],
+    ['unsupported_prototype_schema', 'failed'],
+    ['pending', 'unconfirmed'],
+    ['not_found', 'unconfirmed'],
+    ['busy', 'unknown'],
+    ['unconfirmed', 'unknown'],
+    ['unexpected', 'unknown'],
+  ] as const)('interprets the exact status envelope %s as %s', (status, expected) => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(receiptOutcome(interpreter, { commandId: receiptBase.commandId, status })).toBe(expected);
+  });
+
+  it('validates terminal query and mutation receipts before reporting their outcome', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        status: 'failed',
+        query: { kind: 'list_routes' },
+        reasonCode: 'route_inventory_unavailable',
+      })
+    ).toBe('failed');
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        expectedRevision: 3,
+        observedRevision: 3,
+        status: 'expired',
+        reasonCode: 'deadline_elapsed',
+      })
+    ).toBe('failed');
+    expect(
+      receiptOutcome(interpreter, {
+        ...receiptBase,
+        expectedRevision: 3,
+        observedRevision: 3,
+        status: 'indeterminate',
+        reasonCode: 'commit_attribution_unknown',
+      })
+    ).toBe('indeterminate');
+    expect(receiptOutcome(interpreter, { ...receiptBase, status: 'failed' })).toBe('unknown');
+  });
+
+  it('keeps a busy incumbent failure independent from later command-status resolution', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    const busy = studioToolObservation({
+      interpreter,
+      name: 'studio_apply_edits',
+      output: JSON.stringify({ status: 'busy', commandId: 'incumbent_1' }),
+    });
+    const incumbentStatus = studioToolObservation({
+      interpreter,
+      name: 'studio_get_command_status',
+      toolInput: JSON.stringify({ commandId: 'incumbent_1' }),
+      output: JSON.stringify({
+        ...receiptBase,
+        commandId: 'incumbent_1',
+        expectedRevision: 3,
+        appliedRevision: 4,
+        createdBeatIds: [],
+        createdShotIds: [],
+        status: 'applied',
+      }),
+    });
+    expect(typeof busy === 'string' ? busy : busy.outcome).toBe('failed');
+    expect(summarizeTurnDomainOutcomes([busy, incumbentStatus])).toBe('failed');
+  });
+
+  it('reports valid read-only Studio results as observations', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'aionui-creative-studio:read_storyboard',
+        output: JSON.stringify({ revision: 3, name: 'Film', brief: 'A film.' }),
+      })
+    ).toBe('observed');
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'read_storyboard',
+        output: JSON.stringify({ revision: 0, name: 'Film', brief: 'A film.' }),
+      })
+    ).toBe('unknown');
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'studio_get_conditioning_frame',
+        output: JSON.stringify({ status: 'ready', projectRevision: 3, shotId: 'shot_1' }),
+      })
+    ).toBe('observed');
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'studio_get_conditioning_frame',
+        output: JSON.stringify({ status: 'unavailable', projectRevision: 3, shotId: 'shot_1' }),
+      })
+    ).toBe('observed');
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'studio_get_conditioning_frame',
+        output: JSON.stringify({ status: 'invalid_request', projectRevision: 3, shotId: 'shot_1' }),
+      })
+    ).toBe('unknown');
+  });
+
+  it('treats explicit compaction of a pure observation as benign without weakening uncertain outcomes', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    const committed = studioToolObservation({
+      interpreter,
+      name: 'studio_apply_edits',
+      output: JSON.stringify({
+        ...receiptBase,
+        expectedRevision: 3,
+        appliedRevision: 4,
+        createdBeatIds: [],
+        createdShotIds: [],
+        status: 'applied',
+      }),
+    });
+    const compactedObservation = studioToolObservation({
+      interpreter,
+      name: 'studio_get_project_status',
+      output: '{"schemaVersion":10,"status":"answered",',
+      truncated: true,
+    });
+
+    expect(typeof committed === 'string' ? committed : committed.outcome).toBe('committed');
+    expect(compactedObservation).toBe('observed');
+    expect(summarizeTurnDomainOutcomes([committed, compactedObservation])).toBe('committed');
+    expect(summarizeTurnDomainOutcomes([compactedObservation, committed])).toBe('committed');
+    expect(summarizeTurnDomainOutcomes(['pending_review', compactedObservation])).toBe('pending_review');
+    expect(summarizeTurnDomainOutcomes(['waiting_authorization', compactedObservation])).toBe('waiting_authorization');
+
+    const incompleteMutation = studioToolObservation({
+      interpreter,
+      name: 'studio_apply_edits',
+      output: '{"schemaVersion":10,"status":"applied",',
+      truncated: true,
+    });
+    expect(incompleteMutation).toBe('unknown');
+    expect(summarizeTurnDomainOutcomes([committed, incompleteMutation])).toBe('unknown');
+
+    const incompleteCommandStatus = studioToolObservation({
+      interpreter,
+      name: 'studio_get_command_status',
+      toolInput: JSON.stringify({ commandId: 'command_1' }),
+      output: '{"schemaVersion":10,"commandId":"command_1",',
+      truncated: true,
+    });
+    expect(incompleteCommandStatus).toBe('unknown');
+    expect(
+      summarizeTurnDomainOutcomes([{ outcome: 'unconfirmed', commandId: 'command_1' }, incompleteCommandStatus])
+    ).toBe('unconfirmed');
+
+    expect(
+      studioToolObservation({
+        interpreter,
+        name: 'studio_get_proposal',
+        output: '{"schemaVersion":10,"status":"answered",',
+        truncated: true,
+      })
+    ).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'studio_get_project_status', output: '' })).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'studio_get_project_status', output: '{"status":' })).toBe('unknown');
+  });
+
+  it('correlates a compacted proposal lookup only through its exact input and current catalogue', () => {
+    const truncatedLookup = (interpreter: ToolOutcomeInterpreter, toolInput: string) =>
+      studioToolObservation({
+        interpreter,
+        name: 'studio_get_proposal',
+        toolInput,
+        output: '{"schemaVersion":10,"status":"answered",',
+        truncated: true,
+      });
+    const exactInput = JSON.stringify({ proposalId: 'proposal_1' });
+    const pending = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    const pendingLookup = truncatedLookup(pending, exactInput);
+
+    expect(pendingLookup).toBe('pending_review');
+    expect(summarizeTurnDomainOutcomes(['committed', pendingLookup])).toBe('pending_review');
+    expect(
+      truncatedLookup(
+        createStudioDirectorToolOutcomeInterpreter(
+          'project_1',
+          4,
+          proposalCatalog({ status: 'accepted', review: 'stale', projectRevision: 4 })
+        ),
+        exactInput
+      )
+    ).toBe('committed');
+    expect(
+      truncatedLookup(
+        createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog({ status: 'rejected' })),
+        exactInput
+      )
+    ).toBe('refused');
+    expect(
+      truncatedLookup(
+        createStudioDirectorToolOutcomeInterpreter(
+          'project_1',
+          4,
+          proposalCatalog({ review: 'stale', projectRevision: 4 })
+        ),
+        exactInput
+      )
+    ).toBe('needs_revision');
+
+    expect(truncatedLookup(pending, JSON.stringify({ proposalId: 'proposal_other' }))).toBe('unknown');
+    expect(truncatedLookup(pending, JSON.stringify({ proposalId: 'proposal_1', extra: true }))).toBe('unknown');
+    expect(truncatedLookup(pending, '{"proposalId":')).toBe('unknown');
+    expect(truncatedLookup(createStudioDirectorToolOutcomeInterpreter('project_1', 3, null), exactInput)).toBe(
+      'unknown'
+    );
+    expect(
+      truncatedLookup(
+        createStudioDirectorToolOutcomeInterpreter('project_1', 4, proposalCatalog({ projectRevision: 3 })),
+        exactInput
+      )
+    ).toBe('unknown');
+  });
+
+  it('correlates compacted ACP proposal snapshots across normalize and coalesce only when every input agrees', () => {
+    const acpSnapshot = (input: {
+      messageId: string;
+      rawInput?: Record<string, unknown>;
+      status: 'in_progress' | 'completed';
+      truncated?: boolean;
+    }): IMessageAcpToolCall =>
+      ({
+        id: input.messageId,
+        conversation_id: 'conversation_1',
+        type: 'acp_tool_call',
+        content: {
+          sessionId: 'session_1',
+          ...(input.truncated ? { _compact: { truncated: true, original_size: 8192, preview_chars: 4096 } } : {}),
+          update: {
+            sessionUpdate: 'tool_call_update',
+            tool_call_id: 'proposal-lookup-1',
+            status: input.status,
+            title: 'studio_get_proposal',
+            kind: 'custom',
+            rawInput: input.rawInput,
+            ...(input.status === 'completed'
+              ? { rawOutput: { result: '{"schemaVersion":10,"status":"answered",' } }
+              : {}),
+          },
+        },
+      }) as unknown as IMessageAcpToolCall;
+    const outcome = (...inputs: Array<Record<string, unknown> | undefined>) => {
+      const messages = inputs.map((rawInput, index) =>
+        acpSnapshot({
+          messageId: `proposal-lookup-message-${index}`,
+          rawInput,
+          status: index === inputs.length - 1 ? 'completed' : 'in_progress',
+          truncated: index === inputs.length - 1,
+        })
+      );
+      const step = coalesceToolCalls(normalizeToolMessages(messages))[0]!;
+      const interpreted = createStudioDirectorToolOutcomeInterpreter(
+        'project_1',
+        3,
+        proposalCatalog()
+      )({
+        step,
+        status: step.status,
+      });
+      return typeof interpreted === 'string' ? interpreted : interpreted.outcome;
+    };
+
+    expect(outcome({ proposalId: 'proposal_1' }, undefined)).toBe('pending_review');
+    expect(outcome({ proposalId: 'proposal_1' }, { proposalId: 'proposal_1' })).toBe('pending_review');
+    expect(outcome({ proposalId: 'proposal_1' }, { proposalId: 'proposal_other' })).toBe('unknown');
+    expect(outcome({ proposalId: 'proposal_1', extra: true }, undefined)).toBe('unknown');
+    expect(outcome(undefined)).toBe('unknown');
+  });
+
+  it('reports failed and canceled transport before inspecting output', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(studioToolOutcome({ interpreter, status: 'error', output: recordedProposal })).toBe('failed');
+    expect(studioToolOutcome({ interpreter, status: 'canceled', output: recordedProposal })).toBe('canceled');
+    expect(studioToolOutcome({ interpreter, status: 'pending', output: recordedProposal })).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, status: 'running', output: recordedProposal })).toBe('unknown');
+  });
+
+  it.each([
+    ['missing catalog', 3, null],
+    ['mismatched catalog', 3, proposalCatalog({ projectId: 'project_2' })],
+    ['stale catalog revision', 4, proposalCatalog({ projectRevision: 3 })],
+    ['duplicate proposal identity', 3, proposalCatalog({ duplicate: true })],
+    ['missing project revision', null, proposalCatalog()],
+    [
+      'malformed proposal catalog',
+      3,
+      {
+        projectId: 'project_1',
+        projectRevision: 3,
+        proposals: 'not-an-array',
+      } as unknown as StudioRendererProposalCatalogV2,
+    ],
+  ] as const)('fails closed for %s', (_label, revision, catalog) => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', revision, catalog);
+    expect(studioToolOutcome({ interpreter, output: recordedProposal })).toBe('unknown');
+  });
+
+  it('fails both ordinary and compacted proposal reads closed for malformed catalogue authority', () => {
+    const missingPayload = structuredClone(proposalCatalog()) as unknown as {
+      proposals: Array<Record<string, unknown>>;
+    };
+    delete missingPayload.proposals[0]!.payload;
+
+    const missingReviewGroups = structuredClone(proposalCatalog()) as unknown as {
+      proposals: Array<Record<string, unknown>>;
+    };
+    missingReviewGroups.proposals[0]!.review = { status: 'ready' };
+
+    const acceptedWithoutReview = structuredClone(proposalCatalog({ status: 'accepted' })) as unknown as {
+      proposals: Array<Record<string, unknown>>;
+    };
+    acceptedWithoutReview.proposals[0]!.review = {};
+
+    const extraProposalKey = structuredClone(proposalCatalog()) as unknown as {
+      proposals: Array<Record<string, unknown>>;
+    };
+    extraProposalKey.proposals[0]!.unexpected = true;
+
+    for (const catalog of [missingPayload, missingReviewGroups, acceptedWithoutReview, extraProposalKey]) {
+      const interpreter = createStudioDirectorToolOutcomeInterpreter(
+        'project_1',
+        3,
+        catalog as unknown as StudioRendererProposalCatalogV2
+      );
+      expect(studioToolOutcome({ interpreter, output: recordedProposal })).toBe('unknown');
+      expect(
+        studioToolOutcome({
+          interpreter,
+          name: 'studio_get_proposal',
+          toolInput: JSON.stringify({ proposalId: 'proposal_1' }),
+          output: '{"schemaVersion":10,"status":"answered",',
+          truncated: true,
+        })
+      ).toBe('unknown');
+    }
+  });
+
+  it('fails closed for ambiguous, non-Studio, malformed, and truncated results', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'studio_apply_edits',
+        terminalName: 'propose_storyboard',
+        output: recordedProposal,
+      })
+    ).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'external_apply_edits', output: recordedProposal })).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'studio_apply_edits', output: '{"status":' })).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'studio_apply_edits', output: '[]' })).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'studio_apply_edits', output: '' })).toBe('unknown');
+    expect(studioToolOutcome({ interpreter, name: 'studio_apply_edits' })).toBe('unknown');
+    expect(
+      studioToolOutcome({ interpreter, name: 'studio_apply_edits', output: '{"status":"applied"}', truncated: true })
+    ).toBe('unknown');
+  });
+
+  it('uses exact grouped-MCP provenance without requiring arguments that tool_group does not retain', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    const applied = JSON.stringify({
+      ...receiptBase,
+      expectedRevision: 3,
+      appliedRevision: 4,
+      createdBeatIds: [],
+      createdShotIds: [],
+      status: 'applied',
+    });
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'Studio command',
+        terminalName: 'Studio command',
+        description: 'aionui-creative-studio:studio_get_command_status',
+        toolInput: JSON.stringify({
+          server_name: 'aionui-creative-studio',
+          tool_name: 'studio_get_command_status',
+          tool_display_name: 'Studio command status',
+        }),
+        output: applied,
+      })
+    ).toBe('committed');
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'external_tool',
+        description: 'aionui-creative-studio:studio_get_command_status',
+        output: applied,
+      })
+    ).toBe('unknown');
+  });
+
+  it('interprets a real grouped-MCP normalization path from its exact server/tool provenance', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    const output = JSON.stringify({
+      ...receiptBase,
+      expectedRevision: 3,
+      appliedRevision: 4,
+      createdBeatIds: [],
+      createdShotIds: [],
+      status: 'applied',
+    });
+    const message: IMessageToolGroup = {
+      type: 'tool_group',
+      content: [
+        {
+          call_id: 'grouped-status-1',
+          name: 'Studio command status',
+          description: 'Read the durable command status',
+          render_output_as_markdown: false,
+          result_display: output,
+          status: 'Success',
+          confirmationDetails: {
+            type: 'mcp',
+            title: 'Studio command status',
+            server_name: 'aionui-creative-studio',
+            tool_name: 'studio_get_command_status',
+            tool_display_name: 'Studio command status',
+          },
+        },
+      ],
+    };
+    const calls = normalizeToolMessages([message]);
+    expect(calls[0]?.input).not.toContain('command_1');
+    const step = coalesceToolCalls(calls)[0]!;
+    const interpreted = interpreter({ step, status: step.status });
+    expect(typeof interpreted === 'string' ? interpreted : interpreted.outcome).toBe('committed');
+  });
+
+  it('rejects an available command-status input that disagrees with the returned command', () => {
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    expect(
+      studioToolOutcome({
+        interpreter,
+        name: 'studio_get_command_status',
+        toolInput: JSON.stringify({ commandId: 'another_command' }),
+        output: JSON.stringify({
+          ...receiptBase,
+          expectedRevision: 3,
+          appliedRevision: 4,
+          createdBeatIds: [],
+          createdShotIds: [],
+          status: 'applied',
+        }),
+      })
+    ).toBe('unknown');
+  });
+});
+
 describe('DirectorRail', () => {
   beforeEach(() => {
     forgetDirectorConversationStart();
@@ -355,6 +1227,7 @@ describe('DirectorRail', () => {
     harness.chatUnmounts = 0;
     harness.renderedChatConversation = undefined;
     harness.beforeSend = undefined;
+    harness.toolOutcomeInterpreter = undefined;
     harness.uuid
       .mockReset()
       .mockReturnValueOnce('conversation_director')
@@ -373,6 +1246,20 @@ describe('DirectorRail', () => {
     harness.update.mockReset().mockResolvedValue(true);
     harness.send.mockReset();
     harness.prefill.mockReset();
+  });
+
+  it('installs the Studio outcome interpreter only on its owned Director chat', async () => {
+    const conversation = exactConversation();
+    const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    harness.conversations = [conversation];
+    harness.getProject.mockResolvedValue(supportedProject(conversation.id));
+
+    render(
+      <DirectorRail project={project({ briefConversationId: conversation.id })} toolOutcomeInterpreter={interpreter} />
+    );
+
+    await waitFor(() => expect(harness.renderedChatConversation?.id).toBe(conversation.id));
+    expect(harness.toolOutcomeInterpreter).toBe(interpreter);
   });
 
   it('accepts a persisted session whose keys came back in a different order', () => {

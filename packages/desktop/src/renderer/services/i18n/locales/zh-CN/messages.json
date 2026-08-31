@@ -144,6 +144,21 @@
       }
     },
     "close": {
+      "studio": {
+        "committed": "Studio 更改已提交。",
+        "pendingReview": "提案正在等待你的审核。请接受提案，或让 Director 修改它。",
+        "waitingAuthorization": "生成尚未开始。请审核待处理请求；任何付费工作仍需你的授权。",
+        "actionRequired": "Studio 中仍有提案或生成请求需要你的审核或授权。请先审核每个待处理项目，再继续。",
+        "mixedAttention": "部分 Studio 工作失败、停止或无法确认，同时仍有待处理工作需要你的审核或授权。请先审核每个待处理项目和工具详情，再继续。",
+        "needsRevision": "提案已过期，无法接受。请让 Director 根据当前项目修改它。",
+        "refused": "Studio 更改被拒绝，未应用任何内容。请查看原因，然后让 Director 修改它。",
+        "failed": "Studio 操作失败。请在重试前查看错误和当前 Studio 状态。",
+        "canceled": "Studio 操作已取消。请先查看当前 Studio 状态，再决定是否重新开始。",
+        "unconfirmed": "Studio 结果尚未确认。请勿重试该操作；请让 Director 检查其命令状态。",
+        "indeterminate": "Studio 结果已终止但仍无法确定。请勿重试该操作；请查看当前 Studio 状态和命令详情。",
+        "observed": "Studio 检查已完成。未提交任何项目更改。",
+        "unknown": "无法解释 Studio 结果。请勿重试该操作；请查看工具详情和当前 Studio 状态。"
+      },
       "completed": {
         "v1": "全部完成了——一切都按计划顺利进行。告诉我接下来您想做什么。",
         "v2": "这项工作已经完成并正常运行。告诉我接下来您想往哪个方向进行。",

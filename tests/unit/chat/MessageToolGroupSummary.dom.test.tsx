@@ -10,7 +10,9 @@ import userEvent from '@testing-library/user-event';
 import { createInstance } from 'i18next';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMessageAcpToolCall, IMessageToolCall, IMessageToolGroup } from '@/common/chat/chatLib';
-import MessageToolGroupSummary from '@/renderer/pages/conversation/Messages/components/MessageToolGroupSummary';
+import MessageToolGroupSummary, {
+  ToolOutcomeInterpreterProvider,
+} from '@/renderer/pages/conversation/Messages/components/MessageToolGroupSummary';
 import enUsMessages from '@/renderer/services/i18n/locales/en-US/messages.json';
 import type { WorkJournalSourceMessage } from '@/renderer/pages/conversation/Messages/types';
 
@@ -1155,6 +1157,141 @@ describe('MessageToolGroupSummary plain-language activity', () => {
           },
         },
       }) as unknown as IMessageAcpToolCall;
+
+    it.each([
+      ['committed', 'committed'],
+      ['refused', 'refused'],
+      ['waiting_authorization', 'waitingAuthorization'],
+    ] as const)('renders the Studio %s domain close from the installed interpreter', (outcome, key) => {
+      render(
+        <MessageToolGroupSummary
+          messages={[activityStep('completed', 'studio-1', 'studio_apply_edits', 'execute')]}
+          toolOutcomeInterpreter={() => outcome}
+        />
+      );
+
+      expect(screen.getByText(`messages.toolActivity.close.studio.${key}`)).toBeInTheDocument();
+      expect(screen.queryByText(/^messages\.toolActivity\.close\.completed\.v\d$/)).not.toBeInTheDocument();
+    });
+
+    it('keeps a failed Studio transport from presenting an optimistic interpreted result', () => {
+      render(
+        <MessageToolGroupSummary
+          messages={[activityStep('failed', 'studio-1', 'studio_apply_edits', 'execute')]}
+          toolOutcomeInterpreter={() => 'committed'}
+        />
+      );
+
+      expect(screen.getByText('messages.toolActivity.close.studio.failed')).toBeInTheDocument();
+      expect(screen.queryByText('messages.toolActivity.close.studio.committed')).not.toBeInTheDocument();
+    });
+
+    it('inherits a Studio interpreter from the trusted embedded-chat provider', () => {
+      render(
+        <ToolOutcomeInterpreterProvider value={() => 'waiting_authorization'}>
+          <MessageToolGroupSummary
+            messages={[activityStep('completed', 'studio-1', 'studio_request_reference_images', 'execute')]}
+          />
+        </ToolOutcomeInterpreterProvider>
+      );
+
+      expect(screen.getByText('messages.toolActivity.close.studio.waitingAuthorization')).toBeInTheDocument();
+    });
+
+    it('suppresses a domain close for a Director plan-only group with no tool outcome', () => {
+      render(
+        <ToolOutcomeInterpreterProvider value={() => 'committed'}>
+          <MessageToolGroupSummary
+            messages={
+              [
+                {
+                  id: 'plan-only',
+                  conversation_id: 'conv-1',
+                  type: 'plan',
+                  position: 'left',
+                  content: {
+                    session_id: 'sess-1',
+                    entries: [
+                      { content: 'Reviewing the current Studio state', status: 'completed' },
+                      { content: 'Planning the next Studio step', status: 'completed' },
+                    ],
+                  },
+                },
+              ] as WorkJournalSourceMessage[]
+            }
+          />
+        </ToolOutcomeInterpreterProvider>
+      );
+
+      expect(screen.queryByRole('status')).not.toBeInTheDocument();
+      expect(screen.queryByText(/^messages\.toolActivity\.close\./)).not.toBeInTheDocument();
+    });
+
+    it('keeps pending human action visible beside a failed Studio step', () => {
+      render(
+        <MessageToolGroupSummary
+          messages={[
+            activityStep('completed', 'studio-review', 'propose_storyboard', 'execute'),
+            activityStep('failed', 'studio-failed', 'studio_apply_edits', 'execute'),
+          ]}
+          toolOutcomeInterpreter={({ step, status }) =>
+            status === 'error' ? 'failed' : step.rawName === 'propose_storyboard' ? 'pending_review' : 'unknown'
+          }
+        />
+      );
+
+      expect(screen.getByText('messages.toolActivity.close.studio.mixedAttention')).toBeInTheDocument();
+      expect(screen.queryByText('messages.toolActivity.close.studio.failed')).not.toBeInTheDocument();
+    });
+
+    it('keeps a durable commit visible when a separate pure observation was compacted', () => {
+      render(
+        <MessageToolGroupSummary
+          messages={[
+            activityStep('completed', 'studio-commit', 'studio_apply_edits', 'execute'),
+            activityStep('completed', 'studio-read', 'studio_get_project_status', 'read'),
+          ]}
+          toolOutcomeInterpreter={({ step }) =>
+            step.rawName === 'studio_get_project_status' ? 'observed' : 'committed'
+          }
+        />
+      );
+
+      expect(screen.getByText('messages.toolActivity.close.studio.committed')).toBeInTheDocument();
+      expect(screen.queryByText('messages.toolActivity.close.studio.unknown')).not.toBeInTheDocument();
+      expect(screen.queryByText('messages.toolActivity.close.studio.failed')).not.toBeInTheDocument();
+    });
+
+    it('keeps an unconfirmed Studio command ahead of canceled-tool retry guidance', () => {
+      render(
+        <MessageToolGroupSummary
+          messages={[
+            activityStep('completed', 'studio-uncertain', 'studio_apply_edits', 'execute'),
+            activityStep('canceled', 'studio-canceled', 'studio_get_project_status', 'execute'),
+          ]}
+          toolOutcomeInterpreter={({ step, status }) =>
+            status === 'canceled' || step.rawName === 'studio_get_project_status' ? 'canceled' : 'unconfirmed'
+          }
+        />
+      );
+
+      expect(screen.getByText('messages.toolActivity.close.studio.unconfirmed')).toBeInTheDocument();
+      expect(screen.queryByText('messages.toolActivity.close.studio.canceled')).not.toBeInTheDocument();
+    });
+
+    it('keeps the Studio close copy within durable outcome authority', () => {
+      expect(enUsMessages.toolActivity.close.studio.committed).toBe('The Studio change was committed.');
+      expect(enUsMessages.toolActivity.close.studio.waitingAuthorization).toBe(
+        'Generation has not started. Review the pending request; any paid work still requires your authorization.'
+      );
+      expect(enUsMessages.toolActivity.close.studio.failed).toBe(
+        'The Studio action failed. Review the error and current Studio state before trying again.'
+      );
+      expect(enUsMessages.toolActivity.close.studio.unconfirmed).toMatch(/Do not retry/);
+      expect(enUsMessages.toolActivity.close.studio.indeterminate).toMatch(/terminal but indeterminate/);
+      expect(enUsMessages.toolActivity.close.studio.indeterminate).not.toMatch(/check its command status/);
+      expect(enUsMessages.toolActivity.close.studio.unknown).toMatch(/Do not retry/);
+    });
 
     it('keeps repeated generic steps in the opt-in Technical Details history', () => {
       render(

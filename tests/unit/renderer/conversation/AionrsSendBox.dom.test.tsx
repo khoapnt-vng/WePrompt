@@ -145,6 +145,7 @@ const {
   templateGalleryState,
   aionrsChatSendBoxProps,
   kbHintProps,
+  toolOutcomeProviderValues,
   pendingRecoveryMock,
   updateLocalImageMock,
   useMessageLstCacheMock,
@@ -341,6 +342,7 @@ const {
   },
   aionrsChatSendBoxProps: { current: null as null | Record<string, unknown> },
   kbHintProps: { current: null as null | Record<string, unknown> },
+  toolOutcomeProviderValues: { current: [] as unknown[] },
   pendingRecoveryMock: vi.fn(),
   updateLocalImageMock: vi.fn(),
   useMessageLstCacheMock: vi.fn(),
@@ -555,6 +557,12 @@ vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({
 }));
 vi.mock('@/renderer/pages/conversation/Messages/MessageList', () => ({
   default: ({ emptySlot }: { emptySlot?: React.ReactNode }) => <div data-testid='aionrs-message-list'>{emptySlot}</div>,
+}));
+vi.mock('@/renderer/pages/conversation/Messages/components/MessageToolGroupSummary', () => ({
+  ToolOutcomeInterpreterProvider: ({ children, value }: { children?: React.ReactNode; value: unknown }) => {
+    toolOutcomeProviderValues.current.push(value);
+    return <>{children}</>;
+  },
 }));
 vi.mock('@/renderer/pages/conversation/Messages/artifacts', () => ({
   ConversationArtifactProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
@@ -3005,6 +3013,7 @@ describe('AionrsChat human-submit bridge', () => {
   beforeEach(() => {
     aionrsChatSendBoxProps.current = null;
     kbHintProps.current = null;
+    toolOutcomeProviderValues.current = [];
     pendingRecoveryMock.mockClear();
     updateLocalImageMock.mockClear();
     useMessageLstCacheMock.mockClear();
@@ -3078,5 +3087,21 @@ describe('AionrsChat human-submit bridge', () => {
       workspace: '/tmp/ordinary',
       sessionMcpServers: undefined,
     });
+    expect(toolOutcomeProviderValues.current).toEqual([]);
+  });
+
+  it('scopes an installed domain interpreter to the embedded chat message tree', () => {
+    const toolOutcomeInterpreter = vi.fn(() => 'observed' as const);
+    render(
+      <AionrsChat
+        conversation_id='director-chat'
+        workspace='/tmp/director'
+        modelSelection={modelSelection}
+        toolOutcomeInterpreter={toolOutcomeInterpreter}
+      />
+    );
+
+    expect(toolOutcomeProviderValues.current).toEqual([toolOutcomeInterpreter]);
+    expect(screen.getByTestId('aionrs-message-list')).toBeInTheDocument();
   });
 });

@@ -144,6 +144,21 @@
       }
     },
     "close": {
+      "studio": {
+        "committed": "The Studio change was committed.",
+        "pendingReview": "The proposal is waiting for your review. Accept it or ask the Director to revise it.",
+        "waitingAuthorization": "Generation has not started. Review the pending request; any paid work still requires your authorization.",
+        "actionRequired": "Studio has proposals or generation requests that still need your review or authorization. Review each pending item before continuing.",
+        "mixedAttention": "Some Studio work failed, stopped, or could not be confirmed, and pending work still needs your review or authorization. Review each pending item and the tool details before continuing.",
+        "needsRevision": "The proposal is stale and cannot be accepted. Ask the Director to revise it against the current project.",
+        "refused": "The Studio change was refused and nothing was applied. Review the reason, then ask the Director to revise it.",
+        "failed": "The Studio action failed. Review the error and current Studio state before trying again.",
+        "canceled": "The Studio action was canceled. Review the current Studio state before deciding whether to start it again.",
+        "unconfirmed": "The Studio result is not confirmed. Do not retry the action; ask the Director to check its command status.",
+        "indeterminate": "The Studio outcome is terminal but indeterminate. Do not retry the action; review the current Studio state and command details.",
+        "observed": "The Studio check finished. No project change was committed.",
+        "unknown": "The Studio result could not be interpreted. Do not retry the action; review the tool details and current Studio state."
+      },
       "completed": {
         "v1": "All done — everything went through as planned. Tell me what you'd like to do next.",
         "v2": "That's finished and working. Let me know where you'd like to go from here.",

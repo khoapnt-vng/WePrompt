@@ -144,6 +144,21 @@
       }
     },
     "close": {
+      "studio": {
+        "committed": "Studio değişikliği uygulandı.",
+        "pendingReview": "Öneri incelemenizi bekliyor. Kabul edin veya Director'dan düzeltmesini isteyin.",
+        "waitingAuthorization": "Üretim başlamadı. Bekleyen isteği inceleyin; ücretli işler hâlâ yetkilendirmenizi gerektirir.",
+        "actionRequired": "Studio'da hâlâ incelemenizi veya yetkilendirmenizi bekleyen öneriler ya da üretim istekleri var. Devam etmeden önce bekleyen her öğeyi inceleyin.",
+        "mixedAttention": "Bazı Studio çalışmaları başarısız oldu, durduruldu veya doğrulanamadı; bekleyen çalışmalar da hâlâ incelemenizi ya da yetkilendirmenizi gerektiriyor. Devam etmeden önce her bekleyen öğeyi ve araç ayrıntılarını inceleyin.",
+        "needsRevision": "Öneri güncelliğini yitirdi ve kabul edilemez. Director'dan mevcut projeye göre düzeltmesini isteyin.",
+        "refused": "Studio değişikliği reddedildi ve hiçbir şey uygulanmadı. Nedeni inceleyin, ardından Director'dan düzeltmesini isteyin.",
+        "failed": "Studio işlemi başarısız oldu. Yeniden denemeden önce hatayı ve mevcut Studio durumunu inceleyin.",
+        "canceled": "Studio işlemi iptal edildi. Yeniden başlatmaya karar vermeden önce mevcut Studio durumunu inceleyin.",
+        "unconfirmed": "Studio sonucu doğrulanmadı. İşlemi yeniden denemeyin; Director'dan komut durumunu kontrol etmesini isteyin.",
+        "indeterminate": "Studio sonucu sonlandırılmış ancak belirsizdir. İşlemi yeniden denemeyin; mevcut Studio durumunu ve komut ayrıntılarını inceleyin.",
+        "observed": "Studio denetimi tamamlandı. Hiçbir proje değişikliği uygulanmadı.",
+        "unknown": "Studio sonucu yorumlanamadı. İşlemi yeniden denemeyin; araç ayrıntılarını ve mevcut Studio durumunu inceleyin."
+      },
       "completed": {
         "v1": "Her şey tamam — planlandığı gibi ilerledi. Şimdi ne yapmak istediğinizi söyleyin.",
         "v2": "Bu iş tamamlandı ve sorunsuz çalışıyor. Buradan nasıl devam etmek istediğinizi bana bildirin.",
