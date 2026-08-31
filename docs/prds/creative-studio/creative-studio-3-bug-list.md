@@ -1385,7 +1385,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Reproduction.** On a project whose Shots all have shooting scripts, ask the Director to rewrite them. Observed on `Plateau`; the refused proposal is `c38f15f6`.
   - **CS4 triage: absorb into CS4** · **phase 1**. Both halves are exactly the capability-contract lesson CS4 freezes in phase 1 ('a capability declares its inputs, its outputs, and what it records'), while the card it appears on survives into phase 5's single proposal home; apply*coverage over Beats and Shots is film composition, absent from Pilot 1, so nothing here blocks. Looks stale: proposals.refusal.applyCoverage now reads 'Coverage cannot replace these fixed Shots. \_Stays open until its CS4 acceptance evidence passes.* Claimant: unclaimed.
 
-- [ ] **[BUG-162][P3][Creative Studio] The Director reports "All done — everything went through as planned" when it has done nothing of the kind** — found 2026-08-27 across four Director turns on `Plateau`; **REOPENED 2026-08-31 after the durable-recap fix regressed on compacted read output**
+- [x] **[BUG-162][P3][Creative Studio] The Director reports "All done — everything went through as planned" when it has done nothing of the kind** — found 2026-08-27 across four Director turns on `Plateau`; **re-resolved 2026-08-31 after the durable-recap fix regressed on compacted read output**
   - **Actual.** The literal string _"All done — everything went through as planned. Tell me what you'd like to do next."_ was emitted at the end of turns where:
     - the reference plan had been created but **zero of 36 Shots were bound** (bindings were impossible at that point, because binding requires an approved reference — the sequencing was right, the claim was not);
     - a reference generation had only been **queued for the user's spend approval**, not performed;
@@ -1395,7 +1395,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Fix direction.** The completion line should be derived from what actually committed in the turn — operations applied, proposals created and their review status, requests awaiting the user — rather than asserted. When a turn ends with the user owing an action, say which action.
   - **Resolved 2026-08-30 — the Director recap now follows durable Studio outcomes.** The Studio-owned Aionrs surface installs a scoped interpreter without changing generic chat. It recognizes only the exact built-in Studio tool identity, independently versioned command/proposal records, exact receipt shapes and the current Main-correlated proposal catalogue; stale, mismatched, replay-ambiguous, malformed or truncated evidence fails closed. A successful transport can no longer turn a pending proposal, queued generation request, refusal, cancellation or uncertain command into a success claim.
   - **Truthful lifecycle and next actions.** Committed, pending-review, waiting-authorization, stale, refused, failed, cancelled, unconfirmed, terminal-indeterminate, read-only and unknown results have distinct localized recaps. Mixed turns preserve pending human work and uncertainty rather than inviting an unsafe retry. Exact command-status receipts resolve only the same durable command identity; a busy result cannot borrow the incumbent command's later success. Plan-only Director activity emits no synthetic completion line.
-  - **Focused evidence.** The final focused audit passes **326/326** tests across the recap builder, DOM summary, Director rail and Aionrs provider boundary. It includes accepted and reducer-refused proposals, queued reference authorization, failed and cancelled transport, terminal indeterminacy, stale/erroring catalogues, wrong sidecar versions, skipped revisions, malformed/truncated results, a real `IMessageToolGroup → normalize → coalesce → interpreter` path, busy-command isolation, uncertainty dominance, all 12 locales and generic-chat isolation. Typecheck, i18n generation/validation and diff checks pass; the explicit Creative Studio coverage manifest includes every changed runtime file.
+  - **Focused evidence.** The final focused audit passes **331/331** tests across the recap builder, DOM summary, Director rail and Aionrs provider boundary. It includes accepted and reducer-refused proposals, queued reference authorization, failed and cancelled transport, terminal indeterminacy, stale/erroring catalogues, wrong sidecar versions, skipped revisions, malformed/truncated results, real `IMessageToolGroup → normalize → coalesce → interpreter` and `IMessageAcpToolCall → normalize → coalesce → interpreter` paths, conflicting retained proposal inputs, exact proposal/payload/review authority, busy-command isolation, uncertainty dominance, all 12 locales and generic-chat isolation. Typecheck, i18n generation/validation and diff checks pass; the explicit Creative Studio coverage manifest includes every changed runtime file.
   - **Regression root cause.** `turnRecap.ts` currently converts every terminal call carrying
     `_compact.truncated: true` to `unknown` before considering the exact Studio tool contract, and
     `buildTurnClose.ts` deliberately ranks `unknown` above `committed`. The Director rules require
@@ -1411,19 +1411,32 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
     `studio_list_routes`; none can commit or resolve a project mutation. Classify that case as
     `observed`, so it cannot erase a separately proven commit, pending review or waiting
     authorization. Do not infer this set as the complement of mutations. In particular,
-    `studio_get_command_status` and `studio_get_proposal` are transport reads but can resolve a prior
-    mutation or proposal outcome, so their truncated results remain `unknown`. Truncated mutations,
-    proposal/reference-request tools, ambiguous Studio identity, and missing, empty, oversized or
-    malformed output without the explicit compaction evidence also remain fail-closed as `unknown`.
+    `studio_get_command_status` is a transport read that can resolve a prior mutation, so its
+    truncated result remains `unknown`. A truncated `studio_get_proposal` resolves only when its
+    exact bounded input identifies one proposal in the already validated current renderer catalogue;
+    that catalogue supplies `pending_review`, `committed`, `refused`, or `needs_revision`. Missing,
+    stale, duplicate, mismatched, or malformed input/catalogue authority remains `unknown`, as do
+    truncated mutations, proposal-writing/reference-request tools, ambiguous Studio identity, and
+    missing, empty, oversized, or unmarked malformed output.
   - **Required regression evidence.** Focused interpreter, aggregation and rendered-summary tests
     must prove: a durable commit plus a compacted detailed project-status read reports `committed` in
     either order; `pending_review` and `waiting_authorization` survive that same read without becoming
     `mixed_attention`; and a compacted observation-only call by itself reports `observed`. The inverse
     cases must prove that a compacted mutation or ambiguous read/mutation identity still outranks a
     separate commit as `unknown`, a compacted command-status call cannot resolve an earlier
-    `unconfirmed` command, compacted proposal status remains `unknown`, and missing or malformed
-    unmarked read output remains `unknown`. Transport error and cancellation must continue to report
+    `unconfirmed` command; compacted proposal lookup resolves only through its exact requested id and
+    current catalogue; and missing, mismatched, stale, or malformed proposal authority plus malformed
+    unmarked read output remain `unknown`. Transport error and cancellation must continue to report
     `failed` and `canceled` before output inspection.
+  - **Re-resolved independently on the shared CS3 base by `15d50a0b8`.** Compacted pure observations
+    remain benign, while a compacted proposal read is authoritative only when every retained input is
+    an exact, agreeing proposal identity and the current renderer catalogue has an exact
+    proposal/payload/review envelope. Missing, conflicting or malformed authority stays `unknown`.
+    Creative Studio coverage passed **673 files / 10,778 tests** with `turnRecap.ts` at **86.22% branch
+    coverage**; the uninstrumented full suite passed the same 673 files and 10,778 tests.
+  - **Fixed by `15d50a0b8`.** This repair was authored and reviewed on
+    `fix/studio-director-phase-zero-base`, branched from the current shared CS3 base, before being
+    admitted to the CS4 lineage.
   - **CS4 triage**
     - **Disposition:** Fix before CS4.
     - **Destination:** Prerequisite tranche before Phase 1.
@@ -1455,7 +1468,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Restart proof and recovery oracle.** The fixture observed the dead process and relaunched against the same isolated profile: Electron pid **92561 → 92664** and renderer-discovered backend port **57997 → 58019**. The rail found the one unbound claimant and stopped in the interrupted state rather than creating or looping. **Retry** rebound the exact conversation `c2561185`; its two original message ids survived, exact readback proved the current profile `studio-director-rules-v1:2d7e:f4e014d5`, the catalogue still contained exactly one claimant for project `cc51513d_da7e_449d_bec7_7cc824844fc6`, and a new composer turn finished through the local provider, growing history from **2 → 4**. Provider turn count was exactly **2**. Playwright reported **2 passed (30.0s)**. Teardown removed the disposable project/profile data; a late managed-tool task recreated only an empty staging-directory skeleton, which the verification moved to Trash, then confirmed the original `aionui-e2e-state-bX2nSi` path absent.
   - **Fixed by `0d9a8e01f0`.** The repair keeps the existing Director conversation as the only claimant, distrusts the PATCH echo, proves persisted authority and rules by exact readback, bounds automatic attempts, and lets an explicit retry reuse the same candidate.
   - **Separate platform follow-on.** The shared `conversation.update` bridge is still globally declared `Promise<boolean>` although successful writes can return a record or no body. This Director path is safe because it distrusts the echo and re-reads; other callers that branch on the declared boolean need a separate endpoint-contract audit rather than a broad change hidden inside this repair.
-  - **CS4 triage: fix before CS4**. CS4 explicitly keeps the Director rail and its conversation binding unchanged, and the cutover itself must rewrite `DIRECTOR_PRESET_RULES` (the canvas invalidates the shipped surface map), which drives exactly this stale-rules repair path across every existing conversation — so a broken repair becomes a cutover-wide failure. The fix is already implemented (2026-08-30) and only owes a live kill-and-reopen pass; that pass should happen before phase 2 carves `store.ts`/`StudioPage.tsx`, not after. _Blocks the CS4 base; stays open until fixed._ Claimant: unclaimed.
+  - **CS4 triage: fixed before CS4.** CS4 keeps the Director rail and its conversation binding unchanged, and the cutover rewrites `DIRECTOR_PRESET_RULES`, which drives exactly this stale-rules repair path. The runtime fix `0d9a8e01f0` is already an ancestor of the shared CS3 base, and the current-head live kill-and-reopen pass above is complete. The deterministic restart harness is retained in the independent Tranche 0 branch as regression evidence. _Closed; no longer blocks Phase 2._ Claimant: complete.
 
 - [x] **[BUG-164][P3][Creative Studio] Undecidable Director proposals accumulate forever in the new proposal surface, and the only way to clear one is to reject it individually** — found 2026-08-28 verifying BUG-160's fix (`195c3e345`) on `Plateau`
   - **Resolved 2026-08-28.** One terminal proposal remains visible for immediate recovery; an accumulation of two or more verified stale or reducer-refused proposals collapses into one counted disclosure. Expanding it preserves each exact proposal, its refusal/staleness evidence, **Prepare updated proposal**, and individual Reject. Refreshing, unverified, and in-flight proposals never enter the collapsed group, and no proposal is automatically rejected or discarded.
